@@ -1,0 +1,11 @@
+[package]
+name = "local-first-engine"
+version = "0.1.0"
+edition = "2024"
+
+# The agent engine crate (ADR 0024). Home of the guarded ReAct loop + tool chokepoint
+# as they are extracted from the desktop-gateway monolith, incrementally and
+# behavior-preserving. Inc-0 seeds it with the loop's PURE context-budget logic (no
+# AppState / IO deps) so the crate + wiring are established at zero behavioral risk.
+[dependencies]
+serde_json = "1"

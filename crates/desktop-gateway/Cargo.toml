@@ -13,6 +13,7 @@ futures-util = "0.3"
 # over the internal/loopback network, so no TLS features are needed here.
 tokio-tungstenite = "0.29"
 local-first-context-compression = { path = "../context-compression" }
+local-first-engine = { path = "../engine" }
 local-first-capabilities = { path = "../capabilities" }
 local-first-browser-automation = { path = "../browser-automation" }
 local-first-inference = { path = "../inference" }

@@ -87,6 +87,7 @@ use local_first_capabilities::{
     ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
 };
+use local_first_engine::{context_compaction_span, estimate_tokens, needs_context_compaction};
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
@@ -14549,55 +14550,10 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
 /// Fraction of a model's context window at which token-budget auto-compaction fires
 /// (Fase 1.1). Conservative: leaves headroom for the model's output (~6k) + tool schemas.
 const CONTEXT_COMPACTION_THRESHOLD: f64 = 0.75;
-/// Minimum number of messages a compaction span must cover to be worth a summarizer
-/// round-trip (mirrors the `< 6` guard in `compact_completed_step`).
-const CONTEXT_COMPACTION_MIN_SPAN: usize = 4;
 
-/// Estimate the token footprint of the messages we're about to send (Fase 1.1). No
-/// tokenizer exists (and `tiktoken` would be wrong for non-OpenAI local models), so we
-/// use the universal char/4 heuristic over each message's serialized JSON — a SAFETY
-/// VALVE for the budget check, not a billing meter. Pure + testable.
-fn estimate_tokens(messages: &[serde_json::Value]) -> usize {
-    messages.iter().map(|m| m.to_string().len()).sum::<usize>() / 4
-}
-
-/// Should we compact before sending? True iff the model's context window is KNOWN and the
-/// estimate exceeds `threshold` of it. Unknown window (`None`) or degenerate (`0`) → false
-/// (fail-open to the existing round-based hygiene; the catalog auto-fills the window for
-/// Ollama/cloud so unknown is rare). Pure + testable.
-fn needs_context_compaction(estimated_tokens: usize, context_window: Option<usize>, threshold: f64) -> bool {
-    match context_window {
-        Some(w) if w > 0 => estimated_tokens as f64 > threshold * w as f64,
-        _ => false,
-    }
-}
-
-/// Pick the `[from, to)` span to collapse, preserving the head (`system` + first `user`,
-/// the task anchor) and at least `keep_tail_min` recent messages. The tail boundary is
-/// moved EARLIER past any `tool` result so a kept tool-result is never orphaned from its
-/// `assistant` tool_calls (OpenAI-compat valid). Returns `None` if the resulting span is
-/// too small to be worth a summarizer round-trip. Pure + testable.
-fn context_compaction_span(
-    roles: &[&str],
-    keep_head: usize,
-    keep_tail_min: usize,
-) -> Option<(usize, usize)> {
-    let len = roles.len();
-    if len <= keep_head + keep_tail_min {
-        return None;
-    }
-    let from = keep_head;
-    let mut to = len - keep_tail_min;
-    // Keep more in the tail until it starts at a non-`tool` message (a clean group
-    // boundary), so collapsing [from, to) can't strand a tool result.
-    while to > from && roles[to] == "tool" {
-        to -= 1;
-    }
-    if to <= from || to - from < CONTEXT_COMPACTION_MIN_SPAN {
-        return None;
-    }
-    Some((from, to))
-}
+// The pure context-budget decisions (`estimate_tokens`, `needs_context_compaction`,
+// `context_compaction_span`) now live in the `local-first-engine` crate (ADR 0024 Inc-0)
+// — the first piece extracted from this monolith. Imported at the top of the file.
 
 /// Flatten a slice of conversation messages to `role: content` text. Keeps up to 8000
 /// chars per message so a browser snapshot's actual DATA (a full standings table, a
@@ -58725,43 +58681,8 @@ data: [DONE]\n";
         assert!(!skill_policy_forces_confirm(&[], false)); // read + none active → no
     }
 
-    #[test]
-    fn estimate_tokens_counts_serialized_chars_over_four() {
-        use super::estimate_tokens;
-        let messages = vec![
-            serde_json::json!({"role": "system", "content": "You are helpful."}),
-            serde_json::json!({"role": "user", "content": "Summarize this."}),
-        ];
-        let expected: usize = messages.iter().map(|m| m.to_string().len()).sum::<usize>() / 4;
-        assert_eq!(estimate_tokens(&messages), expected);
-        assert!(estimate_tokens(&messages) > 0);
-    }
-
-    #[test]
-    fn needs_context_compaction_respects_threshold_and_unknown_window() {
-        use super::needs_context_compaction;
-        assert!(needs_context_compaction(800, Some(1000), 0.75)); // > 750
-        assert!(!needs_context_compaction(700, Some(1000), 0.75)); // < 750
-        assert!(!needs_context_compaction(999_999, None, 0.75)); // unknown window → never
-        assert!(!needs_context_compaction(800, Some(0), 0.75)); // degenerate window → never
-    }
-
-    #[test]
-    fn context_compaction_span_preserves_head_tail_and_avoids_orphan_tool() {
-        use super::context_compaction_span;
-        // Too short (len <= keep_head + keep_tail_min) → None.
-        assert_eq!(
-            context_compaction_span(&["system", "user", "assistant", "user"], 2, 2),
-            None
-        );
-        // Normal: collapse the middle, keep head(2) + tail(>=2).
-        let roles = ["system", "user", "a", "tool", "a", "tool", "a", "user"];
-        assert_eq!(context_compaction_span(&roles, 2, 2), Some((2, 6)));
-        // Tail boundary lands on a `tool` result → move earlier so a kept tool
-        // result is never orphaned from its assistant tool_calls.
-        let roles2 = ["system", "user", "a", "tool", "a", "tool", "a", "tool", "a", "user"];
-        assert_eq!(context_compaction_span(&roles2, 2, 3), Some((2, 6)));
-    }
+    // The context-budget pure fns + their tests moved to `local-first-engine`
+    // (ADR 0024 Inc-0); see crates/engine/src/context_budget.rs.
 
     #[test]
     fn resolved_approval_policy_precedence_env_over_default() {
