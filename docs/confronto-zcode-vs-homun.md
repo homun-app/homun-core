@@ -183,11 +183,16 @@ ridurrebbe la fragilità e semplificherebbe l'aggiunta di nuovi tipi di contenut
 | Human-in-the-loop | `permission_request`/`elicitation_request` mediati dall'host. | **Item blocking** (`permission-request` con `completed=false`) + RPC dedicati di risposta. | `pending_confirm` **termina il turno** e lo riprende dopo approvazione; + gate durevole per task in background. |
 
 **Differenza chiave.** ZCode e Codex nascondono la complessità del loop in un processo
-esterno (CLI JS / binario Rust). Homun espone **due motori** (engine #1 in produzione =
-ReAct guardato con planning-as-tool; engine #2 = `OrchestratorBrain`/DAG in fase di
-abbandono, ADR 0021). Questa transizione è una fonte di attrito concettuale, ma la
-decisione di convergere su engine #1 è giusta. **Netto vantaggio Codex: parallelismo
-nativo** (`parallel_tool`) — né ZCode né Homun lo hanno realmente.
+esterno (CLI JS / binario Rust). Homun ha **UN motore live per il turn di chat**: engine #1
+(ReAct guardato con planning-as-tool). **⚠️ Verificato sul codice (2026-07-03):** engine #2
+(`OrchestratorBrain`) come *driver del turn di chat* è **flag-OFF di default**
+(`HOMUN_ORCHESTRATED_CHAT` = solo seed, `HOMUN_DRIVE_CHAT` = driver; entrambi off) → "due motori
+competono sul turn" NON è la realtà del default (la convergenza ADR 0021 è di fatto già così).
+L'`OrchestratorBrain` **persiste** però in altri ruoli: materializzazione dei *task durabili* in
+background (`allowed_actions` vuoto → pianifica ma non esegue tool) e router browser. **Netto
+vantaggio Codex: parallelismo nativo** (`parallel_tool`) — né ZCode né Homun lo hanno realmente.
+*(I riferimenti di riga qui sotto sono best-effort e invecchiano: ri-`grep` i simboli — il codice
+fa fede, non i numeri.)*
 
 **Riferimenti Homun:** loop `crates/desktop-gateway/src/main.rs:18514`
 (`stream_chat_via_openai`), round loop `:20046`, fork act/answer `:20450`, modi `:19225`;

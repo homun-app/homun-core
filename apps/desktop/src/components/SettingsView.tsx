@@ -75,6 +75,7 @@ import {
   type RoleView,
   modelIsCloud,
   type RoutingDecision,
+  type RuntimeSettings,
   type TimezoneInfo,
   type SkillsDetail,
   type SkillsFileNode,
@@ -1374,6 +1375,125 @@ function AdaptiveFloorBlock() {
   );
 }
 
+function SandboxModeBlock() {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<string>("workspace-write");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await coreBridge.runtimeSettings();
+        if (!cancelled) setMode(settings.sandbox_mode || "workspace-write");
+      } catch {
+        /* leave default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const change = async (value: string) => {
+    setMode(value);
+    setBusy(true);
+    try {
+      const saved = await coreBridge.setRuntimeSettings({ sandbox_mode: value });
+      setMode(saved.sandbox_mode || "workspace-write");
+    } catch {
+      /* a later read corrects the optimistic state */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="set-trow" aria-busy={busy}>
+      <div>
+        <div className="tt">{t("settings.sandboxModeTitle")}</div>
+        <div className="td">{t("settings.sandboxModeDesc")}</div>
+        {mode === "danger" && (
+          <p className="set-hint" style={{ color: "var(--danger)", marginTop: "var(--s2)" }}>
+            {t("settings.sandboxModeDangerWarn")}
+          </p>
+        )}
+      </div>
+      <select
+        className="set-input"
+        value={mode}
+        disabled={busy}
+        onChange={(event) => void change(event.target.value)}
+      >
+        <option value="read-only">{t("settings.sandboxModeReadOnly")}</option>
+        <option value="workspace-write">{t("settings.sandboxModeWorkspace")}</option>
+        <option value="danger">{t("settings.sandboxModeDanger")}</option>
+      </select>
+    </div>
+  );
+}
+
+function ApprovalPolicyBlock() {
+  const { t } = useTranslation();
+  const [policy, setPolicy] = useState<string>("on-request");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await coreBridge.runtimeSettings();
+        if (!cancelled) setPolicy(settings.approval_policy || "on-request");
+      } catch {
+        /* leave default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const change = async (value: string) => {
+    setPolicy(value);
+    setBusy(true);
+    try {
+      const saved = await coreBridge.setRuntimeSettings({
+        approval_policy: value,
+      } as Partial<RuntimeSettings>);
+      setPolicy(saved.approval_policy || "on-request");
+    } catch {
+      /* a later read corrects the optimistic state */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="set-trow" aria-busy={busy}>
+      <div>
+        <div className="tt">{t("settings.approvalPolicyTitle")}</div>
+        <div className="td">{t("settings.approvalPolicyDesc")}</div>
+        {policy === "never" && (
+          <p className="set-hint" style={{ color: "var(--danger)", marginTop: "var(--s2)" }}>
+            {t("settings.approvalPolicyNeverWarn")}
+          </p>
+        )}
+      </div>
+      <select
+        className="set-input"
+        value={policy}
+        disabled={busy}
+        onChange={(event) => void change(event.target.value)}
+      >
+        <option value="untrusted">{t("settings.approvalPolicyUntrusted")}</option>
+        <option value="on-failure">{t("settings.approvalPolicyOnFailure")}</option>
+        <option value="on-request">{t("settings.approvalPolicyOnRequest")}</option>
+        <option value="never">{t("settings.approvalPolicyNever")}</option>
+      </select>
+    </div>
+  );
+}
+
 function ConcurrencyBlock() {
   const { t } = useTranslation();
   const [view, setView] = useState<LlmConcurrencyView | null>(null);
@@ -1720,6 +1840,8 @@ function RuntimePane({
               );
             })
           )}
+          <SandboxModeBlock />
+          <ApprovalPolicyBlock />
           <ConcurrencyBlock />
           <AdaptiveFloorBlock />
         </>

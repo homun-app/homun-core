@@ -49,6 +49,15 @@ Homun ha il difetto sistemico di **due implementazioni per cosa**, la canonica d
   Mermaid) e **cita il caposaldo** che serve/ripristina.
 - Le **decisioni** diventano ADR in `decisions/` (numerati, immutabili).
 - `architecture/*.md` descrive la **realtà attuale**, comprese le divergenze dai capisaldi.
+- **⭐ IL CODICE FA FEDE, NON I DOCUMENTI (la regola madre della documentazione).** Prima di
+  basarti su un'affermazione di un doc/ADR/STATO sullo *stato del sistema*, **verificala sul codice**
+  (grep/read): i doc driftano, il codice è la verità. Se divergono, **il codice vince** → correggi o
+  annota il doc. Distinzione: gli **ADR** sono record storici della DECISIONE (non si riscrivono —
+  se superati, si marcano `SUPERSEDED`), ma i **doc di stato-corrente** (STATO, `confronto-*`,
+  `architecture/*`) devono combaciare col codice, e ciò che non è più vero **va rimosso/corretto**.
+  I **riferimenti di riga** (`main.rs:NNNN`) sono best-effort e invecchiano a ogni edit: mai fidarsi
+  del numero, ri-`grep` il simbolo. Prima di *descrivere* l'architettura (specie tra sessioni),
+  verifica flag/default sul codice — non citare a memoria dai doc.
 
 ### 5. Disciplina dei test (bottom-up, gated)
 - Si costruisce **dal basso**: non si lavora su uno strato finché quello sotto non è un **punto

@@ -4,7 +4,7 @@ Date: 2026-07-02
 
 ## Status
 
-**Proposed.** Definisce la **separazione motore/gateway**: estrarre il loop agentico (`stream_chat_via_openai`)
+**Proposed → IN CORSO (refresh 2026-07-03, code-grounded).** Definisce la **separazione motore/gateway**: estrarre il loop agentico (`stream_chat_via_openai`)
 e l'esecuzione dei tool dal monolite `crates/desktop-gateway/src/main.rs` in un **crate motore**
 dedicato, con un **unico chokepoint** per l'esecuzione dei tool. Il gateway HTTP resta il *postino*
 (routing, auth, streaming), non il proprietario della logica d'agente.
@@ -111,6 +111,33 @@ incrementalmente quando si tocca un'area).
    verificata (stesso output turno-per-turno) prima di rendere default.
 4. **Pulizia:** rimuovere la parallela inline una volta che il crate è default (caposaldo #1 igiene).
 5. **(Fase B, ADR futura):** valutare il processo satellite se serve blast-radius isolation.
+
+## Refresh 2026-07-03 — mappa reale del codice + piano a incrementi
+
+Rimappata la superficie sul codice attuale (`main.rs` ora **59.943 righe**, non 57.527). **Un premise dell'ADR è
+superato:** l'ADR diceva "esecuzione tool in più `match name` sparsi, nessun punto unico". **Realtà oggi:**
+`execute_chat_tool` (`main.rs:19180–22501`, ~3.3k righe, **38 rami `else if name==`**) È il dispatch unico de-facto.
+Il chokepoint come *funzione* esiste già — manca renderlo **trait** + estrarlo. Metà del lavoro (convergere i match) è
+di fatto fatto.
+
+**Superficie verificata:**
+- Loop: `stream_chat_via_openai` (`22502–25268`, ~2.7k righe) — round loop, payload, POST modello, streaming.
+- Confine largo: `ChatToolCtx` = **56 campi** (27 stato-turno interno al motore; 5 servizi dal gateway: `state`,
+  `tx`, `thread_id`, `prompt`, `request`; 14 metadati costanti). `AppState` = 19 campi; il loop tocca `http`,
+  `memory_service`, `browser_*`, `vault_store`, `task_executor_*`.
+- **Esiste già (riusare, caposaldo #5):** `MemoryRecallService` trait (`crates/memory`, iniettabile); 
+  `CapabilityFacade::call_tool` (`crates/capabilities`, il target chokepoint — ma il loop NON lo usa ancora);
+  `StepExecutor` trait (`crates/orchestrator`, usato dal driver). **Da costruire:** `ModelClient` trait (oggi il loop
+  fa POST HTTP inline); il crate motore.
+
+**Piano a incrementi (behavior-preserving, dietro flag `HOMUN_ENGINE_CRATE`, parità turno-per-turno):**
+0. **Inc-0 (scaffold, rischio ~0):** creare il crate `local-first-engine` + spostarci le **funzioni pure** già senza
+   dipendenze (context-budget: `estimate_tokens`/`needs_context_compaction`/`context_compaction_span`). Stabilisce
+   crate + wiring, riduce `main.rs`, zero rischio comportamentale.
+1. **Inc-1 (`ModelClient`):** astrarre la chiamata modello (`build_chat_payload`+POST+retry) dietro un trait iniettato.
+2. **Inc-2:** spostare `ChatToolCtx` + `execute_chat_tool` nel crate, servizi come trait (famiglia-per-famiglia).
+3. **Inc-3:** spostare `stream_chat_via_openai`.
+4. **Inc-4:** rimuovere la parallela inline (pulizia, caposaldo #1).
 
 ## Domande aperte
 

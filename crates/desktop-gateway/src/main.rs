@@ -7,6 +7,7 @@ mod chat_store;
 mod model_normalize;
 mod model_registry;
 mod scaffold;
+mod plan_directive;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
 mod skills;
 // Skill catalog (ClawHub/OpenClaw) — cached + searchable, ported from Homun.
@@ -35,6 +36,14 @@ mod sandbox;
 // macOS Seatbelt (`sandbox-exec`) profile generator from a SandboxPolicy (ADR 0023,
 // step 3; pure string generation — not wired yet).
 mod seatbelt;
+// Pure parser for Codex-format patches (ADR 0023 follow-up, Task A; applier +
+// gateway wiring land in later tasks).
+mod apply_patch;
+// The CHILD LOOP for subagent orchestration (ADR 0025, slice-1 Task 1): one child
+// runs a bounded read/gather agentic loop by reusing the orchestrator's
+// `run_agentic_step`, its tools delegated to the gateway's real read/gather dispatch.
+// Machinery only, behind `HOMUN_SUBAGENTS`; the manager fan-out wiring is Task 2.
+mod subagent_child;
 mod task_registry;
 mod temporal;
 mod tool_exec;
@@ -42,10 +51,11 @@ mod tool_exec;
 // not wired yet — seam types only).
 mod tool_safety;
 mod tool_trace_dump;
+mod turn_trace;
 
 // ADR 0023 tool-safety vocabulary + pure decision fn, used by the write-confirm
 // branches in `execute_chat_tool` behind `HOMUN_TOOL_SAFETY`.
-use crate::tool_safety::{AskForApproval, SafetyDecision, SandboxPolicy, assess_tool_safety};
+use crate::tool_safety::{SafetyDecision, SandboxPolicy, assess_tool_safety};
 use axum::{
     Json, Router,
     body::Body,
@@ -79,6 +89,7 @@ use local_first_capabilities::{
     ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
     WorkspaceId as CapabilityWorkspaceId,
 };
+use local_first_engine::{context_compaction_span, estimate_tokens, needs_context_compaction};
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
@@ -6028,16 +6039,18 @@ fn update_plan_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "update_plan",
-            "description": "Create or update the operational step-by-step PLAN of a NON-trivial task \
-    (multi-step: development, refactor, in-depth research). It appears in the \"Plan\" panel and the user \
-    follows progress. Call it at the START with ALL steps (status \"todo\", the first \"doing\") and UPDATE \
-    IT as you proceed (move to \"done\" what you completed, set \"doing\" the current step). Do NOT use it \
-    for single-step requests.",
+            "description": "Create or update the operational PLAN of a NON-trivial task (multi-step: \
+    development, refactor, in-depth research). It appears in the \"Plan\" panel and the user follows \
+    progress. Call it at the START with (1) the `objective` — ONE line stating what \"done\" looks like \
+    (the goal), and (2) ALL steps to get there (status \"todo\", the first \"doing\"); then UPDATE as you \
+    proceed (move to \"done\" what you completed, set \"doing\" the current step). Keep the same objective \
+    across updates (echo it, or pass null to leave it unchanged). Do NOT use it for single-step requests.",
             "strict": true,
             "parameters": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                    "objective": { "type": ["string", "null"], "description": "The GOAL of the task in ONE short line — what \"done\" looks like (e.g. \"Ship a signed macOS build to the release channel\"). Set it when creating the plan; pass null on later updates to keep it unchanged." },
                     "steps": {
                         "type": "array",
                         "description": "The plan steps, in order.",
@@ -6060,7 +6073,7 @@ fn update_plan_tool_schema() -> serde_json::Value {
                         }
                     }
                 },
-                "required": ["steps"]
+                "required": ["objective", "steps"]
             }
         }
     })
@@ -6166,6 +6179,38 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
     out
 }
 
+/// The task-GOAL line inside a ‹‹PLAN›› marker, above the steps (Fase A of goal+steps UX).
+/// A NON-bullet line so `parse_plan_marker` (which reads only `- [` lines) skips it, and
+/// `parse_plan_objective` reads it back for cross-turn resume. Empty when no objective.
+const PLAN_OBJECTIVE_PREFIX: &str = "🎯 **";
+fn plan_objective_line(objective: Option<&str>) -> String {
+    match objective.map(str::trim).filter(|o| !o.is_empty()) {
+        Some(o) => format!("{PLAN_OBJECTIVE_PREFIX}{o}**\n"),
+        None => String::new(),
+    }
+}
+
+/// Extract the task GOAL from the latest ‹‹PLAN›› marker (the `🎯 **…**` line), so a turn
+/// resumes the objective the same way it resumes the steps.
+fn parse_plan_objective(text: &str) -> Option<String> {
+    let (s, e) = (text.rfind("‹‹PLAN››")?, text.rfind("‹‹/PLAN››")?);
+    if e <= s {
+        return None;
+    }
+    for line in text[s..e].lines() {
+        if let Some(i) = line.find(PLAN_OBJECTIVE_PREFIX) {
+            let rest = &line[i + PLAN_OBJECTIVE_PREFIX.len()..];
+            if let Some(end) = rest.find("**") {
+                let o = rest[..end].trim();
+                if !o.is_empty() {
+                    return Some(o.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Anti-churn: the harness appends a fresh ‹‹PLAN›› marker to the running message on
 /// EVERY `update_plan`/`step_advance` call so the plan card animates live. The PERSISTED
 /// message, though, must carry the plan card exactly ONCE — the latest canonical state —
@@ -6239,7 +6284,13 @@ fn replace_latest_plan_marker(text: &str, steps: &[serde_json::Value]) -> String
         return text.to_string();
     }
     let close_end = close_start + CLOSE.len();
-    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(steps));
+    // Preserve the task GOAL line already in the marker being replaced (self-healing:
+    // step_advance/replace paths carry no objective, so re-read it from the current text).
+    let marker = format!(
+        "‹‹PLAN››{}{}‹‹/PLAN››",
+        plan_objective_line(parse_plan_objective(text).as_deref()),
+        build_plan_markdown(steps)
+    );
     let mut out = String::with_capacity(text.len() + marker.len());
     out.push_str(&text[..start]);
     out.push_str(&marker);
@@ -6418,6 +6469,26 @@ fn plan_reconcile_on_delivery_flag(value: Option<&str>) -> bool {
 
 fn plan_reconcile_on_delivery_enabled() -> bool {
     plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_RECONCILE").ok().as_deref())
+}
+
+/// Turn trace is ON by default (local-only, bounded). `HOMUN_TURN_TRACE=0`/`off` opts out.
+fn turn_trace_enabled() -> bool {
+    !matches!(
+        std::env::var("HOMUN_TURN_TRACE")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("0") | Some("off") | Some("OFF") | Some("Off")
+    )
+}
+
+/// Max bytes before `turn-trace.jsonl` rotates. Override with `HOMUN_TURN_TRACE_MAX_BYTES`.
+fn turn_trace_max_bytes() -> u64 {
+    std::env::var("HOMUN_TURN_TRACE_MAX_BYTES")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(5_000_000)
 }
 
 /// ADR 0022 — Tappa 1: instrada brief/recall/learn tramite `MemoryRecallService`
@@ -11158,6 +11229,56 @@ fn edit_file_tool_schema() -> serde_json::Value {
     })
 }
 
+fn apply_patch_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "apply_patch",
+            "description": "Apply a patch to files in the project. `input` is a patch in the format: `*** Begin Patch` … `*** End Patch`, containing `*** Add File: <path>` (body lines start with `+`), `*** Update File: <path>` (optional `*** Move to: <path>`, then `@@` context hunks with `+`/`-`/space line prefixes — NO line numbers; locate edits by context), and `*** Delete File: <path>`. Prefer apply_patch over write_file/edit_file for multi-file or precise edits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input": { "type": "string", "description": "The full patch text, from '*** Begin Patch' to '*** End Patch'." }
+                },
+                "required": ["input"]
+            }
+        }
+    })
+}
+
+/// Fase-0 seam (ADR 0025): schema for the experimental `spawn_subagent` tool. Only added to
+/// the toolset when `HOMUN_SUBAGENTS=1` (see `subagents_enabled`); the fan-out/join/scope
+/// wiring is a later slice-1 task, so the dispatch is a stub for now.
+fn spawn_subagent_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "spawn_subagent",
+            "description": "Delegate independent read/gather sub-tasks to parallel subagents; each researches/gathers and returns findings you then synthesize and act on. Children cannot write — you remain the only writer. Use for parallelizable investigation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "goal": { "type": "string" },
+                                "contract": { "type": "string" },
+                                "role": { "type": "string", "description": "Optional model specialization for this sub-task: one of \"explorer\"/\"research\" (web gather), \"coding\", \"memory\", \"vision\". Omit to reuse your current model." }
+                            },
+                            "required": ["goal"]
+                        },
+                        "description": "Independent read/gather sub-tasks to delegate in parallel."
+                    },
+                    "budget": { "type": "integer", "description": "Optional per-fan-out token budget." }
+                },
+                "required": ["tasks"]
+            }
+        }
+    })
+}
+
 fn list_files_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -11939,6 +12060,109 @@ fn edit_project_file(
     }
 }
 
+/// One file touched by an applied patch, carrying enough to render a diff card and to
+/// register artifact memory. `old` is the pre-image (None for a newly-created file); a
+/// deletion is `deleted = true` with `new` empty.
+struct AppliedPatchFile {
+    path: String,
+    old: Option<String>,
+    new: String,
+    deleted: bool,
+}
+
+/// Apply a Codex-format patch to the thread's project folder, ON THE REAL FILESYSTEM.
+///
+/// This is the sync bridge the `apply_patch` tool dispatch runs inside `spawn_blocking`:
+/// it owns `root` + `input`, routes EVERY touched path through `jail_in_root` (via the
+/// `resolve` closure handed to [`crate::apply_patch::apply_patch_under_root`]), and
+/// creates parent dirs on write (mirroring `write_project_file`). Confinement lives
+/// entirely in `jail_in_root`; this function does not re-implement it. Returns the list
+/// of applied files (for diff + memory) or a model-facing error (nothing written).
+fn apply_patch_in_project(
+    state: &AppState,
+    thread_id: Option<&str>,
+    input: &str,
+) -> Result<Vec<AppliedPatchFile>, String> {
+    let Some(root) = project_root_for_thread(state, thread_id) else {
+        return Err(no_project_folder_msg());
+    };
+
+    // Capture per-file pre-images so the caller can emit before/after diffs. The applier
+    // reads a file before it (or a later hunk) rewrites it, so snapshotting inside the
+    // read closure records the ORIGINAL content. `RefCell` keeps the closure a plain
+    // `Fn` (the applier wants `&dyn Fn` for reads) while still mutating the map.
+    let pre_images: std::cell::RefCell<std::collections::HashMap<String, Option<String>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+
+    let resolve = |rel: &str| jail_in_root(&root, rel);
+    // Snapshot the old content of each path the moment the applier reads it, keyed by
+    // its resolved-relative form, so we can pair it with the change (diff pre-image).
+    let read_snapshot = |p: &std::path::Path| -> Option<String> {
+        let content = std::fs::read_to_string(p).ok();
+        if let Ok(rel) = p.strip_prefix(&root) {
+            pre_images
+                .borrow_mut()
+                .entry(rel.to_string_lossy().replace('\\', "/"))
+                .or_insert_with(|| content.clone());
+        }
+        content
+    };
+
+    // `write` and `remove` both record into `applied`; a `RefCell` lets both `FnMut`
+    // closures borrow it without conflicting (they run sequentially inside the applier).
+    let applied: std::cell::RefCell<Vec<(String, String, bool)>> =
+        std::cell::RefCell::new(Vec::new());
+    let mut write = |p: &std::path::Path, c: &str| -> Result<(), String> {
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("could not create folders for the patch target: {e}"))?;
+        }
+        std::fs::write(p, c).map_err(|e| format!("could not write a patched file: {e}"))?;
+        if let Ok(rel) = p.strip_prefix(&root) {
+            applied
+                .borrow_mut()
+                .push((rel.to_string_lossy().replace('\\', "/"), c.to_string(), false));
+        }
+        Ok(())
+    };
+    let mut remove = |p: &std::path::Path| -> Result<(), String> {
+        std::fs::remove_file(p).map_err(|e| format!("could not delete a patched file: {e}"))?;
+        if let Ok(rel) = p.strip_prefix(&root) {
+            applied
+                .borrow_mut()
+                .push((rel.to_string_lossy().replace('\\', "/"), String::new(), true));
+        }
+        Ok(())
+    };
+
+    crate::apply_patch::apply_patch_under_root(
+        input,
+        &resolve,
+        &read_snapshot,
+        &mut write,
+        &mut remove,
+    )?;
+
+    // Pair each write/remove with its captured pre-image. A Rename shows up as a write
+    // to `to` (pre-image None, it's new) + a remove of `from`; we surface both, and the
+    // remove of `from` is treated like a deletion for the diff.
+    let pre_images = pre_images.into_inner();
+    let files = applied
+        .into_inner()
+        .into_iter()
+        .map(|(path, new, deleted)| {
+            let old = pre_images.get(&path).cloned().flatten();
+            AppliedPatchFile {
+                path,
+                old,
+                new,
+                deleted,
+            }
+        })
+        .collect();
+    Ok(files)
+}
+
 fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
     let Some(root) = project_root_for_thread(state, thread_id) else {
         return no_project_folder_msg();
@@ -12091,24 +12315,22 @@ enum RunProjectOutcome {
 /// exactly one platform arm is compiled in per target — no `unused` warnings.
 #[cfg(target_os = "macos")]
 fn build_sandbox_command(
-    writable_roots: &[std::path::PathBuf],
+    policy: &crate::tool_safety::SandboxPolicy,
     command: &str,
 ) -> Result<tokio::process::Command, String> {
-    // macOS: `sandbox-exec -p <seatbelt-profile> bash -lc <command>` — byte-identical
-    // to the pre-Linux wiring.
-    let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
-        writable_roots: writable_roots.to_vec(),
-        network_access: true,
-    };
-    match crate::seatbelt::seatbelt_profile(&policy) {
+    // macOS: `sandbox-exec -p <seatbelt-profile> bash -lc <command>`. The profile is
+    // derived from the caller-supplied policy so `read-only` fences writes for real
+    // (its profile grants writes to tmp only, no project subpath) — no longer
+    // hardcoded to workspace-write.
+    match crate::seatbelt::seatbelt_profile(policy) {
         Some(profile) => {
             let mut c = tokio::process::Command::new("sandbox-exec");
             c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
             Ok(c)
         }
-        // DangerFullAccess → unreachable here (we build WorkspaceWrite). Fail closed
-        // rather than silently run unsandboxed.
-        None => Err("no seatbelt profile for the workspace policy".to_string()),
+        // Only `DangerFullAccess` yields `None`, and the caller never fences that mode.
+        // Fail closed rather than silently run unsandboxed.
+        None => Err("no seatbelt profile for the sandbox policy".to_string()),
     }
 }
 
@@ -12123,9 +12345,20 @@ fn build_sandbox_command(
 /// resolution finds it in production; the CI test uses `CARGO_BIN_EXE_...` instead.
 #[cfg(target_os = "linux")]
 fn build_sandbox_command(
-    writable_roots: &[std::path::PathBuf],
+    policy: &crate::tool_safety::SandboxPolicy,
     command: &str,
 ) -> Result<tokio::process::Command, String> {
+    use crate::tool_safety::SandboxPolicy;
+    // Derive the Landlock writable roots from the policy: empty for read-only so the
+    // fence denies EVERY filesystem write; `DangerFullAccess` has no fence to build
+    // and never reaches here (the caller gates it out) — fail closed if it ever does.
+    let writable_roots: Vec<std::path::PathBuf> = match policy {
+        SandboxPolicy::WorkspaceWrite { writable_roots, .. } => writable_roots.clone(),
+        SandboxPolicy::ReadOnly => Vec::new(),
+        SandboxPolicy::DangerFullAccess => {
+            return Err("danger-full-access has no fence to build".to_string());
+        }
+    };
     let helper = match std::env::var_os("HOMUN_LINUX_SANDBOX_BIN") {
         Some(path) => std::path::PathBuf::from(path),
         None => {
@@ -12158,7 +12391,7 @@ fn build_sandbox_command(
 /// `_` bindings keep it warning-free.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn build_sandbox_command(
-    _writable_roots: &[std::path::PathBuf],
+    _policy: &crate::tool_safety::SandboxPolicy,
     _command: &str,
 ) -> Result<tokio::process::Command, String> {
     Err("no sandbox backend on this platform".to_string())
@@ -12224,12 +12457,29 @@ Reformulate it without destructive operations.",
         return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
     }
     // Sandboxed path: build the OS fence command, run inline (we need the raw status +
-    // combined output to decide whether to escalate). The writable roots are computed
-    // the same way on every platform; only the command wrapper differs.
-    let writable_roots = workspace_write_roots(&root, std::env::var("HOME").ok().as_deref());
-    // v1: fence filesystem writes, allow network (npm/git need it). Stricter
-    // network-off is a follow-up on both platforms.
-    let mut cmd = match build_sandbox_command(&writable_roots, command) {
+    // combined output to decide whether to escalate). The command wrapper differs per
+    // platform, but the policy it fences to is the SAME resolved mode everywhere.
+    //
+    // Build the concrete policy from the resolved mode. `tool_safety_enabled()` is true
+    // here, so the mode is ReadOnly or WorkspaceWrite (never Danger) — the Danger arm is
+    // an internal-invariant guard, not a reachable path.
+    use crate::tool_safety::SandboxMode;
+    let policy = match resolved_sandbox_mode() {
+        // Read-only: no writable roots — writes are physically denied by the OS fence.
+        SandboxMode::ReadOnly => crate::tool_safety::SandboxPolicy::ReadOnly,
+        // v1 workspace-write: fence filesystem writes to the project + tool caches,
+        // allow network (npm/git need it). Stricter network-off is a follow-up.
+        SandboxMode::WorkspaceWrite => crate::tool_safety::SandboxPolicy::WorkspaceWrite {
+            writable_roots: workspace_write_roots(&root, std::env::var("HOME").ok().as_deref()),
+            network_access: true,
+        },
+        SandboxMode::Danger => {
+            return RunProjectOutcome::Completed(
+                "Command NOT executed: internal sandbox resolution error.".to_string(),
+            );
+        }
+    };
+    let mut cmd = match build_sandbox_command(&policy, command) {
         Ok(cmd) => cmd,
         // Fail-closed: the fence could not be constructed (e.g. the Linux helper
         // binary is missing). NEVER fall back to unsandboxed — surface the same
@@ -14359,6 +14609,87 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
     }
 }
 
+/// Fraction of a model's context window at which token-budget auto-compaction fires
+/// (Fase 1.1). Conservative: leaves headroom for the model's output (~6k) + tool schemas.
+const CONTEXT_COMPACTION_THRESHOLD: f64 = 0.75;
+
+// The pure context-budget decisions (`estimate_tokens`, `needs_context_compaction`,
+// `context_compaction_span`) now live in the `local-first-engine` crate (ADR 0024 Inc-0)
+// — the first piece extracted from this monolith. Imported at the top of the file.
+
+/// Flatten a slice of conversation messages to `role: content` text. Keeps up to 8000
+/// chars per message so a browser snapshot's actual DATA (a full standings table, a
+/// schedule, a price list) survives — 1500 truncated mid-table once, so the data the
+/// deliverable needed was lost. Shared by the summarizer and the memory write-back.
+fn render_slice_text(slice: &[serde_json::Value]) -> String {
+    let mut buf = String::new();
+    for m in slice {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if let Some(content) = m.get("content").and_then(|c| c.as_str()) {
+            buf.push_str(role);
+            buf.push_str(": ");
+            buf.push_str(&content.chars().take(8000).collect::<String>());
+            buf.push('\n');
+        }
+    }
+    buf
+}
+
+/// Summarize a slice of conversation messages into ONE salience-preserving note via the
+/// "memory" role model. Shared by `compact_completed_step` (plan-step) and
+/// `compact_for_context_budget` (token-budget, Fase 1.1). Preserves the task's raw data
+/// AND its salient state; compresses only narration. BEST-EFFORT: returns `None` on any
+/// failure so the caller leaves `messages` untouched (less compaction, never data loss).
+async fn summarize_message_slice(
+    http: &reqwest::Client,
+    slice: &[serde_json::Value],
+) -> Option<String> {
+    let buf = render_slice_text(slice);
+    if buf.trim().is_empty() {
+        return None;
+    }
+    let (base_url, model, api_key) = role_openai_config("memory")?;
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    // Compaction must NOT destroy the task's raw material OR its state. A 150-word gist
+    // drops the concrete rows (standings, schedules, flight options) a LATER step reports
+    // and the decisions/open-questions the turn still depends on — so preserve DATA
+    // verbatim + task STATE, summarize only the narration.
+    let system = "You compress an agent's earlier work to free context WITHOUT losing anything the \
+task still needs. PRESERVE VERBATIM: every concrete data point a later step will report (full tables — \
+standings, schedules, results; lists of options — flights/trains/hotels with times/prices/stops; names, \
+numbers, dates, URLs, artifact filenames) AND the task's salient STATE (the current goal/plan, decisions \
+already made, open questions still to resolve, artifacts produced). Copy data as a compact markdown list or \
+table — do NOT abbreviate, sample, or say \"etc.\". Summarize only the NARRATION (what the agent did/tried). \
+No preamble, no headings.";
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 1600,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": buf.chars().take(24000).collect::<String>() },
+        ],
+    });
+    let mut builder = http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(45));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let resp = builder.json(&payload).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.json::<serde_json::Value>().await.ok()?;
+    let summary = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if summary.is_empty() { None } else { Some(summary) }
+}
+
 /// F3 context compaction: collapse the messages a just-completed plan step produced into
 /// a single summary note, so a long multi-step turn stays within the context window.
 /// Replaces `messages[*start..]` with one assistant summary message and advances `*start`.
@@ -14378,69 +14709,9 @@ async fn compact_completed_step(
     if slice.len() < 6 {
         return;
     }
-    let mut buf = String::new();
-    for m in slice {
-        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
-        if let Some(content) = m.get("content").and_then(|c| c.as_str()) {
-            buf.push_str(role);
-            buf.push_str(": ");
-            // Keep enough of each message that a browser snapshot's actual DATA (a full
-            // standings table, a schedule, a price list) reaches the summarizer — 1500
-            // chars truncated mid-table, so the data the deliverable needs was lost and
-            // the final answer evaporated ("verifica interrotta"). 8000 keeps the data.
-            buf.push_str(&content.chars().take(8000).collect::<String>());
-            buf.push('\n');
-        }
-    }
-    if buf.trim().is_empty() {
-        return;
-    }
-    let Some((base_url, model, api_key)) = role_openai_config("memory") else {
+    let Some(summary) = summarize_message_slice(http, slice).await else {
         return;
     };
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    // Compaction must NOT destroy the task's raw material. A 150-word gist drops the
-    // concrete rows (group standings, match schedule, flight options) the LATER synthesis
-    // step has to report — so preserve DATA verbatim, summarize only the narration.
-    let system = "You compress an agent's completed steps to free context WITHOUT losing the \
-task's raw material. PRESERVE VERBATIM every concrete data point a later step will report: full \
-tables (standings, schedules, results), lists of options (flights/trains/hotels with their \
-times/prices/stops), names, numbers, dates, URLs, artifact filenames. Copy them as a compact \
-markdown list or table — do NOT abbreviate, sample, or say \"etc.\". You may summarize only the \
-NARRATION (what the agent did/tried). No preamble, no headings.";
-    let payload = serde_json::json!({
-        "model": model,
-        "temperature": 0,
-        "max_tokens": 1600,
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": buf.chars().take(24000).collect::<String>() },
-        ],
-    });
-    let mut builder = http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(45));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let Ok(resp) = builder.json(&payload).send().await else {
-        return;
-    };
-    if !resp.status().is_success() {
-        return;
-    }
-    let Ok(body) = resp.json::<serde_json::Value>().await else {
-        return;
-    };
-    let summary = body
-        .pointer("/choices/0/message/content")
-        .and_then(|c| c.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if summary.is_empty() {
-        return;
-    }
     // Replace the slice with one compact assistant note (valid OpenAI-compat: an
     // assistant message with content and no tool_calls). The user-facing answer
     // (`accumulated`, with its ‹‹PLAN››/‹‹ARTIFACT›› markers) is untouched — this only
@@ -14451,6 +14722,71 @@ NARRATION (what the agent did/tried). No preamble, no headings.";
         "content": format!("[Earlier plan steps — context compacted]\n{summary}"),
     }));
     *start = messages.len();
+}
+
+/// Number of head messages (`system` + first `user`, the task anchor) and recent tail
+/// messages token-budget compaction preserves (Fase 1.1).
+const CONTEXT_COMPACTION_KEEP_HEAD: usize = 2;
+const CONTEXT_COMPACTION_KEEP_TAIL: usize = 8;
+
+/// Token-budget auto-compaction (Fase 1.1) — the MEMORY-CHECKPOINT path. When the messages
+/// approach the model's context window, WRITE the older span to the one memory engine
+/// (durable + recallable — nothing lost even if the summary drops something; ADR 0022),
+/// then replace it in-context with one salience-preserving note. Harness-driven — no model
+/// tool (ADR 0021). BEST-EFFORT: any failure leaves `messages` intact. Safe only at a round
+/// boundary (complete tool-call/result groups), like `compact_completed_step`.
+async fn compact_for_context_budget(
+    state: &AppState,
+    messages: &mut Vec<serde_json::Value>,
+    context_window: Option<usize>,
+    thread_id: Option<&str>,
+) {
+    if !needs_context_compaction(
+        estimate_tokens(messages),
+        context_window,
+        CONTEXT_COMPACTION_THRESHOLD,
+    ) {
+        return;
+    }
+    let roles: Vec<&str> = messages
+        .iter()
+        .map(|m| m.get("role").and_then(|r| r.as_str()).unwrap_or(""))
+        .collect();
+    let Some((from, to)) = context_compaction_span(
+        &roles,
+        CONTEXT_COMPACTION_KEEP_HEAD,
+        CONTEXT_COMPACTION_KEEP_TAIL,
+    ) else {
+        return;
+    };
+    let slice: Vec<serde_json::Value> = messages[from..to].to_vec();
+    // Memory checkpoint (the core): flush the span to the ONE memory engine BEFORE
+    // collapsing it — durable, recallable, off-path, fire-and-forget. The safety net that
+    // makes even an aggressive summary lossless.
+    let span_text = render_slice_text(&slice);
+    if !span_text.trim().is_empty() {
+        tokio::spawn(learn_via_service_or_inline(
+            state,
+            &span_text,
+            "",
+            "context-compaction",
+            thread_id,
+            None,
+            None,
+        ));
+    }
+    // Salience-preserving summary replaces the span in-context. Best-effort: on failure
+    // leave messages intact (the write-back above already captured the content durably).
+    let Some(summary) = summarize_message_slice(&state.http, &slice).await else {
+        return;
+    };
+    let note = serde_json::json!({
+        "role": "assistant",
+        "content": format!(
+            "[Earlier conversation — context compacted to fit the window; full detail saved to memory]\n{summary}"
+        ),
+    });
+    messages.splice(from..to, std::iter::once(note));
 }
 
 /// Whether the active orchestrator provider runs locally (loopback base_url).
@@ -14986,81 +15322,9 @@ async fn warm_ollama_capabilities(http: &reqwest::Client, base_url: &str, model:
 /// Converts OpenAI-style messages to Ollama native `/api/chat` shape: multimodal
 /// content-parts become `{content, images:[base64]}`; assistant `tool_calls`
 /// arguments are parsed from JSON STRING back to an OBJECT (native expects an object).
-fn to_ollama_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    messages
-        .iter()
-        .map(|m| {
-            let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-            let mut out = serde_json::Map::new();
-            out.insert("role".into(), serde_json::Value::String(role.to_string()));
-            match m.get("content") {
-                Some(serde_json::Value::Array(parts)) => {
-                    let mut text = String::new();
-                    let mut images: Vec<serde_json::Value> = Vec::new();
-                    for part in parts {
-                        match part.get("type").and_then(|t| t.as_str()) {
-                            Some("text") => {
-                                if let Some(t) = part.get("text").and_then(|x| x.as_str()) {
-                                    text.push_str(t);
-                                }
-                            }
-                            Some("image_url") => {
-                                if let Some(url) = part
-                                    .get("image_url")
-                                    .and_then(|u| u.get("url"))
-                                    .and_then(|x| x.as_str())
-                                {
-                                    // Native wants raw base64 (no data: prefix).
-                                    let b64 = url.rsplit("base64,").next().unwrap_or(url);
-                                    images.push(serde_json::Value::String(b64.to_string()));
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    out.insert("content".into(), serde_json::Value::String(text));
-                    if !images.is_empty() {
-                        out.insert("images".into(), serde_json::Value::Array(images));
-                    }
-                }
-                Some(serde_json::Value::String(s)) => {
-                    out.insert("content".into(), serde_json::Value::String(s.clone()));
-                }
-                Some(other) => {
-                    out.insert("content".into(), other.clone());
-                }
-                None => {
-                    out.insert("content".into(), serde_json::Value::String(String::new()));
-                }
-            }
-            if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
-                let converted: Vec<serde_json::Value> = calls
-                    .iter()
-                    .map(|tc| {
-                        let name = tc
-                            .get("function")
-                            .and_then(|f| f.get("name"))
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("");
-                        let args = match tc.get("function").and_then(|f| f.get("arguments")) {
-                            Some(serde_json::Value::String(s)) => {
-                                serde_json::from_str::<serde_json::Value>(s)
-                                    .unwrap_or_else(|_| serde_json::json!({}))
-                            }
-                            Some(value) => value.clone(),
-                            None => serde_json::json!({}),
-                        };
-                        serde_json::json!({ "function": { "name": name, "arguments": args } })
-                    })
-                    .collect();
-                if !converted.is_empty() {
-                    out.insert("tool_calls".into(), serde_json::Value::Array(converted));
-                }
-            }
-            serde_json::Value::Object(out)
-        })
-        .collect()
-}
+// `to_ollama_messages` + `build_chat_payload` (pure shaping) moved to
+// `local-first-engine::payload` (ADR 0024 Inc-1). The gateway keeps only the thin
+// `build_chat_payload` wrapper (below) that resolves the impure capability/env flags.
 
 /// Applies one Ollama native chat object (`{message:{content,tool_calls},done}`):
 /// streams the content fragment live, accumulates it, and appends any tool_calls
@@ -15208,63 +15472,34 @@ fn build_chat_payload(
     temperature: f64,
     is_final_round: bool,
 ) -> serde_json::Value {
+    // Thin wrapper (ADR 0024 Inc-1): resolve the impure flags (capability cache + env)
+    // here, delegate the provider-specific shaping to the PURE `local-first-engine`
+    // payload builder. Same signature → the call sites are unchanged. See
+    // crates/engine/src/payload.rs (Ollama native/OpenAI/z.ai quirks, tool/think gating).
     let max_tokens = chat_payload_max_tokens(
         is_final_round,
         env::var("HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS").ok().as_deref(),
     );
-    if is_ollama_base(base_url) {
-        // Native /api/chat streams content + tool_calls together fine on current
-        // Ollama (verified on 0.30.6: `/v1` AND native both return tool_calls while
-        // streaming — the historical drop-bug ollama#12557 doesn't reproduce). So we
-        // STREAM always (live tokens) — the ollama-rs "stream:false with tools" rule
-        // is conservative/historical and not needed here. `keep_alive` keeps a LOCAL
-        // model warm between turns. The collector also handles a non-streamed single
-        // object, so this stays robust if a future model needs stream:false.
-        let mut payload = serde_json::json!({
-            "model": model,
-            "messages": to_ollama_messages(messages),
-            "stream": true,
-            "keep_alive": "10m",
-            "options": { "temperature": temperature, "num_predict": max_tokens },
-        });
-        // Offer tools only when the model can use them. Strip ONLY when /api/show confidently
-        // reports no `tools` capability; undetected/cloud (profile None) → keep tools, fail-safe.
-        let tool_capable = ollama_capabilities(base_url, model)
-            .map(|c| c.tools)
-            .unwrap_or(true);
-        if !is_final_round && !tools.is_empty() && tool_capable {
-            payload["tools"] = serde_json::Value::Array(tools.to_vec());
-        }
-        // Ask for the reasoning trace as a SEPARATE `message.thinking` field, but ONLY for
-        // models that advertise the capability (cache warmed before the loop) — sending it to a
-        // non-thinking model 400s. Clean separation beats parsing inline `<think>` tags.
-        if ollama_thinking_supported(base_url, model) {
-            payload["think"] = serde_json::Value::Bool(true);
-        }
-        payload
-    } else {
-        let mut payload = serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": true,
-        });
-        // z.ai GLM defaults to "thinking" mode, which streams the answer as
-        // `reasoning_content` and frequently emits an EMPTY `content` (finish_reason
-        // `stop` with no answer text) — the stream reassembly reads `content`/
-        // `tool_calls` only, so the turn dead-ends on the canned fallback. Disabling
-        // it makes GLM emit normal content + structured tool_calls like every other
-        // provider (verified against api.z.ai). Opt back in with HOMUN_ZAI_THINKING=1.
-        if is_zai_base(base_url) && !zai_thinking_enabled() {
-            payload["thinking"] = serde_json::json!({ "type": "disabled" });
-        }
-        if !is_final_round && !tools.is_empty() {
-            payload["tools"] = serde_json::Value::Array(tools.to_vec());
-            payload["tool_choice"] = serde_json::Value::String("auto".to_string());
-        }
-        payload
-    }
+    let is_ollama = is_ollama_base(base_url);
+    // Offer tools only when the model can use them; undetected/cloud (profile None) → keep
+    // tools, fail-safe. Thinking trace requested only for models that advertise it.
+    let tool_capable = ollama_capabilities(base_url, model)
+        .map(|c| c.tools)
+        .unwrap_or(true);
+    let thinking_supported = ollama_thinking_supported(base_url, model);
+    let zai_thinking_disabled = is_zai_base(base_url) && !zai_thinking_enabled();
+    local_first_engine::payload::build_chat_payload(
+        model,
+        messages,
+        tools,
+        temperature,
+        is_final_round,
+        is_ollama,
+        zai_thinking_disabled,
+        tool_capable,
+        thinking_supported,
+        max_tokens,
+    )
 }
 
 fn chat_payload_max_tokens(is_final_round: bool, debug_override: Option<&str>) -> u32 {
@@ -15829,13 +16064,22 @@ fn homuncoder_skill_ids() -> std::collections::HashSet<String> {
 
 /// Loads an installed skill's SKILL.md body (instructions) by id.
 fn load_skill_body(id: &str) -> Option<String> {
+    load_skill_body_and_sensitive(id).map(|(body, _)| body)
+}
+
+/// Loads a skill's adapted body PLUS its declared sensitive categories in one pass
+/// (ADR 0023 Step 5 / Fase 0.3). `use_skill` uses the body to show instructions and
+/// the categories to arm the turn's force-confirm (`ctx.active_sensitive`).
+fn load_skill_body_and_sensitive(
+    id: &str,
+) -> Option<(String, Vec<skills::SensitiveCategory>)> {
     let dir = skills_dir().ok()?;
     let disabled = load_skills_disabled();
     let origins = load_skills_origins();
     skills::load_detail(&dir, id, &disabled, &origins)
         .ok()
         .flatten()
-        .map(|detail| adapt_skill_body(&detail.body, id))
+        .map(|detail| (adapt_skill_body(&detail.body, id), detail.summary.sensitive))
 }
 
 /// Extracts a skill id from a sandbox command that references the container skill
@@ -18575,6 +18819,9 @@ struct ChatToolCtx<'a> {
     nav_failures: &'a mut std::collections::HashMap<String, u32>,
     browse_sources: &'a mut Vec<String>,
     plan: &'a mut ExecutionPlan,
+    /// Readable per-turn trace (cheap Arc/None handle). Records the plan sent→canonical transition
+    /// from `execute_chat_tool`; no-op when disabled. See turn_trace.rs.
+    turn_trace: turn_trace::TurnTrace,
     step_evidence: &'a mut Vec<String>,
     tool_trace: &'a mut Vec<String>,
     loaded_tools: &'a mut std::collections::BTreeSet<String>,
@@ -18585,6 +18832,14 @@ struct ChatToolCtx<'a> {
     pending_compaction: &'a mut bool,
     pending_vault_reveal_marker: &'a mut Option<String>,
     pending_confirm: &'a mut bool,
+    /// ADR 0023 Step 5 (Fase 0.3): sensitive domains declared by skills loaded via
+    /// `use_skill` this turn (turn-scoped). Non-empty → effectful actions force a
+    /// confirm regardless of approval policy (`skill_policy_forces_confirm`).
+    active_sensitive: &'a mut Vec<crate::skills::SensitiveCategory>,
+    /// The task GOAL for this turn's plan (set via `update_plan`'s `objective`, echoed
+    /// into the ‹‹PLAN›› marker above the steps). Turn-scoped, carried forward across
+    /// `update_plan`/`step_advance` calls and resumed from the marker on turn start.
+    plan_objective: &'a mut Option<String>,
     base_url: &'a mut String,
     model: &'a mut String,
     api_key: &'a mut Option<String>,
@@ -18614,14 +18869,99 @@ struct ChatToolCtx<'a> {
     round: usize,
 }
 
-/// ADR 0023 (`docs/decisions/0023-sandbox-enforcement-and-unified-approval.md`)
-/// gate: when `HOMUN_TOOL_SAFETY=1`, the two write-confirm branches route their
-/// decision through `tool_safety::assess_tool_safety` instead of the ad-hoc
-/// boolean. Default OFF (unset / any other value) → the exact legacy boolean, so
-/// this is behavior-preserving until the flag is flipped. Kept as a fn (not a
-/// `LazyLock`) so tests can toggle the env var per case.
+/// The single source of truth for the sandbox axis. Precedence, mirroring
+/// `adaptive_floor_mode`: env override > persisted RuntimeSettings > default(`danger`).
+/// `HOMUN_TOOL_SAFETY=1` stays a back-compat alias for `workspace-write` so existing
+/// validations/tests keep meaning the same thing; `HOMUN_SANDBOX_MODE` is the explicit
+/// per-run override. Default `danger` → behavior-preserving (no fence) until a later
+/// Settings-UI task flips the persisted default.
+fn resolved_sandbox_mode() -> crate::tool_safety::SandboxMode {
+    use crate::tool_safety::SandboxMode;
+    if let Ok(m) = std::env::var("HOMUN_SANDBOX_MODE") {
+        if !m.trim().is_empty() {
+            return SandboxMode::parse(&m);
+        }
+    }
+    if std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1") {
+        return SandboxMode::WorkspaceWrite;
+    }
+    SandboxMode::parse(&load_runtime_settings().sandbox_mode)
+}
+
+/// The approval axis (ADR 0023 #1b): env override > persisted RuntimeSettings > default (OnRequest).
+/// `HOMUN_APPROVAL_POLICY` is the explicit per-run override; the persisted value comes from Settings.
+/// Default `on-request` — behavior-preserving: the non-autonomous case keeps asking on effectful
+/// writes exactly as today (the wiring, below, still forces `Never` for autonomous runs).
+fn resolved_approval_policy() -> crate::tool_safety::AskForApproval {
+    use crate::tool_safety::AskForApproval;
+    if let Ok(p) = std::env::var("HOMUN_APPROVAL_POLICY") {
+        if !p.trim().is_empty() {
+            return AskForApproval::parse(&p);
+        }
+    }
+    AskForApproval::parse(&load_runtime_settings().approval_policy)
+}
+
+/// Pure: the effective approval for a single turn. Autonomous runs NEVER prompt
+/// (`Never`), whatever the resolved policy; otherwise the resolved policy applies.
+/// Extracted so the wiring's autonomous-preservation is unit-testable without a
+/// ChatToolCtx. With the default `on-request`: non-autonomous → `OnRequest`
+/// (unchanged), autonomous → `Never` (unchanged) — identical to today.
+fn effective_approval(
+    autonomous: bool,
+    resolved: crate::tool_safety::AskForApproval,
+) -> crate::tool_safety::AskForApproval {
+    if autonomous {
+        crate::tool_safety::AskForApproval::Never
+    } else {
+        resolved
+    }
+}
+
+/// ADR 0023 Step 5 (Fase 0.3): a skill that declares a sensitive domain
+/// (`sensitive:` frontmatter) forces a confirmation on its EFFECTFUL actions —
+/// even under a permissive approval policy (`never`/`on-request`) — without
+/// trusting the model. Pure and policy-independent so it OR-composes with the
+/// existing `assess_tool_safety` verdict at each effectful gate: reads are never
+/// gated, and nothing fires unless a sensitive skill is active this turn.
+fn skill_policy_forces_confirm(
+    active_sensitive: &[crate::skills::SensitiveCategory],
+    is_effectful: bool,
+) -> bool {
+    is_effectful && !active_sensitive.is_empty()
+}
+
+/// Pure: does a write tool need the read-only escalation under this mode? Testable
+/// without ChatToolCtx. `sandbox_gate_write` composes this with `resolved_sandbox_mode()`
+/// and, when true, emits the escalation card. Only the Write footprint (write_file/
+/// edit_file today) can escalate; reads and non-file tools never do.
+fn write_needs_read_only_escalation(
+    name: &str,
+    args: &serde_json::Value,
+    mode: crate::tool_safety::SandboxMode,
+) -> bool {
+    matches!(
+        crate::tool_safety::tool_footprint(name, args),
+        crate::tool_safety::ToolFootprint::Write { .. }
+    ) && mode == crate::tool_safety::SandboxMode::ReadOnly
+}
+
+/// ADR 0023 gate, now DERIVED from the sandbox axis (was `HOMUN_TOOL_SAFETY==1`).
+/// Deliberately NOT influenced by the approval axis: with the default mode `danger`
+/// this returns false (legacy behavior); `HOMUN_TOOL_SAFETY=1` → `workspace-write` →
+/// true, exactly as before. Kept a fn (not LazyLock) so tests toggle env per case.
 fn tool_safety_enabled() -> bool {
-    std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
+    resolved_sandbox_mode() != crate::tool_safety::SandboxMode::Danger
+}
+
+/// Gate for the experimental subagent-orchestration tool (ADR 0025). Default OFF — when
+/// off, `spawn_subagent` is not even added to the toolset (and the dispatch also refuses
+/// it defensively), so behavior is unchanged. When ON, the dispatch runs a live
+/// SEQUENTIAL read/gather fan-out (Task 2, `run_spawn_subagent`): children gather and the
+/// manager synthesizes + stays the sole writer. Per-role model routing, per-child budget,
+/// and memory-scope threading are later slice-1 tasks (Task 3).
+fn subagents_enabled() -> bool {
+    std::env::var("HOMUN_SUBAGENTS").as_deref() == Ok("1")
 }
 
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
@@ -18659,6 +18999,48 @@ async fn emit_approval_card(
     "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
         .to_string()
+}
+
+/// ADR 0023 #2: a file-write blocked by the read-only sandbox surfaces the SAME
+/// escalation card as a fenced bash command — approving re-runs the write (still
+/// project-jailed, wired in a later task). The marker carries the tool + its arguments
+/// so the escalation endpoint can re-dispatch and verify provenance.
+async fn emit_write_escalate_card(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_val: &serde_json::Value,
+) -> String {
+    let approval =
+        create_pending_approval(ctx.state, name, args_val, "file write", ctx.thread_id, true);
+    let marker = match approval.as_ref() {
+        Some(a) => serde_json::json!({ "approval_id": a.approval_id, "tool": name, "arguments": args_val }),
+        None => serde_json::json!({ "tool": name, "arguments": args_val }),
+    }
+    .to_string();
+    let card = format!(
+        "\n\nThis write was blocked by the read-only sandbox.\n{SANDBOX_ESCALATE_OPEN}{marker}{SANDBOX_ESCALATE_CLOSE}\n"
+    );
+    ctx.accumulated.push_str(&card);
+    let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
+    *ctx.pending_confirm = true;
+    "AWAITING USER CONFIRMATION: the write was blocked by the read-only sandbox and \
+proposed via an escalation card. Do NOT say it was written."
+        .to_string()
+}
+
+/// Returns `Some(model-facing string)` when a write tool must NOT proceed under the
+/// resolved sandbox mode (read-only → escalation card); `None` = proceed to normal
+/// dispatch (workspace-write/danger; jail_in_root still confines to the project).
+async fn sandbox_gate_write(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_val: &serde_json::Value,
+) -> Option<String> {
+    if write_needs_read_only_escalation(name, args_val, resolved_sandbox_mode()) {
+        Some(emit_write_escalate_card(ctx, name, args_val).await)
+    } else {
+        None
+    }
 }
 
 /// ADR 0023 sandbox axis, SHADOW mode: classify a tool call's filesystem footprint
@@ -18814,8 +19196,17 @@ require your confirmation in the app. Propose it and stop."
             }
         }
         if ctx.browser_session.is_none() {
-            let reused = match ctx.thread_id {
-                Some(t) => {
+            // A read/gather subagent child must NOT steal/park the thread's WARM browser
+            // session: `take_thread_browser_session` REMOVES it from the thread and hands
+            // it to the child's `browser_session`, which is dropped when the child ctx
+            // goes out of scope → `BrowserSidecarSession::drop` shuts down Chromium,
+            // killing the manager's warm session cross-turn. A child keeps its own
+            // `thread_id` (needed for project-root resolution on read_file/list_files and
+            // for Task 3's memory scoping), so we gate on `read_only` — the child always
+            // spawns a THROWAWAY sidecar (fine: it's discarded at child exit) and never
+            // touches the shared warm session.
+            let reused = match (ctx.read_only, ctx.thread_id) {
+                (false, Some(t)) => {
                     let st = ctx.state.clone();
                     let t = t.to_string();
                     tokio::task::spawn_blocking(move || {
@@ -18825,7 +19216,7 @@ require your confirmation in the app. Propose it and stop."
                     .ok()
                     .flatten()
                 }
-                None => None,
+                _ => None,
             };
             // A reused session already has the "chat_0" tab open;
             // mark it opened so navigate reuses it (Navigate, not
@@ -19668,14 +20059,24 @@ Use the text snapshot."
         )
         .await;
         let id_for_load = id.clone();
-        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load))
+        match tokio::task::spawn_blocking(move || load_skill_body_and_sensitive(&id_for_load))
             .await
         {
-            Ok(Some(body)) => format!(
-                "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
+            Ok(Some((body, sensitive))) => {
+                // ADR 0023 Step 5: arm the turn's force-confirm for a skill that
+                // declares a sensitive domain. Dedup so repeated `use_skill` of the
+                // same (or overlapping) skills doesn't grow the active set.
+                for cat in sensitive {
+                    if !ctx.active_sensitive.contains(&cat) {
+                        ctx.active_sensitive.push(cat);
+                    }
+                }
+                format!(
+                    "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
 available tools (for data from the web use the browser: browser_navigate on the indicated URL):\n\n{}",
-                body.chars().take(8000).collect::<String>()
-            ),
+                    body.chars().take(8000).collect::<String>()
+                )
+            }
             _ => format!("Skill «{id}» not found or not readable."),
         }
     } else if name == "run_in_sandbox" {
@@ -20952,6 +21353,17 @@ an uncertain date.",
                 .cloned()
                 .unwrap_or_default()
         };
+        // Carry the task GOAL forward (Fase A of goal+steps UX): `update_plan` may set or
+        // echo the objective; a null/absent value or `step_advance` leaves it unchanged,
+        // so the goal persists across the plan's whole life and never flickers away.
+        if name == "update_plan" {
+            if let Some(obj) = args_val.get("objective").and_then(|v| v.as_str()) {
+                let obj = obj.trim();
+                if !obj.is_empty() {
+                    *ctx.plan_objective = Some(obj.to_string());
+                }
+            }
+        }
         // MERGE the model's steps into the CANONICAL plan (never replace);
         // returns the canonical indices newly claimed done (held `doing`
         // until F2 verifies). See `merge_plan` for the anti-reset rule.
@@ -20979,6 +21391,19 @@ an uncertain date.",
                 plan_sig.join(",")
             );
         }
+        // Turn trace: the sent→canonical transition makes the verify-hold visible (a step the model
+        // claimed `done` that the gate keeps `doing`). Recorded regardless of verbose_debug.
+        let status_of = |s: &serde_json::Value| {
+            s.get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+                .to_string()
+        };
+        ctx.turn_trace.record(turn_trace::TurnEvent::Plan {
+            op: name.to_string(),
+            sent: sent.iter().map(&status_of).collect(),
+            canonical: plan_steps.iter().map(&status_of).collect(),
+        });
         if plan_steps.is_empty() {
             "Empty plan: provide at least one step with a title.".to_string()
         } else {
@@ -21070,8 +21495,11 @@ an uncertain date.",
             // truth (verified state), not the model's raw claim. This is what
             // the UI shows and what the next turn resumes from.
             plan_steps = execution_plan_steps(ctx.plan);
-            let plan_mark =
-                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
+            let plan_mark = format!(
+                "‹‹PLAN››{}{}‹‹/PLAN››",
+                plan_objective_line(ctx.plan_objective.as_deref()),
+                build_plan_markdown(&plan_steps)
+            );
             ctx.accumulated.push_str(&plan_mark);
             let _ = emit_stream_event(
                 ctx.tx,
@@ -21314,9 +21742,33 @@ loaded with use_skill):\n{}",
             out.push_str(&note);
         }
         out
+    } else if name == "spawn_subagent" {
+        // ADR 0025 slice-1 Task 2: LIVE fan-out. The tool is only offered when
+        // HOMUN_SUBAGENTS=1; children are read/gather-only and the manager stays the
+        // sole writer (see `run_spawn_subagent`). A child MUST NOT recurse into another
+        // fan-out, so refuse it inside a child ctx (a child is `read_only`): a child
+        // that somehow got the tool would otherwise spawn grandchildren.
+        if !subagents_enabled() {
+            // Defense-in-depth: the tool isn't in the schema when the flag is off, so a
+            // well-behaved model never calls it — but refuse a hallucinated call rather
+            // than run the fan-out with the flag disabled.
+            "subagent orchestration is disabled".to_string()
+        } else if ctx.read_only {
+            "spawn_subagent is not available to a subagent (no nested fan-out). \
+Return your findings for the manager to act on."
+                .to_string()
+        } else {
+            run_spawn_subagent(ctx, args_raw).await
+        }
     } else if name == "write_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
+        // ADR 0023 #2: read-only sandbox blocks the write here (chokepoint) and
+        // surfaces an escalation card instead of dispatching. workspace-write/danger
+        // return None → unchanged dispatch below (jail_in_root still confines it).
+        if let Some(blocked) = sandbox_gate_write(ctx, "write_file", &args_val).await {
+            return blocked;
+        }
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -21357,6 +21809,10 @@ loaded with use_skill):\n{}",
     } else if name == "edit_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
+        // ADR 0023 #2: same read-only gate as write_file (see above).
+        if let Some(blocked) = sandbox_gate_write(ctx, "edit_file", &args_val).await {
+            return blocked;
+        }
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -21386,6 +21842,81 @@ loaded with use_skill):\n{}",
         })
         .await
         .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "apply_patch" {
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+        let input = args_val
+            .get("input")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🩹 Applying patch‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        // Read-only sandbox: deny INLINE (do NOT route through sandbox_gate_write — the
+        // escalation endpoint does not yet support apply_patch; that's a documented
+        // follow-up). Read-only is opt-in, so a clear message guides the user to switch.
+        if resolved_sandbox_mode() == crate::tool_safety::SandboxMode::ReadOnly {
+            return "apply_patch is blocked by the read-only sandbox. Switch the sandbox \
+mode in Settings (or set it to workspace-write) to allow writes."
+                .to_string();
+        }
+        if project_root_for_thread(ctx.state, ctx.thread_id).is_none() {
+            return no_project_folder_msg();
+        }
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let apply_result = tokio::task::spawn_blocking(move || {
+            apply_patch_in_project(&st, tid.as_deref(), &input)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("Error: {e}")));
+        match apply_result {
+            Ok(files) => {
+                // Emit a structured diff card per touched file (D3 ‹‹DIFF›› marker),
+                // and register artifact memory for each written path (skip deletions).
+                let mut names: Vec<String> = Vec::with_capacity(files.len());
+                for file in &files {
+                    names.push(file.path.clone());
+                    if !file.deleted {
+                        let payload = local_first_subagents::DiffStreamPayload {
+                            path: file.path.clone(),
+                            label: Some(format!("apply_patch: {}", file.path)),
+                            old: file.old.clone(),
+                            new: file.new.clone(),
+                            language: None,
+                        };
+                        if let Ok(json) = serde_json::to_string(&payload) {
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!("‹‹DIFF››{json}‹‹/DIFF››"),
+                                },
+                            )
+                            .await;
+                        }
+                        register_project_file_artifact_memory(
+                            ctx.state,
+                            ctx.thread_id,
+                            &file.path,
+                            file.new.len() as u64,
+                            "apply_patch",
+                        )
+                        .await;
+                    }
+                }
+                if names.is_empty() {
+                    "Applied patch (no files changed).".to_string()
+                } else {
+                    format!("Applied patch. Updated: {}", names.join(", "))
+                }
+            }
+            Err(msg) => msg,
+        }
     } else if name == "list_files" {
         let _ = emit_stream_event(
             ctx.tx,
@@ -21686,15 +22217,15 @@ require your confirmation in the app. Propose it and stop."
         );
         let is_write = ctx.composio_writes.contains(name);
         let needs_confirm = if tool_safety_enabled() {
-            // ADR 0023: route the decision through the pure policy fn. `Never`
-            // (autonomous) → AutoApprove; `OnRequest` + unauthorized write →
-            // AskUser. Sandbox is DangerFullAccess for now (no OS fence wired
-            // yet), so this yields the same verdict as the legacy boolean.
-            let approval = if ctx.autonomous {
-                AskForApproval::Never
-            } else {
-                AskForApproval::OnRequest
-            };
+            // ADR 0023 #1b: route the decision through the pure policy fn. The approval
+            // axis is now RESOLVED (env > persisted Settings > default `on-request`),
+            // but autonomous runs still force `Never` — so at the default this yields
+            // the same verdict as before (non-autonomous → OnRequest, autonomous →
+            // Never). Sandbox is DangerFullAccess for now (no OS fence wired yet).
+            // TODO(0023 #1b): on-failure/untrusted full semantics (run-then-ask-on-
+            // failure / allowlist) not yet realized — assess_tool_safety treats every
+            // non-`Never` policy as "ask on unauthorized effectful write".
+            let approval = effective_approval(ctx.autonomous, resolved_approval_policy());
             matches!(
                 assess_tool_safety(
                     approval,
@@ -21707,6 +22238,10 @@ require your confirmation in the app. Propose it and stop."
         } else {
             is_write && !ctx.autonomous && !workspace_scoped
         };
+        // ADR 0023 Step 5: an active sensitive skill forces a confirm on effectful
+        // actions even when the policy alone wouldn't (e.g. under `never`).
+        let needs_confirm = needs_confirm
+            || skill_policy_forces_confirm(ctx.active_sensitive.as_slice(), is_write);
         if needs_confirm {
             emit_approval_card(
                 ctx,
@@ -21800,14 +22335,12 @@ Connectors → MCP; do NOT claim it's done.",
         let is_write = ctx.composio_writes.contains(name);
         let pre_authorized = composio_tool_allowed(name);
         let needs_confirm = if tool_safety_enabled() {
-            // ADR 0023: same routing as the MCP branch. `pre_authorized` is the
-            // user's always-allow list; `Never` (autonomous) short-circuits to
-            // AutoApprove. Equals the legacy boolean below under DangerFullAccess.
-            let approval = if ctx.autonomous {
-                AskForApproval::Never
-            } else {
-                AskForApproval::OnRequest
-            };
+            // ADR 0023 #1b: same routing as the MCP branch. `pre_authorized` is the
+            // user's always-allow list; the approval axis is now RESOLVED, with
+            // autonomous forced to `Never`. At the default `on-request` this equals
+            // the legacy boolean below under DangerFullAccess.
+            // TODO(0023 #1b): on-failure/untrusted full semantics not yet realized.
+            let approval = effective_approval(ctx.autonomous, resolved_approval_policy());
             matches!(
                 assess_tool_safety(
                     approval,
@@ -21820,6 +22353,10 @@ Connectors → MCP; do NOT claim it's done.",
         } else {
             is_write && !pre_authorized && !ctx.autonomous
         };
+        // ADR 0023 Step 5: an active sensitive skill forces a confirm on effectful
+        // actions even when the policy alone wouldn't (e.g. under `never`).
+        let needs_confirm = needs_confirm
+            || skill_policy_forces_confirm(ctx.active_sensitive.as_slice(), is_write);
         if needs_confirm {
             // Do NOT execute. Emit a confirmation card carrying the exact
             // action; the user runs it (once/always) via the card. The model
@@ -22006,6 +22543,18 @@ FIRST: it returns the correct absolute date to use (e.g. to fill in a form). Do 
 compute dates by hand. You have access to a real browser that YOU drive via granular \
 tools (browser_navigate / browser_snapshot / browser_act / browser_screenshot).\n\
 \n\
+COMMUNICATION STYLE: be direct and concise. Do NOT narrate your process or restate the \
+request, and never open with acknowledgements or framing (\"Got it\", \"Sure\", \
+\"Certainly\", \"Let me first…\", \"You're right\"). When you use a tool, just use it — the \
+result speaks for itself; don't announce it beforehand. No fluff, cheerleading, or filler: \
+say what is necessary, not more. Bias toward ACTION: assume the user wants you to act (search, \
+call tools, use skills) rather than propose — don't ask \"would you like me to…?\" or \"which \
+option do you prefer?\"; commit to a sensible path and state the assumption in one line. FINAL \
+ANSWER: favor PROSE and conciseness — for simple asks, 1-2 short paragraphs; do NOT default to \
+bullets or tables (use them only when the content is inherently a multi-item list or \
+comparison). If the answer is turning into a changelog or a play-by-play, compress it to the \
+outcome and the concrete data.\n\
+\n\
 METHOD (applies to any request, not just travel):\n\
 1. UNDERSTAND: what the user wants and what the concrete EXPECTED RESULT is.\n\
 2. SUCCESS CRITERIA: define explicitly what \"done\" means (which data/fields and how \
@@ -22050,10 +22599,6 @@ Prefer an accurate partial (\"decided so far: …; still open: …\") over a com
 but fabricated picture. Before sending, sanity-check internal consistency (counts match \
 their labels; nothing is both \"already decided\" and \"played later today\").\n\
 \n\
-TOOLS AND ROUTING: when a request can be satisfied by a tool, USE it at once — do \
-NOT reply with empty phrases (\"I'm ready, write to me\", \"what do you want me to \
-do?\") nor ask to repeat what was already asked. A targeted clarification question \
-(as in step 3 of METHOD) is fine; a non-answer is not.\n\
 USER'S COMPUTER FILES AND FOLDERS: if the user wants to see/list/read files or \
 folders on their computer — EVEN if they name the folder WITHOUT a path (e.g. \
 \"the folders in Project\", \"the files in Documents\") — use `list_directory` / \
@@ -22086,11 +22631,10 @@ running commands in a sandbox, creating artifacts, scheduling recurring tasks, �
 call `find_capability` FIRST describing what you want to do: it activates the right \
 tool, callable right after. The browser is NOT in the base set and is activated via \
 `find_capability`: use it as a LAST resort, only if no more direct tool (e.g. \
-`github_search` for GitHub) covers the request.\n\
-EXTERNAL SERVICES (email, calendar, GitHub, …): call `find_capability` to discover \
-the right tool (also search among connected services) and use it; if it finds \
-nothing, call `suggest_capabilities` to propose what to connect. Never leave the \
-user with a non-answer.\n\
+`github_search` for GitHub) covers the request. `find_capability` also searches \
+CONNECTED services (email, calendar, GitHub, …); if it finds nothing, call \
+`suggest_capabilities` to propose what to connect — never leave the user with a \
+non-answer.\n\
 \n\
 Travel and follow-up: always carry with you ALL the parameters already resolved in \
 the conversation (route/place, date with year, constraints). Even on a short \
@@ -22109,12 +22653,12 @@ airlines or airports, the Airline and Airport columns are MANDATORY (do not leav
 ambiguous which price belongs to whom/where). Use a table and list several options, \
 not just one.\n\
 \n\
-RESPONSE FORMATTING (markdown, always): write readable, airy answers, never a wall \
-of text. ALWAYS use markdown: each item in a list goes on its OWN LINE with `- ` \
-(dash) — do not paste multiple entries on the same line. For day/item lists with \
-labels use `**Label**: value` with a blank line between entries, or a table if there \
-are ≥3 fields. Put a blank line between paragraphs. Use `### ` for section headings \
-when the answer is long. {language_instruction} Clear and well-structured.",
+FORMATTING: for simple answers, clear PROSE (see COMMUNICATION STYLE) — never a wall \
+of text. WHEN the content is genuinely list- or table-shaped (multiple items, options, \
+comparisons — e.g. travel results), format it cleanly: each item on its OWN LINE with \
+`- `, `**Label**: value` for labeled entries (blank line between), a table when there \
+are ≥3 fields, `### ` headings when the answer is long. Blank line between paragraphs. \
+{language_instruction}",
         now = now_block(),
         home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string()),
         language_instruction = response_language_instruction(&effective_user_language()),
@@ -22588,34 +23132,7 @@ is required to reveal or edit it. If recall_memory returns a `reveal_card:` line
 marker and renders the PIN unlock card. Do NOT send or forward raw Vault secret values through \
 generic external channels/tools such as send_message. The configured Telegram authorization channel may \
 receive Vault/payment summaries or approval prompts, but raw-value reveal stays behind the local PIN \
-unlock card unless a dedicated approved reveal flow exists. \
-PLAN (plan-mode): for a non-trivial MULTI-STEP task (development, refactor, involved research, \
-actions with effects) FIRST propose the plan and STOP — do NOT start executing in this turn. Emit \
-on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}}‹‹/PLAN_PROPOSE››` \
-(valid JSON). The user will see the Accept/Edit buttons. EXECUTE the plan ONLY in the NEXT turn, \
-after the user has approved it (e.g. «I approve the plan…»); if they ask for changes, revise and re-propose. \
-If the user explicitly asks to create, show, update, verify, or test a plan, use the plan machinery: \
-call update_plan for an operational plan or emit PLAN_PROPOSE for approval-gated plan-mode; do NOT \
-write a free-form numbered plan only in prose. \
-Once executing, use update_plan to update the step status (doing→done), shown in the \
-\"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
-parentheses after the title in the plan card) and the new status — this updates that ONE step \
-WITHOUT re-sending the plan, so steps never duplicate; use update_plan only to CREATE or revise \
-the plan. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
-repeat it in the reply text too — no list or table of the steps in prose (at most one \
-line of context). For single-step requests neither a plan nor a proposal is needed. \
-STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
-result (file written, search returned usable results, build/render succeeded), and only \
-THEN mark it `done` with update_plan before starting the next. Give each step a \
-`done_criterion` (the concrete, checkable proof it's finished): a step you mark done is \
-INDEPENDENTLY verified against its evidence before it counts — if it isn't actually complete \
-you'll be told and must keep working on it. Your working budget RESETS every time a step is \
-verified complete, so a long task (e.g. a 10-slide deck, a deep research) can run as long as \
-it KEEPS CLOSING STEPS — never rush or skip verification to save rounds, and never mark a \
-step done before its result actually exists. RESUMING: if the conversation ALREADY shows an \
-in-progress plan (some steps done, others not), CONTINUE it — re-emit the plan with update_plan \
-keeping the completed steps as done, and proceed from the first not-done step; do NOT restart \
-from scratch or re-propose."
+unlock card unless a dedicated approved reveal flow exists."
     );
     // LANGUAGE: the whole system prompt is in English, so without an explicit
     // directive coding-oriented models (e.g. kimi-*-code) reply in English even to an
@@ -22709,11 +23226,28 @@ to the user (one table per row + an optional Sources footer)."
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
     // "ask" also drops the toolset below (pure conversation).
     let mode = request.mode.as_deref().unwrap_or("agent").to_string();
+    // Turn trace (readable per-turn observability): created once, recorded at the decision points
+    // below (round/nudge/reconcile/end). Cheap Arc/None handle; no-op when disabled. See turn_trace.rs.
+    let turn_trace = if turn_trace_enabled() {
+        match gateway_logs_dir() {
+            Ok(dir) => turn_trace::TurnTrace::new(
+                request.request_id.clone(),
+                dir,
+                turn_trace_max_bytes(),
+            ),
+            Err(_) => turn_trace::TurnTrace::disabled(),
+        }
+    } else {
+        turn_trace::TurnTrace::disabled()
+    };
+    turn_trace.record(turn_trace::TurnEvent::TurnStart {
+        prompt_head: request.prompt.chars().take(200).collect(),
+        prompt_len: request.prompt.chars().count(),
+        mode: mode.clone(),
+        model: model.to_string(),
+        tier: turn_tier.as_str().to_string(),
+    });
     let system = match mode.as_str() {
-        "plan" => format!(
-            "{system}\n\nPLAN MODE (chosen by the user): for ANY non-trivial request \
-FIRST propose a plan with `‹‹PLAN_PROPOSE››…‹‹/PLAN_PROPOSE››` and STOP; execute only after approval."
-        ),
         "ask" => format!(
             "{system}\n\nASK MODE (chosen by the user): answer by conversing from your \
 knowledge and memory. Do NOT use tools and do NOT perform external actions (no browser, files, \
@@ -22726,6 +23260,23 @@ problem, isolate the cause, form a hypothesis, verify it with a minimal experime
 RE-VERIFY by executing. One cause at a time, no blind attempts."
         ),
         _ => system,
+    };
+    // Plan directive by mode (finding 1.2 / C): the HARNESS decides — agent/debug execute
+    // operationally, plan proposes-and-stops, ask has none. The weak model never sees a
+    // "propose and STOP" instruction in agent mode, so it can't stall on it. See plan_directive.rs.
+    let plan_directive = plan_directive::plan_directive_for_mode(&mode);
+    let system = if plan_directive.is_empty() {
+        system
+    } else {
+        // Mode-independent guarantee (kept in main.rs; asserted by the ui-contract): an
+        // EXPLICIT user request for a plan always routes through the plan machinery,
+        // regardless of agent/plan/debug mode.
+        format!(
+            "{system}\n\n{plan_directive}\n\n\
+If the user explicitly asks to create, show, update, verify, or test a plan, use the plan machinery: \
+call update_plan for an operational plan or emit PLAN_PROPOSE for approval-gated plan-mode; do NOT \
+write a free-form numbered plan only in prose."
+        )
     };
     let system = system.as_str();
     let mut endpoint = chat_endpoint(&base_url);
@@ -22795,6 +23346,14 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         base_tools.push(read_file_tool_schema());
         base_tools.push(write_file_tool_schema());
         base_tools.push(edit_file_tool_schema());
+        // Codex-format multi-file patch (ADR 0023 follow-up). Preferred for precise /
+        // multi-file edits; jailed via jail_in_root + gated by the read-only sandbox.
+        base_tools.push(apply_patch_tool_schema());
+        // ADR 0025 seam: offer `spawn_subagent` only when the experimental flag is on.
+        // Flag-off (default) → not pushed → the model can't call it → behavior unchanged.
+        if subagents_enabled() {
+            base_tools.push(spawn_subagent_tool_schema());
+        }
         base_tools.push(list_files_tool_schema());
         // Native filesystem (browse/read the user's authorized folders), so this
         // fundamental capability isn't outsourced to a third-party MCP.
@@ -23487,6 +24046,20 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         }
         let mut loaded_tools: std::collections::BTreeSet<String> =
             std::collections::BTreeSet::new();
+        // Turn-scoped sensitive domains armed by `use_skill` (ADR 0023 Step 5).
+        // Declared here (not per-round) so a skill loaded in an early round keeps
+        // forcing confirms on effectful actions in later rounds of the same turn.
+        let mut active_sensitive: Vec<crate::skills::SensitiveCategory> = Vec::new();
+        // Task goal for the plan (Fase A of the goal+steps UX): set by update_plan's
+        // `objective`, echoed into the ‹‹PLAN›› marker, and RESUMED from the latest plan
+        // marker in context on turn start (so "pass null to leave it unchanged" holds
+        // across turns, not just within one).
+        let mut plan_objective: Option<String> = request
+            .context
+            .iter()
+            .rev()
+            .find(|m| m.text.contains("‹‹PLAN››"))
+            .and_then(|m| parse_plan_objective(&m.text));
         // Turn-local browser state for the granular tools. The sidecar session is
         // held for the WHOLE turn (lock acquired only around each single call) and
         // parked back at every exit path. `last_snapshot` feeds the safety gate so
@@ -23582,6 +24155,17 @@ gathered‹‹/ACT››"
                 compact_completed_step(&state_owned.http, &mut messages, &mut step_messages_start)
                     .await;
             }
+            // Fase 1.1: token-budget auto-compaction (the memory-checkpoint path) —
+            // independent of plan steps. Fires when the conversation approaches the
+            // model's context window, flushing the older span to the memory engine and
+            // collapsing it in-context. Same safe round boundary as the step compaction.
+            compact_for_context_budget(
+                &state_owned,
+                &mut messages,
+                model_context_window,
+                thread_id.as_deref(),
+            )
+            .await;
             // On the LAST allowed round, forbid tools so the model MUST synthesize
             // a final answer from what it already gathered — otherwise it can burn
             // every round on tool calls and end with no answer ("limite di passi").
@@ -23964,6 +24548,33 @@ check/update the key in Settings → Model & Runtime."
                     }
                 });
 
+            // Turn trace: record this round's outcome (finish_reason + tools chosen) before the
+            // tool_calls value is consumed below.
+            turn_trace.record(turn_trace::TurnEvent::Round {
+                round,
+                finish_reason: body
+                    .get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("finish_reason"))
+                    .and_then(|f| f.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                tool_calls: tool_calls
+                    .as_ref()
+                    .map(|calls| {
+                        calls
+                            .iter()
+                            .filter_map(|c| {
+                                c.get("function")
+                                    .and_then(|f| f.get("name"))
+                                    .and_then(|n| n.as_str())
+                                    .map(String::from)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                content_delta_len: raw_content.chars().count(),
+            });
             if let Some(calls) = tool_calls {
                 plan_nudges = 0; // the model is acting again → reset the stop-nudge cap
                 turn_used_tools = true; // slice 2.5: acted → eligible for plan-bootstrap on a premature stop
@@ -24029,6 +24640,7 @@ check/update the key in Settings → Model & Runtime."
                         nav_failures: &mut nav_failures,
                         browse_sources: &mut browse_sources,
                         plan: &mut plan,
+                        turn_trace: turn_trace.clone(),
                         step_evidence: &mut step_evidence,
                         tool_trace: &mut tool_trace,
                         loaded_tools: &mut loaded_tools,
@@ -24039,6 +24651,8 @@ check/update the key in Settings → Model & Runtime."
                         pending_compaction: &mut pending_compaction,
                         pending_vault_reveal_marker: &mut pending_vault_reveal_marker,
                         pending_confirm: &mut pending_confirm,
+                        active_sensitive: &mut active_sensitive,
+                        plan_objective: &mut plan_objective,
                         base_url: &mut base_url,
                         model: &mut model,
                         api_key: &mut api_key,
@@ -24363,6 +24977,10 @@ check/update the key in Settings → Model & Runtime."
                             },
                         )
                         .await;
+                        turn_trace.record(turn_trace::TurnEvent::Nudge {
+                            reason: "answer_did_not_conclude_plan".into(),
+                            next_step: step.clone(),
+                        });
                         continue;
                     }
                     // The answer is substantial and the plan is all-but-closed → finalize with
@@ -24375,6 +24993,12 @@ check/update the key in Settings → Model & Runtime."
                             .iter()
                             .position(|s| plan_step_status(s) != "done")
                         {
+                            // Count open steps at DECISION time (before this reconcile closes one).
+                            let reconcile_open_before = plan_steps
+                                .iter()
+                                .filter(|s| plan_step_status(s) != "done")
+                                .count();
+                            let reconcile_delivered = content.trim().chars().count();
                             plan_steps[open_index]["status"] = serde_json::json!("done");
                             content = replace_latest_plan_marker(&content, &plan_steps);
                             upsert_runtime_plan_memory_from_state(
@@ -24387,6 +25011,13 @@ check/update the key in Settings → Model & Runtime."
                                     "[plan] reconciled last open step to done on delivery: «{step}»"
                                 );
                             }
+                            turn_trace.record(turn_trace::TurnEvent::Reconcile {
+                                fired: true,
+                                step: step.clone(),
+                                open_steps: reconcile_open_before,
+                                delivered_chars: reconcile_delivered,
+                                threshold: MIN_DELIVERED_CHARS_TO_CONCLUDE,
+                            });
                         }
                     }
                 } else if plan_steps.is_empty()
@@ -24441,6 +25072,15 @@ check/update the key in Settings → Model & Runtime."
                         .unwrap_or("");
                     eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
                 }
+                turn_trace.record(turn_trace::TurnEvent::ForcedSynthesis {
+                    finish_reason: body
+                        .get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("finish_reason"))
+                        .and_then(|f| f.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                });
                 // Keep the reasoning trace in context so the synthesis builds on it.
                 if !content.trim().is_empty() {
                     messages.push(serde_json::json!({ "role": "assistant", "content": content }));
@@ -24587,6 +25227,29 @@ Tell me if you want me to retry or rephrase."
                 },
             )
             .await;
+        }
+        // Turn trace: the final record. `memory_answer` is the committed answer in BOTH finalize
+        // paths; `plan` is the final runtime plan. The derived flags (incomplete steps, artifact
+        // claimed-but-absent) are the high-value signal.
+        {
+            let final_steps = execution_plan_steps(&plan);
+            let plan_final: Vec<String> = final_steps
+                .iter()
+                .map(|s| plan_step_status(s).to_string())
+                .collect();
+            let plan_titles: Vec<String> = final_steps
+                .iter()
+                .map(|s| plan_step_title(s).to_string())
+                .collect();
+            let artifact_count = memory_answer.matches("‹‹ARTIFACT››").count();
+            let signals = turn_trace::answer_signals(&memory_answer, artifact_count);
+            let derived = turn_trace::derive_flags(&plan_final, &plan_titles, &signals);
+            turn_trace.record(turn_trace::TurnEvent::TurnEnd {
+                final_len: memory_answer.chars().count(),
+                plan_final,
+                signals,
+                derived,
+            });
         }
         // M2: mine this exchange for durable personal memory (fire-and-forget, off
         // the response path). Best-effort; never blocks or fails the turn.
@@ -27335,16 +27998,99 @@ struct RuntimeSettings {
     /// Adaptive scaffolding floor (ADR 0018): `off` (default) | `shadow` | `on`.
     #[serde(default = "default_adaptive_floor")]
     adaptive_floor: String,
+    /// Sandbox mode (ADR 0023): `workspace-write` (default) | `read-only` | `danger`.
+    /// The persisted source for `resolved_sandbox_mode`; exposed in Settings by a later task.
+    #[serde(default = "default_sandbox_mode")]
+    sandbox_mode: String,
+    /// Approval policy (ADR 0023 #1b): `on-request` (default) | `untrusted` | `on-failure` | `never`.
+    /// The persisted source for `resolved_approval_policy`; exposed in Settings by a later task.
+    #[serde(default = "default_approval_policy")]
+    approval_policy: String,
 }
 
 fn default_adaptive_floor() -> String {
     "off".to_string()
 }
 
+/// The shipped default approval policy (ADR 0023 #1b): `on-request`. The model asks
+/// when it judges a write needs confirmation — today's shipped behavior for the
+/// non-autonomous case. Canonical so it round-trips through `AskForApproval::parse`.
+fn default_approval_policy() -> String {
+    "on-request".to_string()
+}
+
+/// Whether the Linux Landlock fence helper (`homun-linux-sandbox`) can be resolved:
+/// `HOMUN_LINUX_SANDBOX_BIN` points at a file, or a sibling of the current exe exists.
+/// Mirrors the resolution in `build_sandbox_command` (Linux arm). Only consulted under
+/// `cfg!(target_os = "linux")` — macOS fences via Seatbelt (no helper), Windows applies
+/// no fence — so on other platforms its result is irrelevant.
+fn linux_sandbox_helper_available() -> bool {
+    let bin_override = std::env::var_os("HOMUN_LINUX_SANDBOX_BIN").map(std::path::PathBuf::from);
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf));
+    linux_sandbox_helper_resolves(bin_override.as_deref(), exe_dir.as_deref())
+}
+
+/// Pure core of `linux_sandbox_helper_available` (extracted so the Fase 0.2
+/// auto-flip contract is testable on any platform without mutating process-global
+/// env or shelling out to `current_exe`). Given the resolved `HOMUN_LINUX_SANDBOX_BIN`
+/// override (if set) and the gateway executable's directory (if resolvable), decide
+/// whether the `homun-linux-sandbox` helper is present. An EXPLICIT override
+/// short-circuits — if it's set but missing we report absent rather than silently
+/// falling back to a sibling (the caller asked for that exact binary).
+fn linux_sandbox_helper_resolves(
+    bin_override: Option<&std::path::Path>,
+    exe_dir: Option<&std::path::Path>,
+) -> bool {
+    if let Some(p) = bin_override {
+        return p.is_file();
+    }
+    exe_dir
+        .map(|d| d.join("homun-linux-sandbox").is_file())
+        .unwrap_or(false)
+}
+
+/// The shipped default sandbox mode (ADR 0023 #1) — PLATFORM-AWARE and, on Linux,
+/// CAPABILITY-PROBED so we FENCE WHENEVER WE ACTUALLY CAN (addressing the "fail-open by
+/// default" hazard) without shipping a broken app.
+/// - **macOS**: `workspace-write`. Seatbelt (`sandbox-exec`) is always present.
+/// - **Windows**: `workspace-write`. No OS fence is applied on Windows (`run_in_project`
+///   only fences on macOS/Linux) — functional (approval-only), not broken.
+/// - **Linux**: `workspace-write` **iff the `homun-linux-sandbox` helper resolves**
+///   (bundled next to the gateway, or `HOMUN_LINUX_SANDBOX_BIN`). Then the fence works
+///   and this AUTO-UPGRADES the moment the helper is bundled — no code change. If the
+///   helper is ABSENT we cannot fence Linux bash at all (the gateway can't Landlock
+///   itself; only the helper subprocess fences then execs), and defaulting to a fencing
+///   mode would FAIL CLOSED (every bash refused = broken). So we fall back to `danger`
+///   (functional) but WARN ONCE so the unfenced state is never silent. NB: an EXPLICIT
+///   user choice of a fencing mode with the helper absent still fails closed in
+///   `run_in_project` (correct — they asked to fence); this fallback is only for the
+///   default. Note `read-only` is NOT a safe Linux fallback — on Linux it also needs the
+///   helper, so it would fail closed too, not "still enforce".
+/// Selecting `danger` in Settings or `HOMUN_SANDBOX_MODE=danger` opts out; the value is
+/// canonical so it round-trips through `SandboxMode::parse`.
+fn default_sandbox_mode() -> String {
+    if cfg!(target_os = "linux") && !linux_sandbox_helper_available() {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            eprintln!(
+                "[sandbox] WARNING: homun-linux-sandbox helper not found — defaulting to \
+UNFENCED sandbox mode 'danger' on Linux. Bundle the helper next to the gateway or set \
+HOMUN_LINUX_SANDBOX_BIN to enable the workspace-write fence, or pick a mode in Settings."
+            );
+        });
+        return "danger".to_string();
+    }
+    "workspace-write".to_string()
+}
+
 impl Default for RuntimeSettings {
     fn default() -> Self {
         Self {
             adaptive_floor: default_adaptive_floor(),
+            sandbox_mode: default_sandbox_mode(),
+            approval_policy: default_approval_policy(),
         }
     }
 }
@@ -27377,15 +28123,40 @@ fn normalize_adaptive_floor(raw: &str) -> String {
     .to_string()
 }
 
+/// Merge a partial runtime-settings PATCH onto the current settings: only the top-level
+/// keys present in `patch` override; everything else is preserved. This is what makes two
+/// independent Settings controls (adaptive_floor, sandbox_mode) not clobber each other —
+/// each posts only its own field. Unknown keys in the patch are ignored (deserialized-away).
+fn merge_runtime_settings(current: &RuntimeSettings, patch: &serde_json::Value) -> RuntimeSettings {
+    // Serialize current to a JSON object, overlay the patch's top-level keys, deserialize back.
+    let mut base = serde_json::to_value(current).unwrap_or_else(|_| serde_json::json!({}));
+    if let (Some(base_obj), Some(patch_obj)) = (base.as_object_mut(), patch.as_object()) {
+        for (k, v) in patch_obj {
+            base_obj.insert(k.clone(), v.clone());
+        }
+    }
+    serde_json::from_value(base).unwrap_or_else(|_| current.clone())
+}
+
 async fn get_runtime_settings() -> Json<RuntimeSettings> {
     Json(load_runtime_settings())
 }
 
 async fn set_runtime_settings(
-    Json(mut settings): Json<RuntimeSettings>,
+    Json(patch): Json<serde_json::Value>,
 ) -> Result<Json<RuntimeSettings>, GatewayError> {
-    // Normalize so the chat path never sees an unknown mode.
+    // PATCH semantics: merge the partial body onto the persisted settings so a client that
+    // posts only its own field (e.g. `{ "adaptive_floor": "on" }`) does not reset the others.
+    let current = load_runtime_settings();
+    let mut settings = merge_runtime_settings(&current, &patch);
+    // Normalize both fields so the persisted file never holds a non-canonical value.
     settings.adaptive_floor = normalize_adaptive_floor(&settings.adaptive_floor);
+    settings.sandbox_mode = crate::tool_safety::SandboxMode::parse(&settings.sandbox_mode)
+        .as_str()
+        .to_string();
+    settings.approval_policy = crate::tool_safety::AskForApproval::parse(&settings.approval_policy)
+        .as_str()
+        .to_string();
     save_runtime_settings(&settings).map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "runtime_settings_save",
@@ -37030,10 +37801,28 @@ fn sandbox_escalate_matches(text: &str, command: &str) -> bool {
         == Some(command)
 }
 
-/// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
-/// reopening the chat doesn't re-show the actionable card (mirrors
-/// `rewrite_fs_authorize_to_done` / `rewrite_mcp_confirm_to_done`).
-fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
+/// Provenance for a file-write escalation: the stored message must carry a
+/// SANDBOX_ESCALATE card whose `tool` and `arguments` deep-equal the request's, so
+/// only the EXACT proposed write can run (no arbitrary-write RCE). Mirrors
+/// `sandbox_escalate_matches` (bash) but keyed on tool+arguments, not command.
+fn sandbox_escalate_write_matches(
+    text: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    let Some(marker) = confirm_marker_value(text, SANDBOX_ESCALATE_OPEN, SANDBOX_ESCALATE_CLOSE)
+    else {
+        return false;
+    };
+    marker.get("tool").and_then(|v| v.as_str()) == Some(tool)
+        && marker.get("arguments") == Some(arguments)
+}
+
+/// Shared marker-location logic for both escalation rewriters: find the
+/// SANDBOX_ESCALATE card region, strip the card head (any of `head_markers`) and
+/// the marker block, and append `note`. Returns the text unchanged when the marker
+/// is absent (idempotent on already-rewritten text).
+fn rewrite_sandbox_escalate_region(text: &str, head_markers: &[&str], note: &str) -> String {
     let Some(open) = text.find(SANDBOX_ESCALATE_OPEN) else {
         return text.to_string();
     };
@@ -37041,8 +37830,10 @@ fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
         return text.to_string();
     };
     let close = open + close_rel + SANDBOX_ESCALATE_CLOSE.len();
-    let head_end = text[..open]
-        .rfind("I need your confirmation")
+    let head_end = head_markers
+        .iter()
+        .filter_map(|m| text[..open].rfind(m))
+        .min()
         .unwrap_or(open);
     let mut out = text[..head_end].trim_end().to_string();
     let tail = text[close..].trim();
@@ -37055,15 +37846,52 @@ fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
     if !out.is_empty() {
         out.push_str("\n\n");
     }
-    out.push_str(&format!("✓ Ran unsandboxed: {command}"));
+    out.push_str(note);
     out
+}
+
+/// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
+/// reopening the chat doesn't re-show the actionable card (mirrors
+/// `rewrite_fs_authorize_to_done` / `rewrite_mcp_confirm_to_done`).
+fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
+    rewrite_sandbox_escalate_region(
+        text,
+        &["I need your confirmation"],
+        &format!("✓ Ran unsandboxed: {command}"),
+    )
+}
+
+/// Payload-agnostic variant for the write path: the write card's head text differs
+/// from the bash card's, and we don't need the command to locate the marker. Shares
+/// `rewrite_sandbox_escalate_region` with the bash rewriter so the marker-location
+/// logic isn't duplicated.
+fn rewrite_sandbox_escalate_done_generic(text: &str) -> String {
+    rewrite_sandbox_escalate_region(
+        text,
+        &[
+            "This write was blocked by the read-only sandbox.",
+            "I need your confirmation",
+        ],
+        "✔ Ran with approval",
+    )
 }
 
 #[derive(Debug, Deserialize)]
 struct RunEscalateRequest {
-    command: String,
+    #[serde(default)]
+    command: Option<String>, // bash path (optional so the write path can omit it)
     #[serde(default)]
     cwd: Option<String>,
+    #[serde(default)]
+    tool: Option<String>, // write path: "write_file" | "edit_file"
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    old_string: Option<String>,
+    #[serde(default)]
+    new_string: Option<String>,
     #[serde(default)]
     thread_id: Option<String>,
     #[serde(default)]
@@ -37080,13 +37908,92 @@ async fn run_escalate(
     State(state): State<AppState>,
     Json(request): Json<RunEscalateRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
+    // File-write escalation (ADR 0023 #2): re-run the exact blocked write, still project-jailed.
+    if let Some(tool) = request.tool.as_deref() {
+        if tool == "write_file" || tool == "edit_file" {
+            let path = request.path.clone().unwrap_or_default();
+            let arguments = if tool == "write_file" {
+                serde_json::json!({
+                    "path": path.clone(),
+                    "content": request.content.clone().unwrap_or_default(),
+                })
+            } else {
+                serde_json::json!({
+                    "path": path.clone(),
+                    "old_string": request.old_string.clone().unwrap_or_default(),
+                    "new_string": request.new_string.clone().unwrap_or_default(),
+                })
+            };
+            // Provenance gate: the tool+arguments must deep-equal the stored card, so
+            // only the EXACT proposed write can run (no arbitrary-write RCE). The deep-equal
+            // assumes the model's original blocked tool-call emitted exactly the tool's
+            // schema keys (write_file: path/content; edit_file: path/old_string/new_string);
+            // an extra/missing/non-string key makes a *legit* approval fail closed (403)
+            // rather than falsely pass — safe by design.
+            let confirmed = match (&request.thread_id, &request.message_id) {
+                (Some(tid), Some(mid)) => lock_store(&state)
+                    .ok()
+                    .and_then(|s| s.message(tid, mid).ok().flatten())
+                    .is_some_and(|m| sandbox_escalate_write_matches(&m.text, tool, &arguments)),
+                _ => false,
+            };
+            if !confirmed {
+                return Err(GatewayError {
+                    status: StatusCode::FORBIDDEN,
+                    code: "sandbox_escalate_required",
+                    message: "Re-run a write only from its matching escalation card.".to_string(),
+                });
+            }
+            // Re-run through the canonical executor — STILL jail_in_root (project-scoped).
+            // These are blocking `std::fs` calls, so run them off the async executor via
+            // spawn_blocking, exactly like the chat write_file/edit_file dispatch does.
+            let st = state.clone();
+            let tid = request.thread_id.clone();
+            let output = if tool == "write_file" {
+                let content = request.content.clone().unwrap_or_default();
+                let path_c = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    write_project_file(&st, tid.as_deref(), &path_c, &content)
+                })
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"))
+            } else {
+                let old = request.old_string.clone().unwrap_or_default();
+                let new = request.new_string.clone().unwrap_or_default();
+                let path_c = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    edit_project_file(&st, tid.as_deref(), &path_c, &old, &new)
+                })
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"))
+            };
+            // Rewrite the card marker to a done-note so it can't reopen on reload.
+            if let (Some(tid), Some(mid)) = (&request.thread_id, &request.message_id) {
+                if let Ok(store) = lock_store(&state) {
+                    if let Ok(Some(m)) = store.message(tid, mid) {
+                        let rewritten = rewrite_sandbox_escalate_done_generic(&m.text);
+                        let _ = store.set_message_text(tid, mid, &rewritten);
+                    }
+                }
+            }
+            return Ok(Json(serde_json::json!({ "ok": true, "output": output })));
+        }
+    }
+    // Bash path: the request must carry a command (write path returned above).
+    let Some(command) = request.command.clone() else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "sandbox_escalate_no_command",
+            message: "No command to re-run.".to_string(),
+        });
+    };
     // Provenance gate (REQUIRED): the command must match the card in the stored
     // message. Without a matching marker, refuse — never run an arbitrary command.
     let confirmed = match (&request.thread_id, &request.message_id) {
         (Some(thread_id), Some(message_id)) => lock_store(&state)
             .ok()
             .and_then(|store| store.message(thread_id, message_id).ok().flatten())
-            .is_some_and(|message| sandbox_escalate_matches(&message.text, &request.command)),
+            .is_some_and(|message| sandbox_escalate_matches(&message.text, &command)),
         _ => false,
     };
     if !confirmed {
@@ -37110,12 +38017,12 @@ async fn run_escalate(
         });
     };
     // Execute UNSANDBOXED via the shared raw-exec helper.
-    let output = run_bash_unsandboxed(&root, &request.command).await;
+    let output = run_bash_unsandboxed(&root, &command).await;
     // Persist: rewrite the card marker to a "ran unsandboxed" note (no reopen on reload).
     if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
         if let Ok(store) = lock_store(&state) {
             if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &request.command);
+                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &command);
                 let _ = store.set_message_text(thread_id, message_id, &rewritten);
             }
         }
@@ -38611,6 +39518,349 @@ fn plan_is_browse_only(plan: &ExecutionPlan) -> bool {
                     .map(|name| browser_method_for_chat_tool(name).is_some())
                     .unwrap_or(false)
         })
+}
+
+/// Build the full loaded `CapabilityTool` set (with real input schemas) from the
+/// capability registry — the SAME registry read `orchestrator_drive_for_chat` does to
+/// feed the drive executor's arg-fill. A subagent child needs real schemas so
+/// `run_agentic_step`'s `fill_arguments` can constrain the model's tool args; the chat
+/// loop itself only keeps JSON tool_schemas + a name set, not typed `CapabilityTool`s,
+/// so we re-read the registry here. The caller filters this down to the child's
+/// read/gather allowlist via `subagent_child::child_gather_tools`.
+fn loaded_capability_tools_for_subagents(state: &AppState) -> Result<Vec<CapabilityTool>, String> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let registry = lock_capability_registry(state).map_err(|e| format!("{e:?}"))?;
+    let policy = registry
+        .policy_context(&user, &workspace)
+        .map_err(|e| format!("policy context: {e}"))?;
+    let mut loaded: Vec<CapabilityTool> = Vec::new();
+    for provider in &policy.enabled_providers {
+        let tools = registry
+            .cached_tools(provider)
+            .map_err(|e| format!("cached tools: {e}"))?;
+        loaded.extend(tools.into_iter().map(|cached| cached.tool));
+    }
+    Ok(loaded)
+}
+
+/// LIVE fan-out for the `spawn_subagent` tool (ADR 0025, slice-1 Task 2). The manager
+/// delegates independent read/gather sub-tasks to bounded children, collects each
+/// child's findings, and returns ONE synthesized block for the manager to act on in its
+/// own turn. The manager stays the ONLY writer — children run through
+/// `subagent_child::run_chat_subagent`, which offers only the `child_gather_tools`
+/// allowlist and refuses writes at the dispatch boundary (Task 1's guarantee).
+///
+/// ## The async→sync bridge (mirrors the browse path)
+///
+/// The child loop is `subagent_child::run_chat_subagent` → `run_agentic_step`, which is
+/// SYNCHRONOUS: its executor seam is `FnMut(&CapabilityTool, Value) -> _`, no `.await`.
+/// But the real tool dispatch (`execute_chat_tool`) is ASYNC and we are already inside
+/// it, on the multi-threaded Tokio runtime, holding the manager's `&mut ChatToolCtx`.
+///
+/// The browse path crosses this boundary by running its WHOLE sync driven loop
+/// (`orchestrator_drive_for_chat`) inside `tokio::task::spawn_blocking`, because its
+/// executor calls the fully-SYNC `call_shared_browser_sidecar` — it never needs to
+/// re-enter async, and it owns no `&mut ChatToolCtx` (not `Send`/`'static`).
+///
+/// Our case is the inverse: the child dispatch must re-enter the ASYNC
+/// `execute_chat_tool`, and it borrows a `&mut ChatToolCtx` that is NOT `Send`. So we
+/// cannot move it into `spawn_blocking`. Instead we use `tokio::task::block_in_place`:
+/// it tells the multi-thread runtime "this worker is about to block", migrating other
+/// tasks off it, so we can `Handle::current().block_on(...)` the async dispatch from
+/// inside the sync closure WITHOUT moving the ctx across a thread boundary (the closure
+/// and the `&mut child_ctx` stay on the same thread). This is the standard sync-closure-
+/// calls-async bridge on a multi-thread runtime, and it composes with the browse path's
+/// choice rather than inventing a new mechanism: browse = spawn_blocking (no re-entry),
+/// subagents = block_in_place + block_on (re-entry required).
+///
+/// ## Sequential-for-slice-1 (de-risk)
+///
+/// Children run ONE AT A TIME. On local (the primary target) `active_llm_concurrency()`
+/// is 1, so children serialize on the model anyway — sequential is behaviorally
+/// identical AND avoids sharing/cloning a `&mut ChatToolCtx` across concurrent children
+/// (each child gets its own read-only ctx built inline). TRUE concurrency (a semaphore
+/// sized to `active_llm_concurrency()`, cloud parallelism) is an explicit follow-up, not
+/// this task.
+async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String {
+    use crate::subagent_child::{
+        MAX_SUBAGENT_CHILDREN, SubagentResult, child_gather_tools, run_chat_subagent,
+        subagent_role_to_registry_role, synthesize_subagent_results,
+    };
+
+    let args: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    // Parse `{tasks:[{goal, role?, contract?}], budget?}`. `role` is an OPTIONAL hint
+    // that specializes a child's MODEL (Task 3): mapped to a registry role and resolved
+    // per child; absent/unknown → INHERIT the manager's model. `budget` is accepted but
+    // not yet applied per-child; each child is already bounded by `run_agentic_step`'s
+    // round cap, so ignoring it here is safe.
+    let tasks_in = args.get("tasks").and_then(|v| v.as_array());
+    // Per task: (goal, contract, role_hint). `role_hint` is the raw string from the
+    // model; it is mapped to a registry role INSIDE the child loop (see below).
+    let mut goals: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+    if let Some(arr) = tasks_in {
+        for task in arr {
+            let goal = task
+                .get("goal")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if goal.is_empty() {
+                continue;
+            }
+            let contract = task
+                .get("contract")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let role_hint = task
+                .get("role")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            goals.push((goal, contract, role_hint));
+        }
+    }
+
+    if goals.is_empty() {
+        return "spawn_subagent: no valid sub-tasks were provided (each task needs a non-empty \
+`goal`). Proceed with the task yourself."
+            .to_string();
+    }
+
+    // Bound the fan-out: clamp to MAX_SUBAGENT_CHILDREN. A model that asks for more gets
+    // the first N; the rest are dropped with a note so the manager knows.
+    let requested = goals.len();
+    let clamped = requested > MAX_SUBAGENT_CHILDREN;
+    goals.truncate(MAX_SUBAGENT_CHILDREN);
+
+    // The child tool set: the manager's gather-eligible tools filtered to the read/gather
+    // allowlist. Built once from the registry (real schemas) and shared by every child.
+    let child_tools = match loaded_capability_tools_for_subagents(ctx.state) {
+        Ok(all) => child_gather_tools(&all),
+        Err(err) => {
+            eprintln!("[subagents] could not load capability tools: {err}");
+            return format!(
+                "spawn_subagent: could not load tools for subagents ({err}). Proceed yourself."
+            );
+        }
+    };
+
+    // Router PARAMS for the INHERIT default: reuse the MANAGER's current model. A child
+    // with an explicit `role` hint overrides this with a role-resolved model (built per
+    // child inside `block_in_place`, see below). Ollama endpoints are OpenAI-compatible,
+    // so OpenaiCompat covers them; only Anthropic needs its own provider path. We keep
+    // the *params* here (all Send/Clone) and build the actual `ModelRouter` INSIDE
+    // `block_in_place` per child — a `ModelRouter` holds a `dyn InferenceProvider` that
+    // is NOT `Send`, so it must never live across the progress `.await` below or the
+    // whole turn future stops being Send.
+    let kind = if ctx.base_url.contains("anthropic") {
+        ProviderKind::Anthropic
+    } else {
+        ProviderKind::OpenaiCompat
+    };
+    // Same context-window resolution the other router builders use: explicit env
+    // override, else a safe 32k default (the child reuses the manager's model, whose
+    // real window the manager already budgets against).
+    let child_context_window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(32_768);
+    let child_base_url = ctx.base_url.clone();
+    let child_model = ctx.model.clone();
+    let child_api_key = ctx.api_key.clone();
+
+    let mut results: Vec<(String, SubagentResult)> = Vec::new();
+    // SEQUENTIAL fan-out (see the doc comment): one child at a time.
+    for (goal, contract, role_hint) in &goals {
+        // SPECIALIZATION (ADR 0025 Task 3): map the per-task `role` hint to a registry
+        // role, or `None` to INHERIT the manager's model. Mapping is pure/cheap; the
+        // (non-Send) router itself is built per child inside `block_in_place` below.
+        let child_registry_role =
+            subagent_role_to_registry_role(role_hint.as_deref()).map(str::to_string);
+        // Live progress so the user sees the fan-out (visibility refined in Task 4).
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››👥 {goal}…‹‹/ACT››"),
+            },
+        )
+        .await;
+
+        // A NARROW read_only child ctx: same shared turn context (state/tx/thread_id/
+        // prompt/request…) but its OWN mutable buffers and `read_only:true`, so even the
+        // shared dispatch's own read-only guard refuses any write the allowlist somehow
+        // let through (belt-and-braces on top of `child_gather_tools`). The child never
+        // shares the manager's browser session or plan — it gets fresh, empty ones.
+        let mut c_messages: Vec<serde_json::Value> = Vec::new();
+        let mut c_accumulated = String::new();
+        let mut c_browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>> = None;
+        let mut c_browser_used = false;
+        let mut c_last_snapshot = String::new();
+        let mut c_pending_browser_image: Option<String> = None;
+        let mut c_browser_tool_call_ids: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let mut c_current_target = String::new();
+        let mut c_opened_targets: Vec<String> = Vec::new();
+        let mut c_nav_failures: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        let mut c_browse_sources: Vec<String> = Vec::new();
+        // The child has no plan of its own — an empty one keeps the ctx well-formed.
+        let mut c_plan = runtime_execution_plan(&[]);
+        let mut c_step_evidence: Vec<String> = Vec::new();
+        let mut c_tool_trace: Vec<String> = Vec::new();
+        let mut c_loaded_tools: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let mut c_tool_schemas: Vec<serde_json::Value> = Vec::new();
+        let mut c_last_round_sig = String::new();
+        let mut c_repeat_count: u32 = 0;
+        let mut c_progress_anchor_round: usize = 0;
+        let mut c_pending_compaction = false;
+        let mut c_pending_vault_reveal_marker: Option<String> = None;
+        let mut c_pending_confirm = false;
+        // The child arms its own sensitive set (read/gather children don't do
+        // effectful writes today, but this keeps the ctx well-formed and self-arms
+        // if a child ever loads a sensitive skill and acts on it).
+        let mut c_active_sensitive: Vec<crate::skills::SensitiveCategory> = Vec::new();
+        let mut c_plan_objective: Option<String> = None;
+        let mut c_base_url = ctx.base_url.clone();
+        let mut c_model = ctx.model.clone();
+        let mut c_api_key = ctx.api_key.clone();
+        let mut c_endpoint = ctx.endpoint.clone();
+
+        // Wrap the whole sync child loop so we can `block_on` the async dispatch from
+        // inside its sync executor closure (see the doc comment: block_in_place, NOT
+        // spawn_blocking, because the child ctx is not `Send`).
+        // Weave the model's per-task `contract` (if any) into the goal the child sees, so
+        // the child actually honors the acceptance criteria the manager attached. The
+        // synthesis block below still keys off the plain `goal` for a clean label.
+        let goal_owned = match contract {
+            Some(c) if !c.trim().is_empty() => format!("{goal}\n\nContract: {}", c.trim()),
+            _ => goal.clone(),
+        };
+        let outcome = tokio::task::block_in_place(|| {
+            let mut child_ctx = ChatToolCtx {
+                messages: &mut c_messages,
+                accumulated: &mut c_accumulated,
+                browser_session: &mut c_browser_session,
+                browser_used: &mut c_browser_used,
+                last_snapshot: &mut c_last_snapshot,
+                pending_browser_image: &mut c_pending_browser_image,
+                browser_tool_call_ids: &mut c_browser_tool_call_ids,
+                current_target: &mut c_current_target,
+                opened_targets: &mut c_opened_targets,
+                nav_failures: &mut c_nav_failures,
+                browse_sources: &mut c_browse_sources,
+                plan: &mut c_plan,
+                // Subagent turn-trace is out of MVP scope (subagents are default-off).
+                turn_trace: turn_trace::TurnTrace::disabled(),
+                step_evidence: &mut c_step_evidence,
+                tool_trace: &mut c_tool_trace,
+                loaded_tools: &mut c_loaded_tools,
+                tool_schemas: &mut c_tool_schemas,
+                last_round_sig: &mut c_last_round_sig,
+                repeat_count: &mut c_repeat_count,
+                progress_anchor_round: &mut c_progress_anchor_round,
+                pending_compaction: &mut c_pending_compaction,
+                pending_vault_reveal_marker: &mut c_pending_vault_reveal_marker,
+                pending_confirm: &mut c_pending_confirm,
+                active_sensitive: &mut c_active_sensitive,
+                plan_objective: &mut c_plan_objective,
+                base_url: &mut c_base_url,
+                model: &mut c_model,
+                api_key: &mut c_api_key,
+                endpoint: &mut c_endpoint,
+                // Shared, read-only turn context (reborrowed off the manager's ctx).
+                state: ctx.state,
+                tx: ctx.tx,
+                thread_id: ctx.thread_id,
+                prompt: ctx.prompt,
+                request: ctx.request,
+                // The child is ALWAYS read-only: belt-and-braces on the allowlist.
+                read_only: true,
+                channel_owner: ctx.channel_owner,
+                contact_only: ctx.contact_only,
+                can_see_contacts: ctx.can_see_contacts,
+                can_see_calendar: ctx.can_see_calendar,
+                autonomous: ctx.autonomous,
+                composio_writes: ctx.composio_writes,
+                catalog_index: ctx.catalog_index,
+                capability_corpus: ctx.capability_corpus,
+                automation_user_id: ctx.automation_user_id,
+                automation_workspace_id: ctx.automation_workspace_id,
+                turn_scaffold: ctx.turn_scaffold,
+                floor_acting: ctx.floor_acting,
+                round: ctx.round,
+            };
+            // Build the (non-Send) router HERE, inside block_in_place, so it never
+            // crosses an await (see the params note above).
+            //
+            // SPECIALIZATION: with a role hint, resolve a role-appropriate model for THIS
+            // child's goal (goal-aware, via the same `resolve_role_for_task` the
+            // manager/driver use) and build that router. WITHOUT a hint — or if the role
+            // resolves to no eligible model — INHERIT the manager's model (fail-safe: we
+            // just want a working model, so we degrade to inherit rather than fail-closed).
+            // Model selection ONLY: the read/gather envelope is unchanged (a child stays
+            // read-only whatever model it runs on).
+            let child_router = match &child_registry_role {
+                Some(role) => match resolve_role_for_task(&goal_owned, role) {
+                    Some(resolved) => build_router_for_resolved(&resolved),
+                    // Role has no eligible/configured model → fall back to the manager's.
+                    None => build_router_from(
+                        kind,
+                        &child_base_url,
+                        &child_model,
+                        child_api_key.clone(),
+                        child_context_window,
+                    ),
+                },
+                // No role hint → inherit the manager's model (default: don't escalate).
+                None => build_router_from(
+                    kind,
+                    &child_base_url,
+                    &child_model,
+                    child_api_key.clone(),
+                    child_context_window,
+                ),
+            };
+            let handle = tokio::runtime::Handle::current();
+            run_chat_subagent(
+                &goal_owned,
+                &child_tools,
+                |name: &str, tool_args: serde_json::Value| {
+                    // The async→sync seam: block_on the real async gateway dispatch on
+                    // the child's read_only ctx. `execute_chat_tool` returns the tool's
+                    // model-facing String; `run_chat_subagent` wraps it back into JSON.
+                    let raw = tool_args.to_string();
+                    handle.block_on(execute_chat_tool(&mut child_ctx, name, &raw, "subagent"))
+                },
+                &child_router,
+            )
+        });
+
+        match outcome {
+            Ok(result) => results.push((goal.clone(), result)),
+            Err(err) => results.push((
+                goal.clone(),
+                SubagentResult {
+                    findings: serde_json::json!({
+                        "summary": format!("(subagent failed: {err})")
+                    }),
+                    evidence: vec![],
+                },
+            )),
+        }
+    }
+
+    let mut synthesized = synthesize_subagent_results(&results);
+    if clamped {
+        synthesized.push_str(&format!(
+            "\n\n(Note: {requested} sub-tasks requested; only the first {MAX_SUBAGENT_CHILDREN} \
+were run — the cap. Re-delegate the rest if still needed.)"
+        ));
+    }
+    synthesized
 }
 
 /// Plans then DRIVES the turn. Returns `Ok(Some((gathered, plan_steps)))` when the
@@ -47940,7 +49190,8 @@ mod tests {
         inbound_action, is_auto_confirmable, is_confirmation_reply, is_internal_task_kind,
         is_low_value_source_url, is_salient_exchange, is_semantic_duplicate, jail_in_root,
         legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
-        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
+        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
+        merge_plan, merge_runtime_settings, RuntimeSettings,
         message_has_image_url, next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
@@ -47970,6 +49221,38 @@ mod tests {
     use local_first_vault::VaultStore;
     use std::collections::HashMap;
     use std::sync::{Mutex, MutexGuard};
+
+    #[test]
+    fn merge_runtime_settings_preserves_unpatched_fields() {
+        let current = RuntimeSettings {
+            adaptive_floor: "on".to_string(),
+            sandbox_mode: "danger".to_string(),
+            approval_policy: "never".to_string(),
+        };
+        // Patch only sandbox_mode → adaptive_floor + approval_policy must be preserved.
+        let merged =
+            merge_runtime_settings(&current, &serde_json::json!({ "sandbox_mode": "read-only" }));
+        assert_eq!(merged.adaptive_floor, "on");
+        assert_eq!(merged.sandbox_mode, "read-only");
+        assert_eq!(merged.approval_policy, "never");
+        // Patch only adaptive_floor → sandbox_mode + approval_policy preserved.
+        let merged2 =
+            merge_runtime_settings(&current, &serde_json::json!({ "adaptive_floor": "off" }));
+        assert_eq!(merged2.adaptive_floor, "off");
+        assert_eq!(merged2.sandbox_mode, "danger");
+        assert_eq!(merged2.approval_policy, "never");
+        // Patch only approval_policy → sandbox_mode NOT clobbered (the UI sends only its own field).
+        let merged_ap =
+            merge_runtime_settings(&current, &serde_json::json!({ "approval_policy": "on-request" }));
+        assert_eq!(merged_ap.approval_policy, "on-request");
+        assert_eq!(merged_ap.sandbox_mode, "danger");
+        assert_eq!(merged_ap.adaptive_floor, "on");
+        // Empty patch → unchanged.
+        let merged3 = merge_runtime_settings(&current, &serde_json::json!({}));
+        assert_eq!(merged3.adaptive_floor, "on");
+        assert_eq!(merged3.sandbox_mode, "danger");
+        assert_eq!(merged3.approval_policy, "never");
+    }
 
     static GATEWAY_DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -48037,6 +49320,113 @@ mod tests {
         // With no HOME, only the project root is writable.
         let no_home = workspace_write_roots(project, None);
         assert_eq!(no_home, vec![project.to_path_buf()]);
+    }
+
+    // Pure unit test (no exec): a read-only policy must produce a Seatbelt profile that
+    // makes NO project root writable — only tmp. This guards the ADR 0023 #2 wiring so a
+    // future refactor can't silently regress `build_sandbox_command` back to hardcoding
+    // workspace-write when the resolved mode is read-only.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn read_only_policy_yields_a_profile_without_project_write_subpath() {
+        use crate::tool_safety::SandboxPolicy;
+        let profile = crate::seatbelt::seatbelt_profile(&SandboxPolicy::ReadOnly)
+            .expect("read-only has a profile");
+        assert!(profile.contains("(allow file-write*"));
+        // A read-only profile makes NO project root writable — only tmp. Assert a
+        // synthetic project path is absent (a path that cannot appear via the tmp dir).
+        assert!(!profile.contains("/Users/should-not-appear/proj"));
+    }
+
+    // Runtime security gate (macOS, #[ignore]d so `cargo test` doesn't run it by
+    // default): actually EXECUTE a fenced read-only command and prove the OS denies a
+    // project write. The earlier Seatbelt canonicalization bug was only caught by
+    // running — a compile-time check is not enough for a security boundary. Run with:
+    //   cargo test -p local-first-desktop-gateway \
+    //     read_only_bash_denies_project_write -- --ignored --nocapture
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore]
+    async fn read_only_bash_denies_project_write() {
+        use super::build_sandbox_command;
+        use crate::tool_safety::SandboxPolicy;
+        // IMPORTANT: the read-only profile ALWAYS grants writes to the system temp dir
+        // (scratch), so the test's "project" dir must live OUTSIDE $TMPDIR — otherwise
+        // the write would legitimately succeed under the tmp allowance and this gate
+        // would test nothing. HOME is read-only under the read-only fence, so a dir
+        // under HOME is a faithful stand-in for a real project root.
+        let home = std::env::var("HOME").expect("HOME set on macOS test host");
+        let dir = std::path::PathBuf::from(home).join(format!(".homun-ro-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cmd =
+            build_sandbox_command(&SandboxPolicy::ReadOnly, "echo hi > blocked.txt").unwrap();
+        cmd.current_dir(&dir);
+        let out = cmd.output().await.unwrap();
+        // Capture the outcome BEFORE cleanup so a failing assert can't leak the temp dir
+        // under $HOME (no test framework to run teardown for us).
+        let status_success = out.status.success();
+        let file_exists = dir.join("blocked.txt").exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!status_success, "write must be denied under read-only");
+        assert!(!file_exists, "file must NOT be created");
+    }
+
+    // Runtime security gate for the FLIPPED default (macOS, #[ignore]d): actually
+    // EXECUTE a fenced workspace-write command and prove the OS fence is BOTH usable
+    // (in-project write succeeds) AND enforcing (a write outside the writable root is
+    // denied). This is the key evidence that flipping the shipped default to
+    // workspace-write (ADR 0023 #1) is safe. Run with:
+    //   cargo test -p local-first-desktop-gateway \
+    //     workspace_write_allows_in_project_denies_outside -- --ignored --nocapture
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore]
+    async fn workspace_write_allows_in_project_denies_outside() {
+        use super::build_sandbox_command;
+        use crate::tool_safety::SandboxPolicy;
+        // The workspace-write profile ALWAYS grants writes to the system temp dir
+        // (scratch), so to prove ENFORCEMENT the "outside" target must live OUTSIDE
+        // BOTH the writable project root AND $TMPDIR. Two sibling dirs under $HOME
+        // satisfy that: only the project dir is a writable root; the sibling is not.
+        let home = std::env::var("HOME").expect("HOME set on macOS test host");
+        let home = std::path::PathBuf::from(home);
+        let pid = std::process::id();
+        let project_root = home.join(format!(".homun-ww-proj-{pid}"));
+        let outside_dir = home.join(format!(".homun-ww-outside-{pid}"));
+        std::fs::create_dir_all(&project_root).unwrap();
+        std::fs::create_dir_all(&outside_dir).unwrap();
+
+        let policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![project_root.clone()],
+            network_access: true,
+        };
+
+        // USABLE: an in-project write must SUCCEED.
+        let mut allow_cmd =
+            build_sandbox_command(&policy, "echo hi > allowed.txt").unwrap();
+        allow_cmd.current_dir(&project_root);
+        let allow_out = allow_cmd.output().await.unwrap();
+        let allow_success = allow_out.status.success();
+        let allowed_exists = project_root.join("allowed.txt").exists();
+
+        // ENFORCING: a write to a sibling path OUTSIDE the writable root must FAIL.
+        // Absolute path under a second $HOME dir that is NOT a writable root.
+        let outside_file = outside_dir.join("evil.txt");
+        let deny_command = format!("echo evil > {}", outside_file.display());
+        let mut deny_cmd = build_sandbox_command(&policy, &deny_command).unwrap();
+        deny_cmd.current_dir(&project_root);
+        let deny_out = deny_cmd.output().await.unwrap();
+        let deny_success = deny_out.status.success();
+        let outside_exists = outside_file.exists();
+
+        // Clean up BEFORE asserting so a failing assert cannot leak dirs under $HOME.
+        let _ = std::fs::remove_dir_all(&project_root);
+        let _ = std::fs::remove_dir_all(&outside_dir);
+
+        assert!(allow_success, "in-project write must SUCCEED under workspace-write");
+        assert!(allowed_exists, "allowed.txt must be created in the project root");
+        assert!(!deny_success, "write outside the writable root must be DENIED");
+        assert!(!outside_exists, "the outside file must NOT be created");
     }
 
     #[test]
@@ -53706,6 +55096,31 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
+    fn plan_objective_round_trips_and_does_not_disturb_steps() {
+        let plan = vec![
+            serde_json::json!({"id":"s1","title":"Alpha","status":"doing","detail":""}),
+            serde_json::json!({"id":"s2","title":"Beta","status":"todo","detail":""}),
+        ];
+        // Marker with a GOAL line above the steps (Fase A).
+        let marker = format!(
+            "‹‹PLAN››{}{}‹‹/PLAN››",
+            super::plan_objective_line(Some("  Ship a signed macOS build  ")),
+            build_plan_markdown(&plan)
+        );
+        // The objective round-trips (trimmed) …
+        assert_eq!(
+            super::parse_plan_objective(&format!("prose {marker} tail")).as_deref(),
+            Some("Ship a signed macOS build")
+        );
+        // … and the goal line does NOT get parsed as a step.
+        assert_eq!(parse_plan_marker(&marker).len(), 2);
+        // No objective → no line, and parse returns None.
+        let bare = format!("‹‹PLAN››{}{}‹‹/PLAN››", super::plan_objective_line(None), build_plan_markdown(&plan));
+        assert_eq!(super::parse_plan_objective(&bare), None);
+        assert_eq!(parse_plan_marker(&bare).len(), 2);
+    }
+
+    #[test]
     fn plan_completion_requires_every_step_done() {
         let blocked = vec![
             serde_json::json!({"id":"s1","title":"Alpha","status":"done","detail":""}),
@@ -54492,6 +55907,66 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             None => {
                 unsafe { std::env::remove_var("HOMUN_USER_ID"); }
             }
+        }
+    }
+
+    /// SECURITY (ADR 0025 slice-1 Task 3): a subagent CHILD's memory recall must ride
+    /// the MANAGER's scope — never default to Personal, never leak to another workspace.
+    ///
+    /// A child recalls via the same `recall_memory` chat tool as the manager, and
+    /// `recall_memory` derives its scope from `gateway_memory_workspace_id()` (the
+    /// process-global `MEMORY_WORKSPACE`). The manager's turn sets that global from
+    /// `request.thread_id` (`set_memory_workspace(&store.workspace_for_thread(tid))`),
+    /// and children run INLINE + SEQUENTIALLY inside that same turn — they never call
+    /// `set_memory_workspace`, so the global still holds the manager's project when a
+    /// child recalls. This test PINS that invariant: with the manager scoped to a named
+    /// project, the workspace a child's recall would use equals the manager's project —
+    /// NOT `__personal__`, NOT a different workspace id.
+    #[test]
+    fn subagent_child_memory_recall_inherits_manager_scope() {
+        let prev = std::env::var("HOMUN_USER_ID").ok();
+        // SAFETY: isolated test; restored below.
+        unsafe { std::env::set_var("HOMUN_USER_ID", "local-user"); }
+
+        // Manager's turn scoped the memory workspace to a NAMED project (this is what
+        // `set_memory_workspace(&workspace_for_thread(tid))` does at turn start).
+        let manager_project = "proj-alpha";
+        super::set_memory_workspace(manager_project);
+        let manager_ws = super::gateway_memory_workspace_id();
+        assert_eq!(
+            manager_ws.as_str(),
+            manager_project,
+            "manager's recall must resolve to its project workspace"
+        );
+
+        // A child runs inline: it does NOT touch `MEMORY_WORKSPACE`. So the workspace
+        // its `recall_memory` derives is byte-identical to the manager's — same scope,
+        // never Personal-by-default, never another workspace.
+        let child_ws = super::gateway_memory_workspace_id();
+        assert_eq!(
+            child_ws.as_str(),
+            manager_ws.as_str(),
+            "a child must inherit the MANAGER's memory scope, not a different one"
+        );
+        assert_ne!(
+            child_ws.as_str(),
+            super::PERSONAL_WORKSPACE,
+            "a project-scoped manager must NOT let a child fall back to Personal"
+        );
+
+        // And a Personal-scoped manager keeps a child Personal (no accidental escalation
+        // into a project either): both sides resolve to `__personal__`.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        let mgr_personal = super::gateway_memory_workspace_id();
+        let child_personal = super::gateway_memory_workspace_id();
+        assert_eq!(mgr_personal.as_str(), super::PERSONAL_WORKSPACE);
+        assert_eq!(child_personal.as_str(), mgr_personal.as_str());
+
+        // Restore shared global + env.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match prev {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value) },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID") },
         }
     }
 
@@ -56474,7 +57949,7 @@ data: [DONE]\n";
                 "function": { "name": "read_file", "arguments": "{\"path\":\"a.txt\"}" }
             }]
         })];
-        let converted = crate::to_ollama_messages(&msgs);
+        let converted = local_first_engine::payload::to_ollama_messages(&msgs);
         assert_eq!(
             converted[0]["tool_calls"][0]["function"]["arguments"]["path"],
             "a.txt"
@@ -57257,6 +58732,184 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn resolved_sandbox_mode_precedence_env_over_default() {
+        use crate::tool_safety::SandboxMode;
+        use super::{resolved_sandbox_mode, tool_safety_enabled};
+        // Hermetic: drive every case through env so the test never depends on the
+        // developer's on-disk ~/.homun/runtime-settings.json. Env-mutation follows the
+        // Rust-2024 `unsafe` convention used elsewhere in this module.
+        unsafe {
+            std::env::remove_var("HOMUN_SANDBOX_MODE");
+            std::env::set_var("HOMUN_TOOL_SAFETY", "1");
+        }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::WorkspaceWrite); // alias
+        unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "read-only"); }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::ReadOnly); // explicit override beats alias
+        unsafe {
+            std::env::set_var("HOMUN_SANDBOX_MODE", "danger");
+            std::env::remove_var("HOMUN_TOOL_SAFETY");
+        }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::Danger); // explicit danger
+        assert!(!tool_safety_enabled()); // danger → disabled
+        unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); } // clean up
+    }
+
+    #[test]
+    fn linux_sandbox_helper_resolves_from_override_or_sibling() {
+        use super::linux_sandbox_helper_resolves;
+        use std::path::Path;
+        // Hermetic: pure resolution over explicit paths — no env, no `current_exe`,
+        // so this locks the Fase 0.2 auto-flip contract ("helper on disk ⇒ Linux
+        // fence available") on ANY platform without touching process-global env
+        // (avoids the `env::set_var`-without-`#[serial]` flake class).
+        let root = std::env::temp_dir().join(format!(
+            "homun-sandbox-resolve-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let bin_dir = root.join("bin");
+        std::fs::create_dir_all(&bin_dir).expect("create bin dir");
+        let helper = bin_dir.join("homun-linux-sandbox");
+        let missing = root.join("nope").join("homun-linux-sandbox");
+
+        // Override wins when it points at a real file.
+        std::fs::write(&helper, b"#!/bin/true\n").expect("write helper");
+        assert!(linux_sandbox_helper_resolves(Some(&helper), None));
+        // Override that points nowhere is NOT rescued by a valid sibling — an
+        // explicit override short-circuits (preserving the original semantics).
+        assert!(!linux_sandbox_helper_resolves(Some(&missing), Some(&bin_dir)));
+        // No override → resolve as a sibling of the gateway's exe dir.
+        assert!(linux_sandbox_helper_resolves(None, Some(&bin_dir)));
+        // Sibling absent, or no exe dir at all → not available (fail toward "warn").
+        assert!(!linux_sandbox_helper_resolves(None, Some(Path::new(&root))));
+        assert!(!linux_sandbox_helper_resolves(None, None));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn sensitive_skill_forces_confirm_only_on_effectful() {
+        use super::skill_policy_forces_confirm;
+        use crate::skills::SensitiveCategory;
+        // ADR 0023 Step 5 (Fase 0.3): an active sensitive-declared skill forces a
+        // confirmation on EFFECTFUL actions, even under a permissive approval
+        // policy — but never gates reads, and never fires when nothing is active.
+        let active = [SensitiveCategory::Financial];
+        assert!(skill_policy_forces_confirm(&active, true)); // effectful + active → confirm
+        assert!(!skill_policy_forces_confirm(&active, false)); // read + active → no
+        assert!(!skill_policy_forces_confirm(&[], true)); // effectful + none active → no
+        assert!(!skill_policy_forces_confirm(&[], false)); // read + none active → no
+    }
+
+    // The context-budget pure fns + their tests moved to `local-first-engine`
+    // (ADR 0024 Inc-0); see crates/engine/src/context_budget.rs.
+
+    #[test]
+    fn resolved_approval_policy_precedence_env_over_default() {
+        use crate::tool_safety::AskForApproval;
+        use super::resolved_approval_policy;
+        // Hermetic: drive entirely through env so the test never depends on the
+        // developer's on-disk runtime-settings.json. Rust-2024 `unsafe` env convention.
+        unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); }
+        // With no env override and (typically) no persisted value → default OnRequest.
+        // parse() also maps any unknown persisted value to OnRequest, so this holds
+        // regardless of a stray on-disk file.
+        assert_eq!(resolved_approval_policy(), AskForApproval::OnRequest);
+        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "never"); }
+        assert_eq!(resolved_approval_policy(), AskForApproval::Never); // env override
+        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "on-failure"); }
+        assert_eq!(resolved_approval_policy(), AskForApproval::OnFailure);
+        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "untrusted"); }
+        assert_eq!(resolved_approval_policy(), AskForApproval::UnlessTrusted);
+        // Empty env is ignored (falls through to persisted/default), not parsed as unknown.
+        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "  "); }
+        assert_eq!(resolved_approval_policy(), AskForApproval::OnRequest);
+        unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); } // clean up
+    }
+
+    #[test]
+    fn approval_wiring_truth_table_is_behavior_preserving_at_default() {
+        use crate::tool_safety::{AskForApproval, SafetyDecision, SandboxPolicy, assess_tool_safety};
+        use super::effective_approval;
+        // The wiring computes `effective_approval(autonomous, resolved)` then feeds it to
+        // `assess_tool_safety(..., DangerFullAccess, is_effectful_write, pre_authorized)`.
+        // Prove the two crux cases at the DEFAULT policy (`on-request`) match today:
+        let default_resolved = AskForApproval::OnRequest;
+
+        // Non-autonomous + effectful write + not pre-authorized → AskUser (unchanged).
+        let non_auto = effective_approval(false, default_resolved);
+        assert_eq!(non_auto, AskForApproval::OnRequest);
+        assert_eq!(
+            assess_tool_safety(non_auto, &SandboxPolicy::DangerFullAccess, true, false),
+            SafetyDecision::AskUser
+        );
+
+        // Autonomous → Never → auto-approve, whatever the write (unchanged).
+        let auto = effective_approval(true, default_resolved);
+        assert_eq!(auto, AskForApproval::Never);
+        assert!(matches!(
+            assess_tool_safety(auto, &SandboxPolicy::DangerFullAccess, true, false),
+            SafetyDecision::AutoApprove { .. }
+        ));
+
+        // Autonomous forces Never even if the resolved policy would otherwise ask.
+        assert_eq!(
+            effective_approval(true, AskForApproval::UnlessTrusted),
+            AskForApproval::Never
+        );
+        // A user who changes the policy (non-autonomous) sees the new policy verbatim.
+        assert_eq!(
+            effective_approval(false, AskForApproval::Never),
+            AskForApproval::Never
+        );
+    }
+
+    #[test]
+    fn spawn_subagent_schema_is_a_function_tool_named_spawn_subagent() {
+        let schema = super::spawn_subagent_tool_schema();
+        assert_eq!(schema["type"], "function");
+        assert_eq!(schema["function"]["name"], "spawn_subagent");
+        let required = schema["function"]["parameters"]["required"]
+            .as_array()
+            .expect("parameters.required should be an array");
+        assert!(
+            required.iter().any(|v| v == "tasks"),
+            "parameters.required must contain \"tasks\""
+        );
+    }
+
+    #[test]
+    fn subagents_enabled_reads_the_flag() {
+        use super::subagents_enabled;
+        // Hermetic env toggling, Rust-2024 `unsafe` convention (matches this module).
+        let prev = std::env::var("HOMUN_SUBAGENTS").ok();
+        unsafe { std::env::remove_var("HOMUN_SUBAGENTS"); }
+        assert!(!subagents_enabled()); // unset → off (default)
+        unsafe { std::env::set_var("HOMUN_SUBAGENTS", "1"); }
+        assert!(subagents_enabled()); // =1 → on
+        unsafe { std::env::set_var("HOMUN_SUBAGENTS", "0"); }
+        assert!(!subagents_enabled()); // =0 → off
+        // Restore prior state so other tests are unaffected.
+        match prev {
+            Some(value) => unsafe { std::env::set_var("HOMUN_SUBAGENTS", value); },
+            None => unsafe { std::env::remove_var("HOMUN_SUBAGENTS"); },
+        }
+    }
+
+    #[test]
+    fn write_tools_escalate_only_under_read_only() {
+        use crate::tool_safety::SandboxMode;
+        use super::write_needs_read_only_escalation;
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        assert!(write_needs_read_only_escalation("write_file", &args, SandboxMode::ReadOnly));
+        assert!(!write_needs_read_only_escalation("write_file", &args, SandboxMode::WorkspaceWrite));
+        assert!(!write_needs_read_only_escalation("write_file", &args, SandboxMode::Danger));
+        let ra = serde_json::json!({ "path": "src/x.rs" });
+        assert!(!write_needs_read_only_escalation("read_text_file", &ra, SandboxMode::ReadOnly));
+        let ea = serde_json::json!({ "path": "src/x.rs", "old_string": "a", "new_string": "b" });
+        assert!(write_needs_read_only_escalation("edit_file", &ea, SandboxMode::ReadOnly));
+    }
+
+    #[test]
     fn sandbox_escalate_matches_only_the_proposed_command() {
         let text = "I need your confirmation for the action below.\n\
 ‹‹SANDBOX_ESCALATE››{\"approval_id\":\"abc\",\"tool\":\"run_in_project\",\
@@ -57283,6 +58936,43 @@ data: [DONE]\n";
         assert!(out.contains("✓ Ran unsandboxed: npm ci"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
         assert_eq!(crate::rewrite_sandbox_escalate_to_done("hi", "npm ci"), "hi");
+    }
+
+    #[test]
+    fn write_escalate_matches_only_the_proposed_write() {
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        let text = format!(
+            "This write was blocked.\n{}{}{}\n",
+            crate::SANDBOX_ESCALATE_OPEN,
+            serde_json::json!({ "approval_id": "a1", "tool": "write_file", "arguments": args }),
+            crate::SANDBOX_ESCALATE_CLOSE,
+        );
+        assert!(crate::sandbox_escalate_write_matches(&text, "write_file", &args));
+        let other = serde_json::json!({ "path": "src/evil.rs", "content": "hi" });
+        assert!(!crate::sandbox_escalate_write_matches(&text, "write_file", &other)); // wrong path
+        assert!(!crate::sandbox_escalate_write_matches(&text, "edit_file", &args)); // wrong tool
+        let no_marker = "no card here";
+        assert!(!crate::sandbox_escalate_write_matches(no_marker, "write_file", &args)); // no card → reject
+    }
+
+    #[test]
+    fn write_escalate_rewrite_drops_card_marker() {
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        let text = format!(
+            "This write was blocked by the read-only sandbox.\n{}{}{}\n",
+            crate::SANDBOX_ESCALATE_OPEN,
+            serde_json::json!({ "tool": "write_file", "arguments": args }),
+            crate::SANDBOX_ESCALATE_CLOSE,
+        );
+        let out = crate::rewrite_sandbox_escalate_done_generic(&text);
+        assert!(!out.contains("SANDBOX_ESCALATE"), "marker removed");
+        assert!(
+            !out.contains("This write was blocked"),
+            "card head removed"
+        );
+        assert!(out.contains("✔ Ran with approval"));
+        // No-op when the marker is absent (idempotent on already-rewritten text).
+        assert_eq!(crate::rewrite_sandbox_escalate_done_generic("hi"), "hi");
     }
 
     #[test]
@@ -57864,9 +59554,18 @@ data: [DONE]\n";
             last_fired_at: None,
             state: None,
         };
+        // `gateway_user_id()`/`gateway_workspace_id()` read process-global state
+        // (`HOMUN_USER_ID`, `ACTIVE_WORKSPACE`/`HOMUN_WORKSPACE_ID`) that sibling
+        // tests mutate concurrently. Snapshot them ONCE so the insert below and the
+        // lookup later use identical keys — otherwise a parallel test flipping the
+        // global between the two reads makes the lookup miss (the gateway row is
+        // never found → panic). The gateway scope's identity, not its exact value,
+        // is what this test asserts.
+        let gateway_user = super::gateway_user_id();
+        let gateway_workspace = super::gateway_workspace_id();
         let mut gateway_automation = project_automation.clone();
-        gateway_automation.user_id = super::gateway_user_id();
-        gateway_automation.workspace_id = super::gateway_workspace_id();
+        gateway_automation.user_id = gateway_user.clone();
+        gateway_automation.workspace_id = gateway_workspace.clone();
         gateway_automation.title = "Gateway shadow".to_string();
         store.upsert_automation(&project_automation).unwrap();
         store.upsert_automation(&gateway_automation).unwrap();
@@ -57900,11 +59599,7 @@ data: [DONE]\n";
             .unwrap()
             .expect("project automation");
         gateway_automation = store
-            .get_automation(
-                "auto_channel",
-                &super::gateway_user_id(),
-                &super::gateway_workspace_id(),
-            )
+            .get_automation("auto_channel", &gateway_user, &gateway_workspace)
             .unwrap()
             .expect("gateway automation");
 

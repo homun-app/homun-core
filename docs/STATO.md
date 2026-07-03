@@ -3,7 +3,7 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-01.**
+> **Ultimo aggiornamento: 2026-07-03.**
 
 ## Dove siamo
 
@@ -326,6 +326,298 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-07-03 (pomeriggio, dev app in esecuzione) — UX piano + osservabilità turno (branch `feat/piano-ui-completion`, pushato #103):**
+Testando l'app reale è emerso un turno "cerca notizie in tabella" che sembrava bloccato. **Debug sistematico (via log P0 + API):
+NON un bug di B.2/C** — il modello (deepseek) dopo un 404 è degradato a prosa, non ha prodotto la tabella, ha lasciato lo
+step aperto e ha **dichiarato il falso** ("la tabella sopra"). Root cause = comportamento modello. Fix spediti:
+- **A — indicatori step piano** (`5f452218`… `95a43260`): `planStepIndicator(status, streaming)` puro (test 5/5 vitest) →
+  spinner sullo step attivo, **ambra "incompleto"** quando un turno finisce con uno step aperto (non più checkbox ambigua).
+  Live via HMR.
+- **Fix contratto (C regression)** (`b36eed41`): la ui-contract asserisce una stringa piano in `main.rs` che C aveva rimosso →
+  ripristinata (guida "explicit plan request", mode-independent) + dedup dall'agent opener. **Era un CI-fail già su #103.**
+- **⭐ TURN-TRACE osservabilità** (spec+plan superpowers, TDD, `8b48430e`→`36eb9b16`): nuovo modulo `turn_trace` →
+  `~/.homun/logs/turn-trace.jsonl` **leggibile** (separato dall'oracolo di parità `tool_trace_dump`). Eventi per turno:
+  `turn_start`/`round`(finish_reason+tools)/`plan`(sent→canonical, verify-hold)/`nudge`/`forced_synthesis`/`reconcile`/
+  `turn_end`(signals + **derived: `claimed_done_without_artifact`, `incomplete_steps`**). Helper puri unit-testati (7/7).
+  Handle `Arc/None` in `stream_chat_via_openai` + su `ChatToolCtx`. Opt-out `HOMUN_TURN_TRACE=0`, bounded, local-only.
+  **Validato eseguendo (dev app, deepseek):** trace leggibile end-to-end; good-case pulito (tabella presente →
+  `claimed_done_without_artifact:false`, nessun falso positivo); eventi `plan`/`reconcile` **correttamente gated
+  all'esecuzione reale** (nei 3 turni eval deepseek ha *richiesto* update_plan ma il router l'ha *bloccato* → nessun plan
+  event, confermato da `plan_final:[]`). **Caveat onesto:** il caso cattivo (flag `true` + plan/reconcile nel wild) è
+  intermittente e non ripreso nei 3 eval; il **retest illuminato** dell'utente lo mostrerà (trace attiva). Follow-on: vista
+  in-app "Turn inspector". **Restano dalla stessa analisi:** B (reconcile onesto) + C2 (anti-allucinazione deliverable) —
+  design da fare (non patch al volo sul motore-piano).
+
+
+**Sessione 2026-07-02/03 (notturna, autonoma) — ADR 0023 #2 "SANDBOX ONESTO" COMPLETO (branch `feat/piano-ui-completion`):**
+Run autonomo per massimizzare l'allineamento a Codex (direttiva utente: scelte SOTA delegate; vedi
+[[homun-overnight-codex-alignment]]). Piano
+[plans/2026-07-03-sandbox-policy-resolution.md](superpowers/plans/2026-07-03-sandbox-policy-resolution.md)
++ spec [specs/2026-07-03-sandbox-policy-resolution-design.md](superpowers/specs/2026-07-03-sandbox-policy-resolution-design.md),
+eseguito subagent-driven + TDD (implementer + doppia review spec/qualità per task, security-audit sul task provenance).
+**Scoperta che ricalibra il gap:** NESSUN tool risolveva una `SandboxPolicy` selezionabile — bash hardcodava
+workspace-write, i file-tool hardcodavano il project-jail, i rami approval hardcodavano `DangerFullAccess`.
+`write_file`/`edit_file` NON giravano `DangerFullAccess` (STATO precedente impreciso): erano già project-jailed
+via `jail_in_root`, ma scollegati dall'asse policy. Il vero #2 = **una sola sorgente di risoluzione onorata da
+tutti i tool effettful**. Fatto:
+- **`SandboxMode` + `resolved_sandbox_mode()`** (precedenza env `HOMUN_SANDBOX_MODE`/`HOMUN_TOOL_SAFETY`-alias >
+  `RuntimeSettings.sandbox_mode` persistito > default `danger`); `tool_safety_enabled()` derivato (`!= Danger`).
+  Behavior-preserving (default danger → tutto identico; `HOMUN_TOOL_SAFETY=1` → workspace-write come prima). `0cdabf83`.
+- **Bash** `run_in_project` costruisce la policy dal resolver: `read-only` reale (writable-roots vuoti → fence nega).
+  **Validato ESEGUENDO su macOS** (`read_only_bash_denies_project_write` — scrittura negata, exit≠0, file assente;
+  bug del test scoperto eseguendo: `$TMPDIR` è sempre scrivibile nel profilo read-only → dir spostata sotto `$HOME`).
+  CI Linux esteso (`tests/linux_sandbox.rs` read-only nega). `f0cbab89`+`fe5d681d`.
+- **File-tool** `write_file`/`edit_file`: gate al chokepoint (`sandbox_gate_write` + helper puro
+  `write_needs_read_only_escalation`) → sotto `read-only` **card escalation** invece di eseguire; workspace-write/danger
+  invariati (sempre `jail_in_root`, least-privilege: mai fuori progetto neanche in danger). `804c075f`.
+- **Escalation esteso alle scritture** (`run_escalate` + `sandbox_escalate_write_matches`): riesegue la scrittura
+  su approvazione, **project-jailed**, con gate provenance anti-RCE (tool+arguments deep-equal vs card memorizzata,
+  no-card→403). **Security-audit: SOUND** (nessun RCE arbitrario, nessuna jail escape, nessun panic/DoS). Rewriter
+  generalizzato in helper condiviso (bash byte-identico). `1a2f6b96`.
+- **Frontend** escalate card generalizzata a union bash|write (discriminata da `tool`), bridge `runEscalate(payload)`;
+  build + ui-contract verdi, bash wire-identico. `d4132247`.
+- **Cleanup review nits** (spawn_blocking sul re-run, test dir cleanup, doc drift) + docs (ADR 0023 + STATO).
+**MCP/Composio = limite onesto documentato** (asse sandbox non li recinta — processi esterni, come Codex; gate = asse
+approval).
+**ADR 0023 #1 (Settings UI asse sandbox + FLIP) COMPLETO:** (0) `set_runtime_settings` fa ora **merge dei partial**
+(un controllo non clobbera l'altro; `7cce9e8e`); (1) **flip del default `danger`→`workspace-write`** — fence ON di
+default, **validato eseguendo** su macOS (`workspace_write_allows_in_project_denies_outside`: write in-progetto riesce,
+fuori-root negata; `d4f78ae7`); (2) **selector "Sandbox" in Settings › Runtime** (3 livelli + warning su `danger`,
+`setRuntimeSettings` rilassato a `Partial`, i18n en+it; `6cefd413`). Comportamento nuovo: ogni bash `run_in_project`
+gira sotto il fence di default; scritture fuori project+cache → escalation card (Codex-like). **⚠️ Smoke Electron
+app-level non eseguito headless** — consigliato prima del merge (PR draft #103).
+**Default PLATFORM-AWARE** (`fffd09ab`): `workspace-write` su macOS/Windows, ma `danger` su **Linux** finché
+l'helper `homun-linux-sandbox` non è bundlato nel packaged app (altrimenti `build_sandbox_command` fail-closed →
+ogni bash rifiutato = app rotta). **→ FASE 0.2 CHIUSA (2026-07-03):** l'helper è ora bundlato accanto al gateway
+(`prepare-package.mjs` lo copia in `resources/bin/` **solo su host Linux**; cavalca il glob `extraResources`
+esistente, nessuna modifica a electron-builder) + wiring esplicito `HOMUN_LINUX_SANDBOX_BIN` in `main.cjs`
+(belt-and-suspenders sulla risoluzione sibling). Il flip a `workspace-write` su Linux è **automatico** —
+`default_sandbox_mode()` auto-upgrada appena l'helper risolve, nessuna modifica al resolver. Contratto blindato con
+un test PURO: estratto `linux_sandbox_helper_resolves(bin_override, exe_dir)` (thin wrapper env/`current_exe` →
+core testabile su OGNI piattaforma senza mutare env global → **non** peggiora la classe di flake `env::set_var`);
+5 casi (override vince/short-circuita se mancante, sibling, assente, no-exe-dir). TDD RED→GREEN, refactor
+behavior-preserving (test vicino `resolved_sandbox_mode_precedence` invariato). Verifica: 8/8 test sandbox verdi
++ helper compila (bin auto-discover del crate) + `node --check` + 12 test electron verdi. Confine onesto: il flip
+a runtime su Linux è coperto dal test d'integrazione `tests/linux_sandbox.rs` sul runner CI, non riproducibile su
+macOS. **CI flake pre-esistente risolto**
+(`781ccdd8`): `automation_run_..._scope` corseggiava su `HOMUN_USER_ID`/`ACTIVE_WORKSPACE` global (letti due volte),
+NON causato dal flip (provato: esito invariante al sandbox mode); reso ermetico. Residuo noto: ~19 `env::set_var`
+senza `#[serial]` = classe di flake (follow-up = `serial_test`).
+**`apply_patch` (tool-firma Codex) SPEDITO** (parser+applier+wiring, `f47cb7ac`→`283b4483`→`9ba44a1e`):
+grammatica estratta **verbatim dal binario Codex reale**; modulo `apply_patch.rs` (parser puro + applier puro con
+match fuzzy 3-passi fedele a `compute_replacements` di codex-rs + `apply_patch_under_root` testabile) + tool
+`apply_patch` (arg `input`, DiffCard per file, gate read-only inline); **confinamento airtight** (ogni path incl.
+Move-dest via `jail_in_root`, verificato in security-review). Review A+B trovò 2 bug di posizione-sbagliata nel
+matcher (fallback re-anchor + hint `contains`) → corretti. Vedi [architecture/apply-patch.md](architecture/apply-patch.md).
+Follow-up: escalation read-only per apply_patch; diff rename cosmetico.
+**ORCHESTRAZIONE SUBAGENTI — DESIGN FATTO** ([ADR 0025](decisions/0025-subagent-orchestration-delegation-as-a-tool.md)
++ [piano slice-1](superpowers/plans/2026-07-03-subagent-orchestration-slice1.md)). Scoperta della mappa (explorer
+4-agenti): Homun ha GIÀ quasi tutto — motore #1 + chokepoint, task-runtime concorrente (worker/DAG/governor/
+approval-gate), esecuzione subagent durabile, `MemoryScope::{Personal,Project,Thread}` + facade single-writer,
+activity panel; l'envelope sandbox è **process-global** → figli che riusano `execute_chat_tool` ereditano il recinto
+gratis. MANCA: un **tool `spawn_subagent` chiamabile dal modello**, **fan-out+join in-turn**, **threading dello scope
+memoria** nel figlio. Decisione = **delega-come-tool sul loop unico** (NON resuscitare il "drive" ritirato da 0021):
+tool → figli read/gather via `run_agentic_step` che delega a `execute_chat_tool` → join → sintesi; manager unico writer;
+scope+envelope ereditati. **SLICE-1 MACHINERY COSTRUITA (Task 0-3, tutti revisionati + security-audited + 23 test):**
+seam `spawn_subagent` (`f1b443aa`), child loop read/gather fail-closed a 3 assi (`f33874e4`), fan-out/join sequenziale
++ bridge async→sync `block_in_place`+`block_on` (`c5f1c1cd`), scope-guard (no leakage — figli ereditano `MEMORY_WORKSPACE`
+del manager; niente memoria-write) + routing modello-per-ruolo (inherit-default, `62f29df1`). Vedi
+[architecture/subagents.md](architecture/subagents.md). **Sicurezza verificata:** no scope-leak, no memory-write, no
+fan-out annidato (depth 1), sessione browser calda protetta. **VALIDAZIONE RIMANENTE (pre-merge, l'unica):** eval
+flag-on end-to-end su **gemma4** (caposaldo #2 — il manager spawna figli e sintetizza); il flag resta default-off finché
+verde. **Follow-up:** concorrenza cloud-aware (semaforo=`active_llm_concurrency`); visibilità per-step; scritture
+single-threaded+approval.
+- **⭐ ROADMAP CODEX-PARITY COMPLETA** ([roadmap-codex-parity.md](roadmap-codex-parity.md), 2026-07-03): decisione
+  utente "facciamoli tutti". Ordinamento per dipendenze+rischio+momentum. **Fase 0** (safety: #1b approval UI, bundle
+  Linux helper, skill policies) → **Fase 1** (auto-compaction, eval subagenti, lifecycle) → **Fase 2** (ESTRAZIONE
+  MOTORE ADR 0024 = abilitatore) → **Fase 3** (git integration, session rewind/checkpoint, unified_exec, code-review)
+  → **Fase 4** (hooks, config/AGENTS.md, slash-commands, reasoning-effort) → **Fase 5** (produzione) → **Fase 6**
+  (extra). NON inseguire: Chronicle/voice/marketplace-cloud/OpenAI-lock. Programma multi-sessione, si esegue dall'alto.
+  **Fase 0.1 (#1b approval axis) ✅ FATTA** (`2469f55a` backend resolver+wiring behavior-preserving + `5b9852bb`
+  frontend selector 4-livelli): `AskForApproval::parse/as_str`, `resolved_approval_policy()`, wiring MCP+Composio via
+  `effective_approval(autonomous, resolved)` (truth-table equivalence provata), selector in Settings › Runtime.
+  `on-failure`/`untrusted` = resolver-wired ma semantica ricca TODO (non finta).
+  **Fase 0.2 (bundle `homun-linux-sandbox` → auto-fence Linux) ✅ FATTA (2026-07-03):** staging Linux-only in
+  `prepare-package.mjs` + wiring `HOMUN_LINUX_SANDBOX_BIN` in `main.cjs` + resolver reso puro/testabile
+  (`linux_sandbox_helper_resolves`, 5 casi TDD). Flip a `workspace-write` automatico via `default_sandbox_mode()`.
+  **VERIFICATA SUL RUNNER** (`d8d6ce5e` pushato su #103): CI verde tutta, incl. **Landlock fence validation
+  (ubuntu-24.04) pass** + Build linux/mac/win + Backend gateway tests.
+  **Fase 0.3 (skill confirmation policies, ADR 0023 Step 5) ✅ SLICE-1 FATTA (2026-07-03):** spec
+  [specs/2026-07-03-skill-confirmation-policies-design.md](superpowers/specs/2026-07-03-skill-confirmation-policies-design.md)
+  (Approccio A approvato). Frontmatter `sensitive: [delete|financial|medical|sensitive-data]` → enum chiuso
+  `SensitiveCategory` (parse forgiving, dedup, esposto su `SkillSummary`); `use_skill` arma `ctx.active_sensitive`
+  **turn-scoped** (dichiarato accanto a `loaded_tools`, persiste tra i round); enforcement puro
+  `skill_policy_forces_confirm(active, is_effectful)` OR-composto ai due chokepoint di approval **MCP+Composio** →
+  force-confirm anche sotto policy permissiva, mai sulle read. TDD: 3 parse + 1 decisione (puri, no env). Refactor
+  behavior-preserving: helper lista `parse_list_value` condiviso con `allowed-tools`; `load_skill_body` converge su
+  `load_skill_body_and_sensitive`. Verifica: bin compila, 552 test verdi (l'unico fallito = `import_pptx…thumbnail`,
+  ambiente senza LibreOffice locale, verde in CI). **Follow-up dichiarati:** force-confirm su file/bash effettful
+  (oggi jailed/contained+scan), cross-turn stickiness (serve store), rendering UI del tag. Vedi
+  [architecture/subagents.md] per il child ctx (arma il proprio set vuoto).
+  **Fase 1.1 (auto-compaction token-budget-driven = CHECKPOINT DI MEMORIA) ✅ SLICE-1 FATTA (2026-07-03):** spec
+  [specs/2026-07-03-auto-compaction-memory-checkpoint-design.md](superpowers/specs/2026-07-03-auto-compaction-memory-checkpoint-design.md).
+  **Design memory-integrato su richiesta utente** ("preservare i salienti + tenere aggiornata la memoria per non
+  perdere nulla"): Codex comprime-e-dimentica, Homun comprime-DENTRO-la-memoria. Meccanica: 3 funzioni pure TDD
+  (`estimate_tokens` char/4 model-agnostic — NO tiktoken, sarebbe sbagliato sui locali; `needs_context_compaction`
+  soglia 0.75 del `context_window` da `registry_model_capabilities`, unknown→fail-open; `context_compaction_span`
+  boundary-safe: preserva head=2 + tail=8, sposta il boundary oltre i `tool`-result → nessun orfano OpenAI-compat).
+  `compact_for_context_budget` al confine di round (accanto a `compact_completed_step`): **write-back dello span in
+  memoria via `learn_via_service_or_inline` PRIMA del collasso** (motore unico ADR 0022, off-path fire-and-forget,
+  rete di sicurezza lossless) → poi summary salience-aware (`summarize_message_slice` estratto+condiviso, prompt
+  rafforzato su stato/decisioni/aperte/artefatti) → `splice`. Harness-driven, no tool per il modello (ADR 0021).
+  Converge: `compact_completed_step` rifattorizzato su `summarize_message_slice`/`render_slice_text`
+  (behavior-preserving). Verifica: bin compila, 555 test verdi (+3, unico fallito = pptx/LibreOffice d'ambiente).
+  **Follow-up dichiarati:** recall-enrichment (compaction↔memoria bidirezionale), calibrazione da `usage` reale,
+  persistenza durabile summary, indicatore UI context-fill%.
+  **Fase 1.2 (eval subagenti flag-on su gemma4) — ESEGUITA 2026-07-03, VERDETTO = NON accendere il default (2 blocker).**
+  Eval reale: gateway debug con `HOMUN_SUBAGENTS=1` + data-dir scratch + `gemma4:12b` locale (Ollama), `POST
+  /api/chat/generate_stream`. **Q1 (la macchina funziona?) ✅ control-flow validato:** con istruzione esplicita a
+  delegare, gemma4:12b emette il tool-call `spawn_subagent` con 3 task; fan-out a **3 figli** confermato (marker
+  `👥 Indagine su Axum/Actix-web/Rocket`); fallback **onesto** quando i figli falliscono (il manager degrada a
+  risposta diretta dichiarando "i sottosistemi di delega hanno riscontrato un errore tecnico" — no silent-fail).
+  **Q2 (gemma4:12b delega da sola?) ❌:** eval-1 con prompt scomponibile ma SENZA istruzione esplicita → risposta
+  diretta, nessuno spawn = segnale ADR 0018 (modelli deboli non raggiungono lo scaffolding). **Blocker gather:** i
+  figli hanno ricevuto **solo tool browser** (`[agentic] start step=child tools=[browser_act,browser_navigate,
+  browser_snapshot]`) e sono falliti perché il **sidecar browser non era montato** → gather+sintesi NON osservati.
+  Combacia con [browser-stealth](../memory/...): *subagent-parallelism = BUILD, browser fix è prereq*. **Verdetto:
+  `HOMUN_SUBAGENTS` resta default-off** finché (1) i figli hanno un gather funzionante (browser sidecar wired, o un
+  gather non-browser) e (2) c'è la spinta tier-adattiva ADR 0018 perché i modelli deboli deleghino senza istruzione
+  esplicita. Nota latenza: primo round gemma4:12b ~3 min (prompt-eval enorme per il tool-schema set). Artefatti in
+  scratchpad/subagent-eval (stream.ndjson/stream2.ndjson/gateway.log).
+  **Fase 1.2 blocker #1 (delega weak-model, ADR 0018) — ESPERIMENTO ESEGUITO 2026-07-03, IPOTESI FALSIFICATA →
+  revert.** Causa radice trovata: il **system prompt non menziona MAI la delega** (`subagents_enabled()` usato solo
+  per aggiungere lo schema del tool + gattare il dispatch, mai nel prompt-build) → un modello debole non va a
+  cercare un tool di cui non gli si parla. Fix tentato (TDD): `scaffold::delegation_guidance(tier)` tier-adattiva
+  iniettata nel system prompt quando i subagenti sono on (gemma4:12b → tier `Fast` via `infer_profile`, "gemma"
+  marker → guida forte). **Risultato empirico su 4 eval reali (gemma4:12b locale, gateway debug):** (1) senza guida
+  → risposta diretta, no spawn; (2) con istruzione esplicita → spawn 3 figli OK; (3) con guida mite → il modello
+  DECOMPONE ma emette **‹‹PLAN_PROPOSE›› (piano), non spawn**; (4) con guida rafforzata *anti-piano* ("NON proporre
+  un piano, chiama spawn_subagent subito") → **ancora PLAN_PROPOSE, no spawn**. **VERDETTO: il prompt-nudging NON
+  redirige — per un modello debole l'affordance del PIANO domina quella della DELEGA**, anche contro istruzione
+  esplicita. Il fix non è a livello di prompt → **revert del nudge**.
+  **CAUSA CODE-GROUNDED (verificata sul codice 2026-07-03, NON dai doc):** engine #2 (`OrchestratorBrain`) è
+  **flag-OFF di default** (`HOMUN_ORCHESTRATED_CHAT`/`HOMUN_DRIVE_CHAT`, `main.rs`) → nel turn di chat gira **solo
+  engine #1** (ReAct + planning-as-tool); "due motori competono" NON è il problema live (era intent degli ADR
+  0020/0021, non realtà del codice). Il vero colpevole è il **system prompt di engine #1** (`grep PLAN_PROPOSE`
+  in `main.rs`): ordina *incondizionatamente* "per un task multi-step non-triviale FIRST propose the plan and STOP".
+  Il task di eval è multi-step → il modello ha **obbedito** (PLAN_PROPOSE + stop), non ha sbagliato. E il prompt
+  offre **TRE affordance di decomposizione sovrapposte** — `PLAN_PROPOSE` (approval, si ferma) + `update_plan`
+  (operativo) + `spawn_subagent` (delega): la più invadente scatta e preclude le altre. **Diagnosi = accrescimento
+  di prompt in engine #1, non split di motori.** Fix candidato: disambiguare le 3 affordance (gather parallelo→delega
+  senza fermarsi; step dipendenti→piano), tier-adattivo (ADR 0018: al debole offrine MENO, non di più). Nord di lungo
+  periodo (subagenti = substrato d'esecuzione degli step indipendenti) resta, ma non è il blocco immediato. Artefatti
+  eval in scratchpad/subagent-eval.
+  **ITEM CORRENTE = decisione utente:** (a) disambiguare le 3 affordance di decomposizione in engine #1 (fix
+  mirato di 1.2), (b) Fase 1.3 lifecycle, o (c) Fase 2 estrazione motore. Draft PR **#103** (CI verde incl.
+  Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
+  **⭐ C / finding 1.2 — DISAMBIGUAZIONE MODALITÀ FATTA (2026-07-03, spec+plan superpowers, TDD, 3 commit
+  `2504936f`→`ccb0a7b5`).** Scoperta code-grounded che affina la diagnosi: il prompt aveva **DUE direttive
+  PLAN_PROPOSE contraddittorie** — il blocco base (`main.rs` ~23098) forzava *incondizionatamente* «MULTI-STEP →
+  FIRST propose the plan and STOP» in **ogni** modalità, e il blocco `mode=="plan"` era **ridondante**. Quindi
+  **agent si comportava come plan** (contro il contratto del toggle `agent|plan|ask|debug`), ed è ciò che bloccava
+  gemma4 nell'eval 1.2 (girata in agent mode). Fix (Approccio B, harness-owns-decision, non prompt-nudge falsificato):
+  seam puro `plan_directive_for_mode(mode)` (`crates/desktop-gateway/src/plan_directive.rs`) — **agent/debug** =
+  blocco operativo (`update_plan`→esegui, niente stop; eccezione solo su richiesta ESPLICITA dell'utente); **plan** =
+  propose-and-STOP; **ask** = vuoto. Rimosso il blocco base incondizionato dal `format!` MEMORY; rimosso l'arm
+  `"plan"` ridondante; appeso una sola direttiva per modalità. **Verificato:** 5 unit-test sul seam (agent NON
+  contiene «propose the plan and STOP», plan sì, debug==agent, ask vuoto, corpo operativo condiviso); crate 558/1
+  verdi (l'1 = pptx/LibreOffice d'ambiente); `FIRST propose the plan and STOP` grep 0 in main.rs.
+  **⭐ EVAL RUNTIME — VERDETTO ONESTO (A/B completo con counterfactual, ricompilando `51c0191f`):** lo **stallo
+  PLAN_PROPOSE di 1.2 NON si riproduce** in agent mode, né col prompt vecchio né col nuovo, su NESSUNA combinazione:
+  - gemma4:12b, Q&A → risposta diretta (old=new), 0 PLAN_PROPOSE.
+  - gemma4:31b-cloud, Q&A → risposta diretta (old=new), 0 PLAN_PROPOSE.
+  - gemma4:31b-cloud, **task dev/action** → entrambi ESEGUONO operativo: **OLD 0 PLAN_PROPOSE / 6 `plan_update`**,
+    **NEW 0 PLAN_PROPOSE / 1 `plan_update`** (+ activity, file creati). Nessuno stallo, in nessuna versione.
+  **Conseguenza (corregge il premise 1.2):** in **plain agent mode** i modelli NON si fermano a PLAN_PROPOSE — il
+  PLAN_PROPOSE di 1.2 era legato agli esperimenti di **delegation-guidance (poi revertiti)**, non alla modalità agent
+  normale. Quindi **C è un cleanup corretto e behavior-preserving in pratica** (rimuove una contraddizione reale —
+  agent era istruito sia a eseguire sia a proporre-e-fermarsi — e allinea agent al contratto del toggle), **non** la
+  riparazione di uno stallo osservabile. Valore: correttezza di principio + trappola latente rimossa per un eventuale
+  modello che obbedisca *strettamente* a PLAN_PROPOSE (nessuno dei testati lo fa). Verifica solida a livello **unit +
+  strutturale**; l'A/B comportamentale mostra **nessuna differenza osservabile** (entrambi eseguono). Artefatti in
+  `scratchpad/c-eval/` (*.ndjson old/new × 12b/31b × qa/dev). Follow-up: tier-adattività (ADR 0018) + subagenti fuori
+  scope, come deciso.
+
+- **⭐ FLUIDITÀ da Codex reale (2026-07-03) — mappa + Ondata 1 iniziata.** Missione utente: studiare il codice REALE
+  di Codex su disco (`/Users/fabio/Projects/codex`: binario `Resources/codex` + `app.asar`) per rendere Homun più
+  fluido. 5 agenti hanno estratto prompt/tool/delega/approval/streaming dal binario → **mappa in
+  [codex-fluidity-map.md](codex-fluidity-map.md)** ([[homun-codex-fluidity-map]]). Tesi: Codex è fluido perché (1)
+  parla meno, (2) offre meno tool/turno, (3) il piano orchestra una delega NON-bloccante. Homun: prompt ~4300 parole
+  + METODO 5-step + niente regole anti-narrazione; ~60 tool/turno (~5k token, ~3 min primo round gemma4:12b); 3-4
+  affordance di decomposizione concorrenti + fan-out sequenziale bloccante. **Ondata-1 punto-1 SPEDITO (`44dcf772`):**
+  blocco `COMMUNICATION STYLE` nel system prompt (anti-fluff/anti-narrazione + assumi-non-chiedere + prose-first),
+  additivo (non tocca le regole browser/sintesi fragili del METODO), 0 test rotti. **Validato eseguendo:** gemma4:12b
+  su domanda concettuale → risposta dritta al contenuto, **niente apertura "Certamente/Ecco"** (baseline: tutti i turni
+  eval di stamattina aprivano con "Certamente. Per fornirti…").
+  **Ondata-1 punto-2 (snellire tool) — VERIFICATO GIÀ FATTO (code-is-truth):** Homun implementa GIÀ il Tool Search
+  pattern — `main.rs:23433` partiziona in CORE (~19 tool `CORE_TOOL_NAMES`) + DEFERRED; `find_capability`
+  (`bm25_rank(capability_corpus)` → inietta in `loaded_tools`/`tool_schemas`, chiamabile round dopo). Browser/artifact
+  già deferiti. **L'agente 2 aveva SBAGLIATO** ("~60 tool/turno"). Ricerca web confermata: è il pattern *Tool Search
+  Tool* Anthropic (defer_loading, ~85% token, accuratezza su; soglia degrado ~20-25 tool). Differenziazione possibile:
+  BM25→retrieval semantico via nomic-embed (basso ROI ora).
+  **Prompt-size per latenza — PROVATO NON È LA LEVA (misurato):** blocco base = ~2323 tok; consolidato ridondanza +
+  corretta una contraddizione prose-first↔always-markdown (`274f6d3a`, −~101 tok = 1.7% del totale). I ~3 min di primo
+  round = **gemma4:12b lento al prompt-eval su HW locale**, NON la dimensione prompt → **leva vera = scelta modello
+  (onboarding), non hack di prompt.** METODO(~860 tok)/Travel(~265) contengono regole anti-regressione → non tagliare.
+  **NON copiare all'indietro la memoria** (Homun è avanti su Codex).
+  Ondata 2 (delega non-bloccante) = fast-follow (fluidità), Dettaglio in [codex-fluidity-map.md](codex-fluidity-map.md) §3.
+
+- **⭐ ESTRAZIONE MOTORE (ADR 0024) — SCELTA UTENTE: pagare il debito PRIMA (2026-07-03).** Sequenza decisa:
+  estrazione motore → **review UI vs Codex** → early-access. Motivo: `main.rs` a **59.9k righe** è un tax di velocità
+  che compone (ogni feature ci va dentro). ADR 0024 rinfrescato col codice reale: **il chokepoint `execute_chat_tool`
+  esiste già** come funzione unica (~3.3k righe, 38 rami) — il premise "match sparsi" era superato. Confine mappato:
+  `ChatToolCtx` 56 campi (27 stato-motore + 5 servizi-gateway + 14 metadati); riusare `MemoryRecallService`/
+  `CapabilityFacade::call_tool`/`StepExecutor` (esistono), costruire `ModelClient`. **Piano gated
+  (`HOMUN_ENGINE_CRATE`, parità turno-per-turno): Inc-0 scaffold → Inc-1 ModelClient → Inc-2 execute_chat_tool →
+  Inc-3 loop → Inc-4 cleanup.** **Inc-0 FATTO (`a1545774`):** crate `local-first-engine` creato + funzioni pure
+  context-budget (`estimate_tokens`/`needs_context_compaction`/`context_compaction_span`) estratte da main.rs (−79
+  righe, rischio ~0). Verifica: crate 3/3 test verdi, gateway 552/552 (solo pptx-env fallito). Stabilito crate +
+  pattern move→wire→parità. **Follow-up notato:** `crates/context-compression` è dormiente (non usato dal loop) =
+  altro caso caposaldo #5. **Inc-1 FATTO (`c89c15b3`):** estratto `local-first-engine::payload` — `build_chat_payload`
+  puro (shaping Ollama/OpenAI/z.ai, capability come parametri) + `to_ollama_messages`; il gateway tiene un wrapper
+  stessa-firma (6 call-site invariati). NON è il trait `ModelClient` streaming completo (troppo intrecciato con
+  streaming/retry/collector — incremento più avanti); è il pezzo puro sicuro. Verifica: crate 7/7, gateway 552/552,
+  −101 righe (−180 totali, main.rs → 59.763). **PROSSIMO = Inc-2 (spostare `execute_chat_tool`, ~3.3k righe — il
+  chokepoint, il pezzo grosso e rischioso, multi-sessione)** — l'utente ha scelto: **riduzione main.rs a piccoli passi
+  in seguito**, prima la review UX poi early-access. ⭐ Vedi [[homun-codex-fluidity-map]].
+
+- **⭐ REVIEW UX vs Codex (app reali, 2026-07-03) + GOAL+STEPS backend FATTO.** Review visiva side-by-side (Codex.app +
+  Homun.app installate) → [codex-ux-review.md](codex-ux-review.md). **Chiave (utente): la UX è prodotta dal MOTORE, non
+  dal CSS** — ogni superficie Codex (diff/git panel, tool "in esecuzione…", piano vivo, non-bloccante) è un *capability
+  del motore* che Homun non ha o ha bloccante. Homun **non è indietro** come polish (stessa lineage). Forze da tenere:
+  chip deliverable, local-first, ampiezza assistente. **Working island** esiste (`WorkspaceIsland` in ChatView) ma
+  deriva da messaggi PERSISTED → **lag di sync**. **Gap grave trovato: goal+step.** Verificato: `update_plan`/
+  `ExecutionPlan` avevano **step ma NESSUN goal** top-level. **Fase A backend FATTO (`4588fafc`):** `objective` in
+  `update_plan` schema + descrizione (il modello STABILISCE il goal), stato-turno `ctx.plan_objective` (carry-forward
+  + resume dal marker), riga `🎯 **goal**` nel marker ‹‹PLAN›› sopra gli step (frontend la rende già), `replace_latest_
+  plan_marker` self-healing, `parse_plan_objective` + test. 553 test verdi, nessuna regressione.
+  **Fase B frontend parte-1 FATTO (`be68d005`):** `parsePlanObjective` + `workspacePlanObjective` → la **working
+  island rende il goal in cima** (`.wi-objective`, 🎯, brand-tinted, single-line) sopra gli step. tsc pulito,
+  ui-contract passa.
+  **⭐ B.2 SYNC ISLAND LIVE — FATTO (2026-07-03, spec+plan superpowers, TDD, 4 commit `5f452218`→`03300503`).**
+  Intuizione che scioglie il trade-off ADR 0022 C2: gli eventi `plan_update`/`activity` sono **sparsi** (una manciata
+  per turno), solo i delta di testo sono per-frame → alimentare l'island da quegli eventi dà churn ~zero, strettamente
+  meglio di derivare da `threadMessages` (che era il churn temuto). Impl (Approccio A, event-sourced): **reducer puro**
+  `applyLiveEvent` in `apps/desktop/src/lib/liveWorkspace.ts` (`plan_update`→sostituisce piano completo; `activity`→
+  appende step `text.trim()`, parità esatta con `parseActivitySteps`; altro→no-op) + **hook** `useLiveWorkspace` (state
+  + `onStreamEvent` + `reset`) in ChatView. Le **4 path di streaming** (`submitPrompt`/`resumeActiveStream`/
+  `streamRegeneratedAnswer`/`streamContinuetionIntoMessage`) fanno `onStreamEvent(part)` accanto a `streamEventParts`;
+  `reset()` nei 3 new-turn start (NON la continuation) + effetto reset su cambio `threadId`. Island: `conversationPlan =
+  livePlan ?? persistedPlan`, `conversationActivity = liveActivity.length ? liveActivity : persistedActivity` →
+  objective+step live gratis (derivano già da `conversationPlan`). **Artifact restano PERSISTED** (C2 invariato, non
+  lag-sensitive). **Hand-off sticky** (reset al turno successivo, non a fine turno) → nessun flicker.
+  **Verificato:** reducer 5/5 vitest (`npx vitest run`), `tsc --noEmit` 0, `npm run build` ✓ (tsc+vite), ui-contract ✓,
+  renderer boota pulito (0 errori relativi alla modifica; solo warn `automations Failed to fetch` = browser-mode senza
+  bridge Electron, non correlato). **RESTA (smoke live):** guidare un turno browse reale nell'app sbloccata e osservare
+  island che si muove live + no jank + hand-off + cancel + switch-thread — non eseguibile headless (access-token gate +
+  side-effect sul gateway live dell'utente). **Env-gap notato:** `vitest` NON installato in `node_modules` (devDep
+  dichiarato, install incompleto) → `npm run test:unit` (aggiunto) gira solo dopo `npm install`; qui i test passano via
+  `npx`. tsconfig produzione ora esclude `*.test.ts(x)` (il runner possiede i test; build resta verde). launch config
+  `homun-renderer` aggiunto a `Homun/.claude/launch.json` (dev convenience, fuori repo app).
+  **PROSSIMO/follow-up:** (C) affidabilità produzione piano su modelli
+  deboli (finding 1.2); verificare edge marker seed/reconcile. Debito UI: `ChatView.tsx` 9.4k / `SettingsView` 6.9k
+  da splittare.
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,

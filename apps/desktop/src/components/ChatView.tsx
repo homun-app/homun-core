@@ -30,6 +30,7 @@ import {
   FolderOpen,
   GitMerge,
   AlertTriangle,
+  Circle,
   Globe2,
   HardDrive,
   ListTodo,
@@ -108,6 +109,8 @@ import {
 import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
+import { applyLiveEvent, EMPTY_LIVE_WORKSPACE, type LiveWorkspaceState } from "../lib/liveWorkspace";
+import { planStepIndicator, type PlanStepIndicator } from "../lib/planSteps";
 import {
   STRUCTURED_MARKER_DELTA_RE,
   COMPOSIO_CONFIRM_RE,
@@ -441,15 +444,32 @@ export function ChatView({
     }
     return out;
   }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
+  // Live island state for the current turn (fed by the streaming paths, Task 3).
+  // Overlaid over the persisted-derived plan/activity below so the island moves
+  // live without the per-frame churn ADR 0022 C2 avoided (sparse events only).
+  const liveWorkspace = useLiveWorkspace();
   // The agent's operational plan for this conversation (latest update_plan), shown
   // in the Workbench "Piano" panel.
   // ADR 0022 (Piano UI C2): plan/activity derivati dai messaggi PERSISTED, non da
   // threadMessages (che cambia ogni frame di stream). Il plan/activity del messaggio
   // streaming si vede quando viene persisted.
-  const conversationPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
-  const conversationActivity = useMemo(() => latestActivitySteps(messages), [messages]);
+  // Live-first: during a turn, the island reads the sparse-event live state; when
+  // the turn ends the persisted messages carry the same final plan/activity, so
+  // `?? persisted` hands off with no flicker (livePlan stays sticky until the next
+  // turn/thread reset). ADR 0022 C2 stays honoured — we never derive from the
+  // per-frame `threadMessages`, only from sparse events. See spec 2026-07-03.
+  const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
+  const conversationPlan = liveWorkspace.livePlan ?? persistedPlan;
+  const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
+  const conversationActivity =
+    liveWorkspace.liveActivity.length > 0 ? liveWorkspace.liveActivity : persistedActivity;
   const workspacePlanSteps = useMemo(
     () => (conversationPlan ? parsePlanSteps(conversationPlan) : []),
+    [conversationPlan],
+  );
+  // The task GOAL (‹‹PLAN›› `🎯` line), shown above the steps in the island.
+  const workspacePlanObjective = useMemo(
+    () => (conversationPlan ? parsePlanObjective(conversationPlan) : null),
     [conversationPlan],
   );
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
@@ -667,6 +687,7 @@ export function ChatView({
       metadata: "Local model",
     };
     let streamedText = "";
+    liveWorkspace.reset();
     let streamEventParts: ChatEventPart[] = [];
     let streamChunks = 0;
     const streamStartedAt = performance.now();
@@ -762,6 +783,7 @@ export function ChatView({
             });
           }
           streamEventParts = [...streamEventParts, part];
+          liveWorkspace.onStreamEvent(part);
           scheduleStreamingMessage();
           return;
         }
@@ -946,6 +968,7 @@ export function ChatView({
     };
     const promptMessages = [...messages, userMessage];
     let streamedText = "";
+    liveWorkspace.reset();
     let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
@@ -983,6 +1006,7 @@ export function ChatView({
         const part = chatEventPartFromStream(payload);
         if (part) {
           streamEventParts = [...streamEventParts, part];
+          liveWorkspace.onStreamEvent(part);
           scheduleStreamingMessage();
           return;
         }
@@ -1252,6 +1276,7 @@ export function ChatView({
   ) {
     const requestId = `chat_stream_regen_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     let streamedText = "";
+    liveWorkspace.reset();
     let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
@@ -1307,6 +1332,7 @@ export function ChatView({
       const part = chatEventPartFromStream(payload);
       if (part) {
         streamEventParts = [...streamEventParts, part];
+        liveWorkspace.onStreamEvent(part);
         scheduleStreamingMessage();
         return;
       }
@@ -1470,6 +1496,12 @@ export function ChatView({
     };
   }, [thread.threadId]);
 
+  // A live plan belongs to ONE thread's turn — clear it when the user switches
+  // threads so a stale plan can't flash on the new thread before its own stream.
+  useEffect(() => {
+    liveWorkspace.reset();
+  }, [thread.threadId, liveWorkspace.reset]);
+
   useEffect(() => {
     let cancelled = false;
     void coreBridge
@@ -1618,6 +1650,7 @@ export function ChatView({
       const part = chatEventPartFromStream(payload);
       if (part) {
         streamEventParts = [...streamEventParts, part];
+        liveWorkspace.onStreamEvent(part);
         scheduleStreamingMessage();
         return;
       }
@@ -1924,6 +1957,7 @@ export function ChatView({
             fileCount={uploadedFiles.length}
             goalCount={projectGoalCount}
             memoryCount={projectMemoryCount}
+            planObjective={workspacePlanObjective}
             planSteps={workspacePlanSteps}
             streaming={promptSubmitting || Boolean(streamingAssistantId)}
             status={streamStatus}
@@ -2365,6 +2399,7 @@ function WorkspaceIsland({
   fileCount,
   goalCount,
   memoryCount,
+  planObjective,
   planSteps,
   streaming,
   status,
@@ -2381,6 +2416,7 @@ function WorkspaceIsland({
   fileCount: number;
   goalCount: number;
   memoryCount: number;
+  planObjective?: string | null;
   planSteps: PlanStep[];
   streaming: boolean;
   status: ChatStreamStatus | null;
@@ -2570,6 +2606,12 @@ function WorkspaceIsland({
             )}
           </div>
 
+          {planObjective && (
+            <div className="wi-objective" title={planObjective}>
+              <span className="wi-objective-icon" aria-hidden>🎯</span>
+              <span className="wi-objective-text">{planObjective}</span>
+            </div>
+          )}
           {planSteps.length > 0 && (
             <button
               className="wi-row wi-row-button"
@@ -2600,12 +2642,18 @@ function WorkspaceIsland({
               )}
               {openSteps.length > 0 && (
                 <ol className="wi-steps">
-                  {openSteps.slice(0, 5).map((step, index) => (
-                    <li key={`open-${index}-${step.title}`} className={step.status}>
-                      <span>{step.status === "done" ? <Check size={12} /> : <span />}</span>
-                      <em>{step.title}</em>
-                    </li>
-                  ))}
+                  {openSteps.slice(0, 5).map((step, index) => {
+                    const indicator = planStepIndicator(step.status, streaming);
+                    return (
+                      <li
+                        key={`open-${index}-${step.title}`}
+                        className={`${step.status} wi-ind-${indicator}`}
+                      >
+                        <span>{planStepIcon(indicator)}</span>
+                        <em>{step.title}</em>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
               {completedExpanded && completedSteps.length > 0 && (
@@ -3582,6 +3630,37 @@ function parsePlanSteps(markdown: string): PlanStep[] {
   return out;
 }
 
+/** Icon for a plan step's visual indicator (see `planStepIndicator`). A `running`
+ *  step spins (agent is on it now); an `incomplete` one shows an alert (left open
+ *  when the turn ended) instead of an ambiguous empty box that reads as "stuck". */
+function planStepIcon(indicator: PlanStepIndicator) {
+  switch (indicator) {
+    case "done":
+      return <Check size={12} />;
+    case "running":
+      return <Loader2 size={12} className="wi-spin" />;
+    case "incomplete":
+      return <AlertCircle size={12} />;
+    case "blocked":
+      return <AlertTriangle size={12} />;
+    default:
+      return <Circle size={12} />; // pending / todo
+  }
+}
+
+/** Extracts the task GOAL (the `🎯 **…**` line the backend writes above the steps) from
+ *  the ‹‹PLAN›› markdown, so the island can show "what we're trying to achieve". */
+function parsePlanObjective(markdown: string): string | null {
+  for (const raw of markdown.split("\n")) {
+    const m = raw.match(/🎯\s*\*\*(.+?)\*\*/);
+    if (m) {
+      const o = m[1].trim();
+      if (o) return o;
+    }
+  }
+  return null;
+}
+
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
 // They are extracted into a compact collapsible panel so the answer body stays
 // clean — the pattern Claude/assistant-ui use for "tool activity".
@@ -3628,6 +3707,21 @@ function parseArtifacts(text: string): ParsedArtifact[] {
 
 // Operational plan emitted by the agent via the update_plan tool (‹‹PLAN›› markers).
 // The latest one in the conversation drives the Workbench "Piano" panel.
+
+/**
+ * Holds the live working-island state for the CURRENT turn, fed by the streaming
+ * paths via `onStreamEvent`. Functional setState keeps it correct even though the
+ * streaming closures are recreated each render. `reset()` is called at each new
+ * turn start and on thread switch so a plan never leaks across turns/threads.
+ */
+function useLiveWorkspace() {
+  const [state, setState] = useState<LiveWorkspaceState>(EMPTY_LIVE_WORKSPACE);
+  const onStreamEvent = useCallback((part: ChatEventPart) => {
+    setState((prev) => applyLiveEvent(prev, part));
+  }, []);
+  const reset = useCallback(() => setState(EMPTY_LIVE_WORKSPACE), []);
+  return { livePlan: state.plan, liveActivity: state.activity, onStreamEvent, reset };
+}
 
 function latestPlanMarkdown(messages: { text?: string; eventParts?: ChatEventPart[] }[]): string | null {
   let latest: string | null = null;
@@ -5930,7 +6024,10 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
   doneTool: string | null;
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
-  sandboxEscalate: { command: string; cwd: string } | null;
+  sandboxEscalate:
+    | { kind: "command"; command: string; cwd: string }
+    | { kind: "write"; tool: "write_file" | "edit_file"; args: Record<string, string> }
+    | null;
   connectSuggest: ConnectSuggest | null;
   vaultPropose: VaultProposal | null;
   vaultReveal: VaultRevealProposal | null;
@@ -5978,18 +6075,27 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
       /* malformed → just hide it */
     }
   }
-  // ADR 0023: shell command blocked by the Seatbelt sandbox → in-chat "run without
-  // sandbox" card. Payload is a tool call: {arguments:{command,cwd}}.
-  let sandboxEscalate: { command: string; cwd: string } | null = null;
+  // ADR 0023: a shell command OR a file write blocked by the sandbox → "run with full
+  // access" / "write anyway" card. Marker: {tool?, arguments:{command,cwd} | {path,content}
+  // | {path,old_string,new_string}}. Presence of `tool` discriminates a write.
+  let sandboxEscalate:
+    | { kind: "command"; command: string; cwd: string }
+    | { kind: "write"; tool: "write_file" | "edit_file"; args: Record<string, string> }
+    | null = null;
   const escMatch = text.match(SANDBOX_ESCALATE_RE);
   if (escMatch) {
     try {
       const parsed = JSON.parse(escMatch[1]) as {
-        arguments?: { command?: string; cwd?: string };
+        tool?: string;
+        arguments?: Record<string, string>;
       };
-      const command = parsed?.arguments?.command;
-      if (typeof command === "string") {
-        sandboxEscalate = { command, cwd: parsed.arguments?.cwd ?? "" };
+      const a = parsed.arguments ?? {};
+      if (parsed.tool === "write_file" || parsed.tool === "edit_file") {
+        if (typeof a.path === "string") {
+          sandboxEscalate = { kind: "write", tool: parsed.tool, args: a };
+        }
+      } else if (typeof a.command === "string") {
+        sandboxEscalate = { kind: "command", command: a.command, cwd: a.cwd ?? "" };
       }
     } catch {
       /* malformed → just hide it */
@@ -6217,8 +6323,7 @@ const AssistantMessageBody = memo(
       )}
       {sandboxEscalate && !streaming && (
         <SandboxEscalateCard
-          command={sandboxEscalate.command}
-          cwd={sandboxEscalate.cwd}
+          escalate={sandboxEscalate}
           messageId={messageId}
           threadId={threadId}
         />
@@ -7231,13 +7336,13 @@ function FsAuthorizeCard({
  *  Mirrors FsAuthorizeCard: the backend rewrites the originating message to a
  *  done-note (via ctx), so the card can't reopen after a successful run. */
 function SandboxEscalateCard({
-  command,
-  cwd,
+  escalate,
   messageId,
   threadId,
 }: {
-  command: string;
-  cwd: string;
+  escalate:
+    | { kind: "command"; command: string; cwd: string }
+    | { kind: "write"; tool: "write_file" | "edit_file"; args: Record<string, string> };
   messageId?: string;
   threadId?: string;
 }) {
@@ -7246,11 +7351,22 @@ function SandboxEscalateCard({
   const [output, setOutput] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
+  const isWrite = escalate.kind === "write";
+
   const run = async () => {
     setStatus("running");
     setNote(null);
     try {
-      const result = await coreBridge.runEscalate(command, cwd, { threadId, messageId });
+      const result =
+        escalate.kind === "command"
+          ? await coreBridge.runEscalate(
+              { command: escalate.command, cwd: escalate.cwd },
+              { threadId, messageId },
+            )
+          : await coreBridge.runEscalate(
+              { tool: escalate.tool, ...escalate.args },
+              { threadId, messageId },
+            );
       if (!result.ok) {
         setStatus("error");
         setNote(result.summary || t("chat.failed"));
@@ -7269,7 +7385,7 @@ function SandboxEscalateCard({
       <div className="cmp-confirm">
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <ShieldCheck size={15} />
-          <strong>Command ran with full access</strong>
+          <strong>{isWrite ? "File written with approval" : "Command ran with full access"}</strong>
         </div>
         {output && (
           <pre
@@ -7292,13 +7408,19 @@ function SandboxEscalateCard({
     <div className="cmp-confirm">
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <SquareTerminal size={15} />
-        <strong>This command was blocked by the workspace sandbox. Run it with full access?</strong>
+        <strong>
+          {isWrite
+            ? "This write was blocked by the read-only sandbox. Write it anyway?"
+            : "This command was blocked by the workspace sandbox. Run it with full access?"}
+        </strong>
       </div>
       <code style={{ fontSize: 12, wordBreak: "break-all", display: "block", marginTop: 4 }}>
-        {command}
+        {escalate.kind === "command" ? escalate.command : escalate.args.path}
       </code>
       <p className="set-hint" style={{ fontSize: 12 }}>
-        It will run outside the sandbox with full access to your machine. Only approve commands you trust.
+        {isWrite
+          ? "It will write to your machine outside the read-only sandbox. Only approve writes you trust."
+          : "It will run outside the sandbox with full access to your machine. Only approve commands you trust."}
       </p>
       {status === "error" && <p className="cmp-confirm-err">{t("chat.failed")}: {note}</p>}
       <div className="cmp-confirm-actions">
@@ -7310,7 +7432,13 @@ function SandboxEscalateCard({
         >
           <SquareTerminal size={14} />
           <span style={{ marginLeft: 6 }}>
-            {status === "running" ? "Running…" : "Run without sandbox"}
+            {status === "running"
+              ? isWrite
+                ? "Writing…"
+                : "Running…"
+              : isWrite
+                ? "Write anyway"
+                : "Run without sandbox"}
           </span>
         </button>
       </div>
