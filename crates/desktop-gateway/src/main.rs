@@ -51,6 +51,7 @@ mod tool_exec;
 // not wired yet — seam types only).
 mod tool_safety;
 mod tool_trace_dump;
+mod turn_trace;
 
 // ADR 0023 tool-safety vocabulary + pure decision fn, used by the write-confirm
 // branches in `execute_chat_tool` behind `HOMUN_TOOL_SAFETY`.
