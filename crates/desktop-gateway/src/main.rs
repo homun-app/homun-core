@@ -7,6 +7,7 @@ mod chat_store;
 mod model_normalize;
 mod model_registry;
 mod scaffold;
+mod plan_directive;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
 mod skills;
 // Skill catalog (ClawHub/OpenClaw) — cached + searchable, ported from Homun.
