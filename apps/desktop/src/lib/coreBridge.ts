@@ -705,6 +705,8 @@ async function electronSetRuntimeModel(model: string): Promise<{ active: string 
 /** Adaptive scaffolding floor (ADR 0018): "off" | "shadow" | "on". */
 export interface RuntimeSettings {
   adaptive_floor: string;
+  /** Sandbox mode (ADR 0023): "read-only" | "workspace-write" | "danger". */
+  sandbox_mode: string;
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {
@@ -712,7 +714,7 @@ async function electronRuntimeSettings(): Promise<RuntimeSettings> {
 }
 
 async function electronSetRuntimeSettings(
-  settings: RuntimeSettings,
+  settings: Partial<RuntimeSettings>,
 ): Promise<RuntimeSettings> {
   return gatewayPostJson<RuntimeSettings>("/api/runtime/settings", settings);
 }
@@ -1903,17 +1905,16 @@ async function electronFsAuthorize(
   });
 }
 
-/** ADR 0023 — on-failure sandbox escalation: re-run a shell command that failed under
- *  the Seatbelt workspace sandbox with FULL access (unsandboxed). `ctx` lets the backend
- *  rewrite the originating message to a done-note so the card can't reopen. */
+/** ADR 0023 — on-failure sandbox escalation: re-run a blocked action with FULL access
+ *  (unsandboxed). `payload` is EITHER a bash command ({command, cwd}) OR a file write
+ *  ({tool, path, content?, old_string?, new_string?}). `ctx` lets the backend rewrite the
+ *  originating message to a done-note so the card can't reopen. */
 async function electronRunEscalate(
-  command: string,
-  cwd: string,
+  payload: Record<string, string>,
   ctx?: { threadId?: string; messageId?: string },
 ): Promise<{ ok: boolean; output?: string; summary?: string }> {
   return gatewayPostJson("/api/capabilities/run/escalate", {
-    command,
-    cwd,
+    ...payload,
     ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
     ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
   });
@@ -2630,7 +2631,7 @@ export const coreBridge = {
   runtimeModels: (threadId?: string) => electronRuntimeModels(threadId),
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
   runtimeSettings: () => electronRuntimeSettings(),
-  setRuntimeSettings: (settings: RuntimeSettings) =>
+  setRuntimeSettings: (settings: Partial<RuntimeSettings>) =>
     electronSetRuntimeSettings(settings),
   timezone: () => electronTimezone(),
   setTimezone: (timezone: string | null) => electronSetTimezone(timezone),
@@ -2747,10 +2748,9 @@ export const coreBridge = {
     ctx?: { threadId?: string; messageId?: string },
   ) => electronFsAuthorize(path, op, ctx),
   runEscalate: (
-    command: string,
-    cwd: string,
+    payload: Record<string, string>,
     ctx?: { threadId?: string; messageId?: string },
-  ) => electronRunEscalate(command, cwd, ctx),
+  ) => electronRunEscalate(payload, ctx),
   vaultProposalAccept: (input: VaultProposalActionInput) =>
     electronVaultProposalAccept(input),
   vaultProposalDismiss: (input: VaultProposalActionInput) =>

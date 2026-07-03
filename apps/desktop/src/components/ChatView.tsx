@@ -5930,7 +5930,10 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
   doneTool: string | null;
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
-  sandboxEscalate: { command: string; cwd: string } | null;
+  sandboxEscalate:
+    | { kind: "command"; command: string; cwd: string }
+    | { kind: "write"; tool: "write_file" | "edit_file"; args: Record<string, string> }
+    | null;
   connectSuggest: ConnectSuggest | null;
   vaultPropose: VaultProposal | null;
   vaultReveal: VaultRevealProposal | null;
@@ -5978,18 +5981,27 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
       /* malformed → just hide it */
     }
   }
-  // ADR 0023: shell command blocked by the Seatbelt sandbox → in-chat "run without
-  // sandbox" card. Payload is a tool call: {arguments:{command,cwd}}.
-  let sandboxEscalate: { command: string; cwd: string } | null = null;
+  // ADR 0023: a shell command OR a file write blocked by the sandbox → "run with full
+  // access" / "write anyway" card. Marker: {tool?, arguments:{command,cwd} | {path,content}
+  // | {path,old_string,new_string}}. Presence of `tool` discriminates a write.
+  let sandboxEscalate:
+    | { kind: "command"; command: string; cwd: string }
+    | { kind: "write"; tool: "write_file" | "edit_file"; args: Record<string, string> }
+    | null = null;
   const escMatch = text.match(SANDBOX_ESCALATE_RE);
   if (escMatch) {
     try {
       const parsed = JSON.parse(escMatch[1]) as {
-        arguments?: { command?: string; cwd?: string };
+        tool?: string;
+        arguments?: Record<string, string>;
       };
-      const command = parsed?.arguments?.command;
-      if (typeof command === "string") {
-        sandboxEscalate = { command, cwd: parsed.arguments?.cwd ?? "" };
+      const a = parsed.arguments ?? {};
+      if (parsed.tool === "write_file" || parsed.tool === "edit_file") {
+        if (typeof a.path === "string") {
+          sandboxEscalate = { kind: "write", tool: parsed.tool, args: a };
+        }
+      } else if (typeof a.command === "string") {
+        sandboxEscalate = { kind: "command", command: a.command, cwd: a.cwd ?? "" };
       }
     } catch {
       /* malformed → just hide it */
@@ -6217,8 +6229,7 @@ const AssistantMessageBody = memo(
       )}
       {sandboxEscalate && !streaming && (
         <SandboxEscalateCard
-          command={sandboxEscalate.command}
-          cwd={sandboxEscalate.cwd}
+          escalate={sandboxEscalate}
           messageId={messageId}
           threadId={threadId}
         />
@@ -7231,13 +7242,13 @@ function FsAuthorizeCard({
  *  Mirrors FsAuthorizeCard: the backend rewrites the originating message to a
  *  done-note (via ctx), so the card can't reopen after a successful run. */
 function SandboxEscalateCard({
-  command,
-  cwd,
+  escalate,
   messageId,
   threadId,
 }: {
-  command: string;
-  cwd: string;
+  escalate:
+    | { kind: "command"; command: string; cwd: string }
+    | { kind: "write"; tool: "write_file" | "edit_file"; args: Record<string, string> };
   messageId?: string;
   threadId?: string;
 }) {
@@ -7246,11 +7257,22 @@ function SandboxEscalateCard({
   const [output, setOutput] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
+  const isWrite = escalate.kind === "write";
+
   const run = async () => {
     setStatus("running");
     setNote(null);
     try {
-      const result = await coreBridge.runEscalate(command, cwd, { threadId, messageId });
+      const result =
+        escalate.kind === "command"
+          ? await coreBridge.runEscalate(
+              { command: escalate.command, cwd: escalate.cwd },
+              { threadId, messageId },
+            )
+          : await coreBridge.runEscalate(
+              { tool: escalate.tool, ...escalate.args },
+              { threadId, messageId },
+            );
       if (!result.ok) {
         setStatus("error");
         setNote(result.summary || t("chat.failed"));
@@ -7269,7 +7291,7 @@ function SandboxEscalateCard({
       <div className="cmp-confirm">
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <ShieldCheck size={15} />
-          <strong>Command ran with full access</strong>
+          <strong>{isWrite ? "File written with approval" : "Command ran with full access"}</strong>
         </div>
         {output && (
           <pre
@@ -7292,13 +7314,19 @@ function SandboxEscalateCard({
     <div className="cmp-confirm">
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <SquareTerminal size={15} />
-        <strong>This command was blocked by the workspace sandbox. Run it with full access?</strong>
+        <strong>
+          {isWrite
+            ? "This write was blocked by the read-only sandbox. Write it anyway?"
+            : "This command was blocked by the workspace sandbox. Run it with full access?"}
+        </strong>
       </div>
       <code style={{ fontSize: 12, wordBreak: "break-all", display: "block", marginTop: 4 }}>
-        {command}
+        {escalate.kind === "command" ? escalate.command : escalate.args.path}
       </code>
       <p className="set-hint" style={{ fontSize: 12 }}>
-        It will run outside the sandbox with full access to your machine. Only approve commands you trust.
+        {isWrite
+          ? "It will write to your machine outside the read-only sandbox. Only approve writes you trust."
+          : "It will run outside the sandbox with full access to your machine. Only approve commands you trust."}
       </p>
       {status === "error" && <p className="cmp-confirm-err">{t("chat.failed")}: {note}</p>}
       <div className="cmp-confirm-actions">
@@ -7310,7 +7338,13 @@ function SandboxEscalateCard({
         >
           <SquareTerminal size={14} />
           <span style={{ marginLeft: 6 }}>
-            {status === "running" ? "Running…" : "Run without sandbox"}
+            {status === "running"
+              ? isWrite
+                ? "Writing…"
+                : "Running…"
+              : isWrite
+                ? "Write anyway"
+                : "Run without sandbox"}
           </span>
         </button>
       </div>

@@ -3,7 +3,7 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-01.**
+> **Ultimo aggiornamento: 2026-07-03.**
 
 ## Dove siamo
 
@@ -326,6 +326,69 @@ bi-popolazione (caposaldo #2) È eseguibile qui: `python3 scripts/eval_suite.py 
 chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non configurato.
 
 ## Cosa è stato fatto (rolling, conciso)
+
+**Sessione 2026-07-02/03 (notturna, autonoma) — ADR 0023 #2 "SANDBOX ONESTO" COMPLETO (branch `feat/piano-ui-completion`):**
+Run autonomo per massimizzare l'allineamento a Codex (direttiva utente: scelte SOTA delegate; vedi
+[[homun-overnight-codex-alignment]]). Piano
+[plans/2026-07-03-sandbox-policy-resolution.md](superpowers/plans/2026-07-03-sandbox-policy-resolution.md)
++ spec [specs/2026-07-03-sandbox-policy-resolution-design.md](superpowers/specs/2026-07-03-sandbox-policy-resolution-design.md),
+eseguito subagent-driven + TDD (implementer + doppia review spec/qualità per task, security-audit sul task provenance).
+**Scoperta che ricalibra il gap:** NESSUN tool risolveva una `SandboxPolicy` selezionabile — bash hardcodava
+workspace-write, i file-tool hardcodavano il project-jail, i rami approval hardcodavano `DangerFullAccess`.
+`write_file`/`edit_file` NON giravano `DangerFullAccess` (STATO precedente impreciso): erano già project-jailed
+via `jail_in_root`, ma scollegati dall'asse policy. Il vero #2 = **una sola sorgente di risoluzione onorata da
+tutti i tool effettful**. Fatto:
+- **`SandboxMode` + `resolved_sandbox_mode()`** (precedenza env `HOMUN_SANDBOX_MODE`/`HOMUN_TOOL_SAFETY`-alias >
+  `RuntimeSettings.sandbox_mode` persistito > default `danger`); `tool_safety_enabled()` derivato (`!= Danger`).
+  Behavior-preserving (default danger → tutto identico; `HOMUN_TOOL_SAFETY=1` → workspace-write come prima). `0cdabf83`.
+- **Bash** `run_in_project` costruisce la policy dal resolver: `read-only` reale (writable-roots vuoti → fence nega).
+  **Validato ESEGUENDO su macOS** (`read_only_bash_denies_project_write` — scrittura negata, exit≠0, file assente;
+  bug del test scoperto eseguendo: `$TMPDIR` è sempre scrivibile nel profilo read-only → dir spostata sotto `$HOME`).
+  CI Linux esteso (`tests/linux_sandbox.rs` read-only nega). `f0cbab89`+`fe5d681d`.
+- **File-tool** `write_file`/`edit_file`: gate al chokepoint (`sandbox_gate_write` + helper puro
+  `write_needs_read_only_escalation`) → sotto `read-only` **card escalation** invece di eseguire; workspace-write/danger
+  invariati (sempre `jail_in_root`, least-privilege: mai fuori progetto neanche in danger). `804c075f`.
+- **Escalation esteso alle scritture** (`run_escalate` + `sandbox_escalate_write_matches`): riesegue la scrittura
+  su approvazione, **project-jailed**, con gate provenance anti-RCE (tool+arguments deep-equal vs card memorizzata,
+  no-card→403). **Security-audit: SOUND** (nessun RCE arbitrario, nessuna jail escape, nessun panic/DoS). Rewriter
+  generalizzato in helper condiviso (bash byte-identico). `1a2f6b96`.
+- **Frontend** escalate card generalizzata a union bash|write (discriminata da `tool`), bridge `runEscalate(payload)`;
+  build + ui-contract verdi, bash wire-identico. `d4132247`.
+- **Cleanup review nits** (spawn_blocking sul re-run, test dir cleanup, doc drift) + docs (ADR 0023 + STATO).
+**MCP/Composio = limite onesto documentato** (asse sandbox non li recinta — processi esterni, come Codex; gate = asse
+approval).
+**ADR 0023 #1 (Settings UI asse sandbox + FLIP) COMPLETO:** (0) `set_runtime_settings` fa ora **merge dei partial**
+(un controllo non clobbera l'altro; `7cce9e8e`); (1) **flip del default `danger`→`workspace-write`** — fence ON di
+default, **validato eseguendo** su macOS (`workspace_write_allows_in_project_denies_outside`: write in-progetto riesce,
+fuori-root negata; `d4f78ae7`); (2) **selector "Sandbox" in Settings › Runtime** (3 livelli + warning su `danger`,
+`setRuntimeSettings` rilassato a `Partial`, i18n en+it; `6cefd413`). Comportamento nuovo: ogni bash `run_in_project`
+gira sotto il fence di default; scritture fuori project+cache → escalation card (Codex-like). **⚠️ Smoke Electron
+app-level non eseguito headless** — consigliato prima del merge (PR draft #103).
+**Default PLATFORM-AWARE** (`fffd09ab`): `workspace-write` su macOS/Windows, ma `danger` su **Linux** finché
+l'helper `homun-linux-sandbox` non è bundlato nel packaged app (altrimenti `build_sandbox_command` fail-closed →
+ogni bash rifiutato = app rotta). Bundlare l'helper → flippare anche Linux. **CI flake pre-esistente risolto**
+(`781ccdd8`): `automation_run_..._scope` corseggiava su `HOMUN_USER_ID`/`ACTIVE_WORKSPACE` global (letti due volte),
+NON causato dal flip (provato: esito invariante al sandbox mode); reso ermetico. Residuo noto: ~19 `env::set_var`
+senza `#[serial]` = classe di flake (follow-up = `serial_test`).
+**`apply_patch` (tool-firma Codex) SPEDITO** (parser+applier+wiring, `f47cb7ac`→`283b4483`→`9ba44a1e`):
+grammatica estratta **verbatim dal binario Codex reale**; modulo `apply_patch.rs` (parser puro + applier puro con
+match fuzzy 3-passi fedele a `compute_replacements` di codex-rs + `apply_patch_under_root` testabile) + tool
+`apply_patch` (arg `input`, DiffCard per file, gate read-only inline); **confinamento airtight** (ogni path incl.
+Move-dest via `jail_in_root`, verificato in security-review). Review A+B trovò 2 bug di posizione-sbagliata nel
+matcher (fallback re-anchor + hint `contains`) → corretti. Vedi [architecture/apply-patch.md](architecture/apply-patch.md).
+Follow-up: escalation read-only per apply_patch; diff rename cosmetico.
+**ORCHESTRAZIONE SUBAGENTI — DESIGN FATTO** ([ADR 0025](decisions/0025-subagent-orchestration-delegation-as-a-tool.md)
++ [piano slice-1](superpowers/plans/2026-07-03-subagent-orchestration-slice1.md)). Scoperta della mappa (explorer
+4-agenti): Homun ha GIÀ quasi tutto — motore #1 + chokepoint, task-runtime concorrente (worker/DAG/governor/
+approval-gate), esecuzione subagent durabile, `MemoryScope::{Personal,Project,Thread}` + facade single-writer,
+activity panel; l'envelope sandbox è **process-global** → figli che riusano `execute_chat_tool` ereditano il recinto
+gratis. MANCA: un **tool `spawn_subagent` chiamabile dal modello**, **fan-out+join in-turn**, **threading dello scope
+memoria** nel figlio. Decisione = **delega-come-tool sul loop unico** (NON resuscitare il "drive" ritirato da 0021):
+tool → figli read/gather via `run_agentic_step` che delega a `execute_chat_tool` → join → sintesi; manager unico writer;
+scope+envelope ereditati. Dietro `HOMUN_SUBAGENTS` default-off, validare su gemma4. **Rischio-chiave = scope leakage
+(security, net-new)** → il threading esplicito dello scope è testato nella slice (Task 3). **PROSSIMO:** costruire la
+slice-1 (Fase-0 seam prima); poi eventuale **#1b** (asse approval). Draft PR **#103** aperta (CI verde incl. Landlock
+Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,

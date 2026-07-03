@@ -40,6 +40,39 @@ pub enum SandboxPolicy {
     },
 }
 
+/// The resolved sandbox MODE (rootless) — the user/policy CHOICE, before a caller
+/// binds it to concrete writable roots. Roots differ per tool: `run_in_project` gets
+/// project + tool caches (`workspace_write_roots`), the file-write tools stay
+/// project-only (`jail_in_root`). Keeping the mode rootless is what lets one resolver
+/// serve both without leaking one consumer's roots into the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxMode {
+    ReadOnly,
+    WorkspaceWrite,
+    Danger,
+}
+
+impl SandboxMode {
+    /// Forgiving parse (settings/env are user-facing strings). Anything unknown or
+    /// empty falls back to `Danger` — the current default, so an unrecognized value
+    /// never silently enables a fence.
+    pub fn parse(raw: &str) -> SandboxMode {
+        match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "read-only" | "readonly" => SandboxMode::ReadOnly,
+            "workspace-write" | "workspace" => SandboxMode::WorkspaceWrite,
+            _ => SandboxMode::Danger,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SandboxMode::ReadOnly => "read-only",
+            SandboxMode::WorkspaceWrite => "workspace-write",
+            SandboxMode::Danger => "danger",
+        }
+    }
+}
+
 /// Codex `AskForApproval` — WHEN to stop and ask (the UX axis), independent of the fence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AskForApproval {
@@ -179,6 +212,15 @@ pub fn tool_footprint(name: &str, args: &serde_json::Value) -> ToolFootprint {
                 .unwrap_or("")
                 .to_string(),
         },
+        // apply_patch writes too, but touches N paths internally (parsed from the
+        // patch body, not a single `path` arg). We classify it as a Write with a
+        // synthetic placeholder path so shadow-log / read-only detection treat it
+        // like any other write; the concrete per-file jailing happens at the wiring
+        // site (apply_patch_under_root), which routes every touched path through
+        // jail_in_root.
+        "apply_patch" => ToolFootprint::Write {
+            path: "<apply_patch>".to_string(),
+        },
         "run_in_project" => ToolFootprint::Exec,
         "run_in_sandbox" => ToolFootprint::Contained,
         _ => ToolFootprint::NonFilesystem,
@@ -265,6 +307,20 @@ mod tests {
         } else {
             SandboxKind::None
         }
+    }
+
+    #[test]
+    fn sandbox_mode_parses_forgivingly_and_defaults_to_danger() {
+        assert_eq!(SandboxMode::parse("read-only"), SandboxMode::ReadOnly);
+        assert_eq!(SandboxMode::parse("readonly"), SandboxMode::ReadOnly);
+        assert_eq!(SandboxMode::parse("workspace-write"), SandboxMode::WorkspaceWrite);
+        assert_eq!(SandboxMode::parse("workspace_write"), SandboxMode::WorkspaceWrite);
+        assert_eq!(SandboxMode::parse("danger-full-access"), SandboxMode::Danger);
+        assert_eq!(SandboxMode::parse("garbage"), SandboxMode::Danger);
+        assert_eq!(SandboxMode::parse(""), SandboxMode::Danger);
+        assert_eq!(SandboxMode::ReadOnly.as_str(), "read-only");
+        assert_eq!(SandboxMode::WorkspaceWrite.as_str(), "workspace-write");
+        assert_eq!(SandboxMode::Danger.as_str(), "danger");
     }
 
     // ---- assess_tool_safety: the full truth table ------------------------------
@@ -465,6 +521,19 @@ mod tests {
                 "{name} should capture path"
             );
         }
+    }
+
+    #[test]
+    fn apply_patch_is_a_write_with_synthetic_path() {
+        // apply_patch has no single `path` arg (paths live in the patch body), so it
+        // is classified as a Write with a synthetic placeholder so read-only detection
+        // and shadow logging treat it as a write. Per-path jailing is done at wiring.
+        assert_eq!(
+            tool_footprint("apply_patch", &serde_json::json!({})),
+            ToolFootprint::Write {
+                path: "<apply_patch>".to_string()
+            }
+        );
     }
 
     #[test]

@@ -4,7 +4,9 @@
 //! Locates the `homun-linux-sandbox` helper via `CARGO_BIN_EXE_homun-linux-sandbox`
 //! (Cargo sets this for integration tests), runs commands through it, and asserts the
 //! filesystem fence actually holds: a write INSIDE the allowed root succeeds; a write
-//! OUTSIDE it (into `$HOME`) is denied.
+//! OUTSIDE it (into `$HOME`) is denied. It ALSO covers the read-only mode (ADR 0023 #2):
+//! when the helper is given NO writable roots, ALL writes are denied — including one into
+//! the command's own cwd, which the workspace-write case would otherwise permit.
 //!
 //! GitHub `ubuntu-*` runners generally provide Landlock, so the real assertions run.
 //! If the kernel lacks Landlock, the helper fails closed with "landlock unavailable";
@@ -29,6 +31,23 @@ fn run_helper(allow_write: &Path, script: &str) -> (Option<i32>, String) {
     let output = Command::new(HELPER)
         .arg("--allow-write")
         .arg(allow_write)
+        .arg("--")
+        .arg("bash")
+        .arg("-lc")
+        .arg(script)
+        .output()
+        .expect("failed to spawn homun-linux-sandbox helper");
+    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    (output.status.code(), combined)
+}
+
+/// Run the helper with NO writable roots (read-only fence) and a `bash -lc` script;
+/// return (exit_code, combined stdout+stderr). Mirrors `run_helper` but omits every
+/// `--allow-write`, so Landlock must deny ALL filesystem writes — the read-only case
+/// `run_in_project` uses when the resolved sandbox mode is read-only (ADR 0023 #2).
+fn run_helper_read_only(script: &str) -> (Option<i32>, String) {
+    let output = Command::new(HELPER)
         .arg("--")
         .arg("bash")
         .arg("-lc")
@@ -127,6 +146,53 @@ fn normal_command_runs_and_exits_zero_under_the_fence() {
 
     assert_eq!(exit, Some(0), "a plain command should exit 0 under the fence; output:\n{out}");
     assert!(out.contains("ok"), "expected the command's output; got:\n{out}");
+
+    let _ = std::fs::remove_dir_all(&workspace);
+}
+
+#[test]
+fn read_only_fence_denies_project_write() {
+    // ADR 0023 #2: with NO writable roots (the read-only mode), Landlock must deny a
+    // write even into the command's own cwd. This mirrors the workspace-write
+    // assertion above but inverts the expectation: the same project write that
+    // succeeds under workspace-write MUST fail under read-only. Guards against a
+    // regression where `build_sandbox_command` (Linux arm) leaks a writable root when
+    // the resolved mode is read-only.
+    let workspace = std::env::temp_dir().join(format!(
+        "homun-landlock-ro-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&workspace).expect("create workspace temp dir");
+    let blocked = workspace.join("blocked.txt");
+    let _ = std::fs::remove_file(&blocked);
+
+    // Run WITHOUT --allow-write, cwd inside the workspace via an absolute redirect.
+    // `|| true` keeps the script exit at 0 so we assert on file existence + the error.
+    let script = format!("echo evil > {blocked:?} 2>&1 || true");
+    let (exit, out) = run_helper_read_only(&script);
+
+    if fence_unavailable(exit, &out) {
+        eprintln!(
+            "SKIP read_only_fence_denies_project_write: Landlock unavailable on this kernel \
+             (helper failed closed). Fence could not be validated here."
+        );
+        let _ = std::fs::remove_dir_all(&workspace);
+        return;
+    }
+
+    // The write into the (non-allowed) project dir must be denied: no file, and a
+    // permission error in the output.
+    assert!(
+        !blocked.exists(),
+        "read-only fence must deny the project write, but the file exists; output:\n{out}"
+    );
+    let denied = out.contains("Permission denied")
+        || out.contains("Operation not permitted")
+        || out.contains("permission");
+    assert!(
+        denied,
+        "expected a permission error for the read-only project write; helper output:\n{out}"
+    );
 
     let _ = std::fs::remove_dir_all(&workspace);
 }

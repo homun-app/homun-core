@@ -35,6 +35,9 @@ mod sandbox;
 // macOS Seatbelt (`sandbox-exec`) profile generator from a SandboxPolicy (ADR 0023,
 // step 3; pure string generation — not wired yet).
 mod seatbelt;
+// Pure parser for Codex-format patches (ADR 0023 follow-up, Task A; applier +
+// gateway wiring land in later tasks).
+mod apply_patch;
 mod task_registry;
 mod temporal;
 mod tool_exec;
@@ -11158,6 +11161,55 @@ fn edit_file_tool_schema() -> serde_json::Value {
     })
 }
 
+fn apply_patch_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "apply_patch",
+            "description": "Apply a patch to files in the project. `input` is a patch in the format: `*** Begin Patch` … `*** End Patch`, containing `*** Add File: <path>` (body lines start with `+`), `*** Update File: <path>` (optional `*** Move to: <path>`, then `@@` context hunks with `+`/`-`/space line prefixes — NO line numbers; locate edits by context), and `*** Delete File: <path>`. Prefer apply_patch over write_file/edit_file for multi-file or precise edits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input": { "type": "string", "description": "The full patch text, from '*** Begin Patch' to '*** End Patch'." }
+                },
+                "required": ["input"]
+            }
+        }
+    })
+}
+
+/// Fase-0 seam (ADR 0025): schema for the experimental `spawn_subagent` tool. Only added to
+/// the toolset when `HOMUN_SUBAGENTS=1` (see `subagents_enabled`); the fan-out/join/scope
+/// wiring is a later slice-1 task, so the dispatch is a stub for now.
+fn spawn_subagent_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "spawn_subagent",
+            "description": "Delegate independent read/gather sub-tasks to parallel subagents; each researches/gathers and returns findings you then synthesize and act on. Children cannot write — you remain the only writer. Use for parallelizable investigation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "goal": { "type": "string" },
+                                "contract": { "type": "string" }
+                            },
+                            "required": ["goal"]
+                        },
+                        "description": "Independent read/gather sub-tasks to delegate in parallel."
+                    },
+                    "budget": { "type": "integer", "description": "Optional per-fan-out token budget." }
+                },
+                "required": ["tasks"]
+            }
+        }
+    })
+}
+
 fn list_files_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -11939,6 +11991,109 @@ fn edit_project_file(
     }
 }
 
+/// One file touched by an applied patch, carrying enough to render a diff card and to
+/// register artifact memory. `old` is the pre-image (None for a newly-created file); a
+/// deletion is `deleted = true` with `new` empty.
+struct AppliedPatchFile {
+    path: String,
+    old: Option<String>,
+    new: String,
+    deleted: bool,
+}
+
+/// Apply a Codex-format patch to the thread's project folder, ON THE REAL FILESYSTEM.
+///
+/// This is the sync bridge the `apply_patch` tool dispatch runs inside `spawn_blocking`:
+/// it owns `root` + `input`, routes EVERY touched path through `jail_in_root` (via the
+/// `resolve` closure handed to [`crate::apply_patch::apply_patch_under_root`]), and
+/// creates parent dirs on write (mirroring `write_project_file`). Confinement lives
+/// entirely in `jail_in_root`; this function does not re-implement it. Returns the list
+/// of applied files (for diff + memory) or a model-facing error (nothing written).
+fn apply_patch_in_project(
+    state: &AppState,
+    thread_id: Option<&str>,
+    input: &str,
+) -> Result<Vec<AppliedPatchFile>, String> {
+    let Some(root) = project_root_for_thread(state, thread_id) else {
+        return Err(no_project_folder_msg());
+    };
+
+    // Capture per-file pre-images so the caller can emit before/after diffs. The applier
+    // reads a file before it (or a later hunk) rewrites it, so snapshotting inside the
+    // read closure records the ORIGINAL content. `RefCell` keeps the closure a plain
+    // `Fn` (the applier wants `&dyn Fn` for reads) while still mutating the map.
+    let pre_images: std::cell::RefCell<std::collections::HashMap<String, Option<String>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+
+    let resolve = |rel: &str| jail_in_root(&root, rel);
+    // Snapshot the old content of each path the moment the applier reads it, keyed by
+    // its resolved-relative form, so we can pair it with the change (diff pre-image).
+    let read_snapshot = |p: &std::path::Path| -> Option<String> {
+        let content = std::fs::read_to_string(p).ok();
+        if let Ok(rel) = p.strip_prefix(&root) {
+            pre_images
+                .borrow_mut()
+                .entry(rel.to_string_lossy().replace('\\', "/"))
+                .or_insert_with(|| content.clone());
+        }
+        content
+    };
+
+    // `write` and `remove` both record into `applied`; a `RefCell` lets both `FnMut`
+    // closures borrow it without conflicting (they run sequentially inside the applier).
+    let applied: std::cell::RefCell<Vec<(String, String, bool)>> =
+        std::cell::RefCell::new(Vec::new());
+    let mut write = |p: &std::path::Path, c: &str| -> Result<(), String> {
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("could not create folders for the patch target: {e}"))?;
+        }
+        std::fs::write(p, c).map_err(|e| format!("could not write a patched file: {e}"))?;
+        if let Ok(rel) = p.strip_prefix(&root) {
+            applied
+                .borrow_mut()
+                .push((rel.to_string_lossy().replace('\\', "/"), c.to_string(), false));
+        }
+        Ok(())
+    };
+    let mut remove = |p: &std::path::Path| -> Result<(), String> {
+        std::fs::remove_file(p).map_err(|e| format!("could not delete a patched file: {e}"))?;
+        if let Ok(rel) = p.strip_prefix(&root) {
+            applied
+                .borrow_mut()
+                .push((rel.to_string_lossy().replace('\\', "/"), String::new(), true));
+        }
+        Ok(())
+    };
+
+    crate::apply_patch::apply_patch_under_root(
+        input,
+        &resolve,
+        &read_snapshot,
+        &mut write,
+        &mut remove,
+    )?;
+
+    // Pair each write/remove with its captured pre-image. A Rename shows up as a write
+    // to `to` (pre-image None, it's new) + a remove of `from`; we surface both, and the
+    // remove of `from` is treated like a deletion for the diff.
+    let pre_images = pre_images.into_inner();
+    let files = applied
+        .into_inner()
+        .into_iter()
+        .map(|(path, new, deleted)| {
+            let old = pre_images.get(&path).cloned().flatten();
+            AppliedPatchFile {
+                path,
+                old,
+                new,
+                deleted,
+            }
+        })
+        .collect();
+    Ok(files)
+}
+
 fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
     let Some(root) = project_root_for_thread(state, thread_id) else {
         return no_project_folder_msg();
@@ -12091,24 +12246,22 @@ enum RunProjectOutcome {
 /// exactly one platform arm is compiled in per target — no `unused` warnings.
 #[cfg(target_os = "macos")]
 fn build_sandbox_command(
-    writable_roots: &[std::path::PathBuf],
+    policy: &crate::tool_safety::SandboxPolicy,
     command: &str,
 ) -> Result<tokio::process::Command, String> {
-    // macOS: `sandbox-exec -p <seatbelt-profile> bash -lc <command>` — byte-identical
-    // to the pre-Linux wiring.
-    let policy = crate::tool_safety::SandboxPolicy::WorkspaceWrite {
-        writable_roots: writable_roots.to_vec(),
-        network_access: true,
-    };
-    match crate::seatbelt::seatbelt_profile(&policy) {
+    // macOS: `sandbox-exec -p <seatbelt-profile> bash -lc <command>`. The profile is
+    // derived from the caller-supplied policy so `read-only` fences writes for real
+    // (its profile grants writes to tmp only, no project subpath) — no longer
+    // hardcoded to workspace-write.
+    match crate::seatbelt::seatbelt_profile(policy) {
         Some(profile) => {
             let mut c = tokio::process::Command::new("sandbox-exec");
             c.arg("-p").arg(profile).arg("bash").arg("-lc").arg(command);
             Ok(c)
         }
-        // DangerFullAccess → unreachable here (we build WorkspaceWrite). Fail closed
-        // rather than silently run unsandboxed.
-        None => Err("no seatbelt profile for the workspace policy".to_string()),
+        // Only `DangerFullAccess` yields `None`, and the caller never fences that mode.
+        // Fail closed rather than silently run unsandboxed.
+        None => Err("no seatbelt profile for the sandbox policy".to_string()),
     }
 }
 
@@ -12123,9 +12276,20 @@ fn build_sandbox_command(
 /// resolution finds it in production; the CI test uses `CARGO_BIN_EXE_...` instead.
 #[cfg(target_os = "linux")]
 fn build_sandbox_command(
-    writable_roots: &[std::path::PathBuf],
+    policy: &crate::tool_safety::SandboxPolicy,
     command: &str,
 ) -> Result<tokio::process::Command, String> {
+    use crate::tool_safety::SandboxPolicy;
+    // Derive the Landlock writable roots from the policy: empty for read-only so the
+    // fence denies EVERY filesystem write; `DangerFullAccess` has no fence to build
+    // and never reaches here (the caller gates it out) — fail closed if it ever does.
+    let writable_roots: Vec<std::path::PathBuf> = match policy {
+        SandboxPolicy::WorkspaceWrite { writable_roots, .. } => writable_roots.clone(),
+        SandboxPolicy::ReadOnly => Vec::new(),
+        SandboxPolicy::DangerFullAccess => {
+            return Err("danger-full-access has no fence to build".to_string());
+        }
+    };
     let helper = match std::env::var_os("HOMUN_LINUX_SANDBOX_BIN") {
         Some(path) => std::path::PathBuf::from(path),
         None => {
@@ -12158,7 +12322,7 @@ fn build_sandbox_command(
 /// `_` bindings keep it warning-free.
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn build_sandbox_command(
-    _writable_roots: &[std::path::PathBuf],
+    _policy: &crate::tool_safety::SandboxPolicy,
     _command: &str,
 ) -> Result<tokio::process::Command, String> {
     Err("no sandbox backend on this platform".to_string())
@@ -12224,12 +12388,29 @@ Reformulate it without destructive operations.",
         return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
     }
     // Sandboxed path: build the OS fence command, run inline (we need the raw status +
-    // combined output to decide whether to escalate). The writable roots are computed
-    // the same way on every platform; only the command wrapper differs.
-    let writable_roots = workspace_write_roots(&root, std::env::var("HOME").ok().as_deref());
-    // v1: fence filesystem writes, allow network (npm/git need it). Stricter
-    // network-off is a follow-up on both platforms.
-    let mut cmd = match build_sandbox_command(&writable_roots, command) {
+    // combined output to decide whether to escalate). The command wrapper differs per
+    // platform, but the policy it fences to is the SAME resolved mode everywhere.
+    //
+    // Build the concrete policy from the resolved mode. `tool_safety_enabled()` is true
+    // here, so the mode is ReadOnly or WorkspaceWrite (never Danger) — the Danger arm is
+    // an internal-invariant guard, not a reachable path.
+    use crate::tool_safety::SandboxMode;
+    let policy = match resolved_sandbox_mode() {
+        // Read-only: no writable roots — writes are physically denied by the OS fence.
+        SandboxMode::ReadOnly => crate::tool_safety::SandboxPolicy::ReadOnly,
+        // v1 workspace-write: fence filesystem writes to the project + tool caches,
+        // allow network (npm/git need it). Stricter network-off is a follow-up.
+        SandboxMode::WorkspaceWrite => crate::tool_safety::SandboxPolicy::WorkspaceWrite {
+            writable_roots: workspace_write_roots(&root, std::env::var("HOME").ok().as_deref()),
+            network_access: true,
+        },
+        SandboxMode::Danger => {
+            return RunProjectOutcome::Completed(
+                "Command NOT executed: internal sandbox resolution error.".to_string(),
+            );
+        }
+    };
+    let mut cmd = match build_sandbox_command(&policy, command) {
         Ok(cmd) => cmd,
         // Fail-closed: the fence could not be constructed (e.g. the Linux helper
         // binary is missing). NEVER fall back to unsandboxed — surface the same
@@ -18614,14 +18795,53 @@ struct ChatToolCtx<'a> {
     round: usize,
 }
 
-/// ADR 0023 (`docs/decisions/0023-sandbox-enforcement-and-unified-approval.md`)
-/// gate: when `HOMUN_TOOL_SAFETY=1`, the two write-confirm branches route their
-/// decision through `tool_safety::assess_tool_safety` instead of the ad-hoc
-/// boolean. Default OFF (unset / any other value) → the exact legacy boolean, so
-/// this is behavior-preserving until the flag is flipped. Kept as a fn (not a
-/// `LazyLock`) so tests can toggle the env var per case.
+/// The single source of truth for the sandbox axis. Precedence, mirroring
+/// `adaptive_floor_mode`: env override > persisted RuntimeSettings > default(`danger`).
+/// `HOMUN_TOOL_SAFETY=1` stays a back-compat alias for `workspace-write` so existing
+/// validations/tests keep meaning the same thing; `HOMUN_SANDBOX_MODE` is the explicit
+/// per-run override. Default `danger` → behavior-preserving (no fence) until a later
+/// Settings-UI task flips the persisted default.
+fn resolved_sandbox_mode() -> crate::tool_safety::SandboxMode {
+    use crate::tool_safety::SandboxMode;
+    if let Ok(m) = std::env::var("HOMUN_SANDBOX_MODE") {
+        if !m.trim().is_empty() {
+            return SandboxMode::parse(&m);
+        }
+    }
+    if std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1") {
+        return SandboxMode::WorkspaceWrite;
+    }
+    SandboxMode::parse(&load_runtime_settings().sandbox_mode)
+}
+
+/// Pure: does a write tool need the read-only escalation under this mode? Testable
+/// without ChatToolCtx. `sandbox_gate_write` composes this with `resolved_sandbox_mode()`
+/// and, when true, emits the escalation card. Only the Write footprint (write_file/
+/// edit_file today) can escalate; reads and non-file tools never do.
+fn write_needs_read_only_escalation(
+    name: &str,
+    args: &serde_json::Value,
+    mode: crate::tool_safety::SandboxMode,
+) -> bool {
+    matches!(
+        crate::tool_safety::tool_footprint(name, args),
+        crate::tool_safety::ToolFootprint::Write { .. }
+    ) && mode == crate::tool_safety::SandboxMode::ReadOnly
+}
+
+/// ADR 0023 gate, now DERIVED from the sandbox axis (was `HOMUN_TOOL_SAFETY==1`).
+/// Deliberately NOT influenced by the approval axis: with the default mode `danger`
+/// this returns false (legacy behavior); `HOMUN_TOOL_SAFETY=1` → `workspace-write` →
+/// true, exactly as before. Kept a fn (not LazyLock) so tests toggle env per case.
 fn tool_safety_enabled() -> bool {
-    std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
+    resolved_sandbox_mode() != crate::tool_safety::SandboxMode::Danger
+}
+
+/// Gate for the experimental subagent-orchestration tool (ADR 0025). Default OFF — when
+/// off, `spawn_subagent` is not even added to the toolset, so behavior is unchanged. The
+/// fan-out/join/scope wiring lands in later slice-1 tasks; today the dispatch is a stub.
+fn subagents_enabled() -> bool {
+    std::env::var("HOMUN_SUBAGENTS").as_deref() == Ok("1")
 }
 
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
@@ -18659,6 +18879,48 @@ async fn emit_approval_card(
     "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
         .to_string()
+}
+
+/// ADR 0023 #2: a file-write blocked by the read-only sandbox surfaces the SAME
+/// escalation card as a fenced bash command — approving re-runs the write (still
+/// project-jailed, wired in a later task). The marker carries the tool + its arguments
+/// so the escalation endpoint can re-dispatch and verify provenance.
+async fn emit_write_escalate_card(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_val: &serde_json::Value,
+) -> String {
+    let approval =
+        create_pending_approval(ctx.state, name, args_val, "file write", ctx.thread_id, true);
+    let marker = match approval.as_ref() {
+        Some(a) => serde_json::json!({ "approval_id": a.approval_id, "tool": name, "arguments": args_val }),
+        None => serde_json::json!({ "tool": name, "arguments": args_val }),
+    }
+    .to_string();
+    let card = format!(
+        "\n\nThis write was blocked by the read-only sandbox.\n{SANDBOX_ESCALATE_OPEN}{marker}{SANDBOX_ESCALATE_CLOSE}\n"
+    );
+    ctx.accumulated.push_str(&card);
+    let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
+    *ctx.pending_confirm = true;
+    "AWAITING USER CONFIRMATION: the write was blocked by the read-only sandbox and \
+proposed via an escalation card. Do NOT say it was written."
+        .to_string()
+}
+
+/// Returns `Some(model-facing string)` when a write tool must NOT proceed under the
+/// resolved sandbox mode (read-only → escalation card); `None` = proceed to normal
+/// dispatch (workspace-write/danger; jail_in_root still confines to the project).
+async fn sandbox_gate_write(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_val: &serde_json::Value,
+) -> Option<String> {
+    if write_needs_read_only_escalation(name, args_val, resolved_sandbox_mode()) {
+        Some(emit_write_escalate_card(ctx, name, args_val).await)
+    } else {
+        None
+    }
 }
 
 /// ADR 0023 sandbox axis, SHADOW mode: classify a tool call's filesystem footprint
@@ -21314,9 +21576,28 @@ loaded with use_skill):\n{}",
             out.push_str(&note);
         }
         out
+    } else if name == "spawn_subagent" {
+        // Fase-0 seam (ADR 0025): the tool is only offered when HOMUN_SUBAGENTS=1; the
+        // fan-out/join/scope-threading wiring is slice-1 Tasks 1-4. Until then, be honest.
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››👥 Subagents‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        "Subagent orchestration is enabled but not yet wired (slice-1 in progress). \
+Proceed with the task yourself for now."
+            .to_string()
     } else if name == "write_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
+        // ADR 0023 #2: read-only sandbox blocks the write here (chokepoint) and
+        // surfaces an escalation card instead of dispatching. workspace-write/danger
+        // return None → unchanged dispatch below (jail_in_root still confines it).
+        if let Some(blocked) = sandbox_gate_write(ctx, "write_file", &args_val).await {
+            return blocked;
+        }
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -21357,6 +21638,10 @@ loaded with use_skill):\n{}",
     } else if name == "edit_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
+        // ADR 0023 #2: same read-only gate as write_file (see above).
+        if let Some(blocked) = sandbox_gate_write(ctx, "edit_file", &args_val).await {
+            return blocked;
+        }
         let path = args_val
             .get("path")
             .and_then(|v| v.as_str())
@@ -21386,6 +21671,81 @@ loaded with use_skill):\n{}",
         })
         .await
         .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "apply_patch" {
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+        let input = args_val
+            .get("input")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🩹 Applying patch‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        // Read-only sandbox: deny INLINE (do NOT route through sandbox_gate_write — the
+        // escalation endpoint does not yet support apply_patch; that's a documented
+        // follow-up). Read-only is opt-in, so a clear message guides the user to switch.
+        if resolved_sandbox_mode() == crate::tool_safety::SandboxMode::ReadOnly {
+            return "apply_patch is blocked by the read-only sandbox. Switch the sandbox \
+mode in Settings (or set it to workspace-write) to allow writes."
+                .to_string();
+        }
+        if project_root_for_thread(ctx.state, ctx.thread_id).is_none() {
+            return no_project_folder_msg();
+        }
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let apply_result = tokio::task::spawn_blocking(move || {
+            apply_patch_in_project(&st, tid.as_deref(), &input)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("Error: {e}")));
+        match apply_result {
+            Ok(files) => {
+                // Emit a structured diff card per touched file (D3 ‹‹DIFF›› marker),
+                // and register artifact memory for each written path (skip deletions).
+                let mut names: Vec<String> = Vec::with_capacity(files.len());
+                for file in &files {
+                    names.push(file.path.clone());
+                    if !file.deleted {
+                        let payload = local_first_subagents::DiffStreamPayload {
+                            path: file.path.clone(),
+                            label: Some(format!("apply_patch: {}", file.path)),
+                            old: file.old.clone(),
+                            new: file.new.clone(),
+                            language: None,
+                        };
+                        if let Ok(json) = serde_json::to_string(&payload) {
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!("‹‹DIFF››{json}‹‹/DIFF››"),
+                                },
+                            )
+                            .await;
+                        }
+                        register_project_file_artifact_memory(
+                            ctx.state,
+                            ctx.thread_id,
+                            &file.path,
+                            file.new.len() as u64,
+                            "apply_patch",
+                        )
+                        .await;
+                    }
+                }
+                if names.is_empty() {
+                    "Applied patch (no files changed).".to_string()
+                } else {
+                    format!("Applied patch. Updated: {}", names.join(", "))
+                }
+            }
+            Err(msg) => msg,
+        }
     } else if name == "list_files" {
         let _ = emit_stream_event(
             ctx.tx,
@@ -22795,6 +23155,14 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         base_tools.push(read_file_tool_schema());
         base_tools.push(write_file_tool_schema());
         base_tools.push(edit_file_tool_schema());
+        // Codex-format multi-file patch (ADR 0023 follow-up). Preferred for precise /
+        // multi-file edits; jailed via jail_in_root + gated by the read-only sandbox.
+        base_tools.push(apply_patch_tool_schema());
+        // ADR 0025 seam: offer `spawn_subagent` only when the experimental flag is on.
+        // Flag-off (default) → not pushed → the model can't call it → behavior unchanged.
+        if subagents_enabled() {
+            base_tools.push(spawn_subagent_tool_schema());
+        }
         base_tools.push(list_files_tool_schema());
         // Native filesystem (browse/read the user's authorized folders), so this
         // fundamental capability isn't outsourced to a third-party MCP.
@@ -27335,16 +27703,71 @@ struct RuntimeSettings {
     /// Adaptive scaffolding floor (ADR 0018): `off` (default) | `shadow` | `on`.
     #[serde(default = "default_adaptive_floor")]
     adaptive_floor: String,
+    /// Sandbox mode (ADR 0023): `workspace-write` (default) | `read-only` | `danger`.
+    /// The persisted source for `resolved_sandbox_mode`; exposed in Settings by a later task.
+    #[serde(default = "default_sandbox_mode")]
+    sandbox_mode: String,
 }
 
 fn default_adaptive_floor() -> String {
     "off".to_string()
 }
 
+/// Whether the Linux Landlock fence helper (`homun-linux-sandbox`) can be resolved:
+/// `HOMUN_LINUX_SANDBOX_BIN` points at a file, or a sibling of the current exe exists.
+/// Mirrors the resolution in `build_sandbox_command` (Linux arm). Only consulted under
+/// `cfg!(target_os = "linux")` — macOS fences via Seatbelt (no helper), Windows applies
+/// no fence — so on other platforms its result is irrelevant.
+fn linux_sandbox_helper_available() -> bool {
+    if let Some(p) = std::env::var_os("HOMUN_LINUX_SANDBOX_BIN") {
+        return std::path::Path::new(&p).is_file();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("homun-linux-sandbox")))
+        .map(|h| h.is_file())
+        .unwrap_or(false)
+}
+
+/// The shipped default sandbox mode (ADR 0023 #1) — PLATFORM-AWARE and, on Linux,
+/// CAPABILITY-PROBED so we FENCE WHENEVER WE ACTUALLY CAN (addressing the "fail-open by
+/// default" hazard) without shipping a broken app.
+/// - **macOS**: `workspace-write`. Seatbelt (`sandbox-exec`) is always present.
+/// - **Windows**: `workspace-write`. No OS fence is applied on Windows (`run_in_project`
+///   only fences on macOS/Linux) — functional (approval-only), not broken.
+/// - **Linux**: `workspace-write` **iff the `homun-linux-sandbox` helper resolves**
+///   (bundled next to the gateway, or `HOMUN_LINUX_SANDBOX_BIN`). Then the fence works
+///   and this AUTO-UPGRADES the moment the helper is bundled — no code change. If the
+///   helper is ABSENT we cannot fence Linux bash at all (the gateway can't Landlock
+///   itself; only the helper subprocess fences then execs), and defaulting to a fencing
+///   mode would FAIL CLOSED (every bash refused = broken). So we fall back to `danger`
+///   (functional) but WARN ONCE so the unfenced state is never silent. NB: an EXPLICIT
+///   user choice of a fencing mode with the helper absent still fails closed in
+///   `run_in_project` (correct — they asked to fence); this fallback is only for the
+///   default. Note `read-only` is NOT a safe Linux fallback — on Linux it also needs the
+///   helper, so it would fail closed too, not "still enforce".
+/// Selecting `danger` in Settings or `HOMUN_SANDBOX_MODE=danger` opts out; the value is
+/// canonical so it round-trips through `SandboxMode::parse`.
+fn default_sandbox_mode() -> String {
+    if cfg!(target_os = "linux") && !linux_sandbox_helper_available() {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            eprintln!(
+                "[sandbox] WARNING: homun-linux-sandbox helper not found — defaulting to \
+UNFENCED sandbox mode 'danger' on Linux. Bundle the helper next to the gateway or set \
+HOMUN_LINUX_SANDBOX_BIN to enable the workspace-write fence, or pick a mode in Settings."
+            );
+        });
+        return "danger".to_string();
+    }
+    "workspace-write".to_string()
+}
+
 impl Default for RuntimeSettings {
     fn default() -> Self {
         Self {
             adaptive_floor: default_adaptive_floor(),
+            sandbox_mode: default_sandbox_mode(),
         }
     }
 }
@@ -27377,15 +27800,37 @@ fn normalize_adaptive_floor(raw: &str) -> String {
     .to_string()
 }
 
+/// Merge a partial runtime-settings PATCH onto the current settings: only the top-level
+/// keys present in `patch` override; everything else is preserved. This is what makes two
+/// independent Settings controls (adaptive_floor, sandbox_mode) not clobber each other —
+/// each posts only its own field. Unknown keys in the patch are ignored (deserialized-away).
+fn merge_runtime_settings(current: &RuntimeSettings, patch: &serde_json::Value) -> RuntimeSettings {
+    // Serialize current to a JSON object, overlay the patch's top-level keys, deserialize back.
+    let mut base = serde_json::to_value(current).unwrap_or_else(|_| serde_json::json!({}));
+    if let (Some(base_obj), Some(patch_obj)) = (base.as_object_mut(), patch.as_object()) {
+        for (k, v) in patch_obj {
+            base_obj.insert(k.clone(), v.clone());
+        }
+    }
+    serde_json::from_value(base).unwrap_or_else(|_| current.clone())
+}
+
 async fn get_runtime_settings() -> Json<RuntimeSettings> {
     Json(load_runtime_settings())
 }
 
 async fn set_runtime_settings(
-    Json(mut settings): Json<RuntimeSettings>,
+    Json(patch): Json<serde_json::Value>,
 ) -> Result<Json<RuntimeSettings>, GatewayError> {
-    // Normalize so the chat path never sees an unknown mode.
+    // PATCH semantics: merge the partial body onto the persisted settings so a client that
+    // posts only its own field (e.g. `{ "adaptive_floor": "on" }`) does not reset the others.
+    let current = load_runtime_settings();
+    let mut settings = merge_runtime_settings(&current, &patch);
+    // Normalize both fields so the persisted file never holds a non-canonical value.
     settings.adaptive_floor = normalize_adaptive_floor(&settings.adaptive_floor);
+    settings.sandbox_mode = crate::tool_safety::SandboxMode::parse(&settings.sandbox_mode)
+        .as_str()
+        .to_string();
     save_runtime_settings(&settings).map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "runtime_settings_save",
@@ -37030,10 +37475,28 @@ fn sandbox_escalate_matches(text: &str, command: &str) -> bool {
         == Some(command)
 }
 
-/// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
-/// reopening the chat doesn't re-show the actionable card (mirrors
-/// `rewrite_fs_authorize_to_done` / `rewrite_mcp_confirm_to_done`).
-fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
+/// Provenance for a file-write escalation: the stored message must carry a
+/// SANDBOX_ESCALATE card whose `tool` and `arguments` deep-equal the request's, so
+/// only the EXACT proposed write can run (no arbitrary-write RCE). Mirrors
+/// `sandbox_escalate_matches` (bash) but keyed on tool+arguments, not command.
+fn sandbox_escalate_write_matches(
+    text: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    let Some(marker) = confirm_marker_value(text, SANDBOX_ESCALATE_OPEN, SANDBOX_ESCALATE_CLOSE)
+    else {
+        return false;
+    };
+    marker.get("tool").and_then(|v| v.as_str()) == Some(tool)
+        && marker.get("arguments") == Some(arguments)
+}
+
+/// Shared marker-location logic for both escalation rewriters: find the
+/// SANDBOX_ESCALATE card region, strip the card head (any of `head_markers`) and
+/// the marker block, and append `note`. Returns the text unchanged when the marker
+/// is absent (idempotent on already-rewritten text).
+fn rewrite_sandbox_escalate_region(text: &str, head_markers: &[&str], note: &str) -> String {
     let Some(open) = text.find(SANDBOX_ESCALATE_OPEN) else {
         return text.to_string();
     };
@@ -37041,8 +37504,10 @@ fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
         return text.to_string();
     };
     let close = open + close_rel + SANDBOX_ESCALATE_CLOSE.len();
-    let head_end = text[..open]
-        .rfind("I need your confirmation")
+    let head_end = head_markers
+        .iter()
+        .filter_map(|m| text[..open].rfind(m))
+        .min()
         .unwrap_or(open);
     let mut out = text[..head_end].trim_end().to_string();
     let tail = text[close..].trim();
@@ -37055,15 +37520,52 @@ fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
     if !out.is_empty() {
         out.push_str("\n\n");
     }
-    out.push_str(&format!("✓ Ran unsandboxed: {command}"));
+    out.push_str(note);
     out
+}
+
+/// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
+/// reopening the chat doesn't re-show the actionable card (mirrors
+/// `rewrite_fs_authorize_to_done` / `rewrite_mcp_confirm_to_done`).
+fn rewrite_sandbox_escalate_to_done(text: &str, command: &str) -> String {
+    rewrite_sandbox_escalate_region(
+        text,
+        &["I need your confirmation"],
+        &format!("✓ Ran unsandboxed: {command}"),
+    )
+}
+
+/// Payload-agnostic variant for the write path: the write card's head text differs
+/// from the bash card's, and we don't need the command to locate the marker. Shares
+/// `rewrite_sandbox_escalate_region` with the bash rewriter so the marker-location
+/// logic isn't duplicated.
+fn rewrite_sandbox_escalate_done_generic(text: &str) -> String {
+    rewrite_sandbox_escalate_region(
+        text,
+        &[
+            "This write was blocked by the read-only sandbox.",
+            "I need your confirmation",
+        ],
+        "✔ Ran with approval",
+    )
 }
 
 #[derive(Debug, Deserialize)]
 struct RunEscalateRequest {
-    command: String,
+    #[serde(default)]
+    command: Option<String>, // bash path (optional so the write path can omit it)
     #[serde(default)]
     cwd: Option<String>,
+    #[serde(default)]
+    tool: Option<String>, // write path: "write_file" | "edit_file"
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    old_string: Option<String>,
+    #[serde(default)]
+    new_string: Option<String>,
     #[serde(default)]
     thread_id: Option<String>,
     #[serde(default)]
@@ -37080,13 +37582,92 @@ async fn run_escalate(
     State(state): State<AppState>,
     Json(request): Json<RunEscalateRequest>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
+    // File-write escalation (ADR 0023 #2): re-run the exact blocked write, still project-jailed.
+    if let Some(tool) = request.tool.as_deref() {
+        if tool == "write_file" || tool == "edit_file" {
+            let path = request.path.clone().unwrap_or_default();
+            let arguments = if tool == "write_file" {
+                serde_json::json!({
+                    "path": path.clone(),
+                    "content": request.content.clone().unwrap_or_default(),
+                })
+            } else {
+                serde_json::json!({
+                    "path": path.clone(),
+                    "old_string": request.old_string.clone().unwrap_or_default(),
+                    "new_string": request.new_string.clone().unwrap_or_default(),
+                })
+            };
+            // Provenance gate: the tool+arguments must deep-equal the stored card, so
+            // only the EXACT proposed write can run (no arbitrary-write RCE). The deep-equal
+            // assumes the model's original blocked tool-call emitted exactly the tool's
+            // schema keys (write_file: path/content; edit_file: path/old_string/new_string);
+            // an extra/missing/non-string key makes a *legit* approval fail closed (403)
+            // rather than falsely pass — safe by design.
+            let confirmed = match (&request.thread_id, &request.message_id) {
+                (Some(tid), Some(mid)) => lock_store(&state)
+                    .ok()
+                    .and_then(|s| s.message(tid, mid).ok().flatten())
+                    .is_some_and(|m| sandbox_escalate_write_matches(&m.text, tool, &arguments)),
+                _ => false,
+            };
+            if !confirmed {
+                return Err(GatewayError {
+                    status: StatusCode::FORBIDDEN,
+                    code: "sandbox_escalate_required",
+                    message: "Re-run a write only from its matching escalation card.".to_string(),
+                });
+            }
+            // Re-run through the canonical executor — STILL jail_in_root (project-scoped).
+            // These are blocking `std::fs` calls, so run them off the async executor via
+            // spawn_blocking, exactly like the chat write_file/edit_file dispatch does.
+            let st = state.clone();
+            let tid = request.thread_id.clone();
+            let output = if tool == "write_file" {
+                let content = request.content.clone().unwrap_or_default();
+                let path_c = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    write_project_file(&st, tid.as_deref(), &path_c, &content)
+                })
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"))
+            } else {
+                let old = request.old_string.clone().unwrap_or_default();
+                let new = request.new_string.clone().unwrap_or_default();
+                let path_c = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    edit_project_file(&st, tid.as_deref(), &path_c, &old, &new)
+                })
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"))
+            };
+            // Rewrite the card marker to a done-note so it can't reopen on reload.
+            if let (Some(tid), Some(mid)) = (&request.thread_id, &request.message_id) {
+                if let Ok(store) = lock_store(&state) {
+                    if let Ok(Some(m)) = store.message(tid, mid) {
+                        let rewritten = rewrite_sandbox_escalate_done_generic(&m.text);
+                        let _ = store.set_message_text(tid, mid, &rewritten);
+                    }
+                }
+            }
+            return Ok(Json(serde_json::json!({ "ok": true, "output": output })));
+        }
+    }
+    // Bash path: the request must carry a command (write path returned above).
+    let Some(command) = request.command.clone() else {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "sandbox_escalate_no_command",
+            message: "No command to re-run.".to_string(),
+        });
+    };
     // Provenance gate (REQUIRED): the command must match the card in the stored
     // message. Without a matching marker, refuse — never run an arbitrary command.
     let confirmed = match (&request.thread_id, &request.message_id) {
         (Some(thread_id), Some(message_id)) => lock_store(&state)
             .ok()
             .and_then(|store| store.message(thread_id, message_id).ok().flatten())
-            .is_some_and(|message| sandbox_escalate_matches(&message.text, &request.command)),
+            .is_some_and(|message| sandbox_escalate_matches(&message.text, &command)),
         _ => false,
     };
     if !confirmed {
@@ -37110,12 +37691,12 @@ async fn run_escalate(
         });
     };
     // Execute UNSANDBOXED via the shared raw-exec helper.
-    let output = run_bash_unsandboxed(&root, &request.command).await;
+    let output = run_bash_unsandboxed(&root, &command).await;
     // Persist: rewrite the card marker to a "ran unsandboxed" note (no reopen on reload).
     if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
         if let Ok(store) = lock_store(&state) {
             if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &request.command);
+                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &command);
                 let _ = store.set_message_text(thread_id, message_id, &rewritten);
             }
         }
@@ -47940,7 +48521,8 @@ mod tests {
         inbound_action, is_auto_confirmable, is_confirmation_reply, is_internal_task_kind,
         is_low_value_source_url, is_salient_exchange, is_semantic_duplicate, jail_in_root,
         legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
-        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
+        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days,
+        merge_plan, merge_runtime_settings, RuntimeSettings,
         message_has_image_url, next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
@@ -47970,6 +48552,28 @@ mod tests {
     use local_first_vault::VaultStore;
     use std::collections::HashMap;
     use std::sync::{Mutex, MutexGuard};
+
+    #[test]
+    fn merge_runtime_settings_preserves_unpatched_fields() {
+        let current = RuntimeSettings {
+            adaptive_floor: "on".to_string(),
+            sandbox_mode: "danger".to_string(),
+        };
+        // Patch only sandbox_mode → adaptive_floor must be preserved.
+        let merged =
+            merge_runtime_settings(&current, &serde_json::json!({ "sandbox_mode": "read-only" }));
+        assert_eq!(merged.adaptive_floor, "on");
+        assert_eq!(merged.sandbox_mode, "read-only");
+        // Patch only adaptive_floor → sandbox_mode preserved.
+        let merged2 =
+            merge_runtime_settings(&current, &serde_json::json!({ "adaptive_floor": "off" }));
+        assert_eq!(merged2.adaptive_floor, "off");
+        assert_eq!(merged2.sandbox_mode, "danger");
+        // Empty patch → unchanged.
+        let merged3 = merge_runtime_settings(&current, &serde_json::json!({}));
+        assert_eq!(merged3.adaptive_floor, "on");
+        assert_eq!(merged3.sandbox_mode, "danger");
+    }
 
     static GATEWAY_DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -48037,6 +48641,113 @@ mod tests {
         // With no HOME, only the project root is writable.
         let no_home = workspace_write_roots(project, None);
         assert_eq!(no_home, vec![project.to_path_buf()]);
+    }
+
+    // Pure unit test (no exec): a read-only policy must produce a Seatbelt profile that
+    // makes NO project root writable — only tmp. This guards the ADR 0023 #2 wiring so a
+    // future refactor can't silently regress `build_sandbox_command` back to hardcoding
+    // workspace-write when the resolved mode is read-only.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn read_only_policy_yields_a_profile_without_project_write_subpath() {
+        use crate::tool_safety::SandboxPolicy;
+        let profile = crate::seatbelt::seatbelt_profile(&SandboxPolicy::ReadOnly)
+            .expect("read-only has a profile");
+        assert!(profile.contains("(allow file-write*"));
+        // A read-only profile makes NO project root writable — only tmp. Assert a
+        // synthetic project path is absent (a path that cannot appear via the tmp dir).
+        assert!(!profile.contains("/Users/should-not-appear/proj"));
+    }
+
+    // Runtime security gate (macOS, #[ignore]d so `cargo test` doesn't run it by
+    // default): actually EXECUTE a fenced read-only command and prove the OS denies a
+    // project write. The earlier Seatbelt canonicalization bug was only caught by
+    // running — a compile-time check is not enough for a security boundary. Run with:
+    //   cargo test -p local-first-desktop-gateway \
+    //     read_only_bash_denies_project_write -- --ignored --nocapture
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore]
+    async fn read_only_bash_denies_project_write() {
+        use super::build_sandbox_command;
+        use crate::tool_safety::SandboxPolicy;
+        // IMPORTANT: the read-only profile ALWAYS grants writes to the system temp dir
+        // (scratch), so the test's "project" dir must live OUTSIDE $TMPDIR — otherwise
+        // the write would legitimately succeed under the tmp allowance and this gate
+        // would test nothing. HOME is read-only under the read-only fence, so a dir
+        // under HOME is a faithful stand-in for a real project root.
+        let home = std::env::var("HOME").expect("HOME set on macOS test host");
+        let dir = std::path::PathBuf::from(home).join(format!(".homun-ro-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cmd =
+            build_sandbox_command(&SandboxPolicy::ReadOnly, "echo hi > blocked.txt").unwrap();
+        cmd.current_dir(&dir);
+        let out = cmd.output().await.unwrap();
+        // Capture the outcome BEFORE cleanup so a failing assert can't leak the temp dir
+        // under $HOME (no test framework to run teardown for us).
+        let status_success = out.status.success();
+        let file_exists = dir.join("blocked.txt").exists();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!status_success, "write must be denied under read-only");
+        assert!(!file_exists, "file must NOT be created");
+    }
+
+    // Runtime security gate for the FLIPPED default (macOS, #[ignore]d): actually
+    // EXECUTE a fenced workspace-write command and prove the OS fence is BOTH usable
+    // (in-project write succeeds) AND enforcing (a write outside the writable root is
+    // denied). This is the key evidence that flipping the shipped default to
+    // workspace-write (ADR 0023 #1) is safe. Run with:
+    //   cargo test -p local-first-desktop-gateway \
+    //     workspace_write_allows_in_project_denies_outside -- --ignored --nocapture
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore]
+    async fn workspace_write_allows_in_project_denies_outside() {
+        use super::build_sandbox_command;
+        use crate::tool_safety::SandboxPolicy;
+        // The workspace-write profile ALWAYS grants writes to the system temp dir
+        // (scratch), so to prove ENFORCEMENT the "outside" target must live OUTSIDE
+        // BOTH the writable project root AND $TMPDIR. Two sibling dirs under $HOME
+        // satisfy that: only the project dir is a writable root; the sibling is not.
+        let home = std::env::var("HOME").expect("HOME set on macOS test host");
+        let home = std::path::PathBuf::from(home);
+        let pid = std::process::id();
+        let project_root = home.join(format!(".homun-ww-proj-{pid}"));
+        let outside_dir = home.join(format!(".homun-ww-outside-{pid}"));
+        std::fs::create_dir_all(&project_root).unwrap();
+        std::fs::create_dir_all(&outside_dir).unwrap();
+
+        let policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![project_root.clone()],
+            network_access: true,
+        };
+
+        // USABLE: an in-project write must SUCCEED.
+        let mut allow_cmd =
+            build_sandbox_command(&policy, "echo hi > allowed.txt").unwrap();
+        allow_cmd.current_dir(&project_root);
+        let allow_out = allow_cmd.output().await.unwrap();
+        let allow_success = allow_out.status.success();
+        let allowed_exists = project_root.join("allowed.txt").exists();
+
+        // ENFORCING: a write to a sibling path OUTSIDE the writable root must FAIL.
+        // Absolute path under a second $HOME dir that is NOT a writable root.
+        let outside_file = outside_dir.join("evil.txt");
+        let deny_command = format!("echo evil > {}", outside_file.display());
+        let mut deny_cmd = build_sandbox_command(&policy, &deny_command).unwrap();
+        deny_cmd.current_dir(&project_root);
+        let deny_out = deny_cmd.output().await.unwrap();
+        let deny_success = deny_out.status.success();
+        let outside_exists = outside_file.exists();
+
+        // Clean up BEFORE asserting so a failing assert cannot leak dirs under $HOME.
+        let _ = std::fs::remove_dir_all(&project_root);
+        let _ = std::fs::remove_dir_all(&outside_dir);
+
+        assert!(allow_success, "in-project write must SUCCEED under workspace-write");
+        assert!(allowed_exists, "allowed.txt must be created in the project root");
+        assert!(!deny_success, "write outside the writable root must be DENIED");
+        assert!(!outside_exists, "the outside file must NOT be created");
     }
 
     #[test]
@@ -57257,6 +57968,75 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn resolved_sandbox_mode_precedence_env_over_default() {
+        use crate::tool_safety::SandboxMode;
+        use super::{resolved_sandbox_mode, tool_safety_enabled};
+        // Hermetic: drive every case through env so the test never depends on the
+        // developer's on-disk ~/.homun/runtime-settings.json. Env-mutation follows the
+        // Rust-2024 `unsafe` convention used elsewhere in this module.
+        unsafe {
+            std::env::remove_var("HOMUN_SANDBOX_MODE");
+            std::env::set_var("HOMUN_TOOL_SAFETY", "1");
+        }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::WorkspaceWrite); // alias
+        unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "read-only"); }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::ReadOnly); // explicit override beats alias
+        unsafe {
+            std::env::set_var("HOMUN_SANDBOX_MODE", "danger");
+            std::env::remove_var("HOMUN_TOOL_SAFETY");
+        }
+        assert_eq!(resolved_sandbox_mode(), SandboxMode::Danger); // explicit danger
+        assert!(!tool_safety_enabled()); // danger → disabled
+        unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); } // clean up
+    }
+
+    #[test]
+    fn spawn_subagent_schema_is_a_function_tool_named_spawn_subagent() {
+        let schema = super::spawn_subagent_tool_schema();
+        assert_eq!(schema["type"], "function");
+        assert_eq!(schema["function"]["name"], "spawn_subagent");
+        let required = schema["function"]["parameters"]["required"]
+            .as_array()
+            .expect("parameters.required should be an array");
+        assert!(
+            required.iter().any(|v| v == "tasks"),
+            "parameters.required must contain \"tasks\""
+        );
+    }
+
+    #[test]
+    fn subagents_enabled_reads_the_flag() {
+        use super::subagents_enabled;
+        // Hermetic env toggling, Rust-2024 `unsafe` convention (matches this module).
+        let prev = std::env::var("HOMUN_SUBAGENTS").ok();
+        unsafe { std::env::remove_var("HOMUN_SUBAGENTS"); }
+        assert!(!subagents_enabled()); // unset → off (default)
+        unsafe { std::env::set_var("HOMUN_SUBAGENTS", "1"); }
+        assert!(subagents_enabled()); // =1 → on
+        unsafe { std::env::set_var("HOMUN_SUBAGENTS", "0"); }
+        assert!(!subagents_enabled()); // =0 → off
+        // Restore prior state so other tests are unaffected.
+        match prev {
+            Some(value) => unsafe { std::env::set_var("HOMUN_SUBAGENTS", value); },
+            None => unsafe { std::env::remove_var("HOMUN_SUBAGENTS"); },
+        }
+    }
+
+    #[test]
+    fn write_tools_escalate_only_under_read_only() {
+        use crate::tool_safety::SandboxMode;
+        use super::write_needs_read_only_escalation;
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        assert!(write_needs_read_only_escalation("write_file", &args, SandboxMode::ReadOnly));
+        assert!(!write_needs_read_only_escalation("write_file", &args, SandboxMode::WorkspaceWrite));
+        assert!(!write_needs_read_only_escalation("write_file", &args, SandboxMode::Danger));
+        let ra = serde_json::json!({ "path": "src/x.rs" });
+        assert!(!write_needs_read_only_escalation("read_text_file", &ra, SandboxMode::ReadOnly));
+        let ea = serde_json::json!({ "path": "src/x.rs", "old_string": "a", "new_string": "b" });
+        assert!(write_needs_read_only_escalation("edit_file", &ea, SandboxMode::ReadOnly));
+    }
+
+    #[test]
     fn sandbox_escalate_matches_only_the_proposed_command() {
         let text = "I need your confirmation for the action below.\n\
 ‹‹SANDBOX_ESCALATE››{\"approval_id\":\"abc\",\"tool\":\"run_in_project\",\
@@ -57283,6 +58063,43 @@ data: [DONE]\n";
         assert!(out.contains("✓ Ran unsandboxed: npm ci"));
         // No-op when the marker is absent (idempotent on already-rewritten text).
         assert_eq!(crate::rewrite_sandbox_escalate_to_done("hi", "npm ci"), "hi");
+    }
+
+    #[test]
+    fn write_escalate_matches_only_the_proposed_write() {
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        let text = format!(
+            "This write was blocked.\n{}{}{}\n",
+            crate::SANDBOX_ESCALATE_OPEN,
+            serde_json::json!({ "approval_id": "a1", "tool": "write_file", "arguments": args }),
+            crate::SANDBOX_ESCALATE_CLOSE,
+        );
+        assert!(crate::sandbox_escalate_write_matches(&text, "write_file", &args));
+        let other = serde_json::json!({ "path": "src/evil.rs", "content": "hi" });
+        assert!(!crate::sandbox_escalate_write_matches(&text, "write_file", &other)); // wrong path
+        assert!(!crate::sandbox_escalate_write_matches(&text, "edit_file", &args)); // wrong tool
+        let no_marker = "no card here";
+        assert!(!crate::sandbox_escalate_write_matches(no_marker, "write_file", &args)); // no card → reject
+    }
+
+    #[test]
+    fn write_escalate_rewrite_drops_card_marker() {
+        let args = serde_json::json!({ "path": "src/x.rs", "content": "hi" });
+        let text = format!(
+            "This write was blocked by the read-only sandbox.\n{}{}{}\n",
+            crate::SANDBOX_ESCALATE_OPEN,
+            serde_json::json!({ "tool": "write_file", "arguments": args }),
+            crate::SANDBOX_ESCALATE_CLOSE,
+        );
+        let out = crate::rewrite_sandbox_escalate_done_generic(&text);
+        assert!(!out.contains("SANDBOX_ESCALATE"), "marker removed");
+        assert!(
+            !out.contains("This write was blocked"),
+            "card head removed"
+        );
+        assert!(out.contains("✔ Ran with approval"));
+        // No-op when the marker is absent (idempotent on already-rewritten text).
+        assert_eq!(crate::rewrite_sandbox_escalate_done_generic("hi"), "hi");
     }
 
     #[test]
@@ -57864,9 +58681,18 @@ data: [DONE]\n";
             last_fired_at: None,
             state: None,
         };
+        // `gateway_user_id()`/`gateway_workspace_id()` read process-global state
+        // (`HOMUN_USER_ID`, `ACTIVE_WORKSPACE`/`HOMUN_WORKSPACE_ID`) that sibling
+        // tests mutate concurrently. Snapshot them ONCE so the insert below and the
+        // lookup later use identical keys — otherwise a parallel test flipping the
+        // global between the two reads makes the lookup miss (the gateway row is
+        // never found → panic). The gateway scope's identity, not its exact value,
+        // is what this test asserts.
+        let gateway_user = super::gateway_user_id();
+        let gateway_workspace = super::gateway_workspace_id();
         let mut gateway_automation = project_automation.clone();
-        gateway_automation.user_id = super::gateway_user_id();
-        gateway_automation.workspace_id = super::gateway_workspace_id();
+        gateway_automation.user_id = gateway_user.clone();
+        gateway_automation.workspace_id = gateway_workspace.clone();
         gateway_automation.title = "Gateway shadow".to_string();
         store.upsert_automation(&project_automation).unwrap();
         store.upsert_automation(&gateway_automation).unwrap();
@@ -57900,11 +58726,7 @@ data: [DONE]\n";
             .unwrap()
             .expect("project automation");
         gateway_automation = store
-            .get_automation(
-                "auto_channel",
-                &super::gateway_user_id(),
-                &super::gateway_workspace_id(),
-            )
+            .get_automation("auto_channel", &gateway_user, &gateway_workspace)
             .unwrap()
             .expect("gateway automation");
 
