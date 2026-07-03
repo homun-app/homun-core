@@ -499,9 +499,23 @@ single-threaded+approval.
   blocco `COMMUNICATION STYLE` nel system prompt (anti-fluff/anti-narrazione + assumi-non-chiedere + prose-first),
   additivo (non tocca le regole browser/sintesi fragili del METODO), 0 test rotti. **Validato eseguendo:** gemma4:12b
   su domanda concettuale → risposta dritta al contenuto, **niente apertura "Certamente/Ecco"** (baseline: tutti i turni
-  eval di stamattina aprivano con "Certamente. Per fornirti…"). Prossimo: Ondata-1 punto-2 (snellire il set di tool →
-  latenza) e punto-3 (approved-command-prefixes). **NON copiare all'indietro la memoria** (Homun è avanti su Codex).
-  Roadmap CORRETTA (code-grounded): il fix di 1.2 = disambiguare le affordance = Ondata-2 di questa mappa.
+  eval di stamattina aprivano con "Certamente. Per fornirti…").
+  **Ondata-1 punto-2 (snellire tool) — VERIFICATO GIÀ FATTO (code-is-truth):** Homun implementa GIÀ il Tool Search
+  pattern — `main.rs:23433` partiziona in CORE (~19 tool `CORE_TOOL_NAMES`) + DEFERRED; `find_capability`
+  (`bm25_rank(capability_corpus)` → inietta in `loaded_tools`/`tool_schemas`, chiamabile round dopo). Browser/artifact
+  già deferiti. **L'agente 2 aveva SBAGLIATO** ("~60 tool/turno"). Ricerca web confermata: è il pattern *Tool Search
+  Tool* Anthropic (defer_loading, ~85% token, accuratezza su; soglia degrado ~20-25 tool). Differenziazione possibile:
+  BM25→retrieval semantico via nomic-embed (basso ROI ora).
+  **Prompt-size per latenza — PROVATO NON È LA LEVA (misurato):** blocco base = ~2323 tok; consolidato ridondanza +
+  corretta una contraddizione prose-first↔always-markdown (`274f6d3a`, −~101 tok = 1.7% del totale). I ~3 min di primo
+  round = **gemma4:12b lento al prompt-eval su HW locale**, NON la dimensione prompt → **leva vera = scelta modello
+  (onboarding), non hack di prompt.** METODO(~860 tok)/Travel(~265) contengono regole anti-regressione → non tagliare.
+  **NON copiare all'indietro la memoria** (Homun è avanti su Codex).
+  **⭐ PROSSIMO = ONDATA 2 (strutturale, sessione dedicata):** il piano orchestra una delega NON-bloccante — separa
+  PLAN_PROPOSE (alto-rischio) da update_plan (operativo); step `sidecar` → delegati in parallelo `tokio::spawn` +
+  `wait_subagents` di rado (vs il `for`-loop `block_in_place` sequenziale attuale). Risolve il finding 1.2 (le 3
+  affordance non competono più) + latenza subagenti da somma→max. Va progettato con spec prima. Dettaglio in
+  [codex-fluidity-map.md](codex-fluidity-map.md) §3 + [[homun-codex-fluidity-map]].
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
