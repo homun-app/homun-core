@@ -452,6 +452,11 @@ export function ChatView({
     () => (conversationPlan ? parsePlanSteps(conversationPlan) : []),
     [conversationPlan],
   );
+  // The task GOAL (‹‹PLAN›› `🎯` line), shown above the steps in the island.
+  const workspacePlanObjective = useMemo(
+    () => (conversationPlan ? parsePlanObjective(conversationPlan) : null),
+    [conversationPlan],
+  );
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {
@@ -1924,6 +1929,7 @@ export function ChatView({
             fileCount={uploadedFiles.length}
             goalCount={projectGoalCount}
             memoryCount={projectMemoryCount}
+            planObjective={workspacePlanObjective}
             planSteps={workspacePlanSteps}
             streaming={promptSubmitting || Boolean(streamingAssistantId)}
             status={streamStatus}
@@ -2365,6 +2371,7 @@ function WorkspaceIsland({
   fileCount,
   goalCount,
   memoryCount,
+  planObjective,
   planSteps,
   streaming,
   status,
@@ -2381,6 +2388,7 @@ function WorkspaceIsland({
   fileCount: number;
   goalCount: number;
   memoryCount: number;
+  planObjective?: string | null;
   planSteps: PlanStep[];
   streaming: boolean;
   status: ChatStreamStatus | null;
@@ -2570,6 +2578,12 @@ function WorkspaceIsland({
             )}
           </div>
 
+          {planObjective && (
+            <div className="wi-objective" title={planObjective}>
+              <span className="wi-objective-icon" aria-hidden>🎯</span>
+              <span className="wi-objective-text">{planObjective}</span>
+            </div>
+          )}
           {planSteps.length > 0 && (
             <button
               className="wi-row wi-row-button"
@@ -3580,6 +3594,19 @@ function parsePlanSteps(markdown: string): PlanStep[] {
     out.push({ status, title: m[2].trim(), detail: m[3].trim() });
   }
   return out;
+}
+
+/** Extracts the task GOAL (the `🎯 **…**` line the backend writes above the steps) from
+ *  the ‹‹PLAN›› markdown, so the island can show "what we're trying to achieve". */
+function parsePlanObjective(markdown: string): string | null {
+  for (const raw of markdown.split("\n")) {
+    const m = raw.match(/🎯\s*\*\*(.+?)\*\*/);
+    if (m) {
+      const o = m[1].trim();
+      if (o) return o;
+    }
+  }
+  return null;
 }
 
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).

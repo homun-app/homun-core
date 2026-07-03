@@ -2364,6 +2364,32 @@ body.resizing-drawer {
   font-weight: 650;
 }
 
+/* The task GOAL row at the top of the working island (Fase A goal+steps UX): what
+   we're trying to achieve, above the steps. Prominent but single-line (full text on hover). */
+.wi-objective {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 22%, transparent);
+}
+.wi-objective-icon {
+  flex: none;
+  font-size: 13px;
+  line-height: 1;
+}
+.wi-objective-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .wi-progress {
   margin: 4px 0 10px;
   padding-top: 8px;
