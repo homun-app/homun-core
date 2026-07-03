@@ -472,15 +472,22 @@ single-threaded+approval.
   DECOMPONE ma emette **‹‹PLAN_PROPOSE›› (piano), non spawn**; (4) con guida rafforzata *anti-piano* ("NON proporre
   un piano, chiama spawn_subagent subito") → **ancora PLAN_PROPOSE, no spawn**. **VERDETTO: il prompt-nudging NON
   redirige — per un modello debole l'affordance del PIANO domina quella della DELEGA**, anche contro istruzione
-  esplicita. Il fix non è a livello di prompt → **revert del nudge** (non spedire un prompt-hack non validato che
-  litiga col meccanismo di piano funzionante). **Il vero blocker 1.2 è architetturale = convergenza plan↔delegate**
-  (memorie [loop-convergence]/[single-loop-verdict]): i due meccanismi di decomposizione competono; la direzione
-  SOTA è rendere i **subagenti il substrato di ESECUZIONE degli step di piano indipendenti** (plan→delegate bridge),
-  non un tool concorrente che il modello deve scegliere. Richiede un ADR. Artefatti eval in scratchpad/subagent-eval
-  (stream/gateway *.log/ndjson).
-  **ITEM CORRENTE = decisione utente:** (a) ADR convergenza plan↔delegate (il fix vero di 1.2), (b) passare a Fase
-  1.3 lifecycle, o (c) Fase 2 estrazione motore. Draft PR **#103** (CI verde incl. Landlock Linux). NON toccare
-  `check-ui-contract.mjs` (vault).
+  esplicita. Il fix non è a livello di prompt → **revert del nudge**.
+  **CAUSA CODE-GROUNDED (verificata sul codice 2026-07-03, NON dai doc):** engine #2 (`OrchestratorBrain`) è
+  **flag-OFF di default** (`HOMUN_ORCHESTRATED_CHAT`/`HOMUN_DRIVE_CHAT`, `main.rs`) → nel turn di chat gira **solo
+  engine #1** (ReAct + planning-as-tool); "due motori competono" NON è il problema live (era intent degli ADR
+  0020/0021, non realtà del codice). Il vero colpevole è il **system prompt di engine #1** (`grep PLAN_PROPOSE`
+  in `main.rs`): ordina *incondizionatamente* "per un task multi-step non-triviale FIRST propose the plan and STOP".
+  Il task di eval è multi-step → il modello ha **obbedito** (PLAN_PROPOSE + stop), non ha sbagliato. E il prompt
+  offre **TRE affordance di decomposizione sovrapposte** — `PLAN_PROPOSE` (approval, si ferma) + `update_plan`
+  (operativo) + `spawn_subagent` (delega): la più invadente scatta e preclude le altre. **Diagnosi = accrescimento
+  di prompt in engine #1, non split di motori.** Fix candidato: disambiguare le 3 affordance (gather parallelo→delega
+  senza fermarsi; step dipendenti→piano), tier-adattivo (ADR 0018: al debole offrine MENO, non di più). Nord di lungo
+  periodo (subagenti = substrato d'esecuzione degli step indipendenti) resta, ma non è il blocco immediato. Artefatti
+  eval in scratchpad/subagent-eval.
+  **ITEM CORRENTE = decisione utente:** (a) disambiguare le 3 affordance di decomposizione in engine #1 (fix
+  mirato di 1.2), (b) Fase 1.3 lifecycle, o (c) Fase 2 estrazione motore. Draft PR **#103** (CI verde incl.
+  Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
