@@ -511,11 +511,21 @@ single-threaded+approval.
   round = **gemma4:12b lento al prompt-eval su HW locale**, NON la dimensione prompt → **leva vera = scelta modello
   (onboarding), non hack di prompt.** METODO(~860 tok)/Travel(~265) contengono regole anti-regressione → non tagliare.
   **NON copiare all'indietro la memoria** (Homun è avanti su Codex).
-  **⭐ PROSSIMO = ONDATA 2 (strutturale, sessione dedicata):** il piano orchestra una delega NON-bloccante — separa
-  PLAN_PROPOSE (alto-rischio) da update_plan (operativo); step `sidecar` → delegati in parallelo `tokio::spawn` +
-  `wait_subagents` di rado (vs il `for`-loop `block_in_place` sequenziale attuale). Risolve il finding 1.2 (le 3
-  affordance non competono più) + latenza subagenti da somma→max. Va progettato con spec prima. Dettaglio in
-  [codex-fluidity-map.md](codex-fluidity-map.md) §3 + [[homun-codex-fluidity-map]].
+  Ondata 2 (delega non-bloccante) = fast-follow (fluidità), Dettaglio in [codex-fluidity-map.md](codex-fluidity-map.md) §3.
+
+- **⭐ ESTRAZIONE MOTORE (ADR 0024) — SCELTA UTENTE: pagare il debito PRIMA (2026-07-03).** Sequenza decisa:
+  estrazione motore → **review UI vs Codex** → early-access. Motivo: `main.rs` a **59.9k righe** è un tax di velocità
+  che compone (ogni feature ci va dentro). ADR 0024 rinfrescato col codice reale: **il chokepoint `execute_chat_tool`
+  esiste già** come funzione unica (~3.3k righe, 38 rami) — il premise "match sparsi" era superato. Confine mappato:
+  `ChatToolCtx` 56 campi (27 stato-motore + 5 servizi-gateway + 14 metadati); riusare `MemoryRecallService`/
+  `CapabilityFacade::call_tool`/`StepExecutor` (esistono), costruire `ModelClient`. **Piano gated
+  (`HOMUN_ENGINE_CRATE`, parità turno-per-turno): Inc-0 scaffold → Inc-1 ModelClient → Inc-2 execute_chat_tool →
+  Inc-3 loop → Inc-4 cleanup.** **Inc-0 FATTO (`a1545774`):** crate `local-first-engine` creato + funzioni pure
+  context-budget (`estimate_tokens`/`needs_context_compaction`/`context_compaction_span`) estratte da main.rs (−79
+  righe, rischio ~0). Verifica: crate 3/3 test verdi, gateway 552/552 (solo pptx-env fallito). Stabilito crate +
+  pattern move→wire→parità. **Follow-up notato:** `crates/context-compression` è dormiente (non usato dal loop) =
+  altro caso caposaldo #5. **PROSSIMO = Inc-1 (`ModelClient` trait)** o, se preferito, la review UI prima.
+  ⭐ Vedi [[homun-codex-fluidity-map]] per il contesto Codex.
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
