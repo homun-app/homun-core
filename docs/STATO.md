@@ -385,10 +385,16 @@ activity panel; l'envelope sandbox è **process-global** → figli che riusano `
 gratis. MANCA: un **tool `spawn_subagent` chiamabile dal modello**, **fan-out+join in-turn**, **threading dello scope
 memoria** nel figlio. Decisione = **delega-come-tool sul loop unico** (NON resuscitare il "drive" ritirato da 0021):
 tool → figli read/gather via `run_agentic_step` che delega a `execute_chat_tool` → join → sintesi; manager unico writer;
-scope+envelope ereditati. Dietro `HOMUN_SUBAGENTS` default-off, validare su gemma4. **Rischio-chiave = scope leakage
-(security, net-new)** → il threading esplicito dello scope è testato nella slice (Task 3). **PROSSIMO:** costruire la
-slice-1 (Fase-0 seam prima); poi eventuale **#1b** (asse approval). Draft PR **#103** aperta (CI verde incl. Landlock
-Linux). NON toccare `check-ui-contract.mjs` (vault).
+scope+envelope ereditati. **SLICE-1 MACHINERY COSTRUITA (Task 0-3, tutti revisionati + security-audited + 23 test):**
+seam `spawn_subagent` (`f1b443aa`), child loop read/gather fail-closed a 3 assi (`f33874e4`), fan-out/join sequenziale
++ bridge async→sync `block_in_place`+`block_on` (`c5f1c1cd`), scope-guard (no leakage — figli ereditano `MEMORY_WORKSPACE`
+del manager; niente memoria-write) + routing modello-per-ruolo (inherit-default, `62f29df1`). Vedi
+[architecture/subagents.md](architecture/subagents.md). **Sicurezza verificata:** no scope-leak, no memory-write, no
+fan-out annidato (depth 1), sessione browser calda protetta. **VALIDAZIONE RIMANENTE (pre-merge, l'unica):** eval
+flag-on end-to-end su **gemma4** (caposaldo #2 — il manager spawna figli e sintetizza); il flag resta default-off finché
+verde. **Follow-up:** concorrenza cloud-aware (semaforo=`active_llm_concurrency`); visibilità per-step; scritture
+single-threaded+approval. Poi eventuale **#1b** (asse approval). Draft PR **#103** (CI verde incl. Landlock Linux).
+NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
