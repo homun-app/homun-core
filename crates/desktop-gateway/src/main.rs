@@ -27656,27 +27656,54 @@ fn default_adaptive_floor() -> String {
     "off".to_string()
 }
 
-/// The shipped default sandbox mode (ADR 0023 #1) — PLATFORM-AWARE: the fence is on
-/// by default only where it is production-ready.
-/// - **macOS**: `workspace-write`. Seatbelt (`sandbox-exec`) is always present, so the
-///   fence works out of the box; validated by executing.
+/// Whether the Linux Landlock fence helper (`homun-linux-sandbox`) can be resolved:
+/// `HOMUN_LINUX_SANDBOX_BIN` points at a file, or a sibling of the current exe exists.
+/// Mirrors the resolution in `build_sandbox_command` (Linux arm). Only consulted under
+/// `cfg!(target_os = "linux")` — macOS fences via Seatbelt (no helper), Windows applies
+/// no fence — so on other platforms its result is irrelevant.
+fn linux_sandbox_helper_available() -> bool {
+    if let Some(p) = std::env::var_os("HOMUN_LINUX_SANDBOX_BIN") {
+        return std::path::Path::new(&p).is_file();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("homun-linux-sandbox")))
+        .map(|h| h.is_file())
+        .unwrap_or(false)
+}
+
+/// The shipped default sandbox mode (ADR 0023 #1) — PLATFORM-AWARE and, on Linux,
+/// CAPABILITY-PROBED so we FENCE WHENEVER WE ACTUALLY CAN (addressing the "fail-open by
+/// default" hazard) without shipping a broken app.
+/// - **macOS**: `workspace-write`. Seatbelt (`sandbox-exec`) is always present.
 /// - **Windows**: `workspace-write`. No OS fence is applied on Windows (`run_in_project`
-///   only fences on macOS/Linux), so this is functional (approval-only) — not broken.
-/// - **Linux**: `danger` (fence OFF) FOR NOW. The Linux fence needs the
-///   `homun-linux-sandbox` helper binary bundled next to the gateway in the packaged
-///   app; until that ships, defaulting to `workspace-write` would make
-///   `build_sandbox_command` FAIL CLOSED (every bash command refused) whenever the
-///   helper can't be resolved — a broken app. Once the helper is bundled + validated on
-///   a packaged Linux build, flip this to `workspace-write` too. Users can still opt
-///   into any mode in Settings meanwhile.
+///   only fences on macOS/Linux) — functional (approval-only), not broken.
+/// - **Linux**: `workspace-write` **iff the `homun-linux-sandbox` helper resolves**
+///   (bundled next to the gateway, or `HOMUN_LINUX_SANDBOX_BIN`). Then the fence works
+///   and this AUTO-UPGRADES the moment the helper is bundled — no code change. If the
+///   helper is ABSENT we cannot fence Linux bash at all (the gateway can't Landlock
+///   itself; only the helper subprocess fences then execs), and defaulting to a fencing
+///   mode would FAIL CLOSED (every bash refused = broken). So we fall back to `danger`
+///   (functional) but WARN ONCE so the unfenced state is never silent. NB: an EXPLICIT
+///   user choice of a fencing mode with the helper absent still fails closed in
+///   `run_in_project` (correct — they asked to fence); this fallback is only for the
+///   default. Note `read-only` is NOT a safe Linux fallback — on Linux it also needs the
+///   helper, so it would fail closed too, not "still enforce".
 /// Selecting `danger` in Settings or `HOMUN_SANDBOX_MODE=danger` opts out; the value is
 /// canonical so it round-trips through `SandboxMode::parse`.
 fn default_sandbox_mode() -> String {
-    if cfg!(target_os = "linux") {
-        "danger".to_string()
-    } else {
-        "workspace-write".to_string()
+    if cfg!(target_os = "linux") && !linux_sandbox_helper_available() {
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        WARNED.call_once(|| {
+            eprintln!(
+                "[sandbox] WARNING: homun-linux-sandbox helper not found — defaulting to \
+UNFENCED sandbox mode 'danger' on Linux. Bundle the helper next to the gateway or set \
+HOMUN_LINUX_SANDBOX_BIN to enable the workspace-write fence, or pick a mode in Settings."
+            );
+        });
+        return "danger".to_string();
     }
+    "workspace-write".to_string()
 }
 
 impl Default for RuntimeSettings {
