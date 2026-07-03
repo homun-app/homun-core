@@ -327,6 +327,29 @@ chat di default = deepseek-v4-pro:cloud (Z.ai, tier **Balanced**); Composio non 
 
 ## Cosa è stato fatto (rolling, conciso)
 
+**Sessione 2026-07-03 (pomeriggio, dev app in esecuzione) — UX piano + osservabilità turno (branch `feat/piano-ui-completion`, pushato #103):**
+Testando l'app reale è emerso un turno "cerca notizie in tabella" che sembrava bloccato. **Debug sistematico (via log P0 + API):
+NON un bug di B.2/C** — il modello (deepseek) dopo un 404 è degradato a prosa, non ha prodotto la tabella, ha lasciato lo
+step aperto e ha **dichiarato il falso** ("la tabella sopra"). Root cause = comportamento modello. Fix spediti:
+- **A — indicatori step piano** (`5f452218`… `95a43260`): `planStepIndicator(status, streaming)` puro (test 5/5 vitest) →
+  spinner sullo step attivo, **ambra "incompleto"** quando un turno finisce con uno step aperto (non più checkbox ambigua).
+  Live via HMR.
+- **Fix contratto (C regression)** (`b36eed41`): la ui-contract asserisce una stringa piano in `main.rs` che C aveva rimosso →
+  ripristinata (guida "explicit plan request", mode-independent) + dedup dall'agent opener. **Era un CI-fail già su #103.**
+- **⭐ TURN-TRACE osservabilità** (spec+plan superpowers, TDD, `8b48430e`→`36eb9b16`): nuovo modulo `turn_trace` →
+  `~/.homun/logs/turn-trace.jsonl` **leggibile** (separato dall'oracolo di parità `tool_trace_dump`). Eventi per turno:
+  `turn_start`/`round`(finish_reason+tools)/`plan`(sent→canonical, verify-hold)/`nudge`/`forced_synthesis`/`reconcile`/
+  `turn_end`(signals + **derived: `claimed_done_without_artifact`, `incomplete_steps`**). Helper puri unit-testati (7/7).
+  Handle `Arc/None` in `stream_chat_via_openai` + su `ChatToolCtx`. Opt-out `HOMUN_TURN_TRACE=0`, bounded, local-only.
+  **Validato eseguendo (dev app, deepseek):** trace leggibile end-to-end; good-case pulito (tabella presente →
+  `claimed_done_without_artifact:false`, nessun falso positivo); eventi `plan`/`reconcile` **correttamente gated
+  all'esecuzione reale** (nei 3 turni eval deepseek ha *richiesto* update_plan ma il router l'ha *bloccato* → nessun plan
+  event, confermato da `plan_final:[]`). **Caveat onesto:** il caso cattivo (flag `true` + plan/reconcile nel wild) è
+  intermittente e non ripreso nei 3 eval; il **retest illuminato** dell'utente lo mostrerà (trace attiva). Follow-on: vista
+  in-app "Turn inspector". **Restano dalla stessa analisi:** B (reconcile onesto) + C2 (anti-allucinazione deliverable) —
+  design da fare (non patch al volo sul motore-piano).
+
+
 **Sessione 2026-07-02/03 (notturna, autonoma) — ADR 0023 #2 "SANDBOX ONESTO" COMPLETO (branch `feat/piano-ui-completion`):**
 Run autonomo per massimizzare l'allineamento a Codex (direttiva utente: scelte SOTA delegate; vedi
 [[homun-overnight-codex-alignment]]). Piano
