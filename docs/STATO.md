@@ -462,8 +462,25 @@ single-threaded+approval.
   gather non-browser) e (2) c'è la spinta tier-adattiva ADR 0018 perché i modelli deboli deleghino senza istruzione
   esplicita. Nota latenza: primo round gemma4:12b ~3 min (prompt-eval enorme per il tool-schema set). Artefatti in
   scratchpad/subagent-eval (stream.ndjson/stream2.ndjson/gateway.log).
-  **ITEM CORRENTE = Fase 1.2 follow-up** (browser-backed re-run per validare gather+sintesi, oppure passare a 1.3
-  lifecycle) — decisione utente. Draft PR **#103** (CI verde incl. Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
+  **Fase 1.2 blocker #1 (delega weak-model, ADR 0018) — ESPERIMENTO ESEGUITO 2026-07-03, IPOTESI FALSIFICATA →
+  revert.** Causa radice trovata: il **system prompt non menziona MAI la delega** (`subagents_enabled()` usato solo
+  per aggiungere lo schema del tool + gattare il dispatch, mai nel prompt-build) → un modello debole non va a
+  cercare un tool di cui non gli si parla. Fix tentato (TDD): `scaffold::delegation_guidance(tier)` tier-adattiva
+  iniettata nel system prompt quando i subagenti sono on (gemma4:12b → tier `Fast` via `infer_profile`, "gemma"
+  marker → guida forte). **Risultato empirico su 4 eval reali (gemma4:12b locale, gateway debug):** (1) senza guida
+  → risposta diretta, no spawn; (2) con istruzione esplicita → spawn 3 figli OK; (3) con guida mite → il modello
+  DECOMPONE ma emette **‹‹PLAN_PROPOSE›› (piano), non spawn**; (4) con guida rafforzata *anti-piano* ("NON proporre
+  un piano, chiama spawn_subagent subito") → **ancora PLAN_PROPOSE, no spawn**. **VERDETTO: il prompt-nudging NON
+  redirige — per un modello debole l'affordance del PIANO domina quella della DELEGA**, anche contro istruzione
+  esplicita. Il fix non è a livello di prompt → **revert del nudge** (non spedire un prompt-hack non validato che
+  litiga col meccanismo di piano funzionante). **Il vero blocker 1.2 è architetturale = convergenza plan↔delegate**
+  (memorie [loop-convergence]/[single-loop-verdict]): i due meccanismi di decomposizione competono; la direzione
+  SOTA è rendere i **subagenti il substrato di ESECUZIONE degli step di piano indipendenti** (plan→delegate bridge),
+  non un tool concorrente che il modello deve scegliere. Richiede un ADR. Artefatti eval in scratchpad/subagent-eval
+  (stream/gateway *.log/ndjson).
+  **ITEM CORRENTE = decisione utente:** (a) ADR convergenza plan↔delegate (il fix vero di 1.2), (b) passare a Fase
+  1.3 lifecycle, o (c) Fase 2 estrazione motore. Draft PR **#103** (CI verde incl. Landlock Linux). NON toccare
+  `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
