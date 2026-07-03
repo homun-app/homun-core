@@ -488,6 +488,26 @@ single-threaded+approval.
   **ITEM CORRENTE = decisione utente:** (a) disambiguare le 3 affordance di decomposizione in engine #1 (fix
   mirato di 1.2), (b) Fase 1.3 lifecycle, o (c) Fase 2 estrazione motore. Draft PR **#103** (CI verde incl.
   Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
+  **⭐ C / finding 1.2 — DISAMBIGUAZIONE MODALITÀ FATTA (2026-07-03, spec+plan superpowers, TDD, 3 commit
+  `2504936f`→`ccb0a7b5`).** Scoperta code-grounded che affina la diagnosi: il prompt aveva **DUE direttive
+  PLAN_PROPOSE contraddittorie** — il blocco base (`main.rs` ~23098) forzava *incondizionatamente* «MULTI-STEP →
+  FIRST propose the plan and STOP» in **ogni** modalità, e il blocco `mode=="plan"` era **ridondante**. Quindi
+  **agent si comportava come plan** (contro il contratto del toggle `agent|plan|ask|debug`), ed è ciò che bloccava
+  gemma4 nell'eval 1.2 (girata in agent mode). Fix (Approccio B, harness-owns-decision, non prompt-nudge falsificato):
+  seam puro `plan_directive_for_mode(mode)` (`crates/desktop-gateway/src/plan_directive.rs`) — **agent/debug** =
+  blocco operativo (`update_plan`→esegui, niente stop; eccezione solo su richiesta ESPLICITA dell'utente); **plan** =
+  propose-and-STOP; **ask** = vuoto. Rimosso il blocco base incondizionato dal `format!` MEMORY; rimosso l'arm
+  `"plan"` ridondante; appeso una sola direttiva per modalità. **Verificato:** 5 unit-test sul seam (agent NON
+  contiene «propose the plan and STOP», plan sì, debug==agent, ask vuoto, corpo operativo condiviso); crate 558/1
+  verdi (l'1 = pptx/LibreOffice d'ambiente); `FIRST propose the plan and STOP` grep 0 in main.rs.
+  **Eval runtime gemma4:12b (ONESTO, non pieno A/B):** agent mode → risposta coerente diretta, **0 PLAN_PROPOSE, nessuno
+  stallo** ✅ (claim primario). MA **non ho riprodotto un A/B pulito**: il prompt-confronto risponde diretto sia col
+  prompt NUOVO sia col VECCHIO (counterfactual verificato ricompilando `51c0191f`), e i task ACTION entrano nel loop
+  tool multi-round (~3min/round gemma4) → timeout a 5min con 0 delta. Quindi lo stallo specifico di 1.2 **non è stato
+  riprodotto** questa sessione: fix verificato **strutturalmente + a livello di prompt (unit-test)**, non con un A/B
+  comportamentale. Nota onesta: anche in **plan mode** gemma4:12b non emette PLAN_PROPOSE (risponde/chiede diretto) =
+  limite di instruction-following del modello debole, **ortogonale** (testo plan-mode invariato). Artefatti in
+  `scratchpad/c-eval/`. Follow-up: tier-adattività (ADR 0018) + subagenti restano fuori scope, come deciso.
 
 - **⭐ FLUIDITÀ da Codex reale (2026-07-03) — mappa + Ondata 1 iniziata.** Missione utente: studiare il codice REALE
   di Codex su disco (`/Users/fabio/Projects/codex`: binario `Resources/codex` + `app.asar`) per rendere Homun più
