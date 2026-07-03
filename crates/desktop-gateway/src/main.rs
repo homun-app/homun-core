@@ -6037,16 +6037,18 @@ fn update_plan_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "update_plan",
-            "description": "Create or update the operational step-by-step PLAN of a NON-trivial task \
-    (multi-step: development, refactor, in-depth research). It appears in the \"Plan\" panel and the user \
-    follows progress. Call it at the START with ALL steps (status \"todo\", the first \"doing\") and UPDATE \
-    IT as you proceed (move to \"done\" what you completed, set \"doing\" the current step). Do NOT use it \
-    for single-step requests.",
+            "description": "Create or update the operational PLAN of a NON-trivial task (multi-step: \
+    development, refactor, in-depth research). It appears in the \"Plan\" panel and the user follows \
+    progress. Call it at the START with (1) the `objective` — ONE line stating what \"done\" looks like \
+    (the goal), and (2) ALL steps to get there (status \"todo\", the first \"doing\"); then UPDATE as you \
+    proceed (move to \"done\" what you completed, set \"doing\" the current step). Keep the same objective \
+    across updates (echo it, or pass null to leave it unchanged). Do NOT use it for single-step requests.",
             "strict": true,
             "parameters": {
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                    "objective": { "type": ["string", "null"], "description": "The GOAL of the task in ONE short line — what \"done\" looks like (e.g. \"Ship a signed macOS build to the release channel\"). Set it when creating the plan; pass null on later updates to keep it unchanged." },
                     "steps": {
                         "type": "array",
                         "description": "The plan steps, in order.",
@@ -6069,7 +6071,7 @@ fn update_plan_tool_schema() -> serde_json::Value {
                         }
                     }
                 },
-                "required": ["steps"]
+                "required": ["objective", "steps"]
             }
         }
     })
@@ -6175,6 +6177,38 @@ fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
     out
 }
 
+/// The task-GOAL line inside a ‹‹PLAN›› marker, above the steps (Fase A of goal+steps UX).
+/// A NON-bullet line so `parse_plan_marker` (which reads only `- [` lines) skips it, and
+/// `parse_plan_objective` reads it back for cross-turn resume. Empty when no objective.
+const PLAN_OBJECTIVE_PREFIX: &str = "🎯 **";
+fn plan_objective_line(objective: Option<&str>) -> String {
+    match objective.map(str::trim).filter(|o| !o.is_empty()) {
+        Some(o) => format!("{PLAN_OBJECTIVE_PREFIX}{o}**\n"),
+        None => String::new(),
+    }
+}
+
+/// Extract the task GOAL from the latest ‹‹PLAN›› marker (the `🎯 **…**` line), so a turn
+/// resumes the objective the same way it resumes the steps.
+fn parse_plan_objective(text: &str) -> Option<String> {
+    let (s, e) = (text.rfind("‹‹PLAN››")?, text.rfind("‹‹/PLAN››")?);
+    if e <= s {
+        return None;
+    }
+    for line in text[s..e].lines() {
+        if let Some(i) = line.find(PLAN_OBJECTIVE_PREFIX) {
+            let rest = &line[i + PLAN_OBJECTIVE_PREFIX.len()..];
+            if let Some(end) = rest.find("**") {
+                let o = rest[..end].trim();
+                if !o.is_empty() {
+                    return Some(o.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Anti-churn: the harness appends a fresh ‹‹PLAN›› marker to the running message on
 /// EVERY `update_plan`/`step_advance` call so the plan card animates live. The PERSISTED
 /// message, though, must carry the plan card exactly ONCE — the latest canonical state —
@@ -6248,7 +6282,13 @@ fn replace_latest_plan_marker(text: &str, steps: &[serde_json::Value]) -> String
         return text.to_string();
     }
     let close_end = close_start + CLOSE.len();
-    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(steps));
+    // Preserve the task GOAL line already in the marker being replaced (self-healing:
+    // step_advance/replace paths carry no objective, so re-read it from the current text).
+    let marker = format!(
+        "‹‹PLAN››{}{}‹‹/PLAN››",
+        plan_objective_line(parse_plan_objective(text).as_deref()),
+        build_plan_markdown(steps)
+    );
     let mut out = String::with_capacity(text.len() + marker.len());
     out.push_str(&text[..start]);
     out.push_str(&marker);
@@ -18771,6 +18811,10 @@ struct ChatToolCtx<'a> {
     /// `use_skill` this turn (turn-scoped). Non-empty → effectful actions force a
     /// confirm regardless of approval policy (`skill_policy_forces_confirm`).
     active_sensitive: &'a mut Vec<crate::skills::SensitiveCategory>,
+    /// The task GOAL for this turn's plan (set via `update_plan`'s `objective`, echoed
+    /// into the ‹‹PLAN›› marker above the steps). Turn-scoped, carried forward across
+    /// `update_plan`/`step_advance` calls and resumed from the marker on turn start.
+    plan_objective: &'a mut Option<String>,
     base_url: &'a mut String,
     model: &'a mut String,
     api_key: &'a mut Option<String>,
@@ -21284,6 +21328,17 @@ an uncertain date.",
                 .cloned()
                 .unwrap_or_default()
         };
+        // Carry the task GOAL forward (Fase A of goal+steps UX): `update_plan` may set or
+        // echo the objective; a null/absent value or `step_advance` leaves it unchanged,
+        // so the goal persists across the plan's whole life and never flickers away.
+        if name == "update_plan" {
+            if let Some(obj) = args_val.get("objective").and_then(|v| v.as_str()) {
+                let obj = obj.trim();
+                if !obj.is_empty() {
+                    *ctx.plan_objective = Some(obj.to_string());
+                }
+            }
+        }
         // MERGE the model's steps into the CANONICAL plan (never replace);
         // returns the canonical indices newly claimed done (held `doing`
         // until F2 verifies). See `merge_plan` for the anti-reset rule.
@@ -21402,8 +21457,11 @@ an uncertain date.",
             // truth (verified state), not the model's raw claim. This is what
             // the UI shows and what the next turn resumes from.
             plan_steps = execution_plan_steps(ctx.plan);
-            let plan_mark =
-                format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
+            let plan_mark = format!(
+                "‹‹PLAN››{}{}‹‹/PLAN››",
+                plan_objective_line(ctx.plan_objective.as_deref()),
+                build_plan_markdown(&plan_steps)
+            );
             ctx.accumulated.push_str(&plan_mark);
             let _ = emit_stream_event(
                 ctx.tx,
@@ -23947,6 +24005,16 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // Declared here (not per-round) so a skill loaded in an early round keeps
         // forcing confirms on effectful actions in later rounds of the same turn.
         let mut active_sensitive: Vec<crate::skills::SensitiveCategory> = Vec::new();
+        // Task goal for the plan (Fase A of the goal+steps UX): set by update_plan's
+        // `objective`, echoed into the ‹‹PLAN›› marker, and RESUMED from the latest plan
+        // marker in context on turn start (so "pass null to leave it unchanged" holds
+        // across turns, not just within one).
+        let mut plan_objective: Option<String> = request
+            .context
+            .iter()
+            .rev()
+            .find(|m| m.text.contains("‹‹PLAN››"))
+            .and_then(|m| parse_plan_objective(&m.text));
         // Turn-local browser state for the granular tools. The sidecar session is
         // held for the WHOLE turn (lock acquired only around each single call) and
         // parked back at every exit path. `last_snapshot` feeds the safety gate so
@@ -24511,6 +24579,7 @@ check/update the key in Settings → Model & Runtime."
                         pending_vault_reveal_marker: &mut pending_vault_reveal_marker,
                         pending_confirm: &mut pending_confirm,
                         active_sensitive: &mut active_sensitive,
+                        plan_objective: &mut plan_objective,
                         base_url: &mut base_url,
                         model: &mut model,
                         api_key: &mut api_key,
@@ -39532,6 +39601,7 @@ async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String
         // effectful writes today, but this keeps the ctx well-formed and self-arms
         // if a child ever loads a sensitive skill and acts on it).
         let mut c_active_sensitive: Vec<crate::skills::SensitiveCategory> = Vec::new();
+        let mut c_plan_objective: Option<String> = None;
         let mut c_base_url = ctx.base_url.clone();
         let mut c_model = ctx.model.clone();
         let mut c_api_key = ctx.api_key.clone();
@@ -39572,6 +39642,7 @@ async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String
                 pending_vault_reveal_marker: &mut c_pending_vault_reveal_marker,
                 pending_confirm: &mut c_pending_confirm,
                 active_sensitive: &mut c_active_sensitive,
+                plan_objective: &mut c_plan_objective,
                 base_url: &mut c_base_url,
                 model: &mut c_model,
                 api_key: &mut c_api_key,
@@ -54898,6 +54969,31 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(parsed[1]["title"], "Beta");
         assert_eq!(plan_step_status(&parsed[1]), "doing");
         assert_eq!(plan_done_count(&parsed), 1);
+    }
+
+    #[test]
+    fn plan_objective_round_trips_and_does_not_disturb_steps() {
+        let plan = vec![
+            serde_json::json!({"id":"s1","title":"Alpha","status":"doing","detail":""}),
+            serde_json::json!({"id":"s2","title":"Beta","status":"todo","detail":""}),
+        ];
+        // Marker with a GOAL line above the steps (Fase A).
+        let marker = format!(
+            "‹‹PLAN››{}{}‹‹/PLAN››",
+            super::plan_objective_line(Some("  Ship a signed macOS build  ")),
+            build_plan_markdown(&plan)
+        );
+        // The objective round-trips (trimmed) …
+        assert_eq!(
+            super::parse_plan_objective(&format!("prose {marker} tail")).as_deref(),
+            Some("Ship a signed macOS build")
+        );
+        // … and the goal line does NOT get parsed as a step.
+        assert_eq!(parse_plan_marker(&marker).len(), 2);
+        // No objective → no line, and parse returns None.
+        let bare = format!("‹‹PLAN››{}{}‹‹/PLAN››", super::plan_objective_line(None), build_plan_markdown(&plan));
+        assert_eq!(super::parse_plan_objective(&bare), None);
+        assert_eq!(parse_plan_marker(&bare).len(), 2);
     }
 
     #[test]
