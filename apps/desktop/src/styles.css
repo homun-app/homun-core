@@ -2489,6 +2489,29 @@ body.resizing-drawer {
   color: var(--red);
 }
 
+/* Active step being worked right now: the spinner + accent make it obvious. */
+.wi-spin {
+  animation: spin 1s linear infinite;
+}
+
+.wi-steps li.wi-ind-running svg {
+  color: var(--accent);
+}
+
+/* A `doing` step left open when the turn ENDED: show it as honestly unfinished
+ * (amber alert, muted, no "active" highlight) instead of a perpetual empty box
+ * that reads as "stuck". Placed after `.doing` so it wins the equal-specificity
+ * cascade for an element carrying both classes. */
+.wi-steps li.wi-ind-incomplete {
+  color: var(--muted);
+  font-weight: normal;
+  background: none;
+}
+
+.wi-steps li.wi-ind-incomplete svg {
+  color: var(--amber);
+}
+
 .wi-steps em,
 .wi-latest {
   min-width: 0;

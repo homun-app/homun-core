@@ -30,6 +30,7 @@ import {
   FolderOpen,
   GitMerge,
   AlertTriangle,
+  Circle,
   Globe2,
   HardDrive,
   ListTodo,
@@ -109,6 +110,7 @@ import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../li
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
 import { applyLiveEvent, EMPTY_LIVE_WORKSPACE, type LiveWorkspaceState } from "../lib/liveWorkspace";
+import { planStepIndicator, type PlanStepIndicator } from "../lib/planSteps";
 import {
   STRUCTURED_MARKER_DELTA_RE,
   COMPOSIO_CONFIRM_RE,
@@ -2640,12 +2642,18 @@ function WorkspaceIsland({
               )}
               {openSteps.length > 0 && (
                 <ol className="wi-steps">
-                  {openSteps.slice(0, 5).map((step, index) => (
-                    <li key={`open-${index}-${step.title}`} className={step.status}>
-                      <span>{step.status === "done" ? <Check size={12} /> : <span />}</span>
-                      <em>{step.title}</em>
-                    </li>
-                  ))}
+                  {openSteps.slice(0, 5).map((step, index) => {
+                    const indicator = planStepIndicator(step.status, streaming);
+                    return (
+                      <li
+                        key={`open-${index}-${step.title}`}
+                        className={`${step.status} wi-ind-${indicator}`}
+                      >
+                        <span>{planStepIcon(indicator)}</span>
+                        <em>{step.title}</em>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
               {completedExpanded && completedSteps.length > 0 && (
@@ -3620,6 +3628,24 @@ function parsePlanSteps(markdown: string): PlanStep[] {
     out.push({ status, title: m[2].trim(), detail: m[3].trim() });
   }
   return out;
+}
+
+/** Icon for a plan step's visual indicator (see `planStepIndicator`). A `running`
+ *  step spins (agent is on it now); an `incomplete` one shows an alert (left open
+ *  when the turn ended) instead of an ambiguous empty box that reads as "stuck". */
+function planStepIcon(indicator: PlanStepIndicator) {
+  switch (indicator) {
+    case "done":
+      return <Check size={12} />;
+    case "running":
+      return <Loader2 size={12} className="wi-spin" />;
+    case "incomplete":
+      return <AlertCircle size={12} />;
+    case "blocked":
+      return <AlertTriangle size={12} />;
+    default:
+      return <Circle size={12} />; // pending / todo
+  }
 }
 
 /** Extracts the task GOAL (the `🎯 **…**` line the backend writes above the steps) from
