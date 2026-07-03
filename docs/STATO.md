@@ -377,10 +377,18 @@ match fuzzy 3-passi fedele a `compute_replacements` di codex-rs + `apply_patch_u
 Move-dest via `jail_in_root`, verificato in security-review). Review A+B trovò 2 bug di posizione-sbagliata nel
 matcher (fallback re-anchor + hint `contains`) → corretti. Vedi [architecture/apply-patch.md](architecture/apply-patch.md).
 Follow-up: escalation read-only per apply_patch; diff rename cosmetico.
-**PROSSIMO (coda notturna):** **orchestrazione subagenti** (priorità utente esplicita — "come Codex crea/delega
-subagenti"): design ADR + prima slice, convergente sul loop unico (ADR 0021) + `orchestrator`/`agentic.rs` esistente
-+ envelope sandbox+approval ereditato + recall/write-back via l'UNICA MemoryFacade (caposaldo #1). Poi eventuale
-**#1b** (asse approval in Settings + wiring 4-livelli). Draft PR **#103** aperta. NON toccare `check-ui-contract.mjs` (vault).
+**ORCHESTRAZIONE SUBAGENTI — DESIGN FATTO** ([ADR 0025](decisions/0025-subagent-orchestration-delegation-as-a-tool.md)
++ [piano slice-1](superpowers/plans/2026-07-03-subagent-orchestration-slice1.md)). Scoperta della mappa (explorer
+4-agenti): Homun ha GIÀ quasi tutto — motore #1 + chokepoint, task-runtime concorrente (worker/DAG/governor/
+approval-gate), esecuzione subagent durabile, `MemoryScope::{Personal,Project,Thread}` + facade single-writer,
+activity panel; l'envelope sandbox è **process-global** → figli che riusano `execute_chat_tool` ereditano il recinto
+gratis. MANCA: un **tool `spawn_subagent` chiamabile dal modello**, **fan-out+join in-turn**, **threading dello scope
+memoria** nel figlio. Decisione = **delega-come-tool sul loop unico** (NON resuscitare il "drive" ritirato da 0021):
+tool → figli read/gather via `run_agentic_step` che delega a `execute_chat_tool` → join → sintesi; manager unico writer;
+scope+envelope ereditati. Dietro `HOMUN_SUBAGENTS` default-off, validare su gemma4. **Rischio-chiave = scope leakage
+(security, net-new)** → il threading esplicito dello scope è testato nella slice (Task 3). **PROSSIMO:** costruire la
+slice-1 (Fase-0 seam prima); poi eventuale **#1b** (asse approval). Draft PR **#103** aperta (CI verde incl. Landlock
+Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
