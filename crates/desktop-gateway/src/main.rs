@@ -38,6 +38,11 @@ mod seatbelt;
 // Pure parser for Codex-format patches (ADR 0023 follow-up, Task A; applier +
 // gateway wiring land in later tasks).
 mod apply_patch;
+// The CHILD LOOP for subagent orchestration (ADR 0025, slice-1 Task 1): one child
+// runs a bounded read/gather agentic loop by reusing the orchestrator's
+// `run_agentic_step`, its tools delegated to the gateway's real read/gather dispatch.
+// Machinery only, behind `HOMUN_SUBAGENTS`; the manager fan-out wiring is Task 2.
+mod subagent_child;
 mod task_registry;
 mod temporal;
 mod tool_exec;
