@@ -707,6 +707,8 @@ export interface RuntimeSettings {
   adaptive_floor: string;
   /** Sandbox mode (ADR 0023): "read-only" | "workspace-write" | "danger". */
   sandbox_mode: string;
+  /** Approval policy (ADR 0023): "untrusted" | "on-failure" | "on-request" | "never". */
+  approval_policy: string;
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {
