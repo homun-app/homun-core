@@ -400,7 +400,11 @@ single-threaded+approval.
   MOTORE ADR 0024 = abilitatore) → **Fase 3** (git integration, session rewind/checkpoint, unified_exec, code-review)
   → **Fase 4** (hooks, config/AGENTS.md, slash-commands, reasoning-effort) → **Fase 5** (produzione) → **Fase 6**
   (extra). NON inseguire: Chronicle/voice/marketplace-cloud/OpenAI-lock. Programma multi-sessione, si esegue dall'alto.
-  **ITEM CORRENTE = Fase 0.1 (#1b approval axis in Settings + wiring `resolved_approval_policy`).** Draft PR **#103**
+  **Fase 0.1 (#1b approval axis) ✅ FATTA** (`2469f55a` backend resolver+wiring behavior-preserving + `5b9852bb`
+  frontend selector 4-livelli): `AskForApproval::parse/as_str`, `resolved_approval_policy()`, wiring MCP+Composio via
+  `effective_approval(autonomous, resolved)` (truth-table equivalence provata), selector in Settings › Runtime.
+  `on-failure`/`untrusted` = resolver-wired ma semantica ricca TODO (non finta). **ITEM CORRENTE = Fase 0.2** (bundle
+  `homun-linux-sandbox` nel packaged Linux → auto-fence) poi 0.3 (skill confirmation policies). Draft PR **#103**
   (CI verde incl. Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
