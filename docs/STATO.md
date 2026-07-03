@@ -370,10 +370,17 @@ ogni bash rifiutato = app rotta). Bundlare l'helper → flippare anche Linux. **
 (`781ccdd8`): `automation_run_..._scope` corseggiava su `HOMUN_USER_ID`/`ACTIVE_WORKSPACE` global (letti due volte),
 NON causato dal flip (provato: esito invariante al sandbox mode); reso ermetico. Residuo noto: ~19 `env::set_var`
 senza `#[serial]` = classe di flake (follow-up = `serial_test`).
-**PROSSIMO (coda notturna):** **#1b** = asse **approval** in Settings + wiring 4-livelli (`resolved_approval_policy`);
-poi **`apply_patch`** (tool-firma Codex: edit multi-file `*** Begin Patch` + diff card, converge su chokepoint+gate);
-poi **orchestrazione subagenti** (design ADR + slice; priorità utente esplicita). Draft PR **#103** aperta (CI verde,
-incl. **Landlock fence Linux**). NON toccare `check-ui-contract.mjs` (sessione vault).
+**`apply_patch` (tool-firma Codex) SPEDITO** (parser+applier+wiring, `f47cb7ac`→`283b4483`→`9ba44a1e`):
+grammatica estratta **verbatim dal binario Codex reale**; modulo `apply_patch.rs` (parser puro + applier puro con
+match fuzzy 3-passi fedele a `compute_replacements` di codex-rs + `apply_patch_under_root` testabile) + tool
+`apply_patch` (arg `input`, DiffCard per file, gate read-only inline); **confinamento airtight** (ogni path incl.
+Move-dest via `jail_in_root`, verificato in security-review). Review A+B trovò 2 bug di posizione-sbagliata nel
+matcher (fallback re-anchor + hint `contains`) → corretti. Vedi [architecture/apply-patch.md](architecture/apply-patch.md).
+Follow-up: escalation read-only per apply_patch; diff rename cosmetico.
+**PROSSIMO (coda notturna):** **orchestrazione subagenti** (priorità utente esplicita — "come Codex crea/delega
+subagenti"): design ADR + prima slice, convergente sul loop unico (ADR 0021) + `orchestrator`/`agentic.rs` esistente
++ envelope sandbox+approval ereditato + recall/write-back via l'UNICA MemoryFacade (caposaldo #1). Poi eventuale
+**#1b** (asse approval in Settings + wiring 4-livelli). Draft PR **#103** aperta. NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
