@@ -11178,6 +11178,38 @@ fn apply_patch_tool_schema() -> serde_json::Value {
     })
 }
 
+/// Fase-0 seam (ADR 0025): schema for the experimental `spawn_subagent` tool. Only added to
+/// the toolset when `HOMUN_SUBAGENTS=1` (see `subagents_enabled`); the fan-out/join/scope
+/// wiring is a later slice-1 task, so the dispatch is a stub for now.
+fn spawn_subagent_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "spawn_subagent",
+            "description": "Delegate independent read/gather sub-tasks to parallel subagents; each researches/gathers and returns findings you then synthesize and act on. Children cannot write — you remain the only writer. Use for parallelizable investigation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "goal": { "type": "string" },
+                                "contract": { "type": "string" }
+                            },
+                            "required": ["goal"]
+                        },
+                        "description": "Independent read/gather sub-tasks to delegate in parallel."
+                    },
+                    "budget": { "type": "integer", "description": "Optional per-fan-out token budget." }
+                },
+                "required": ["tasks"]
+            }
+        }
+    })
+}
+
 fn list_files_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -18805,6 +18837,13 @@ fn tool_safety_enabled() -> bool {
     resolved_sandbox_mode() != crate::tool_safety::SandboxMode::Danger
 }
 
+/// Gate for the experimental subagent-orchestration tool (ADR 0025). Default OFF — when
+/// off, `spawn_subagent` is not even added to the toolset, so behavior is unchanged. The
+/// fan-out/join/scope wiring lands in later slice-1 tasks; today the dispatch is a stub.
+fn subagents_enabled() -> bool {
+    std::env::var("HOMUN_SUBAGENTS").as_deref() == Ok("1")
+}
+
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
 /// Verbatim unification of the MCP and Composio confirmation blocks — the only
 /// per-family differences are the marker delimiters and the human label. The `card`
@@ -21537,6 +21576,19 @@ loaded with use_skill):\n{}",
             out.push_str(&note);
         }
         out
+    } else if name == "spawn_subagent" {
+        // Fase-0 seam (ADR 0025): the tool is only offered when HOMUN_SUBAGENTS=1; the
+        // fan-out/join/scope-threading wiring is slice-1 Tasks 1-4. Until then, be honest.
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››👥 Subagents‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        "Subagent orchestration is enabled but not yet wired (slice-1 in progress). \
+Proceed with the task yourself for now."
+            .to_string()
     } else if name == "write_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
@@ -23106,6 +23158,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // Codex-format multi-file patch (ADR 0023 follow-up). Preferred for precise /
         // multi-file edits; jailed via jail_in_root + gated by the read-only sandbox.
         base_tools.push(apply_patch_tool_schema());
+        // ADR 0025 seam: offer `spawn_subagent` only when the experimental flag is on.
+        // Flag-off (default) → not pushed → the model can't call it → behavior unchanged.
+        if subagents_enabled() {
+            base_tools.push(spawn_subagent_tool_schema());
+        }
         base_tools.push(list_files_tool_schema());
         // Native filesystem (browse/read the user's authorized folders), so this
         // fundamental capability isn't outsourced to a third-party MCP.
@@ -57931,6 +57988,38 @@ data: [DONE]\n";
         assert_eq!(resolved_sandbox_mode(), SandboxMode::Danger); // explicit danger
         assert!(!tool_safety_enabled()); // danger → disabled
         unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); } // clean up
+    }
+
+    #[test]
+    fn spawn_subagent_schema_is_a_function_tool_named_spawn_subagent() {
+        let schema = super::spawn_subagent_tool_schema();
+        assert_eq!(schema["type"], "function");
+        assert_eq!(schema["function"]["name"], "spawn_subagent");
+        let required = schema["function"]["parameters"]["required"]
+            .as_array()
+            .expect("parameters.required should be an array");
+        assert!(
+            required.iter().any(|v| v == "tasks"),
+            "parameters.required must contain \"tasks\""
+        );
+    }
+
+    #[test]
+    fn subagents_enabled_reads_the_flag() {
+        use super::subagents_enabled;
+        // Hermetic env toggling, Rust-2024 `unsafe` convention (matches this module).
+        let prev = std::env::var("HOMUN_SUBAGENTS").ok();
+        unsafe { std::env::remove_var("HOMUN_SUBAGENTS"); }
+        assert!(!subagents_enabled()); // unset → off (default)
+        unsafe { std::env::set_var("HOMUN_SUBAGENTS", "1"); }
+        assert!(subagents_enabled()); // =1 → on
+        unsafe { std::env::set_var("HOMUN_SUBAGENTS", "0"); }
+        assert!(!subagents_enabled()); // =0 → off
+        // Restore prior state so other tests are unaffected.
+        match prev {
+            Some(value) => unsafe { std::env::set_var("HOMUN_SUBAGENTS", value); },
+            None => unsafe { std::env::remove_var("HOMUN_SUBAGENTS"); },
+        }
     }
 
     #[test]
