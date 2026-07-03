@@ -108,6 +108,7 @@ import {
 import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
+import { applyLiveEvent, EMPTY_LIVE_WORKSPACE, type LiveWorkspaceState } from "../lib/liveWorkspace";
 import {
   STRUCTURED_MARKER_DELTA_RE,
   COMPOSIO_CONFIRM_RE,
@@ -441,6 +442,10 @@ export function ChatView({
     }
     return out;
   }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
+  // Live island state for the current turn (fed by the streaming paths, Task 3).
+  // Overlaid over the persisted-derived plan/activity below so the island moves
+  // live without the per-frame churn ADR 0022 C2 avoided (sparse events only).
+  const liveWorkspace = useLiveWorkspace();
   // The agent's operational plan for this conversation (latest update_plan), shown
   // in the Workbench "Piano" panel.
   // ADR 0022 (Piano UI C2): plan/activity derivati dai messaggi PERSISTED, non da
@@ -3655,6 +3660,21 @@ function parseArtifacts(text: string): ParsedArtifact[] {
 
 // Operational plan emitted by the agent via the update_plan tool (‹‹PLAN›› markers).
 // The latest one in the conversation drives the Workbench "Piano" panel.
+
+/**
+ * Holds the live working-island state for the CURRENT turn, fed by the streaming
+ * paths via `onStreamEvent`. Functional setState keeps it correct even though the
+ * streaming closures are recreated each render. `reset()` is called at each new
+ * turn start and on thread switch so a plan never leaks across turns/threads.
+ */
+function useLiveWorkspace() {
+  const [state, setState] = useState<LiveWorkspaceState>(EMPTY_LIVE_WORKSPACE);
+  const onStreamEvent = useCallback((part: ChatEventPart) => {
+    setState((prev) => applyLiveEvent(prev, part));
+  }, []);
+  const reset = useCallback(() => setState(EMPTY_LIVE_WORKSPACE), []);
+  return { livePlan: state.plan, liveActivity: state.activity, onStreamEvent, reset };
+}
 
 function latestPlanMarkdown(messages: { text?: string; eventParts?: ChatEventPart[] }[]): string | null {
   let latest: string | null = null;
