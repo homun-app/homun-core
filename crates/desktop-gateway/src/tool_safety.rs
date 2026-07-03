@@ -212,6 +212,15 @@ pub fn tool_footprint(name: &str, args: &serde_json::Value) -> ToolFootprint {
                 .unwrap_or("")
                 .to_string(),
         },
+        // apply_patch writes too, but touches N paths internally (parsed from the
+        // patch body, not a single `path` arg). We classify it as a Write with a
+        // synthetic placeholder path so shadow-log / read-only detection treat it
+        // like any other write; the concrete per-file jailing happens at the wiring
+        // site (apply_patch_under_root), which routes every touched path through
+        // jail_in_root.
+        "apply_patch" => ToolFootprint::Write {
+            path: "<apply_patch>".to_string(),
+        },
         "run_in_project" => ToolFootprint::Exec,
         "run_in_sandbox" => ToolFootprint::Contained,
         _ => ToolFootprint::NonFilesystem,
@@ -512,6 +521,19 @@ mod tests {
                 "{name} should capture path"
             );
         }
+    }
+
+    #[test]
+    fn apply_patch_is_a_write_with_synthetic_path() {
+        // apply_patch has no single `path` arg (paths live in the patch body), so it
+        // is classified as a Write with a synthetic placeholder so read-only detection
+        // and shadow logging treat it as a write. Per-path jailing is done at wiring.
+        assert_eq!(
+            tool_footprint("apply_patch", &serde_json::json!({})),
+            ToolFootprint::Write {
+                path: "<apply_patch>".to_string()
+            }
+        );
     }
 
     #[test]

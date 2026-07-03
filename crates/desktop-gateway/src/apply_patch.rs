@@ -552,6 +552,149 @@ fn hint_anchor_index(lines: &[String], hint: &str) -> Option<usize> {
         .or_else(|| lines.iter().position(|l| l.contains(needle)))
 }
 
+// ============================================================================
+// Gateway bridge (Task C): apply a patch under a project root.
+// ============================================================================
+
+/// Apply a patch under `root`, jailing every touched path. Returns the changed paths on
+/// success. Confinement is via the injected `jail`+`fs` closures so it is unit-testable
+/// without touching the real filesystem or the gateway. Atomic at compute time (pure
+/// applier); best-effort at write time (documented).
+///
+/// SECURITY: every path a patch touches — an Add/Update/Delete target AND a Move
+/// destination — is routed through `resolve` (the `jail_in_root` wrapper). A path that
+/// fails `resolve` (outside the project, `..`/absolute/symlink escape) aborts the whole
+/// operation BEFORE any write, so nothing partial escapes. `resolve` is applied twice
+/// per path: once while building the `read` view for `compute_changes` (so the pure
+/// applier never sees an out-of-jail file), and again just before each `write`/`remove`.
+///
+/// Atomicity: `compute_changes` is all-or-nothing (it returns every change or the first
+/// error), so a patch that cannot apply cleanly writes NOTHING. The subsequent write
+/// phase is best-effort: if the Nth file write fails after N-1 succeeded, earlier writes
+/// are not rolled back (the same guarantee `write_file` gives today). This is acceptable
+/// because compute-time validation catches the overwhelmingly common failure modes
+/// (missing file, bad context, jail violation) before any byte is written.
+pub fn apply_patch_under_root(
+    input: &str,
+    resolve: &dyn Fn(&str) -> Result<std::path::PathBuf, String>,
+    read: &dyn Fn(&std::path::Path) -> Option<String>,
+    write: &mut dyn FnMut(&std::path::Path, &str) -> Result<(), String>,
+    remove: &mut dyn FnMut(&std::path::Path) -> Result<(), String>,
+) -> Result<Vec<String>, String> {
+    let patch = parse_patch(input).map_err(format_parse_error)?;
+
+    // Fail fast on any jail violation among the paths the patch references, BEFORE
+    // computing or writing anything. `resolve` is the security boundary; a single
+    // violation aborts. We keep the resolved paths so `read`/`write`/`remove` reuse the
+    // exact same jailed target the check validated.
+    let mut resolved: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
+    for op in &patch.ops {
+        match op {
+            FileOp::Add { path, .. } | FileOp::Delete { path } => {
+                resolve_into(&mut resolved, resolve, path)?;
+            }
+            FileOp::Update { path, move_to, .. } => {
+                resolve_into(&mut resolved, resolve, path)?;
+                if let Some(to) = move_to {
+                    resolve_into(&mut resolved, resolve, to)?;
+                }
+            }
+        }
+    }
+
+    // Build the `read` view for the pure applier over the jailed paths only. A patch
+    // path that isn't in `resolved` cannot occur (every op path was resolved above).
+    let read_by_rel = |rel: &str| -> Option<String> {
+        let abs = resolved.get(rel)?;
+        read(abs)
+    };
+    let changes = compute_changes(&patch, &read_by_rel).map_err(format_apply_error)?;
+
+    // Write phase: every path resolved again through the same jailed map.
+    let mut changed = Vec::with_capacity(changes.len());
+    for change in changes {
+        match change {
+            FileChange::Write { path, contents } => {
+                let abs = jailed(&resolved, &path)?;
+                write(&abs, &contents)?;
+                changed.push(path);
+            }
+            FileChange::Delete { path } => {
+                let abs = jailed(&resolved, &path)?;
+                remove(&abs)?;
+                changed.push(path);
+            }
+            FileChange::Rename {
+                from,
+                to,
+                contents,
+            } => {
+                // Both endpoints are jailed: write the destination, then drop the source.
+                let to_abs = jailed(&resolved, &to)?;
+                let from_abs = jailed(&resolved, &from)?;
+                write(&to_abs, &contents)?;
+                remove(&from_abs)?;
+                changed.push(to);
+            }
+        }
+    }
+
+    Ok(changed)
+}
+
+/// Resolve `rel` once through the jail and remember it, so later phases reuse the exact
+/// validated path. A jail failure propagates as `Err` (aborting the whole apply).
+fn resolve_into(
+    map: &mut std::collections::HashMap<String, std::path::PathBuf>,
+    resolve: &dyn Fn(&str) -> Result<std::path::PathBuf, String>,
+    rel: &str,
+) -> Result<(), String> {
+    if !map.contains_key(rel) {
+        let abs = resolve(rel)?;
+        map.insert(rel.to_string(), abs);
+    }
+    Ok(())
+}
+
+/// Look up the pre-resolved jailed path for `rel`. Every path reaching the write phase
+/// was resolved up-front, so a miss is an internal invariant break, surfaced as an error
+/// rather than a panic.
+fn jailed(
+    map: &std::collections::HashMap<String, std::path::PathBuf>,
+    rel: &str,
+) -> Result<std::path::PathBuf, String> {
+    map.get(rel)
+        .cloned()
+        .ok_or_else(|| format!("internal: path '{rel}' was not jailed before write"))
+}
+
+/// Render a [`ParseError`] as a concise, model-facing message.
+fn format_parse_error(e: ParseError) -> String {
+    match e {
+        ParseError::NoBegin => "patch must start with '*** Begin Patch'".to_string(),
+        ParseError::NoEnd => "patch is missing '*** End Patch'".to_string(),
+        ParseError::BadHeader(l) => format!("unrecognized patch header: {l}"),
+        ParseError::EmptyHunk => "a hunk (@@) had no body lines".to_string(),
+        ParseError::UnexpectedLine(l) => format!("unexpected line in patch: {l}"),
+        ParseError::AddLineMissingPlus(l) => {
+            format!("'Add File' body lines must start with '+': {l}")
+        }
+    }
+}
+
+/// Render an [`ApplyError`] as a concise, model-facing message.
+fn format_apply_error(e: ApplyError) -> String {
+    match e {
+        ApplyError::AddExists(p) => format!("cannot add '{p}': it already exists"),
+        ApplyError::Missing(p) => format!("cannot update/delete '{p}': it does not exist"),
+        ApplyError::ContextNotFound { path, hint } => match hint {
+            Some(h) => format!("could not locate the patch context in '{path}' (near '{h}')"),
+            None => format!("could not locate the patch context in '{path}'"),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1033,5 +1176,176 @@ mod tests {
             compute_changes(&patch, &files).unwrap_err(),
             ApplyError::ContextNotFound { .. }
         ));
+    }
+
+    // --- Task C: apply_patch_under_root (gateway bridge) tests ---
+    //
+    // These use an in-memory HashMap as the fake filesystem. `resolve` here mimics
+    // jail_in_root: it rejects any path containing `..` (a stand-in for the real jail's
+    // escape rules) and otherwise maps a relative path to a synthetic absolute PathBuf
+    // under "/root".
+
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    fn fake_resolve(rel: &str) -> Result<PathBuf, String> {
+        if rel.split('/').any(|c| c == "..") {
+            return Err(format!("'..' not allowed (outside the project): {rel}"));
+        }
+        Ok(Path::new("/root").join(rel))
+    }
+
+    /// Turn an absolute fake path back into its project-relative key ("/root/a.py" → "a.py").
+    fn rel_of(abs: &Path) -> String {
+        abs.strip_prefix("/root")
+            .unwrap_or(abs)
+            .to_string_lossy()
+            .to_string()
+    }
+
+    #[test]
+    fn apply_under_root_add_update_delete_success() {
+        let mut fs: HashMap<String, String> = HashMap::new();
+        fs.insert("upd.py".to_string(), "def f():\n    return 1\n".to_string());
+        fs.insert("gone.txt".to_string(), "bye\n".to_string());
+
+        let input = "*** Begin Patch\n\
+*** Add File: new.txt\n+hello\n\
+*** Update File: upd.py\n@@\n def f():\n-    return 1\n+    return 2\n\
+*** Delete File: gone.txt\n\
+*** End Patch\n";
+
+        // read/write/remove close over `fs` via a RefCell so the &mut closures compose.
+        let cell = std::cell::RefCell::new(fs);
+        let read = |p: &Path| cell.borrow().get(&rel_of(p)).cloned();
+        let mut write =
+            |p: &Path, c: &str| -> Result<(), String> {
+                cell.borrow_mut().insert(rel_of(p), c.to_string());
+                Ok(())
+            };
+        let mut remove = |p: &Path| -> Result<(), String> {
+            cell.borrow_mut().remove(&rel_of(p));
+            Ok(())
+        };
+
+        let mut changed =
+            apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove).unwrap();
+        changed.sort();
+        // All three touched paths are reported, including the deletion.
+        assert_eq!(changed, vec!["gone.txt", "new.txt", "upd.py"]);
+
+        let fs = cell.into_inner();
+        assert_eq!(fs.get("new.txt").map(String::as_str), Some("hello\n"));
+        assert_eq!(
+            fs.get("upd.py").map(String::as_str),
+            Some("def f():\n    return 2\n")
+        );
+        assert!(!fs.contains_key("gone.txt"), "deleted file must be gone");
+    }
+
+    #[test]
+    fn apply_under_root_jail_violation_writes_nothing() {
+        // A path escaping the project (`../escape`) must abort with a jail error and
+        // leave the fake fs untouched — nothing written.
+        let fs: HashMap<String, String> = HashMap::new();
+        let cell = std::cell::RefCell::new(fs);
+        let read = |p: &Path| cell.borrow().get(&rel_of(p)).cloned();
+        let mut wrote = false;
+        let mut write = |_p: &Path, _c: &str| -> Result<(), String> {
+            wrote = true;
+            Ok(())
+        };
+        let mut removed = false;
+        let mut remove = |_p: &Path| -> Result<(), String> {
+            removed = true;
+            Ok(())
+        };
+
+        let input = "*** Begin Patch\n*** Add File: ../escape.txt\n+pwn\n*** End Patch\n";
+        let err =
+            apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove).unwrap_err();
+        assert!(err.contains("not allowed"), "expected jail error, got: {err}");
+        assert!(!wrote, "no write must happen on a jail violation");
+        assert!(!removed, "no remove must happen on a jail violation");
+        assert!(cell.borrow().is_empty(), "fs must be untouched");
+    }
+
+    #[test]
+    fn apply_under_root_move_dest_is_jailed() {
+        // The Move DESTINATION must go through the jail too: an escaping `Move to:`
+        // aborts before any write.
+        let mut fs: HashMap<String, String> = HashMap::new();
+        fs.insert("a.txt".to_string(), "a\n".to_string());
+        let cell = std::cell::RefCell::new(fs);
+        let read = |p: &Path| cell.borrow().get(&rel_of(p)).cloned();
+        let mut wrote = false;
+        let mut write = |_p: &Path, _c: &str| -> Result<(), String> {
+            wrote = true;
+            Ok(())
+        };
+        let mut remove = |_p: &Path| -> Result<(), String> { Ok(()) };
+
+        let input = "*** Begin Patch\n*** Update File: a.txt\n*** Move to: ../out.txt\n@@\n-a\n+A\n*** End Patch\n";
+        let err =
+            apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove).unwrap_err();
+        assert!(
+            err.contains("not allowed"),
+            "move destination must be jailed, got: {err}"
+        );
+        assert!(!wrote, "no write must happen when the move dest escapes");
+    }
+
+    #[test]
+    fn apply_under_root_context_not_found_writes_nothing() {
+        // A well-formed patch whose context can't be located → error, nothing written.
+        let mut fs: HashMap<String, String> = HashMap::new();
+        fs.insert("a.txt".to_string(), "totally different\n".to_string());
+        let cell = std::cell::RefCell::new(fs);
+        let read = |p: &Path| cell.borrow().get(&rel_of(p)).cloned();
+        let mut wrote = false;
+        let mut write = |_p: &Path, _c: &str| -> Result<(), String> {
+            wrote = true;
+            Ok(())
+        };
+        let mut remove = |_p: &Path| -> Result<(), String> { Ok(()) };
+
+        let input =
+            "*** Begin Patch\n*** Update File: a.txt\n@@\n-does not exist\n+x\n*** End Patch\n";
+        let err =
+            apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove).unwrap_err();
+        assert!(
+            err.contains("could not locate"),
+            "expected context error, got: {err}"
+        );
+        assert!(!wrote, "no write on a context-not-found failure");
+        assert_eq!(
+            cell.borrow().get("a.txt").map(String::as_str),
+            Some("totally different\n"),
+            "target file must be unchanged"
+        );
+    }
+
+    #[test]
+    fn apply_under_root_rename_writes_dest_removes_source() {
+        let mut fs: HashMap<String, String> = HashMap::new();
+        fs.insert("a.txt".to_string(), "a\n".to_string());
+        let cell = std::cell::RefCell::new(fs);
+        let read = |p: &Path| cell.borrow().get(&rel_of(p)).cloned();
+        let mut write = |p: &Path, c: &str| -> Result<(), String> {
+            cell.borrow_mut().insert(rel_of(p), c.to_string());
+            Ok(())
+        };
+        let mut remove = |p: &Path| -> Result<(), String> {
+            cell.borrow_mut().remove(&rel_of(p));
+            Ok(())
+        };
+
+        let input = "*** Begin Patch\n*** Update File: a.txt\n*** Move to: b.txt\n@@\n-a\n+A\n*** End Patch\n";
+        let changed =
+            apply_patch_under_root(input, &fake_resolve, &read, &mut write, &mut remove).unwrap();
+        assert_eq!(changed, vec!["b.txt"]);
+        let fs = cell.into_inner();
+        assert!(!fs.contains_key("a.txt"), "source must be removed");
+        assert_eq!(fs.get("b.txt").map(String::as_str), Some("A\n"));
     }
 }
