@@ -541,10 +541,14 @@ single-threaded+approval.
   `ExecutionPlan` avevano **step ma NESSUN goal** top-level. **Fase A backend FATTO (`4588fafc`):** `objective` in
   `update_plan` schema + descrizione (il modello STABILISCE il goal), stato-turno `ctx.plan_objective` (carry-forward
   + resume dal marker), riga `🎯 **goal**` nel marker ‹‹PLAN›› sopra gli step (frontend la rende già), `replace_latest_
-  plan_marker` self-healing, `parse_plan_objective` + test. 553 test verdi, nessuna regressione. **PROSSIMO/follow-up:**
-  (B) trattamento frontend dedicato del goal in cima all'island + fix sync island; (C) affidabilità produzione piano su
-  modelli deboli (finding 1.2); verificare edge marker seed/reconcile. Debito UI: `ChatView.tsx` 9.4k / `SettingsView`
-  6.9k da splittare.
+  plan_marker` self-healing, `parse_plan_objective` + test. 553 test verdi, nessuna regressione.
+  **Fase B frontend parte-1 FATTO (`be68d005`):** `parsePlanObjective` + `workspacePlanObjective` → la **working
+  island rende il goal in cima** (`.wi-objective`, 🎯, brand-tinted, single-line) sopra gli step. tsc pulito,
+  ui-contract passa. **PROSSIMO/follow-up:** (B parte-2) **sync island** — `conversationPlan` deriva da `messages`
+  PERSISTED (ADR 0022 C2, *deliberato* per evitare churn per-frame in streaming) → lag; farlo live senza reintrodurre
+  il churn = cambio React da fare con CURA + test (non un edit al volo). (C) affidabilità produzione piano su modelli
+  deboli (finding 1.2); verificare edge marker seed/reconcile. Debito UI: `ChatView.tsx` 9.4k / `SettingsView` 6.9k
+  da splittare.
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
