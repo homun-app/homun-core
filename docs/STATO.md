@@ -393,8 +393,15 @@ del manager; niente memoria-write) + routing modello-per-ruolo (inherit-default,
 fan-out annidato (depth 1), sessione browser calda protetta. **VALIDAZIONE RIMANENTE (pre-merge, l'unica):** eval
 flag-on end-to-end su **gemma4** (caposaldo #2 — il manager spawna figli e sintetizza); il flag resta default-off finché
 verde. **Follow-up:** concorrenza cloud-aware (semaforo=`active_llm_concurrency`); visibilità per-step; scritture
-single-threaded+approval. Poi eventuale **#1b** (asse approval). Draft PR **#103** (CI verde incl. Landlock Linux).
-NON toccare `check-ui-contract.mjs` (vault).
+single-threaded+approval.
+- **⭐ ROADMAP CODEX-PARITY COMPLETA** ([roadmap-codex-parity.md](roadmap-codex-parity.md), 2026-07-03): decisione
+  utente "facciamoli tutti". Ordinamento per dipendenze+rischio+momentum. **Fase 0** (safety: #1b approval UI, bundle
+  Linux helper, skill policies) → **Fase 1** (auto-compaction, eval subagenti, lifecycle) → **Fase 2** (ESTRAZIONE
+  MOTORE ADR 0024 = abilitatore) → **Fase 3** (git integration, session rewind/checkpoint, unified_exec, code-review)
+  → **Fase 4** (hooks, config/AGENTS.md, slash-commands, reasoning-effort) → **Fase 5** (produzione) → **Fase 6**
+  (extra). NON inseguire: Chronicle/voice/marketplace-cloud/OpenAI-lock. Programma multi-sessione, si esegue dall'alto.
+  **ITEM CORRENTE = Fase 0.1 (#1b approval axis in Settings + wiring `resolved_approval_policy`).** Draft PR **#103**
+  (CI verde incl. Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
