@@ -677,6 +677,7 @@ export function ChatView({
       metadata: "Local model",
     };
     let streamedText = "";
+    liveWorkspace.reset();
     let streamEventParts: ChatEventPart[] = [];
     let streamChunks = 0;
     const streamStartedAt = performance.now();
@@ -772,6 +773,7 @@ export function ChatView({
             });
           }
           streamEventParts = [...streamEventParts, part];
+          liveWorkspace.onStreamEvent(part);
           scheduleStreamingMessage();
           return;
         }
@@ -956,6 +958,7 @@ export function ChatView({
     };
     const promptMessages = [...messages, userMessage];
     let streamedText = "";
+    liveWorkspace.reset();
     let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
@@ -993,6 +996,7 @@ export function ChatView({
         const part = chatEventPartFromStream(payload);
         if (part) {
           streamEventParts = [...streamEventParts, part];
+          liveWorkspace.onStreamEvent(part);
           scheduleStreamingMessage();
           return;
         }
@@ -1262,6 +1266,7 @@ export function ChatView({
   ) {
     const requestId = `chat_stream_regen_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     let streamedText = "";
+    liveWorkspace.reset();
     let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
     const flushStreamingMessage = () => {
@@ -1317,6 +1322,7 @@ export function ChatView({
       const part = chatEventPartFromStream(payload);
       if (part) {
         streamEventParts = [...streamEventParts, part];
+        liveWorkspace.onStreamEvent(part);
         scheduleStreamingMessage();
         return;
       }
@@ -1480,6 +1486,12 @@ export function ChatView({
     };
   }, [thread.threadId]);
 
+  // A live plan belongs to ONE thread's turn — clear it when the user switches
+  // threads so a stale plan can't flash on the new thread before its own stream.
+  useEffect(() => {
+    liveWorkspace.reset();
+  }, [thread.threadId, liveWorkspace.reset]);
+
   useEffect(() => {
     let cancelled = false;
     void coreBridge
@@ -1628,6 +1640,7 @@ export function ChatView({
       const part = chatEventPartFromStream(payload);
       if (part) {
         streamEventParts = [...streamEventParts, part];
+        liveWorkspace.onStreamEvent(part);
         scheduleStreamingMessage();
         return;
       }
