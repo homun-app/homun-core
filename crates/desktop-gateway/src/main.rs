@@ -27781,13 +27781,29 @@ fn default_approval_policy() -> String {
 /// `cfg!(target_os = "linux")` — macOS fences via Seatbelt (no helper), Windows applies
 /// no fence — so on other platforms its result is irrelevant.
 fn linux_sandbox_helper_available() -> bool {
-    if let Some(p) = std::env::var_os("HOMUN_LINUX_SANDBOX_BIN") {
-        return std::path::Path::new(&p).is_file();
-    }
-    std::env::current_exe()
+    let bin_override = std::env::var_os("HOMUN_LINUX_SANDBOX_BIN").map(std::path::PathBuf::from);
+    let exe_dir = std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|d| d.join("homun-linux-sandbox")))
-        .map(|h| h.is_file())
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf));
+    linux_sandbox_helper_resolves(bin_override.as_deref(), exe_dir.as_deref())
+}
+
+/// Pure core of `linux_sandbox_helper_available` (extracted so the Fase 0.2
+/// auto-flip contract is testable on any platform without mutating process-global
+/// env or shelling out to `current_exe`). Given the resolved `HOMUN_LINUX_SANDBOX_BIN`
+/// override (if set) and the gateway executable's directory (if resolvable), decide
+/// whether the `homun-linux-sandbox` helper is present. An EXPLICIT override
+/// short-circuits — if it's set but missing we report absent rather than silently
+/// falling back to a sibling (the caller asked for that exact binary).
+fn linux_sandbox_helper_resolves(
+    bin_override: Option<&std::path::Path>,
+    exe_dir: Option<&std::path::Path>,
+) -> bool {
+    if let Some(p) = bin_override {
+        return p.is_file();
+    }
+    exe_dir
+        .map(|d| d.join("homun-linux-sandbox").is_file())
         .unwrap_or(false)
 }
 
@@ -58458,6 +58474,38 @@ data: [DONE]\n";
         assert_eq!(resolved_sandbox_mode(), SandboxMode::Danger); // explicit danger
         assert!(!tool_safety_enabled()); // danger → disabled
         unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); } // clean up
+    }
+
+    #[test]
+    fn linux_sandbox_helper_resolves_from_override_or_sibling() {
+        use super::linux_sandbox_helper_resolves;
+        use std::path::Path;
+        // Hermetic: pure resolution over explicit paths — no env, no `current_exe`,
+        // so this locks the Fase 0.2 auto-flip contract ("helper on disk ⇒ Linux
+        // fence available") on ANY platform without touching process-global env
+        // (avoids the `env::set_var`-without-`#[serial]` flake class).
+        let root = std::env::temp_dir().join(format!(
+            "homun-sandbox-resolve-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let bin_dir = root.join("bin");
+        std::fs::create_dir_all(&bin_dir).expect("create bin dir");
+        let helper = bin_dir.join("homun-linux-sandbox");
+        let missing = root.join("nope").join("homun-linux-sandbox");
+
+        // Override wins when it points at a real file.
+        std::fs::write(&helper, b"#!/bin/true\n").expect("write helper");
+        assert!(linux_sandbox_helper_resolves(Some(&helper), None));
+        // Override that points nowhere is NOT rescued by a valid sibling — an
+        // explicit override short-circuits (preserving the original semantics).
+        assert!(!linux_sandbox_helper_resolves(Some(&missing), Some(&bin_dir)));
+        // No override → resolve as a sibling of the gateway's exe dir.
+        assert!(linux_sandbox_helper_resolves(None, Some(&bin_dir)));
+        // Sibling absent, or no exe dir at all → not available (fail toward "warn").
+        assert!(!linux_sandbox_helper_resolves(None, Some(Path::new(&root))));
+        assert!(!linux_sandbox_helper_resolves(None, None));
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

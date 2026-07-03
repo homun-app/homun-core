@@ -20,9 +20,12 @@ onesto, apply_patch, subagenti slice-1 (machinery).
 ## Fase 0 — Chiudere l'arco safety (piccolo, alta confidenza) — *in corso*
 Chiude ADR 0023 al 100%. S–M.
 - **0.1 Approval axis 4-livelli in Settings (#1b)** — esporre `approval_policy` (untrusted/on-failure/on-request/
-  never) + wiring `resolved_approval_policy()` al chokepoint, sostituendo la logica autonomous-based. *(S)*
+  never) + wiring `resolved_approval_policy()` al chokepoint, sostituendo la logica autonomous-based. *(S)* — ✅ **FATTA**
+  (`2469f55a`+`5b9852bb`): resolver+wiring behavior-preserving + selector 4-livelli in Settings › Runtime.
 - **0.2 Bundle `homun-linux-sandbox`** nel packaged Linux (electron-builder) → Linux auto-recinta (il probe promuove
-  a workspace-write) + Windows approval-only confermato. *(S)*
+  a workspace-write) + Windows approval-only confermato. *(S)* — ✅ **FATTA (2026-07-03):** staging Linux-only in
+  `prepare-package.mjs` (cavalca `extraResources`) + wiring `HOMUN_LINUX_SANDBOX_BIN` in `main.cjs`; resolver estratto
+  puro `linux_sandbox_helper_resolves` (5 casi TDD); flip a `workspace-write` automatico.
 - **0.3 Skill confirmation policies** — categorie sensibili dichiarative in `SKILL.md` (delete/financial/medical/
   sensitive-data) rispettate dall'harness (il pattern Codex Step 5 ADR 0023). *(M)*
 - **0.4 Network approval per-dominio** (Codex `network_approval`/MITM) — opzionale, più avanti. *(M, opz)*

@@ -316,6 +316,18 @@ function spawnGateway() {
     if (fs.existsSync(waBin)) env.HOMUN_WHATSAPP_BIN = waBin;
   }
 
+  // Point the gateway at the bundled Linux Landlock sandbox helper so
+  // `run_in_project` can fence bash on an installed Linux app (ADR 0023, Fase 0.2).
+  // The gateway also resolves it as a sibling of its own exe, but setting the env
+  // explicitly is belt-and-suspenders (robust to any current_exe() surprise) and
+  // mirrors the bridge wiring above. This presence is exactly what auto-flips the
+  // Linux default to the `workspace-write` fence (see default_sandbox_mode). An
+  // explicit override wins; Linux-only (the helper is a no-op stub elsewhere).
+  if (process.platform === "linux" && !env.HOMUN_LINUX_SANDBOX_BIN) {
+    const sbBin = path.join(RESOURCES_ROOT, "bin", "homun-linux-sandbox");
+    if (fs.existsSync(sbBin)) env.HOMUN_LINUX_SANDBOX_BIN = sbBin;
+  }
+
   // Point the gateway at the bundled browser-automation sidecar (Node/Playwright)
   // that drives the contained-computer browser over CDP. Without this the gateway
   // only finds the repo-relative runtimes/ path (absent from the bundle) and the

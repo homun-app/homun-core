@@ -52,6 +52,29 @@ if (!existsSync(gatewaySource)) {
 cpSync(gatewaySource, gatewayTarget);
 chmodSync(gatewayTarget, 0o755);
 
+// Stage the Linux Landlock sandbox helper (`homun-linux-sandbox`) NEXT TO the
+// gateway so `run_in_project` can fence bash on an installed Linux app (ADR 0023,
+// roadmap Fase 0.2). This is what auto-flips the Linux default from the unfenced
+// `danger` to `workspace-write`: `default_sandbox_mode()` returns `workspace-write`
+// the moment the helper resolves as a sibling of the gateway exe (or via
+// HOMUN_LINUX_SANDBOX_BIN — main.cjs also points at this path). Linux-only: the
+// helper is a Landlock (Linux-kernel LSM) binary; off Linux it's a no-op stub, so
+// shipping it on mac/win would be dead weight (`default_sandbox_mode` never probes
+// it there). Built as an auto-discovered bin of the gateway crate by the `cargo
+// build -p ...` above; fail loud if absent so a broken build never ships unfenced.
+if (process.platform === "linux") {
+  const helperSource = join(repoRoot, "target", "release", "homun-linux-sandbox");
+  const helperTarget = join(resourcesDir, "bin", "homun-linux-sandbox");
+  if (!existsSync(helperSource)) {
+    throw new Error(
+      `Linux sandbox helper not found: ${helperSource} ` +
+        `(built by \`cargo build -p local-first-desktop-gateway --release\`)`,
+    );
+  }
+  cpSync(helperSource, helperTarget);
+  chmodSync(helperTarget, 0o755);
+}
+
 // Stage the contained-computer build context so the packaged app can start the
 // agent's browser/sandbox. up.sh builds the image from THIS directory; the
 // gateway is pointed at the staged up.sh via HOMUN_CONTAINED_COMPUTER_UP (see
@@ -122,6 +145,9 @@ for (const entry of ["tsconfig.json", "package-lock.json"]) {
 
 console.log(`Prepared Electron resources at ${resourcesDir}`);
 console.log(`Gateway: ${relative(repoRoot, gatewayTarget)}`);
+if (process.platform === "linux") {
+  console.log(`Linux sandbox helper: ${relative(repoRoot, join(resourcesDir, "bin", "homun-linux-sandbox"))}`);
+}
 console.log(`Contained computer: ${relative(repoRoot, ccTarget)}`);
 if (existsSync(skillsTarget)) {
   console.log(`Default skills: ${relative(repoRoot, skillsTarget)}`);

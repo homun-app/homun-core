@@ -366,7 +366,18 @@ gira sotto il fence di default; scritture fuori project+cache → escalation car
 app-level non eseguito headless** — consigliato prima del merge (PR draft #103).
 **Default PLATFORM-AWARE** (`fffd09ab`): `workspace-write` su macOS/Windows, ma `danger` su **Linux** finché
 l'helper `homun-linux-sandbox` non è bundlato nel packaged app (altrimenti `build_sandbox_command` fail-closed →
-ogni bash rifiutato = app rotta). Bundlare l'helper → flippare anche Linux. **CI flake pre-esistente risolto**
+ogni bash rifiutato = app rotta). **→ FASE 0.2 CHIUSA (2026-07-03):** l'helper è ora bundlato accanto al gateway
+(`prepare-package.mjs` lo copia in `resources/bin/` **solo su host Linux**; cavalca il glob `extraResources`
+esistente, nessuna modifica a electron-builder) + wiring esplicito `HOMUN_LINUX_SANDBOX_BIN` in `main.cjs`
+(belt-and-suspenders sulla risoluzione sibling). Il flip a `workspace-write` su Linux è **automatico** —
+`default_sandbox_mode()` auto-upgrada appena l'helper risolve, nessuna modifica al resolver. Contratto blindato con
+un test PURO: estratto `linux_sandbox_helper_resolves(bin_override, exe_dir)` (thin wrapper env/`current_exe` →
+core testabile su OGNI piattaforma senza mutare env global → **non** peggiora la classe di flake `env::set_var`);
+5 casi (override vince/short-circuita se mancante, sibling, assente, no-exe-dir). TDD RED→GREEN, refactor
+behavior-preserving (test vicino `resolved_sandbox_mode_precedence` invariato). Verifica: 8/8 test sandbox verdi
++ helper compila (bin auto-discover del crate) + `node --check` + 12 test electron verdi. Confine onesto: il flip
+a runtime su Linux è coperto dal test d'integrazione `tests/linux_sandbox.rs` sul runner CI, non riproducibile su
+macOS. **CI flake pre-esistente risolto**
 (`781ccdd8`): `automation_run_..._scope` corseggiava su `HOMUN_USER_ID`/`ACTIVE_WORKSPACE` global (letti due volte),
 NON causato dal flip (provato: esito invariante al sandbox mode); reso ermetico. Residuo noto: ~19 `env::set_var`
 senza `#[serial]` = classe di flake (follow-up = `serial_test`).
@@ -403,8 +414,12 @@ single-threaded+approval.
   **Fase 0.1 (#1b approval axis) ✅ FATTA** (`2469f55a` backend resolver+wiring behavior-preserving + `5b9852bb`
   frontend selector 4-livelli): `AskForApproval::parse/as_str`, `resolved_approval_policy()`, wiring MCP+Composio via
   `effective_approval(autonomous, resolved)` (truth-table equivalence provata), selector in Settings › Runtime.
-  `on-failure`/`untrusted` = resolver-wired ma semantica ricca TODO (non finta). **ITEM CORRENTE = Fase 0.2** (bundle
-  `homun-linux-sandbox` nel packaged Linux → auto-fence) poi 0.3 (skill confirmation policies). Draft PR **#103**
+  `on-failure`/`untrusted` = resolver-wired ma semantica ricca TODO (non finta).
+  **Fase 0.2 (bundle `homun-linux-sandbox` → auto-fence Linux) ✅ FATTA (2026-07-03):** staging Linux-only in
+  `prepare-package.mjs` + wiring `HOMUN_LINUX_SANDBOX_BIN` in `main.cjs` + resolver reso puro/testabile
+  (`linux_sandbox_helper_resolves`, 5 casi TDD). Flip a `workspace-write` automatico via `default_sandbox_mode()`.
+  **ITEM CORRENTE = Fase 0.3** (skill confirmation policies: categorie sensibili delete/financial/medical/
+  sensitive-data dichiarative in `SKILL.md` rispettate dall'harness, pattern Codex Step 5 ADR 0023). Draft PR **#103**
   (CI verde incl. Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
