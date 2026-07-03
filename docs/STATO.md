@@ -500,14 +500,21 @@ single-threaded+approval.
   `"plan"` ridondante; appeso una sola direttiva per modalità. **Verificato:** 5 unit-test sul seam (agent NON
   contiene «propose the plan and STOP», plan sì, debug==agent, ask vuoto, corpo operativo condiviso); crate 558/1
   verdi (l'1 = pptx/LibreOffice d'ambiente); `FIRST propose the plan and STOP` grep 0 in main.rs.
-  **Eval runtime gemma4:12b (ONESTO, non pieno A/B):** agent mode → risposta coerente diretta, **0 PLAN_PROPOSE, nessuno
-  stallo** ✅ (claim primario). MA **non ho riprodotto un A/B pulito**: il prompt-confronto risponde diretto sia col
-  prompt NUOVO sia col VECCHIO (counterfactual verificato ricompilando `51c0191f`), e i task ACTION entrano nel loop
-  tool multi-round (~3min/round gemma4) → timeout a 5min con 0 delta. Quindi lo stallo specifico di 1.2 **non è stato
-  riprodotto** questa sessione: fix verificato **strutturalmente + a livello di prompt (unit-test)**, non con un A/B
-  comportamentale. Nota onesta: anche in **plan mode** gemma4:12b non emette PLAN_PROPOSE (risponde/chiede diretto) =
-  limite di instruction-following del modello debole, **ortogonale** (testo plan-mode invariato). Artefatti in
-  `scratchpad/c-eval/`. Follow-up: tier-adattività (ADR 0018) + subagenti restano fuori scope, come deciso.
+  **⭐ EVAL RUNTIME — VERDETTO ONESTO (A/B completo con counterfactual, ricompilando `51c0191f`):** lo **stallo
+  PLAN_PROPOSE di 1.2 NON si riproduce** in agent mode, né col prompt vecchio né col nuovo, su NESSUNA combinazione:
+  - gemma4:12b, Q&A → risposta diretta (old=new), 0 PLAN_PROPOSE.
+  - gemma4:31b-cloud, Q&A → risposta diretta (old=new), 0 PLAN_PROPOSE.
+  - gemma4:31b-cloud, **task dev/action** → entrambi ESEGUONO operativo: **OLD 0 PLAN_PROPOSE / 6 `plan_update`**,
+    **NEW 0 PLAN_PROPOSE / 1 `plan_update`** (+ activity, file creati). Nessuno stallo, in nessuna versione.
+  **Conseguenza (corregge il premise 1.2):** in **plain agent mode** i modelli NON si fermano a PLAN_PROPOSE — il
+  PLAN_PROPOSE di 1.2 era legato agli esperimenti di **delegation-guidance (poi revertiti)**, non alla modalità agent
+  normale. Quindi **C è un cleanup corretto e behavior-preserving in pratica** (rimuove una contraddizione reale —
+  agent era istruito sia a eseguire sia a proporre-e-fermarsi — e allinea agent al contratto del toggle), **non** la
+  riparazione di uno stallo osservabile. Valore: correttezza di principio + trappola latente rimossa per un eventuale
+  modello che obbedisca *strettamente* a PLAN_PROPOSE (nessuno dei testati lo fa). Verifica solida a livello **unit +
+  strutturale**; l'A/B comportamentale mostra **nessuna differenza osservabile** (entrambi eseguono). Artefatti in
+  `scratchpad/c-eval/` (*.ndjson old/new × 12b/31b × qa/dev). Follow-up: tier-adattività (ADR 0018) + subagenti fuori
+  scope, come deciso.
 
 - **⭐ FLUIDITÀ da Codex reale (2026-07-03) — mappa + Ondata 1 iniziata.** Missione utente: studiare il codice REALE
   di Codex su disco (`/Users/fabio/Projects/codex`: binario `Resources/codex` + `app.asar`) per rendere Homun più
