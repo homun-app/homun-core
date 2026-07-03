@@ -53,7 +53,7 @@ mod tool_trace_dump;
 
 // ADR 0023 tool-safety vocabulary + pure decision fn, used by the write-confirm
 // branches in `execute_chat_tool` behind `HOMUN_TOOL_SAFETY`.
-use crate::tool_safety::{AskForApproval, SafetyDecision, SandboxPolicy, assess_tool_safety};
+use crate::tool_safety::{SafetyDecision, SandboxPolicy, assess_tool_safety};
 use axum::{
     Json, Router,
     body::Body,
@@ -18820,6 +18820,36 @@ fn resolved_sandbox_mode() -> crate::tool_safety::SandboxMode {
     SandboxMode::parse(&load_runtime_settings().sandbox_mode)
 }
 
+/// The approval axis (ADR 0023 #1b): env override > persisted RuntimeSettings > default (OnRequest).
+/// `HOMUN_APPROVAL_POLICY` is the explicit per-run override; the persisted value comes from Settings.
+/// Default `on-request` — behavior-preserving: the non-autonomous case keeps asking on effectful
+/// writes exactly as today (the wiring, below, still forces `Never` for autonomous runs).
+fn resolved_approval_policy() -> crate::tool_safety::AskForApproval {
+    use crate::tool_safety::AskForApproval;
+    if let Ok(p) = std::env::var("HOMUN_APPROVAL_POLICY") {
+        if !p.trim().is_empty() {
+            return AskForApproval::parse(&p);
+        }
+    }
+    AskForApproval::parse(&load_runtime_settings().approval_policy)
+}
+
+/// Pure: the effective approval for a single turn. Autonomous runs NEVER prompt
+/// (`Never`), whatever the resolved policy; otherwise the resolved policy applies.
+/// Extracted so the wiring's autonomous-preservation is unit-testable without a
+/// ChatToolCtx. With the default `on-request`: non-autonomous → `OnRequest`
+/// (unchanged), autonomous → `Never` (unchanged) — identical to today.
+fn effective_approval(
+    autonomous: bool,
+    resolved: crate::tool_safety::AskForApproval,
+) -> crate::tool_safety::AskForApproval {
+    if autonomous {
+        crate::tool_safety::AskForApproval::Never
+    } else {
+        resolved
+    }
+}
+
 /// Pure: does a write tool need the read-only escalation under this mode? Testable
 /// without ChatToolCtx. `sandbox_gate_write` composes this with `resolved_sandbox_mode()`
 /// and, when true, emits the escalation card. Only the Write footprint (write_file/
@@ -22069,15 +22099,15 @@ require your confirmation in the app. Propose it and stop."
         );
         let is_write = ctx.composio_writes.contains(name);
         let needs_confirm = if tool_safety_enabled() {
-            // ADR 0023: route the decision through the pure policy fn. `Never`
-            // (autonomous) → AutoApprove; `OnRequest` + unauthorized write →
-            // AskUser. Sandbox is DangerFullAccess for now (no OS fence wired
-            // yet), so this yields the same verdict as the legacy boolean.
-            let approval = if ctx.autonomous {
-                AskForApproval::Never
-            } else {
-                AskForApproval::OnRequest
-            };
+            // ADR 0023 #1b: route the decision through the pure policy fn. The approval
+            // axis is now RESOLVED (env > persisted Settings > default `on-request`),
+            // but autonomous runs still force `Never` — so at the default this yields
+            // the same verdict as before (non-autonomous → OnRequest, autonomous →
+            // Never). Sandbox is DangerFullAccess for now (no OS fence wired yet).
+            // TODO(0023 #1b): on-failure/untrusted full semantics (run-then-ask-on-
+            // failure / allowlist) not yet realized — assess_tool_safety treats every
+            // non-`Never` policy as "ask on unauthorized effectful write".
+            let approval = effective_approval(ctx.autonomous, resolved_approval_policy());
             matches!(
                 assess_tool_safety(
                     approval,
@@ -22183,14 +22213,12 @@ Connectors → MCP; do NOT claim it's done.",
         let is_write = ctx.composio_writes.contains(name);
         let pre_authorized = composio_tool_allowed(name);
         let needs_confirm = if tool_safety_enabled() {
-            // ADR 0023: same routing as the MCP branch. `pre_authorized` is the
-            // user's always-allow list; `Never` (autonomous) short-circuits to
-            // AutoApprove. Equals the legacy boolean below under DangerFullAccess.
-            let approval = if ctx.autonomous {
-                AskForApproval::Never
-            } else {
-                AskForApproval::OnRequest
-            };
+            // ADR 0023 #1b: same routing as the MCP branch. `pre_authorized` is the
+            // user's always-allow list; the approval axis is now RESOLVED, with
+            // autonomous forced to `Never`. At the default `on-request` this equals
+            // the legacy boolean below under DangerFullAccess.
+            // TODO(0023 #1b): on-failure/untrusted full semantics not yet realized.
+            let approval = effective_approval(ctx.autonomous, resolved_approval_policy());
             matches!(
                 assess_tool_safety(
                     approval,
@@ -27730,10 +27758,21 @@ struct RuntimeSettings {
     /// The persisted source for `resolved_sandbox_mode`; exposed in Settings by a later task.
     #[serde(default = "default_sandbox_mode")]
     sandbox_mode: String,
+    /// Approval policy (ADR 0023 #1b): `on-request` (default) | `untrusted` | `on-failure` | `never`.
+    /// The persisted source for `resolved_approval_policy`; exposed in Settings by a later task.
+    #[serde(default = "default_approval_policy")]
+    approval_policy: String,
 }
 
 fn default_adaptive_floor() -> String {
     "off".to_string()
+}
+
+/// The shipped default approval policy (ADR 0023 #1b): `on-request`. The model asks
+/// when it judges a write needs confirmation — today's shipped behavior for the
+/// non-autonomous case. Canonical so it round-trips through `AskForApproval::parse`.
+fn default_approval_policy() -> String {
+    "on-request".to_string()
 }
 
 /// Whether the Linux Landlock fence helper (`homun-linux-sandbox`) can be resolved:
@@ -27791,6 +27830,7 @@ impl Default for RuntimeSettings {
         Self {
             adaptive_floor: default_adaptive_floor(),
             sandbox_mode: default_sandbox_mode(),
+            approval_policy: default_approval_policy(),
         }
     }
 }
@@ -27852,6 +27892,9 @@ async fn set_runtime_settings(
     // Normalize both fields so the persisted file never holds a non-canonical value.
     settings.adaptive_floor = normalize_adaptive_floor(&settings.adaptive_floor);
     settings.sandbox_mode = crate::tool_safety::SandboxMode::parse(&settings.sandbox_mode)
+        .as_str()
+        .to_string();
+    settings.approval_policy = crate::tool_safety::AskForApproval::parse(&settings.approval_policy)
         .as_str()
         .to_string();
     save_runtime_settings(&settings).map_err(|message| GatewayError {
@@ -48915,21 +48958,31 @@ mod tests {
         let current = RuntimeSettings {
             adaptive_floor: "on".to_string(),
             sandbox_mode: "danger".to_string(),
+            approval_policy: "never".to_string(),
         };
-        // Patch only sandbox_mode → adaptive_floor must be preserved.
+        // Patch only sandbox_mode → adaptive_floor + approval_policy must be preserved.
         let merged =
             merge_runtime_settings(&current, &serde_json::json!({ "sandbox_mode": "read-only" }));
         assert_eq!(merged.adaptive_floor, "on");
         assert_eq!(merged.sandbox_mode, "read-only");
-        // Patch only adaptive_floor → sandbox_mode preserved.
+        assert_eq!(merged.approval_policy, "never");
+        // Patch only adaptive_floor → sandbox_mode + approval_policy preserved.
         let merged2 =
             merge_runtime_settings(&current, &serde_json::json!({ "adaptive_floor": "off" }));
         assert_eq!(merged2.adaptive_floor, "off");
         assert_eq!(merged2.sandbox_mode, "danger");
+        assert_eq!(merged2.approval_policy, "never");
+        // Patch only approval_policy → sandbox_mode NOT clobbered (the UI sends only its own field).
+        let merged_ap =
+            merge_runtime_settings(&current, &serde_json::json!({ "approval_policy": "on-request" }));
+        assert_eq!(merged_ap.approval_policy, "on-request");
+        assert_eq!(merged_ap.sandbox_mode, "danger");
+        assert_eq!(merged_ap.adaptive_floor, "on");
         // Empty patch → unchanged.
         let merged3 = merge_runtime_settings(&current, &serde_json::json!({}));
         assert_eq!(merged3.adaptive_floor, "on");
         assert_eq!(merged3.sandbox_mode, "danger");
+        assert_eq!(merged3.approval_policy, "never");
     }
 
     static GATEWAY_DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -58405,6 +58458,66 @@ data: [DONE]\n";
         assert_eq!(resolved_sandbox_mode(), SandboxMode::Danger); // explicit danger
         assert!(!tool_safety_enabled()); // danger → disabled
         unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); } // clean up
+    }
+
+    #[test]
+    fn resolved_approval_policy_precedence_env_over_default() {
+        use crate::tool_safety::AskForApproval;
+        use super::resolved_approval_policy;
+        // Hermetic: drive entirely through env so the test never depends on the
+        // developer's on-disk runtime-settings.json. Rust-2024 `unsafe` env convention.
+        unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); }
+        // With no env override and (typically) no persisted value → default OnRequest.
+        // parse() also maps any unknown persisted value to OnRequest, so this holds
+        // regardless of a stray on-disk file.
+        assert_eq!(resolved_approval_policy(), AskForApproval::OnRequest);
+        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "never"); }
+        assert_eq!(resolved_approval_policy(), AskForApproval::Never); // env override
+        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "on-failure"); }
+        assert_eq!(resolved_approval_policy(), AskForApproval::OnFailure);
+        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "untrusted"); }
+        assert_eq!(resolved_approval_policy(), AskForApproval::UnlessTrusted);
+        // Empty env is ignored (falls through to persisted/default), not parsed as unknown.
+        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "  "); }
+        assert_eq!(resolved_approval_policy(), AskForApproval::OnRequest);
+        unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); } // clean up
+    }
+
+    #[test]
+    fn approval_wiring_truth_table_is_behavior_preserving_at_default() {
+        use crate::tool_safety::{AskForApproval, SafetyDecision, SandboxPolicy, assess_tool_safety};
+        use super::effective_approval;
+        // The wiring computes `effective_approval(autonomous, resolved)` then feeds it to
+        // `assess_tool_safety(..., DangerFullAccess, is_effectful_write, pre_authorized)`.
+        // Prove the two crux cases at the DEFAULT policy (`on-request`) match today:
+        let default_resolved = AskForApproval::OnRequest;
+
+        // Non-autonomous + effectful write + not pre-authorized → AskUser (unchanged).
+        let non_auto = effective_approval(false, default_resolved);
+        assert_eq!(non_auto, AskForApproval::OnRequest);
+        assert_eq!(
+            assess_tool_safety(non_auto, &SandboxPolicy::DangerFullAccess, true, false),
+            SafetyDecision::AskUser
+        );
+
+        // Autonomous → Never → auto-approve, whatever the write (unchanged).
+        let auto = effective_approval(true, default_resolved);
+        assert_eq!(auto, AskForApproval::Never);
+        assert!(matches!(
+            assess_tool_safety(auto, &SandboxPolicy::DangerFullAccess, true, false),
+            SafetyDecision::AutoApprove { .. }
+        ));
+
+        // Autonomous forces Never even if the resolved policy would otherwise ask.
+        assert_eq!(
+            effective_approval(true, AskForApproval::UnlessTrusted),
+            AskForApproval::Never
+        );
+        // A user who changes the policy (non-autonomous) sees the new policy verbatim.
+        assert_eq!(
+            effective_approval(false, AskForApproval::Never),
+            AskForApproval::Never
+        );
     }
 
     #[test]
