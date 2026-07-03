@@ -27,7 +27,10 @@ Chiude ADR 0023 al 100%. S–M.
   `prepare-package.mjs` (cavalca `extraResources`) + wiring `HOMUN_LINUX_SANDBOX_BIN` in `main.cjs`; resolver estratto
   puro `linux_sandbox_helper_resolves` (5 casi TDD); flip a `workspace-write` automatico.
 - **0.3 Skill confirmation policies** — categorie sensibili dichiarative in `SKILL.md` (delete/financial/medical/
-  sensitive-data) rispettate dall'harness (il pattern Codex Step 5 ADR 0023). *(M)*
+  sensitive-data) rispettate dall'harness (il pattern Codex Step 5 ADR 0023). *(M)* — ✅ **SLICE-1 FATTA
+  (2026-07-03):** frontmatter `sensitive:` → `SensitiveCategory`; `use_skill` arma `ctx.active_sensitive`
+  turn-scoped; `skill_policy_forces_confirm` OR-composto ai chokepoint MCP+Composio (force-confirm sotto policy
+  permissiva). Follow-up: force-confirm file/bash, cross-turn stickiness, UI.
 - **0.4 Network approval per-dominio** (Codex `network_approval`/MITM) — opzionale, più avanti. *(M, opz)*
 **Success:** approval selezionabile+wired; Linux fenced di default nel packaged; skill possono dichiarare conferme.
 

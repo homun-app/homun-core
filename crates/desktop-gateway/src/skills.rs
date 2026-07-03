@@ -39,6 +39,10 @@ pub struct SkillSummary {
     pub license: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allowed_tools: Vec<String>,
+    /// Declared sensitive domains (ADR 0023 Step 5) — surfaced for UI/transparency;
+    /// serialized as kebab-case strings. Enforcement lives in the harness.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sensitive: Vec<SensitiveCategory>,
 }
 
 /// A node in a skill's file tree (directories carry `children`).
@@ -74,6 +78,39 @@ pub struct Frontmatter {
     pub license: Option<String>,
     pub version: Option<String>,
     pub allowed_tools: Vec<String>,
+    /// Declared sensitive domains (ADR 0023 Step 5). When non-empty, the harness
+    /// force-confirms this skill's effectful actions regardless of approval policy
+    /// — the skill declares the domain, the harness enforces, without trusting the
+    /// model. Unknown tokens are dropped at parse time.
+    pub sensitive: Vec<SensitiveCategory>,
+}
+
+/// A declarative sensitive-domain category a skill can carry in its `sensitive:`
+/// frontmatter list. Closed vocabulary (the Codex SKILL.md pattern): `delete`,
+/// `financial`, `medical`, `sensitive-data`. These are semantic labels — the
+/// harness does not detect the domain, it raises the confirmation bar while a
+/// skill declaring one is active (see `skill_policy_forces_confirm` in `main.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SensitiveCategory {
+    Delete,
+    Financial,
+    Medical,
+    SensitiveData,
+}
+
+impl SensitiveCategory {
+    /// Forgiving parse: case-insensitive, `_`/`-` interchangeable. Returns `None`
+    /// for unknown tokens (caller drops them) so a typo never fails skill loading.
+    fn parse(token: &str) -> Option<Self> {
+        match token.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "delete" => Some(Self::Delete),
+            "financial" => Some(Self::Financial),
+            "medical" => Some(Self::Medical),
+            "sensitive-data" => Some(Self::SensitiveData),
+            _ => None,
+        }
+    }
 }
 
 /// Splits a `SKILL.md` into (frontmatter, markdown body). If there is no
@@ -142,18 +179,16 @@ fn parse_frontmatter(fm_lines: &[&str]) -> Frontmatter {
                 }
             }
             "allowed-tools" | "allowed_tools" | "tools" => {
-                if value.is_empty() {
-                    let (items, consumed) = gather_list(&fm_lines[idx..]);
-                    fm.allowed_tools = items;
-                    idx += consumed;
-                } else if value.starts_with('[') {
-                    fm.allowed_tools = parse_inline_list(value);
-                } else {
-                    fm.allowed_tools = value
-                        .split(',')
-                        .map(|s| unquote(s.trim()).to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
+                fm.allowed_tools = parse_list_value(value, &fm_lines[idx..], &mut idx);
+            }
+            "sensitive" => {
+                let raw = parse_list_value(value, &fm_lines[idx..], &mut idx);
+                for token in &raw {
+                    if let Some(cat) = SensitiveCategory::parse(token) {
+                        if !fm.sensitive.contains(&cat) {
+                            fm.sensitive.push(cat);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -203,6 +238,27 @@ fn gather_block(lines: &[&str], literal: bool) -> (String, usize) {
             .to_string()
     };
     (text, consumed)
+}
+
+/// Parses a frontmatter list value in any of the three forms we support: empty
+/// scalar (`key:` followed by an indented `- item` block), inline (`[a, b]`), or
+/// a comma-separated scalar. `rest_lines` is the frontmatter tail after the key
+/// line; `idx` is advanced past any consumed block lines. Shared by `allowed-tools`
+/// and `sensitive` so the two stay in lockstep.
+fn parse_list_value(value: &str, rest_lines: &[&str], idx: &mut usize) -> Vec<String> {
+    if value.is_empty() {
+        let (items, consumed) = gather_list(rest_lines);
+        *idx += consumed;
+        items
+    } else if value.starts_with('[') {
+        parse_inline_list(value)
+    } else {
+        value
+            .split(',')
+            .map(|s| unquote(s.trim()).to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
 }
 
 /// Collects a YAML block list (`- item` lines) starting at `lines`.
@@ -312,6 +368,7 @@ fn summary_from(
         version: fm.version,
         license: fm.license,
         allowed_tools: fm.allowed_tools,
+        sensitive: fm.sensitive,
         id: id.to_string(),
     }
 }
@@ -461,5 +518,34 @@ mod tests {
         assert!(!is_safe_id("a/b"));
         assert!(!is_safe_id(".."));
         assert!(is_safe_id("skill-creator"));
+    }
+
+    #[test]
+    fn parses_sensitive_categories_inline() {
+        let md = "---\nname: pay\ndescription: d\nsensitive: [delete, financial]\n---\nb";
+        let (fm, _) = split_frontmatter(md);
+        assert_eq!(
+            fm.sensitive,
+            vec![SensitiveCategory::Delete, SensitiveCategory::Financial]
+        );
+    }
+
+    #[test]
+    fn sensitive_block_list_aliases_unknowns_and_dedup() {
+        // Block-list form + underscore alias + case-insensitive + unknown dropped
+        // + duplicate collapsed, order of first occurrence preserved.
+        let md = "---\nname: x\ndescription: d\nsensitive:\n  - Sensitive_Data\n  - MEDICAL\n  - bogus\n  - medical\n---\nb";
+        let (fm, _) = split_frontmatter(md);
+        assert_eq!(
+            fm.sensitive,
+            vec![SensitiveCategory::SensitiveData, SensitiveCategory::Medical]
+        );
+    }
+
+    #[test]
+    fn sensitive_absent_is_empty() {
+        let md = "---\nname: x\ndescription: d\n---\nb";
+        let (fm, _) = split_frontmatter(md);
+        assert!(fm.sensitive.is_empty());
     }
 }

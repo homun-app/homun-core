@@ -76,15 +76,22 @@ fn skill_policy_forces_confirm(active_sensitive: &[SensitiveCategory], is_effect
 }
 ```
 
-Ai gate esistenti in `execute_chat_tool` (siti MCP, Composio, e `sandbox_gate_write` per
-file/apply_patch/bash effettful), `needs_confirm` diventa:
-`assess_tool_safety(...) == AskUser  ||  skill_policy_forces_confirm(ctx.active_sensitive, is_effectful)`.
-La card di `emit_approval_card` riporta la/e categoria/e e il fatto che l'ha richiesta una skill
-sensibile (contesto per l'utente). L'azione **non** viene eseguita finché l'utente non conferma —
+Ai due chokepoint di approval effettful in `execute_chat_tool` (siti **MCP** ~22137 e **Composio**
+~22251), `needs_confirm` diventa (shadowing):
+`needs_confirm || skill_policy_forces_confirm(ctx.active_sensitive, is_write)`. La card di
+`emit_approval_card` gira come sempre; l'azione **non** viene eseguita finché l'utente non conferma —
 identico al flusso approval attuale.
 
 Le **read** non sono effettful → non gated: una skill sensibile che fa 10 letture e 1 scrittura
 chiede conferma solo sulla scrittura.
+
+**Perché MCP/Composio e non anche file/bash in slice 1.** MCP/Composio sono il chokepoint
+**real-world** (connettori pagamenti, API dati-salute) dove le categorie *semantiche*
+`financial`/`medical`/`sensitive-data` agiscono e dove **non esiste altra difesa** — è lì che lo
+Step 5 aggiunge valore. Le azioni distruttive (`delete`) hanno **già** difese: `run_in_sandbox`
+passa lo `skill_security::scan_blobs` (blocca i comandi pericolosi) ed è *contained*; `write_file`/
+`edit_file`/`apply_patch` sono *jailed* alla project root con escalation card (asse sandbox). Estendere
+il force-confirm anche a questi path è un follow-up dichiarato (§Follow-up), non un buco silenzioso.
 
 ### 4. Test (TDD, prima del codice)
 - **Parse frontmatter** (`skills.rs`): `sensitive: [delete, financial]` → 2 categorie; alias
@@ -99,6 +106,10 @@ chiede conferma solo sulla scrittura.
 - **MCP/Composio non recintati a livello OS:** come già documentato nell'ADR, questi tool non sono
   sottoprocessi sotto fence; il loro gate è l'asse approval — che è **esattamente** dove agganciamo
   il force-confirm. Nessun enforcement OS-level nuovo qui.
+- **Force-confirm su file/bash effettful:** estendere `skill_policy_forces_confirm` ai path
+  `write_file`/`edit_file`/`apply_patch`/`run_in_sandbox` (oggi coperti da jail + scan, non dalla card
+  sensibile). Utile soprattutto per rendere `delete` enforced end-to-end via lo Step 5, non solo via
+  le difese esistenti.
 - **Detector concreti (Approccio B):** wiring di `WarningCategory` per un gating per-azione più fine
   su `delete`/`sensitive-data` resta possibile in seguito, sopra questo scaffold.
 

@@ -418,9 +418,22 @@ single-threaded+approval.
   **Fase 0.2 (bundle `homun-linux-sandbox` → auto-fence Linux) ✅ FATTA (2026-07-03):** staging Linux-only in
   `prepare-package.mjs` + wiring `HOMUN_LINUX_SANDBOX_BIN` in `main.cjs` + resolver reso puro/testabile
   (`linux_sandbox_helper_resolves`, 5 casi TDD). Flip a `workspace-write` automatico via `default_sandbox_mode()`.
-  **ITEM CORRENTE = Fase 0.3** (skill confirmation policies: categorie sensibili delete/financial/medical/
-  sensitive-data dichiarative in `SKILL.md` rispettate dall'harness, pattern Codex Step 5 ADR 0023). Draft PR **#103**
-  (CI verde incl. Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
+  **VERIFICATA SUL RUNNER** (`d8d6ce5e` pushato su #103): CI verde tutta, incl. **Landlock fence validation
+  (ubuntu-24.04) pass** + Build linux/mac/win + Backend gateway tests.
+  **Fase 0.3 (skill confirmation policies, ADR 0023 Step 5) ✅ SLICE-1 FATTA (2026-07-03):** spec
+  [specs/2026-07-03-skill-confirmation-policies-design.md](superpowers/specs/2026-07-03-skill-confirmation-policies-design.md)
+  (Approccio A approvato). Frontmatter `sensitive: [delete|financial|medical|sensitive-data]` → enum chiuso
+  `SensitiveCategory` (parse forgiving, dedup, esposto su `SkillSummary`); `use_skill` arma `ctx.active_sensitive`
+  **turn-scoped** (dichiarato accanto a `loaded_tools`, persiste tra i round); enforcement puro
+  `skill_policy_forces_confirm(active, is_effectful)` OR-composto ai due chokepoint di approval **MCP+Composio** →
+  force-confirm anche sotto policy permissiva, mai sulle read. TDD: 3 parse + 1 decisione (puri, no env). Refactor
+  behavior-preserving: helper lista `parse_list_value` condiviso con `allowed-tools`; `load_skill_body` converge su
+  `load_skill_body_and_sensitive`. Verifica: bin compila, 552 test verdi (l'unico fallito = `import_pptx…thumbnail`,
+  ambiente senza LibreOffice locale, verde in CI). **Follow-up dichiarati:** force-confirm su file/bash effettful
+  (oggi jailed/contained+scan), cross-turn stickiness (serve store), rendering UI del tag. Vedi
+  [architecture/subagents.md] per il child ctx (arma il proprio set vuoto).
+  **ITEM CORRENTE = Fase 1** (auto-compaction → eval subagenti gemma4 → subagent lifecycle) oppure follow-up 0.3.
+  Draft PR **#103** (CI verde incl. Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
