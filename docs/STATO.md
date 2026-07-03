@@ -524,7 +524,12 @@ single-threaded+approval.
   context-budget (`estimate_tokens`/`needs_context_compaction`/`context_compaction_span`) estratte da main.rs (−79
   righe, rischio ~0). Verifica: crate 3/3 test verdi, gateway 552/552 (solo pptx-env fallito). Stabilito crate +
   pattern move→wire→parità. **Follow-up notato:** `crates/context-compression` è dormiente (non usato dal loop) =
-  altro caso caposaldo #5. **PROSSIMO = Inc-1 (`ModelClient` trait)** o, se preferito, la review UI prima.
+  altro caso caposaldo #5. **Inc-1 FATTO (`c89c15b3`):** estratto `local-first-engine::payload` — `build_chat_payload`
+  puro (shaping Ollama/OpenAI/z.ai, capability come parametri) + `to_ollama_messages`; il gateway tiene un wrapper
+  stessa-firma (6 call-site invariati). NON è il trait `ModelClient` streaming completo (troppo intrecciato con
+  streaming/retry/collector — incremento più avanti); è il pezzo puro sicuro. Verifica: crate 7/7, gateway 552/552,
+  −101 righe (−180 totali, main.rs → 59.763). **PROSSIMO = Inc-2 (spostare `execute_chat_tool`, ~3.3k righe — il
+  chokepoint, il pezzo grosso e rischioso, multi-sessione)** oppure, come da sequenza utente, la **review UI vs Codex**.
   ⭐ Vedi [[homun-codex-fluidity-map]] per il contesto Codex.
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
