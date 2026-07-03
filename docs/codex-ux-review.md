@@ -35,7 +35,25 @@ superfici di Codex alzano la UX di Homun **senza** tradirne l'identità".
    presentazioni. Superfici che Codex non ha.
 4. **Rendering markdown pulito** (liste annidate, bold, inline-code) — alla pari di Codex.
 
-## Miglioramenti UX proposti (ordinati per ROI/rischio, coerenti con l'identità Homun)
+## ⭐ La UX è prodotta dal MOTORE (non dal CSS) — la lettura giusta
+La differenza vera con Codex **non è visiva**: è che ogni superficie UX che ho osservato è **generata da un capability
+del motore** che Homun non ha (o ha in forma bloccante). La UX-come-engine mappa 1:1 sul lavoro motore già in agenda:
+
+| UX di Codex (osservata) | Capability del MOTORE dietro | Gap del motore Homun | Dov'è tracciato |
+|---|---|---|---|
+| Pannello **diff live "+1493 −0"** + commit/push/PR | il motore **traccia le mutazioni** dell'agente + integrazione git | nessun *change-ledger*, niente git nel motore | **Fase 3.1** (git) + un registro mutazioni |
+| **Tool "in esecuzione…"**, piano/reasoning come blocchi separati | il motore emette **ITEM TIPIZZATI** (`item/started|progress|completed`) | il motore emette **solo `Delta` di testo** → tool = pausa cieca | fluidity-map **§5** |
+| Sensazione **viva** (lavora mentre i tool girano) | esecuzione **NON-bloccante / parallela** (`parallel_tool`/async) | il motore è **sequenziale/bloccante** | fluidity-map **§3** / Ondata 2 |
+| **Piano vivo** (card che si aggiorna) | il motore possiede il piano come artefatto di prima classe e ne streamma gli update | **3 affordance di piano che competono** (finding 1.2) | fluidity-map §3 |
+| **Approval inline** ("Accesso completo") | asse approval/sandbox del motore, surfacato al turno | l'asse c'è (Fase 0.1) ma non surfacato/ricco | Fase 0.x + surface |
+| **Ambiente/branch/PR** come stato di sessione | il motore ha thread/turn/**item** + stato-sessione ricco | modello di sessione più piatto | Fase 3.2 (rewind/checkpoint) |
+
+**Conseguenza:** la "review UX" non produce task di CSS ma **conferma la rotta del motore**: l'**estrazione motore
+(ADR 0024)** è l'abilitatore; sopra di essa, i capability che generano la UX-Codex sono **item-streaming (§5),
+change-tracking+git (Fase 3.1), esecuzione non-bloccante (Ondata 2), piano-convergente (finding 1.2)**. Il pannello di
+contesto (sotto U1) è la *superficie* di questi capability, non la sostanza.
+
+## Superfici UI proposte (le "finestre" sui capability del motore, coerenti con l'identità Homun)
 | # | Miglioramento | Perché (da Codex) | Nota |
 |---|---|---|---|
 | **U1** | **Pannello di contesto a destra** — ma in versione Homun: *cosa sto facendo / cosa so*. Es. piano corrente + **artefatti prodotti** (deliverable) + memoria/fonti rilevanti + (quando c'è coding) diff/git. | La cabina di regia di Codex dà situational awareness | Alto valore. Riusa i deliverable come "artifacts panel". Coding-git = Fase 3.1 |
