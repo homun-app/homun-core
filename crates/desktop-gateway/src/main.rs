@@ -6471,6 +6471,26 @@ fn plan_reconcile_on_delivery_enabled() -> bool {
     plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_RECONCILE").ok().as_deref())
 }
 
+/// Turn trace is ON by default (local-only, bounded). `HOMUN_TURN_TRACE=0`/`off` opts out.
+fn turn_trace_enabled() -> bool {
+    !matches!(
+        std::env::var("HOMUN_TURN_TRACE")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("0") | Some("off") | Some("OFF") | Some("Off")
+    )
+}
+
+/// Max bytes before `turn-trace.jsonl` rotates. Override with `HOMUN_TURN_TRACE_MAX_BYTES`.
+fn turn_trace_max_bytes() -> u64 {
+    std::env::var("HOMUN_TURN_TRACE_MAX_BYTES")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(5_000_000)
+}
+
 /// ADR 0022 — Tappa 1: instrada brief/recall/learn tramite `MemoryRecallService`
 /// invece dell'orchestrazione inline. Default OFF (parità conservativa); flip ON
 /// per validare l'incapsulamento. Stessa disciplina di `plan_stall_abort_enabled`.
@@ -23190,6 +23210,27 @@ to the user (one table per row + an optional Sources footer)."
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
     // "ask" also drops the toolset below (pure conversation).
     let mode = request.mode.as_deref().unwrap_or("agent").to_string();
+    // Turn trace (readable per-turn observability): created once, recorded at the decision points
+    // below (round/nudge/reconcile/end). Cheap Arc/None handle; no-op when disabled. See turn_trace.rs.
+    let turn_trace = if turn_trace_enabled() {
+        match gateway_logs_dir() {
+            Ok(dir) => turn_trace::TurnTrace::new(
+                request.request_id.clone(),
+                dir,
+                turn_trace_max_bytes(),
+            ),
+            Err(_) => turn_trace::TurnTrace::disabled(),
+        }
+    } else {
+        turn_trace::TurnTrace::disabled()
+    };
+    turn_trace.record(turn_trace::TurnEvent::TurnStart {
+        prompt_head: request.prompt.chars().take(200).collect(),
+        prompt_len: request.prompt.chars().count(),
+        mode: mode.clone(),
+        model: model.to_string(),
+        tier: turn_tier.as_str().to_string(),
+    });
     let system = match mode.as_str() {
         "ask" => format!(
             "{system}\n\nASK MODE (chosen by the user): answer by conversing from your \
@@ -24491,6 +24532,33 @@ check/update the key in Settings → Model & Runtime."
                     }
                 });
 
+            // Turn trace: record this round's outcome (finish_reason + tools chosen) before the
+            // tool_calls value is consumed below.
+            turn_trace.record(turn_trace::TurnEvent::Round {
+                round,
+                finish_reason: body
+                    .get("choices")
+                    .and_then(|c| c.get(0))
+                    .and_then(|c| c.get("finish_reason"))
+                    .and_then(|f| f.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                tool_calls: tool_calls
+                    .as_ref()
+                    .map(|calls| {
+                        calls
+                            .iter()
+                            .filter_map(|c| {
+                                c.get("function")
+                                    .and_then(|f| f.get("name"))
+                                    .and_then(|n| n.as_str())
+                                    .map(String::from)
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                content_delta_len: raw_content.chars().count(),
+            });
             if let Some(calls) = tool_calls {
                 plan_nudges = 0; // the model is acting again → reset the stop-nudge cap
                 turn_used_tools = true; // slice 2.5: acted → eligible for plan-bootstrap on a premature stop
@@ -24892,6 +24960,10 @@ check/update the key in Settings → Model & Runtime."
                             },
                         )
                         .await;
+                        turn_trace.record(turn_trace::TurnEvent::Nudge {
+                            reason: "answer_did_not_conclude_plan".into(),
+                            next_step: step.clone(),
+                        });
                         continue;
                     }
                     // The answer is substantial and the plan is all-but-closed → finalize with
@@ -24904,6 +24976,12 @@ check/update the key in Settings → Model & Runtime."
                             .iter()
                             .position(|s| plan_step_status(s) != "done")
                         {
+                            // Count open steps at DECISION time (before this reconcile closes one).
+                            let reconcile_open_before = plan_steps
+                                .iter()
+                                .filter(|s| plan_step_status(s) != "done")
+                                .count();
+                            let reconcile_delivered = content.trim().chars().count();
                             plan_steps[open_index]["status"] = serde_json::json!("done");
                             content = replace_latest_plan_marker(&content, &plan_steps);
                             upsert_runtime_plan_memory_from_state(
@@ -24916,6 +24994,13 @@ check/update the key in Settings → Model & Runtime."
                                     "[plan] reconciled last open step to done on delivery: «{step}»"
                                 );
                             }
+                            turn_trace.record(turn_trace::TurnEvent::Reconcile {
+                                fired: true,
+                                step: step.clone(),
+                                open_steps: reconcile_open_before,
+                                delivered_chars: reconcile_delivered,
+                                threshold: MIN_DELIVERED_CHARS_TO_CONCLUDE,
+                            });
                         }
                     }
                 } else if plan_steps.is_empty()
@@ -24970,6 +25055,15 @@ check/update the key in Settings → Model & Runtime."
                         .unwrap_or("");
                     eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
                 }
+                turn_trace.record(turn_trace::TurnEvent::ForcedSynthesis {
+                    finish_reason: body
+                        .get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("finish_reason"))
+                        .and_then(|f| f.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                });
                 // Keep the reasoning trace in context so the synthesis builds on it.
                 if !content.trim().is_empty() {
                     messages.push(serde_json::json!({ "role": "assistant", "content": content }));
@@ -25116,6 +25210,29 @@ Tell me if you want me to retry or rephrase."
                 },
             )
             .await;
+        }
+        // Turn trace: the final record. `memory_answer` is the committed answer in BOTH finalize
+        // paths; `plan` is the final runtime plan. The derived flags (incomplete steps, artifact
+        // claimed-but-absent) are the high-value signal.
+        {
+            let final_steps = execution_plan_steps(&plan);
+            let plan_final: Vec<String> = final_steps
+                .iter()
+                .map(|s| plan_step_status(s).to_string())
+                .collect();
+            let plan_titles: Vec<String> = final_steps
+                .iter()
+                .map(|s| plan_step_title(s).to_string())
+                .collect();
+            let artifact_count = memory_answer.matches("‹‹ARTIFACT››").count();
+            let signals = turn_trace::answer_signals(&memory_answer, artifact_count);
+            let derived = turn_trace::derive_flags(&plan_final, &plan_titles, &signals);
+            turn_trace.record(turn_trace::TurnEvent::TurnEnd {
+                final_len: memory_answer.chars().count(),
+                plan_final,
+                signals,
+                derived,
+            });
         }
         // M2: mine this exchange for durable personal memory (fire-and-forget, off
         // the response path). Best-effort; never blocks or fails the turn.
