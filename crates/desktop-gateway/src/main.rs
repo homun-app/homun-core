@@ -18819,6 +18819,9 @@ struct ChatToolCtx<'a> {
     nav_failures: &'a mut std::collections::HashMap<String, u32>,
     browse_sources: &'a mut Vec<String>,
     plan: &'a mut ExecutionPlan,
+    /// Readable per-turn trace (cheap Arc/None handle). Records the plan sent→canonical transition
+    /// from `execute_chat_tool`; no-op when disabled. See turn_trace.rs.
+    turn_trace: turn_trace::TurnTrace,
     step_evidence: &'a mut Vec<String>,
     tool_trace: &'a mut Vec<String>,
     loaded_tools: &'a mut std::collections::BTreeSet<String>,
@@ -21388,6 +21391,19 @@ an uncertain date.",
                 plan_sig.join(",")
             );
         }
+        // Turn trace: the sent→canonical transition makes the verify-hold visible (a step the model
+        // claimed `done` that the gate keeps `doing`). Recorded regardless of verbose_debug.
+        let status_of = |s: &serde_json::Value| {
+            s.get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+                .to_string()
+        };
+        ctx.turn_trace.record(turn_trace::TurnEvent::Plan {
+            op: name.to_string(),
+            sent: sent.iter().map(&status_of).collect(),
+            canonical: plan_steps.iter().map(&status_of).collect(),
+        });
         if plan_steps.is_empty() {
             "Empty plan: provide at least one step with a title.".to_string()
         } else {
@@ -24624,6 +24640,7 @@ check/update the key in Settings → Model & Runtime."
                         nav_failures: &mut nav_failures,
                         browse_sources: &mut browse_sources,
                         plan: &mut plan,
+                        turn_trace: turn_trace.clone(),
                         step_evidence: &mut step_evidence,
                         tool_trace: &mut tool_trace,
                         loaded_tools: &mut loaded_tools,
@@ -39736,6 +39753,8 @@ async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String
                 nav_failures: &mut c_nav_failures,
                 browse_sources: &mut c_browse_sources,
                 plan: &mut c_plan,
+                // Subagent turn-trace is out of MVP scope (subagents are default-off).
+                turn_trace: turn_trace::TurnTrace::disabled(),
                 step_evidence: &mut c_step_evidence,
                 tool_trace: &mut c_tool_trace,
                 loaded_tools: &mut c_loaded_tools,
