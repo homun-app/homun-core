@@ -23210,7 +23210,15 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     let system = if plan_directive.is_empty() {
         system
     } else {
-        format!("{system}\n\n{plan_directive}")
+        // Mode-independent guarantee (kept in main.rs; asserted by the ui-contract): an
+        // EXPLICIT user request for a plan always routes through the plan machinery,
+        // regardless of agent/plan/debug mode.
+        format!(
+            "{system}\n\n{plan_directive}\n\n\
+If the user explicitly asks to create, show, update, verify, or test a plan, use the plan machinery: \
+call update_plan for an operational plan or emit PLAN_PROPOSE for approval-gated plan-mode; do NOT \
+write a free-form numbered plan only in prose."
+        )
     };
     let system = system.as_str();
     let mut endpoint = chat_endpoint(&base_url);

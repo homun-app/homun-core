@@ -14,7 +14,10 @@ const OPERATIONAL_BODY: &str = "Use update_plan to CREATE or revise the plan (gi
 
 /// Agent/debug opener: EXECUTE operationally, no stop-to-propose. The only stop is a user-EXPLICIT
 /// request to see/approve a plan first (user-triggered, not model-guessed).
-const AGENT_OPENER: &str = "PLAN: for a non-trivial MULTI-STEP task (development, refactor, involved research, actions with effects), CREATE an operational plan with update_plan (set its `objective`) and EXECUTE it in THIS turn, one step at a time — do NOT stop to ask approval of the plan itself; just start working. Irreversible or risky ACTIONS are gated separately by the approval system, not by proposing a plan. ONLY if the user EXPLICITLY asks to see, approve, create, or test a plan FIRST: emit on its own line `‹‹PLAN_PROPOSE››{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}‹‹/PLAN_PROPOSE››` (valid JSON) and STOP, executing after approval.";
+// The explicit-user-plan-request clause is MODE-INDEPENDENT and lives in the gateway
+// prompt build (`main.rs`), not here — both to avoid duplicating it in every mode and
+// because the ui-contract asserts that guarantee against `main.rs`.
+const AGENT_OPENER: &str = "PLAN: for a non-trivial MULTI-STEP task (development, refactor, involved research, actions with effects), CREATE an operational plan with update_plan (set its `objective`) and EXECUTE it in THIS turn, one step at a time — do NOT stop to ask approval of the plan itself; just start working. Irreversible or risky ACTIONS are gated separately by the approval system, not by proposing a plan.";
 
 /// Plan-mode opener: propose-and-STOP for ANY non-trivial request (the user chose to gate execution).
 const PLAN_OPENER: &str = "PLAN MODE (chosen by the user): for ANY non-trivial request FIRST propose a plan — emit on its own line `‹‹PLAN_PROPOSE››{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}‹‹/PLAN_PROPOSE››` (valid JSON) — and STOP. The user will see Accept/Edit; EXECUTE the plan ONLY in the NEXT turn after approval; if they ask for changes, revise and re-propose.";
@@ -40,8 +43,9 @@ mod tests {
         assert!(d.contains("update_plan"));
         // The removed miscalibration must not come back in agent mode.
         assert!(!d.contains("FIRST propose the plan and STOP"));
-        // Propose is only the user-explicit exception here.
-        assert!(d.contains("ONLY if the user EXPLICITLY asks"));
+        // Agent mode does NOT carry a propose-and-stop instruction (the explicit-request
+        // clause is mode-independent and lives in the gateway prompt build, not here).
+        assert!(!d.contains("PLAN_PROPOSE"));
     }
 
     #[test]
