@@ -489,6 +489,20 @@ single-threaded+approval.
   mirato di 1.2), (b) Fase 1.3 lifecycle, o (c) Fase 2 estrazione motore. Draft PR **#103** (CI verde incl.
   Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
 
+- **⭐ FLUIDITÀ da Codex reale (2026-07-03) — mappa + Ondata 1 iniziata.** Missione utente: studiare il codice REALE
+  di Codex su disco (`/Users/fabio/Projects/codex`: binario `Resources/codex` + `app.asar`) per rendere Homun più
+  fluido. 5 agenti hanno estratto prompt/tool/delega/approval/streaming dal binario → **mappa in
+  [codex-fluidity-map.md](codex-fluidity-map.md)** ([[homun-codex-fluidity-map]]). Tesi: Codex è fluido perché (1)
+  parla meno, (2) offre meno tool/turno, (3) il piano orchestra una delega NON-bloccante. Homun: prompt ~4300 parole
+  + METODO 5-step + niente regole anti-narrazione; ~60 tool/turno (~5k token, ~3 min primo round gemma4:12b); 3-4
+  affordance di decomposizione concorrenti + fan-out sequenziale bloccante. **Ondata-1 punto-1 SPEDITO (`44dcf772`):**
+  blocco `COMMUNICATION STYLE` nel system prompt (anti-fluff/anti-narrazione + assumi-non-chiedere + prose-first),
+  additivo (non tocca le regole browser/sintesi fragili del METODO), 0 test rotti. **Validato eseguendo:** gemma4:12b
+  su domanda concettuale → risposta dritta al contenuto, **niente apertura "Certamente/Ecco"** (baseline: tutti i turni
+  eval di stamattina aprivano con "Certamente. Per fornirti…"). Prossimo: Ondata-1 punto-2 (snellire il set di tool →
+  latenza) e punto-3 (approved-command-prefixes). **NON copiare all'indietro la memoria** (Homun è avanti su Codex).
+  Roadmap CORRETTA (code-grounded): il fix di 1.2 = disambiguare le affordance = Ondata-2 di questa mappa.
+
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
 binario `codex` 0.142.5, chronicle, cua_node, 7 plugin) e auditata Homun v0.1.x sulle dimensioni di
