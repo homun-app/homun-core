@@ -9,5 +9,6 @@
 //! `execute_chat_tool` + `stream_chat_via_openai`.
 
 pub mod context_budget;
+pub mod payload;
 
 pub use context_budget::{context_compaction_span, estimate_tokens, needs_context_compaction};

@@ -15260,81 +15260,9 @@ async fn warm_ollama_capabilities(http: &reqwest::Client, base_url: &str, model:
 /// Converts OpenAI-style messages to Ollama native `/api/chat` shape: multimodal
 /// content-parts become `{content, images:[base64]}`; assistant `tool_calls`
 /// arguments are parsed from JSON STRING back to an OBJECT (native expects an object).
-fn to_ollama_messages(messages: &[serde_json::Value]) -> Vec<serde_json::Value> {
-    messages
-        .iter()
-        .map(|m| {
-            let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-            let mut out = serde_json::Map::new();
-            out.insert("role".into(), serde_json::Value::String(role.to_string()));
-            match m.get("content") {
-                Some(serde_json::Value::Array(parts)) => {
-                    let mut text = String::new();
-                    let mut images: Vec<serde_json::Value> = Vec::new();
-                    for part in parts {
-                        match part.get("type").and_then(|t| t.as_str()) {
-                            Some("text") => {
-                                if let Some(t) = part.get("text").and_then(|x| x.as_str()) {
-                                    text.push_str(t);
-                                }
-                            }
-                            Some("image_url") => {
-                                if let Some(url) = part
-                                    .get("image_url")
-                                    .and_then(|u| u.get("url"))
-                                    .and_then(|x| x.as_str())
-                                {
-                                    // Native wants raw base64 (no data: prefix).
-                                    let b64 = url.rsplit("base64,").next().unwrap_or(url);
-                                    images.push(serde_json::Value::String(b64.to_string()));
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    out.insert("content".into(), serde_json::Value::String(text));
-                    if !images.is_empty() {
-                        out.insert("images".into(), serde_json::Value::Array(images));
-                    }
-                }
-                Some(serde_json::Value::String(s)) => {
-                    out.insert("content".into(), serde_json::Value::String(s.clone()));
-                }
-                Some(other) => {
-                    out.insert("content".into(), other.clone());
-                }
-                None => {
-                    out.insert("content".into(), serde_json::Value::String(String::new()));
-                }
-            }
-            if let Some(calls) = m.get("tool_calls").and_then(|v| v.as_array()) {
-                let converted: Vec<serde_json::Value> = calls
-                    .iter()
-                    .map(|tc| {
-                        let name = tc
-                            .get("function")
-                            .and_then(|f| f.get("name"))
-                            .and_then(|n| n.as_str())
-                            .unwrap_or("");
-                        let args = match tc.get("function").and_then(|f| f.get("arguments")) {
-                            Some(serde_json::Value::String(s)) => {
-                                serde_json::from_str::<serde_json::Value>(s)
-                                    .unwrap_or_else(|_| serde_json::json!({}))
-                            }
-                            Some(value) => value.clone(),
-                            None => serde_json::json!({}),
-                        };
-                        serde_json::json!({ "function": { "name": name, "arguments": args } })
-                    })
-                    .collect();
-                if !converted.is_empty() {
-                    out.insert("tool_calls".into(), serde_json::Value::Array(converted));
-                }
-            }
-            serde_json::Value::Object(out)
-        })
-        .collect()
-}
+// `to_ollama_messages` + `build_chat_payload` (pure shaping) moved to
+// `local-first-engine::payload` (ADR 0024 Inc-1). The gateway keeps only the thin
+// `build_chat_payload` wrapper (below) that resolves the impure capability/env flags.
 
 /// Applies one Ollama native chat object (`{message:{content,tool_calls},done}`):
 /// streams the content fragment live, accumulates it, and appends any tool_calls
@@ -15482,63 +15410,34 @@ fn build_chat_payload(
     temperature: f64,
     is_final_round: bool,
 ) -> serde_json::Value {
+    // Thin wrapper (ADR 0024 Inc-1): resolve the impure flags (capability cache + env)
+    // here, delegate the provider-specific shaping to the PURE `local-first-engine`
+    // payload builder. Same signature → the call sites are unchanged. See
+    // crates/engine/src/payload.rs (Ollama native/OpenAI/z.ai quirks, tool/think gating).
     let max_tokens = chat_payload_max_tokens(
         is_final_round,
         env::var("HOMUN_DEBUG_MAIN_LOOP_MAX_TOKENS").ok().as_deref(),
     );
-    if is_ollama_base(base_url) {
-        // Native /api/chat streams content + tool_calls together fine on current
-        // Ollama (verified on 0.30.6: `/v1` AND native both return tool_calls while
-        // streaming — the historical drop-bug ollama#12557 doesn't reproduce). So we
-        // STREAM always (live tokens) — the ollama-rs "stream:false with tools" rule
-        // is conservative/historical and not needed here. `keep_alive` keeps a LOCAL
-        // model warm between turns. The collector also handles a non-streamed single
-        // object, so this stays robust if a future model needs stream:false.
-        let mut payload = serde_json::json!({
-            "model": model,
-            "messages": to_ollama_messages(messages),
-            "stream": true,
-            "keep_alive": "10m",
-            "options": { "temperature": temperature, "num_predict": max_tokens },
-        });
-        // Offer tools only when the model can use them. Strip ONLY when /api/show confidently
-        // reports no `tools` capability; undetected/cloud (profile None) → keep tools, fail-safe.
-        let tool_capable = ollama_capabilities(base_url, model)
-            .map(|c| c.tools)
-            .unwrap_or(true);
-        if !is_final_round && !tools.is_empty() && tool_capable {
-            payload["tools"] = serde_json::Value::Array(tools.to_vec());
-        }
-        // Ask for the reasoning trace as a SEPARATE `message.thinking` field, but ONLY for
-        // models that advertise the capability (cache warmed before the loop) — sending it to a
-        // non-thinking model 400s. Clean separation beats parsing inline `<think>` tags.
-        if ollama_thinking_supported(base_url, model) {
-            payload["think"] = serde_json::Value::Bool(true);
-        }
-        payload
-    } else {
-        let mut payload = serde_json::json!({
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": true,
-        });
-        // z.ai GLM defaults to "thinking" mode, which streams the answer as
-        // `reasoning_content` and frequently emits an EMPTY `content` (finish_reason
-        // `stop` with no answer text) — the stream reassembly reads `content`/
-        // `tool_calls` only, so the turn dead-ends on the canned fallback. Disabling
-        // it makes GLM emit normal content + structured tool_calls like every other
-        // provider (verified against api.z.ai). Opt back in with HOMUN_ZAI_THINKING=1.
-        if is_zai_base(base_url) && !zai_thinking_enabled() {
-            payload["thinking"] = serde_json::json!({ "type": "disabled" });
-        }
-        if !is_final_round && !tools.is_empty() {
-            payload["tools"] = serde_json::Value::Array(tools.to_vec());
-            payload["tool_choice"] = serde_json::Value::String("auto".to_string());
-        }
-        payload
-    }
+    let is_ollama = is_ollama_base(base_url);
+    // Offer tools only when the model can use them; undetected/cloud (profile None) → keep
+    // tools, fail-safe. Thinking trace requested only for models that advertise it.
+    let tool_capable = ollama_capabilities(base_url, model)
+        .map(|c| c.tools)
+        .unwrap_or(true);
+    let thinking_supported = ollama_thinking_supported(base_url, model);
+    let zai_thinking_disabled = is_zai_base(base_url) && !zai_thinking_enabled();
+    local_first_engine::payload::build_chat_payload(
+        model,
+        messages,
+        tools,
+        temperature,
+        is_final_round,
+        is_ollama,
+        zai_thinking_disabled,
+        tool_capable,
+        thinking_supported,
+        max_tokens,
+    )
 }
 
 fn chat_payload_max_tokens(is_final_round: bool, debug_override: Option<&str>) -> u32 {
@@ -57830,7 +57729,7 @@ data: [DONE]\n";
                 "function": { "name": "read_file", "arguments": "{\"path\":\"a.txt\"}" }
             }]
         })];
-        let converted = crate::to_ollama_messages(&msgs);
+        let converted = local_first_engine::payload::to_ollama_messages(&msgs);
         assert_eq!(
             converted[0]["tool_calls"][0]["function"]["arguments"]["path"],
             "a.txt"
