@@ -451,8 +451,16 @@ export function ChatView({
   // ADR 0022 (Piano UI C2): plan/activity derivati dai messaggi PERSISTED, non da
   // threadMessages (che cambia ogni frame di stream). Il plan/activity del messaggio
   // streaming si vede quando viene persisted.
-  const conversationPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
-  const conversationActivity = useMemo(() => latestActivitySteps(messages), [messages]);
+  // Live-first: during a turn, the island reads the sparse-event live state; when
+  // the turn ends the persisted messages carry the same final plan/activity, so
+  // `?? persisted` hands off with no flicker (livePlan stays sticky until the next
+  // turn/thread reset). ADR 0022 C2 stays honoured — we never derive from the
+  // per-frame `threadMessages`, only from sparse events. See spec 2026-07-03.
+  const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
+  const conversationPlan = liveWorkspace.livePlan ?? persistedPlan;
+  const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
+  const conversationActivity =
+    liveWorkspace.liveActivity.length > 0 ? liveWorkspace.liveActivity : persistedActivity;
   const workspacePlanSteps = useMemo(
     () => (conversationPlan ? parsePlanSteps(conversationPlan) : []),
     [conversationPlan],
