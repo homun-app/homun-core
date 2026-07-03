@@ -11201,7 +11201,8 @@ fn spawn_subagent_tool_schema() -> serde_json::Value {
                             "type": "object",
                             "properties": {
                                 "goal": { "type": "string" },
-                                "contract": { "type": "string" }
+                                "contract": { "type": "string" },
+                                "role": { "type": "string", "description": "Optional model specialization for this sub-task: one of \"explorer\"/\"research\" (web gather), \"coding\", \"memory\", \"vision\". Omit to reuse your current model." }
                             },
                             "required": ["goal"]
                         },
@@ -39281,16 +39282,20 @@ fn loaded_capability_tools_for_subagents(state: &AppState) -> Result<Vec<Capabil
 async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String {
     use crate::subagent_child::{
         MAX_SUBAGENT_CHILDREN, SubagentResult, child_gather_tools, run_chat_subagent,
-        synthesize_subagent_results,
+        subagent_role_to_registry_role, synthesize_subagent_results,
     };
 
     let args: serde_json::Value =
         serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
-    // Parse `{tasks:[{goal, contract?}], budget?}`. `budget` is accepted but not yet
-    // applied per-child (Task 3 wires per-role budgets); each child is already bounded
-    // by `run_agentic_step`'s round cap, so ignoring it here is safe.
+    // Parse `{tasks:[{goal, role?, contract?}], budget?}`. `role` is an OPTIONAL hint
+    // that specializes a child's MODEL (Task 3): mapped to a registry role and resolved
+    // per child; absent/unknown → INHERIT the manager's model. `budget` is accepted but
+    // not yet applied per-child; each child is already bounded by `run_agentic_step`'s
+    // round cap, so ignoring it here is safe.
     let tasks_in = args.get("tasks").and_then(|v| v.as_array());
-    let mut goals: Vec<(String, Option<String>)> = Vec::new();
+    // Per task: (goal, contract, role_hint). `role_hint` is the raw string from the
+    // model; it is mapped to a registry role INSIDE the child loop (see below).
+    let mut goals: Vec<(String, Option<String>, Option<String>)> = Vec::new();
     if let Some(arr) = tasks_in {
         for task in arr {
             let goal = task
@@ -39306,7 +39311,12 @@ async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String
                 .get("contract")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            goals.push((goal, contract));
+            let role_hint = task
+                .get("role")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            goals.push((goal, contract, role_hint));
         }
     }
 
@@ -39334,12 +39344,14 @@ async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String
         }
     };
 
-    // Router PARAMS reusing the MANAGER's current model (per-role routing is Task 3).
-    // Ollama endpoints are OpenAI-compatible, so OpenaiCompat covers them; only
-    // Anthropic needs its own provider path. We keep the *params* here (all Send/Clone)
-    // and build the actual `ModelRouter` INSIDE `block_in_place` per child — a
-    // `ModelRouter` holds a `dyn InferenceProvider` that is NOT `Send`, so it must never
-    // live across the progress `.await` below or the whole turn future stops being Send.
+    // Router PARAMS for the INHERIT default: reuse the MANAGER's current model. A child
+    // with an explicit `role` hint overrides this with a role-resolved model (built per
+    // child inside `block_in_place`, see below). Ollama endpoints are OpenAI-compatible,
+    // so OpenaiCompat covers them; only Anthropic needs its own provider path. We keep
+    // the *params* here (all Send/Clone) and build the actual `ModelRouter` INSIDE
+    // `block_in_place` per child — a `ModelRouter` holds a `dyn InferenceProvider` that
+    // is NOT `Send`, so it must never live across the progress `.await` below or the
+    // whole turn future stops being Send.
     let kind = if ctx.base_url.contains("anthropic") {
         ProviderKind::Anthropic
     } else {
@@ -39358,7 +39370,12 @@ async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String
 
     let mut results: Vec<(String, SubagentResult)> = Vec::new();
     // SEQUENTIAL fan-out (see the doc comment): one child at a time.
-    for (goal, contract) in &goals {
+    for (goal, contract, role_hint) in &goals {
+        // SPECIALIZATION (ADR 0025 Task 3): map the per-task `role` hint to a registry
+        // role, or `None` to INHERIT the manager's model. Mapping is pure/cheap; the
+        // (non-Send) router itself is built per child inside `block_in_place` below.
+        let child_registry_role =
+            subagent_role_to_registry_role(role_hint.as_deref()).map(str::to_string);
         // Live progress so the user sees the fan-out (visibility refined in Task 4).
         let _ = emit_stream_event(
             ctx.tx,
@@ -39466,13 +39483,35 @@ async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String
             };
             // Build the (non-Send) router HERE, inside block_in_place, so it never
             // crosses an await (see the params note above).
-            let child_router = build_router_from(
-                kind,
-                &child_base_url,
-                &child_model,
-                child_api_key.clone(),
-                child_context_window,
-            );
+            //
+            // SPECIALIZATION: with a role hint, resolve a role-appropriate model for THIS
+            // child's goal (goal-aware, via the same `resolve_role_for_task` the
+            // manager/driver use) and build that router. WITHOUT a hint — or if the role
+            // resolves to no eligible model — INHERIT the manager's model (fail-safe: we
+            // just want a working model, so we degrade to inherit rather than fail-closed).
+            // Model selection ONLY: the read/gather envelope is unchanged (a child stays
+            // read-only whatever model it runs on).
+            let child_router = match &child_registry_role {
+                Some(role) => match resolve_role_for_task(&goal_owned, role) {
+                    Some(resolved) => build_router_for_resolved(&resolved),
+                    // Role has no eligible/configured model → fall back to the manager's.
+                    None => build_router_from(
+                        kind,
+                        &child_base_url,
+                        &child_model,
+                        child_api_key.clone(),
+                        child_context_window,
+                    ),
+                },
+                // No role hint → inherit the manager's model (default: don't escalate).
+                None => build_router_from(
+                    kind,
+                    &child_base_url,
+                    &child_model,
+                    child_api_key.clone(),
+                    child_context_window,
+                ),
+            };
             let handle = tokio::runtime::Handle::current();
             run_chat_subagent(
                 &goal_owned,
@@ -55521,6 +55560,66 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             None => {
                 unsafe { std::env::remove_var("HOMUN_USER_ID"); }
             }
+        }
+    }
+
+    /// SECURITY (ADR 0025 slice-1 Task 3): a subagent CHILD's memory recall must ride
+    /// the MANAGER's scope — never default to Personal, never leak to another workspace.
+    ///
+    /// A child recalls via the same `recall_memory` chat tool as the manager, and
+    /// `recall_memory` derives its scope from `gateway_memory_workspace_id()` (the
+    /// process-global `MEMORY_WORKSPACE`). The manager's turn sets that global from
+    /// `request.thread_id` (`set_memory_workspace(&store.workspace_for_thread(tid))`),
+    /// and children run INLINE + SEQUENTIALLY inside that same turn — they never call
+    /// `set_memory_workspace`, so the global still holds the manager's project when a
+    /// child recalls. This test PINS that invariant: with the manager scoped to a named
+    /// project, the workspace a child's recall would use equals the manager's project —
+    /// NOT `__personal__`, NOT a different workspace id.
+    #[test]
+    fn subagent_child_memory_recall_inherits_manager_scope() {
+        let prev = std::env::var("HOMUN_USER_ID").ok();
+        // SAFETY: isolated test; restored below.
+        unsafe { std::env::set_var("HOMUN_USER_ID", "local-user"); }
+
+        // Manager's turn scoped the memory workspace to a NAMED project (this is what
+        // `set_memory_workspace(&workspace_for_thread(tid))` does at turn start).
+        let manager_project = "proj-alpha";
+        super::set_memory_workspace(manager_project);
+        let manager_ws = super::gateway_memory_workspace_id();
+        assert_eq!(
+            manager_ws.as_str(),
+            manager_project,
+            "manager's recall must resolve to its project workspace"
+        );
+
+        // A child runs inline: it does NOT touch `MEMORY_WORKSPACE`. So the workspace
+        // its `recall_memory` derives is byte-identical to the manager's — same scope,
+        // never Personal-by-default, never another workspace.
+        let child_ws = super::gateway_memory_workspace_id();
+        assert_eq!(
+            child_ws.as_str(),
+            manager_ws.as_str(),
+            "a child must inherit the MANAGER's memory scope, not a different one"
+        );
+        assert_ne!(
+            child_ws.as_str(),
+            super::PERSONAL_WORKSPACE,
+            "a project-scoped manager must NOT let a child fall back to Personal"
+        );
+
+        // And a Personal-scoped manager keeps a child Personal (no accidental escalation
+        // into a project either): both sides resolve to `__personal__`.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        let mgr_personal = super::gateway_memory_workspace_id();
+        let child_personal = super::gateway_memory_workspace_id();
+        assert_eq!(mgr_personal.as_str(), super::PERSONAL_WORKSPACE);
+        assert_eq!(child_personal.as_str(), mgr_personal.as_str());
+
+        // Restore shared global + env.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match prev {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value) },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID") },
         }
     }
 

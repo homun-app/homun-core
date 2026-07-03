@@ -74,15 +74,34 @@ const CHILD_READ_GATHER_TOOLS: &[&str] = &[
     "browser_act",
     // Web + memory gather (NonFilesystem).
     "web_search",
-    "memory_recall",
+    // MEMORY RECALL (read-only). The gateway chat tool is literally named
+    // `recall_memory` (see `recall_memory_tool_schema` / the dispatch arm in
+    // `execute_chat_tool`), so the allowlist name MUST match that exact string or
+    // the entry is dead and a child can never recall. This is READ-only: it derives
+    // its `MemoryScope` from the process-global `MEMORY_WORKSPACE` the MANAGER's turn
+    // set from `request.thread_id`, and a child runs INLINE inside that same turn, so
+    // it rides the manager's scope (Thread/Project) — never Personal-by-default nor
+    // another workspace. Memory WRITE tools (`record_decision`, `forget_memory`) are
+    // deliberately absent (see `CHILD_FORBIDDEN_TOOLS`): a child gathers, never learns.
+    "recall_memory",
 ];
 
 /// Write/exec tools that a child must NEVER be able to dispatch. Kept as an explicit
 /// list for the fail-closed assertion in tests and as documentation of intent; the
 /// real guard is [`is_child_read_gather_tool`] (allowlist + footprint), which rejects
 /// these both by absence from the allowlist AND by their Write/Exec footprint.
-pub const CHILD_FORBIDDEN_TOOLS: &[&str] =
-    &["write_file", "edit_file", "apply_patch", "run_in_project"];
+pub const CHILD_FORBIDDEN_TOOLS: &[&str] = &[
+    "write_file",
+    "edit_file",
+    "apply_patch",
+    "run_in_project",
+    // Memory WRITE/mutation tools: a child gathers and recalls, it must NEVER learn
+    // or forget. Learning is a world-state decision (it changes what the manager and
+    // future turns recall) and must ride the manager's single-writer path. These are
+    // absent from `CHILD_READ_GATHER_TOOLS`, so this list is the fail-closed pin.
+    "record_decision",
+    "forget_memory",
+];
 
 /// True iff a chat tool of this name is safe for a child to call: it must be on the
 /// read/gather allowlist AND its filesystem footprint must not be a Write/Exec (a
@@ -112,6 +131,41 @@ pub fn child_gather_tools(loaded: &[CapabilityTool]) -> Vec<CapabilityTool> {
         .filter(|tool| is_child_read_gather_tool(&tool.name, &empty))
         .cloned()
         .collect()
+}
+
+/// Map a subagent per-task `role` HINT to a registry role key (the catalog in
+/// `model_registry::ROLES` / `role_requirements`), or `None` to INHERIT the manager's
+/// model.
+///
+/// ## Why inherit-by-default (ADR 0025 / Codex role pattern)
+///
+/// Children specialize by role→model, but the DEFAULT is inherit: an absent or
+/// unknown hint returns `None`, and the caller then reuses the MANAGER's model rather
+/// than silently escalating cost/capability. Only an explicit, recognized hint routes
+/// a child to a role-appropriate model. This is model SELECTION only — it never widens
+/// the read/gather envelope (a child stays read-only whatever model it runs on).
+///
+/// Recognized hints (case-insensitive), each mapped to an existing registry role so we
+/// reuse the SAME resolver (`resolve_role_for_task`) the manager/driver use — no new
+/// role catalog:
+/// - `explorer` / `research` / `search` → `browser` (the fast observe-act/gather tier)
+/// - `coding` / `code` → `coding` (strong reasoning + tool-use for code)
+/// - `memory` / `recall` → `memory` (fast, cheap extraction/recall tier)
+/// - `vision` / `image` → `vision` (a vision-capable model)
+/// - `orchestrator` / `plan` / `reasoning` → `orchestrator` (the reasoning tier)
+///
+/// Anything else (including `None`) → `None` = inherit.
+pub fn subagent_role_to_registry_role(role_hint: Option<&str>) -> Option<&'static str> {
+    let hint = role_hint?.trim().to_ascii_lowercase();
+    match hint.as_str() {
+        "explorer" | "research" | "search" => Some("browser"),
+        "coding" | "code" => Some("coding"),
+        "memory" | "recall" => Some("memory"),
+        "vision" | "image" => Some("vision"),
+        "orchestrator" | "plan" | "reasoning" => Some("orchestrator"),
+        // Unknown / empty → inherit the manager's model (don't guess a role).
+        _ => None,
+    }
 }
 
 /// The dispatch surface a child uses to actually run a tool. Sync-returning-String
@@ -321,21 +375,80 @@ mod tests {
 
     #[test]
     fn allowlist_excludes_write_and_exec_tools() {
-        // The four world-touching builtins are forbidden — both by absence from the
-        // allowlist and by their Write/Exec footprint.
+        // EVERY forbidden tool is rejected for a child — the primary guarantee is
+        // absence from the read/gather allowlist (default-deny), which holds for all
+        // of them regardless of footprint.
         let empty = serde_json::json!({});
         for name in CHILD_FORBIDDEN_TOOLS {
             assert!(
                 !is_child_read_gather_tool(name, &empty),
                 "{name} must be forbidden to a child"
             );
-            // And its footprint is indeed Write/Exec (the second, independent guard).
+        }
+        // The FILESYSTEM/EXEC writers additionally carry a Write/Exec footprint (the
+        // second, independent fail-closed guard). Memory-write tools are NonFilesystem
+        // (they mutate the memory store, not the filesystem), so they are pinned by
+        // allowlist-absence alone — asserted separately in `memory_write_tools_*`.
+        for name in ["write_file", "edit_file", "apply_patch", "run_in_project"] {
             let fp = tool_footprint(name, &serde_json::json!({"path": "/x"}));
             assert!(
                 matches!(fp, ToolFootprint::Write { .. } | ToolFootprint::Exec),
                 "{name} footprint should be Write/Exec, got {fp:?}"
             );
         }
+    }
+
+    // ── SECURITY (ADR 0025 Task 3): memory scope + read-only memory ───────────
+
+    #[test]
+    fn memory_recall_is_child_gatherable_under_the_real_tool_name() {
+        // Regression pin: the gateway chat tool is named `recall_memory` (NOT
+        // `memory_recall`). If the allowlist name drifts from the dispatch arm the
+        // entry goes dead — a child silently loses memory recall. Assert the REAL
+        // name is on the read/gather allowlist so recall stays reachable.
+        let empty = serde_json::json!({});
+        assert!(
+            is_child_read_gather_tool("recall_memory", &empty),
+            "recall_memory must be gatherable by a child (read-only memory)"
+        );
+        // And a child that is offered `recall_memory` keeps it after filtering.
+        let loaded = vec![tool("recall_memory", ActionClass::Read)];
+        let names: Vec<String> = child_gather_tools(&loaded)
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+        assert_eq!(names, vec!["recall_memory".to_string()]);
+    }
+
+    #[test]
+    fn memory_write_tools_are_never_child_gatherable() {
+        // The SECURITY deliverable's write half: a child gathers/recalls but must
+        // NEVER learn or forget. `record_decision`/`forget_memory` mutate the shared
+        // memory store (a world-state decision that changes future recall) and must
+        // ride the manager's single-writer path — so they are absent from the child
+        // allowlist AND absent from the filtered gather set even when offered.
+        let empty = serde_json::json!({});
+        for name in ["record_decision", "forget_memory"] {
+            assert!(
+                CHILD_FORBIDDEN_TOOLS.contains(&name),
+                "{name} must be listed as forbidden to a child"
+            );
+            assert!(
+                !is_child_read_gather_tool(name, &empty),
+                "{name} (memory write) must never be gatherable by a child"
+            );
+        }
+        // Even if the manager's loaded set contains them, filtering strips them.
+        let loaded = vec![
+            tool("recall_memory", ActionClass::Read),
+            tool("record_decision", ActionClass::WriteWithConfirmation),
+            tool("forget_memory", ActionClass::WriteWithConfirmation),
+        ];
+        let names: Vec<String> = child_gather_tools(&loaded)
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+        assert_eq!(names, vec!["recall_memory".to_string()]);
     }
 
     #[test]
@@ -507,6 +620,50 @@ mod tests {
         assert!(block.contains("gather B") && block.contains("finding B"));
         // Both children recorded their gather provenance.
         assert!(block.matches("gather:web_search").count() == 2);
+    }
+
+    // ── SPECIALIZATION (ADR 0025 Task 3): role hint → registry role, inherit default ──
+
+    #[test]
+    fn role_hint_maps_known_hints_and_inherits_otherwise() {
+        // Known hints resolve to an existing registry role (reusing the manager's
+        // resolver), case-insensitively and trimming whitespace.
+        assert_eq!(subagent_role_to_registry_role(Some("explorer")), Some("browser"));
+        assert_eq!(subagent_role_to_registry_role(Some("research")), Some("browser"));
+        assert_eq!(subagent_role_to_registry_role(Some("  Coding ")), Some("coding"));
+        assert_eq!(subagent_role_to_registry_role(Some("MEMORY")), Some("memory"));
+        assert_eq!(subagent_role_to_registry_role(Some("vision")), Some("vision"));
+        assert_eq!(
+            subagent_role_to_registry_role(Some("orchestrator")),
+            Some("orchestrator")
+        );
+
+        // Unknown, empty, and absent → INHERIT (None) = reuse the manager's model.
+        // This is the safe default: don't silently escalate cost/capability.
+        assert_eq!(subagent_role_to_registry_role(Some("wizard")), None);
+        assert_eq!(subagent_role_to_registry_role(Some("")), None);
+        assert_eq!(subagent_role_to_registry_role(Some("   ")), None);
+        assert_eq!(subagent_role_to_registry_role(None), None);
+    }
+
+    #[test]
+    fn role_hint_decides_specialize_vs_inherit_router_path() {
+        // The routing DECISION (HTTP-free): a task WITH a recognized role hint takes the
+        // "resolve a role → build a specialized router" path (Some), while a task with no
+        // (or an unknown) hint takes the INHERIT path (None = reuse manager's router).
+        // This pins the branch `run_spawn_subagent` selects per child without a live model.
+        let specialized = subagent_role_to_registry_role(Some("explorer"));
+        let inherited = subagent_role_to_registry_role(None);
+        assert!(
+            specialized.is_some(),
+            "a role-hinted child must resolve a registry role (specialize)"
+        );
+        assert!(
+            inherited.is_none(),
+            "an un-hinted child must inherit the manager's model"
+        );
+        // The two paths are distinct — a hinted child does NOT share the inherit path.
+        assert_ne!(specialized, inherited);
     }
 
     #[test]
