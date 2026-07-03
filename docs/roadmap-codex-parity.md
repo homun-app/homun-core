@@ -36,7 +36,11 @@ Chiude ADR 0023 al 100%. S–M.
 
 ## Fase 1 — Table-stakes coding-agent (indipendenti dall'estrazione) — *M*
 - **1.1 Auto-compaction** — compaction token-budget-driven della conversazione + consapevolezza contesto
-  (`get_context_remaining`/`new_context_window` equivalenti). Senza, le sessioni lunghe si rompono. *(M)*
+  (`get_context_remaining`/`new_context_window` equivalenti). Senza, le sessioni lunghe si rompono. *(M)* — ✅
+  **SLICE-1 FATTA (2026-07-03):** design **memory-integrato** (compaction = checkpoint di memoria: write-back al
+  motore unico prima del collasso → lossless, poi summary salience-aware). Funzioni pure TDD (estimate char/4 /
+  trigger 0.75×window / span boundary-safe head+tail); `compact_for_context_budget` harness-driven (no tool,
+  ADR 0021). Follow-up: recall-enrichment, calibrazione `usage`, persistenza durabile, UI fill%.
 - **1.2 Eval subagenti su gemma4** — validare flag-on end-to-end (manager spawna read/gather + sintetizza),
   poi accendere `HOMUN_SUBAGENTS` di default. *(S–M)* → sblocca la priorità utente.
 - **1.3 Subagent lifecycle basilare** — `wait`/`interrupt`/`close` + concorrenza cloud-aware (semaforo =

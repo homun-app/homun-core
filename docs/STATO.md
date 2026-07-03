@@ -432,8 +432,24 @@ single-threaded+approval.
   ambiente senza LibreOffice locale, verde in CI). **Follow-up dichiarati:** force-confirm su file/bash effettful
   (oggi jailed/contained+scan), cross-turn stickiness (serve store), rendering UI del tag. Vedi
   [architecture/subagents.md] per il child ctx (arma il proprio set vuoto).
-  **ITEM CORRENTE = Fase 1** (auto-compaction → eval subagenti gemma4 → subagent lifecycle) oppure follow-up 0.3.
-  Draft PR **#103** (CI verde incl. Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
+  **Fase 1.1 (auto-compaction token-budget-driven = CHECKPOINT DI MEMORIA) ✅ SLICE-1 FATTA (2026-07-03):** spec
+  [specs/2026-07-03-auto-compaction-memory-checkpoint-design.md](superpowers/specs/2026-07-03-auto-compaction-memory-checkpoint-design.md).
+  **Design memory-integrato su richiesta utente** ("preservare i salienti + tenere aggiornata la memoria per non
+  perdere nulla"): Codex comprime-e-dimentica, Homun comprime-DENTRO-la-memoria. Meccanica: 3 funzioni pure TDD
+  (`estimate_tokens` char/4 model-agnostic — NO tiktoken, sarebbe sbagliato sui locali; `needs_context_compaction`
+  soglia 0.75 del `context_window` da `registry_model_capabilities`, unknown→fail-open; `context_compaction_span`
+  boundary-safe: preserva head=2 + tail=8, sposta il boundary oltre i `tool`-result → nessun orfano OpenAI-compat).
+  `compact_for_context_budget` al confine di round (accanto a `compact_completed_step`): **write-back dello span in
+  memoria via `learn_via_service_or_inline` PRIMA del collasso** (motore unico ADR 0022, off-path fire-and-forget,
+  rete di sicurezza lossless) → poi summary salience-aware (`summarize_message_slice` estratto+condiviso, prompt
+  rafforzato su stato/decisioni/aperte/artefatti) → `splice`. Harness-driven, no tool per il modello (ADR 0021).
+  Converge: `compact_completed_step` rifattorizzato su `summarize_message_slice`/`render_slice_text`
+  (behavior-preserving). Verifica: bin compila, 555 test verdi (+3, unico fallito = pptx/LibreOffice d'ambiente).
+  **Follow-up dichiarati:** recall-enrichment (compaction↔memoria bidirezionale), calibrazione da `usage` reale,
+  persistenza durabile summary, indicatore UI context-fill%.
+  **ITEM CORRENTE = Fase 1.2** (eval subagenti flag-on end-to-end su gemma4 → accendere `HOMUN_SUBAGENTS` default)
+  poi 1.3 (lifecycle wait/interrupt/close + concorrenza cloud-aware + chip UI). Draft PR **#103** (CI verde incl.
+  Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
