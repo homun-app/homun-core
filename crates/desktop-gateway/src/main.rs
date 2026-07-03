@@ -18843,8 +18843,11 @@ fn tool_safety_enabled() -> bool {
 }
 
 /// Gate for the experimental subagent-orchestration tool (ADR 0025). Default OFF — when
-/// off, `spawn_subagent` is not even added to the toolset, so behavior is unchanged. The
-/// fan-out/join/scope wiring lands in later slice-1 tasks; today the dispatch is a stub.
+/// off, `spawn_subagent` is not even added to the toolset (and the dispatch also refuses
+/// it defensively), so behavior is unchanged. When ON, the dispatch runs a live
+/// SEQUENTIAL read/gather fan-out (Task 2, `run_spawn_subagent`): children gather and the
+/// manager synthesizes + stays the sole writer. Per-role model routing, per-child budget,
+/// and memory-scope threading are later slice-1 tasks (Task 3).
 fn subagents_enabled() -> bool {
     std::env::var("HOMUN_SUBAGENTS").as_deref() == Ok("1")
 }
@@ -19081,8 +19084,17 @@ require your confirmation in the app. Propose it and stop."
             }
         }
         if ctx.browser_session.is_none() {
-            let reused = match ctx.thread_id {
-                Some(t) => {
+            // A read/gather subagent child must NOT steal/park the thread's WARM browser
+            // session: `take_thread_browser_session` REMOVES it from the thread and hands
+            // it to the child's `browser_session`, which is dropped when the child ctx
+            // goes out of scope → `BrowserSidecarSession::drop` shuts down Chromium,
+            // killing the manager's warm session cross-turn. A child keeps its own
+            // `thread_id` (needed for project-root resolution on read_file/list_files and
+            // for Task 3's memory scoping), so we gate on `read_only` — the child always
+            // spawns a THROWAWAY sidecar (fine: it's discarded at child exit) and never
+            // touches the shared warm session.
+            let reused = match (ctx.read_only, ctx.thread_id) {
+                (false, Some(t)) => {
                     let st = ctx.state.clone();
                     let t = t.to_string();
                     tokio::task::spawn_blocking(move || {
@@ -19092,7 +19104,7 @@ require your confirmation in the app. Propose it and stop."
                     .ok()
                     .flatten()
                 }
-                None => None,
+                _ => None,
             };
             // A reused session already has the "chat_0" tab open;
             // mark it opened so navigate reuses it (Navigate, not
@@ -21582,18 +21594,23 @@ loaded with use_skill):\n{}",
         }
         out
     } else if name == "spawn_subagent" {
-        // Fase-0 seam (ADR 0025): the tool is only offered when HOMUN_SUBAGENTS=1; the
-        // fan-out/join/scope-threading wiring is slice-1 Tasks 1-4. Until then, be honest.
-        let _ = emit_stream_event(
-            ctx.tx,
-            GenerateStreamEvent::Delta {
-                text: "‹‹ACT››👥 Subagents‹‹/ACT››".to_string(),
-            },
-        )
-        .await;
-        "Subagent orchestration is enabled but not yet wired (slice-1 in progress). \
-Proceed with the task yourself for now."
-            .to_string()
+        // ADR 0025 slice-1 Task 2: LIVE fan-out. The tool is only offered when
+        // HOMUN_SUBAGENTS=1; children are read/gather-only and the manager stays the
+        // sole writer (see `run_spawn_subagent`). A child MUST NOT recurse into another
+        // fan-out, so refuse it inside a child ctx (a child is `read_only`): a child
+        // that somehow got the tool would otherwise spawn grandchildren.
+        if !subagents_enabled() {
+            // Defense-in-depth: the tool isn't in the schema when the flag is off, so a
+            // well-behaved model never calls it — but refuse a hallucinated call rather
+            // than run the fan-out with the flag disabled.
+            "subagent orchestration is disabled".to_string()
+        } else if ctx.read_only {
+            "spawn_subagent is not available to a subagent (no nested fan-out). \
+Return your findings for the manager to act on."
+                .to_string()
+        } else {
+            run_spawn_subagent(ctx, args_raw).await
+        }
     } else if name == "write_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
@@ -39197,6 +39214,302 @@ fn plan_is_browse_only(plan: &ExecutionPlan) -> bool {
                     .map(|name| browser_method_for_chat_tool(name).is_some())
                     .unwrap_or(false)
         })
+}
+
+/// Build the full loaded `CapabilityTool` set (with real input schemas) from the
+/// capability registry — the SAME registry read `orchestrator_drive_for_chat` does to
+/// feed the drive executor's arg-fill. A subagent child needs real schemas so
+/// `run_agentic_step`'s `fill_arguments` can constrain the model's tool args; the chat
+/// loop itself only keeps JSON tool_schemas + a name set, not typed `CapabilityTool`s,
+/// so we re-read the registry here. The caller filters this down to the child's
+/// read/gather allowlist via `subagent_child::child_gather_tools`.
+fn loaded_capability_tools_for_subagents(state: &AppState) -> Result<Vec<CapabilityTool>, String> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let registry = lock_capability_registry(state).map_err(|e| format!("{e:?}"))?;
+    let policy = registry
+        .policy_context(&user, &workspace)
+        .map_err(|e| format!("policy context: {e}"))?;
+    let mut loaded: Vec<CapabilityTool> = Vec::new();
+    for provider in &policy.enabled_providers {
+        let tools = registry
+            .cached_tools(provider)
+            .map_err(|e| format!("cached tools: {e}"))?;
+        loaded.extend(tools.into_iter().map(|cached| cached.tool));
+    }
+    Ok(loaded)
+}
+
+/// LIVE fan-out for the `spawn_subagent` tool (ADR 0025, slice-1 Task 2). The manager
+/// delegates independent read/gather sub-tasks to bounded children, collects each
+/// child's findings, and returns ONE synthesized block for the manager to act on in its
+/// own turn. The manager stays the ONLY writer — children run through
+/// `subagent_child::run_chat_subagent`, which offers only the `child_gather_tools`
+/// allowlist and refuses writes at the dispatch boundary (Task 1's guarantee).
+///
+/// ## The async→sync bridge (mirrors the browse path)
+///
+/// The child loop is `subagent_child::run_chat_subagent` → `run_agentic_step`, which is
+/// SYNCHRONOUS: its executor seam is `FnMut(&CapabilityTool, Value) -> _`, no `.await`.
+/// But the real tool dispatch (`execute_chat_tool`) is ASYNC and we are already inside
+/// it, on the multi-threaded Tokio runtime, holding the manager's `&mut ChatToolCtx`.
+///
+/// The browse path crosses this boundary by running its WHOLE sync driven loop
+/// (`orchestrator_drive_for_chat`) inside `tokio::task::spawn_blocking`, because its
+/// executor calls the fully-SYNC `call_shared_browser_sidecar` — it never needs to
+/// re-enter async, and it owns no `&mut ChatToolCtx` (not `Send`/`'static`).
+///
+/// Our case is the inverse: the child dispatch must re-enter the ASYNC
+/// `execute_chat_tool`, and it borrows a `&mut ChatToolCtx` that is NOT `Send`. So we
+/// cannot move it into `spawn_blocking`. Instead we use `tokio::task::block_in_place`:
+/// it tells the multi-thread runtime "this worker is about to block", migrating other
+/// tasks off it, so we can `Handle::current().block_on(...)` the async dispatch from
+/// inside the sync closure WITHOUT moving the ctx across a thread boundary (the closure
+/// and the `&mut child_ctx` stay on the same thread). This is the standard sync-closure-
+/// calls-async bridge on a multi-thread runtime, and it composes with the browse path's
+/// choice rather than inventing a new mechanism: browse = spawn_blocking (no re-entry),
+/// subagents = block_in_place + block_on (re-entry required).
+///
+/// ## Sequential-for-slice-1 (de-risk)
+///
+/// Children run ONE AT A TIME. On local (the primary target) `active_llm_concurrency()`
+/// is 1, so children serialize on the model anyway — sequential is behaviorally
+/// identical AND avoids sharing/cloning a `&mut ChatToolCtx` across concurrent children
+/// (each child gets its own read-only ctx built inline). TRUE concurrency (a semaphore
+/// sized to `active_llm_concurrency()`, cloud parallelism) is an explicit follow-up, not
+/// this task.
+async fn run_spawn_subagent(ctx: &mut ChatToolCtx<'_>, args_raw: &str) -> String {
+    use crate::subagent_child::{
+        MAX_SUBAGENT_CHILDREN, SubagentResult, child_gather_tools, run_chat_subagent,
+        synthesize_subagent_results,
+    };
+
+    let args: serde_json::Value =
+        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+    // Parse `{tasks:[{goal, contract?}], budget?}`. `budget` is accepted but not yet
+    // applied per-child (Task 3 wires per-role budgets); each child is already bounded
+    // by `run_agentic_step`'s round cap, so ignoring it here is safe.
+    let tasks_in = args.get("tasks").and_then(|v| v.as_array());
+    let mut goals: Vec<(String, Option<String>)> = Vec::new();
+    if let Some(arr) = tasks_in {
+        for task in arr {
+            let goal = task
+                .get("goal")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if goal.is_empty() {
+                continue;
+            }
+            let contract = task
+                .get("contract")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            goals.push((goal, contract));
+        }
+    }
+
+    if goals.is_empty() {
+        return "spawn_subagent: no valid sub-tasks were provided (each task needs a non-empty \
+`goal`). Proceed with the task yourself."
+            .to_string();
+    }
+
+    // Bound the fan-out: clamp to MAX_SUBAGENT_CHILDREN. A model that asks for more gets
+    // the first N; the rest are dropped with a note so the manager knows.
+    let requested = goals.len();
+    let clamped = requested > MAX_SUBAGENT_CHILDREN;
+    goals.truncate(MAX_SUBAGENT_CHILDREN);
+
+    // The child tool set: the manager's gather-eligible tools filtered to the read/gather
+    // allowlist. Built once from the registry (real schemas) and shared by every child.
+    let child_tools = match loaded_capability_tools_for_subagents(ctx.state) {
+        Ok(all) => child_gather_tools(&all),
+        Err(err) => {
+            eprintln!("[subagents] could not load capability tools: {err}");
+            return format!(
+                "spawn_subagent: could not load tools for subagents ({err}). Proceed yourself."
+            );
+        }
+    };
+
+    // Router PARAMS reusing the MANAGER's current model (per-role routing is Task 3).
+    // Ollama endpoints are OpenAI-compatible, so OpenaiCompat covers them; only
+    // Anthropic needs its own provider path. We keep the *params* here (all Send/Clone)
+    // and build the actual `ModelRouter` INSIDE `block_in_place` per child — a
+    // `ModelRouter` holds a `dyn InferenceProvider` that is NOT `Send`, so it must never
+    // live across the progress `.await` below or the whole turn future stops being Send.
+    let kind = if ctx.base_url.contains("anthropic") {
+        ProviderKind::Anthropic
+    } else {
+        ProviderKind::OpenaiCompat
+    };
+    // Same context-window resolution the other router builders use: explicit env
+    // override, else a safe 32k default (the child reuses the manager's model, whose
+    // real window the manager already budgets against).
+    let child_context_window = env::var("HOMUN_INFERENCE_CONTEXT_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(32_768);
+    let child_base_url = ctx.base_url.clone();
+    let child_model = ctx.model.clone();
+    let child_api_key = ctx.api_key.clone();
+
+    let mut results: Vec<(String, SubagentResult)> = Vec::new();
+    // SEQUENTIAL fan-out (see the doc comment): one child at a time.
+    for (goal, contract) in &goals {
+        // Live progress so the user sees the fan-out (visibility refined in Task 4).
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!("‹‹ACT››👥 {goal}…‹‹/ACT››"),
+            },
+        )
+        .await;
+
+        // A NARROW read_only child ctx: same shared turn context (state/tx/thread_id/
+        // prompt/request…) but its OWN mutable buffers and `read_only:true`, so even the
+        // shared dispatch's own read-only guard refuses any write the allowlist somehow
+        // let through (belt-and-braces on top of `child_gather_tools`). The child never
+        // shares the manager's browser session or plan — it gets fresh, empty ones.
+        let mut c_messages: Vec<serde_json::Value> = Vec::new();
+        let mut c_accumulated = String::new();
+        let mut c_browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>> = None;
+        let mut c_browser_used = false;
+        let mut c_last_snapshot = String::new();
+        let mut c_pending_browser_image: Option<String> = None;
+        let mut c_browser_tool_call_ids: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let mut c_current_target = String::new();
+        let mut c_opened_targets: Vec<String> = Vec::new();
+        let mut c_nav_failures: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        let mut c_browse_sources: Vec<String> = Vec::new();
+        // The child has no plan of its own — an empty one keeps the ctx well-formed.
+        let mut c_plan = runtime_execution_plan(&[]);
+        let mut c_step_evidence: Vec<String> = Vec::new();
+        let mut c_tool_trace: Vec<String> = Vec::new();
+        let mut c_loaded_tools: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let mut c_tool_schemas: Vec<serde_json::Value> = Vec::new();
+        let mut c_last_round_sig = String::new();
+        let mut c_repeat_count: u32 = 0;
+        let mut c_progress_anchor_round: usize = 0;
+        let mut c_pending_compaction = false;
+        let mut c_pending_vault_reveal_marker: Option<String> = None;
+        let mut c_pending_confirm = false;
+        let mut c_base_url = ctx.base_url.clone();
+        let mut c_model = ctx.model.clone();
+        let mut c_api_key = ctx.api_key.clone();
+        let mut c_endpoint = ctx.endpoint.clone();
+
+        // Wrap the whole sync child loop so we can `block_on` the async dispatch from
+        // inside its sync executor closure (see the doc comment: block_in_place, NOT
+        // spawn_blocking, because the child ctx is not `Send`).
+        // Weave the model's per-task `contract` (if any) into the goal the child sees, so
+        // the child actually honors the acceptance criteria the manager attached. The
+        // synthesis block below still keys off the plain `goal` for a clean label.
+        let goal_owned = match contract {
+            Some(c) if !c.trim().is_empty() => format!("{goal}\n\nContract: {}", c.trim()),
+            _ => goal.clone(),
+        };
+        let outcome = tokio::task::block_in_place(|| {
+            let mut child_ctx = ChatToolCtx {
+                messages: &mut c_messages,
+                accumulated: &mut c_accumulated,
+                browser_session: &mut c_browser_session,
+                browser_used: &mut c_browser_used,
+                last_snapshot: &mut c_last_snapshot,
+                pending_browser_image: &mut c_pending_browser_image,
+                browser_tool_call_ids: &mut c_browser_tool_call_ids,
+                current_target: &mut c_current_target,
+                opened_targets: &mut c_opened_targets,
+                nav_failures: &mut c_nav_failures,
+                browse_sources: &mut c_browse_sources,
+                plan: &mut c_plan,
+                step_evidence: &mut c_step_evidence,
+                tool_trace: &mut c_tool_trace,
+                loaded_tools: &mut c_loaded_tools,
+                tool_schemas: &mut c_tool_schemas,
+                last_round_sig: &mut c_last_round_sig,
+                repeat_count: &mut c_repeat_count,
+                progress_anchor_round: &mut c_progress_anchor_round,
+                pending_compaction: &mut c_pending_compaction,
+                pending_vault_reveal_marker: &mut c_pending_vault_reveal_marker,
+                pending_confirm: &mut c_pending_confirm,
+                base_url: &mut c_base_url,
+                model: &mut c_model,
+                api_key: &mut c_api_key,
+                endpoint: &mut c_endpoint,
+                // Shared, read-only turn context (reborrowed off the manager's ctx).
+                state: ctx.state,
+                tx: ctx.tx,
+                thread_id: ctx.thread_id,
+                prompt: ctx.prompt,
+                request: ctx.request,
+                // The child is ALWAYS read-only: belt-and-braces on the allowlist.
+                read_only: true,
+                channel_owner: ctx.channel_owner,
+                contact_only: ctx.contact_only,
+                can_see_contacts: ctx.can_see_contacts,
+                can_see_calendar: ctx.can_see_calendar,
+                autonomous: ctx.autonomous,
+                composio_writes: ctx.composio_writes,
+                catalog_index: ctx.catalog_index,
+                capability_corpus: ctx.capability_corpus,
+                automation_user_id: ctx.automation_user_id,
+                automation_workspace_id: ctx.automation_workspace_id,
+                turn_scaffold: ctx.turn_scaffold,
+                floor_acting: ctx.floor_acting,
+                round: ctx.round,
+            };
+            // Build the (non-Send) router HERE, inside block_in_place, so it never
+            // crosses an await (see the params note above).
+            let child_router = build_router_from(
+                kind,
+                &child_base_url,
+                &child_model,
+                child_api_key.clone(),
+                child_context_window,
+            );
+            let handle = tokio::runtime::Handle::current();
+            run_chat_subagent(
+                &goal_owned,
+                &child_tools,
+                |name: &str, tool_args: serde_json::Value| {
+                    // The async→sync seam: block_on the real async gateway dispatch on
+                    // the child's read_only ctx. `execute_chat_tool` returns the tool's
+                    // model-facing String; `run_chat_subagent` wraps it back into JSON.
+                    let raw = tool_args.to_string();
+                    handle.block_on(execute_chat_tool(&mut child_ctx, name, &raw, "subagent"))
+                },
+                &child_router,
+            )
+        });
+
+        match outcome {
+            Ok(result) => results.push((goal.clone(), result)),
+            Err(err) => results.push((
+                goal.clone(),
+                SubagentResult {
+                    findings: serde_json::json!({
+                        "summary": format!("(subagent failed: {err})")
+                    }),
+                    evidence: vec![],
+                },
+            )),
+        }
+    }
+
+    let mut synthesized = synthesize_subagent_results(&results);
+    if clamped {
+        synthesized.push_str(&format!(
+            "\n\n(Note: {requested} sub-tasks requested; only the first {MAX_SUBAGENT_CHILDREN} \
+were run — the cap. Re-delegate the rest if still needed.)"
+        ));
+    }
+    synthesized
 }
 
 /// Plans then DRIVES the turn. Returns `Ok(Some((gathered, plan_steps)))` when the

@@ -36,10 +36,11 @@
 //! exists. The `spawn_subagent` tool stays a stub behind `HOMUN_SUBAGENTS` until
 //! then. See [`ChildDispatch`] for the exact bridge plan.
 
-// Seam-phase: this module is the child-loop MACHINERY (Task 1). Nothing calls it
-// live yet — the manager fan-out that invokes `run_chat_subagent` with a real
-// `execute_chat_tool`-backed dispatch is Task 2. Mirrors `tool_safety.rs`'s
-// seam-phase allow. Remove the allow once Task 2 wires it in.
+// Task 2 wires the live fan-out (`spawn_subagent` in main.rs calls `run_chat_subagent`
+// + `synthesize_subagent_results` with an `execute_chat_tool`-backed dispatch). A few
+// items here stay test-only fail-closed documentation (`CHILD_FORBIDDEN_TOOLS`,
+// `ChildDispatch` as a named trait), so keep a module-level allow rather than sprinkle
+// per-item allows. Mirrors `tool_safety.rs`'s seam-phase allow.
 #![allow(dead_code)]
 
 use local_first_capabilities::CapabilityTool;
@@ -114,29 +115,26 @@ pub fn child_gather_tools(loaded: &[CapabilityTool]) -> Vec<CapabilityTool> {
 }
 
 /// The dispatch surface a child uses to actually run a tool. Sync-returning-String
-/// on purpose: `run_agentic_step`'s executor seam is synchronous, and the whole loop
-/// runs under `spawn_blocking` (the model + sidecar calls block), exactly like the
+/// on purpose: `run_agentic_step`'s executor seam is synchronous, exactly like the
 /// drive's browse path (`|tool, args| this.run_browser_tool(...)`).
 ///
-/// ## Bridge plan to `execute_chat_tool` (Task 2)
+/// `FnMut` (not `Fn`), because the real Task-2 dispatch mutably borrows a child
+/// `ChatToolCtx` (`execute_chat_tool(&mut child_ctx, …)`) — so the closure necessarily
+/// captures `&mut child_ctx`. `run_agentic_step`'s executor is already `FnMut`, so this
+/// composes.
 ///
-/// In Task 2 the manager, inside its live turn, builds a closure that calls the real
-/// async `execute_chat_tool(ctx, name, &args_raw, call_id)` and blocks on it (the
-/// child loop is already on a blocking thread; use a `Handle::block_on` /
-/// `futures::executor::block_on` at that seam). `execute_chat_tool` needs a
-/// `ChatToolCtx`; a child needs a NARROW subset of its fields:
-///   - `state`, `tx`, `thread_id`, `prompt`   — read-only turn context / streaming.
-///   - `browser_session` + the browser bookkeeping (`browser_used`, `last_snapshot`,
-///     `opened_targets`, `current_target`, `nav_failures`, `browse_sources`,
-///     `browser_tool_call_ids`) — so browser read/gather reuses the thread's session.
-///   - `read_only: true` + an empty write set — belt-and-braces: even the shared
-///     dispatch's own read-only guard then refuses any write the allowlist somehow
-///     let through.
-/// A child does NOT need `plan`, `step_evidence`, `pending_confirm`, `composio_writes`,
-/// the model-switch fields, etc. — those are writer/planner concerns. The seam here
-/// is a plain `Fn(name, args_json) -> String`, so none of that couples into Task 1.
-pub trait ChildDispatch: Fn(&str, serde_json::Value) -> String {}
-impl<F: Fn(&str, serde_json::Value) -> String> ChildDispatch for F {}
+/// ## Bridge to `execute_chat_tool` (Task 2, now wired in main.rs)
+///
+/// The manager, inside its live turn, wraps the sync child loop in
+/// `tokio::task::block_in_place` and, inside this closure, `Handle::current().block_on`s
+/// the async `execute_chat_tool(&mut child_ctx, name, &args_raw, call_id)`. `block_in_place`
+/// (not `spawn_blocking`) is used because the child ctx is not `Send`, so it can't cross
+/// a thread boundary. `execute_chat_tool` needs a `ChatToolCtx`; a child gets a NARROW
+/// `read_only` one: shared turn context (`state`/`tx`/`thread_id`/`prompt`/`request`) +
+/// its OWN fresh mutable buffers, `read_only: true` (belt-and-braces: even the shared
+/// dispatch's read-only guard then refuses any write the allowlist somehow let through).
+pub trait ChildDispatch: FnMut(&str, serde_json::Value) -> String {}
+impl<F: FnMut(&str, serde_json::Value) -> String> ChildDispatch for F {}
 
 /// The synthesized result of one child subagent's read/gather loop.
 #[derive(Debug, Clone, PartialEq)]
@@ -146,6 +144,56 @@ pub struct SubagentResult {
     /// Provenance: which gather tools the child actually called (e.g.
     /// `"gather:web_search"`). Empty means the child gathered nothing.
     pub evidence: Vec<String>,
+}
+
+/// Hard cap on how many children a single `spawn_subagent` fan-out may run
+/// (Task 2). A larger `tasks` array is clamped to the first N so a runaway/adversarial
+/// model can't spawn an unbounded number of children. Each child is itself bounded by
+/// `run_agentic_step`'s `MAX_AGENTIC_ROUNDS`, so the total work is
+/// `MAX_SUBAGENT_CHILDREN * MAX_AGENTIC_ROUNDS` rounds — a fixed ceiling.
+pub const MAX_SUBAGENT_CHILDREN: usize = 4;
+
+/// Reduce one child's `findings` JSON to a compact one-line string for the manager
+/// prompt. The child loop's forced synthesis produces `{"summary": "..."}` (the
+/// `finish` action), so prefer `summary`; fall back to the whole JSON for any other
+/// shape. Kept separate from [`synthesize_subagent_results`] so both are trivially
+/// unit-testable.
+fn findings_to_text(findings: &serde_json::Value) -> String {
+    if let Some(summary) = findings.get("summary").and_then(|v| v.as_str()) {
+        return summary.trim().to_string();
+    }
+    // No `summary` key (unusual): render the raw JSON so nothing is silently dropped.
+    findings.to_string()
+}
+
+/// Join N children's results into ONE model-facing block for the manager to act on.
+///
+/// This is the "synthesize" half of the fan-out/JOIN: the manager stays the only
+/// writer, so a child never touches the world — it hands back findings + evidence, and
+/// the manager reads THIS block in its own turn and decides what to do. Pure (no ctx,
+/// no IO) precisely so it can be unit-tested without a live turn.
+///
+/// `results` pairs each child's original `goal` with its [`SubagentResult`] so the
+/// block is self-describing (which finding answers which sub-task). Evidence is
+/// appended per child when present, so the manager can see provenance.
+pub fn synthesize_subagent_results(results: &[(String, SubagentResult)]) -> String {
+    if results.is_empty() {
+        return "Subagent findings: (no sub-tasks were run).".to_string();
+    }
+    let mut out = String::from("Subagent findings:\n");
+    for (goal, result) in results {
+        let findings = findings_to_text(&result.findings);
+        out.push_str(&format!("- {goal}: {findings}"));
+        if !result.evidence.is_empty() {
+            out.push_str(&format!(" [evidence: {}]", result.evidence.join(", ")));
+        }
+        out.push('\n');
+    }
+    out.push_str(
+        "\nSynthesize the above into your answer and take any required action yourself \
+         (the subagents only gathered — you are the only writer).",
+    );
+    out
 }
 
 /// Build the read/gather `PlanStep` a child runs. A child is always a ReadGather
@@ -177,7 +225,7 @@ fn child_step(goal: &str) -> PlanStep {
 /// Run ONE child subagent's bounded read/gather loop and return its findings.
 ///
 /// A thin wrapper over [`run_agentic_step`]: it adapts the child's simple
-/// `Fn(name, args) -> String` dispatch to the orchestrator executor seam
+/// `FnMut(name, args) -> String` dispatch to the orchestrator executor seam
 /// (`FnMut(&CapabilityTool, Value) -> OrchestratorResult<Value>`) and enforces the
 /// read/gather allowlist a SECOND time at the dispatch boundary (defense in depth: a
 /// tool must be in `allowed_tools` AND pass the footprint guard, else the dispatch
@@ -186,7 +234,7 @@ fn child_step(goal: &str) -> PlanStep {
 pub fn run_chat_subagent<R, D>(
     goal: &str,
     allowed_tools: &[CapabilityTool],
-    dispatch: D,
+    mut dispatch: D,
     llm: &R,
 ) -> OrchestratorResult<SubagentResult>
 where
@@ -378,5 +426,94 @@ mod tests {
         // calling the closure. Only the read tool actually ran.
         assert_eq!(&*executed.lock().unwrap(), &["web_search".to_string()]);
         assert_eq!(result.findings["summary"], "done safely");
+    }
+
+    // ── Synthesis (JOIN): N child results → one manager-facing block ──────────
+
+    fn result_with(summary: &str, evidence: &[&str]) -> SubagentResult {
+        SubagentResult {
+            findings: serde_json::json!({ "summary": summary }),
+            evidence: evidence.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn synthesize_joins_two_children_with_goals_findings_and_evidence() {
+        let results = vec![
+            (
+                "gather pricing".to_string(),
+                result_with("Plan A is $10/mo.", &["gather:web_search"]),
+            ),
+            (
+                "gather changelog".to_string(),
+                result_with("v2 shipped subagents.", &["gather:read_text_file"]),
+            ),
+        ];
+        let block = synthesize_subagent_results(&results);
+
+        // Both goals AND both findings appear in the single block.
+        assert!(block.contains("gather pricing"));
+        assert!(block.contains("Plan A is $10/mo."));
+        assert!(block.contains("gather changelog"));
+        assert!(block.contains("v2 shipped subagents."));
+        // Evidence/provenance is carried per child.
+        assert!(block.contains("gather:web_search"));
+        assert!(block.contains("gather:read_text_file"));
+        // The manager is reminded it is the only writer.
+        assert!(block.contains("only writer"));
+    }
+
+    #[test]
+    fn synthesize_handles_empty_and_summaryless_findings() {
+        // Empty fan-out → a clear, non-empty message (never a blank block).
+        assert!(synthesize_subagent_results(&[]).contains("no sub-tasks"));
+
+        // A child whose findings has no `summary` key: the raw JSON is preserved,
+        // not silently dropped.
+        let odd = SubagentResult {
+            findings: serde_json::json!({ "note": "partial" }),
+            evidence: vec![],
+        };
+        let block = synthesize_subagent_results(&[("odd goal".to_string(), odd)]);
+        assert!(block.contains("odd goal"));
+        assert!(block.contains("partial"));
+    }
+
+    #[test]
+    fn two_children_run_then_synthesize_into_one_block() {
+        // End-to-end at the helper level (no live ctx): drive TWO children through the
+        // real `run_chat_subagent` loop with a fake dispatch + fake LLM, then JOIN with
+        // `synthesize_subagent_results`. The single block must carry BOTH goals + both
+        // findings — the exact fan-out/join shape the manager relies on.
+        let allowed = vec![tool("web_search", ActionClass::Read)];
+        let mut results: Vec<(String, SubagentResult)> = Vec::new();
+        for (goal, answer) in [
+            ("gather A", "finding A"),
+            ("gather B", "finding B"),
+        ] {
+            let llm = ScriptRuntime::new(vec![
+                serde_json::json!({"action": "use_tool", "tool_name": "web_search"}),
+                serde_json::json!({"q": goal}),
+                serde_json::json!({"action": "finish", "summary": answer}),
+            ]);
+            let dispatch = |_name: &str, _args: serde_json::Value| "hit".to_string();
+            let r = run_chat_subagent(goal, &allowed, dispatch, &llm).unwrap();
+            results.push((goal.to_string(), r));
+        }
+        assert_eq!(results.len(), 2);
+
+        let block = synthesize_subagent_results(&results);
+        assert!(block.contains("gather A") && block.contains("finding A"));
+        assert!(block.contains("gather B") && block.contains("finding B"));
+        // Both children recorded their gather provenance.
+        assert!(block.matches("gather:web_search").count() == 2);
+    }
+
+    #[test]
+    fn max_children_bound_is_small_and_positive() {
+        // The handler clamps `tasks` to this many children; keep it a small ceiling so
+        // total work stays bounded (see `MAX_SUBAGENT_CHILDREN` docs). The clamp itself
+        // lives in the main.rs handler (needs a live ctx); this pins the constant.
+        assert!(MAX_SUBAGENT_CHILDREN >= 1 && MAX_SUBAGENT_CHILDREN <= 8);
     }
 }
