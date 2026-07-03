@@ -58354,9 +58354,18 @@ data: [DONE]\n";
             last_fired_at: None,
             state: None,
         };
+        // `gateway_user_id()`/`gateway_workspace_id()` read process-global state
+        // (`HOMUN_USER_ID`, `ACTIVE_WORKSPACE`/`HOMUN_WORKSPACE_ID`) that sibling
+        // tests mutate concurrently. Snapshot them ONCE so the insert below and the
+        // lookup later use identical keys — otherwise a parallel test flipping the
+        // global between the two reads makes the lookup miss (the gateway row is
+        // never found → panic). The gateway scope's identity, not its exact value,
+        // is what this test asserts.
+        let gateway_user = super::gateway_user_id();
+        let gateway_workspace = super::gateway_workspace_id();
         let mut gateway_automation = project_automation.clone();
-        gateway_automation.user_id = super::gateway_user_id();
-        gateway_automation.workspace_id = super::gateway_workspace_id();
+        gateway_automation.user_id = gateway_user.clone();
+        gateway_automation.workspace_id = gateway_workspace.clone();
         gateway_automation.title = "Gateway shadow".to_string();
         store.upsert_automation(&project_automation).unwrap();
         store.upsert_automation(&gateway_automation).unwrap();
@@ -58390,11 +58399,7 @@ data: [DONE]\n";
             .unwrap()
             .expect("project automation");
         gateway_automation = store
-            .get_automation(
-                "auto_channel",
-                &super::gateway_user_id(),
-                &super::gateway_workspace_id(),
-            )
+            .get_automation("auto_channel", &gateway_user, &gateway_workspace)
             .unwrap()
             .expect("gateway automation");
 
