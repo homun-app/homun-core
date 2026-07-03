@@ -27458,14 +27458,27 @@ fn default_adaptive_floor() -> String {
     "off".to_string()
 }
 
-/// The shipped default sandbox mode. As of ADR 0023 #1 this is `workspace-write`
-/// (OS fence ON: bash runs sandboxed with writes confined to the project + tool
-/// caches, and file-writes stay project-jailed) — the honest state now that the
-/// fence covers both bash and the write tools. Selecting `danger` in Settings or
-/// `HOMUN_SANDBOX_MODE=danger` opts out. Kept as a canonical string so it round-trips
-/// through `SandboxMode::parse`.
+/// The shipped default sandbox mode (ADR 0023 #1) — PLATFORM-AWARE: the fence is on
+/// by default only where it is production-ready.
+/// - **macOS**: `workspace-write`. Seatbelt (`sandbox-exec`) is always present, so the
+///   fence works out of the box; validated by executing.
+/// - **Windows**: `workspace-write`. No OS fence is applied on Windows (`run_in_project`
+///   only fences on macOS/Linux), so this is functional (approval-only) — not broken.
+/// - **Linux**: `danger` (fence OFF) FOR NOW. The Linux fence needs the
+///   `homun-linux-sandbox` helper binary bundled next to the gateway in the packaged
+///   app; until that ships, defaulting to `workspace-write` would make
+///   `build_sandbox_command` FAIL CLOSED (every bash command refused) whenever the
+///   helper can't be resolved — a broken app. Once the helper is bundled + validated on
+///   a packaged Linux build, flip this to `workspace-write` too. Users can still opt
+///   into any mode in Settings meanwhile.
+/// Selecting `danger` in Settings or `HOMUN_SANDBOX_MODE=danger` opts out; the value is
+/// canonical so it round-trips through `SandboxMode::parse`.
 fn default_sandbox_mode() -> String {
-    "workspace-write".to_string()
+    if cfg!(target_os = "linux") {
+        "danger".to_string()
+    } else {
+        "workspace-write".to_string()
+    }
 }
 
 impl Default for RuntimeSettings {
