@@ -52,6 +52,38 @@ codice passa lo scope del thread a un figlio spawnato).
 Delega-come-**tool**, non come secondo motore: un solo loop guardato (ADR 0021), che *chiama* la delega come
 qualunque altra capability. È l'equivalente Homun di come Claude Code/Codex spawnano subagenti da un tool.
 
+### Concorrenza, routing modello e specializzazione (il nodo local-first)
+
+Riferimento: Codex 0.142.5 ha `spawn_agent` con **role files** (`AgentRoleToml`) che *pinnano* model/effort/tier
+per ruolo, override modello per-spawn (default = **eredita il modello del padre**), cap espliciti
+(`max_concurrent_threads_per_session`/`max_depth`/`job_max_runtime_seconds`), default **delegation-averse**, e gira su
+Ollama/LM Studio. Homun ha già i mattoni; qui li componiamo.
+
+- **Specializzazione = ruolo → modello (già quasi tutto in Homun).** `SubagentTask.agent_id ∈ {Planner, Memory,
+  Tool, Vision, Risk, Automation, Review}` è la specializzazione; il **role→model registry** esistente (6 ruoli,
+  match per-capability via `/api/show`, router semantico goal-aware `resolve_role_for_task`) è il meccanismo. OGGI
+  però `execute_subagent_task` risolve **sempre** il ruolo `orchestrator` (main.rs:~33494): il gap è una **mappa
+  `agent_id → ruolo registry`** (Vision→`vision`, Memory→`memory`, gather→un ruolo "explorer" su modello piccolo,
+  ecc.) — l'equivalente Homun dei role files di Codex, ~1 riga di dispatch + eventualmente esporre i ruoli
+  `vision`/`review` nel catalogo `ROLES`.
+- **Modello per-child: eredita-di-default + override (da Codex).** Un child eredita il modello/tier del manager
+  salvo override esplicito per ruolo. Local-first → **niente escalation di costo silenziosa**; un gather-child può
+  essere pinnato a un modello **piccolo/veloce** locale, il manager resta sul modello forte.
+- **"Occupato → attende O delega": entrambe, già supportate.** Il `ResourceGovernor` cappa `LlmInference` in modo
+  **local-aware** (`active_llm_concurrency`: locale loopback = **1**, cloud = **4**, override utente/env). Ogni
+  `SubagentTask` dichiara `LlmInference:1` → su locale i child **si serializzano** (`WaitingResource` → requeue,
+  non falliscono) = *attende*; oppure il routing per-ruolo li **instrada a un modello libero** = *delega a un
+  modello specifico*. **Verità onesta:** su un singolo modello locale il fan-out **non dà speedup wall-clock**
+  (Ollama serve ~1 per volta; Homun non conosce `OLLAMA_NUM_PARALLEL`, si difende col cap=1) — il valore è
+  decomposizione + specializzazione + contesto isolato. Su cloud il fan-out parallelizza davvero.
+- **Fan-out capacity-aware.** La larghezza del fan-out e l'assegnazione modello-per-child si scalano sulla
+  concorrenza effettiva (già calcolata) e sui modelli caricati: locale stretto → pochi/serializzati; cloud → largo.
+- **Cap bounded + delegation-averse (da Codex).** Slice-1: `max_children` per manager, **`max_depth=1`** (niente
+  nipoti finché read/gather non è punto fermo), `max_runtime`/budget per child; e **spawn solo quando aiuta davvero**
+  (lavoro indipendente parallelizzabile), non per "sii accurato" — allineato al verdetto single-loop e anti
+  plan-stall. NB framing: "**un loop per agente, molti agenti**" (rollout indipendenti riconciliati via write-set
+  disgiunti) è compatibile col single-loop verdict (che riguarda il loop *interno*), NON uno split plan-execute.
+
 ### Ereditarietà (invarianti chiave)
 
 - **Sandbox/approval**: i figli riusano `execute_chat_tool` → `resolved_sandbox_mode()` global li recinta
