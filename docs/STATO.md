@@ -364,6 +364,12 @@ fuori-root negata; `d4f78ae7`); (2) **selector "Sandbox" in Settings › Runtime
 `setRuntimeSettings` rilassato a `Partial`, i18n en+it; `6cefd413`). Comportamento nuovo: ogni bash `run_in_project`
 gira sotto il fence di default; scritture fuori project+cache → escalation card (Codex-like). **⚠️ Smoke Electron
 app-level non eseguito headless** — consigliato prima del merge (PR draft #103).
+**Default PLATFORM-AWARE** (`fffd09ab`): `workspace-write` su macOS/Windows, ma `danger` su **Linux** finché
+l'helper `homun-linux-sandbox` non è bundlato nel packaged app (altrimenti `build_sandbox_command` fail-closed →
+ogni bash rifiutato = app rotta). Bundlare l'helper → flippare anche Linux. **CI flake pre-esistente risolto**
+(`781ccdd8`): `automation_run_..._scope` corseggiava su `HOMUN_USER_ID`/`ACTIVE_WORKSPACE` global (letti due volte),
+NON causato dal flip (provato: esito invariante al sandbox mode); reso ermetico. Residuo noto: ~19 `env::set_var`
+senza `#[serial]` = classe di flake (follow-up = `serial_test`).
 **PROSSIMO (coda notturna):** **#1b** = asse **approval** in Settings + wiring 4-livelli (`resolved_approval_policy`);
 poi **`apply_patch`** (tool-firma Codex: edit multi-file `*** Begin Patch` + diff card, converge su chokepoint+gate);
 poi **orchestrazione subagenti** (design ADR + slice; priorità utente esplicita). Draft PR **#103** aperta (CI verde,
