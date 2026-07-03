@@ -447,9 +447,23 @@ single-threaded+approval.
   (behavior-preserving). Verifica: bin compila, 555 test verdi (+3, unico fallito = pptx/LibreOffice d'ambiente).
   **Follow-up dichiarati:** recall-enrichment (compaction↔memoria bidirezionale), calibrazione da `usage` reale,
   persistenza durabile summary, indicatore UI context-fill%.
-  **ITEM CORRENTE = Fase 1.2** (eval subagenti flag-on end-to-end su gemma4 → accendere `HOMUN_SUBAGENTS` default)
-  poi 1.3 (lifecycle wait/interrupt/close + concorrenza cloud-aware + chip UI). Draft PR **#103** (CI verde incl.
-  Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
+  **Fase 1.2 (eval subagenti flag-on su gemma4) — ESEGUITA 2026-07-03, VERDETTO = NON accendere il default (2 blocker).**
+  Eval reale: gateway debug con `HOMUN_SUBAGENTS=1` + data-dir scratch + `gemma4:12b` locale (Ollama), `POST
+  /api/chat/generate_stream`. **Q1 (la macchina funziona?) ✅ control-flow validato:** con istruzione esplicita a
+  delegare, gemma4:12b emette il tool-call `spawn_subagent` con 3 task; fan-out a **3 figli** confermato (marker
+  `👥 Indagine su Axum/Actix-web/Rocket`); fallback **onesto** quando i figli falliscono (il manager degrada a
+  risposta diretta dichiarando "i sottosistemi di delega hanno riscontrato un errore tecnico" — no silent-fail).
+  **Q2 (gemma4:12b delega da sola?) ❌:** eval-1 con prompt scomponibile ma SENZA istruzione esplicita → risposta
+  diretta, nessuno spawn = segnale ADR 0018 (modelli deboli non raggiungono lo scaffolding). **Blocker gather:** i
+  figli hanno ricevuto **solo tool browser** (`[agentic] start step=child tools=[browser_act,browser_navigate,
+  browser_snapshot]`) e sono falliti perché il **sidecar browser non era montato** → gather+sintesi NON osservati.
+  Combacia con [browser-stealth](../memory/...): *subagent-parallelism = BUILD, browser fix è prereq*. **Verdetto:
+  `HOMUN_SUBAGENTS` resta default-off** finché (1) i figli hanno un gather funzionante (browser sidecar wired, o un
+  gather non-browser) e (2) c'è la spinta tier-adattiva ADR 0018 perché i modelli deboli deleghino senza istruzione
+  esplicita. Nota latenza: primo round gemma4:12b ~3 min (prompt-eval enorme per il tool-schema set). Artefatti in
+  scratchpad/subagent-eval (stream.ndjson/stream2.ndjson/gateway.log).
+  **ITEM CORRENTE = Fase 1.2 follow-up** (browser-backed re-run per validare gather+sintesi, oppure passare a 1.3
+  lifecycle) — decisione utente. Draft PR **#103** (CI verde incl. Landlock Linux). NON toccare `check-ui-contract.mjs` (vault).
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,

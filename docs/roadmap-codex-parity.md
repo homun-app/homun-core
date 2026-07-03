@@ -42,7 +42,10 @@ Chiude ADR 0023 al 100%. S–M.
   trigger 0.75×window / span boundary-safe head+tail); `compact_for_context_budget` harness-driven (no tool,
   ADR 0021). Follow-up: recall-enrichment, calibrazione `usage`, persistenza durabile, UI fill%.
 - **1.2 Eval subagenti su gemma4** — validare flag-on end-to-end (manager spawna read/gather + sintetizza),
-  poi accendere `HOMUN_SUBAGENTS` di default. *(S–M)* → sblocca la priorità utente.
+  poi accendere `HOMUN_SUBAGENTS` di default. *(S–M)* → sblocca la priorità utente. — 🟡 **ESEGUITA (2026-07-03),
+  default NON acceso (2 blocker):** control-flow validato su gemma4:12b (spawn_subagent → 3 figli → fallback
+  onesto), ma (a) gemma4:12b non delega senza istruzione esplicita (ADR 0018) e (b) gather figli bloccato sul
+  sidecar browser non montato (prereq noto). Vedi STATO. Follow-up: browser-backed re-run o 1.3.
 - **1.3 Subagent lifecycle basilare** — `wait`/`interrupt`/`close` + concorrenza cloud-aware (semaforo =
   `active_llm_concurrency`) + chip UI multi-agente. *(M)*
 **Success:** conversazioni lunghe non si rompono; subagenti validati e on-by-default; UI multi-agente.
