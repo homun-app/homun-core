@@ -529,8 +529,22 @@ single-threaded+approval.
   stessa-firma (6 call-site invariati). NON è il trait `ModelClient` streaming completo (troppo intrecciato con
   streaming/retry/collector — incremento più avanti); è il pezzo puro sicuro. Verifica: crate 7/7, gateway 552/552,
   −101 righe (−180 totali, main.rs → 59.763). **PROSSIMO = Inc-2 (spostare `execute_chat_tool`, ~3.3k righe — il
-  chokepoint, il pezzo grosso e rischioso, multi-sessione)** oppure, come da sequenza utente, la **review UI vs Codex**.
-  ⭐ Vedi [[homun-codex-fluidity-map]] per il contesto Codex.
+  chokepoint, il pezzo grosso e rischioso, multi-sessione)** — l'utente ha scelto: **riduzione main.rs a piccoli passi
+  in seguito**, prima la review UX poi early-access. ⭐ Vedi [[homun-codex-fluidity-map]].
+
+- **⭐ REVIEW UX vs Codex (app reali, 2026-07-03) + GOAL+STEPS backend FATTO.** Review visiva side-by-side (Codex.app +
+  Homun.app installate) → [codex-ux-review.md](codex-ux-review.md). **Chiave (utente): la UX è prodotta dal MOTORE, non
+  dal CSS** — ogni superficie Codex (diff/git panel, tool "in esecuzione…", piano vivo, non-bloccante) è un *capability
+  del motore* che Homun non ha o ha bloccante. Homun **non è indietro** come polish (stessa lineage). Forze da tenere:
+  chip deliverable, local-first, ampiezza assistente. **Working island** esiste (`WorkspaceIsland` in ChatView) ma
+  deriva da messaggi PERSISTED → **lag di sync**. **Gap grave trovato: goal+step.** Verificato: `update_plan`/
+  `ExecutionPlan` avevano **step ma NESSUN goal** top-level. **Fase A backend FATTO (`4588fafc`):** `objective` in
+  `update_plan` schema + descrizione (il modello STABILISCE il goal), stato-turno `ctx.plan_objective` (carry-forward
+  + resume dal marker), riga `🎯 **goal**` nel marker ‹‹PLAN›› sopra gli step (frontend la rende già), `replace_latest_
+  plan_marker` self-healing, `parse_plan_objective` + test. 553 test verdi, nessuna regressione. **PROSSIMO/follow-up:**
+  (B) trattamento frontend dedicato del goal in cima all'island + fix sync island; (C) affidabilità produzione piano su
+  modelli deboli (finding 1.2); verificare edge marker seed/reconcile. Debito UI: `ChatView.tsx` 9.4k / `SettingsView`
+  6.9k da splittare.
 
 **Sessione 2026-07-02 — gap analysis production-readiness vs Codex.app + P0 IMPLEMENTATO (branch `feat/p0-production-hygiene`):**
 Analizzato il bundle distribuito di Codex (`/Users/fabio/Projects/codex/Contents`: asar estratto,
