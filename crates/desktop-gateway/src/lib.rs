@@ -100,6 +100,24 @@ pub struct ChatGenerateStreamRequest {
     pub mode: Option<String>,
 }
 
+/// Body for POST /api/chat/turns. The new broker entry point.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct EnqueueTurnRequest {
+    pub thread_id: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub visible_prompt: Option<String>,
+    #[serde(default)]
+    pub attachments: Option<serde_json::Value>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    /// "interactive" | "automation" | "channel" | "connector". Defaults to "interactive".
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CancelGenerationRequest {
     pub request_id: String,

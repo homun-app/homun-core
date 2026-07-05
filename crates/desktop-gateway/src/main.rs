@@ -65,8 +65,8 @@ use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     CommitContinuationResultRequest, CommitPromptResultRequest, CommitRegeneratedResultRequest,
-    SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest, build_chat_runtime_prompt,
-    compact_thread_title, strip_display_markers,
+    EnqueueTurnRequest, SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest,
+    build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
 };
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
@@ -1068,11 +1068,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/capabilities/composio/allowed-tools/{slug}",
             delete(composio_revoke_allowed_tool),
-        )
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            require_gateway_token,
-        ));
+        );
+    // Turn broker HTTP surface — only mounted when HOMUN_TURN_BROKER is on, so the
+    // flag-off path is byte-for-byte unchanged. Registered before the token layer is
+    // applied (below) so these routes are still bearer-gated like the rest of /api.
+    let chat_routes = if turn_broker_enabled() {
+        chat_routes
+            .route("/api/chat/turns", post(enqueue_turn))
+            .route(
+                "/api/chat/turns/{turn_id}",
+                get(get_turn).delete(cancel_turn),
+            )
+            .route("/api/chat/turns/{turn_id}/events", get(get_turn_events))
+            .route("/api/chat/turns/{turn_id}/stream", get(subscribe_turn_stream))
+    } else {
+        chat_routes
+    };
+    let chat_routes = chat_routes.route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        require_gateway_token,
+    ));
     let startup_state = state.clone();
     let mut app = Router::new()
         .route("/api/health", get(health))
@@ -31070,6 +31085,326 @@ async fn resume_stream(Path(request_id): Path<String>) -> Result<Response, Gatew
             message: "No active stream for this request.".to_string(),
         }),
     }
+}
+
+// ── Turn broker HTTP surface (behind turn_broker_enabled()) ───────────────────
+//
+// POST   /api/chat/turns                    — enqueue a chat turn (201 / 409)
+// GET    /api/chat/turns/{turn_id}          — turn status
+// DELETE /api/chat/turns/{turn_id}          — cancel (202 / 404)
+// GET    /api/chat/turns/{turn_id}/events   — batch events (?since=seq)
+// GET    /api/chat/turns/{turn_id}/stream   — replay + live NDJSON (?since=seq)
+
+/// Local identity for broker calls. The desktop gateway is single-user; these are
+/// constants rather than extracted from a session because there is no auth layer yet.
+fn broker_local_user() -> UserId {
+    UserId::new("local")
+}
+
+fn broker_default_workspace() -> WorkspaceId {
+    WorkspaceId::new("default")
+}
+
+/// POST /api/chat/turns — enqueue a chat turn via the broker.
+async fn enqueue_turn(
+    State(state): State<AppState>,
+    Json(req): Json<EnqueueTurnRequest>,
+) -> Result<(StatusCode, Json<Value>), GatewayError> {
+    let request_id = format!(
+        "chat_stream_{}_{}",
+        now_epoch_secs(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let source = match req.source.as_deref().unwrap_or("interactive") {
+        "automation" => local_first_task_runtime::broker::ChatTurnSource::Automation,
+        "channel" => local_first_task_runtime::broker::ChatTurnSource::Channel,
+        "connector" => local_first_task_runtime::broker::ChatTurnSource::Connector,
+        _ => local_first_task_runtime::broker::ChatTurnSource::Interactive,
+    };
+    let approval = match source {
+        local_first_task_runtime::broker::ChatTurnSource::Interactive => {
+            local_first_task_runtime::broker::TurnApproval::Full
+        }
+        _ => local_first_task_runtime::broker::TurnApproval::Confirm,
+    };
+    let input = local_first_task_runtime::broker::ChatTurnInput {
+        thread_id: req.thread_id.clone(),
+        request_id: request_id.clone(),
+        prompt: req.prompt.clone(),
+        visible_prompt: req.visible_prompt.clone(),
+        attachments: req.attachments.clone(),
+        mode: req.mode.clone(),
+        model: req.model.clone(),
+        source,
+        approval,
+    };
+    let user_id = broker_local_user();
+    let workspace_id = broker_default_workspace();
+    let store = state.task_store.lock().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "broker_store_lock",
+        message: format!("task store lock: {e}"),
+    })?;
+    match local_first_task_runtime::broker::enqueue_chat_turn(
+        &store,
+        &user_id,
+        &workspace_id,
+        &input,
+    ) {
+        Ok(enqueued) => {
+            let turn_id = enqueued.task_id.as_str().to_string();
+            Ok((
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "turn_id": turn_id,
+                    "thread_id": enqueued.thread_id,
+                    "request_id": request_id,
+                    "status": "queued",
+                    "position_in_queue": enqueued.position_in_queue,
+                })),
+            ))
+        }
+        Err(local_first_task_runtime::broker::EnqueueError::ThreadBusy {
+            thread_id,
+            active_turn_id,
+        }) => Ok((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "thread_busy",
+                "thread_id": thread_id,
+                "active_turn_id": active_turn_id,
+            })),
+        )),
+        Err(local_first_task_runtime::broker::EnqueueError::Store(e)) => Err(GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "broker_enqueue_store",
+            message: format!("enqueue store error: {e}"),
+        }),
+    }
+}
+
+/// GET /api/chat/turns/{turn_id} — turn status.
+async fn get_turn(
+    Path(turn_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, GatewayError> {
+    let store = state.task_store.lock().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "broker_store_lock",
+        message: format!("lock: {e}"),
+    })?;
+    let user_id = broker_local_user();
+    let workspace_id = broker_default_workspace();
+    let task_id = TaskId::new(&turn_id);
+    let task = store
+        .get_task(&task_id, &user_id, &workspace_id)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "broker_get",
+            message: format!("{e}"),
+        })?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "turn_not_found",
+            message: format!("turn {turn_id} not found"),
+        })?;
+    Ok(Json(serde_json::json!({
+        "turn_id": turn_id,
+        "thread_id": task.input_json.get("thread_id").and_then(|v| v.as_str()),
+        "request_id": task.input_json.get("request_id").and_then(|v| v.as_str()),
+        "status": format!("{:?}", task.status).to_lowercase(),
+        "priority": format!("{:?}", task.priority).to_lowercase(),
+        "source": task.input_json.get("source").and_then(|v| v.as_str()),
+        "created_at": task.created_at.unix_timestamp(),
+        "updated_at": task.updated_at.unix_timestamp(),
+    })))
+}
+
+/// DELETE /api/chat/turns/{turn_id} — cancel a turn (idempotent). 202 if cancelled,
+/// 404 if the turn does not exist or is already terminal.
+async fn cancel_turn(
+    Path(turn_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, GatewayError> {
+    let store = state.task_store.lock().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "broker_store_lock",
+        message: format!("lock: {e}"),
+    })?;
+    let user_id = broker_local_user();
+    let workspace_id = broker_default_workspace();
+    let task_id = TaskId::new(&turn_id);
+    let ok = local_first_task_runtime::broker::cancel_chat_turn(
+        &store,
+        &user_id,
+        &workspace_id,
+        &task_id,
+        &crate::turn_executor::GatewayCancelNotify,
+    )
+    .map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "broker_cancel",
+        message: format!("{e}"),
+    })?;
+    Ok(if ok {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::NOT_FOUND
+    })
+}
+
+/// Query params for the events/stream endpoints.
+#[derive(Debug, Clone, Deserialize)]
+struct TurnSinceQuery {
+    #[serde(default)]
+    since: Option<i64>,
+}
+
+/// GET /api/chat/turns/{turn_id}/events — batch read of events with seq > ?since=.
+async fn get_turn_events(
+    Path(turn_id): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<TurnSinceQuery>,
+) -> Result<Json<Vec<Value>>, GatewayError> {
+    let since = query.since.unwrap_or(0);
+    let store = state.task_store.lock().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "broker_store_lock",
+        message: format!("lock: {e}"),
+    })?;
+    let events = store
+        .read_turn_events(&turn_id, since)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "broker_events",
+            message: format!("{e}"),
+        })?;
+    let out: Vec<_> = events
+        .into_iter()
+        .map(|e| {
+            serde_json::json!({
+                "seq": e.seq,
+                "kind": e.kind.as_str(),
+                "payload": e.payload,
+                "created_at": e.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(out))
+}
+
+/// GET /api/chat/turns/{turn_id}/stream — replay buffered events (seq > since) then
+/// forward live broadcast events, as NDJSON. Mirrors `resume_stream` /
+/// `ndjson_body_for_entry`: the broadcast subscription is taken BEFORE the DB
+/// snapshot so a subscriber neither misses nor duplicates an event. The executor
+/// always persists THEN broadcasts (`emit_turn_event`), so subscribe-first +
+/// dedup-by-seq closes the race window. If no live broadcast exists (turn not
+/// running, or already finished) the stream still serves the replay and then ends.
+async fn subscribe_turn_stream(
+    Path(turn_id): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<TurnSinceQuery>,
+) -> Result<Response, GatewayError> {
+    let since = query.since.unwrap_or(0);
+
+    // 1) Subscribe to the live broadcast FIRST. broadcast::subscribe only yields
+    //    events sent after this call, so we must subscribe before reading the DB to
+    //    avoid losing an event that lands between snapshot and subscribe. The
+    //    overlap (events in both the snapshot and the broadcast) is deduped below.
+    let live_rx = crate::turn_executor::turn_broadcast_registry()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&turn_id).map(|b| b.tx.subscribe()));
+
+    // 2) Replay snapshot from the DB (the durable source of truth) — hold the store
+    //    lock only as long as needed to read. `max_seq` is the highest seq delivered
+    //    in the replay, used to dedup the live tail.
+    let (replay, max_seq) = {
+        let store = state.task_store.lock().map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "broker_store_lock",
+            message: format!("lock: {e}"),
+        })?;
+        let events = store
+            .read_turn_events(&turn_id, since)
+            .map_err(|e| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "broker_events",
+                message: format!("{e}"),
+            })?;
+        let max = events.last().map(|e| e.seq).unwrap_or(since);
+        let lines: Vec<String> = events
+            .into_iter()
+            .map(|e| {
+                serde_json::to_string(&serde_json::json!({
+                    "seq": e.seq,
+                    "kind": e.kind.as_str(),
+                    "payload": e.payload,
+                    "created_at": e.created_at,
+                }))
+                .unwrap_or_else(|_| "{}".to_string())
+            })
+            .collect();
+        (lines, max)
+    };
+
+    // 3) Build the mpsc → Body stream: push replay first, then forward live events,
+    //    deduping any event the snapshot already delivered (seq <= max_seq).
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(64);
+    tokio::spawn(async move {
+        // Replay.
+        for line in &replay {
+            if tx
+                .send(Ok(Bytes::from(format!("{line}\n"))))
+                .await
+                .is_err()
+            {
+                return;
+            }
+        }
+        // Live fan-out (only if a broadcast exists).
+        if let Some(mut brx) = live_rx {
+            loop {
+                match brx.recv().await {
+                    Ok(ev) => {
+                        // Dedup against the replay snapshot: an event persisted right
+                        // before the DB read was also broadcast right after, so it can
+                        // show up in both. Drop the duplicate; live must be strictly >.
+                        if ev.seq <= max_seq {
+                            continue;
+                        }
+                        let line = match serde_json::to_string(&serde_json::json!({
+                            "seq": ev.seq,
+                            "kind": ev.kind,
+                            "payload": ev.payload,
+                        })) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        };
+                        if tx
+                            .send(Ok(Bytes::from(format!("{line}\n"))))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        }
+    });
+
+    let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    }));
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/x-ndjson")
+        .header("cache-control", "no-cache")
+        .body(body)
+        .expect("valid streaming response"))
 }
 
 /// Global fan-out for UI events (thread.upserted, thread.updated, …). One
