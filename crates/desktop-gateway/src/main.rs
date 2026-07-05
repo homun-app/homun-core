@@ -32236,7 +32236,10 @@ fn run_next_task_once(
         // Blocked = didn't meet success criteria. Retry while attempts remain, else
         // mark terminal AND (if recurring) schedule the next occurrence so a single
         // failure never silently stops the automation; notify + record on terminal.
-        handle_failed_task_run(state, &mut task, false, &reason)?;
+        // chat_turn: when attempts are exhausted, FAIL hard (not waiting_external_event,
+        // which would soft-lock the thread forever on a turn the user can't unstick).
+        let hard_error = task.kind == "chat_turn";
+        handle_failed_task_run(state, &mut task, hard_error, &reason)?;
         let retried = matches!(task.status, TaskStatus::Queued);
         sync_session_for_task_run(
             state,
@@ -32704,7 +32707,14 @@ fn handle_failed_task_run(
     reason: &str,
 ) -> Result<(), GatewayError> {
     if task.attempt_count + 1 < task.retry_policy.max_attempts {
-        let step = task.retry_policy.backoff_seconds.max(30);
+        // chat_turn retry policies are explicit and may use short backoffs (15s for
+        // interactive); other tasks get the legacy floor of 30s.
+        let is_chat_turn = task.kind == "chat_turn";
+        let step = if is_chat_turn {
+            task.retry_policy.backoff_seconds
+        } else {
+            task.retry_policy.backoff_seconds.max(30)
+        };
         let backoff = step * (task.attempt_count as i64 + 1);
         task.attempt_count += 1;
         task.status = TaskStatus::Queued;
@@ -32722,6 +32732,22 @@ fn handle_failed_task_run(
             let store = lock_task_store(state)?;
             store.release_resources(task).map_err(GatewayError::task)?;
             store.insert_task(task).map_err(GatewayError::task)?;
+            // Surface the retry as a turn_event so a live subscriber (or one that
+            // reconnects later) can show "retry in corso (n/N fra Xs)…" and the user
+            // can still cancel. Best-effort: a store error here must not block the
+            // retry itself.
+            if is_chat_turn {
+                let _ = store.insert_turn_event(
+                    task.task_id.as_str(),
+                    local_first_task_runtime::TurnEventKind::Retry,
+                    serde_json::json!({
+                        "attempt": task.attempt_count + 1,
+                        "max_attempts": task.retry_policy.max_attempts,
+                        "backoff_seconds": backoff,
+                        "reason": reason,
+                    }),
+                );
+            }
         }
         record_automation_run_for_task(state, task, false, &format!("retry: {reason}"));
         return Ok(());

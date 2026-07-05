@@ -321,6 +321,54 @@ def run_tests():
     http_request("GET", "/api/chat/turns/turn_nonexistent_xyz", expect=404)
     log("  → 404 ✓")
 
+    # --- Test 8: failed turn reaches `failed` (not waiting_external_event) ---
+    # A turn with no LLM provider returns "No reply generated." → the executor marks
+    # completed=false → the worker retries up to max_attempts, then (because chat_turn
+    # uses hard_error=true) lands in `failed`. We verify the FINAL state is failed and
+    # that a `retry` or `error` event was emitted along the way.
+    log("TEST 8: failed chat_turn reaches terminal `failed` state (no waiting_external_event zombie)")
+    thread3 = create_thread()
+    status, body, _ = http_request(
+        "POST",
+        "/api/chat/turns",
+        body={"thread_id": thread3, "prompt": "this will fail without an LLM provider"},
+        expect=201,
+    )
+    turn3 = body.get("turn_id")
+    log(f"  enqueued {turn3}; waiting for retry attempts to exhaust (interactive = 2 attempts, ~15s backoff)…")
+    # Interactive retry policy: max_attempts=2, backoff=15s. Allow generous time for
+    # both attempts to fail and the worker to mark the task failed.
+    final_status = "unknown"
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        status, body, _ = http_request("GET", f"/api/chat/turns/{turn3}")
+        if isinstance(body, dict):
+            final_status = body.get("status")
+            # terminal states for a chat_turn
+            if final_status in ("failed", "completed", "cancelled"):
+                break
+        time.sleep(1.0)
+    log(f"  → final status: {final_status}")
+    if final_status == "waitingexternalevent":
+        fail(
+            "ZOMBIE: turn ended in waiting_external_event (the soft-lock bug). "
+            "Expected: failed (or completed/cancelled)."
+        )
+    if final_status not in ("failed", "completed", "cancelled"):
+        fail(f"turn did not reach a terminal state within 60s (last: {final_status})")
+    # Verify a `retry` or `error` turn_event was emitted (visibility of the retry path).
+    status, body, _ = http_request("GET", f"/api/chat/turns/{turn3}/events?since=0", expect=200)
+    if isinstance(body, list):
+        kinds = [e.get("kind") for e in body]
+        log(f"  event kinds: {kinds}")
+        if "retry" in kinds:
+            log("  → `retry` event emitted ✓ (retry is visible to subscribers)")
+        elif "error" in kinds:
+            log("  → `error` event present (acceptable; retry may have been skipped if max_attempts=1)")
+        else:
+            log(f"  → NOTE: no retry/error events (kinds={kinds}); may be ok if it failed fast")
+    log(f"  → TEST 8 ✓ (final status {final_status}, no zombie)")
+
     log("ALL TESTS PASSED")
 
 

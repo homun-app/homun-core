@@ -2,8 +2,8 @@
 //! Phase 0: testable synchronous primitives. Phase 1 wraps them in an async executor.
 
 use crate::{
-    TaskId, TaskPriority, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore,
-    TurnEventKind, UserId, WorkspaceId,
+    RetryPolicy, TaskId, TaskPriority, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
+    TaskStore, TurnEventKind, UserId, WorkspaceId,
 };
 use serde_json::{json, Value};
 use time::OffsetDateTime;
@@ -101,6 +101,28 @@ pub fn chat_turn_task_id(request_id: &str) -> TaskId {
     TaskId::new(format!("turn_{request_id}"))
 }
 
+/// Retry policy for a chat_turn, by source. Transient failures (LLM 5xx, timeout,
+/// rate limit) get retried; once attempts are exhausted the turn goes to `failed`
+/// (never to the `waiting_external_event` limbo — that would soft-lock the thread
+/// forever on a turn the user can't unstick). Interactive turns retry less
+/// aggressively than automation because the user is waiting on screen.
+pub fn chat_turn_retry_policy(source: ChatTurnSource) -> RetryPolicy {
+    match source {
+        ChatTurnSource::Interactive => RetryPolicy {
+            max_attempts: 2,
+            backoff_seconds: 15,
+        },
+        ChatTurnSource::Channel => RetryPolicy {
+            max_attempts: 3,
+            backoff_seconds: 30,
+        },
+        ChatTurnSource::Automation | ChatTurnSource::Connector => RetryPolicy {
+            max_attempts: 3,
+            backoff_seconds: 60,
+        },
+    }
+}
+
 /// Transactional enqueue: INSERT task(queued) + check 1-turn-per-thread constraint.
 /// Returns ThreadBusy if the thread already has an active chat_turn.
 pub fn enqueue_chat_turn(
@@ -146,6 +168,7 @@ pub fn enqueue_chat_turn(
         ChatTurnSource::Channel => TaskPriority::Low,
         ChatTurnSource::Automation | ChatTurnSource::Connector => TaskPriority::Background,
     };
+    task.retry_policy = chat_turn_retry_policy(input.source);
     task.created_at = now;
     task.updated_at = now;
 
@@ -247,6 +270,7 @@ where
         ChatTurnSource::Channel => TaskPriority::Low,
         ChatTurnSource::Automation | ChatTurnSource::Connector => TaskPriority::Background,
     };
+    task.retry_policy = chat_turn_retry_policy(input.source);
     task.created_at = now;
     task.updated_at = now;
 

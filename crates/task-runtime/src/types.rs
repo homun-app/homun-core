@@ -208,6 +208,10 @@ pub enum TurnEventKind {
     Error,
     Cancelled,
     Aborted,
+    /// A transient failure triggered an automatic retry. Payload carries attempt,
+    /// max_attempts, backoff_seconds, reason — so the UI can show "retry in corso
+    /// (2/2 fra 15s)…". The user can still cancel via DELETE /turns/{id}.
+    Retry,
 }
 
 impl TurnEventKind {
@@ -222,6 +226,7 @@ impl TurnEventKind {
             TurnEventKind::Error => "error",
             TurnEventKind::Cancelled => "cancelled",
             TurnEventKind::Aborted => "aborted",
+            TurnEventKind::Retry => "retry",
         }
     }
 
@@ -236,6 +241,7 @@ impl TurnEventKind {
             "error" => Self::Error,
             "cancelled" => Self::Cancelled,
             "aborted" => Self::Aborted,
+            "retry" => Self::Retry,
             _ => return None,
         })
     }
