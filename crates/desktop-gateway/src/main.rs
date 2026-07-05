@@ -175,6 +175,65 @@ pub(crate) struct AppState {
     pub(crate) ws_registry: std::sync::Arc<ws_gateway::WsRegistry>,
 }
 
+impl AppState {
+    /// Minimal AppState for unit tests that only need a subset of fields (e.g.
+    /// `ws_registry` for `emit_turn_event`). Stores use in-memory SQLite; the
+    /// secret store uses a throwaway temp file. Heavy subsystems (browser
+    /// client, capabilities) are left empty/default — tests that need them
+    /// should construct a real state via the boot path instead.
+    #[cfg(test)]
+    pub(crate) fn for_tests() -> Self {
+        let secret_path = std::env::temp_dir().join(format!(
+            "desktop-gateway-test-secrets-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let secret_store = EncryptedFileSecretStore::open(
+            &secret_path,
+            DevelopmentSecretKeyProvider::new([0u8; 32]),
+        )
+        .expect("open test secret store");
+        let state = AppState {
+            http: reqwest::Client::new(),
+            chat_store: Arc::new(Mutex::new(
+                ChatStore::in_memory().expect("in-memory chat store"),
+            )),
+            task_store: Arc::new(Mutex::new(
+                TaskStore::open_in_memory().expect("in-memory task store"),
+            )),
+            computer_store: Arc::new(Mutex::new(
+                LocalComputerSessionStore::open_in_memory().expect("in-memory computer store"),
+            )),
+            browser_url_policies: Arc::new(Mutex::new(
+                BrowserUrlPolicyStore::open_in_memory().expect("in-memory url policy store"),
+            )),
+            memory_facade: Arc::new(Mutex::new(MemoryFacade::new(
+                SQLiteMemoryStore::open_in_memory().expect("in-memory memory store"),
+            ))),
+            vault_store: Arc::new(Mutex::new(
+                SQLiteVaultStore::open_in_memory().expect("in-memory vault store"),
+            )),
+            pending_vault_proposals: Arc::new(privacy_guard::PendingVaultProposalStore::default()),
+            capability_registry: Arc::new(Mutex::new(
+                CapabilityRegistryStore::open_in_memory().expect("in-memory capability store"),
+            )),
+            task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(false))),
+            task_executor_registry: TaskExecutorRegistry::with_defaults(),
+            browser_capability_client: Arc::new(Mutex::new(None)),
+            browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            secret_store: Arc::new(secret_store),
+            auth_token: "test-token".into(),
+            novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            novnc_view_ticket: Arc::new(Mutex::new(None)),
+            ws_registry: std::sync::Arc::new(ws_gateway::WsRegistry::new()),
+        };
+        // Register the test registry process-wide so the global accessor
+        // (`ws_registry()`) is consistent with `state.ws_registry`.
+        let _ = ws_registry().set(state.ws_registry.clone());
+        state
+    }
+}
+
 #[derive(Debug, Clone)]
 struct PaymentApprovalGrant {
     snapshot: PaymentApprovalSnapshot,
@@ -622,6 +681,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    // Unified WS registry: build the Arc once, register it process-wide (so free
+    // functions like `publish_app_event` can publish without `&AppState`), then
+    // hand the same Arc to AppState. Clones below are cheap Arc clones.
+    let ws_registry_arc = std::sync::Arc::new(ws_gateway::WsRegistry::new());
+    let _ = ws_registry().set(ws_registry_arc.clone());
     let state = AppState {
         http: reqwest::Client::new(),
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
@@ -653,7 +717,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth_token: resolve_gateway_auth_token()?.into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
         novnc_view_ticket: Arc::new(Mutex::new(None)),
-        ws_registry: std::sync::Arc::new(ws_gateway::WsRegistry::new()),
+        ws_registry: ws_registry_arc,
     };
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
@@ -29521,7 +29585,7 @@ fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
         _ => return,
     };
     if let Ok(store) = state.task_store.lock() {
-        let _ = crate::turn_executor::emit_turn_event(&store, turn_id, kind, payload);
+        let _ = crate::turn_executor::emit_turn_event(state, &store, turn_id, kind, payload);
     }
 }
 
@@ -31644,11 +31708,24 @@ fn app_events_tx() -> &'static tokio::sync::broadcast::Sender<String> {
     CELL.get_or_init(|| tokio::sync::broadcast::channel::<String>(256).0)
 }
 
-/// Publish a UI event (JSON) to all connected /api/events listeners.
-/// Best-effort: silently dropped if there are no subscribers.
+/// Process-wide WS registry singleton (set at boot when `AppState` is constructed).
+/// Allows free functions like `publish_app_event` to publish on the unified WS
+/// without threading `&AppState` through every callsite. Clones the `Arc`, not
+/// the registry, so all publishers share one subscriber map.
+fn ws_registry() -> &'static std::sync::OnceLock<std::sync::Arc<ws_gateway::WsRegistry>> {
+    static CELL: std::sync::OnceLock<std::sync::Arc<ws_gateway::WsRegistry>> =
+        std::sync::OnceLock::new();
+    &CELL
+}
+
+/// Publish a UI event (JSON) to all connected /api/events listeners AND to all
+/// unified-WS clients. Best-effort: silently dropped if there are no subscribers.
 fn publish_app_event(event: serde_json::Value) {
-    if let Ok(line) = serde_json::to_string(&event) {
-        let _ = app_events_tx().send(line);
+    let line = serde_json::to_string(&event).unwrap_or_default();
+    let _ = app_events_tx().send(line);
+    // Also publish on the unified WS (fan-out to all connected clients).
+    if let Some(registry) = ws_registry().get() {
+        registry.publish_app_event(event);
     }
 }
 

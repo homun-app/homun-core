@@ -64,23 +64,39 @@ pub fn turn_cancel_notify(turn_id: &str) -> Option<Arc<Notify>> {
 
 /// Fan-out helper: persist the event in turn_events (durable) AND broadcast it live.
 /// Call from the executor for each delta/activity/plan_update/etc.
+///
+/// Publishes on THREE sinks:
+/// 1. `turn_events` table (durable, for stream resume after reconnect).
+/// 2. The per-turn broadcast channel (legacy NDJSON `/api/chat/turns/{id}/events`
+///    stream — transitional, kept until the unified WS is the only client).
+/// 3. The unified `WsRegistry` (fan-out to all connected WS clients).
 pub fn emit_turn_event(
+    state: &crate::AppState,
     store: &TaskStore,
     turn_id: &str,
     kind: TurnEventKind,
     payload: Value,
 ) -> TaskRuntimeResult<()> {
     let event = store.insert_turn_event(turn_id, kind, payload.clone())?;
-    // best-effort live broadcast: no receivers is fine (broadcast::send errors are benign)
+    // Best-effort live broadcast on the per-turn channel (NDJSON stream — transitional).
+    // No receivers is fine (broadcast::send errors are benign).
     if let Ok(map) = turn_broadcast_registry().lock() {
         if let Some(broadcast) = map.get(turn_id) {
             let _ = broadcast.tx.send(TurnEvent {
                 seq: event.seq,
                 kind: event.kind.as_str().to_string(),
-                payload,
+                payload: payload.clone(),
             });
         }
     }
+    // Publish on the unified WS (fan-out to all connected clients).
+    state.ws_registry.publish_turn_event(
+        turn_id,
+        None,
+        event.seq,
+        event.kind.as_str(),
+        event.payload.clone(),
+    );
     Ok(())
 }
 
@@ -219,6 +235,7 @@ pub fn execute_chat_turn_task(
     tracing::info!(target: "broker::executor", turn_id = %turn_id, "emitting done event");
     if let Ok(store) = state.task_store.lock() {
         let _ = emit_turn_event(
+            state,
             &store,
             turn_id,
             local_first_task_runtime::TurnEventKind::Done,
@@ -319,6 +336,7 @@ fn build_activity_prefix_from_turn_events(state: &crate::AppState, turn_id: &str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::AppState;
     use local_first_task_runtime::TaskStore;
 
     #[test]
@@ -334,9 +352,11 @@ mod tests {
     #[test]
     fn emit_persists_and_broadcasts() {
         let store = TaskStore::open_in_memory().unwrap();
+        let state = AppState::for_tests();
         let broadcast = register_turn("turn_test_emit");
         let mut rx = broadcast.tx.subscribe();
         emit_turn_event(
+            &state,
             &store,
             "turn_test_emit",
             TurnEventKind::Delta,
@@ -347,10 +367,12 @@ mod tests {
         let events = store.read_turn_events("turn_test_emit", 0).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, TurnEventKind::Delta);
-        // broadcasted
+        // broadcasted on the per-turn channel
         let received = rx.try_recv().unwrap();
         assert_eq!(received.seq, 1);
         assert_eq!(received.kind, "delta");
+        // published on the unified WS (no subscribers → noop, but must not panic)
+        assert_eq!(state.ws_registry.subscriber_count(), 0);
         unregister_turn("turn_test_emit");
     }
 
