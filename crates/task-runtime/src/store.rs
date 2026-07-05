@@ -146,6 +146,24 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_automation_event_dedup_seen
                 ON automation_event_dedup(automation_id, seen_at DESC);
 
+            CREATE TABLE IF NOT EXISTS turn_events (
+                event_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                turn_id     TEXT NOT NULL,
+                seq         INTEGER NOT NULL,
+                kind        TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at  INTEGER NOT NULL,
+                UNIQUE(turn_id, seq)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_turn_events_turn
+                ON turn_events(turn_id, seq);
+
+            CREATE TABLE IF NOT EXISTS broker_meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
             INSERT INTO task_runtime_metadata(key, value)
             VALUES ('schema_version', '4')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
