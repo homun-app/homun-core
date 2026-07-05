@@ -1,4 +1,5 @@
 import { chatApi } from "./chatApi";
+import { enqueueTurn, openTurnStream } from "./chatApi";
 export type { CoreBranchPoint, CoreBranchOption } from "./chatApi";
 import {
   DESKTOP_GATEWAY_URL,
@@ -3785,36 +3786,27 @@ async function submitBrowserRuntimeChatPromptStream(
   const startedAt = performance.now();
   const maxTokens = browserChatMaxTokens(prompt);
   const promptBuildStartedAt = performance.now();
-  // Regenerate supplies its own context (history up to the prompting user message,
-  // excluding the old answer); continuation needs none; otherwise read the thread.
-  const rawContext = contextOverride
-    ? contextOverride
-    : assistantMessageId
-      ? []
-      : chatApi.rawRecentChatContext(threadId, 12);
-  const stream = await openChatStreamWithGateway(
-    requestId,
-    prompt,
-    maxTokens,
-    rawContext,
-    threadId,
-    model,
-    images,
-    attachments,
+  // Broker path: enqueue (POST /turns) then subscribe (GET /turns/{id}/stream).
+  // The broker is the server-owned source of truth: it persists the user message
+  // atomically with the enqueue, runs the turn, persists the assistant message on
+  // done, and emits durable turn_events for the live stream. We NO LONGER call
+  // commit_prompt_result — the broker commits.
+  const enqueued = await enqueueTurn(threadId, requestId, prompt, {
+    visiblePrompt,
+    attachments: attachments?.length ? attachments : undefined,
     mode,
-  );
+    model,
+  });
+  const turnId = enqueued.turn_id;
+  const streamResponse = await openTurnStream(turnId, 0);
   const promptBuildSeconds = roundedSeconds(
     (performance.now() - promptBuildStartedAt) / 1000,
   );
-  const response = stream.response;
-  if (!response.ok) {
-    throw new Error(`Inference provider unavailable: HTTP ${response.status}`);
-  }
-  if (!response.body) {
-    throw new Error("The inference provider did not open the stream.");
+  if (!streamResponse.body) {
+    throw new Error("The broker did not open the turn stream.");
   }
 
-  const reader = response.body.getReader();
+  const reader = streamResponse.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
@@ -3832,7 +3824,13 @@ async function submitBrowserRuntimeChatPromptStream(
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const line of lines) {
-        const event = parseBrowserStreamEvent(line);
+        // The broker emits {seq, kind, payload}; adapt to the legacy {type, ...}.
+        const legacyEvent = parseTurnStreamEventAsLegacy(line);
+        if (!legacyEvent) continue;
+        // Reuse parseBrowserStreamEvent's typing + browserStreamEventToCoreEvent by
+        // re-stringifying into the legacy shape. Cheap (one JSON round-trip per event)
+        // and keeps a single dispatch path.
+        const event = parseBrowserStreamEvent(JSON.stringify(legacyEvent));
         if (!event) continue;
         if (event.type === "delta") {
           if (firstTokenSeconds === undefined) {
@@ -3846,9 +3844,10 @@ async function submitBrowserRuntimeChatPromptStream(
           });
         } else if (event.type === "done") {
           chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
-          // Done carries the AUTHORITATIVE final text (gateway-sanitized, markers/cards
-          // resolved). Use it to replace the raw live-streamed preview, so token
-          // streaming stays a preview and the committed message is the clean version.
+          // The broker's done does NOT carry the final text (it persists server-side).
+          // We keep the live-accumulated `text` as a preview; the authoritative text
+          // will come from the backend refresh (App.tsx polls messages every 2.5s).
+          // If the broker ever starts including the text in done, prefer it:
           if (event.text) text = String(event.text);
           if (typeof event.redacted_user_text === "string") {
             redactedUserText = event.redacted_user_text;
@@ -3878,7 +3877,7 @@ async function submitBrowserRuntimeChatPromptStream(
     ? joinContinuetionText(previousAssistantText, text)
     : text.trim();
   const result: CorePromptSubmissionResult = {
-    effective_model: stream.effectiveModel ?? null,
+    effective_model: model ?? null,
     user_message: {
       id: `browser_user_${Date.now()}`,
       role: "user",
@@ -3896,8 +3895,6 @@ async function submitBrowserRuntimeChatPromptStream(
       metadata: "Local model",
       metrics: {
         prompt_tokens: metrics.prompt_tokens ?? 0,
-        // `||` not `??`: the cloud stream sends 0 (not null), so persist the real
-        // wall-clock / a text-length token estimate instead of a useless 0.
         generation_tokens:
           metrics.generation_tokens || Math.max(1, Math.round(assistantText.length / 4)),
         prompt_tps: metrics.prompt_tps ?? 0,
@@ -3908,20 +3905,15 @@ async function submitBrowserRuntimeChatPromptStream(
         prompt_build_seconds: promptBuildSeconds,
         time_to_first_token_seconds: firstTokenSeconds ?? null,
         total_elapsed_seconds: totalElapsedSeconds,
-        runtime_status_before: stream.runtimeStatusBefore,
+        runtime_status_before: null,
       },
     },
     computer_session: browserComputerSession(sessionId, totalElapsedSeconds),
     plan: null,
   };
-  if (regenerateFromUserId) {
-    // New answer becomes a sibling of the previous one under its user message.
-    await chatApi.commitChatRegeneratedResult(threadId, regenerateFromUserId, result);
-  } else if (assistantMessageId) {
-    await chatApi.commitChatContinuetionResult(threadId, assistantMessageId, result);
-  } else {
-    await chatApi.commitChatPromptResult(threadId, result, branchFromId);
-  }
+  // BROKER PATH: NO client-side commit. The broker persists the assistant message
+  // when the turn reaches `done`. The client refreshes from the backend (polling
+  // every 2.5s in App.tsx) to pick up the authoritative persisted text.
   result.computer_session = await electronLocalComputerSession(sessionId);
   return result;
 }
@@ -4207,6 +4199,50 @@ function parseBrowserStreamEvent(line: string) {
     message?: string;
     metrics?: Partial<CoreChatMessageMetrics>;
   };
+}
+
+/**
+ * Adapt a broker turn_event NDJSON line into the legacy `{type, ...}` shape that
+ * `parseBrowserStreamEvent` + the stream loop already consume. The broker emits
+ * `{seq, kind, payload}`; the legacy path expects `{type, text|markdown|payload|...}`.
+ * Unknown kinds (retry, queued, aborted, cancelled) are mapped to a no-op event
+ * the loop ignores (returned as null by the downstream parser).
+ */
+function parseTurnStreamEventAsLegacy(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  const raw = JSON.parse(trimmed) as { seq?: number; kind: string; payload?: unknown };
+  const payload = (raw.payload ?? {}) as Record<string, unknown>;
+  switch (raw.kind) {
+    case "delta":
+      return { type: "delta" as const, text: String(payload.text ?? "") };
+    case "reasoning":
+      return { type: "reasoning" as const, text: String(payload.text ?? "") };
+    case "activity":
+      return { type: "activity" as const, text: String(payload.text ?? "") };
+    case "plan_update":
+      return { type: "plan_update" as const, markdown: String(payload.markdown ?? "") };
+    case "tool":
+      return { type: "tool_result" as const, payload: raw.payload };
+    case "error":
+      return {
+        type: "error" as const,
+        message: String((payload as { message?: string }).message ?? "turn error"),
+      };
+    case "done":
+      // The broker's done payload carries assistant_message_id + user_message_id
+      // but NOT the final text (the broker persists it server-side). The loop will
+      // use whatever text it accumulated from deltas; the caller refreshes from
+      // the backend to get the authoritative persisted text.
+      return {
+        type: "done" as const,
+        text: undefined,
+        payload: raw.payload,
+      };
+    // retry / queued / aborted / cancelled: informational, no legacy mapping.
+    default:
+      return null;
+  }
 }
 
 function browserStreamEventToCoreEvent(
