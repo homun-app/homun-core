@@ -635,6 +635,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // proactivity cards. Cancel any check-in still scheduled from a previous version
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
     cancel_homun_checkins(&state);
+    eprintln!(
+        "turn broker: enabled={} (HOMUN_TURN_BROKER); Phase 0 = foundation primitives only",
+        turn_broker_enabled()
+    );
     start_task_executor_worker(state.clone());
     spawn_memory_consolidation_tick(state.clone());
     spawn_embedding_catchup(state.clone());
@@ -31677,6 +31681,15 @@ fn task_executor_worker_enabled() -> bool {
             !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
         })
         .unwrap_or(true)
+}
+
+/// Feature flag for the turn broker. Default OFF in Phase 0 (no behavior change).
+/// ON enables the broker path for chat_turn (Phase 1). Read once at startup.
+fn turn_broker_enabled() -> bool {
+    matches!(
+        std::env::var("HOMUN_TURN_BROKER").as_deref(),
+        Ok("1") | Ok("on") | Ok("true")
+    )
 }
 
 /// Number of independent background workers. Each worker is a self-contained
