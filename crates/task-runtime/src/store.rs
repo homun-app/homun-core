@@ -1,7 +1,7 @@
 use crate::{
     ApprovalRequest, Automation, AutomationRun, ResourceClass, TaskCheckpoint,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    UserId, WorkspaceId,
+    TurnEvent, TurnEventKind, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -832,6 +832,60 @@ impl TaskStore {
             .transpose()
     }
 
+    /// Appends an event to a turn's stream. Returns the event with seq/event_id
+    /// assigned. `seq` is monotonic per turn_id (1-based). Used by the broker to
+    /// persist every delta.
+    pub fn insert_turn_event(
+        &self,
+        turn_id: &str,
+        kind: TurnEventKind,
+        payload: Value,
+    ) -> TaskRuntimeResult<TurnEvent> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        // next seq per turn_id
+        let seq: i64 = self.connection.query_row(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM turn_events WHERE turn_id = ?1",
+            params![turn_id],
+            |row| row.get(0),
+        )?;
+        self.connection.execute(
+            "INSERT INTO turn_events (turn_id, seq, kind, payload_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![turn_id, seq, kind.as_str(), serde_json::to_string(&payload)?, now],
+        )?;
+        let event_id = self.connection.last_insert_rowid();
+        Ok(TurnEvent { event_id, turn_id: turn_id.to_string(), seq, kind, payload, created_at: now })
+    }
+
+    /// Reads a turn's events with seq > since (for stream resume). Returned in
+    /// ascending seq order.
+    pub fn read_turn_events(&self, turn_id: &str, since: i64) -> TaskRuntimeResult<Vec<TurnEvent>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT event_id, turn_id, seq, kind, payload_json, created_at
+             FROM turn_events
+             WHERE turn_id = ?1 AND seq > ?2
+             ORDER BY seq ASC",
+        )?;
+        let rows = stmt.query_map(params![turn_id, since], |row| {
+            let event_id: i64 = row.get(0)?;
+            let turn_id: String = row.get(1)?;
+            let seq: i64 = row.get(2)?;
+            let kind_str: String = row.get(3)?;
+            let payload_json: String = row.get(4)?;
+            let created_at: i64 = row.get(5)?;
+            Ok((event_id, turn_id, seq, kind_str, payload_json, created_at))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (event_id, turn_id, seq, kind_str, payload_json, created_at) = row?;
+            let kind = TurnEventKind::parse(&kind_str)
+                .ok_or_else(|| TaskRuntimeError::Store(format!("unknown turn_event kind: {kind_str}")))?;
+            let payload: Value = serde_json::from_str(&payload_json)?;
+            out.push(TurnEvent { event_id, turn_id, seq, kind, payload, created_at });
+        }
+        Ok(out)
+    }
+
     fn next_checkpoint_sequence(
         &self,
         task_id: &TaskId,
@@ -977,5 +1031,54 @@ mod migration_tests {
     fn chat_turn_index_exists() {
         let store = TaskStore::open_in_memory().expect("open");
         assert!(index_exists(&store.connection, "idx_tasks_chat_turn_thread"));
+    }
+}
+
+#[cfg(test)]
+mod turn_event_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn store() -> TaskStore {
+        TaskStore::open_in_memory().expect("open")
+    }
+
+    #[test]
+    fn append_assigns_monotonic_seq_per_turn() {
+        let s = store();
+        let e1 = s.insert_turn_event("t1", TurnEventKind::Delta, json!({"text":"a"})).unwrap();
+        let e2 = s.insert_turn_event("t1", TurnEventKind::Delta, json!({"text":"b"})).unwrap();
+        let e3 = s.insert_turn_event("t2", TurnEventKind::Delta, json!({"text":"other"})).unwrap();
+        assert_eq!(e1.seq, 1);
+        assert_eq!(e2.seq, 2);
+        assert_eq!(e3.seq, 1, "seq is per turn_id, independent across turns");
+    }
+
+    #[test]
+    fn read_since_returns_only_newer_in_order() {
+        let s = store();
+        s.insert_turn_event("t1", TurnEventKind::Delta, json!({"i":1})).unwrap();
+        s.insert_turn_event("t1", TurnEventKind::Activity, json!({"i":2})).unwrap();
+        s.insert_turn_event("t1", TurnEventKind::PlanUpdate, json!({"i":3})).unwrap();
+        let since1 = s.read_turn_events("t1", 1).unwrap();
+        assert_eq!(since1.len(), 2);
+        assert_eq!(since1[0].seq, 2);
+        assert_eq!(since1[1].seq, 3);
+        let since0 = s.read_turn_events("t1", 0).unwrap();
+        assert_eq!(since0.len(), 3);
+        assert_eq!(since0[2].kind, TurnEventKind::PlanUpdate);
+    }
+
+    #[test]
+    fn kind_round_trips() {
+        let s = store();
+        for k in [TurnEventKind::Delta, TurnEventKind::Aborted, TurnEventKind::Cancelled] {
+            s.insert_turn_event("t", k, json!({})).unwrap();
+        }
+        let events = s.read_turn_events("t", 0).unwrap();
+        assert_eq!(
+            events.iter().map(|e| e.kind).collect::<Vec<_>>(),
+            vec![TurnEventKind::Delta, TurnEventKind::Aborted, TurnEventKind::Cancelled]
+        );
     }
 }

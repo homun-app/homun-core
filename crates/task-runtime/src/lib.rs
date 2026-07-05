@@ -28,6 +28,6 @@ pub use store::TaskStore;
 pub use types::{
     ApprovalPolicy, Automation, AutomationRun, AutomationSource, AutomationTrigger, EventTrigger,
     ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskPriority, TaskRecord, TaskStatus,
-    UserId, WorkflowId, WorkspaceId,
+    TurnEvent, TurnEventKind, UserId, WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

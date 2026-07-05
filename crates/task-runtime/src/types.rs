@@ -183,6 +183,64 @@ pub struct AutomationRun {
     pub detail: Option<String>,
 }
 
+/// One unit of a turn's stream, persisted for resume and the working island. The
+/// semantics of `kind` mirror `liveWorkspace.ts` (replace on `plan_update`, append
+/// on `activity`) — the client reducer is preserved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnEvent {
+    pub event_id: i64,
+    pub turn_id: String,
+    pub seq: i64,
+    pub kind: TurnEventKind,
+    pub payload: Value,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnEventKind {
+    Delta,
+    Reasoning,
+    Activity,
+    PlanUpdate,
+    Tool,
+    Done,
+    Error,
+    Cancelled,
+    Aborted,
+}
+
+impl TurnEventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TurnEventKind::Delta => "delta",
+            TurnEventKind::Reasoning => "reasoning",
+            TurnEventKind::Activity => "activity",
+            TurnEventKind::PlanUpdate => "plan_update",
+            TurnEventKind::Tool => "tool",
+            TurnEventKind::Done => "done",
+            TurnEventKind::Error => "error",
+            TurnEventKind::Cancelled => "cancelled",
+            TurnEventKind::Aborted => "aborted",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "delta" => Self::Delta,
+            "reasoning" => Self::Reasoning,
+            "activity" => Self::Activity,
+            "plan_update" => Self::PlanUpdate,
+            "tool" => Self::Tool,
+            "done" => Self::Done,
+            "error" => Self::Error,
+            "cancelled" => Self::Cancelled,
+            "aborted" => Self::Aborted,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskRecord {
     pub task_id: TaskId,
