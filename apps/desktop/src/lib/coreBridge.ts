@@ -1,16 +1,6 @@
 import { chatApi } from "./chatApi";
-import { enqueueTurn, openTurnStream, isBrokerEnabled } from "./chatApi";
+import { enqueueTurn, openTurnStream } from "./chatApi";
 export type { CoreBranchPoint, CoreBranchOption } from "./chatApi";
-
-// Cached broker-flag probe: queried once per session (the gateway restart on flag
-// flip is rare and the client can't detect it without a reload anyway).
-let _brokerEnabledCache: boolean | null = null;
-async function brokerEnabledCached(): Promise<boolean> {
-  if (_brokerEnabledCache === null) {
-    _brokerEnabledCache = await isBrokerEnabled();
-  }
-  return _brokerEnabledCache;
-}
 import {
   DESKTOP_GATEWAY_URL,
   gatewayHeaders,
@@ -4102,25 +4092,10 @@ async function submitBrowserRuntimeChatPromptStream(
   regenerateFromUserId?: string | null,
   contextOverride?: Array<{ role: "user" | "assistant"; text: string }>,
 ): Promise<CorePromptSubmissionResult> {
-  if (await brokerEnabledCached()) {
-    return submitBrokerRuntimeChatPromptStream(
-      requestId,
-      threadId,
-      sessionId,
-      prompt,
-      visiblePrompt,
-      assistantMessageId,
-      previousAssistantText,
-      model,
-      images,
-      attachments,
-      mode,
-      branchFromId,
-      regenerateFromUserId,
-      contextOverride,
-    );
-  }
-  return submitBrowserRuntimeChatPromptStreamLegacy(
+  // Broker is the only path now (legacy NDJSON removed). The unified WS
+  // delivers turn events; the bridge enqueues + reads the NDJSON stream
+  // for the result text.
+  return submitBrokerRuntimeChatPromptStream(
     requestId,
     threadId,
     sessionId,
@@ -4188,12 +4163,15 @@ async function resumeBrowserRuntimeChatPromptStream(
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      // Adapt broker {seq, kind, payload} → legacy {type, ...} and re-parse.
-      const legacyEvent = parseTurnStreamEventAsLegacy(line);
-      if (!legacyEvent) continue;
-      const event = parseBrowserStreamEvent(JSON.stringify(legacyEvent));
-      if (!event) continue;
+      for (const line of lines) {
+        // Adapt broker {seq, kind, payload} → legacy {type, ...} and re-parse.
+        if (line.includes("‹‹ACT") || line.includes("‹‹REASONING")) {
+          console.log("[broker-debug] raw line with marker:", line.slice(0, 200));
+        }
+        const legacyEvent = parseTurnStreamEventAsLegacy(line);
+        if (!legacyEvent) continue;
+        const event = parseBrowserStreamEvent(JSON.stringify(legacyEvent));
+        if (!event) continue;
       if (event.type === "delta") {
         text += String(event.text ?? "");
         chatApi.notifyChatStreamDelta({
