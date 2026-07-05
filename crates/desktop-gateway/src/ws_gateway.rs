@@ -19,8 +19,10 @@ use crate::AppState;
 #[serde(tag = "type")]
 pub enum ServerMessage {
     /// Sent immediately when the WS connection is established.
+    #[serde(rename = "hello")]
     Hello { session_id: String },
     /// Keepalive probe (every 30s). Client must respond with Pong.
+    #[serde(rename = "ping")]
     Ping,
     /// A turn stream event (delta, activity, plan, reasoning, tool, done, queued, retry, error).
     #[serde(rename = "turn.event")]
