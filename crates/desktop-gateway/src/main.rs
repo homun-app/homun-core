@@ -3,6 +3,8 @@
 mod attachments;
 mod browser_safety;
 mod chat_store;
+// One-shot fuse of the two legacy SQLite files into the unified homun.sqlite.
+mod db_migrate;
 // Multi-provider inference registry (Phase 1 of per-role model routing).
 mod model_normalize;
 mod model_registry;
