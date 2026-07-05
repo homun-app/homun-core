@@ -1010,6 +1010,47 @@ impl TaskStore {
             .map(|json| Ok(serde_json::from_str::<ApprovalRequest>(&json)?))
             .transpose()
     }
+
+    /// Returns the task_id of the active (queued/running) chat_turn for a thread, if any.
+    /// Used by enqueue to enforce the 1-turn-per-thread constraint (409 if busy).
+    /// Uses the partial index idx_tasks_chat_turn_thread.
+    pub fn active_chat_turn_for_thread(&self, thread_id: &str) -> TaskRuntimeResult<Option<String>> {
+        let task_id: Option<String> = self.connection
+            .query_row(
+                "SELECT task_id FROM tasks
+                 WHERE thread_id = ?1 AND kind = 'chat_turn'
+                   AND status IN ('queued', 'running')
+                 LIMIT 1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(task_id)
+    }
+
+    /// Inserts a chat_turn populating the indexed columns (thread_id, request_id, source,
+    /// approval). The task_json blob (managed by insert_task) remains the source of truth
+    /// for non-indexed fields.
+    pub fn insert_chat_turn(
+        &self,
+        task: &TaskRecord,
+        thread_id: &str,
+        request_id: &str,
+        source: &str,
+        approval: &str,
+    ) -> TaskRuntimeResult<()> {
+        // insert_task first (blob + base columns), then update the chat_turn columns
+        self.insert_task(task)?;
+        self.connection.execute(
+            "UPDATE tasks SET thread_id = ?1, request_id = ?2, source = ?3, approval = ?4
+             WHERE task_id = ?5 AND user_id = ?6 AND workspace_id = ?7",
+            params![
+                thread_id, request_id, source, approval,
+                task.task_id.as_str(), task.user_id.as_str(), task.workspace_id.as_str(),
+            ],
+        )?;
+        Ok(())
+    }
 }
 
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
@@ -1132,5 +1173,85 @@ mod generation_tests {
         assert_eq!(s.bump_process_generation().unwrap(), 1);
         assert_eq!(s.bump_process_generation().unwrap(), 2);
         assert_eq!(s.get_process_generation().unwrap(), 2);
+    }
+}
+
+#[cfg(test)]
+mod chat_turn_query_tests {
+    use super::*;
+    use crate::{TaskPriority, TaskRecord, TaskStatus, UserId, WorkspaceId};
+    use serde_json::json;
+
+    fn store() -> TaskStore {
+        TaskStore::open_in_memory().unwrap()
+    }
+
+    fn make_chat_turn(task_id: &str, thread_id: &str, status: TaskStatus) -> TaskRecord {
+        let mut t = TaskRecord::new(
+            task_id,
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "chat_turn",
+            format!("prompt for {thread_id}"),
+            json!({}),
+        );
+        t.status = status;
+        t.priority = TaskPriority::High;
+        t
+    }
+
+    #[test]
+    fn active_chat_turn_returns_none_when_empty() {
+        let s = store();
+        assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap(), None);
+    }
+
+    #[test]
+    fn active_chat_turn_finds_queued_or_running() {
+        let s = store();
+        let t1 = make_chat_turn("t1", "thread_x", TaskStatus::Queued);
+        s.insert_chat_turn(&t1, "thread_x", "chat_stream_1", "interactive", "full")
+            .unwrap();
+        assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap().as_deref(), Some("t1"));
+
+        // a second thread doesn't collide
+        let t2 = make_chat_turn("t2", "thread_y", TaskStatus::Running);
+        s.insert_chat_turn(&t2, "thread_y", "chat_stream_2", "interactive", "full")
+            .unwrap();
+        assert_eq!(s.active_chat_turn_for_thread("thread_y").unwrap().as_deref(), Some("t2"));
+        assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap().as_deref(), Some("t1"));
+    }
+
+    #[test]
+    fn active_chat_turn_ignores_completed() {
+        let s = store();
+        let t = make_chat_turn("t1", "thread_x", TaskStatus::Completed);
+        s.insert_chat_turn(&t, "thread_x", "chat_stream_1", "interactive", "full")
+            .unwrap();
+        assert_eq!(
+            s.active_chat_turn_for_thread("thread_x").unwrap(),
+            None,
+            "completed turns do not block a new enqueue"
+        );
+    }
+
+    #[test]
+    fn active_chat_turn_ignores_non_chat_turn_kind() {
+        let s = store();
+        let mut other = TaskRecord::new(
+            "bg1",
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "background_job",
+            "do thing",
+            json!({}),
+        );
+        other.status = TaskStatus::Running;
+        s.insert_task(&other).unwrap();
+        // even if thread_id were set, kind != chat_turn -> ignored
+        s.connection
+            .execute("UPDATE tasks SET thread_id = 'thread_x' WHERE task_id = 'bg1'", [])
+            .unwrap();
+        assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap(), None);
     }
 }
