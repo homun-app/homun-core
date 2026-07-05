@@ -29270,6 +29270,130 @@ async fn drain_agent_stream_into_message(
     Some(final_text)
 }
 
+/// Maps a raw stream NDJSON line to a TurnEventKind + payload and emits it via
+/// the turn_executor fan-out (durable turn_events + live broadcast). Best-effort:
+/// unparseable lines or unknown types are silently skipped (they don't affect the
+/// assistant message accumulation either).
+fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
+    let line = line.trim();
+    if line.is_empty() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
+    };
+    let kind_str = match value.get("type").and_then(|t| t.as_str()) {
+        Some(t) => t,
+        None => return,
+    };
+    let (kind, payload) = match kind_str {
+        "delta" => (
+            local_first_task_runtime::TurnEventKind::Delta,
+            serde_json::json!({ "text": value.get("text").and_then(|t| t.as_str()).unwrap_or("") }),
+        ),
+        "reasoning" => (
+            local_first_task_runtime::TurnEventKind::Reasoning,
+            serde_json::json!({ "text": value.get("text").and_then(|t| t.as_str()).unwrap_or("") }),
+        ),
+        "activity" => (
+            local_first_task_runtime::TurnEventKind::Activity,
+            serde_json::json!({ "text": value.get("text").and_then(|t| t.as_str()).unwrap_or("") }),
+        ),
+        "plan_update" => (
+            local_first_task_runtime::TurnEventKind::PlanUpdate,
+            serde_json::json!({ "markdown": value.get("markdown").and_then(|t| t.as_str()).unwrap_or("") }),
+        ),
+        "tool_result" => (
+            local_first_task_runtime::TurnEventKind::Tool,
+            value.clone(),
+        ),
+        "error" => (
+            local_first_task_runtime::TurnEventKind::Error,
+            value.clone(),
+        ),
+        // unknown event types (e.g. choice_prompt, vault_propose) are not turn events
+        _ => return,
+    };
+    if let Ok(store) = state.task_store.lock() {
+        let _ = crate::turn_executor::emit_turn_event(&store, turn_id, kind, payload);
+    }
+}
+
+/// Like `drain_agent_stream_into_message` but additionally mirrors each raw
+/// stream event into the turn_events durable log + per-turn live broadcast via
+/// `fanout_turn_event`. Used by the broker executor path; the automation path
+/// keeps using the plain drain.
+async fn drain_agent_stream_into_message_with_fanout(
+    state: &AppState,
+    thread_id: &str,
+    assistant_message_id: &str,
+    entry: std::sync::Arc<StreamEntry>,
+    turn_id: &str,
+) -> Option<String> {
+    let mut streamed_text = String::new();
+    let mut final_text: Option<String> = None;
+    let mut last_flush = std::time::Instant::now();
+    let mut last_flushed_len = 0usize;
+
+    let (snapshot, mut brx) = {
+        let buf = entry.lines.lock().expect("stream lines lock");
+        (buf.clone(), entry.tx.subscribe())
+    };
+    for line in snapshot {
+        let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        fanout_turn_event(state, turn_id, &line);
+        if streamed_text.len() != last_flushed_len
+            && last_flush.elapsed() >= std::time::Duration::from_millis(200)
+        {
+            update_channel_assistant_message(
+                state,
+                thread_id,
+                assistant_message_id,
+                &streamed_text,
+            );
+            last_flush = std::time::Instant::now();
+            last_flushed_len = streamed_text.len();
+        }
+        if terminal {
+            break;
+        }
+    }
+
+    while final_text.is_none() {
+        match brx.recv().await {
+            Ok(line) => {
+                let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                fanout_turn_event(state, turn_id, &line);
+                if streamed_text.len() != last_flushed_len
+                    && last_flush.elapsed() >= std::time::Duration::from_millis(200)
+                {
+                    update_channel_assistant_message(
+                        state,
+                        thread_id,
+                        assistant_message_id,
+                        &streamed_text,
+                    );
+                    last_flush = std::time::Instant::now();
+                    last_flushed_len = streamed_text.len();
+                }
+                if terminal {
+                    break;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+        }
+    }
+
+    let final_text = final_text.unwrap_or(streamed_text);
+    let final_text = final_text.trim().to_string();
+    if final_text.is_empty() {
+        return None;
+    }
+    update_channel_assistant_message(state, thread_id, assistant_message_id, &final_text);
+    Some(final_text)
+}
+
 /// Runs an agent turn for channel-originated work while keeping the owning chat
 /// visible: the inbound user message and assistant placeholder already exist,
 /// and this function streams deltas into that assistant message.
@@ -29329,8 +29453,9 @@ async fn run_agent_turn_into_message(
     result
 }
 
-/// TEMPORARY STUB — Task 1a.4 replaces this with the real fan-out version that
-/// mirrors each stream event into turn_events + the per-turn broadcast.
+/// Like `run_agent_turn_into_message` but additionally mirrors each stream
+/// event into turn_events (durable) + the per-turn broadcast (live) via the
+/// fan-out drain. Used by the broker executor path.
 async fn run_agent_turn_into_message_with_fanout(
     state: &AppState,
     thread_id: &str,
@@ -29338,17 +29463,61 @@ async fn run_agent_turn_into_message_with_fanout(
     tool_policy: &str,
     source_user_message_id: &str,
     assistant_message_id: &str,
-    _turn_id: &str,
+    turn_id: &str,
 ) -> Option<String> {
-    run_agent_turn_into_message(
+    let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))?;
+    let context = agent_turn_context(
         state,
         thread_id,
-        prompt,
-        tool_policy,
-        source_user_message_id,
-        assistant_message_id,
-    )
-    .await
+        &[source_user_message_id, assistant_message_id],
+    )?;
+    let request_id = format!("broker-{turn_id}");
+    let request = ChatGenerateStreamRequest {
+        request_id: request_id.clone(),
+        prompt: prompt.to_string(),
+        thread_id: Some(thread_id.to_string()),
+        context,
+        max_context_chars: None,
+        model: None,
+        images: Vec::new(),
+        attachments: Vec::new(),
+        max_tokens: 2000,
+        temperature: 0.3,
+        wait_if_busy: true,
+        request_timeout_seconds: None,
+        tool_policy: Some(tool_policy.to_string()),
+        mode: None,
+    };
+    let response = stream_chat_via_openai(state, request, base_url, model, api_key)
+        .await
+        .ok()?;
+    let entry = stream_registry()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&request_id).cloned());
+
+    let body_task = tokio::spawn(async move {
+        let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await;
+    });
+
+    let result = match entry {
+        Some(entry) => {
+            drain_agent_stream_into_message_with_fanout(
+                state,
+                thread_id,
+                assistant_message_id,
+                entry,
+                turn_id,
+            )
+            .await
+        }
+        None => {
+            let _ = body_task.await;
+            return None;
+        }
+    };
+    let _ = body_task.await;
+    result
 }
 
 async fn generate_channel_reply(
