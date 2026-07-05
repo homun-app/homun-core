@@ -12,6 +12,11 @@ futures-util = "0.3"
 # (gateway -> homun-cc:6080) through the gateway's own public origin. Plain ws://
 # over the internal/loopback network, so no TLS features are needed here.
 tokio-tungstenite = "0.29"
+# Structured logging with level filtering (RUST_LOG env). Replaces the scattered
+# eprintln!/println! calls with proper INFO/WARN/ERROR/DEBUG levels so log output
+# is filterable and the broker/turn/chat paths are traceable without noise.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 local-first-context-compression = { path = "../context-compression" }
 local-first-capabilities = { path = "../capabilities" }
 local-first-browser-automation = { path = "../browser-automation" }

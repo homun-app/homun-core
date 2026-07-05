@@ -547,6 +547,22 @@ fn migrate_legacy_data_dir() {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize structured logging. RUST_LOG controls verbosity per module:
+    //   RUST_LOG=warn                       → only warnings/errors (default-ish)
+    //   RUST_LOG=homun_desktop_gateway=info → gateway info+ (broker/turn/chat lifecycle)
+    //   RUST_LOG=homun_desktop_gateway=debug → verbose (per-event broker logging)
+    //   RUST_LOG=trace                      → everything (noisy, includes deps)
+    // Default when RUST_LOG is unset: warn (so existing eprintln! noise is reduced
+    // and the user sees real problems). Existing eprintln!/println! calls still
+    // print (they bypass tracing) but the structured tracing events are filterable.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+        )
+        .with_target(false)
+        .try_init();
+
     // SECURITY (data at rest): make everything this process writes owner-only.
     // The personal stores (memory.sqlite, desktop-gateway.sqlite, the WhatsApp
     // session, …) are PLAINTEXT SQLite — 0644 would expose the user's memory,
@@ -29467,6 +29483,7 @@ fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
         Some(t) => t,
         None => return,
     };
+    tracing::debug!(target: "broker::fanout", turn_id = %turn_id, kind = %kind_str, "stream event");
     let (kind, payload) = match kind_str {
         "delta" => (
             local_first_task_runtime::TurnEventKind::Delta,
@@ -31266,6 +31283,13 @@ async fn enqueue_turn(
     State(state): State<AppState>,
     Json(req): Json<EnqueueTurnRequest>,
 ) -> Result<(StatusCode, Json<Value>), GatewayError> {
+    tracing::info!(
+        target: "broker::enqueue",
+        thread_id = %req.thread_id,
+        prompt_len = req.prompt.len(),
+        source = ?req.source.as_deref().unwrap_or("interactive"),
+        "turn enqueue requested"
+    );
     let request_id = format!(
         "chat_stream_{}_{}",
         now_epoch_secs(),
@@ -31336,6 +31360,12 @@ async fn enqueue_turn(
     ) {
         Ok(enqueued) => {
             let turn_id = enqueued.task_id.as_str().to_string();
+            tracing::info!(
+                target: "broker::enqueue",
+                turn_id = %turn_id,
+                thread_id = %enqueued.thread_id,
+                "turn enqueued (201) — worker pool will pick it up"
+            );
             Ok((
                 StatusCode::CREATED,
                 Json(serde_json::json!({
@@ -31350,14 +31380,22 @@ async fn enqueue_turn(
         Err(local_first_task_runtime::broker::EnqueueError::ThreadBusy {
             thread_id,
             active_turn_id,
-        }) => Ok((
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({
-                "error": "thread_busy",
-                "thread_id": thread_id,
-                "active_turn_id": active_turn_id,
-            })),
-        )),
+        }) => {
+            tracing::warn!(
+                target: "broker::enqueue",
+                thread_id = %thread_id,
+                active_turn_id = %active_turn_id,
+                "turn rejected (409) — thread already has an active turn"
+            );
+            Ok((
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "thread_busy",
+                    "thread_id": thread_id,
+                    "active_turn_id": active_turn_id,
+                })),
+            ))
+        }
         Err(local_first_task_runtime::broker::EnqueueError::Store(e)) => Err(GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             code: "broker_enqueue_store",
@@ -32057,7 +32095,17 @@ fn run_next_task_once(
         worker_id,
         now,
     )? {
-        TaskAcquireResult::Acquired(task) => task,
+        TaskAcquireResult::Acquired(task) => {
+            if task.kind == "chat_turn" {
+                tracing::info!(
+                    target: "broker::worker",
+                    turn_id = %task.task_id.as_str(),
+                    thread_id = ?task.input_json.get("thread_id").and_then(|v| v.as_str()),
+                    "worker acquired chat_turn — dispatching to executor"
+                );
+            }
+            task
+        }
         TaskAcquireResult::WaitingResource(reason) => {
             // Surface the wait as a turn_event so a live subscriber (or one that
             // reconnects) can show "in attesa del browser slot…". Best-effort:

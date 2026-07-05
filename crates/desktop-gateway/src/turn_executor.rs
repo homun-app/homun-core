@@ -109,6 +109,7 @@ pub fn execute_chat_turn_task(
     task: &local_first_task_runtime::TaskRecord,
 ) -> Result<crate::TaskExecutionOutcome, crate::LocalTaskExecutionError> {
     let turn_id = task.task_id.as_str();
+    tracing::info!(target: "broker::executor", turn_id = %turn_id, "executor started");
 
     // 1. Required inputs (set by `broker::enqueue_chat_turn`).
     let thread_id = task
@@ -174,6 +175,8 @@ pub fn execute_chat_turn_task(
     // 5. Drive the agent-loop to completion. The real fan-out (Task 1a.4) will
     //    mirror each stream event into turn_events + the broadcast; the stub
     //    just delegates to the existing drainer.
+    tracing::info!(target: "broker::executor", turn_id = %turn_id, thread_id = %thread_id, "agent-loop starting");
+    let drain_started = std::time::Instant::now();
     let answer = tokio::runtime::Handle::current()
         .block_on(crate::run_agent_turn_into_message_with_fanout(
             state,
@@ -185,6 +188,13 @@ pub fn execute_chat_turn_task(
             turn_id,
         ))
         .unwrap_or_else(|| "No reply generated.".to_string());
+    tracing::info!(
+        target: "broker::executor",
+        turn_id = %turn_id,
+        elapsed_ms = drain_started.elapsed().as_millis() as u64,
+        answer_len = answer.len(),
+        "agent-loop completed — persisting assistant message"
+    );
 
     // 6. Finalize the assistant message. The legacy path persists the full
     // streamed text (which includes ‹‹ACT›› activity markers as inline deltas),
@@ -206,6 +216,7 @@ pub fn execute_chat_turn_task(
     );
 
     // 7. Emit the terminal `done` turn event (durable + best-effort live).
+    tracing::info!(target: "broker::executor", turn_id = %turn_id, "emitting done event");
     if let Ok(store) = state.task_store.lock() {
         let _ = emit_turn_event(
             &store,
@@ -224,6 +235,12 @@ pub fn execute_chat_turn_task(
     // 9. Build the outcome — same shape as `execute_proactive_prompt_task`.
     let completed = !answer.trim().is_empty()
         && answer.trim() != "No reply generated.";
+    tracing::info!(
+        target: "broker::executor",
+        turn_id = %turn_id,
+        completed,
+        "executor finished — assistant message persisted, broadcast closed"
+    );
     Ok(crate::TaskExecutionOutcome {
         completed,
         blocked_reason: if completed {
