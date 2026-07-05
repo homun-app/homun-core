@@ -1014,3 +1014,95 @@ function compactTitle(text: string) {
 function currentTimestampSeconds() {
   return Math.floor(Date.now() / 1000).toString();
 }
+
+// ── Broker turn API (POST /api/chat/turns + GET /turns/{id}/stream) ──────────
+// These helpers talk to the persistent turn broker. The bridge uses them when
+// the gateway reports HOMUN_TURN_BROKER=on (see isBrokerEnabled). The broker is
+// the server-owned source of truth: it persists the user message atomically with
+// the enqueue, runs the turn, persists the assistant message on done, and emits
+// durable turn_events for the live stream.
+
+/** Response body for POST /api/chat/turns. */
+export interface EnqueueTurnResponse {
+  turn_id: string;
+  thread_id: string;
+  request_id: string;
+  status: "queued";
+  position_in_queue: number;
+}
+
+/** Thrown by enqueueTurn when the thread already has an active turn (HTTP 409). */
+export class TurnBusyError extends Error {
+  constructor(public readonly activeTurnId: string) {
+    super(`thread is busy with another turn: ${activeTurnId}`);
+    this.name = "TurnBusyError";
+  }
+}
+
+/**
+ * Enqueue a chat turn via the broker. The client passes its own `requestId`
+ * so the resulting turn_id is prevedibile (`turn_{requestId}`). Throws
+ * TurnBusyError on 409 (thread already active), or Error on other failures.
+ */
+export async function enqueueTurn(
+  threadId: string,
+  requestId: string,
+  prompt: string,
+  options?: {
+    visiblePrompt?: string;
+    attachments?: unknown;
+    mode?: string;
+    model?: string;
+    source?: string;
+  },
+): Promise<EnqueueTurnResponse> {
+  const res = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/turns`, {
+    method: "POST",
+    headers: gatewayHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      thread_id: threadId,
+      request_id: requestId,
+      prompt,
+      visible_prompt: options?.visiblePrompt,
+      attachments: options?.attachments,
+      mode: options?.mode,
+      model: options?.model,
+      source: options?.source ?? "interactive",
+    }),
+  });
+  if (res.status === 201) return (await res.json()) as EnqueueTurnResponse;
+  if (res.status === 409) {
+    const body = (await res.json()) as { active_turn_id: string };
+    throw new TurnBusyError(body.active_turn_id);
+  }
+  throw new Error(`enqueueTurn: unexpected status ${res.status}: ${await gatewayErrorMessage(res)}`);
+}
+
+/**
+ * Subscribe to a turn's event stream (NDJSON). Replays buffered events with
+ * seq > since, then streams live events. Returns the raw Response; the caller
+ * reads the body with getReader() and parses each line as { seq, kind, payload }.
+ * Closing the connection does NOT cancel the turn (subscribe is non-possessive).
+ */
+export async function openTurnStream(turnId: string, since: number = 0): Promise<Response> {
+  const url = `${DESKTOP_GATEWAY_URL}/api/chat/turns/${encodeURIComponent(turnId)}/stream?since=${since}`;
+  const res = await fetch(url, { headers: gatewayHeaders() });
+  if (!res.ok) {
+    throw new Error(`openTurnStream: HTTP ${res.status}: ${await gatewayErrorMessage(res)}`);
+  }
+  return res;
+}
+
+/** Reports whether the gateway has the broker path active (HOMUN_TURN_BROKER=on). */
+export async function isBrokerEnabled(): Promise<boolean> {
+  try {
+    const res = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/broker_enabled`, {
+      headers: gatewayHeaders(),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { enabled?: boolean };
+    return body.enabled === true;
+  } catch {
+    return false;
+  }
+}
