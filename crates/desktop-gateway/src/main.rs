@@ -757,6 +757,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/build_prompt", post(build_prompt))
         .route("/api/chat/generate_stream", post(generate_stream))
+        // Always-mounted capability probe: lets the client pick broker vs legacy
+        // path. NOT gated by the flag — must be visible so the client can decide.
+        .route("/api/chat/broker_enabled", get(broker_enabled))
         .route("/api/chat/stream_resume/{request_id}", get(resume_stream))
         .route("/api/chat/active_streams", get(active_streams))
         .route("/api/events", get(app_events))
@@ -32416,6 +32419,13 @@ fn turn_broker_enabled() -> bool {
         std::env::var("HOMUN_TURN_BROKER").as_deref(),
         Ok("1") | Ok("on") | Ok("true")
     )
+}
+
+/// Capability probe for the client: tells it whether to use the broker path
+/// (POST /turns + GET /turns/{id}/stream) or the legacy direct NDJSON path
+/// (POST /generate_stream). Always mounted (NOT behind the flag).
+async fn broker_enabled() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "enabled": turn_broker_enabled() }))
 }
 
 /// Number of independent background workers. Each worker is a self-contained

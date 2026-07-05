@@ -1,6 +1,16 @@
 import { chatApi } from "./chatApi";
-import { enqueueTurn, openTurnStream } from "./chatApi";
+import { enqueueTurn, openTurnStream, isBrokerEnabled } from "./chatApi";
 export type { CoreBranchPoint, CoreBranchOption } from "./chatApi";
+
+// Cached broker-flag probe: queried once per session (the gateway restart on flag
+// flip is rare and the client can't detect it without a reload anyway).
+let _brokerEnabledCache: boolean | null = null;
+async function brokerEnabledCached(): Promise<boolean> {
+  if (_brokerEnabledCache === null) {
+    _brokerEnabledCache = await isBrokerEnabled();
+  }
+  return _brokerEnabledCache;
+}
 import {
   DESKTOP_GATEWAY_URL,
   gatewayHeaders,
@@ -3767,7 +3777,7 @@ async function electronCapabilities(): Promise<CoreCapabilitySnapshot> {
   }
 }
 
-async function submitBrowserRuntimeChatPromptStream(
+async function submitBrokerRuntimeChatPromptStream(
   requestId: string,
   threadId: string,
   sessionId: string,
@@ -3916,6 +3926,216 @@ async function submitBrowserRuntimeChatPromptStream(
   // every 2.5s in App.tsx) to pick up the authoritative persisted text.
   result.computer_session = await electronLocalComputerSession(sessionId);
   return result;
+}
+
+// ── Legacy path (POST /generate_stream direct NDJSON) — used when HOMUN_TURN_BROKER=off ──
+// Preserved verbatim from the pre-broker implementation. The client commits the
+// result itself (commit_prompt_result) because the legacy gateway is not the
+// source of truth for persistence in this path.
+async function submitBrowserRuntimeChatPromptStreamLegacy(
+  requestId: string,
+  threadId: string,
+  sessionId: string,
+  prompt: string,
+  visiblePrompt?: string,
+  assistantMessageId?: string,
+  previousAssistantText?: string,
+  model?: string,
+  images?: string[],
+  attachments?: ChatAttachmentInput[],
+  mode?: string,
+  branchFromId?: string | null,
+  regenerateFromUserId?: string | null,
+  contextOverride?: Array<{ role: "user" | "assistant"; text: string }>,
+): Promise<CorePromptSubmissionResult> {
+  const startedAt = performance.now();
+  const maxTokens = browserChatMaxTokens(prompt);
+  const promptBuildStartedAt = performance.now();
+  const rawContext = contextOverride
+    ? contextOverride
+    : assistantMessageId
+      ? []
+      : chatApi.rawRecentChatContext(threadId, 12);
+  const stream = await openChatStreamWithGateway(
+    requestId,
+    prompt,
+    maxTokens,
+    rawContext,
+    threadId,
+    model,
+    images,
+    attachments,
+    mode,
+  );
+  const promptBuildSeconds = roundedSeconds(
+    (performance.now() - promptBuildStartedAt) / 1000,
+  );
+  const response = stream.response;
+  if (!response.ok) {
+    throw new Error(`Inference provider unavailable: HTTP ${response.status}`);
+  }
+  if (!response.body) {
+    throw new Error("The inference provider did not open the stream.");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let redactedUserText: string | undefined;
+  let metrics: Partial<CoreChatMessageMetrics> = {};
+  let firstTokenSeconds: number | undefined;
+  keepDesktopAwake(true);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const event = parseBrowserStreamEvent(line);
+        if (!event) continue;
+        if (event.type === "delta") {
+          if (firstTokenSeconds === undefined) {
+            firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
+          }
+          text += String(event.text ?? "");
+          chatApi.notifyChatStreamDelta({
+            type: "delta",
+            request_id: requestId,
+            delta: String(event.text ?? ""),
+          });
+        } else if (event.type === "done") {
+          chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
+          if (event.text) text = String(event.text);
+          if (typeof event.redacted_user_text === "string") {
+            redactedUserText = event.redacted_user_text;
+          }
+          metrics = event.metrics ?? {};
+        } else if (event.type === "error") {
+          chatApi.notifyChatStreamEvent({
+            type: "error",
+            request_id: requestId,
+            message: String(event.message ?? "Local runtime error"),
+          });
+          throw new Error(String(event.message ?? "Local runtime error"));
+        } else {
+          const payload = browserStreamEventToCoreEvent(event, requestId);
+          if (payload) chatApi.notifyChatStreamEvent(payload);
+        }
+      }
+    }
+  } finally {
+    keepDesktopAwake(false);
+  }
+  const timestamp = currentTimestampSeconds();
+  const totalElapsedSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
+  const promptAttachments = (attachments ?? []).map(coreAttachmentFromInput);
+  const assistantText = previousAssistantText
+    ? joinContinuetionText(previousAssistantText, text)
+    : text.trim();
+  const result: CorePromptSubmissionResult = {
+    effective_model: stream.effectiveModel ?? null,
+    user_message: {
+      id: `browser_user_${Date.now()}`,
+      role: "user",
+      text: redactedUserText ?? visiblePrompt ?? prompt,
+      timestamp,
+      metadata: null,
+      metrics: null,
+      attachments: promptAttachments,
+    },
+    assistant_message: {
+      id: assistantMessageId ?? `browser_assistant_${Date.now()}`,
+      role: "assistant",
+      text: assistantText,
+      timestamp,
+      metadata: "Local model",
+      metrics: {
+        prompt_tokens: metrics.prompt_tokens ?? 0,
+        generation_tokens:
+          metrics.generation_tokens || Math.max(1, Math.round(assistantText.length / 4)),
+        prompt_tps: metrics.prompt_tps ?? 0,
+        generation_tps: metrics.generation_tps ?? 0,
+        peak_memory_gb: metrics.peak_memory_gb ?? 0,
+        elapsed_seconds: metrics.elapsed_seconds || totalElapsedSeconds,
+        max_tokens: maxTokens,
+        prompt_build_seconds: promptBuildSeconds,
+        time_to_first_token_seconds: firstTokenSeconds ?? null,
+        total_elapsed_seconds: totalElapsedSeconds,
+        runtime_status_before: stream.runtimeStatusBefore,
+      },
+    },
+    computer_session: browserComputerSession(sessionId, totalElapsedSeconds),
+    plan: null,
+  };
+  if (regenerateFromUserId) {
+    await chatApi.commitChatRegeneratedResult(threadId, regenerateFromUserId, result);
+  } else if (assistantMessageId) {
+    await chatApi.commitChatContinuetionResult(threadId, assistantMessageId, result);
+  } else {
+    await chatApi.commitChatPromptResult(threadId, result, branchFromId);
+  }
+  result.computer_session = await electronLocalComputerSession(sessionId);
+  return result;
+}
+
+/**
+ * Entry dispatcher: probes the gateway once per session and routes to the broker
+ * path (POST /turns + GET /turns/{id}/stream, broker is source of truth) or the
+ * legacy path (POST /generate_stream, client commits). Signature + return type
+ * are identical, so callers (ChatView) don't change.
+ */
+async function submitBrowserRuntimeChatPromptStream(
+  requestId: string,
+  threadId: string,
+  sessionId: string,
+  prompt: string,
+  visiblePrompt?: string,
+  assistantMessageId?: string,
+  previousAssistantText?: string,
+  model?: string,
+  images?: string[],
+  attachments?: ChatAttachmentInput[],
+  mode?: string,
+  branchFromId?: string | null,
+  regenerateFromUserId?: string | null,
+  contextOverride?: Array<{ role: "user" | "assistant"; text: string }>,
+): Promise<CorePromptSubmissionResult> {
+  if (await brokerEnabledCached()) {
+    return submitBrokerRuntimeChatPromptStream(
+      requestId,
+      threadId,
+      sessionId,
+      prompt,
+      visiblePrompt,
+      assistantMessageId,
+      previousAssistantText,
+      model,
+      images,
+      attachments,
+      mode,
+      branchFromId,
+      regenerateFromUserId,
+      contextOverride,
+    );
+  }
+  return submitBrowserRuntimeChatPromptStreamLegacy(
+    requestId,
+    threadId,
+    sessionId,
+    prompt,
+    visiblePrompt,
+    assistantMessageId,
+    previousAssistantText,
+    model,
+    images,
+    attachments,
+    mode,
+    branchFromId,
+    regenerateFromUserId,
+    contextOverride,
+  );
 }
 
 function coreAttachmentFromInput(
