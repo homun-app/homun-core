@@ -286,6 +286,11 @@ export function ChatView({
   const [promptError, setPromptError] = useState<string | null>(null);
   const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const [streamStatus, setStreamStatus] = useState<ChatStreamStatus | null>(null);
+  // Live workspace state: accumulates activity/plan events DURING streaming so
+  // the island shows them in real-time (not just after the persisted text arrives).
+  // Cleared on submit; superseded by the persisted values when streaming ends.
+  const [liveActivitySteps, setLiveActivitySteps] = useState<string[]>([]);
+  const [livePlanMarkdown, setLivePlanMarkdown] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [chatExported, setChatExported] = useState(false);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
@@ -411,9 +416,14 @@ export function ChatView({
     return out;
   }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
   // The agent's operational plan for this conversation (latest update_plan), shown
-  // in the Workbench "Piano" panel.
-  const conversationPlan = useMemo(() => latestPlanMarkdown(threadMessages), [threadMessages]);
-  const conversationActivity = useMemo(() => latestActivitySteps(threadMessages), [threadMessages]);
+  // in the Workbench "Piano" panel. During streaming, prefer the live-accumulated
+  // activity/plan (from the stream events) so the island updates in real-time;
+  // fall back to the persisted values when not streaming or after the turn ends.
+  const persistedPlan = useMemo(() => latestPlanMarkdown(threadMessages), [threadMessages]);
+  const persistedActivity = useMemo(() => latestActivitySteps(threadMessages), [threadMessages]);
+  const isStreaming = promptSubmitting || Boolean(streamingAssistantId);
+  const conversationPlan = isStreaming && livePlanMarkdown ? livePlanMarkdown : persistedPlan;
+  const conversationActivity = isStreaming && liveActivitySteps.length > 0 ? liveActivitySteps : persistedActivity;
   const workspacePlanSteps = useMemo(
     () => (conversationPlan ? parsePlanSteps(conversationPlan) : []),
     [conversationPlan],
@@ -696,6 +706,8 @@ export function ChatView({
       // durable multi-step task via a tool when it judges the work needs it.
       setOptimisticMessages([...promptMessages, streamingMessage]);
       resetStreamingState("");
+      setLiveActivitySteps([]);
+      setLivePlanMarkdown(null);
       setStreamingAssistantId(streamingMessage.id);
       notifyStreaming(true);
       streamingUserPinnedRef.current = conversationBottomDistance() < 220;
@@ -713,6 +725,12 @@ export function ChatView({
         const part = chatEventPartFromStream(payload);
         if (part) {
           streamEventParts = [...streamEventParts, part];
+          // Feed the island in real-time from live activity/plan events.
+          if (part.type === "activity" && part.text) {
+            setLiveActivitySteps((prev) => [...prev, part.text!.trim()].filter((s) => s.length > 0));
+          } else if (part.type === "plan_update" && part.markdown) {
+            setLivePlanMarkdown(part.markdown);
+          }
           scheduleStreamingMessage();
           return;
         }
@@ -836,6 +854,8 @@ export function ChatView({
         streamingUserPinnedRef.current = false;
         setStreamingAssistantId(null);
         resetStreamingState("");
+        setLiveActivitySteps([]);
+        setLivePlanMarkdown(null);
         setStreamStatus((current) =>
           current?.requestId === requestId ? null : current,
         );
