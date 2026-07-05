@@ -1255,3 +1255,71 @@ mod chat_turn_query_tests {
         assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap(), None);
     }
 }
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+    use crate::{TaskId, TaskRecord, UserId, WorkspaceId};
+    use rusqlite::Connection;
+
+    #[test]
+    fn upgrades_v3_to_v4_adding_chat_turn_cols() {
+        // Build a valid v3-era TaskRecord blob so get_task round-trips after migration.
+        let task = TaskRecord::new(
+            "t",
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "old_kind",
+            "v3 fixture",
+            serde_json::json!({}),
+        );
+        let task_json = serde_json::to_string(&task).unwrap();
+        // Create a DB with the OLD v3 schema (no chat_turn columns, no turn_events/broker_meta).
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE task_runtime_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO task_runtime_metadata VALUES ('schema_version', '3');
+             CREATE TABLE tasks (
+                task_id TEXT NOT NULL, user_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+                workflow_id TEXT, kind TEXT NOT NULL, status TEXT NOT NULL, priority TEXT NOT NULL,
+                created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+                blocked_reason TEXT, task_json TEXT NOT NULL,
+                PRIMARY KEY (task_id, user_id, workspace_id)
+             );",
+        )
+        .unwrap();
+        // Parameterized INSERT: task_json is a full TaskRecord blob.
+        conn.execute(
+            "INSERT INTO tasks (task_id, user_id, workspace_id, workflow_id, kind, status,
+                                priority, created_at, updated_at, blocked_reason, task_json)
+             VALUES ('t', 'u', 'w', NULL, 'old_kind', 'queued', 'normal',
+                     1, 1, NULL, ?1)",
+            [&task_json],
+        )
+        .unwrap();
+        // Save to a temp file and reopen as TaskStore to run migrations.
+        let tmp = std::env::temp_dir().join(format!(
+            "homun-task-runtime-upgrade-test-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
+            .unwrap();
+        let store = TaskStore::open(&tmp).unwrap();
+        assert_eq!(store.schema_version().unwrap(), 4);
+        for col in ["thread_id", "request_id", "source", "approval"] {
+            assert!(column_exists(&store.connection, "tasks", col));
+        }
+        // Existing data preserved
+        let t = store
+            .get_task(&TaskId::new("t"), &UserId::new("u"), &WorkspaceId::new("w"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(t.kind, "old_kind");
+        // Cleanup
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
