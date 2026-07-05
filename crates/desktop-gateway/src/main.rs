@@ -29,6 +29,7 @@ mod sandbox;
 mod task_registry;
 mod temporal;
 mod turn_executor;
+mod ws_gateway;
 
 use axum::{
     Json, Router,
@@ -169,6 +170,9 @@ pub(crate) struct AppState {
     /// The current STABLE live-view ticket, reused across status polls so the embed
     /// URL (and thus the iframe) doesn't change every poll. Re-minted when expired.
     pub(crate) novnc_view_ticket: Arc<Mutex<Option<String>>>,
+    /// Unified WebSocket subscriber registry. Long-lived (created at boot).
+    /// publish_* functions fan-out events to all connected WS clients.
+    pub(crate) ws_registry: std::sync::Arc<ws_gateway::WsRegistry>,
 }
 
 #[derive(Debug, Clone)]
@@ -649,6 +653,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         auth_token: resolve_gateway_auth_token()?.into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
         novnc_view_ticket: Arc::new(Mutex::new(None)),
+        ws_registry: std::sync::Arc::new(ws_gateway::WsRegistry::new()),
     };
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
