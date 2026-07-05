@@ -32487,6 +32487,9 @@ fn execute_read_only_task(
         GatewayTaskExecutorKind::CapabilityGeneric => execute_capability_generic(state, task),
         GatewayTaskExecutorKind::Subagent => execute_subagent_task(task),
         GatewayTaskExecutorKind::ProactivePrompt => execute_proactive_prompt_task(state, task),
+        // Phase 1a Task 1: ChatTurn is registered but dispatch is deferred to Task 5
+        // (execute_chat_turn_task does not exist yet). Placeholder keeps the match exhaustive.
+        GatewayTaskExecutorKind::ChatTurn => todo!("chat_turn dispatch wired in Phase 1a Task 5"),
         GatewayTaskExecutorKind::LegacyShell => execute_shell_read_only_task(task),
         GatewayTaskExecutorKind::LegacyLocal => execute_local_read_only_task(task),
     }
