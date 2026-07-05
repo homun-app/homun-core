@@ -573,6 +573,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.trim().parse().ok())
         .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1]));
     let addr = SocketAddr::from((host, port));
+    // Phase 1b: fuse the legacy two-DB layout (desktop-gateway.sqlite +
+    // task-runtime.sqlite) into the unified homun.sqlite. Idempotent; MUST run
+    // before AppState opens the stores on the unified path.
+    {
+        let unified = gateway_unified_database_path()?;
+        let legacy_chat = gateway_legacy_chat_database_path()?;
+        let legacy_task = gateway_legacy_task_database_path()?;
+        match db_migrate::unify_databases_if_needed(&legacy_chat, &legacy_task, &unified) {
+            Ok(report) => {
+                if report.unified {
+                    let total_chat: usize = report.chat_rows.values().sum();
+                    let total_task: usize = report.task_rows.values().sum();
+                    eprintln!(
+                        "db unify: migrated legacy chat ({total_chat} rows across {} tables) + task ({total_task} rows across {} tables) into {}",
+                        report.chat_rows.len(),
+                        report.task_rows.len(),
+                        unified.display()
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "db unify: WARNING migration failed ({e}); continuing with whatever state exists at {}",
+                    unified.display()
+                );
+                // Non-fatal: the stores will open on whatever the unified path resolves to.
+            }
+        }
+    }
     let state = AppState {
         http: reqwest::Client::new(),
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
@@ -47184,6 +47213,7 @@ fn lock_task_executor_status(
 }
 
 fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
+    // Env override keeps working for backwards compat / testing.
     if let Ok(path) = env::var("HOMUN_DESKTOP_GATEWAY_DB") {
         let path = PathBuf::from(path);
         if let Some(parent) = path.parent() {
@@ -47192,8 +47222,7 @@ fn gateway_database_path() -> Result<PathBuf, std::io::Error> {
         return Ok(path);
     }
 
-    let base = gateway_data_dir()?;
-    Ok(base.join("desktop-gateway.sqlite"))
+    gateway_unified_database_path()
 }
 
 fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
@@ -47205,6 +47234,24 @@ fn gateway_task_database_path() -> Result<PathBuf, std::io::Error> {
         return Ok(path);
     }
 
+    gateway_unified_database_path()
+}
+
+/// Path of the unified DB. Both ChatStore and TaskStore open this same file.
+/// The legacy two-file layout is migrated once at boot by `unify_databases_if_needed`.
+fn gateway_unified_database_path() -> Result<PathBuf, std::io::Error> {
+    let base = gateway_data_dir()?;
+    Ok(base.join("homun.sqlite"))
+}
+
+/// Legacy chat DB path (desktop-gateway.sqlite). Used only by the migration.
+fn gateway_legacy_chat_database_path() -> Result<PathBuf, std::io::Error> {
+    let base = gateway_data_dir()?;
+    Ok(base.join("desktop-gateway.sqlite"))
+}
+
+/// Legacy task DB path (task-runtime.sqlite). Used only by the migration.
+fn gateway_legacy_task_database_path() -> Result<PathBuf, std::io::Error> {
     let base = gateway_data_dir()?;
     Ok(base.join("task-runtime.sqlite"))
 }
