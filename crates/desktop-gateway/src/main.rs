@@ -788,6 +788,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     spawn_browser_handoff_reaper(state.clone());
     spawn_connector_event_poller(state.clone());
     start_proactivity_auto_review(state.clone());
+    // Phase A: publish `computer.live` on the unified WS whenever the contained
+    // computer state changes. A background task polls the same read-model the
+    // `GET /api/local-computer/live` handler returns every 1s (internally) and
+    // pushes it only when its JSON signature changes — replacing the client's
+    // 600ms-2.5s polling with a server push. `touch_activity = false` so the
+    // publisher (which fires regardless of whether a panel is open) does not
+    // skew the contained-computer idle timer.
+    spawn_computer_live_publisher(state.clone());
     let chat_routes = Router::new()
         .route(
             "/api/chat/threads",
@@ -46435,17 +46443,45 @@ async fn update_trigger(State(state): State<AppState>) -> Json<UpdateTriggerResp
     }
 }
 
-/// Reports whether the contained computer's live view is available, where to
-/// embed it, whether the browser is working RIGHT NOW, and the live step
-/// checklist. Polled by the desktop panel.
-async fn contained_computer_live(
-    State(state): State<AppState>,
-) -> Json<ContainedComputerLiveResponse> {
-    // Watching the live view counts as activity. This endpoint is polled only while a
-    // computer panel / the Local-computer page is open, so touching the idle timer here
-    // keeps the container from being recycled out from under the user mid-view (the
-    // reaper still reclaims it once nothing is viewing it for the idle window).
-    touch_cc_activity();
+/// Builds the contained computer live read-model: whether the live view is
+/// available, where to embed it, whether the browser is working RIGHT NOW, and
+/// the live step checklist. Shared by the `GET /api/local-computer/live` handler
+/// and the Phase A background publisher (which pushes it on the unified WS
+/// whenever its signature changes).
+///
+/// `touch_activity` should be true for the polled HTTP handler (watching counts
+/// as activity, keeping the container from being recycled mid-view) and false
+/// for the internal publisher (which fires regardless of whether a panel is
+/// open, so it must not skew the idle timer).
+/// Phase A background publisher: polls the contained computer live read-model
+/// every 1s and broadcasts `computer.live` on the unified WS **only when its
+/// JSON signature changes**. Replaces the client's 600ms-2.5s polling of
+/// `GET /api/local-computer/live` with a server push. The signature guard
+/// avoids spamming subscribers with identical frames during quiet periods.
+fn spawn_computer_live_publisher(state: AppState) {
+    tokio::spawn(async move {
+        let mut last_signature = String::new();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            // `touch_activity = false`: the publisher fires unconditionally, so
+            // touching the idle timer here would pin the container alive forever
+            // (only an open panel/Local-computer page should reset it).
+            let live = build_contained_computer_live(&state, false);
+            let signature = serde_json::to_string(&live).unwrap_or_default();
+            if signature != last_signature {
+                last_signature = signature;
+                if let Ok(value) = serde_json::to_value(&live) {
+                    state.ws_registry.publish_computer_live(value);
+                }
+            }
+        }
+    });
+}
+
+fn build_contained_computer_live(state: &AppState, touch_activity: bool) -> ContainedComputerLiveResponse {
+    if touch_activity {
+        touch_cc_activity();
+    }
     let mut novnc_url = resolve_contained_computer_novnc(
         contained_computer_cdp_endpoint().is_some(),
         env::var("HOMUN_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
@@ -46460,7 +46496,7 @@ async fn contained_computer_live(
         if url.starts_with('/') {
             url.push_str(&format!(
                 "?ticket={}",
-                novnc_proxy::current_view_ticket(&state)
+                novnc_proxy::current_view_ticket(state)
             ));
         }
     }
@@ -46487,7 +46523,7 @@ async fn contained_computer_live(
                 None
             }
         });
-    Json(ContainedComputerLiveResponse {
+    ContainedComputerLiveResponse {
         // The panel is useful for terminal activity even when the noVNC view is
         // not available, so report enabled when either surface has something.
         enabled: novnc_url.is_some() || terminal_active,
@@ -46498,7 +46534,20 @@ async fn contained_computer_live(
         steps: activity_state.map(|state| state.steps).unwrap_or_default(),
         terminal_active,
         terminal,
-    })
+    }
+}
+
+/// Reports whether the contained computer's live view is available, where to
+/// embed it, whether the browser is working RIGHT NOW, and the live step
+/// checklist. Polled by the desktop panel.
+async fn contained_computer_live(
+    State(state): State<AppState>,
+) -> Json<ContainedComputerLiveResponse> {
+    // Watching the live view counts as activity. This endpoint is polled only while a
+    // computer panel / the Local-computer page is open, so touching the idle timer here
+    // keeps the container from being recycled out from under the user mid-view (the
+    // reaper still reclaims it once nothing is viewing it for the idle window).
+    Json(build_contained_computer_live(&state, true))
 }
 
 const CONTAINED_CONTAINER_NAME: &str = "homun-cc";
