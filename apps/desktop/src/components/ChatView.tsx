@@ -100,6 +100,7 @@ import {
   type ProviderModelsGroup,
   type SkillsSummary,
 } from "../lib/coreBridge";
+import { wsSubscription } from "../lib/wsSubscription";
 import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
@@ -291,6 +292,9 @@ export function ChatView({
   // Cleared on submit; superseded by the persisted values when streaming ends.
   const [liveActivitySteps, setLiveActivitySteps] = useState<string[]>([]);
   const [livePlanMarkdown, setLivePlanMarkdown] = useState<string | null>(null);
+  // Track the active turn_id for WS event filtering. Set when a turn starts,
+  // cleared when it ends. Used by the wsSubscription subscriber to route events.
+  const activeTurnIdRef = useRef<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [chatExported, setChatExported] = useState(false);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
@@ -364,6 +368,27 @@ export function ChatView({
       notifyStreaming(false);
     };
   }, [notifyStreaming]);
+  // ── Unified WS subscription for turn events ──
+  // Listens for turn.event messages on the WS for the currently-active turn.
+  // Feeds the island (activity steps + plan markdown) in real-time, independent
+  // of the bridge NDJSON stream. This is the primary live channel for the island.
+  useEffect(() => {
+    const unsub = wsSubscription.subscribe((msg) => {
+      if (msg.type !== "turn.event") return;
+      const turnId = msg.turn_id as string | undefined;
+      if (!turnId || turnId !== activeTurnIdRef.current) return;
+      const kind = msg.kind as string;
+      const payload = msg.payload as Record<string, unknown> | undefined;
+      if (kind === "activity" && payload?.text) {
+        setLiveActivitySteps((prev) =>
+          [...prev, String(payload.text).trim()].filter((s) => s.length > 0),
+        );
+      } else if (kind === "plan_update" && payload?.markdown) {
+        setLivePlanMarkdown(String(payload.markdown));
+      }
+    });
+    return unsub;
+  }, []);
   const activeHealth = useMemo(
     () => health.filter((item) => item.status !== "attention").slice(0, 2),
     [health],
@@ -626,6 +651,7 @@ export function ChatView({
     };
     const promptMessages = [...conversationBase, userMessage];
     const requestId = `chat_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    activeTurnIdRef.current = `turn_${requestId}`;
     setStreamStatus({
       requestId,
       phase: "accepted",
@@ -776,6 +802,13 @@ export function ChatView({
       }
       streamedText = result.assistant_message.text || streamedText;
       streamEventParts = [];
+      console.log("[broker-debug] autotitle check", {
+        streamedTextLen: streamedText.length,
+        streamedTextPreview: streamedText.slice(0, 80),
+        shouldAutoTitle: shouldAutoTitleAfterSubmit,
+        threadTitle: thread.title,
+        promptMessagesLen: promptMessages.length,
+      });
       await persistAutoTitleForCompletedTurn(
         promptMessages,
         streamedText,
@@ -866,6 +899,7 @@ export function ChatView({
         cancelStreamingRequestRef.current = null;
       }
       cancelledStreamIdsRef.current.delete(requestId);
+      activeTurnIdRef.current = null;
       clearResumeMarker(thread.threadId);
     }
   }
@@ -1222,6 +1256,7 @@ export function ChatView({
     baseMessages: ChatMessage[],
   ) {
     const requestId = `chat_stream_regen_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    activeTurnIdRef.current = `turn_${requestId}`;
     let streamedText = "";
     let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
@@ -1540,6 +1575,7 @@ export function ChatView({
     attempt: number,
   ) {
     const requestId = `chat_stream_continue_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    activeTurnIdRef.current = `turn_${requestId}`;
     let streamedText = message.text;
     let streamEventParts: ChatEventPart[] = message.eventParts ?? [];
     let unlistenStream: (() => void) | undefined;

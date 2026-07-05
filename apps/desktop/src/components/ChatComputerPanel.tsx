@@ -13,6 +13,7 @@ import {
   SquareTerminal,
 } from "lucide-react";
 import { coreBridge, type ContainedComputerLive, type TerminalEntry } from "../lib/coreBridge";
+import { wsSubscription } from "../lib/wsSubscription";
 
 const IDLE: ContainedComputerLive = {
   enabled: false,
@@ -40,6 +41,7 @@ export function ChatComputerPanel({
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
   const [view, setView] = useState<"bar" | "expanded" | "full">("bar");
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  void pollRef; // kept for compatibility; no longer used after WS migration
   // Liveness: track WHEN the activity last changed so the panel can show "Xs ago" and a
   // soft "may be stuck" warning — otherwise the spinner looks identical whether the agent
   // is advancing or frozen (the "I can't tell if it's stuck" report).
@@ -48,30 +50,15 @@ export function ChatComputerPanel({
   const [now, setNow] = useState<number>(() => Date.now());
 
   useEffect(() => {
-    let cancelled = false;
-    const schedule = (delayMs: number) => {
-      if (pollRef.current) clearTimeout(pollRef.current);
-      pollRef.current = setTimeout(() => void poll(), delayMs);
-    };
-    const poll = async () => {
-      try {
-        const value = await coreBridge.containedComputerLive();
-        if (!cancelled) {
-          setLive(value);
-          schedule(isComputerLiveBusy(value) ? 600 : 2500);
-        }
-      } catch {
-        if (!cancelled) {
-          setLive(IDLE);
-          schedule(2500);
-        }
+    // Primary: unified WS push (computer.live events from the gateway).
+    const unsub = wsSubscription.subscribe((msg) => {
+      if (msg.type === "computer.live" && msg.state) {
+        setLive(msg.state as ContainedComputerLive);
       }
-    };
-    void poll();
-    return () => {
-      cancelled = true;
-      if (pollRef.current) clearTimeout(pollRef.current);
-    };
+    });
+    // Fallback: initial fetch so we don't wait for the first WS push.
+    void coreBridge.containedComputerLive().then((value) => setLive(value)).catch(() => {});
+    return unsub;
   }, []);
 
   // Reset the "last activity" clock whenever the step list or activity label changes.

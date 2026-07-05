@@ -46,6 +46,7 @@ import {
   type PluginState,
   type TemplateCatalogEntry,
 } from "./lib/coreBridge";
+import { wsSubscription } from "./lib/wsSubscription";
 import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
 import type {
@@ -798,8 +799,20 @@ export default function App() {
     }
   };
   useEffect(() => {
-    const unsubscribe = subscribeAppEvents((event) => appEventHandlerRef.current(event));
-    return unsubscribe;
+    // Unified WebSocket: persistent channel for ALL server→client events.
+    // Replaces subscribeAppEvents (NDJSON /api/events) + listenChatStreamEvent.
+    wsSubscription.connect();
+    const unsub = wsSubscription.subscribe((msg) => {
+      // Dispatch app events (thread.updated, thread.turn_started, project_graph.ready)
+      if (msg.type === "app.event") {
+        const event = msg.event as Record<string, unknown>;
+        appEventHandlerRef.current(event as unknown as Parameters<typeof appEventHandlerRef.current>[0]);
+      }
+    });
+    return () => {
+      unsub();
+      wsSubscription.disconnect();
+    };
   }, []);
 
   // Onboarding check: if setup isn't complete and no provider is configured,
