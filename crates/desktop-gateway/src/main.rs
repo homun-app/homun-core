@@ -640,6 +640,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "turn broker: enabled={} (HOMUN_TURN_BROKER); Phase 0 = foundation primitives only",
         turn_broker_enabled()
     );
+    // Phase 1a: lease-aware boot recovery. Bump the process generation, then re-queue any
+    // chat_turn left Running by a previous (now-dead) process. Must run BEFORE the worker
+    // pool starts so recovered turns are already Queued when executors begin polling.
+    if turn_broker_enabled() {
+        let store = state.task_store.lock().expect("task store lock at boot");
+        let generation = store.bump_process_generation().expect("bump process generation");
+        let user_id = local_first_task_runtime::UserId::new("local");
+        let workspace_id = local_first_task_runtime::WorkspaceId::new("default");
+        let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(
+            &store, &user_id, &workspace_id, generation,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("turn broker: recovery error: {e}");
+            Vec::new()
+        });
+        eprintln!(
+            "turn broker: recovery generation={generation} recovered={} turns",
+            recovered.len()
+        );
+        drop(store);
+    }
     start_task_executor_worker(state.clone());
     spawn_memory_consolidation_tick(state.clone());
     spawn_embedding_catchup(state.clone());
@@ -13766,6 +13787,12 @@ async fn generate_stream(
     State(state): State<AppState>,
     Json(request): Json<ChatGenerateStreamRequest>,
 ) -> Result<Response, GatewayError> {
+    // Phase 1a: when the broker is enabled, redirect through the broker instead of streaming
+    // inline. The client gets a 201 with a stream_url and subscribes to the broker stream
+    // (Phase 2 client concern). When the flag is off, the legacy direct path runs unchanged.
+    if turn_broker_enabled() {
+        return generate_stream_via_broker(State(state), Json(request)).await;
+    }
     // Chat runs through the configured OpenAI-compatible provider. The local
     // MLX/Gemma fallback was removed: a provider is required. Project chats use the
     // "coding" role when bound (else the orchestrator).
@@ -13819,6 +13846,90 @@ async fn generate_stream(
 Settings → Model & Runtime."
             .to_string(),
     })
+}
+
+/// Phase 1a broker shim for `generate_stream`. Enqueues the turn and returns a JSON body
+/// pointing the client at the broker stream, instead of streaming inline. The direct
+/// streaming path is a Phase 2 client concern (SSE bridge over turn events).
+async fn generate_stream_via_broker(
+    State(state): State<AppState>,
+    Json(request): Json<ChatGenerateStreamRequest>,
+) -> Result<Response, GatewayError> {
+    let thread_id = request
+        .thread_id
+        .clone()
+        .unwrap_or_else(|| format!("thread_{}", now_epoch_secs()));
+    let request_id = request.request_id.clone();
+    let input = local_first_task_runtime::broker::ChatTurnInput {
+        thread_id: thread_id.clone(),
+        request_id: request_id.clone(),
+        prompt: request.prompt.clone(),
+        visible_prompt: None,
+        attachments: None,
+        mode: None,
+        model: request.model.clone(),
+        source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+        approval: local_first_task_runtime::broker::TurnApproval::Full,
+    };
+    let store = state.task_store.lock().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "broker_store_lock",
+        message: format!("lock: {e}"),
+    })?;
+    let user_id = local_first_task_runtime::UserId::new("local");
+    let workspace_id = local_first_task_runtime::WorkspaceId::new("default");
+    match local_first_task_runtime::broker::enqueue_chat_turn(
+        &store,
+        &user_id,
+        &workspace_id,
+        &input,
+    ) {
+        Ok(enqueued) => {
+            let turn_id = enqueued.task_id.as_str().to_string();
+            let body = axum::body::Body::from(serde_json::to_vec(&serde_json::json!({
+                "turn_id": turn_id,
+                "request_id": request_id,
+                "thread_id": thread_id,
+                "status": "queued",
+                "stream_url": format!("/api/chat/turns/{turn_id}/stream"),
+            }))
+            .unwrap_or_default());
+            Ok(Response::builder()
+                .status(StatusCode::CREATED)
+                .header("content-type", "application/json")
+                .body(body)
+                .map_err(|e| GatewayError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "broker_response_build",
+                    message: format!("response: {e}"),
+                })?)
+        }
+        Err(local_first_task_runtime::broker::EnqueueError::ThreadBusy {
+            thread_id,
+            active_turn_id,
+        }) => {
+            let body = axum::body::Body::from(serde_json::to_vec(&serde_json::json!({
+                "error": "thread_busy",
+                "thread_id": thread_id,
+                "active_turn_id": active_turn_id,
+            }))
+            .unwrap_or_default());
+            Ok(Response::builder()
+                .status(StatusCode::CONFLICT)
+                .header("content-type", "application/json")
+                .body(body)
+                .map_err(|e| GatewayError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "broker_response_build",
+                    message: format!("response: {e}"),
+                })?)
+        }
+        Err(local_first_task_runtime::broker::EnqueueError::Store(e)) => Err(GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "broker_enqueue_store",
+            message: format!("enqueue: {e}"),
+        }),
+    }
 }
 
 #[derive(Debug, Deserialize)]
