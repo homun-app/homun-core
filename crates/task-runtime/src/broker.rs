@@ -261,6 +261,54 @@ pub fn recover_chat_turns_at_boot(
     Ok(recovered)
 }
 
+/// Cancel notification hook: the gateway (Phase 1) implements this with a tokio::sync::Notify
+/// per turn_id in the active-executor registry. Phase 0: default no-op.
+/// The executor receives the cancel via this channel (instant) + via DB poll (fallback).
+pub trait CancelNotify: Send + Sync {
+    fn notify_cancel(&self, turn_id: &str);
+}
+
+/// Default no-op cancel notify (Phase 0: the in-process notify lives in the gateway, not here).
+pub struct NoopCancelNotify;
+impl CancelNotify for NoopCancelNotify {
+    fn notify_cancel(&self, _turn_id: &str) {}
+}
+
+/// Marks a chat_turn as Cancelled (durable source of truth) and notifies the in-process
+/// executor via hook. Idempotent: no-op if already terminal (Completed/Failed/Cancelled).
+/// Writes a `cancelled` event in turn_events for subscribers.
+pub fn cancel_chat_turn(
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    task_id: &TaskId,
+    notify: &dyn CancelNotify,
+) -> TaskRuntimeResult<bool> {
+    let Some(mut task) = store.get_task(task_id, user_id, workspace_id)? else {
+        return Ok(false);
+    };
+    if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled) {
+        return Ok(false); // idempotent
+    }
+    let now = OffsetDateTime::now_utc();
+    task.status = TaskStatus::Cancelled;
+    task.blocked_reason = Some("cancelled by user/server".into());
+    task.updated_at = now;
+    let thread_id = task.input_json.get("thread_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let request_id = task.input_json.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let source = task.input_json.get("source").and_then(|v| v.as_str()).unwrap_or("interactive");
+    let approval = task.input_json.get("approval").and_then(|v| v.as_str()).unwrap_or("full");
+    store.insert_chat_turn(&task, &thread_id, &request_id, source, approval)?;
+    store.insert_turn_event(
+        task_id.as_str(),
+        TurnEventKind::Cancelled,
+        serde_json::json!({ "reason": "user_cancel", "at": now.unix_timestamp() }),
+    )?;
+    // notify the in-process executor (instant); no-op if not active
+    notify.notify_cancel(task_id.as_str());
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +454,57 @@ mod recovery_tests {
             recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), generation)
                 .unwrap();
         assert!(recovered.is_empty(), "non-chat_turn tasks are not the broker's business");
+    }
+}
+
+#[cfg(test)]
+mod cancel_tests {
+    use super::*;
+    use crate::{TaskStore, TaskStatus, UserId, WorkspaceId};
+    use std::sync::{Arc, Mutex};
+
+    struct RecordingNotify { turns: Arc<Mutex<Vec<String>>> }
+    impl CancelNotify for RecordingNotify {
+        fn notify_cancel(&self, turn_id: &str) { self.turns.lock().unwrap().push(turn_id.into()); }
+    }
+
+    fn make_input(request_id: &str, thread_id: &str) -> ChatTurnInput {
+        ChatTurnInput {
+            thread_id: thread_id.to_string(),
+            request_id: request_id.to_string(),
+            prompt: "hi".into(),
+            visible_prompt: None,
+            attachments: None,
+            mode: None,
+            model: None,
+            source: ChatTurnSource::Interactive,
+            approval: TurnApproval::Full,
+        }
+    }
+
+    #[test]
+    fn cancel_marks_cancelled_and_writes_event_and_notifies() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let r = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &make_input("r1", "t1")).unwrap();
+        let turns = Arc::new(Mutex::new(Vec::new()));
+        let notify = RecordingNotify { turns: turns.clone() };
+        let ok = cancel_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &r.task_id, &notify).unwrap();
+        assert!(ok);
+        let t = s.get_task(&r.task_id, &UserId::new("u"), &WorkspaceId::new("w")).unwrap().unwrap();
+        assert_eq!(t.status, TaskStatus::Cancelled);
+        let events = s.read_turn_events(r.task_id.as_str(), 0).unwrap();
+        assert!(events.iter().any(|e| e.kind == TurnEventKind::Cancelled));
+        assert_eq!(turns.lock().unwrap().clone(), vec![r.task_id.as_str().to_string()]);
+    }
+
+    #[test]
+    fn cancel_is_idempotent_on_terminal() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let r = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &make_input("r1", "t1")).unwrap();
+        s.update_task_status(&r.task_id, &UserId::new("u"), &WorkspaceId::new("w"),
+            TaskStatus::Completed, None).unwrap();
+        let notify = NoopCancelNotify;
+        let ok = cancel_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &r.task_id, &notify).unwrap();
+        assert!(!ok, "no-op on already-terminal turn");
     }
 }
