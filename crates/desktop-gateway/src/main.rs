@@ -29329,6 +29329,28 @@ async fn run_agent_turn_into_message(
     result
 }
 
+/// TEMPORARY STUB — Task 1a.4 replaces this with the real fan-out version that
+/// mirrors each stream event into turn_events + the per-turn broadcast.
+async fn run_agent_turn_into_message_with_fanout(
+    state: &AppState,
+    thread_id: &str,
+    prompt: &str,
+    tool_policy: &str,
+    source_user_message_id: &str,
+    assistant_message_id: &str,
+    _turn_id: &str,
+) -> Option<String> {
+    run_agent_turn_into_message(
+        state,
+        thread_id,
+        prompt,
+        tool_policy,
+        source_user_message_id,
+        assistant_message_id,
+    )
+    .await
+}
+
 async fn generate_channel_reply(
     state: &AppState,
     sender_name: &str,
