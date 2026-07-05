@@ -17,6 +17,12 @@ impl TaskStore {
         let store = Self {
             connection: Connection::open(path)?,
         };
+        // WAL enables concurrent readers + serialized writers — required when two
+        // stores (chat + task) point at the same file. busy_timeout avoids transient
+        // SQLITE_BUSY when the other writer is mid-commit.
+        store
+            .connection
+            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
         store.run_migrations()?;
         Ok(store)
     }
@@ -25,6 +31,10 @@ impl TaskStore {
         let store = Self {
             connection: Connection::open_in_memory()?,
         };
+        // WAL is a no-op on in-memory DBs but busy_timeout still applies.
+        store
+            .connection
+            .execute_batch("PRAGMA busy_timeout=5000;")?;
         store.run_migrations()?;
         Ok(store)
     }
@@ -1321,5 +1331,37 @@ mod upgrade_tests {
         assert_eq!(t.kind, "old_kind");
         // Cleanup
         let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod wal_tests {
+    use super::*;
+
+    #[test]
+    fn open_sets_wal_mode() {
+        // Use a temp file: WAL is a no-op on in-memory DBs.
+        let tmp = std::env::temp_dir().join(format!(
+            "homun-wal-test-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = TaskStore::open(&tmp).unwrap();
+        let mode: String = store
+            .connection
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+        let timeout: i64 = store
+            .connection
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(timeout, 5000);
+        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::remove_file(tmp.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(tmp.with_extension("sqlite-shm"));
     }
 }
