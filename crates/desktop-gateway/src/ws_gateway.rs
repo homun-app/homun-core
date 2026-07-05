@@ -6,9 +6,12 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
+
+use crate::AppState;
 
 /// A message the server sends to a connected WS client. Each variant maps 1:1 to a
 /// `type` field in the JSON wire protocol (see the unified-websocket-design spec).
@@ -135,4 +138,164 @@ impl Default for WsRegistry {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Axum handler for `GET /api/ws`. Upgrades to a WebSocket and runs the connection loop.
+pub async fn ws_handler(
+    ws: axum::extract::WebSocketUpgrade,
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> impl axum::response::IntoResponse {
+    ws.on_upgrade(move |socket| ws_connection_loop(socket, state))
+}
+
+/// The main connection loop for a single WS client. Registers the subscriber,
+/// spawns a sender task, and processes incoming messages (resume, pong).
+async fn ws_connection_loop(socket: axum::extract::ws::WebSocket, state: AppState) {
+    let subscriber_count_before = state.ws_registry.subscriber_count();
+    tracing::info!(
+        target: "ws::gateway",
+        subscribers_before = subscriber_count_before,
+        "WS client connected"
+    );
+    let (mut ws_tx, mut ws_rx) = socket.split();
+    let (session_id, mut msg_rx) = state.ws_registry.register();
+
+    // Send hello
+    let hello = ServerMessage::Hello {
+        session_id: session_id.clone(),
+    };
+    let hello_json = serde_json::to_string(&hello).unwrap_or_default();
+    let _ = ws_tx
+        .send(axum::extract::ws::Message::Text(hello_json.into()))
+        .await;
+
+    // Spawn the sender task: forwards registry messages → WS client
+    let state_for_send = state.clone();
+    let session_id_for_send = session_id.clone();
+    let send_task = tokio::spawn(async move {
+        while let Some(msg) = msg_rx.recv().await {
+            let json = serde_json::to_string(&msg).unwrap_or_default();
+            if ws_tx
+                .send(axum::extract::ws::Message::Text(json.into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        state_for_send.ws_registry.unregister(&session_id_for_send);
+    });
+
+    // Receive loop: process client messages (resume, pong, close)
+    while let Some(msg_result) = ws_rx.next().await {
+        match msg_result {
+            Ok(axum::extract::ws::Message::Text(text)) => {
+                let parsed: Result<ClientMessage, _> = serde_json::from_str(&text);
+                match parsed {
+                    Ok(ClientMessage::Pong) => {
+                        // Keepalive response — nothing to do
+                    }
+                    Ok(ClientMessage::Resume { turn_id, since }) => {
+                        handle_resume(&state, &turn_id, since).await;
+                    }
+                    Err(_) => {
+                        // Malformed message — ignore
+                    }
+                }
+            }
+            Ok(axum::extract::ws::Message::Close(_)) | Err(_) => break,
+            _ => {}
+        }
+    }
+
+    // Cleanup
+    state.ws_registry.unregister(&session_id);
+    send_task.abort();
+    tracing::info!(
+        target: "ws::gateway",
+        subscribers_after = state.ws_registry.subscriber_count(),
+        "WS client disconnected"
+    );
+}
+
+/// Handle a resume request: replay turn_events with seq > since from the DB,
+/// then check if the turn is still active. If terminal, send resume.done.
+async fn handle_resume(state: &AppState, turn_id: &str, since: i64) {
+    let events = {
+        let Ok(store) = state.task_store.lock() else {
+            return;
+        };
+        match store.read_turn_events(turn_id, since) {
+            Ok(events) => events,
+            Err(e) => {
+                tracing::warn!(
+                    target: "ws::gateway",
+                    turn_id = %turn_id,
+                    error = %e,
+                    "resume: failed to read turn_events"
+                );
+                return;
+            }
+        }
+    };
+
+    if events.is_empty() {
+        let status = get_turn_status(state, turn_id);
+        broadcast_resume_done(state, turn_id, status, since);
+        return;
+    }
+
+    let from_seq = events.first().unwrap().seq;
+    let to_seq = events.last().unwrap().seq;
+
+    state.ws_registry.broadcast(ServerMessage::ResumeAck {
+        turn_id: turn_id.to_string(),
+        from_seq,
+        to_seq,
+    });
+
+    for event in events {
+        state.ws_registry.publish_turn_event(
+            turn_id,
+            None,
+            event.seq,
+            event.kind.as_str(),
+            event.payload,
+        );
+    }
+
+    let status = get_turn_status(state, turn_id);
+    if let Some(ref s) = status {
+        if is_terminal_status(s) {
+            broadcast_resume_done(state, turn_id, status.clone(), to_seq);
+        }
+    }
+}
+
+fn get_turn_status(state: &AppState, turn_id: &str) -> Option<String> {
+    let Ok(store) = state.task_store.lock() else {
+        return None;
+    };
+    let task_id = local_first_task_runtime::TaskId::new(turn_id);
+    let user_id = crate::gateway_user_id();
+    let workspace_id = crate::gateway_workspace_id();
+    store
+        .get_task(&task_id, &user_id, &workspace_id)
+        .ok()?
+        .map(|t| format!("{:?}", t.status).to_lowercase())
+}
+
+fn is_terminal_status(status: &str) -> bool {
+    matches!(
+        status,
+        "completed" | "failed" | "cancelled" | "expired"
+    )
+}
+
+fn broadcast_resume_done(state: &AppState, turn_id: &str, status: Option<String>, last_seq: i64) {
+    state.ws_registry.broadcast(ServerMessage::ResumeDone {
+        turn_id: turn_id.to_string(),
+        status: status.unwrap_or_else(|| "unknown".to_string()),
+        last_seq,
+    });
 }

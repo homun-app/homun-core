@@ -1170,6 +1170,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let startup_state = state.clone();
     let mut app = Router::new()
         .route("/api/health", get(health))
+        // Unified WS endpoint: OUTSIDE the bearer layer (WS upgrade can't always
+        // carry the header). See the unified-websocket-design spec.
+        .route("/api/ws", get(ws_gateway::ws_handler))
         // noVNC live-view proxy: OUTSIDE the bearer layer (an iframe/WS can't send
         // the header) — gated instead by the short-lived ticket. The exact
         // `/websockify` match wins over the asset catch-all.
@@ -47603,7 +47606,7 @@ fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), std::i
     fs::write(path, bytes)
 }
 
-fn gateway_user_id() -> UserId {
+pub(crate) fn gateway_user_id() -> UserId {
     UserId::new(
         env::var("HOMUN_USER_ID")
             .unwrap_or_else(|_| "local-user".to_string())
@@ -47652,7 +47655,7 @@ fn set_memory_workspace(id: &str) {
     }
 }
 
-fn gateway_workspace_id() -> WorkspaceId {
+pub(crate) fn gateway_workspace_id() -> WorkspaceId {
     WorkspaceId::new(active_workspace_id())
 }
 
