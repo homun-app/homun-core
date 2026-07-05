@@ -201,6 +201,36 @@ def run_tests():
         fail(f"unexpected turn_id in 201 response: {body}")
     log(f"  → 201, turn_id={turn_id}, status={body.get('status')}")
 
+    # --- Test 1b: atomicity — user message persisted in chat_messages together with the turn ---
+    log("TEST 1b: atomicity — user message persisted in chat_messages with the turn")
+    # Brief wait: the broker's atomic INSERT commits immediately, but the chat_store's
+    # reader connection may lag by a WAL checkpoint. The other tests below already poll,
+    # but for this atomicity check we want to read soon after enqueue without racing the
+    # WAL visibility window.
+    time.sleep(0.5)
+    status, body, _ = http_request(
+        "GET", f"/api/chat/threads/{thread_id}/messages", expect=200
+    )
+    # The response shape is {"thread_id": "...", "messages": [...]}.
+    messages = body.get("messages") if isinstance(body, dict) else body
+    found = False
+    if isinstance(messages, list):
+        for msg in messages:
+            if isinstance(msg, dict) and "hello broker" in (msg.get("text") or ""):
+                found = True
+                break
+    if not found:
+        # Debug: print what we actually got back so the failure is diagnosable.
+        msg_count = len(messages) if isinstance(messages, list) else "n/a"
+        sample_texts = []
+        if isinstance(messages, list):
+            sample_texts = [(m.get("role"), (m.get("text") or "")[:50]) for m in messages if isinstance(m, dict)]
+        fail(
+            f"ATOMICITY BROKEN: 'hello broker' not found in thread messages after "
+            f"enqueue (got {msg_count} messages: {sample_texts})"
+        )
+    log("  → user message 'hello broker' found in chat_messages ✓ (atomicity holds)")
+
     # --- Test 2: second enqueue on same thread → 409 thread_busy ---
     log("TEST 2: POST /api/chat/turns again on same thread → expect 409")
     status, body, _ = http_request(

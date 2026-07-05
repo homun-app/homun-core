@@ -653,16 +653,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let st = state.clone();
         tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
     }
-    // VACUUM all SQLite stores in background to reclaim free space from
-    // deleted workspaces/tasks/memories. Runs at boot (not on every delete)
-    // because VACUUM rewrites the entire file and can be slow on large DBs.
-    {
-        let st = state.clone();
-        tokio::task::spawn_blocking(move || {
-            vacuum_all_stores(&st);
-            eprintln!("startup VACUUM: all stores compacted");
-        });
-    }
     // Homun retired as a proactive surface: its curiosities/onboarding now flow as
     // proactivity cards. Cancel any check-in still scheduled from a previous version
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
@@ -673,7 +663,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     // Phase 1a: lease-aware boot recovery. Bump the process generation, then re-queue any
     // chat_turn left Running by a previous (now-dead) process. Must run BEFORE the worker
-    // pool starts so recovered turns are already Queued when executors begin polling.
+    // pool starts AND before the background VACUUM (VACUUM takes an exclusive lock that
+    // would collide with bump_process_generation on the unified DB → "database is locked").
     if turn_broker_enabled() {
         let store = state.task_store.lock().expect("task store lock at boot");
         let generation = store.bump_process_generation().expect("bump process generation");
@@ -691,6 +682,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             recovered.len()
         );
         drop(store);
+    }
+    // VACUUM all SQLite stores in background to reclaim free space from
+    // deleted workspaces/tasks/memories. Runs at boot (not on every delete)
+    // because VACUUM rewrites the entire file and can be slow on large DBs.
+    // Runs AFTER the broker recovery above (which needs an exclusive write lock
+    // on the unified DB that VACUUM would otherwise block).
+    {
+        let st = state.clone();
+        tokio::task::spawn_blocking(move || {
+            vacuum_all_stores(&st);
+            eprintln!("startup VACUUM: all stores compacted");
+        });
     }
     start_task_executor_worker(state.clone());
     spawn_memory_consolidation_tick(state.clone());

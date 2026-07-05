@@ -1025,11 +1025,17 @@ impl TaskStore {
     /// Used by enqueue to enforce the 1-turn-per-thread constraint (409 if busy).
     /// Uses the partial index idx_tasks_chat_turn_thread.
     pub fn active_chat_turn_for_thread(&self, thread_id: &str) -> TaskRuntimeResult<Option<String>> {
+        // An "active" turn is any non-terminal chat_turn: the 1-turn-per-thread
+        // constraint must hold while a turn is queued, running, OR paused/waiting
+        // (e.g. waiting_resource, waiting_external_event, waiting_user_approval).
+        // Only terminal states (completed/failed/cancelled/expired) free the thread
+        // for a new turn — otherwise a turn stuck in waiting_external_event would
+        // silently stop blocking, letting a second turn race on the same transcript.
         let task_id: Option<String> = self.connection
             .query_row(
                 "SELECT task_id FROM tasks
                  WHERE thread_id = ?1 AND kind = 'chat_turn'
-                   AND status IN ('queued', 'running')
+                   AND status NOT IN ('completed', 'failed', 'cancelled', 'expired')
                  LIMIT 1",
                 params![thread_id],
                 |row| row.get(0),
