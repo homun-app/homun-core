@@ -3,7 +3,7 @@
 
 use crate::{
     TaskId, TaskPriority, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore,
-    UserId, WorkspaceId,
+    TurnEventKind, UserId, WorkspaceId,
 };
 use serde_json::{json, Value};
 use time::OffsetDateTime;
@@ -193,6 +193,74 @@ fn count_queued_chat_turns_for_thread(
     Ok(0)
 }
 
+/// Lease-aware recovery at boot. Call AFTER `bump_process_generation`.
+///
+/// Rule: every chat_turn Running whose lease_owner does NOT belong to the current
+/// generation is stale (the process that held it has died). We re-queue it (status=Queued,
+/// clear the lease) and write an `aborted` event in turn_events (so a reconnecting client
+/// knows to discard the previous execution's deltas).
+///
+/// In single-process today: all Running have a previous generation (we just started) →
+/// all are re-queued. Respects the LeaseManager even in multi-process (current-generation
+/// leases are left alone).
+pub fn recover_chat_turns_at_boot(
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    current_generation: u64,
+) -> TaskRuntimeResult<Vec<TaskId>> {
+    let mut recovered = Vec::new();
+    for mut task in store.list_tasks(user_id, workspace_id)? {
+        if task.kind != "chat_turn" || task.status != TaskStatus::Running {
+            continue;
+        }
+        // lease_owner has the form "<generation>:<worker_id>". If the generation is the
+        // current one, the worker is (theoretically) still active: leave it alone. In
+        // single-process just after start this branch is impossible — the check is for
+        // future multi-process defense.
+        let owned_by_current = task
+            .lease_owner
+            .as_deref()
+            .and_then(|o| o.split(':').next())
+            .map(|g| g.parse::<u64>().ok() == Some(current_generation))
+            .unwrap_or(false);
+        if owned_by_current {
+            continue;
+        }
+
+        // release resources, clear lease, re-queue
+        store.release_resources(&task)?;
+        task.status = TaskStatus::Queued;
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
+        task.blocked_reason = Some("recovered at boot (stale lease)".into());
+        task.updated_at = OffsetDateTime::now_utc();
+        let task_id = task.task_id.clone();
+        store.insert_chat_turn(
+            &task,
+            task.input_json.get("thread_id").and_then(|v| v.as_str()).unwrap_or(""),
+            task.input_json.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
+            task.input_json.get("source").and_then(|v| v.as_str()).unwrap_or("interactive"),
+            task.input_json.get("approval").and_then(|v| v.as_str()).unwrap_or("full"),
+        )?;
+
+        // aborted marker: the reconnecting client discards previous deltas
+        let turn_id = task_id.as_str().to_string();
+        store.insert_turn_event(
+            &turn_id,
+            TurnEventKind::Aborted,
+            serde_json::json!({
+                "reason": "lease_expired_at_boot",
+                "generation": current_generation,
+            }),
+        )?;
+
+        recovered.push(task_id);
+    }
+    Ok(recovered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,5 +320,91 @@ mod tests {
         enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r1", "t1")).unwrap();
         enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r2", "t2"))
             .expect("different threads are independent");
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use crate::{TaskRecord, TaskStore, TaskStatus, UserId, WorkspaceId};
+    use serde_json::json;
+    use time::Duration;
+
+    fn store() -> TaskStore { TaskStore::open_in_memory().unwrap() }
+
+    fn seed_running_with_generation(store: &TaskStore, gen_val: u64) -> TaskId {
+        // inserts a chat_turn Running with a lease_owner of the given generation
+        let mut t = TaskRecord::new(
+            "turn_stale", UserId::new("u"), WorkspaceId::new("w"),
+            "chat_turn", "prompt",
+            json!({"thread_id":"t1","request_id":"r1","source":"interactive","approval":"full"}),
+        );
+        t.status = TaskStatus::Running;
+        t.lease_owner = Some(format!("{gen_val}:worker_0"));
+        t.lease_expires_at = Some(time::OffsetDateTime::now_utc() + Duration::minutes(5));
+        store.insert_chat_turn(&t, "t1", "r1", "interactive", "full").unwrap();
+        TaskId::new("turn_stale")
+    }
+
+    #[test]
+    fn recover_requeues_stale_running_from_previous_generation() {
+        let s = store();
+        seed_running_with_generation(&s, 1);
+        // bump twice to simulate "we are generation 2, the lease is from generation 1"
+        s.bump_process_generation().unwrap();
+        let gen_now = s.bump_process_generation().unwrap();
+        assert_eq!(gen_now, 2);
+        let recovered = recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), gen_now).unwrap();
+        assert_eq!(recovered.len(), 1);
+        // now it's Queued
+        let t = s.get_task(&TaskId::new("turn_stale"), &UserId::new("u"), &WorkspaceId::new("w")).unwrap().unwrap();
+        assert_eq!(t.status, TaskStatus::Queued);
+        assert!(t.lease_owner.is_none());
+        // and the aborted event was written
+        let events = s.read_turn_events("turn_stale", 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TurnEventKind::Aborted);
+    }
+
+    #[test]
+    fn recover_does_not_touch_current_generation_running() {
+        let s = store();
+        let gen_now = s.bump_process_generation().unwrap(); // 1
+        seed_running_with_generation(&s, gen_now); // lease of the current generation
+        let recovered = recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), gen_now).unwrap();
+        assert!(recovered.is_empty(), "current-generation leases are left alone");
+    }
+
+    #[test]
+    fn recover_ignores_completed_chat_turns() {
+        let s = store();
+        let mut t = TaskRecord::new(
+            "turn_done", UserId::new("u"), WorkspaceId::new("w"),
+            "chat_turn", "prompt",
+            json!({"thread_id":"t1","request_id":"r2","source":"interactive","approval":"full"}),
+        );
+        t.status = TaskStatus::Completed;
+        s.insert_chat_turn(&t, "t1", "r2", "interactive", "full").unwrap();
+        let generation = s.bump_process_generation().unwrap();
+        let recovered =
+            recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), generation)
+                .unwrap();
+        assert!(recovered.is_empty());
+    }
+
+    #[test]
+    fn recover_ignores_non_chat_turn_running() {
+        let s = store();
+        let mut other = TaskRecord::new(
+            "bg1", UserId::new("u"), WorkspaceId::new("w"),
+            "background_job", "thing", json!({}),
+        );
+        other.status = TaskStatus::Running;
+        s.insert_task(&other).unwrap();
+        let generation = s.bump_process_generation().unwrap();
+        let recovered =
+            recover_chat_turns_at_boot(&s, &UserId::new("u"), &WorkspaceId::new("w"), generation)
+                .unwrap();
+        assert!(recovered.is_empty(), "non-chat_turn tasks are not the broker's business");
     }
 }
