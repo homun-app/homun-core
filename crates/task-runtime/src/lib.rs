@@ -1,6 +1,7 @@
 //! Durable local-first task runtime.
 
 pub mod approval;
+pub mod broker;
 pub mod checkpoint;
 pub mod error;
 pub mod executor;
@@ -15,6 +16,9 @@ pub mod types;
 pub mod ui;
 
 pub use approval::{ApprovalGate, ApprovalRequest, ApprovalStatus};
+pub use broker::{
+    chat_turn_task_id, ChatTurnInput, ChatTurnSource, EnqueueError, EnqueuedTurn, TurnApproval,
+};
 pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
 pub use executor::{ExecutorResult, FakeTaskExecutor, TaskExecutor};
