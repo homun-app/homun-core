@@ -147,10 +147,32 @@ impl TaskStore {
                 ON automation_event_dedup(automation_id, seen_at DESC);
 
             INSERT INTO task_runtime_metadata(key, value)
-            VALUES ('schema_version', '3')
+            VALUES ('schema_version', '4')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             ",
         )?;
+
+        // ── chat_turn columns (schema_version 4). Guarded: idempotenti sui DB esistenti.
+        // Colonne indicizzate per i turni chat. Nelle righe non-chat_turn restano NULL.
+        let chat_turn_cols = ["thread_id", "request_id", "source", "approval"];
+        for col in chat_turn_cols {
+            if !column_exists(&self.connection, "tasks", col) {
+                self.connection.execute(
+                    &format!("ALTER TABLE tasks ADD COLUMN {col} TEXT"),
+                    [],
+                )?;
+            }
+        }
+        // Indice parziale: solo le righe chat_turn (thread_id IS NOT NULL). Indicizza la
+        // query del 409-per-thread (status queued/running) senza inquinarle con i task non-chat.
+        if !index_exists(&self.connection, "idx_tasks_chat_turn_thread") {
+            self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_chat_turn_thread
+                    ON tasks(thread_id, status, kind)
+                    WHERE thread_id IS NOT NULL",
+                [],
+            )?;
+        }
         Ok(())
     }
 
@@ -879,9 +901,61 @@ impl TaskStore {
     }
 }
 
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info({table})")) else {
+        return false;
+    };
+    let names = stmt.query_map([], |row| row.get::<_, String>(1));
+    match names {
+        Ok(iter) => iter.filter_map(Result::ok).any(|name| name == column),
+        Err(_) => false,
+    }
+}
+
+fn table_exists(conn: &Connection, table: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        rusqlite::params![table],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+fn index_exists(conn: &Connection, index_name: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+        rusqlite::params![index_name],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
 fn enum_value<T: serde::Serialize>(value: &T) -> TaskRuntimeResult<String> {
     serde_json::to_value(value)?
         .as_str()
         .map(str::to_string)
         .ok_or_else(|| TaskRuntimeError::Store("enum did not serialize to string".to_string()))
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn migrations_run_idempotently_with_chat_turn_cols() {
+        let store = TaskStore::open_in_memory().expect("open");
+        // Le colonne esistono dopo la prima migrazione.
+        for col in ["thread_id", "request_id", "source", "approval"] {
+            assert!(column_exists(&store.connection, "tasks", col), "missing col {col}");
+        }
+        // Rieseguire le migrazioni non deve panicare (guarded ALTER).
+        store.run_migrations().expect("idempotent re-run");
+        assert_eq!(store.schema_version().unwrap(), 4);
+    }
+
+    #[test]
+    fn chat_turn_index_exists() {
+        let store = TaskStore::open_in_memory().expect("open");
+        assert!(index_exists(&store.connection, "idx_tasks_chat_turn_thread"));
+    }
 }
