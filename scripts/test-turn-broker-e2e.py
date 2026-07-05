@@ -369,6 +369,51 @@ def run_tests():
             log(f"  → NOTE: no retry/error events (kinds={kinds}); may be ok if it failed fast")
     log(f"  → TEST 8 ✓ (final status {final_status}, no zombie)")
 
+    # --- Test 9: browser gating — two turns on different threads compete for the slot ---
+    # Each chat_turn now declares a BrowserSession(1) requirement; the ResourceGovernor
+    # limit is 1. So if turn A is holding the slot while turn B is dispatched, B must
+    # land in WaitingResource (with a `queued` turn_event) and only proceed once A frees.
+    # We can't deterministically reproduce "A is mid-execution when B is dispatched" with
+    # the no-LLM setup (turns fail in setup before reserving the browser), so this test
+    # is a best-effort check: enqueue two on different threads in quick succession and
+    # verify that BOTH reach a terminal state and at least one emitted a `queued` event
+    # at some point. If neither ever queues, the gating is either not engaged (bug) or
+    # the timing window was missed (acceptable in a no-LLM test).
+    log("TEST 9: browser gating — two concurrent turns on different threads")
+    thread_a = create_thread()
+    thread_b = create_thread()
+    _, body_a, _ = http_request("POST", "/api/chat/turns", body={"thread_id": thread_a, "prompt": "a"}, expect=201)
+    _, body_b, _ = http_request("POST", "/api/chat/turns", body={"thread_id": thread_b, "prompt": "b"}, expect=201)
+    turn_a = body_a["turn_id"]
+    turn_b = body_b["turn_id"]
+    log(f"  enqueued {turn_a} (thread A) and {turn_b} (thread B)")
+
+    # Wait briefly to let the workers race for the browser slot.
+    time.sleep(2)
+
+    # Check events on both turns for a `queued` event (the one that lost the race).
+    queued_seen = False
+    for tid in (turn_a, turn_b):
+        _, events_body, _ = http_request("GET", f"/api/chat/turns/{tid}/events?since=0", expect=200)
+        if isinstance(events_body, list) and any(e.get("kind") == "queued" for e in events_body):
+            queued_seen = True
+            log(f"  → turn {tid} emitted a `queued` event (browser slot contended) ✓")
+            break
+
+    if not queued_seen:
+        log("  → NOTE: no `queued` event observed (turns may have failed before reserving the browser; acceptable in no-LLM test)")
+
+    # Both turns must eventually reach a terminal state (failed/completed/cancelled),
+    # never stuck in WaitingResource forever — the governor re-queues them when the
+    # slot frees, so they proceed even without the other turn completing successfully.
+    log("  waiting for both turns to reach terminal status…")
+    for tid in (turn_a, turn_b):
+        final = wait_for_terminal_status(tid, timeout_s=60)
+        if final == "waitingresource":
+            fail(f"turn {tid} stuck in WaitingResource (browser slot never freed) — governor requeue may be broken")
+        log(f"  → {tid} final: {final}")
+    log("  → TEST 9 ✓ (both turns reached terminal state; no permanent WaitingResource)")
+
     log("ALL TESTS PASSED")
 
 

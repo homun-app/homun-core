@@ -2,8 +2,8 @@
 //! Phase 0: testable synchronous primitives. Phase 1 wraps them in an async executor.
 
 use crate::{
-    RetryPolicy, TaskId, TaskPriority, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    TaskStore, TurnEventKind, UserId, WorkspaceId,
+    ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskPriority, TaskRecord,
+    TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind, UserId, WorkspaceId,
 };
 use serde_json::{json, Value};
 use time::OffsetDateTime;
@@ -123,6 +123,18 @@ pub fn chat_turn_retry_policy(source: ChatTurnSource) -> RetryPolicy {
     }
 }
 
+/// Resource requirements for a chat_turn in agent mode. The agent MAY use the
+/// shared browser at any point during the turn, so every agent turn reserves one
+/// `BrowserSession` unit up front. The ResourceGovernor (limit=1 in
+/// `conservative_defaults`) then guarantees only one chat_turn drives the single
+/// shared Chromium at a time — superseding the old `browse_web_lock` Mutex. The
+/// inline lock remains as a defensive backstop (double-gating), but the governor
+/// is now the authoritative gate: it surfaces a turn as `WaitingResource` (visible
+/// to the user via the existing turn_events path) instead of FIFO-blocking silently.
+pub fn chat_turn_resource_requirements() -> Vec<ResourceRequirement> {
+    vec![ResourceRequirement::new(ResourceClass::BrowserSession, 1)]
+}
+
 /// Transactional enqueue: INSERT task(queued) + check 1-turn-per-thread constraint.
 /// Returns ThreadBusy if the thread already has an active chat_turn.
 pub fn enqueue_chat_turn(
@@ -169,6 +181,7 @@ pub fn enqueue_chat_turn(
         ChatTurnSource::Automation | ChatTurnSource::Connector => TaskPriority::Background,
     };
     task.retry_policy = chat_turn_retry_policy(input.source);
+    task.resource_requirements = chat_turn_resource_requirements();
     task.created_at = now;
     task.updated_at = now;
 
@@ -271,6 +284,7 @@ where
         ChatTurnSource::Automation | ChatTurnSource::Connector => TaskPriority::Background,
     };
     task.retry_policy = chat_turn_retry_policy(input.source);
+    task.resource_requirements = chat_turn_resource_requirements();
     task.created_at = now;
     task.updated_at = now;
 

@@ -212,6 +212,11 @@ pub enum TurnEventKind {
     /// max_attempts, backoff_seconds, reason — so the UI can show "retry in corso
     /// (2/2 fra 15s)…". The user can still cancel via DELETE /turns/{id}.
     Retry,
+    /// The turn is waiting for a shared resource (e.g. the browser slot). Payload
+    /// carries detail (human reason like "waiting for browser slot") so the UI can
+    /// surface "in attesa del browser…". Emitted when the governor puts the task in
+    /// WaitingResource. The turn auto-resumes (back to Queued) once the resource frees.
+    Queued,
 }
 
 impl TurnEventKind {
@@ -227,6 +232,7 @@ impl TurnEventKind {
             TurnEventKind::Cancelled => "cancelled",
             TurnEventKind::Aborted => "aborted",
             TurnEventKind::Retry => "retry",
+            TurnEventKind::Queued => "queued",
         }
     }
 
@@ -242,6 +248,7 @@ impl TurnEventKind {
             "cancelled" => Self::Cancelled,
             "aborted" => Self::Aborted,
             "retry" => Self::Retry,
+            "queued" => Self::Queued,
             _ => return None,
         })
     }

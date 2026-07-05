@@ -32043,6 +32043,7 @@ fn run_next_task_once(
     };
 
     let task_id = task.task_id.as_str().to_string();
+    let task_kind = task.kind.clone();
     let mut task = match acquire_task_for_execution(
         state,
         task,
@@ -32055,6 +32056,21 @@ fn run_next_task_once(
     )? {
         TaskAcquireResult::Acquired(task) => task,
         TaskAcquireResult::WaitingResource(reason) => {
+            // Surface the wait as a turn_event so a live subscriber (or one that
+            // reconnects) can show "in attesa del browser slot…". Best-effort:
+            // a store error here must not block the waiting task itself.
+            if task_kind == "chat_turn" {
+                if let Ok(store) = lock_task_store(state) {
+                    let _ = store.insert_turn_event(
+                        &task_id,
+                        local_first_task_runtime::TurnEventKind::Queued,
+                        serde_json::json!({
+                            "detail": reason,
+                            "phase": "waiting_resource",
+                        }),
+                    );
+                }
+            }
             return Ok(TaskRunBatchResponse {
                 status: "waiting_resource".to_string(),
                 completed: 0,
