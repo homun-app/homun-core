@@ -886,6 +886,45 @@ impl TaskStore {
         Ok(out)
     }
 
+    /// Increments and persists the process_generation. Call ONCE at process startup,
+    /// before any acquire. Uniquely identifies this incarnation of the process: leases
+    /// written by previous generations are stale at boot recovery.
+    pub fn bump_process_generation(&self) -> TaskRuntimeResult<u64> {
+        // read-modify-write in a single explicit tx (atomicity on the meta row).
+        let tx = self.connection.unchecked_transaction()?;
+        let current: Option<String> = tx
+            .query_row(
+                "SELECT value FROM broker_meta WHERE key = 'process_generation'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let next: u64 = current
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0)
+            .saturating_add(1);
+        tx.execute(
+            "INSERT INTO broker_meta (key, value) VALUES ('process_generation', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![next.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(next)
+    }
+
+    /// The currently-persisted generation (the last one that bumped).
+    pub fn get_process_generation(&self) -> TaskRuntimeResult<u64> {
+        let value: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT value FROM broker_meta WHERE key = 'process_generation'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(value.and_then(|s| s.parse::<u64>().ok()).unwrap_or(0))
+    }
+
     fn next_checkpoint_sequence(
         &self,
         task_id: &TaskId,
@@ -1080,5 +1119,18 @@ mod turn_event_tests {
             events.iter().map(|e| e.kind).collect::<Vec<_>>(),
             vec![TurnEventKind::Delta, TurnEventKind::Aborted, TurnEventKind::Cancelled]
         );
+    }
+}
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+
+    #[test]
+    fn bump_is_monotonic() {
+        let s = TaskStore::open_in_memory().unwrap();
+        assert_eq!(s.bump_process_generation().unwrap(), 1);
+        assert_eq!(s.bump_process_generation().unwrap(), 2);
+        assert_eq!(s.get_process_generation().unwrap(), 2);
     }
 }
