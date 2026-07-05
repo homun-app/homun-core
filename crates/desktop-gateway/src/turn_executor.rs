@@ -186,12 +186,23 @@ pub fn execute_chat_turn_task(
         ))
         .unwrap_or_else(|| "No reply generated.".to_string());
 
-    // 6. Finalize the assistant message text + publish the update.
+    // 6. Finalize the assistant message. The legacy path persists the full
+    // streamed text (which includes ‹‹ACT›› activity markers as inline deltas),
+    // so the working island can parse them out of `message.text`. The broker
+    // separates activity into its own event kind, so to keep the island working
+    // we re-prefix the activity markers (collected from the turn_events emitted
+    // during the drain) ahead of the clean answer text.
+    let activity_prefix = build_activity_prefix_from_turn_events(state, turn_id);
+    let full_text = if activity_prefix.is_empty() {
+        answer.clone()
+    } else {
+        format!("{activity_prefix}\n{answer}")
+    };
     crate::update_channel_assistant_message(
         state,
         thread_id,
         &visible_turn.assistant_message_id,
-        &answer,
+        &full_text,
     );
 
     // 7. Emit the terminal `done` turn event (durable + best-effort live).
@@ -260,6 +271,32 @@ pub fn execute_chat_turn_task(
         }),
         artifacts: vec![],
     })
+}
+
+/// Reconstruct the `‹‹ACT››…‹‹/ACT››` activity prefix the working island parses
+/// out of `message.text`. The broker separates activity into its own
+/// `TurnEventKind::Activity` events during the drain; this reads them back from
+/// the durable `turn_events` table and re-wraps each label as the inline marker
+/// the legacy client UI expects. Returns "" if there were no activity events.
+fn build_activity_prefix_from_turn_events(state: &crate::AppState, turn_id: &str) -> String {
+    let Ok(store) = state.task_store.lock() else {
+        return String::new();
+    };
+    let Ok(events) = store.read_turn_events(turn_id, 0) else {
+        return String::new();
+    };
+    let mut labels: Vec<String> = Vec::new();
+    for event in events {
+        if event.kind == local_first_task_runtime::TurnEventKind::Activity {
+            if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    labels.push(format!("‹‹ACT››{trimmed}‹‹/ACT››"));
+                }
+            }
+        }
+    }
+    labels.join("\n")
 }
 
 #[cfg(test)]
