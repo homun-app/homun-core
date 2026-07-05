@@ -1061,6 +1061,20 @@ impl TaskStore {
         )?;
         Ok(())
     }
+
+    /// Runs a closure with a transaction handle. Use for cross-table atomic
+    /// operations (e.g., broker enqueue that must also insert a chat_message in
+    /// the same tx). The closure receives a `&Transaction` and can run arbitrary
+    /// SQL. Commits on Ok, rolls back on Err.
+    pub fn with_transaction<F, T>(&self, f: F) -> TaskRuntimeResult<T>
+    where
+        F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<T>,
+    {
+        let tx = self.connection.unchecked_transaction()?;
+        let result = f(&tx)?;
+        tx.commit()?;
+        Ok(result)
+    }
 }
 
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {

@@ -193,7 +193,135 @@ fn count_queued_chat_turns_for_thread(
     Ok(0)
 }
 
-/// Lease-aware recovery at boot. Call AFTER `bump_process_generation`.
+/// Atomic variant of `enqueue_chat_turn`: runs the broker insert AND a
+/// caller-provided chat_message insert in the SAME SQLite transaction. If either
+/// fails, both roll back — guaranteeing the prompt+turn atomicity invariant.
+///
+/// The `insert_user_message` closure receives a `&Transaction` and must insert
+/// the user message row (the caller knows the chat_messages schema, which lives
+/// in chat_store). It should be idempotent on the request_id (use INSERT OR IGNORE)
+/// so re-enqueue after a crash doesn't duplicate.
+pub fn enqueue_chat_turn_atomic<F>(
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    input: &ChatTurnInput,
+    insert_user_message: F,
+) -> Result<EnqueuedTurn, EnqueueError>
+where
+    F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
+{
+    // Pre-check (the tx below hardens against races).
+    if let Some(active) = store.active_chat_turn_for_thread(&input.thread_id)? {
+        return Err(EnqueueError::ThreadBusy {
+            thread_id: input.thread_id.clone(),
+            active_turn_id: active,
+        });
+    }
+
+    let task_id = chat_turn_task_id(&input.request_id);
+    let now = OffsetDateTime::now_utc();
+    let input_json = serde_json::json!({
+        "thread_id": input.thread_id,
+        "request_id": input.request_id,
+        "prompt": input.prompt,
+        "visible_prompt": input.visible_prompt,
+        "attachments": input.attachments,
+        "mode": input.mode,
+        "model": input.model,
+        "source": input.source.as_str(),
+        "approval": input.approval.as_str(),
+    });
+
+    let mut task = TaskRecord::new(
+        task_id.as_str(),
+        user_id.clone(),
+        workspace_id.clone(),
+        "chat_turn",
+        input.prompt.clone(),
+        input_json,
+    );
+    task.status = TaskStatus::Queued;
+    task.priority = match input.source {
+        ChatTurnSource::Interactive => TaskPriority::High,
+        ChatTurnSource::Channel => TaskPriority::Low,
+        ChatTurnSource::Automation | ChatTurnSource::Connector => TaskPriority::Background,
+    };
+    task.created_at = now;
+    task.updated_at = now;
+
+    // Atomic section: insert_user_message + insert task in one tx.
+    let task_clone = task.clone();
+    let thread_id = input.thread_id.clone();
+    let request_id = input.request_id.clone();
+    let source = input.source.as_str().to_string();
+    let approval = input.approval.as_str().to_string();
+    store.with_transaction(|tx| {
+        // Caller inserts the chat message in the same tx.
+        insert_user_message(tx)?;
+
+        // Insert the task + indexed columns in the same tx.
+        let task_json = serde_json::to_string(&task_clone)
+            .map_err(|e| TaskRuntimeError::Store(e.to_string()))?;
+        tx.execute(
+            "INSERT INTO tasks (
+                task_id, user_id, workspace_id, workflow_id, kind, status, priority,
+                created_at, updated_at, blocked_reason, task_json
+            )
+            VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, NULL, ?9)
+            ON CONFLICT(task_id, user_id, workspace_id) DO UPDATE SET
+                kind = excluded.kind, status = excluded.status, priority = excluded.priority,
+                updated_at = excluded.updated_at, task_json = excluded.task_json",
+            rusqlite::params![
+                task_clone.task_id.as_str(),
+                task_clone.user_id.as_str(),
+                task_clone.workspace_id.as_str(),
+                task_clone.kind,
+                "queued",
+                "high",
+                now.unix_timestamp(),
+                now.unix_timestamp(),
+                task_json,
+            ],
+        )?;
+        tx.execute(
+            "UPDATE tasks SET thread_id = ?1, request_id = ?2, source = ?3, approval = ?4
+             WHERE task_id = ?5 AND user_id = ?6 AND workspace_id = ?7",
+            rusqlite::params![
+                thread_id, request_id, source, approval,
+                task_clone.task_id.as_str(),
+                task_clone.user_id.as_str(),
+                task_clone.workspace_id.as_str(),
+            ],
+        )?;
+        Ok(())
+    })?;
+
+    // Post-insert double-check (outside tx).
+    if let Some(a) = store.active_chat_turn_for_thread(&input.thread_id)? {
+        if a != task.task_id.as_str() {
+            store.update_task_status(
+                &task.task_id,
+                user_id,
+                workspace_id,
+                TaskStatus::Cancelled,
+                Some("race lost on thread enqueue"),
+            )?;
+            return Err(EnqueueError::ThreadBusy {
+                thread_id: input.thread_id.clone(),
+                active_turn_id: a,
+            });
+        }
+    }
+
+    Ok(EnqueuedTurn {
+        task_id,
+        thread_id: input.thread_id.clone(),
+        position_in_queue: 0,
+    })
+}
+
+
 ///
 /// Rule: every chat_turn Running whose lease_owner does NOT belong to the current
 /// generation is stale (the process that held it has died). We re-queue it (status=Queued,
@@ -506,5 +634,109 @@ mod cancel_tests {
         let notify = NoopCancelNotify;
         let ok = cancel_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &r.task_id, &notify).unwrap();
         assert!(!ok, "no-op on already-terminal turn");
+    }
+}
+
+#[cfg(test)]
+mod atomic_tests {
+    use super::*;
+    use crate::TaskStore;
+
+    fn make_input(request_id: &str, thread_id: &str) -> ChatTurnInput {
+        ChatTurnInput {
+            thread_id: thread_id.to_string(),
+            request_id: request_id.to_string(),
+            prompt: "p".into(),
+            visible_prompt: None,
+            attachments: None,
+            mode: None,
+            model: None,
+            source: ChatTurnSource::Interactive,
+            approval: TurnApproval::Full,
+        }
+    }
+
+    #[test]
+    fn atomic_enqueue_skips_closure_when_pre_check_fails() {
+        let s = TaskStore::open_in_memory().unwrap();
+        // Pre-insert a conflicting turn on the same thread.
+        enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &make_input("r1", "t1"),
+        )
+        .unwrap();
+        let called = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let called_clone = called.clone();
+        let result = enqueue_chat_turn_atomic(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &make_input("r2", "t1"),
+            |_tx| {
+                *called_clone.lock().unwrap() = true;
+                Ok(())
+            },
+        );
+        assert!(matches!(result, Err(EnqueueError::ThreadBusy { .. })));
+        assert!(
+            !*called.lock().unwrap(),
+            "user_message closure should NOT be called when pre-check fails"
+        );
+    }
+
+    #[test]
+    fn atomic_enqueue_runs_both_inserts_on_success() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let called = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let called_clone = called.clone();
+        let result = enqueue_chat_turn_atomic(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &make_input("r1", "t1"),
+            |tx| {
+                *called_clone.lock().unwrap() = true;
+                // Simulate a chat_messages-like insert in the same tx.
+                tx.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS chat_messages (id TEXT PRIMARY KEY);
+                     INSERT INTO chat_messages VALUES ('local_user_r1');",
+                )?;
+                Ok(())
+            },
+        );
+        assert!(result.is_ok(), "atomic enqueue should succeed: {:?}", result.err());
+        assert!(*called.lock().unwrap());
+        // The marker row landed in the same DB (atomicity verified) — read it
+        // back via a public helper instead of the private `connection` field.
+        // We rely on active_chat_turn_for_thread (public) to confirm the task
+        // landed, and the closure's INSERT is implicitly verified because it
+        // shared the same tx (if it hadn't landed, the task wouldn't either).
+        let active = s.active_chat_turn_for_thread("t1").unwrap();
+        assert_eq!(active.as_deref(), Some("turn_r1"));
+    }
+
+    #[test]
+    fn atomic_enqueue_rolls_back_when_closure_fails() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let result = enqueue_chat_turn_atomic(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &make_input("r1", "t1"),
+            |_tx| {
+                Err(TaskRuntimeError::Store(
+                    "simulated chat_message insert failure".to_string(),
+                ))
+            },
+        );
+        assert!(result.is_err(), "should propagate the closure error");
+        // Verify the task was NOT inserted (rolled back).
+        let active = s.active_chat_turn_for_thread("t1").unwrap();
+        assert!(
+            active.is_none(),
+            "task must not be inserted when the closure fails (rollback)"
+        );
     }
 }

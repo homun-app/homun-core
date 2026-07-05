@@ -13909,11 +13909,29 @@ async fn generate_stream_via_broker(
     })?;
     let user_id = gateway_user_id();
     let workspace_id = gateway_workspace_id();
-    match local_first_task_runtime::broker::enqueue_chat_turn(
+    let user_message_id = format!("local_user_{request_id}");
+    let user_message_prompt = input.prompt.clone();
+    let user_message_thread = input.thread_id.clone();
+    let user_message_ts = now_epoch_secs().to_string();
+    match local_first_task_runtime::broker::enqueue_chat_turn_atomic(
         &store,
         &user_id,
         &workspace_id,
         &input,
+        |tx| {
+            tx.execute(
+                "INSERT OR IGNORE INTO chat_messages (id, thread_id, role, text, timestamp)
+                 VALUES (?1, ?2, 'user', ?3, ?4)",
+                rusqlite::params![
+                    user_message_id,
+                    user_message_thread,
+                    user_message_prompt,
+                    user_message_ts,
+                ],
+            )
+            .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))?;
+            Ok(())
+        },
     ) {
         Ok(enqueued) => {
             let turn_id = enqueued.task_id.as_str().to_string();
@@ -31277,11 +31295,38 @@ async fn enqueue_turn(
         code: "broker_store_lock",
         message: format!("task store lock: {e}"),
     })?;
-    match local_first_task_runtime::broker::enqueue_chat_turn(
+    // Atomic enqueue: persist the user message in chat_messages AND insert the
+    // chat_turn task in the SAME SQLite transaction. Restores the prompt+turn
+    // atomicity invariant (a crash between the two writes can no longer lose
+    // the prompt or leave an orphan task).
+    let user_message_id = format!("local_user_{request_id}");
+    let user_message_prompt = input.prompt.clone();
+    let user_message_thread = input.thread_id.clone();
+    let user_message_ts = now_epoch_secs().to_string();
+    let user_message_request_id = request_id.clone();
+    match local_first_task_runtime::broker::enqueue_chat_turn_atomic(
         &store,
         &user_id,
         &workspace_id,
         &input,
+        |tx| {
+            tx.execute(
+                "INSERT OR IGNORE INTO chat_messages (id, thread_id, role, text, timestamp)
+                 VALUES (?1, ?2, 'user', ?3, ?4)",
+                rusqlite::params![
+                    user_message_id,
+                    user_message_thread,
+                    user_message_prompt,
+                    user_message_ts,
+                ],
+            )
+            .map_err(|e| {
+                local_first_task_runtime::TaskRuntimeError::Store(e.to_string())
+            })?;
+            // The request_id is logged separately; the id already embeds it for idempotency.
+            let _ = user_message_request_id;
+            Ok(())
+        },
     ) {
         Ok(enqueued) => {
             let turn_id = enqueued.task_id.as_str().to_string();
