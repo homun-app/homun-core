@@ -3950,15 +3950,12 @@ async function resumeBrowserRuntimeChatPromptStream(
   commitResult = true,
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
-  const response = await fetch(
-    `${DESKTOP_GATEWAY_URL}/api/chat/stream_resume/${encodeURIComponent(requestId)}`,
-    { headers: gatewayHeaders() },
-  );
-  if (!response.ok) {
-    throw new Error(`Stream no longer available: HTTP ${response.status}`);
-  }
+  // Broker resume: turn_id derives from the saved requestId (`turn_{requestId}`).
+  // since=0 replays all buffered turn_events for the turn; the live tail follows.
+  const turnId = `turn_${requestId}`;
+  const response = await openTurnStream(turnId, 0);
   if (!response.body) {
-    throw new Error("The stream to resume has no body.");
+    throw new Error("The turn stream to resume has no body.");
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -3972,7 +3969,10 @@ async function resumeBrowserRuntimeChatPromptStream(
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {
-      const event = parseBrowserStreamEvent(line);
+      // Adapt broker {seq, kind, payload} → legacy {type, ...} and re-parse.
+      const legacyEvent = parseTurnStreamEventAsLegacy(line);
+      if (!legacyEvent) continue;
+      const event = parseBrowserStreamEvent(JSON.stringify(legacyEvent));
       if (!event) continue;
       if (event.type === "delta") {
         text += String(event.text ?? "");
@@ -3983,7 +3983,7 @@ async function resumeBrowserRuntimeChatPromptStream(
         });
       } else if (event.type === "done") {
         chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
-        // Done is authoritative (sanitized final text) → replace the live preview.
+        // Broker done may not carry text (server persists authoritative version).
         if (event.text) text = String(event.text);
         if (typeof event.redacted_user_text === "string") {
           redactedUserText = event.redacted_user_text;
@@ -4035,9 +4035,10 @@ async function resumeBrowserRuntimeChatPromptStream(
     computer_session: browserComputerSession(sessionId, totalElapsedSeconds),
     plan: null,
   };
-  if (commitResult) {
-    await chatApi.commitChatPromptResult(threadId, result);
-  }
+  // BROKER PATH: NO client-side commit. The broker already persisted the assistant
+  // message when the turn reached `done`. `commitResult` is now ignored (kept in
+  // the signature for source compatibility with the caller).
+  void commitResult;
   result.computer_session = await electronLocalComputerSession(sessionId);
   return result;
 }
