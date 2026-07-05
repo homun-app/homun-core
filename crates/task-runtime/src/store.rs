@@ -152,8 +152,8 @@ impl TaskStore {
             ",
         )?;
 
-        // ── chat_turn columns (schema_version 4). Guarded: idempotenti sui DB esistenti.
-        // Colonne indicizzate per i turni chat. Nelle righe non-chat_turn restano NULL.
+        // ── chat_turn columns (schema_version 4). Guarded: idempotent on existing DBs.
+        // Indexed columns for chat turns. Remain NULL on non-chat_turn rows.
         let chat_turn_cols = ["thread_id", "request_id", "source", "approval"];
         for col in chat_turn_cols {
             if !column_exists(&self.connection, "tasks", col) {
@@ -163,8 +163,8 @@ impl TaskStore {
                 )?;
             }
         }
-        // Indice parziale: solo le righe chat_turn (thread_id IS NOT NULL). Indicizza la
-        // query del 409-per-thread (status queued/running) senza inquinarle con i task non-chat.
+        // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
+        // 409-per-thread query (status queued/running) without polluting it with non-chat tasks.
         if !index_exists(&self.connection, "idx_tasks_chat_turn_thread") {
             self.connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_chat_turn_thread
@@ -912,6 +912,8 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     }
 }
 
+// Required by the Phase 0 plan; consumed by later tasks.
+#[allow(dead_code)]
 fn table_exists(conn: &Connection, table: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -944,11 +946,11 @@ mod migration_tests {
     #[test]
     fn migrations_run_idempotently_with_chat_turn_cols() {
         let store = TaskStore::open_in_memory().expect("open");
-        // Le colonne esistono dopo la prima migrazione.
+        // Columns exist after the first migration.
         for col in ["thread_id", "request_id", "source", "approval"] {
             assert!(column_exists(&store.connection, "tasks", col), "missing col {col}");
         }
-        // Rieseguire le migrazioni non deve panicare (guarded ALTER).
+        // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
         assert_eq!(store.schema_version().unwrap(), 4);
     }
