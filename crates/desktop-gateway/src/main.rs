@@ -646,8 +646,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if turn_broker_enabled() {
         let store = state.task_store.lock().expect("task store lock at boot");
         let generation = store.bump_process_generation().expect("bump process generation");
-        let user_id = local_first_task_runtime::UserId::new("local");
-        let workspace_id = local_first_task_runtime::WorkspaceId::new("default");
+        let user_id = gateway_user_id();
+        let workspace_id = gateway_workspace_id();
         let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(
             &store, &user_id, &workspace_id, generation,
         )
@@ -13876,8 +13876,8 @@ async fn generate_stream_via_broker(
         code: "broker_store_lock",
         message: format!("lock: {e}"),
     })?;
-    let user_id = local_first_task_runtime::UserId::new("local");
-    let workspace_id = local_first_task_runtime::WorkspaceId::new("default");
+    let user_id = gateway_user_id();
+    let workspace_id = gateway_workspace_id();
     match local_first_task_runtime::broker::enqueue_chat_turn(
         &store,
         &user_id,
@@ -31206,16 +31206,6 @@ async fn resume_stream(Path(request_id): Path<String>) -> Result<Response, Gatew
 // GET    /api/chat/turns/{turn_id}/events   — batch events (?since=seq)
 // GET    /api/chat/turns/{turn_id}/stream   — replay + live NDJSON (?since=seq)
 
-/// Local identity for broker calls. The desktop gateway is single-user; these are
-/// constants rather than extracted from a session because there is no auth layer yet.
-fn broker_local_user() -> UserId {
-    UserId::new("local")
-}
-
-fn broker_default_workspace() -> WorkspaceId {
-    WorkspaceId::new("default")
-}
-
 /// POST /api/chat/turns — enqueue a chat turn via the broker.
 async fn enqueue_turn(
     State(state): State<AppState>,
@@ -31249,8 +31239,8 @@ async fn enqueue_turn(
         source,
         approval,
     };
-    let user_id = broker_local_user();
-    let workspace_id = broker_default_workspace();
+    let user_id = gateway_user_id();
+    let workspace_id = gateway_workspace_id();
     let store = state.task_store.lock().map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "broker_store_lock",
@@ -31304,8 +31294,8 @@ async fn get_turn(
         code: "broker_store_lock",
         message: format!("lock: {e}"),
     })?;
-    let user_id = broker_local_user();
-    let workspace_id = broker_default_workspace();
+    let user_id = gateway_user_id();
+    let workspace_id = gateway_workspace_id();
     let task_id = TaskId::new(&turn_id);
     let task = store
         .get_task(&task_id, &user_id, &workspace_id)
@@ -31342,8 +31332,8 @@ async fn cancel_turn(
         code: "broker_store_lock",
         message: format!("lock: {e}"),
     })?;
-    let user_id = broker_local_user();
-    let workspace_id = broker_default_workspace();
+    let user_id = gateway_user_id();
+    let workspace_id = gateway_workspace_id();
     let task_id = TaskId::new(&turn_id);
     let ok = local_first_task_runtime::broker::cancel_chat_turn(
         &store,
