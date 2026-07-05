@@ -32556,9 +32556,11 @@ fn task_executor_worker_enabled() -> bool {
 /// Feature flag for the turn broker. Default OFF in Phase 0 (no behavior change).
 /// ON enables the broker path for chat_turn (Phase 1). Read once at startup.
 fn turn_broker_enabled() -> bool {
-    matches!(
+    // Broker is now the ONLY path (legacy NDJSON removed from the client).
+    // The env override is kept for backwards compatibility but defaults to true.
+    !matches!(
         std::env::var("HOMUN_TURN_BROKER").as_deref(),
-        Ok("1") | Ok("on") | Ok("true")
+        Ok("off") | Ok("0") | Ok("false")
     )
 }
 
