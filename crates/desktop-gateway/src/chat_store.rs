@@ -113,6 +113,9 @@ pub struct SuggestionInput {
     /// when engaged, they become clickable answers in the opened chat.
     pub choices: Option<String>,
     pub dedup_key: String,
+    /// Unix epoch past which this card is stale (date-bound cards only; None = never
+    /// expires). `gc_expired_suggestions` retires it once the date passes.
+    pub relevant_until: Option<i64>,
 }
 
 /// A suggestion card as shown in the dashboard.
@@ -2208,6 +2211,17 @@ impl ChatStore {
             self.conn
                 .execute("alter table suggestions add column choices text", [])?;
         }
+        // Time-boxed suggestions: when a card hinges on a date (a trip on the 30th, a
+        // deadline), the proactive generator records the date past which it's noise as a
+        // unix epoch. `gc_expired_suggestions` retires those once the date passes, so a
+        // stale "finalize your 30 June trip" card auto-trashes instead of lingering.
+        // Additive + nullable (NULL = never expires); guarded ALTER.
+        if !self.column_exists("suggestions", "relevant_until")? {
+            self.conn.execute(
+                "alter table suggestions add column relevant_until integer",
+                [],
+            )?;
+        }
         // Chat branching foundation (non-destructive edit/regenerate — roadmap
         // "Evoluzioni future"). The history becomes a TREE: `chat_messages.parent_id`
         // points at the message a node hangs off (NULL = a root) and
@@ -2493,8 +2507,8 @@ impl ChatStore {
             .unwrap_or(0);
         self.conn.execute(
             "insert into suggestions
-                (scope, kind, title, body, rationale, proposed_action, choices, status, dedup_key, created_at, updated_at)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?9, ?9)",
+                (scope, kind, title, body, rationale, proposed_action, choices, status, dedup_key, created_at, updated_at, relevant_until)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?9, ?9, ?10)",
             params![
                 s.scope,
                 s.kind,
@@ -2505,9 +2519,26 @@ impl ChatStore {
                 s.choices,
                 s.dedup_key,
                 now,
+                s.relevant_until,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Auto-trash date-bound suggestions whose `relevant_until` has passed: a
+    /// "finalize your 30 June trip" card is pure noise on 6 July. Marked `stale` (not
+    /// deleted) so feedback/history stay intact; the dashboard only shows `pending`, so
+    /// they disappear. Returns how many were retired. Cheap; safe to call on every read.
+    pub fn gc_expired_suggestions(&self) -> rusqlite::Result<usize> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.conn.execute(
+            "update suggestions set status = 'stale', updated_at = ?1
+               where status = 'pending' and relevant_until is not null and relevant_until < ?1",
+            params![now],
+        )
     }
 
     /// Pending suggestions, newest first. `scope` None = all scopes; with a scope,
@@ -2517,6 +2548,9 @@ impl ChatStore {
         scope: Option<&str>,
         limit: usize,
     ) -> rusqlite::Result<Vec<SuggestionRow>> {
+        // Retire date-expired cards before listing, so the board never shows a card
+        // whose date has already passed.
+        let _ = self.gc_expired_suggestions();
         let mut stmt;
         let rows = if let Some(scope) = scope {
             stmt = self.conn.prepare(

@@ -804,6 +804,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let st = state.clone();
         tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
     }
+    // One-time (flag-guarded): retire proactivity cards whose date already passed but
+    // that predate the `relevant_until` field (e.g. a 30 June trip card still on the
+    // board in July). Background — it makes one model call. New cards carry an expiry
+    // and auto-trash via gc_expired_suggestions, so this never re-runs after it settles.
+    {
+        let st = state.clone();
+        tokio::spawn(async move { sweep_stale_dated_suggestions_once(&st).await });
+    }
     // Homun retired as a proactive surface: its curiosities/onboarding now flow as
     // proactivity cards. Cancel any check-in still scheduled from a previous version
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
@@ -1634,6 +1642,14 @@ fn parse_review_suggestion(
     // with the card's `kind` field and never collides an empty-kind card with a
     // "suggerimento" one on the same anchor.
     let dedup_key = sanitize_dedup_key(&kind, &anchor);
+    // Date past which this card is noise (date-bound cards only). The model emits an
+    // ISO date; `gc_expired_suggestions` auto-trashes the card once it passes.
+    let relevant_until = s
+        .get("relevant_until")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .and_then(parse_relevant_until_epoch);
     Some(chat_store::SuggestionInput {
         scope: scope.to_string(),
         kind,
@@ -1643,7 +1659,23 @@ fn parse_review_suggestion(
         proposed_action,
         choices,
         dedup_key,
+        relevant_until,
     })
+}
+
+/// Parse an ISO `YYYY-MM-DD` (any trailing time ignored) into the unix timestamp of the
+/// START of the NEXT day (UTC). A card dated `2026-06-30` is "relevant until" the first
+/// instant of `2026-07-01`, so it stays on the board through its own day and
+/// auto-trashes only after. Manual split avoids needing the `time` macros feature.
+fn parse_relevant_until_epoch(iso: &str) -> Option<i64> {
+    let head = iso.split(['T', ' ']).next().unwrap_or(iso);
+    let mut parts = head.split('-');
+    let year: i32 = parts.next()?.trim().parse().ok()?;
+    let month: u8 = parts.next()?.trim().parse().ok()?;
+    let day: u8 = parts.next()?.trim().parse().ok()?;
+    let month = time::Month::try_from(month).ok()?;
+    let date = time::Date::from_calendar_date(year, month, day).ok()?;
+    Some(date.next_day()?.midnight().assume_utc().unix_timestamp())
 }
 
 /// Decode a card's stored `choices` (a JSON array string) into a JSON value the
@@ -1685,13 +1717,18 @@ nothing solid and non-trivial, reply {\"suggestion\": null}. ZERO IS BETTER THAN
 LEARN FROM FEEDBACK: if a FEEDBACK section is present, favor the STYLE and THEMES of suggestions \
 the user found USEFUL and AVOID anything resembling the ones marked NOT USEFUL. Feedback is the \
 most important signal about their taste.\n\
+TIME-AWARENESS: a TODAY date is given above. NEVER surface a card about a date/event that has \
+ALREADY passed — a trip, deadline or meeting whose date is before TODAY is done, so say nothing \
+about it. When a card DOES hinge on a date, set `relevant_until` to the LAST day it is worth acting \
+on (ISO YYYY-MM-DD) so it auto-trashes once that date passes; omit it for timeless cards.\n\
 Reply with JSON ONLY: {\"suggestion\": null} OR {\"suggestion\": {\"kind\":\"short theme in \
 kebab-case\",\"title\":\"very short title (for a question, this IS the question)\",\"body\":\"1-3 \
 sentences: what you noticed and what you propose/ask\",\"rationale\":\"which context element it \
 derives from (or what you do not know yet)\",\"dedup_key\":\"STABLE anchor of WHAT it is about \
 (the object/person/deadline), not the text\",\"proposed_action\":\"OPTIONAL, only for ACTIONS: what \
 to do, which the user will approve\",\"choices\":[\"OPTIONAL, only for CLOSED-CHOICE QUESTIONS: 2-4 \
-short options\"]}}.";
+short options\"],\"relevant_until\":\"OPTIONAL ISO date YYYY-MM-DD past which the card is stale \
+(date-bound cards only)\"}}.";
 
 /// Internal plugins (ADR 0011 §10-A). The id gates the plugin's UI (nav+panel,
 /// from the frontend registry) AND its engine (here) — detaching makes all three
@@ -1733,7 +1770,20 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
         .map(|c| format!("- [{}] {}", c.kind, c.title))
         .collect();
 
-    let mut brief = format!("SCOPE: {}\n\n", scope_display_name(scope));
+    // Make the supervisor TIME-AWARE: without today's date it can't tell a past event
+    // from a future one, so it happily surfaces "finalize your 30 June trip" in July.
+    let today = OffsetDateTime::now_utc().date();
+    let today_str = format!(
+        "{:04}-{:02}-{:02}",
+        today.year(),
+        u8::from(today.month()),
+        today.day()
+    );
+    let mut brief = format!(
+        "TODAY (UTC): {}\nSCOPE: {}\n\n",
+        today_str,
+        scope_display_name(scope)
+    );
     if !memory.is_empty() {
         brief.push_str("SCOPE MEMORY (decisions/goals/facts/preferences):\n");
         brief.push_str(&memory.join("\n"));
@@ -1804,6 +1854,75 @@ async fn run_proactive_review(state: &AppState, scope: &str) -> Option<i64> {
         input.title
     );
     Some(id)
+}
+
+/// One-time sweep (guarded by a persistent flag) for cards that PREDATE the
+/// `relevant_until` field: a "finalize your 30 June trip" card surfaced before the fix
+/// has no expiry, so it would linger past its date. Ask the model ONCE which pending
+/// cards hinge on a date/event already past relative to today, and retire those. New
+/// cards carry `relevant_until` and auto-trash via `gc_expired_suggestions`, so once
+/// the flag is set this never runs again.
+async fn sweep_stale_dated_suggestions_once(state: &AppState) {
+    const FLAG: &str = "suggestions_date_sweep_v1";
+    let already_done = lock_store(state)
+        .ok()
+        .and_then(|s| s.flag(FLAG).ok().flatten())
+        .is_some_and(|v| v == "done");
+    if already_done {
+        return;
+    }
+    let cards = lock_store(state)
+        .ok()
+        .and_then(|s| s.pending_suggestions(None, 200).ok())
+        .unwrap_or_default();
+    if cards.is_empty() {
+        let _ = lock_store(state).map(|s| s.set_flag(FLAG, "done"));
+        return;
+    }
+    let today = OffsetDateTime::now_utc().date();
+    let today_str = format!(
+        "{:04}-{:02}-{:02}",
+        today.year(),
+        u8::from(today.month()),
+        today.day()
+    );
+    let list: String = cards
+        .iter()
+        .map(|c| {
+            format!(
+                "- id {}: {} — {}",
+                c.id,
+                c.title,
+                c.body.chars().take(200).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let system = "You retire stale proactivity cards. Given TODAY and a list of cards, return the ids \
+of cards that hinge on a date/event ALREADY PAST relative to TODAY (a trip, deadline or meeting whose \
+date is before TODAY — no longer actionable). Cards with no date, or with a date of today or the \
+future, are NOT stale. Reply with JSON ONLY: {\"stale_ids\": [<id>, ...]}.";
+    let brief = format!("TODAY (UTC): {today_str}\n\nCARDS:\n{list}");
+    let Some(root) = call_memory_json(state, system, &brief).await else {
+        return; // transient model failure: don't set the flag, retry next boot
+    };
+    let stale_ids: Vec<i64> = root
+        .get("stale_ids")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(serde_json::Value::as_i64).collect())
+        .unwrap_or_default();
+    if let Ok(store) = lock_store(state) {
+        for id in &stale_ids {
+            let _ = store.set_suggestion_status(*id, "stale", None, None);
+        }
+        let _ = store.set_flag(FLAG, "done");
+    }
+    if !stale_ids.is_empty() {
+        eprintln!(
+            "[proactivity] one-time date sweep: retired {} stale-dated card(s)",
+            stale_ids.len()
+        );
+    }
 }
 
 /// Interval between auto-review ticks — a cheap LOCAL cadence check; the review
@@ -50000,6 +50119,7 @@ prs.save(Path({path:?}))
                 proposed_action: Some("Controllare lo stato di Idra".to_string()),
                 choices: None,
                 dedup_key: "follow-up:idra".to_string(),
+                relevant_until: None,
             })
             .unwrap();
 
