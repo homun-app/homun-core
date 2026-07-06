@@ -6874,9 +6874,34 @@ fn execution_plan_steps(plan: &ExecutionPlan) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// Harness-owned MONOTONIC progress: a plan runs in order, so once a step is `doing`
+/// (or `done`), every earlier still-open step is finished — mark it `done`. Models,
+/// especially weak ones, advance the `doing` pointer without ever marking prior steps
+/// `done` (and even re-emit the whole plan with completed steps back to `todo`), which
+/// left "Progress" stuck at 0/N despite real work. Derive completion deterministically
+/// instead of trusting the model. Lives at the plan source, so EVERY client (chat,
+/// Telegram/WhatsApp, future surfaces) gets correct progress. Blocked steps are left
+/// untouched (a stalled step before the frontier stays visible as blocked).
+fn enforce_monotonic_plan_progress(steps: &mut [serde_json::Value]) {
+    let Some(frontier) = steps
+        .iter()
+        .rposition(|s| matches!(plan_step_status(s), "doing" | "done"))
+    else {
+        return;
+    };
+    for step in steps.iter_mut().take(frontier) {
+        if plan_step_status(step) == "todo" {
+            step["status"] = serde_json::json!("done");
+        }
+    }
+}
+
 fn merge_execution_plan(plan: &mut ExecutionPlan, sent: &[serde_json::Value]) -> Vec<usize> {
     let mut steps = execution_plan_steps(plan);
     let claims = merge_plan(&mut steps, sent);
+    // Derive completion of earlier steps from the current frontier (see helper) so the
+    // persisted plan — and thus every surface that renders it — reflects real progress.
+    enforce_monotonic_plan_progress(&mut steps);
     let mut previous_steps = std::mem::take(&mut plan.steps);
     plan.steps = steps
         .iter()
@@ -49765,8 +49790,9 @@ mod tests {
         fonti_section, format_memory_block, humanize_task_kind, hybrid_memory_score,
         inbound_action, is_auto_confirmable, is_confirmation_reply, is_internal_task_kind,
         is_low_value_source_url, is_salient_exchange, is_semantic_duplicate, jail_in_root,
-        legacy_dir_action, llm_concurrency_view, mcp_error_hint, mcp_provider_slug,
-        mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata, memory_age_days, merge_plan,
+        enforce_monotonic_plan_progress, legacy_dir_action, llm_concurrency_view, mcp_error_hint,
+        mcp_provider_slug, mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata,
+        memory_age_days, merge_plan,
         message_has_image_url, next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
@@ -52084,6 +52110,41 @@ prs.save(Path({path:?}))
         assert_eq!(plan[0]["title"], "Render deck", "title preserved");
         assert_eq!(claims, vec![0]);
         assert_eq!(plan_step_status(&plan[0]), "doing");
+    }
+
+    #[test]
+    fn monotonic_progress_completes_steps_before_the_frontier() {
+        // The model advanced `doing` to step 3 but left the earlier steps `todo` (never
+        // marked them done). Monotonic progress closes them so "Progress" reflects reality.
+        let mut steps = vec![
+            serde_json::json!({ "id": "s1", "title": "A", "status": "todo", "detail": "" }),
+            serde_json::json!({ "id": "s2", "title": "B", "status": "todo", "detail": "" }),
+            serde_json::json!({ "id": "s3", "title": "C", "status": "doing", "detail": "" }),
+            serde_json::json!({ "id": "s4", "title": "D", "status": "todo", "detail": "" }),
+        ];
+        enforce_monotonic_plan_progress(&mut steps);
+        assert_eq!(plan_step_status(&steps[0]), "done", "before frontier → done");
+        assert_eq!(plan_step_status(&steps[1]), "done", "before frontier → done");
+        assert_eq!(plan_step_status(&steps[2]), "doing", "frontier stays doing");
+        assert_eq!(plan_step_status(&steps[3]), "todo", "after frontier stays todo");
+    }
+
+    #[test]
+    fn monotonic_progress_preserves_blocked_and_no_frontier() {
+        // A blocked step before the frontier stays blocked (not silently completed).
+        let mut steps = vec![
+            serde_json::json!({ "id": "s1", "title": "A", "status": "blocked", "detail": "" }),
+            serde_json::json!({ "id": "s2", "title": "B", "status": "doing", "detail": "" }),
+        ];
+        enforce_monotonic_plan_progress(&mut steps);
+        assert_eq!(plan_step_status(&steps[0]), "blocked", "blocked stays blocked");
+        // No doing/done anywhere → nothing to derive → unchanged.
+        let mut all_todo = vec![
+            serde_json::json!({ "id": "s1", "title": "A", "status": "todo", "detail": "" }),
+            serde_json::json!({ "id": "s2", "title": "B", "status": "todo", "detail": "" }),
+        ];
+        enforce_monotonic_plan_progress(&mut all_todo);
+        assert_eq!(plan_step_status(&all_todo[0]), "todo", "no frontier → unchanged");
     }
 
     #[test]
