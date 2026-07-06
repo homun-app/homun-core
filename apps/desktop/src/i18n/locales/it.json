@@ -364,6 +364,10 @@
     "interrupted": "Risposta interrotta.",
     "thinking": "L'assistente sta pensando",
     "writing": "L'assistente sta scrivendo",
+    "recalling": "Sto controllando la memoria…",
+    "recallingHits": "Trovati {{count}} ricordi",
+    "recallingNoHits": "Nessun ricordo trovato",
+    "memoryBadge": "Ha richiamato {{count}} ricordi",
     "roleSystem": "Sistema",
     "roleAssistant": "Assistente",
     "metrics": "Prestazioni",
@@ -952,6 +956,12 @@
     "aboutVersion": "Informazioni e versione",
     "versionLine": "Versione {{version}}",
     "versionUnknown": "Versione non disponibile in questa build",
+    "feedbackTitle": "Segnala un problema",
+    "feedbackHint": "Crea un archivio con i log tecnici (nessun dato di memoria o chat; i log possono contenere percorsi file o frammenti di messaggi) da allegare alla segnalazione.",
+    "feedbackButton": "Crea archivio log",
+    "feedbackBuilding": "Creo l'archivio…",
+    "feedbackDone": "Archivio creato: {{path}}",
+    "feedbackError": "Impossibile creare l'archivio. Verifica che ~/.homun/logs sia accessibile.",
     "checkForUpdates": "Controlla aggiornamenti",
     "updateChecking": "Controllo…",
     "updateUpToDate": "Sei alla versione più recente.",
@@ -1151,5 +1161,13 @@
     "newActivity": "Nuova attività",
     "newMessage": "Nuovo messaggio",
     "scheduledReady": "Task pianificato pronto"
+  },
+  "projectContext": {
+    "title": "Contesto del progetto",
+    "objective": "Obiettivo",
+    "brief": "Sintesi",
+    "openLoops": "Lavori in sospeso",
+    "decisions": "Decisioni",
+    "learnedInChat": "appreso in un'altra chat"
   }
 }

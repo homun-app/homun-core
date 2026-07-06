@@ -4,17 +4,23 @@ Date: 2026-07-06
 
 ## Status
 
-**Proposed.** Formalizza una direzione già citata come corrente (in `CLAUDE.md` e nella memoria
-di lavoro) ma **non ancora implementata**. Discende dal **caposaldo #1** (la memoria è il
-differenziatore e l'**unico layer condiviso**: tutto vi passa, mai store paralleli) e si appoggia
+**Accepted — in gran parte implementata (2026-07-01).** Discende dal **caposaldo #1** (la memoria è
+il differenziatore e l'**unico layer condiviso**: tutto vi passa, mai store paralleli) e si appoggia
 alla [0016](0016-harness-owned-task-engine-cross-model.md)/[0021](0021-single-guarded-loop-planning-as-tool.md)
 (l'harness possiede il control flow attorno al loop unico).
 
-> ⚠️ **Stato reale del codice (verificato 2026-07-06):** `crates/memory` esiste (~6k righe,
-> `MemoryFacade`, `graph`, `lifecycle`, `operations`), ma i flag `HOMUN_MEMORY_SERVICE` e
-> `HOMUN_MEMORY_POOL` **non esistono** (0 occorrenze). L'orchestrazione di memoria
-> (`recall`/`learn`/`consolidate`/`brief`) vive ancora **in-path** dentro
-> `crates/desktop-gateway/src/main.rs`. Questo ADR è la **decisione di estrarla**, non un fatto compiuto.
+> ✅ **Stato reale del codice (verificato 2026-07-06, post-merge):** implementata dietro i flag
+> `HOMUN_MEMORY_SERVICE` / `HOMUN_MEMORY_POOL` (default OFF). Fatte le **Tappe 1** (trait
+> `MemoryRecallService` in `crates/memory/src/service.rs`: `brief`/`recall`/`learn`, delega
+> zero-behaviour-change), **1.5** (cache briefing con generation-counter nel `MemoryFacade`),
+> **2** (pool reader/writer WAL nello store), **4** (orchestrazione `recall`/`learn`/`consolidate`/
+> `backfill` MIGRATA nel crate — `recall.rs`/`learn.rs`/`consolidate.rs`/`embedding.rs`, ~600 righe
+> tolte da `main.rs`, testabile in isolamento con mock). **Resta:** Tappa 3 (recall on-demand via
+> tool) + pulizia fn gateway morte. Dettaglio vivo in [STATO.md](../STATO.md). Il testo qui sotto
+> descrive la decisione originale.
+>
+> _(Nota storica: questo file è stato scritto il 2026-07-06 su un branch cieco a questo lavoro, che
+> lo dava per "non iniziato"; corretto dopo il merge con `origin/main`.)_
 
 ## Perché questa decisione esiste
 
@@ -56,9 +62,10 @@ la costruzione del grafo/consolidamento avviene fuori dal path di risposta.
 - Local-first, privacy-by-design, la memoria ibrida (FTS5/bm25 + dense + RRF, grafo, wiki).
 - Il fatto che la memoria sia il differenziatore e l'unico layer condiviso.
 
-## Note di implementazione (aperte)
+## Stato implementazione (2026-07-01)
 
-- Nessun flag/servizio ancora scritto. Primo slice suggerito: spostare `brief`/`recall` dietro
-  `HOMUN_MEMORY_SERVICE` con parità di comportamento e un test di contratto, poi il write-back.
+- ✅ Tappa 1 (trait `MemoryRecallService`), 1.5 (cache briefing), 2 (pool WAL), 4 (recall/learn/
+  consolidate/backfill migrati nel crate). Tutto dietro `HOMUN_MEMORY_SERVICE`/`HOMUN_MEMORY_POOL`.
+- ☐ Tappa 3 (recall on-demand via tool) + pulizia delle fn gateway morte. Dettaglio in [STATO.md](../STATO.md).
 
 Vedi memoria: `homun-memory-engine-shared-layer`.

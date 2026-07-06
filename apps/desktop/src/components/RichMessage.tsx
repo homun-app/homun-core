@@ -1,24 +1,29 @@
 import { lazy, memo, Suspense } from "react";
 import { useTranslation } from "react-i18next";
+import type { ChatEventPart } from "../types";
+import {
+  REASONING_MARKER_RE,
+  STRAY_REASONING_MARKER_RE,
+  REASONING_OPEN,
+  THINK_RE,
+  THINK_OPEN_RE,
+  CONTROL_MARKER_RE,
+  ACTIVITY_MARKER_RE,
+  ARTIFACT_MARKER_RE,
+  PLAN_MARKER_RE,
+  DIFF_MARKER_RE,
+  ARTIFACT_NOTE_RE,
+  BROKEN_IMAGE_RE,
+  LEAKED_TOOLCALL_RE,
+} from "../lib/markers";
 
 interface RichMessageProps {
   text: string;
   streaming?: boolean;
+  eventParts?: ChatEventPart[];
 }
 
 const RichMessageRenderer = lazy(() => import("./RichMessageRenderer"));
-
-// The reasoning trace travels in a ‹‹REASONING››…‹‹/REASONING›› marker (gateway). It is
-// rendered COLLAPSED ("Ragionamento", expandable) and kept OUT of the answer body — the
-// model's thinking is never shown as the answer itself.
-const REASONING_MARKER_RE = /‹‹REASONING››([\s\S]*?)‹‹\/REASONING››/g;
-const STRAY_REASONING_MARKER_RE = /‹{1,2}\/?REASONING››/g;
-const REASONING_OPEN = "‹‹REASONING››";
-// Reasoning models (e.g. deepseek) emit their trace inline as <think>…</think> in the
-// CONTENT, which streams live — so the trace must be collapsed DURING streaming, not only
-// after the gateway rewrites it to a ‹‹REASONING›› marker at the end. Handle both forms.
-const THINK_RE = /<think(?:ing)?>([\s\S]*?)<\/think(?:ing)?>/gi;
-const THINK_OPEN_RE = /<think(?:ing)?>/i;
 
 /// Split a message into its (collapsed) reasoning trace and the answer body. Handles BOTH
 /// the ‹‹REASONING›› marker (final, from the gateway) and inline <think> (live, from the
@@ -81,12 +86,14 @@ function renderAnswer(text: string, streaming: boolean) {
     text.includes("‹‹COMPOSIO_") ||
     text.includes("‹‹ACT››") ||
     text.includes("‹‹ARTIFACT››") ||
-    text.includes("‹‹PLAN››")
+    text.includes("‹‹PLAN››") ||
+    text.includes("‹‹DIFF››")
       ? text
           .replace(CONTROL_MARKER_RE, "")
           .replace(ACTIVITY_MARKER_RE, "")
           .replace(ARTIFACT_MARKER_RE, "")
           .replace(PLAN_MARKER_RE, "")
+          .replace(DIFF_MARKER_RE, "")
           .replace(ARTIFACT_NOTE_RE, "")
           .trim()
       : text;
@@ -109,32 +116,14 @@ function renderAnswer(text: string, streaming: boolean) {
   );
 }
 
-// Internal control markers the gateway uses to carry a pending write-confirmation
-// action (or its executed state), and the tool-activity trace; both are rendered
-// out-of-band (confirmation card / collapsible activity panel) and never shown as
-// raw text inside the answer body.
-const CONTROL_MARKER_RE =
-  /‹‹COMPOSIO_(?:CONFIRM|DONE|RECONNECT)››[\s\S]*?‹‹\/COMPOSIO_(?:CONFIRM|DONE|RECONNECT)››/g;
-const ACTIVITY_MARKER_RE = /‹‹ACT››[\s\S]*?‹‹\/ACT››/g;
-const ARTIFACT_MARKER_RE = /‹‹ARTIFACT››[\s\S]*?‹‹\/ARTIFACT››/g;
-// Operational plan markers: rendered out-of-band in the "Piano" workbench panel.
-const PLAN_MARKER_RE = /‹‹PLAN››[\s\S]*?‹‹\/PLAN››/g;
-// Plain "[file generato: …]" notes the gateway adds for the model are dropped too.
-const ARTIFACT_NOTE_RE = /\n?\[file generato: [^\]]*\]/g;
-// The model sometimes invents a markdown image link for a generated file
-// (e.g. `![cover](cover.png)`) — a bare filename / non-embeddable src that resolves
-// to nothing and renders as a broken-image icon. The real image is surfaced via the
-// ‹‹ARTIFACT›› chip + inline preview, so drop any image whose src isn't a genuine
-// embeddable URL (http/https/data/blob).
-const BROKEN_IMAGE_RE = /!\[[^\]]*\]\(\s*(?!https?:\/\/|data:|blob:)[^)]*\)/g;
-// Weak/local models sometimes EMIT a tool call as PROSE instead of a real call
-// (e.g. `<tool_call name="run_in_sandbox">{…}</tool_call>`, often unclosed). The
-// harness ignores it, but it must not render as text. Strip from `<tool_call` to the
-// closing tag, or to end-of-message when the model left it dangling.
-const LEAKED_TOOLCALL_RE = /<tool_call\b[\s\S]*?(?:<\/tool_call>|$)/gi;
-
-export const RichMessage = memo(function RichMessage({ text, streaming = false }: RichMessageProps) {
-  const { reasoning, body } = extractReasoning(text);
+export const RichMessage = memo(function RichMessage({ text, streaming = false, eventParts }: RichMessageProps) {
+  // Structured path (primary): when eventParts carries a `reasoning` part, use its text
+  // directly instead of regex-extracting it from `text`. The body is still stripped of
+  // marker wrappers via the regex fallback path below. When eventParts is absent, behavior
+  // is identical to before (regex-only extraction).
+  const structuredReasoning = eventParts?.find((p) => p.type === "reasoning")?.text;
+  const { reasoning: regexReasoning, body } = extractReasoning(text);
+  const reasoning = structuredReasoning ?? regexReasoning;
   const answer = renderAnswer(body, streaming);
   if (!reasoning) return answer;
   return (

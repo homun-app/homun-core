@@ -9,20 +9,187 @@ use rusqlite::{Connection, Row, params};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA_VERSION: u32 = 3;
 
+/// ADR 0022 (Tappa 2) — modello di connessione dello store.
+///
+/// - `Single`: una `Connection` dietro `Mutex` (path legacy, `HOMUN_MEMORY_POOL`
+///   OFF). Comportamento invariato: la concorrenza resta serializzata dal
+///   `Mutex<MemoryFacade>` del gateway. Il `Mutex` interno serve solo a rendere
+///   lo store `Sync` (come la variante Pooled) — non aggiunge contesa reale in
+///   Single mode perché il facade è comunque dietro un mutex.
+/// - `Pooled`: WAL mode con una writer dedicata + N reader. I read girano su
+///   reader concorrenti (WAL: un read non blocca un write); le scritture
+///   (learn/consolidate/backfill) non bloccano più il recall del turno.
+enum Connections {
+    Single(Mutex<Connection>),
+    Pooled {
+        writer: Mutex<Connection>,
+        readers: Vec<Mutex<Connection>>,
+        /// Indice round-robin per distribuire i read tra le reader.
+        reader_idx: AtomicUsize,
+    },
+}
+
+/// Maniglia su una `Connection` presa in prestito dal pool. Sempre `Guarded`
+/// (un `MutexGuard`) — in entrambe le modalità la connection è dietro un Mutex.
+/// Fa da `Deref` a `Connection`, così i metodi scrivono
+/// `let conn = self.read_conn(); conn.execute(...)`.
+enum ConnHandle<'a> {
+    Guarded(MutexGuard<'a, Connection>),
+}
+
+impl std::ops::Deref for ConnHandle<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        match self {
+            ConnHandle::Guarded(guard) => guard,
+        }
+    }
+}
+
 pub struct SQLiteMemoryStore {
-    conn: Connection,
+    conns: Connections,
     key_provider: Option<Box<dyn KeyProvider>>,
     db_path: Option<PathBuf>,
 }
 
 impl SQLiteMemoryStore {
+    /// ADR 0022 (Tappa 2) — `true` quando `HOMUN_MEMORY_POOL=on`: lo store usa il
+    /// pool WAL (writer + reader). Default OFF → `Single` (path legacy invariato).
+    fn pool_enabled() -> bool {
+        std::env::var("HOMUN_MEMORY_POOL")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
+            .unwrap_or(false)
+    }
+
+    /// Numero di reader nel pool (default 3). Letto una volta al costruttore.
+    fn pool_reader_count() -> usize {
+        std::env::var("HOMUN_MEMORY_POOL_READERS")
+            .ok()
+            .and_then(|value| value.trim().parse().ok())
+            .filter(|value: &usize| *value > 0)
+            .unwrap_or(3)
+    }
+
+    /// Applica i PRAGMA WAL a una connection (writer o reader). WAL è persistente
+    /// a livello di DB file, ma `synchronous`/`busy_timeout`/`foreign_keys` sono
+    /// per-connection: vanno settati su ognuna.
+    fn apply_wal_pragmas(conn: &Connection) -> Result<(), String> {
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|e| e.to_string())?;
+        // synchronous=NORMAL è sicuro in WAL (nessun corruption; al max si perde
+        // l'ultima transazione su crash). FULL aggiunge fsync per-statement.
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(|e| e.to_string())?;
+        // busy_timeout: se due writer competono (o un checkpoint), attende prima
+        // di restituire SQLITE_BUSY. 5000ms copre il consolidation LLM.
+        conn.pragma_update(None, "busy_timeout", 5000)
+            .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Costruisce il modello di connessione in base al flag. In Single mode una
+    /// sola connection (legacy). In Pooled mode apre writer + N reader WAL.
+    fn build_connections(
+        in_memory: bool,
+        path: &Option<PathBuf>,
+    ) -> Result<Connections, String> {
+        if !Self::pool_enabled() {
+            let conn = Self::open_raw(in_memory, path)?;
+            return Ok(Connections::Single(Mutex::new(conn)));
+        }
+        // Pooled: WAL richiede un file su disco (l'in-memory di SQLite non supporta
+        // WAL multi-connection condivise). Se richiesto in-memory, cada su una
+        // tempdir condivisa tra le connection del pool.
+        let (writer_conn, readers_conns) = if in_memory {
+            // WAL su in-memory non è condivisibile tra connection: per i test,
+            // cada su Single (parità di behaviour, niente pool in-memory).
+            // Questo è documentato: il pool è una ottimizzazione per il DB su disco.
+            let conn = Self::open_raw(true, path)?;
+            return Ok(Connections::Single(Mutex::new(conn)));
+        } else {
+            let writer = Self::open_raw(false, path)?;
+            Self::apply_wal_pragmas(&writer)?;
+            let reader_count = Self::pool_reader_count();
+            let mut readers = Vec::with_capacity(reader_count);
+            for _ in 0..reader_count {
+                let r = Self::open_raw(false, path)?;
+                Self::apply_wal_pragmas(&r)?;
+                readers.push(r);
+            }
+            (writer, readers)
+        };
+        Ok(Connections::Pooled {
+            writer: Mutex::new(writer_conn),
+            readers: readers_conns.into_iter().map(Mutex::new).collect(),
+            reader_idx: AtomicUsize::new(0),
+        })
+    }
+
+    fn open_raw(in_memory: bool, path: &Option<PathBuf>) -> Result<Connection, String> {
+        if in_memory {
+            Connection::open_in_memory().map_err(|e| e.to_string())
+        } else {
+            let path = path
+                .as_ref()
+                .ok_or_else(|| "pool requires a database path".to_string())?;
+            Connection::open(path).map_err(|e| e.to_string())
+        }
+    }
+
+    /// Prende una connection per i READ. In Single mode è l'unica connection; in
+    /// Pooled mode è una reader round-robin (lock individuale, read concorrenti).
+    fn read_conn(&self) -> ConnHandle<'_> {
+        match &self.conns {
+            Connections::Single(conn) => ConnHandle::Guarded(
+                conn.lock()
+                    .map_err(|_| "memory single connection poisoned".to_string())
+                    .expect("memory single connection poisoned"),
+            ),
+            Connections::Pooled { readers, reader_idx, .. } => {
+                // Round-robin: ogni read prende la reader successiva. Se quella
+                // specifica è occupata (altro read in corso su di essa), attende.
+                let len = readers.len().max(1);
+                let idx = reader_idx.fetch_add(1, Ordering::Relaxed) % len;
+                let guard = readers[idx]
+                    .lock()
+                    .map_err(|_| "memory reader connection poisoned".to_string())
+                    .expect("memory reader connection poisoned");
+                ConnHandle::Guarded(guard)
+            }
+        }
+    }
+
+    /// Prende la connection WRITER. In Single mode è l'unica connection; in
+    /// Pooled mode è la writer dedicata (lock unico — le scritture serializzano
+    /// tra loro, come deve essere, ma NON bloccano i read in WAL mode).
+    fn write_conn(&self) -> ConnHandle<'_> {
+        match &self.conns {
+            Connections::Single(conn) => ConnHandle::Guarded(
+                conn.lock()
+                    .map_err(|_| "memory single connection poisoned".to_string())
+                    .expect("memory single connection poisoned"),
+            ),
+            Connections::Pooled { writer, .. } => {
+                let guard = writer
+                    .lock()
+                    .map_err(|_| "memory writer connection poisoned".to_string())
+                    .expect("memory writer connection poisoned");
+                ConnHandle::Guarded(guard)
+            }
+        }
+    }
+
     pub fn open_in_memory() -> Result<Self, String> {
-        let conn = Connection::open_in_memory().map_err(|error| error.to_string())?;
+        let conns = Self::build_connections(true, &None)?;
         let store = Self {
-            conn,
+            conns,
             key_provider: None,
             db_path: None,
         };
@@ -33,9 +200,9 @@ impl SQLiteMemoryStore {
     pub fn open_in_memory_with_key_provider(
         key_provider: Box<dyn KeyProvider>,
     ) -> Result<Self, String> {
-        let conn = Connection::open_in_memory().map_err(|error| error.to_string())?;
+        let conns = Self::build_connections(true, &None)?;
         let store = Self {
-            conn,
+            conns,
             key_provider: Some(key_provider),
             db_path: None,
         };
@@ -45,9 +212,9 @@ impl SQLiteMemoryStore {
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref().to_path_buf();
-        let conn = Connection::open(&path).map_err(|error| error.to_string())?;
+        let conns = Self::build_connections(false, &Some(path.clone()))?;
         let store = Self {
-            conn,
+            conns,
             key_provider: None,
             db_path: Some(path),
         };
@@ -60,9 +227,9 @@ impl SQLiteMemoryStore {
         key_provider: Box<dyn KeyProvider>,
     ) -> Result<Self, String> {
         let path = path.as_ref().to_path_buf();
-        let conn = Connection::open(&path).map_err(|error| error.to_string())?;
+        let conns = Self::build_connections(false, &Some(path.clone()))?;
         let store = Self {
-            conn,
+            conns,
             key_provider: Some(key_provider),
             db_path: Some(path),
         };
@@ -75,15 +242,15 @@ impl SQLiteMemoryStore {
     }
 
     pub fn schema_version(&self) -> Result<u32, String> {
-        self.conn
-            .query_row(
-                "select value from schema_metadata where key = 'schema_version'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(|error| error.to_string())?
-            .parse::<u32>()
-            .map_err(|error| error.to_string())
+        let conn = self.read_conn();
+        conn.query_row(
+            "select value from schema_metadata where key = 'schema_version'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|error| error.to_string())?
+        .parse::<u32>()
+        .map_err(|error| error.to_string())
     }
 
     pub fn health(&self) -> Result<MemoryHealth, String> {
@@ -106,8 +273,9 @@ impl SQLiteMemoryStore {
         if let Some(parent) = destination_path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        self.conn
-            .execute_batch("pragma wal_checkpoint(full);")
+        // wal_checkpoint è una write (forza il flush del WAL): gira sulla writer.
+        let conn = self.write_conn();
+        conn.execute_batch("pragma wal_checkpoint(full);")
             .map_err(|error| error.to_string())?;
         let bytes_copied =
             fs::copy(source_path, &destination_path).map_err(|error| error.to_string())?;
@@ -141,8 +309,8 @@ impl SQLiteMemoryStore {
     }
 
     pub fn run_maintenance(&self) -> Result<MemoryMaintenanceReport, String> {
-        let integrity: String = self
-            .conn
+        let conn = self.write_conn();
+        let integrity: String = conn
             .query_row("pragma integrity_check", [], |row| row.get(0))
             .map_err(|error| error.to_string())?;
         self.rebuild_memory_search_index()?;
@@ -153,30 +321,30 @@ impl SQLiteMemoryStore {
     }
 
     pub fn record_event(&self, event: &MemoryEvent) -> Result<(), String> {
-        self.conn
-            .execute(
-                "insert or replace into memory_events (
-                    ref, user_id, workspace_id, timestamp, source, event_type, payload_json,
-                    privacy_domain, sensitivity
-                ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                (
-                    event.reference.to_string(),
-                    event.user_id.as_str(),
-                    event.workspace_id.as_str(),
-                    &event.timestamp,
-                    &event.source,
-                    &event.event_type,
-                    self.payload_to_storage(
-                        &event.user_id,
-                        &event.workspace_id,
-                        event.sensitivity,
-                        &event.payload,
-                    )?,
-                    event.privacy_domain.as_str(),
-                    enum_name(&event.sensitivity)?,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+        let conn = self.write_conn();
+        conn.execute(
+            "insert or replace into memory_events (
+                ref, user_id, workspace_id, timestamp, source, event_type, payload_json,
+                privacy_domain, sensitivity
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            (
+                event.reference.to_string(),
+                event.user_id.as_str(),
+                event.workspace_id.as_str(),
+                &event.timestamp,
+                &event.source,
+                &event.event_type,
+                self.payload_to_storage(
+                    &event.user_id,
+                    &event.workspace_id,
+                    event.sensitivity,
+                    &event.payload,
+                )?,
+                event.privacy_domain.as_str(),
+                enum_name(&event.sensitivity)?,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -189,8 +357,9 @@ impl SQLiteMemoryStore {
         if self.is_tombstoned(reference, user_id, workspace_id)? {
             return Ok(None);
         }
+        let conn = self.read_conn();
         query_optional(
-            &self.conn,
+            &conn,
             "select ref, user_id, workspace_id, timestamp, source, event_type, payload_json,
                     privacy_domain, sensitivity
              from memory_events
@@ -205,41 +374,41 @@ impl SQLiteMemoryStore {
     }
 
     pub fn upsert_memory(&self, memory: &MemoryRecord) -> Result<(), String> {
-        self.conn
-            .execute(
-                "insert or replace into memories (
-                    ref, user_id, workspace_id, memory_type, text, aliases_json,
-                    language_hints_json, confidence, status, privacy_domain, sensitivity,
-                    metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
-                    superseded_by, correction_of
-                ) values (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                    ?16, ?17, ?18
-                )",
-                params![
-                    memory.reference.to_string(),
-                    memory.user_id.as_str(),
-                    memory.workspace_id.as_str(),
-                    &memory.memory_type,
-                    &memory.text,
-                    serde_json::to_string(&memory.aliases).map_err(|error| error.to_string())?,
-                    serde_json::to_string(&memory.language_hints)
-                        .map_err(|error| error.to_string())?,
-                    memory.confidence,
-                    enum_name(&memory.status)?,
-                    memory.privacy_domain.as_str(),
-                    enum_name(&memory.sensitivity)?,
-                    serde_json::to_string(&memory.metadata).map_err(|error| error.to_string())?,
-                    &memory.created_at,
-                    &memory.updated_at,
-                    memory.last_seen_at.as_deref(),
-                    serde_json::to_string(&memory.supersedes).map_err(|error| error.to_string())?,
-                    memory.superseded_by.as_ref().map(ToString::to_string),
-                    memory.correction_of.as_ref().map(ToString::to_string),
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-        self.index_memory(memory)?;
+        let conn = self.write_conn();
+        conn.execute(
+            "insert or replace into memories (
+                ref, user_id, workspace_id, memory_type, text, aliases_json,
+                language_hints_json, confidence, status, privacy_domain, sensitivity,
+                metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
+                superseded_by, correction_of
+            ) values (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                ?16, ?17, ?18
+            )",
+            params![
+                memory.reference.to_string(),
+                memory.user_id.as_str(),
+                memory.workspace_id.as_str(),
+                &memory.memory_type,
+                &memory.text,
+                serde_json::to_string(&memory.aliases).map_err(|error| error.to_string())?,
+                serde_json::to_string(&memory.language_hints)
+                    .map_err(|error| error.to_string())?,
+                memory.confidence,
+                enum_name(&memory.status)?,
+                memory.privacy_domain.as_str(),
+                enum_name(&memory.sensitivity)?,
+                serde_json::to_string(&memory.metadata).map_err(|error| error.to_string())?,
+                &memory.created_at,
+                &memory.updated_at,
+                memory.last_seen_at.as_deref(),
+                serde_json::to_string(&memory.supersedes).map_err(|error| error.to_string())?,
+                memory.superseded_by.as_ref().map(ToString::to_string),
+                memory.correction_of.as_ref().map(ToString::to_string),
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        self.index_memory_on(&conn, memory)?;
         Ok(())
     }
 
@@ -252,8 +421,9 @@ impl SQLiteMemoryStore {
         if self.is_tombstoned(reference, user_id, workspace_id)? {
             return Ok(None);
         }
+        let conn = self.read_conn();
         query_optional(
-            &self.conn,
+            &conn,
             "select ref, user_id, workspace_id, memory_type, text, aliases_json,
                     language_hints_json, confidence, status, privacy_domain, sensitivity,
                     metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
@@ -274,8 +444,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<MemoryRecord>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, memory_type, text, aliases_json,
                         language_hints_json, confidence, status, privacy_domain, sensitivity,
@@ -292,7 +462,7 @@ impl SQLiteMemoryStore {
         let mut memories = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             let memory = memory_from_row(row)?;
-            if !self.is_tombstoned(&memory.reference, user_id, workspace_id)? {
+            if !self.is_tombstoned_on(&conn, &memory.reference, user_id, workspace_id)? {
                 memories.push(memory);
             }
         }
@@ -308,8 +478,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<String>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select text from memories
                  where user_id = ?1 and workspace_id = ?2
@@ -340,8 +510,8 @@ impl SQLiteMemoryStore {
         if fts.is_empty() {
             return Ok(Vec::new());
         }
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref
                  from memory_search_fts
@@ -364,11 +534,17 @@ impl SQLiteMemoryStore {
     }
 
     pub fn rebuild_memory_search_index(&self) -> Result<(), String> {
-        self.conn
-            .execute("delete from memory_search_fts", [])
+        let conn = self.write_conn();
+        self.rebuild_memory_search_index_on(&conn)
+    }
+
+    /// Rebuild FTS su una connection data (writer). Usato da init() che ha già
+    /// il lock writer, per non riprenderlo.
+    fn rebuild_memory_search_index_on(&self, conn: &Connection) -> Result<(), String> {
+        conn.execute("delete from memory_search_fts", [])
             .map_err(|error| error.to_string())?;
-        for memory in self.all_memories_for_index()? {
-            self.index_memory(&memory)?;
+        for memory in self.all_memories_for_index_on(conn)? {
+            self.index_memory_on(conn, &memory)?;
         }
         Ok(())
     }
@@ -378,8 +554,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<MemoryEntity>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, entity_type, name, canonical_key,
                         aliases_json, privacy_domain, sensitivity, metadata_json
@@ -394,7 +570,7 @@ impl SQLiteMemoryStore {
         let mut entities = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             let entity = entity_from_row(row)?;
-            if !self.is_tombstoned(&entity.reference, user_id, workspace_id)? {
+            if !self.is_tombstoned_on(&conn, &entity.reference, user_id, workspace_id)? {
                 entities.push(entity);
             }
         }
@@ -410,8 +586,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<(MemoryEntity, bool)>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, entity_type, name, canonical_key,
                         aliases_json, privacy_domain, sensitivity, metadata_json
@@ -426,7 +602,7 @@ impl SQLiteMemoryStore {
         let mut out = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             let entity = entity_from_row(row)?;
-            let dead = self.is_tombstoned(&entity.reference, user_id, workspace_id)?;
+            let dead = self.is_tombstoned_on(&conn, &entity.reference, user_id, workspace_id)?;
             out.push((entity, dead));
         }
         Ok(out)
@@ -442,9 +618,9 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<(), String> {
+        let conn = self.write_conn();
         for col in ["source_ref", "target_ref"] {
-            self.conn
-                .execute(
+            conn.execute(
                     &format!(
                         "update relations set {col} = ?1
                          where {col} = ?2 and user_id = ?3 and workspace_id = ?4"
@@ -471,8 +647,8 @@ impl SQLiteMemoryStore {
         workspace_id: &WorkspaceId,
         new_type: &str,
     ) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "update memories set memory_type = ?1, updated_at = current_timestamp \
                  where ref = ?2 and user_id = ?3 and workspace_id = ?4",
                 params![
@@ -494,15 +670,26 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        self.clear_graphify_on(&conn, user_id, workspace_id)
+    }
+
+    /// `clear_graphify` su una `&Connection` data. Usato da `import_graphify_batch`
+    /// che ha già il lock writer (e una transazione aperta) — riprenderlo causerebbe
+    /// deadlock in Pooled mode.
+    fn clear_graphify_on(
+        &self,
+        conn: &Connection,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<(), String> {
+        conn.execute(
                 "delete from relations where user_id = ?1 and workspace_id = ?2
                  and json_extract(metadata_json, '$.source') = 'graphify'",
                 params![user_id.as_str(), workspace_id.as_str()],
             )
             .map_err(|error| error.to_string())?;
-        self.conn
-            .execute(
+        conn.execute(
                 "delete from entities where user_id = ?1 and workspace_id = ?2
                  and json_extract(metadata_json, '$.source') = 'graphify'",
                 params![user_id.as_str(), workspace_id.as_str()],
@@ -547,7 +734,8 @@ impl SQLiteMemoryStore {
         for term in terms {
             params.push(format!("%{}%", term.to_lowercase()));
         }
-        let mut statement = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let conn = self.read_conn();
+        let mut statement = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = statement
             .query_map(rusqlite::params_from_iter(params.iter()), |row| {
                 Ok((
@@ -577,28 +765,29 @@ impl SQLiteMemoryStore {
         entities: &[MemoryEntity],
         relations: &[MemoryRelation],
     ) -> Result<(usize, usize), String> {
-        self.conn
-            .execute_batch("BEGIN")
-            .map_err(|e| e.to_string())?;
+        // Lock the writer ONCE for the whole transaction: BEGIN/COMMIT/ROLLBACK and
+        // the per-row inserts must run on the SAME connection. The `*_on` helpers
+        // take this `&Connection` directly — calling the public wrappers (which each
+        // re-take the writer lock) inside a BEGIN would deadlock in Pooled mode.
+        let conn = self.write_conn();
+        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
         let run = || -> Result<(usize, usize), String> {
-            self.clear_graphify(user_id, workspace_id)?;
+            self.clear_graphify_on(&conn, user_id, workspace_id)?;
             for entity in entities {
-                self.upsert_entity(entity)?;
+                self.upsert_entity_on(&conn, entity)?;
             }
             for relation in relations {
-                self.upsert_relation(relation)?;
+                self.upsert_relation_on(&conn, relation)?;
             }
             Ok((entities.len(), relations.len()))
         };
         match run() {
             Ok(counts) => {
-                self.conn
-                    .execute_batch("COMMIT")
-                    .map_err(|e| e.to_string())?;
+                conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
                 Ok(counts)
             }
             Err(error) => {
-                let _ = self.conn.execute_batch("ROLLBACK");
+                let _ = conn.execute_batch("ROLLBACK");
                 Err(error)
             }
         }
@@ -612,8 +801,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "delete from tombstones where ref = ?1 and user_id = ?2 and workspace_id = ?3",
                 params![
                     reference.to_string(),
@@ -626,8 +815,18 @@ impl SQLiteMemoryStore {
     }
 
     pub fn upsert_entity(&self, entity: &MemoryEntity) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        self.upsert_entity_on(&conn, entity)
+    }
+
+    /// `upsert_entity` su una `&Connection` data. Usato da `import_graphify_batch`
+    /// (vedi `clear_graphify_on`) per non riprendere il lock writer dentro la tx.
+    fn upsert_entity_on(
+        &self,
+        conn: &Connection,
+        entity: &MemoryEntity,
+    ) -> Result<(), String> {
+        conn.execute(
                 "insert or replace into entities (
                     ref, user_id, workspace_id, entity_type, name, canonical_key,
                     aliases_json, privacy_domain, sensitivity, metadata_json
@@ -658,8 +857,9 @@ impl SQLiteMemoryStore {
         if self.is_tombstoned(reference, user_id, workspace_id)? {
             return Ok(None);
         }
+        let conn = self.read_conn();
         query_optional(
-            &self.conn,
+            &conn,
             "select ref, user_id, workspace_id, entity_type, name, canonical_key,
                     aliases_json, privacy_domain, sensitivity, metadata_json
              from entities
@@ -674,8 +874,18 @@ impl SQLiteMemoryStore {
     }
 
     pub fn upsert_relation(&self, relation: &MemoryRelation) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        self.upsert_relation_on(&conn, relation)
+    }
+
+    /// `upsert_relation` su una `&Connection` data. Usato da `import_graphify_batch`
+    /// (vedi `clear_graphify_on`) per non riprendere il lock writer dentro la tx.
+    fn upsert_relation_on(
+        &self,
+        conn: &Connection,
+        relation: &MemoryRelation,
+    ) -> Result<(), String> {
+        conn.execute(
                 "insert or replace into relations (
                     ref, user_id, workspace_id, source_ref, relation_type, target_ref,
                     confidence, privacy_domain, sensitivity, evidence_json, metadata_json
@@ -708,8 +918,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<usize, String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "delete from relations
                  where user_id = ?1 and workspace_id = ?2 and relation_type = 'mentions'
                    and json_extract(metadata_json, '$.source') = 'mention-linker'",
@@ -724,8 +934,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<MemoryRelation>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, source_ref, relation_type, target_ref,
                         confidence, privacy_domain, sensitivity, evidence_json, metadata_json
@@ -753,8 +963,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<MemoryRelation>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, source_ref, relation_type, target_ref,
                         confidence, privacy_domain, sensitivity, evidence_json, metadata_json
@@ -769,7 +979,7 @@ impl SQLiteMemoryStore {
         let mut relations = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             let relation = relation_from_row(row)?;
-            if !self.is_tombstoned(&relation.reference, user_id, workspace_id)? {
+            if !self.is_tombstoned_on(&conn, &relation.reference, user_id, workspace_id)? {
                 relations.push(relation);
             }
         }
@@ -777,8 +987,8 @@ impl SQLiteMemoryStore {
     }
 
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "insert or replace into memory_evidence (memory_ref, evidence_ref, note)
                  values (?1, ?2, ?3)",
                 (
@@ -800,8 +1010,8 @@ impl SQLiteMemoryStore {
         if memory_ref.user_id != *user_id || memory_ref.workspace_id != *workspace_id {
             return Ok(vec![]);
         }
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select memory_ref, evidence_ref, note
                  from memory_evidence
@@ -837,8 +1047,8 @@ impl SQLiteMemoryStore {
         vector: &[f32],
     ) -> Result<(), String> {
         let bytes: Vec<u8> = vector.iter().flat_map(|v| v.to_le_bytes()).collect();
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "insert into memory_embeddings(ref, user_id, workspace_id, model, dim, vector, updated_at)
                  values(?1, ?2, ?3, ?4, ?5, ?6, current_timestamp)
                  on conflict(ref) do update set
@@ -862,8 +1072,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<(MemoryRef, Vec<f32>)>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, vector from memory_embeddings where user_id = ?1 and workspace_id = ?2",
             )
@@ -906,8 +1116,8 @@ impl SQLiteMemoryStore {
         workspace_id: &WorkspaceId,
         limit: usize,
     ) -> Result<Vec<MemoryRef>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select m.ref from memories m
                  left join memory_embeddings e on e.ref = m.ref
@@ -929,8 +1139,8 @@ impl SQLiteMemoryStore {
     }
 
     pub fn record_wiki_page(&self, page: &WikiPage) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "insert or replace into wiki_pages (
                     ref, user_id, workspace_id, path, title, body, linked_refs_json,
                     privacy_domain, sensitivity
@@ -968,18 +1178,18 @@ impl SQLiteMemoryStore {
     }
 
     pub fn raw_event_payload_for_test(&self, reference: &MemoryRef) -> Result<String, String> {
-        self.conn
-            .query_row(
-                "select payload_json from memory_events where ref = ?1",
-                [reference.to_string()],
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())
+        let conn = self.read_conn();
+        conn.query_row(
+            "select payload_json from memory_events where ref = ?1",
+            [reference.to_string()],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn access_audit_count(&self) -> Result<u64, String> {
-        self.conn
-            .query_row("select count(*) from access_audit", [], |row| row.get(0))
+        let conn = self.read_conn();
+        conn.query_row("select count(*) from access_audit", [], |row| row.get(0))
             .map_err(|error| error.to_string())
     }
 
@@ -992,8 +1202,9 @@ impl SQLiteMemoryStore {
         if self.is_tombstoned(reference, user_id, workspace_id)? {
             return Ok(None);
         }
+        let conn = self.read_conn();
         query_optional(
-            &self.conn,
+            &conn,
             "select ref, user_id, workspace_id, path, title, body, linked_refs_json,
                     privacy_domain, sensitivity
              from wiki_pages
@@ -1012,8 +1223,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<WikiPage>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, path, title, body, linked_refs_json,
                         privacy_domain, sensitivity
@@ -1028,7 +1239,7 @@ impl SQLiteMemoryStore {
         let mut pages = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             let page = wiki_page_from_row(row)?;
-            if !self.is_tombstoned(&page.reference, user_id, workspace_id)? {
+            if !self.is_tombstoned_on(&conn, &page.reference, user_id, workspace_id)? {
                 pages.push(page);
             }
         }
@@ -1036,8 +1247,8 @@ impl SQLiteMemoryStore {
     }
 
     pub fn upsert_routine(&self, routine: &RoutineRecord) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "insert or replace into routines (
                     ref, user_id, workspace_id, name, intent, confidence, status,
                     schedule_hint_json, privacy_domain, sensitivity, evidence_json,
@@ -1074,8 +1285,9 @@ impl SQLiteMemoryStore {
         if self.is_tombstoned(reference, user_id, workspace_id)? {
             return Ok(None);
         }
+        let conn = self.read_conn();
         query_optional(
-            &self.conn,
+            &conn,
             "select ref, user_id, workspace_id, name, intent, confidence, status,
                     schedule_hint_json, privacy_domain, sensitivity, evidence_json,
                     metadata_json, created_at, updated_at
@@ -1095,8 +1307,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<RoutineRecord>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, name, intent, confidence, status,
                         schedule_hint_json, privacy_domain, sensitivity, evidence_json,
@@ -1112,7 +1324,7 @@ impl SQLiteMemoryStore {
         let mut routines = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             let routine = routine_from_row(row)?;
-            if !self.is_tombstoned(&routine.reference, user_id, workspace_id)? {
+            if !self.is_tombstoned_on(&conn, &routine.reference, user_id, workspace_id)? {
                 routines.push(routine);
             }
         }
@@ -1128,8 +1340,8 @@ impl SQLiteMemoryStore {
         workspace_id: &WorkspaceId,
         status: &AutomationCandidateStatus,
     ) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "update automation_candidates set status = ?1, updated_at = ?2
                  where ref = ?3 and user_id = ?4 and workspace_id = ?5",
                 params![
@@ -1148,8 +1360,8 @@ impl SQLiteMemoryStore {
         &self,
         candidate: &AutomationCandidateRecord,
     ) -> Result<(), String> {
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "insert or replace into automation_candidates (
                     ref, user_id, workspace_id, routine_ref, title, summary, trigger,
                     actions_json, risk_level, autonomy_level, status, privacy_domain,
@@ -1184,8 +1396,8 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<AutomationCandidateRecord>, String> {
-        let mut statement = self
-            .conn
+        let conn = self.read_conn();
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, routine_ref, title, summary, trigger,
                         actions_json, risk_level, autonomy_level, status, privacy_domain,
@@ -1201,7 +1413,7 @@ impl SQLiteMemoryStore {
         let mut candidates = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             let candidate = automation_candidate_from_row(row)?;
-            if !self.is_tombstoned(&candidate.reference, user_id, workspace_id)? {
+            if !self.is_tombstoned_on(&conn, &candidate.reference, user_id, workspace_id)? {
                 candidates.push(candidate);
             }
         }
@@ -1218,8 +1430,8 @@ impl SQLiteMemoryStore {
         if reference.user_id != *user_id || reference.workspace_id != *workspace_id {
             return Err("cannot tombstone ref outside user/workspace".to_string());
         }
-        self.conn
-            .execute(
+        let conn = self.write_conn();
+        conn.execute(
                 "insert or replace into tombstones (ref, user_id, workspace_id, reason)
                  values (?1, ?2, ?3, ?4)",
                 (
@@ -1234,8 +1446,7 @@ impl SQLiteMemoryStore {
         // relation touching it (memory→entity "mentions", entity↔entity links).
         // Both delete paths (delete_memory and tombstone_entity) funnel through
         // here, so this single seam keeps the relations table free of danglers.
-        self.conn
-            .execute(
+        conn.execute(
                 "delete from relations
                  where user_id = ?1 and workspace_id = ?2
                    and (source_ref = ?3 or target_ref = ?3)",
@@ -1258,9 +1469,9 @@ impl SQLiteMemoryStore {
         workspace_id: &WorkspaceId,
     ) -> Result<usize, String> {
         let (uid, wid) = (user_id.as_str(), workspace_id.as_str());
+        let conn = self.write_conn();
         // Count memories before deleting for the return value.
-        let count: u64 = self
-            .conn
+        let count: u64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND workspace_id = ?2",
                 (uid, wid),
@@ -1276,8 +1487,7 @@ impl SQLiteMemoryStore {
             "episodes",
             "wiki_pages",
         ] {
-            self.conn
-                .execute(
+            conn.execute(
                     &format!("DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"),
                     (uid, wid),
                 )
@@ -1288,7 +1498,8 @@ impl SQLiteMemoryStore {
 
     /// Reclaims free space. Call periodically, NOT on every delete.
     pub fn vacuum(&self) -> Result<(), String> {
-        self.conn.execute_batch("VACUUM").map_err(|e| e.to_string())
+        let conn = self.write_conn();
+        conn.execute_batch("VACUUM").map_err(|e| e.to_string())
     }
 
     fn is_tombstoned(
@@ -1297,8 +1508,22 @@ impl SQLiteMemoryStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> Result<bool, String> {
-        let count: u64 = self
-            .conn
+        let conn = self.read_conn();
+        self.is_tombstoned_on(&conn, reference, user_id, workspace_id)
+    }
+
+    /// Variante su connection data. I metodi read/write che GIÀ tengono un guard
+    /// (read_conn/write_conn) devono usare questa: in Single mode la connection è
+    /// dietro un unico Mutex, quindi chiamare `is_tombstoned` (che re-prende il
+    /// lock) deadlocka. Passando la connection già lockata si evita il re-entrancy.
+    fn is_tombstoned_on(
+        &self,
+        conn: &Connection,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<bool, String> {
+        let count: u64 = conn
             .query_row(
                 "select count(*) from tombstones where ref = ?1 and user_id = ?2 and workspace_id = ?3",
                 (
@@ -1378,7 +1603,10 @@ impl SQLiteMemoryStore {
     }
 
     fn init(&self) -> Result<(), String> {
-        self.conn
+        // init() crea lo schema + rebuild FTS: gira sulla writer (in pooled mode
+        // i reader vedranno lo schema via WAL; init idempotente su reader è harmless).
+        let conn = self.write_conn();
+        conn
             .execute_batch(
                 "create table if not exists schema_metadata (
                     key text primary key,
@@ -1549,49 +1777,62 @@ impl SQLiteMemoryStore {
                 );",
             )
             .map_err(|error| error.to_string())?;
-        self.ensure_column(
+        // I sub-helper (ensure_column, rebuild) ricevono questa stessa connection
+        // (lock unico su writer) — evita di riprendere il Mutex e fare deadlock.
+        let conn_ref: &Connection = &conn;
+        self.ensure_column_on(
+            conn_ref,
             "memories",
             "created_at",
             "alter table memories add column created_at text not null default ''",
         )?;
-        self.ensure_column(
+        self.ensure_column_on(
+            conn_ref,
             "memories",
             "updated_at",
             "alter table memories add column updated_at text not null default ''",
         )?;
-        self.ensure_column(
+        self.ensure_column_on(
+            conn_ref,
             "memories",
             "last_seen_at",
             "alter table memories add column last_seen_at text",
         )?;
-        self.ensure_column(
+        self.ensure_column_on(
+            conn_ref,
             "memories",
             "supersedes_json",
             "alter table memories add column supersedes_json text not null default '[]'",
         )?;
-        self.ensure_column(
+        self.ensure_column_on(
+            conn_ref,
             "memories",
             "superseded_by",
             "alter table memories add column superseded_by text",
         )?;
-        self.ensure_column(
+        self.ensure_column_on(
+            conn_ref,
             "memories",
             "correction_of",
             "alter table memories add column correction_of text",
         )?;
-        self.conn
-            .execute(
-                "insert or replace into schema_metadata (key, value) values ('schema_version', ?1)",
-                [SCHEMA_VERSION.to_string()],
-            )
-            .map_err(|error| error.to_string())?;
-        self.rebuild_memory_search_index()?;
+        conn.execute(
+            "insert or replace into schema_metadata (key, value) values ('schema_version', ?1)",
+            [SCHEMA_VERSION.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+        self.rebuild_memory_search_index_on(conn_ref)?;
         Ok(())
     }
 
-    fn ensure_column(&self, table: &str, column: &str, alter_sql: &str) -> Result<(), String> {
-        let mut statement = self
-            .conn
+    fn ensure_column_on(
+        &self,
+        conn: &Connection,
+        table: &str,
+        column: &str,
+        alter_sql: &str,
+    ) -> Result<(), String> {
+        let mut statement = conn
             .prepare(&format!("pragma table_info({table})"))
             .map_err(|error| error.to_string())?;
         let mut rows = statement.query([]).map_err(|error| error.to_string())?;
@@ -1601,45 +1842,44 @@ impl SQLiteMemoryStore {
                 return Ok(());
             }
         }
-        self.conn
-            .execute(alter_sql, [])
+        conn.execute(alter_sql, [])
             .map_err(|error| error.to_string())?;
         Ok(())
     }
 
     fn count_table(&self, table: &str) -> Result<u64, String> {
         let sql = format!("select count(*) from {table}");
-        self.conn
-            .query_row(&sql, [], |row| row.get(0))
+        let conn = self.read_conn();
+        conn.query_row(&sql, [], |row| row.get(0))
             .map_err(|error| error.to_string())
     }
 
-    fn index_memory(&self, memory: &MemoryRecord) -> Result<(), String> {
-        self.conn
-            .execute(
-                "delete from memory_search_fts where ref = ?1",
-                [memory.reference.to_string()],
-            )
-            .map_err(|error| error.to_string())?;
-        self.conn
-            .execute(
-                "insert into memory_search_fts (ref, user_id, workspace_id, text, aliases)
-                 values (?1, ?2, ?3, ?4, ?5)",
-                (
-                    memory.reference.to_string(),
-                    memory.user_id.as_str(),
-                    memory.workspace_id.as_str(),
-                    &memory.text,
-                    memory.aliases.join(" "),
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+    /// Indicizza un memory nel FTS shadow table. Su connection data (usata da
+    /// upsert_memory/init che hanno già il lock writer, per non riprenderlo e
+    /// fare deadlock).
+    fn index_memory_on(&self, conn: &Connection, memory: &MemoryRecord) -> Result<(), String> {
+        conn.execute(
+            "delete from memory_search_fts where ref = ?1",
+            [memory.reference.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+        conn.execute(
+            "insert into memory_search_fts (ref, user_id, workspace_id, text, aliases)
+             values (?1, ?2, ?3, ?4, ?5)",
+            (
+                memory.reference.to_string(),
+                memory.user_id.as_str(),
+                memory.workspace_id.as_str(),
+                &memory.text,
+                memory.aliases.join(" "),
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
-    fn all_memories_for_index(&self) -> Result<Vec<MemoryRecord>, String> {
-        let mut statement = self
-            .conn
+    fn all_memories_for_index_on(&self, conn: &Connection) -> Result<Vec<MemoryRecord>, String> {
+        let mut statement = conn
             .prepare(
                 "select ref, user_id, workspace_id, memory_type, text, aliases_json,
                         language_hints_json, confidence, status, privacy_domain, sensitivity,

@@ -32,6 +32,13 @@ interface LocalFirstDesktopConfig {
   ) => () => void;
   /** Bring the desktop window to the front (e.g. on a notification click). */
   focusWindow?: () => Promise<void>;
+  /** "Report a problem": builds a local tar.gz of ~/.homun/logs + report.json. */
+  createFeedbackBundle?: () => Promise<{
+    ok: boolean;
+    path?: string;
+    uncompressed?: boolean;
+    error?: string;
+  }>;
 }
 
 declare global {
@@ -158,6 +165,20 @@ export async function getAppVersion(): Promise<string | null> {
   if (!get) return null;
   try {
     return (await get()) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** "Report a problem": asks the shell to build a local diagnostics archive
+ *  (logs + report.json, never memory/chat). Returns null outside Electron. */
+export async function createFeedbackBundle(): Promise<
+  { ok: boolean; path?: string; uncompressed?: boolean; error?: string } | null
+> {
+  const build = desktopConfig?.createFeedbackBundle;
+  if (!build) return null;
+  try {
+    return await build();
   } catch {
     return null;
   }

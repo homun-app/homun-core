@@ -32,7 +32,9 @@ type StreamEvent =
         | "vault_propose"
         | "vault_reveal"
         | "payment_approval"
-        | "tool_result";
+        | "tool_result"
+        | "recall"
+        | "diff";
       request_id: string;
       text?: string;
       markdown?: string;
@@ -819,7 +821,16 @@ function streamEventToCoreEvent(
     case "vault_reveal":
     case "payment_approval":
     case "tool_result":
-      return { type: event.type, request_id: requestId, payload: event.payload };
+    case "recall":
+    case "diff":
+      // Payload raw dallo stream (JSON.parse → unknown). La validazione runtime
+      // avviene nei parser downstream (parseVaultProposalPayload, ecc.); qui
+      // trasportiamo il payload nel tipo dichiarato dell'evento (B2/A1).
+      return {
+        type: event.type,
+        request_id: requestId,
+        payload: event.payload,
+      } as CoreChatStreamEvent;
     default:
       return null;
   }

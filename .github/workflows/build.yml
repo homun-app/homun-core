@@ -19,6 +19,12 @@ on:
   push:
     tags:
       - "v*"
+  # PRs to main build all three platforms as UNSIGNED, NON-publishing artifacts
+  # (every `--publish` below is gated on a `v*` tag ref, so a PR never publishes a
+  # release). This is the cross-platform compile+package validation: it proves the
+  # gateway + app build on macOS, Windows and Linux before merge.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -104,7 +110,9 @@ jobs:
           fi
 
       - name: Build installer (macOS · signed + notarized)
-        if: matrix.platform == 'mac' && steps.signing.outputs.has_cert == 'true'
+        # Only on a release tag: signing + Apple notarization is slow and only the
+        # tag run publishes. PRs/dispatch take the fast unsigned path below.
+        if: matrix.platform == 'mac' && steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
         working-directory: apps/desktop
         run: npx electron-builder --mac --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }} -c.mac.notarize=true
         env:
@@ -118,10 +126,12 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      # macOS unsigned (no Apple cert): build as artifact only, never publish — an
-      # unsigned mac build must not reach the signed auto-update channel.
-      - name: Build installer (macOS · unsigned — Apple cert not configured)
-        if: matrix.platform == 'mac' && steps.signing.outputs.has_cert != 'true'
+      # macOS unsigned: build as artifact only, never publish — an unsigned mac
+      # build must not reach the signed auto-update channel. Runs when no Apple cert
+      # is configured, OR on any non-tag build (PR/dispatch) where the fast unsigned
+      # path is what we want for cross-platform validation.
+      - name: Build installer (macOS · unsigned — no cert or non-release build)
+        if: matrix.platform == 'mac' && (steps.signing.outputs.has_cert != 'true' || !startsWith(github.ref, 'refs/tags/v'))
         working-directory: apps/desktop
         run: npx electron-builder --mac --publish never -c.mac.identity=null
         env:

@@ -425,7 +425,7 @@ assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-preview",
 assertContains("src/styles.css", ".workbench-artifacts-list .artifact-row-wrap", "artifact review must frame artifacts as cards inside the workbench");
 assertContains("src/styles.css", ".workbench-artifacts-list .artifact-preview-doc", "artifact preview content must be padded and bounded inside the workbench");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
-assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");
+assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}", "assistant markdown must stay progressive while the message streams");
 assertContains("src/components/ChatView.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
 assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
 assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");
@@ -487,10 +487,13 @@ assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-w
 assertContains("src/components/RichMessage.tsx", "STRAY_REASONING_MARKER_RE", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
 assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
 assertContains("src/components/ChatView.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");
-assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE|", "vault proposal markers must be stripped from visible prose");
+// The strip regex (COMPOSIO_MARKERS_RE, which lists VAULT_PROPOSE|…) was refactored out of
+// ChatView into src/lib/markers.ts; ChatView imports and applies it (see COMPOSIO_MARKERS_RE below).
+assertContains("src/lib/markers.ts", "VAULT_PROPOSE|", "vault proposal markers must be stripped from visible prose");
+assertContains("src/components/ChatView.tsx", "COMPOSIO_MARKERS_RE", "chat renderer must apply the marker-strip regex to visible prose");
 assertContains("src/components/ChatView.tsx", "VAULT_REVEAL_RE", "chat renderer must parse vault reveal markers");
 assertContains("src/components/ChatView.tsx", "VaultRevealCard", "chat renderer must render PIN-gated vault reveal cards");
-assertContains("src/components/ChatView.tsx", "VAULT_REVEAL|", "vault reveal markers must be stripped from visible prose");
+assertContains("src/lib/markers.ts", "VAULT_REVEAL|", "vault reveal markers must be stripped from visible prose");
 
 assertContains("src/types.ts", "\"learning\"", "auto-learning must be a first-class view");
 assertContains("src/components/LearningView.tsx", "learning-view", "auto-learning must have a dedicated page");

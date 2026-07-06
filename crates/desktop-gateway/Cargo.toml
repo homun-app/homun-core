@@ -58,6 +58,13 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Linux Landlock filesystem fence for `run_in_project` (ADR 0023 Linux enforcement,
+# the counterpart to the macOS Seatbelt path). Target-gated so `landlock` is OFF
+# macOS/Windows builds entirely — it's a Linux-kernel LSM binding. Used by the
+# `landlock_fence` module and the `homun-linux-sandbox` helper binary.
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+
 [dev-dependencies]
 ed25519-dalek = "2"
 tower = { version = "0.5", features = ["util"] }

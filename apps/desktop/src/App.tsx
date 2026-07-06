@@ -6,6 +6,7 @@ import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
+import { MemoryView } from "./components/MemoryView";
 import { Shell } from "./components/Shell";
 import { LoginGate } from "./components/LoginGate";
 import { NotificationsView } from "./components/NotificationsView";
@@ -157,9 +158,14 @@ function mapCoreChatEventParts(parts: unknown[] | null | undefined): ChatEventPa
       type === "vault_propose" ||
       type === "vault_reveal" ||
       type === "payment_approval" ||
-      type === "tool_result"
+      type === "tool_result" ||
+      type === "recall" ||
+      type === "diff"
     ) {
-      mapped.push({ type, payload: record.payload });
+      // Ricostruiamo da `unknown` (record persistito). La validazione runtime è
+      // nei parser downstream (parseVaultProposalPayload, parseChoicePromptPayload…);
+      // qui trasportiamo il payload nel tipo dichiarato della union (B2/A1).
+      mapped.push({ type, payload: record.payload } as ChatEventPart);
     }
   }
   return mapped.length > 0 ? mapped : undefined;
@@ -1504,6 +1510,10 @@ export default function App() {
             proposals={automationProposals}
           />
         )}
+        {/* ADR 0022 (Piano UI A4): MemoryView al nav — la vista memoria (440 righe,
+            già completa) era raggiungibile solo da Settings → Memory. Ora ha una
+            voce di nav top-level. */}
+        {activeView === "memory" && <MemoryView />}
         {activeView === "settings" && (
           <SettingsView
             connections={connectionItems}

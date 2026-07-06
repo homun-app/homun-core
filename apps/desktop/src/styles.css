@@ -2003,6 +2003,28 @@ body.resizing-drawer {
 .chat-status-stack:has(.cc-dock.full) {
   max-width: min(360px, calc(100vw - 390px));
 }
+/* ADR 0022: unifica ProjectContextPanel + WorkspaceIsland in un'unica card
+   contigua (no gap, border-radius solo ai bordi esterni). */
+.unified-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  pointer-events: auto;
+}
+.unified-status-panel .project-context-panel {
+  border-radius: 14px 14px 0 0;
+  border-bottom: none;
+  margin-bottom: 0;
+}
+.unified-status-panel.has-project-context .workspace-island {
+  border-radius: 0 0 14px 14px;
+  margin-top: 0;
+}
+/* Quando non c'è il project context, l'island ha i border-radius normali. */
+.unified-status-panel:not(.has-project-context) .workspace-island {
+  border-radius: 14px;
+}
 
 /* Workspace Island — compact operational state, inspired by Zed/Zcode status
    panels: the pill expands in place into a lightweight thread card. */
@@ -2083,6 +2105,137 @@ body.resizing-drawer {
   background: color-mix(in srgb, var(--surface) 96%, transparent);
   box-shadow: var(--shadow-menu);
   backdrop-filter: blur(14px);
+}
+
+/* Project context panel (ADR 0022 / Piano UI A5) — what the agent STABLY knows
+   about the active project. Mirrors the workspace-island aesthetic: compact,
+   muted, rounded, with a subtle border/background. Collapses to a one-line pill. */
+.project-context-panel {
+  position: relative;
+  pointer-events: none;
+}
+
+.project-context-panel .pcp-pill,
+.project-context-panel .pcp-body {
+  pointer-events: auto;
+}
+
+.project-context-panel .pcp-pill {
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  color: var(--muted);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(12px);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-context-panel .pcp-pill:hover,
+.project-context-panel .pcp-pill:focus-visible {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.project-context-panel .pcp-pill svg {
+  flex: none;
+}
+
+.project-context-panel .pcp-pill-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.project-context-panel .pcp-pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-context-panel.expanded .pcp-body {
+  width: 320px;
+  max-width: 100%;
+  max-height: min(460px, calc(100vh - 128px));
+  overflow: auto;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: blur(14px);
+}
+
+.project-context-panel .pcp-section + .pcp-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.project-context-panel .pcp-section-title {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.project-context-panel .pcp-objective,
+.project-context-panel .pcp-brief {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.project-context-panel .pcp-brief {
+  color: var(--muted);
+}
+
+.project-context-panel .pcp-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-context-panel .pcp-list li {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.project-context-panel .pcp-item {
+  display: inline;
+}
+
+.project-context-panel .pcp-item-text {
+  /* flows inline with the provenance tag */
+}
+
+.project-context-panel .pcp-provenance {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+  white-space: nowrap;
 }
 
 .wi-head,
@@ -2534,6 +2687,29 @@ body.resizing-drawer {
 .assistant-thinking-state .thinking-label {
   font-size: 13px;
   color: var(--muted);
+}
+.assistant-thinking-state .thinking-elapsed {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+.assistant-thinking-state .thinking-detail {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.8;
+  margin-left: 4px;
+}
+
+/* ADR 0022 (Piano UI A3): memory recall badge nel footer del messaggio assistant. */
+.memory-recall-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--bg-elevated, rgba(127, 127, 127, 0.12));
+  cursor: help;
+  white-space: nowrap;
 }
 
 .message.system p,
@@ -10069,6 +10245,41 @@ body.resizing-drawer {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* D3 (Piano UI): inline code-diff card rendered inside an assistant message. */
+.diff-card {
+  margin-top: var(--s3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control, 10px);
+  background: var(--surface);
+}
+.diff-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.diff-card-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.diff-card-label {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+}
+.diff-card .diff-view {
+  border: none;
+  border-radius: 0;
+  margin: 0 -12px -10px;
+}
+
 .choices-card.done {
   flex-direction: row;
   align-items: center;

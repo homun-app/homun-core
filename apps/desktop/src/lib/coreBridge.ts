@@ -320,16 +320,81 @@ export interface CoreChatStreamDelta {
   delta: string;
 }
 
+/** B2 (Piano UI) — payload tipizzati dei ChatEventPart. Definiti qui (lower layer)
+ *  e re-esportati da `types.ts` per evitare un import circolare. Le shape vengono
+ *  dai parser runtime in ChatView (un tempo `unknown`). */
+
+/** Prompt di una scelta singola/multipla che il modello pone all'utente. */
+export interface ChoicePromptPayload {
+  question: string;
+  multi: boolean;
+  options: string[];
+}
+
+/** Proposta di salvataggio di un segreto nel vault. */
+export interface VaultProposePayload {
+  category: string;
+  label: string;
+  redacted_preview: string;
+  pending_id?: string;
+}
+
+/** Rivelazione di un segreto già in vault. */
+export interface VaultRevealPayload {
+  record_id: string;
+  category: string;
+  label: string;
+  redacted_preview: string;
+}
+
+/** Richiesta di approvazione di un pagamento — snapshot immutabile. */
+export interface PaymentApprovalPayload {
+  snapshot: PaymentApprovalSnapshot;
+}
+
+/** Risultato di un tool eseguito dal modello. Contratto lasso (nessun consumer
+ *  tipizzato oggi); stringere quando recall/structured output lo richiederà. */
+export interface ToolResultPayload {
+  name?: string;
+  output?: unknown;
+}
+
+/** A1 (Piano UI): risultato di una recall RAG episodica. NON ancora renderizzato
+ *  (A2 fase recalling + A3 badge = tappe successive). `scope` rispetta l'invariant
+ *  Personale↔Progetto (recall sempre within-scope). */
+export interface RecallHitPayload {
+  ref: string;
+  text: string;
+  score: number;
+  type: string;
+}
+
+/** D3 (Piano UI): una modifica di codice proposta dal modello (diff inline). */
+export interface DiffEventPayload {
+  path: string;
+  label?: string;
+  old?: string;
+  new: string;
+  language?: string;
+}
+export interface RecallEventPayload {
+  query: string;
+  hits: RecallHitPayload[];
+  scope: "personal" | "project";
+}
+
 export type CoreChatStreamEvent =
   | CoreChatStreamDelta
   | { type: "reasoning"; request_id: string; text: string }
   | { type: "activity"; request_id: string; text: string }
   | { type: "plan_update"; request_id: string; markdown: string }
-  | { type: "choice_prompt"; request_id: string; payload: unknown }
-  | { type: "vault_propose"; request_id: string; payload: unknown }
-  | { type: "vault_reveal"; request_id: string; payload: unknown }
-  | { type: "payment_approval"; request_id: string; payload: unknown }
-  | { type: "tool_result"; request_id: string; payload: unknown }
+  | { type: "choice_prompt"; request_id: string; payload: ChoicePromptPayload }
+  | { type: "vault_propose"; request_id: string; payload: VaultProposePayload }
+  | { type: "vault_reveal"; request_id: string; payload: VaultRevealPayload }
+  | { type: "payment_approval"; request_id: string; payload: PaymentApprovalPayload }
+  | { type: "tool_result"; request_id: string; payload: ToolResultPayload }
+  | { type: "recall"; request_id: string; payload: RecallEventPayload }
+  | { type: "diff"; request_id: string; payload: DiffEventPayload }
   | { type: "done"; request_id: string }
   | { type: "error"; request_id: string; message?: string };
 
@@ -1840,6 +1905,22 @@ async function electronFsAuthorize(
   });
 }
 
+/** ADR 0023 — on-failure sandbox escalation: re-run a shell command that failed under
+ *  the Seatbelt workspace sandbox with FULL access (unsandboxed). `ctx` lets the backend
+ *  rewrite the originating message to a done-note so the card can't reopen. */
+async function electronRunEscalate(
+  command: string,
+  cwd: string,
+  ctx?: { threadId?: string; messageId?: string },
+): Promise<{ ok: boolean; output?: string; summary?: string }> {
+  return gatewayPostJson("/api/capabilities/run/escalate", {
+    command,
+    cwd,
+    ...(ctx?.threadId ? { thread_id: ctx.threadId } : {}),
+    ...(ctx?.messageId ? { message_id: ctx.messageId } : {}),
+  });
+}
+
 export interface VaultProposalActionInput {
   category: string;
   label: string;
@@ -2667,6 +2748,11 @@ export const coreBridge = {
     op: string,
     ctx?: { threadId?: string; messageId?: string },
   ) => electronFsAuthorize(path, op, ctx),
+  runEscalate: (
+    command: string,
+    cwd: string,
+    ctx?: { threadId?: string; messageId?: string },
+  ) => electronRunEscalate(command, cwd, ctx),
   vaultProposalAccept: (input: VaultProposalActionInput) =>
     electronVaultProposalAccept(input),
   vaultProposalDismiss: (input: VaultProposalActionInput) =>
@@ -2765,6 +2851,7 @@ export const coreBridge = {
   exportLocalData: () => electronExportLocalData(),
   memoryItems: () => electronMemoryItems(),
   projectGoals: (threadId: string) => electronProjectGoals(threadId),
+  projectBriefing: (threadId: string) => electronProjectBriefing(threadId),
   suggestGoals: (threadId: string) => electronSuggestGoals(threadId),
   promoteGoals: (workspace: string, refs: string[]) => electronPromoteGoals(workspace, refs),
   addGoal: (workspace: string, text: string) => electronAddGoal(workspace, text),
@@ -3283,6 +3370,23 @@ export type ProjectGoalsData = {
   decisions: { reference: string; text: string }[];
 };
 
+/** ADR 0022 (Piano UI A5): project briefing — ciò che l'agente SA stabilmente del
+ *  progetto (objective/brief/open-loops/decisions/goals) con provenance cross-chat. */
+export type ProjectBriefingItem = {
+  reference: string;
+  text: string;
+  thread_id: string | null;
+};
+export type ProjectBriefingData = {
+  workspace: string;
+  is_project: boolean;
+  objective: string | null;
+  brief: { body: string } | null;
+  open_loops: ProjectBriefingItem[];
+  decisions: ProjectBriefingItem[];
+  goals: ProjectBriefingItem[];
+};
+
 /// Goals + promotable decisions for the active chat's project (resolved from threadId).
 async function electronProjectGoals(threadId: string): Promise<ProjectGoalsData | null> {
   try {
@@ -3292,6 +3396,20 @@ async function electronProjectGoals(threadId: string): Promise<ProjectGoalsData 
     );
     if (!response.ok) return null;
     return (await response.json()) as ProjectGoalsData;
+  } catch {
+    return null;
+  }
+}
+
+/// ADR 0022 (Piano UI A5): project briefing for the active chat's project.
+async function electronProjectBriefing(threadId: string): Promise<ProjectBriefingData | null> {
+  try {
+    const response = await fetch(
+      `${DESKTOP_GATEWAY_URL}/api/memory/project-briefing?thread=${encodeURIComponent(threadId)}`,
+      { headers: gatewayHeaders() },
+    );
+    if (!response.ok) return null;
+    return (await response.json()) as ProjectBriefingData;
   } catch {
     return null;
   }
@@ -4455,7 +4573,11 @@ function browserStreamEventToCoreEvent(
     case "vault_reveal":
     case "payment_approval":
     case "tool_result":
-      return { type: event.type, request_id: requestId, payload: event.payload };
+      return {
+        type: event.type,
+        request_id: requestId,
+        payload: event.payload,
+      } as CoreChatStreamEvent;
     default:
       return null;
   }

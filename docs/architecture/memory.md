@@ -1,6 +1,12 @@
 # Architettura — Memoria (SQL + grafo + markdown)
 
-> Verificato vs codice 2026-07-06 (memory-service ADR 0022 = Proposed, oggi in-path).
+> ⚠️ **CORREZIONE post-merge 2026-07-06.** Questo file è stato verificato su un branch **cieco**
+> alla linea `origin/main`. La realtà (post-merge): l'orchestrazione memoria (recall / learn /
+> consolidate / backfill) è **stata migrata in `crates/memory/`** (`service.rs`/`recall.rs`/
+> `learn.rs`/`consolidate.rs`/`embedding.rs`) dietro `HOMUN_MEMORY_SERVICE` / `HOMUN_MEMORY_POOL`
+> — **ADR 0022 Tappe 1/1.5/2/4 FATTE** (resta Tappa 3 = recall on-demand via tool + pulizia).
+> Le affermazioni "in-path / ADR 0022 = Proposed / flag inesistenti" più sotto sono **superate**.
+> Vedi [ADR 0022](../decisions/0022-memory-as-out-of-path-service.md) e [STATO.md](../STATO.md).
 >
 > Stato: **2026-06-27 — verificato vs codice. Punto fermo.** Questo è il diagramma vivo
 > e accurato del sottosistema memoria. Il *perché* di prodotto → [memory-vision.md](../memory-vision.md);

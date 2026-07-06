@@ -63,7 +63,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
@@ -109,10 +109,33 @@ import {
 import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../lib/gatewayConfig";
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
+import {
+  STRUCTURED_MARKER_DELTA_RE,
+  COMPOSIO_CONFIRM_RE,
+  MCP_CONFIRM_RE,
+  FS_AUTHORIZE_RE,
+  SANDBOX_ESCALATE_RE,
+  CONNECT_SUGGEST_RE,
+  COMPOSIO_DONE_RE,
+  COMPOSIO_RECONNECT_RE,
+  VAULT_PROPOSE_RE,
+  VAULT_REVEAL_RE,
+  PAYMENT_APPROVAL_RE,
+  CHOICES_RE,
+  PLAN_PROPOSE_RE,
+  GOAL_PROPOSE_RE,
+  UNCLOSED_PROPOSE_RE,
+  COMPOSIO_MARKERS_RE,
+  PROPOSE_MARKERS_VISIBLE_RE,
+  ACTIVITY_RE,
+  ARTIFACT_RE,
+  PLAN_RE,
+} from "../lib/markers";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
+import { ProjectContextPanel } from "./ProjectContextPanel";
 import type {
   ChatMessage,
   ChatMessageMetrics,
@@ -124,6 +147,7 @@ import type {
   ApprovelItem,
   RuntimeHealth,
   TaskItem,
+  DiffEventPayload,
 } from "../types";
 
 const CHAT_VIEW_SESSION_ID =
@@ -179,7 +203,7 @@ interface ReplyContext {
 
 type MessageFeedback = NonNullable<ChatMessage["feedback"]>;
 type MessageContentKind = "user" | "system" | "text" | "code" | "diagram";
-type ChatStreamPhase = "accepted" | "thinking" | "writing";
+type ChatStreamPhase = "accepted" | "thinking" | "writing" | "recalling";
 
 function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | null {
   switch (event.type) {
@@ -194,7 +218,9 @@ function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | nu
     case "vault_reveal":
     case "payment_approval":
     case "tool_result":
-      return { type: event.type, payload: event.payload };
+    case "recall":
+    case "diff":
+      return { type: event.type, payload: event.payload } as ChatEventPart;
     default:
       return null;
   }
@@ -218,15 +244,14 @@ function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] 
       case "vault_reveal":
       case "payment_approval":
       case "tool_result":
-        return [{ type: item.type, payload: item.payload }];
+      case "recall":
+      case "diff":
+        return [{ type: item.type, payload: item.payload } as ChatEventPart];
       default:
         return [];
     }
   });
 }
-
-const STRUCTURED_MARKER_DELTA_RE =
-  /^‹‹(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››[\s\S]*?‹‹\/(?:ACT|REASONING|PLAN|CHOICES|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL)››$/;
 
 function shouldDropStructuredMarkerDelta(delta: string) {
   return STRUCTURED_MARKER_DELTA_RE.test(delta.trim());
@@ -404,10 +429,16 @@ export function ChatView({
   }, [optimisticMessages, messages]);
   // All artifacts generated in this conversation (from persisted ‹‹ARTIFACT››
   // markers) — drives the Artifacts workspace panel.
+  // ADR 0022 (Piano UI C2): dipende dai messaggi PERSISTED (`messages`), NON da
+  // `threadMessages` (che include optimisticMessages e cambia ogni frame di stream).
+  // Così questo memo NON ricalcola durante lo streaming del messaggio corrente —
+  // il vero riduttore di jank su thread lunghi. Gli artifact del messaggio streaming
+  // si vedono quando viene persisted.
   const conversationArtifacts = useMemo(() => {
     const seen = new Set<string>();
     const out: ParsedArtifact[] = [];
-    for (const message of threadMessages) {
+    for (const message of messages) {
+      if (message.role === "assistant" && message.id.endsWith("_ready")) continue;
       for (const artifact of parseArtifacts(message.text ?? "")) {
         if (!seen.has(artifact.name)) {
           seen.add(artifact.name);
@@ -416,7 +447,7 @@ export function ChatView({
       }
     }
     return out;
-  }, [threadMessages]);
+  }, [messages]);
   const workbenchArtifacts = useMemo(() => {
     const seen = new Set<string>();
     const out: ParsedArtifact[] = [];
@@ -441,11 +472,14 @@ export function ChatView({
     return out;
   }, [conversationArtifacts, memoryArtifacts, thread.threadId]);
   // The agent's operational plan for this conversation (latest update_plan), shown
-  // in the Workbench "Piano" panel. During streaming, prefer the live-accumulated
-  // activity/plan (from the stream events) so the island updates in real-time;
-  // fall back to the persisted values when not streaming or after the turn ends.
-  const persistedPlan = useMemo(() => latestPlanMarkdown(threadMessages), [threadMessages]);
-  const persistedActivity = useMemo(() => latestActivitySteps(threadMessages), [threadMessages]);
+  // in the Workbench "Piano" panel. Merge of two lines:
+  //  - Piano UI C2 (persisted): the fallback derives from PERSISTED `messages`, NOT
+  //    `threadMessages` (which changes every stream frame → churn).
+  //  - unified-WS live island: during streaming, prefer the live-accumulated
+  //    plan/activity from the stream events so the island updates in real-time.
+  // Net: live while streaming, persisted-from-`messages` at rest.
+  const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
+  const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
   const isStreaming = promptSubmitting || Boolean(streamingAssistantId);
   const conversationPlan = isStreaming && livePlanMarkdown ? livePlanMarkdown : persistedPlan;
   const conversationActivity = isStreaming && liveActivitySteps.length > 0 ? liveActivitySteps : persistedActivity;
@@ -458,7 +492,8 @@ export function ChatView({
   const uploadedFiles = useMemo(() => {
     const seen = new Set<string>();
     const out: ChatAttachment[] = [];
-    for (const message of threadMessages) {
+    for (const message of messages) {
+      if (message.role === "assistant" && message.id.endsWith("_ready")) continue;
       for (const attachment of message.attachments ?? []) {
         if (!seen.has(attachment.title)) {
           seen.add(attachment.title);
@@ -467,7 +502,7 @@ export function ChatView({
       }
     }
     return out;
-  }, [threadMessages]);
+  }, [messages]);
   const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
@@ -750,6 +785,20 @@ export function ChatView({
         if (cancelledStreamIdsRef.current.has(requestId)) return;
         const part = chatEventPartFromStream(payload);
         if (part) {
+          // ADR 0022 (Piano UI A2): quando arriva un evento recall, mostra la fase
+          // "Sto controllando la memoria…" (precedenza su thinking/writing).
+          if (part.type === "recall") {
+            const count = part.payload?.hits?.length ?? 0;
+            setStreamStatus({
+              requestId,
+              phase: "recalling",
+              title: t("chat.recalling"),
+              detail:
+                count > 0
+                  ? t("chat.recallingHits", { count })
+                  : t("chat.recallingNoHits"),
+            });
+          }
           streamEventParts = [...streamEventParts, part];
           // Feed the island in real-time from live activity/plan events.
           if (part.type === "activity" && part.text) {
@@ -1918,27 +1967,32 @@ export function ChatView({
       </header>
 
       <div className="chat-status-stack" aria-label="Live workspace status">
-        <WorkspaceIsland
-          threadId={thread.threadId}
-          activitySteps={conversationActivity}
-          artifacts={workbenchArtifacts}
-          computerActivity={computerLiveStatus.activity}
-          computerLive={computerLiveStatus.active}
-          fileCount={uploadedFiles.length}
-          goalCount={projectGoalCount}
-          memoryCount={projectMemoryCount}
-          planSteps={workspacePlanSteps}
-          streaming={promptSubmitting || Boolean(streamingAssistantId)}
-          status={streamStatus}
-          threadHasMessages={threadMessages.length > 0}
-          onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
-          onExportChat={() => void exportChatMarkdown()}
-          onOpenWorkbench={(tab) => {
-            setArtifactsInitial(null);
-            setWorkbenchTab(tab);
-            setArtifactsOpen(true);
-          }}
-        />
+        {/* ADR 0022: un unico pannello unificato — ProjectContextPanel (solo progetti)
+            + WorkspaceIsland fusi visivamente in una sola card contigua, senza gap. */}
+        <div className={`unified-status-panel${thread.workspaceId ? " has-project-context" : ""}`}>
+          {thread.workspaceId && <ProjectContextPanel threadId={thread.threadId} />}
+          <WorkspaceIsland
+            threadId={thread.threadId}
+            activitySteps={conversationActivity}
+            artifacts={workbenchArtifacts}
+            computerActivity={computerLiveStatus.activity}
+            computerLive={computerLiveStatus.active}
+            fileCount={uploadedFiles.length}
+            goalCount={projectGoalCount}
+            memoryCount={projectMemoryCount}
+            planSteps={workspacePlanSteps}
+            streaming={promptSubmitting || Boolean(streamingAssistantId)}
+            status={streamStatus}
+            threadHasMessages={threadMessages.length > 0}
+            onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
+            onExportChat={() => void exportChatMarkdown()}
+            onOpenWorkbench={(tab) => {
+              setArtifactsInitial(null);
+              setWorkbenchTab(tab);
+              setArtifactsOpen(true);
+            }}
+          />
+        </div>
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
       </div>
 
@@ -2200,6 +2254,28 @@ export function ChatView({
                         </span>
                       );
                     })()}
+                    {/* ADR 0022 (Piano UI A3): memory badge — quante memorie sono
+                        state richiamate per questa risposta. Derivato dalle
+                        eventParts recall (se l'evento Recall è stato emesso). */}
+                    {(() => {
+                      const recallCount =
+                        displayMessage.eventParts
+                          ?.filter((p) => p.type === "recall")
+                          .reduce((sum, p) => sum + (p.payload?.hits?.length ?? 0), 0) ?? 0;
+                      if (recallCount === 0) return null;
+                      return (
+                        <span
+                          className="memory-recall-badge"
+                          title={displayMessage.eventParts
+                            ?.filter((p) => p.type === "recall")
+                            .flatMap((p) => p.payload?.hits ?? [])
+                            .map((h) => `• ${h.text}`)
+                            .join("\n")}
+                        >
+                          📝 {t("chat.memoryBadge", { count: recallCount })}
+                        </span>
+                      );
+                    })()}
                   </>
                 ) : (
                   visibleMessageMetadata(displayMessage.metadata) && (
@@ -2294,8 +2370,22 @@ export function ChatView({
   );
 }
 
+// ADR 0022 (Piano UI D1): activity signal = verb-tense + timer + count (non
+// spinner-only). I typing-dots restano come affiancamento visivo, ma il label
+// mostra la fase verb-tense + un timer elapsed + il detail (count per recall).
 function AssistantThinkingState({ status }: { status: ChatStreamStatus | null }) {
   const { t } = useTranslation();
+  // Timer elapsed dalla comparsa dello stato (per mostrare "thinking… 3s").
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    startRef.current = Date.now();
+    setElapsed(0);
+    const id = window.setInterval(() => {
+      if (startRef.current) setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [status?.requestId, status?.phase]);
   return (
     <div className="assistant-thinking-state" aria-live="polite">
       <span className="typing-dots" aria-hidden="true">
@@ -2303,7 +2393,11 @@ function AssistantThinkingState({ status }: { status: ChatStreamStatus | null })
         <i />
         <i />
       </span>
-      <span className="thinking-label">{status?.title ?? t("chat.thinking")}</span>
+      <span className="thinking-label">
+        {status?.title ?? t("chat.thinking")}
+        {elapsed > 0 && <span className="thinking-elapsed"> {elapsed}s</span>}
+      </span>
+      {status?.detail && <span className="thinking-detail">{status.detail}</span>}
     </div>
   );
 }
@@ -3377,32 +3471,6 @@ interface ComposioPendingAction {
   kind?: "composio" | "mcp";
 }
 
-const COMPOSIO_CONFIRM_RE = /‹‹COMPOSIO_CONFIRM››([\s\S]*?)‹‹\/COMPOSIO_CONFIRM››/;
-const MCP_CONFIRM_RE = /‹‹MCP_CONFIRM››([\s\S]*?)‹‹\/MCP_CONFIRM››/;
-const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUTHORIZE››/;
-const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT_SUGGEST››/;
-const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
-const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
-const VAULT_PROPOSE_RE = /‹‹VAULT_PROPOSE››([\s\S]*?)‹‹\/VAULT_PROPOSE››/;
-const VAULT_REVEAL_RE = /‹‹VAULT_REVEAL››([\s\S]*?)‹‹\/VAULT_REVEAL››/;
-const PAYMENT_APPROVAL_RE = /‹‹PAYMENT_APPROVAL››([\s\S]*?)‹‹\/PAYMENT_APPROVAL››/;
-// Single/multi-choice question card (Claude-Code style): the model emits the choices
-// instead of listing them in prose, and the click sends the answer back.
-const CHOICES_RE = /‹‹CHOICES››([\s\S]*?)‹‹\/CHOICES››/;
-// Plan-mode: the model proposes a plan and STOPS; the card gates execution behind
-// Accetta / Edit (the answer becomes the next user message).
-// Require a closed marker before rendering an actionable plan card. During streaming an
-// incomplete marker is hidden from prose below, but it is not accepted as a proposal.
-const PLAN_PROPOSE_RE = /‹‹PLAN_PROPOSE››([\s\S]*?)‹‹\/PLAN_PROPOSE››/;
-// Goal-propose: the model proposes the project's objective(s); the card lets the user save.
-const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_PROPOSE››/;
-// Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
-const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
-const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
-const PROPOSE_MARKERS_VISIBLE_RE =
-  /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
-
 /** One clickable suggestion in an in-chat connect-card. */
 interface ConnectSuggestItem {
   kind: "mcp" | "skill" | "composio";
@@ -3573,7 +3641,6 @@ function parsePlanSteps(markdown: string): PlanStep[] {
 // Tool-activity trace markers (browser / skill / sandbox / connected-tool steps).
 // They are extracted into a compact collapsible panel so the answer body stays
 // clean — the pattern Claude/assistant-ui use for "tool activity".
-const ACTIVITY_RE = /‹‹ACT››([\s\S]*?)‹‹\/ACT››/g;
 
 function parseActivitySteps(text: string): string[] {
   if (!text.includes("‹‹ACT››")) return [];
@@ -3583,7 +3650,6 @@ function parseActivitySteps(text: string): string[] {
 }
 
 // Generated-file artifacts surfaced by the gateway (skill outputs in $OUTPUT_DIR).
-const ARTIFACT_RE = /‹‹ARTIFACT››([\s\S]*?)‹‹\/ARTIFACT››/g;
 
 interface ParsedArtifact {
   name: string;
@@ -3618,7 +3684,6 @@ function parseArtifacts(text: string): ParsedArtifact[] {
 
 // Operational plan emitted by the agent via the update_plan tool (‹‹PLAN›› markers).
 // The latest one in the conversation drives the Workbench "Piano" panel.
-const PLAN_RE = /‹‹PLAN››([\s\S]*?)‹‹\/PLAN››/g;
 
 function latestPlanMarkdown(messages: { text?: string; eventParts?: ChatEventPart[] }[]): string | null {
   let latest: string | null = null;
@@ -5921,6 +5986,7 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
   doneTool: string | null;
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
+  sandboxEscalate: { command: string; cwd: string } | null;
   connectSuggest: ConnectSuggest | null;
   vaultPropose: VaultProposal | null;
   vaultReveal: VaultRevealProposal | null;
@@ -5963,6 +6029,23 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
       const parsed = JSON.parse(fsMatch[1]) as { path?: string; op?: string };
       if (parsed && typeof parsed.path === "string") {
         fsAuthorize = { path: parsed.path, op: parsed.op === "read" ? "read" : "list" };
+      }
+    } catch {
+      /* malformed → just hide it */
+    }
+  }
+  // ADR 0023: shell command blocked by the Seatbelt sandbox → in-chat "run without
+  // sandbox" card. Payload is a tool call: {arguments:{command,cwd}}.
+  let sandboxEscalate: { command: string; cwd: string } | null = null;
+  const escMatch = text.match(SANDBOX_ESCALATE_RE);
+  if (escMatch) {
+    try {
+      const parsed = JSON.parse(escMatch[1]) as {
+        arguments?: { command?: string; cwd?: string };
+      };
+      const command = parsed?.arguments?.command;
+      if (typeof command === "string") {
+        sandboxEscalate = { command, cwd: parsed.arguments?.cwd ?? "" };
       }
     } catch {
       /* malformed → just hide it */
@@ -6105,6 +6188,7 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
     doneTool,
     reconnectSlug,
     fsAuthorize,
+    sandboxEscalate,
     connectSuggest,
     vaultPropose,
     vaultReveal,
@@ -6126,29 +6210,36 @@ function humanizeToolSlugs(text: string): string {
 /** Renders an assistant message body, surfacing a write-confirmation card when
  *  the model proposed a write action that needs approval (once / always), or a
  *  static "done" note once it has been executed. */
-function AssistantMessageBody({
-  text,
-  eventParts,
-  streaming,
-  messageId,
-  threadId,
-  onOpenArtifact,
-  onChoose,
-}: {
-  text: string;
-  eventParts?: ChatEventPart[];
-  streaming?: boolean;
-  messageId?: string;
-  threadId?: string;
-  onOpenArtifact?: (artifact: ParsedArtifact) => void;
-  onChoose?: (answer: string) => void;
-}) {
+// ADR 0022 (Piano UI C4): memo per stabilizzare l'identity dei messaggi non-
+// streaming. Durante lo stream di un messaggio, l'array optimisticMessages è
+// fresco ogni frame → senza memo TUTTI i messaggi re-renderizzano. Questo comparatore
+// re-renderizza un messaggio solo se il suo text/eventParts/streaming cambiano;
+// i messaggi finalizzati (text stabile) NON re-renderizzano durante lo stream altrui.
+const AssistantMessageBody = memo(
+  function AssistantMessageBody({
+    text,
+    eventParts,
+    streaming,
+    messageId,
+    threadId,
+    onOpenArtifact,
+    onChoose,
+  }: {
+    text: string;
+    eventParts?: ChatEventPart[];
+    streaming?: boolean;
+    messageId?: string;
+    threadId?: string;
+    onOpenArtifact?: (artifact: ParsedArtifact) => void;
+    onChoose?: (answer: string) => void;
+  }) {
   const {
     visible,
     action,
     doneTool,
     reconnectSlug,
     fsAuthorize,
+    sandboxEscalate,
     connectSuggest,
     vaultPropose,
     vaultReveal,
@@ -6160,7 +6251,7 @@ function AssistantMessageBody({
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
-      {readable && <RichMessage text={readable} streaming={streaming} />}
+      {readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}
       {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (
         <div className="cmp-confirm done">
@@ -6176,6 +6267,14 @@ function AssistantMessageBody({
         <FsAuthorizeCard
           path={fsAuthorize.path}
           op={fsAuthorize.op}
+          messageId={messageId}
+          threadId={threadId}
+        />
+      )}
+      {sandboxEscalate && !streaming && (
+        <SandboxEscalateCard
+          command={sandboxEscalate.command}
+          cwd={sandboxEscalate.cwd}
           messageId={messageId}
           threadId={threadId}
         />
@@ -6211,7 +6310,35 @@ function AssistantMessageBody({
       {goalPropose && !streaming && threadId && (
         <GoalProposeCard objectives={goalPropose} threadId={threadId} />
       )}
+      {eventParts
+        ?.filter((p): p is Extract<ChatEventPart, { type: "diff" }> => p.type === "diff")
+        .map((part, index) => (
+          <DiffCard key={`diff-${index}`} payload={part.payload} />
+        ))}
     </>
+  );
+  },
+  // Comparatore: re-renderizza solo se il contenuto del messaggio cambia.
+  // Le callback (onOpenArtifact/onChoose) sono stabili nel caller — skip.
+  (prev, next) =>
+    prev.text === next.text &&
+    prev.streaming === next.streaming &&
+    prev.messageId === next.messageId &&
+    prev.threadId === next.threadId &&
+    prev.eventParts === next.eventParts,
+);
+
+// D3 (Piano UI): inline code-diff card. Renders the model's proposed change for a single
+// file path with a header and the unified line diff (added=green, removed=red).
+function DiffCard({ payload }: { payload: DiffEventPayload }) {
+  return (
+    <div className="diff-card">
+      <div className="diff-card-header">
+        <span className="diff-card-path">📄 {payload.path}</span>
+        {payload.label && <span className="diff-card-label">{payload.label}</span>}
+      </div>
+      <DiffView oldText={payload.old ?? ""} newText={payload.new} />
+    </div>
   );
 }
 
@@ -7148,6 +7275,98 @@ function FsAuthorizeCard({
               : op === "read"
                 ? "Autorizza e leggi"
                 : "Autorizza ed elenca"}
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** ADR 0023 — on-failure sandbox escalation card. A shell command failed under the
+ *  Seatbelt workspace sandbox; approving re-runs it UNSANDBOXED with full access.
+ *  Mirrors FsAuthorizeCard: the backend rewrites the originating message to a
+ *  done-note (via ctx), so the card can't reopen after a successful run. */
+function SandboxEscalateCard({
+  command,
+  cwd,
+  messageId,
+  threadId,
+}: {
+  command: string;
+  cwd: string;
+  messageId?: string;
+  threadId?: string;
+}) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [output, setOutput] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  const run = async () => {
+    setStatus("running");
+    setNote(null);
+    try {
+      const result = await coreBridge.runEscalate(command, cwd, { threadId, messageId });
+      if (!result.ok) {
+        setStatus("error");
+        setNote(result.summary || t("chat.failed"));
+        return;
+      }
+      setOutput(result.output ?? "");
+      setStatus("done");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  if (status === "done") {
+    return (
+      <div className="cmp-confirm">
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ShieldCheck size={15} />
+          <strong>Command ran with full access</strong>
+        </div>
+        {output && (
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: 12,
+              marginTop: 8,
+              maxHeight: 300,
+              overflow: "auto",
+            }}
+          >
+            {output}
+          </pre>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="cmp-confirm">
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <SquareTerminal size={15} />
+        <strong>This command was blocked by the workspace sandbox. Run it with full access?</strong>
+      </div>
+      <code style={{ fontSize: 12, wordBreak: "break-all", display: "block", marginTop: 4 }}>
+        {command}
+      </code>
+      <p className="set-hint" style={{ fontSize: 12 }}>
+        It will run outside the sandbox with full access to your machine. Only approve commands you trust.
+      </p>
+      {status === "error" && <p className="cmp-confirm-err">{t("chat.failed")}: {note}</p>}
+      <div className="cmp-confirm-actions">
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={status === "running"}
+          onClick={() => void run()}
+        >
+          <SquareTerminal size={14} />
+          <span style={{ marginLeft: 6 }}>
+            {status === "running" ? "Running…" : "Run without sandbox"}
           </span>
         </button>
       </div>
