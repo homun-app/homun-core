@@ -1,5 +1,6 @@
 import { chatApi } from "./chatApi";
 import { enqueueTurn, openTurnStream } from "./chatApi";
+import { wsSubscription } from "./wsSubscription";
 export type { CoreBranchPoint, CoreBranchOption } from "./chatApi";
 import {
   DESKTOP_GATEWAY_URL,
@@ -3798,74 +3799,63 @@ async function submitBrokerRuntimeChatPromptStream(
     model,
   });
   const turnId = enqueued.turn_id;
-  const streamResponse = await openTurnStream(turnId, 0);
   const promptBuildSeconds = roundedSeconds(
     (performance.now() - promptBuildStartedAt) / 1000,
   );
-  if (!streamResponse.body) {
-    throw new Error("The broker did not open the turn stream.");
-  }
 
-  const reader = streamResponse.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
+  // The bridge subscribes to the unified WS for this turn's events. The WS
+  // delivers turn.event messages with {turn_id, seq, kind, payload}. We
+  // accumulate delta text, dispatch activity/plan to the UI, and resolve the
+  // Promise when done/error arrives.
   let text = "";
   let redactedUserText: string | undefined;
   let metrics: Partial<CoreChatMessageMetrics> = {};
   let firstTokenSeconds: number | undefined;
-
-  // Keep the Mac awake for the whole stream (a long task must survive idle-sleep).
   keepDesktopAwake(true);
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        // The broker emits {seq, kind, payload}; adapt to the legacy {type, ...}.
-        const legacyEvent = parseTurnStreamEventAsLegacy(line);
-        if (!legacyEvent) continue;
-        // Reuse parseBrowserStreamEvent's typing + browserStreamEventToCoreEvent by
-        // re-stringifying into the legacy shape. Cheap (one JSON round-trip per event)
-        // and keeps a single dispatch path.
-        const event = parseBrowserStreamEvent(JSON.stringify(legacyEvent));
-        if (!event) continue;
-        if (event.type === "delta") {
-          if (firstTokenSeconds === undefined) {
+    await new Promise<void>((resolve, reject) => {
+      const unsub = wsSubscription.subscribe((msg) => {
+        if (msg.type !== "turn.event") return;
+        if ((msg.turn_id as string) !== turnId) return;
+        const kind = msg.kind as string;
+        const payload = (msg.payload ?? {}) as Record<string, unknown>;
+        if (kind === "delta") {
+          const deltaText = String(payload.text ?? "");
+          if (deltaText && firstTokenSeconds === undefined) {
             firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
           }
-          text += String(event.text ?? "");
+          text += deltaText;
           chatApi.notifyChatStreamDelta({
             type: "delta",
             request_id: requestId,
-            delta: String(event.text ?? ""),
+            delta: deltaText,
           });
-        } else if (event.type === "done") {
+        } else if (kind === "done") {
           chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
-          // The broker's done does NOT carry the final text (it persists server-side).
-          // We keep the live-accumulated `text` as a preview; the authoritative text
-          // will come from the backend refresh (App.tsx polls messages every 2.5s).
-          // If the broker ever starts including the text in done, prefer it:
-          if (event.text) text = String(event.text);
-          if (typeof event.redacted_user_text === "string") {
-            redactedUserText = event.redacted_user_text;
-          }
-          metrics = event.metrics ?? {};
-        } else if (event.type === "error") {
+          unsub();
+          resolve();
+        } else if (kind === "error") {
+          const errMsg = String((payload as { message?: string }).message ?? "Turn error");
           chatApi.notifyChatStreamEvent({
             type: "error",
             request_id: requestId,
-            message: String(event.message ?? "Local runtime error"),
+            message: errMsg,
           });
-          throw new Error(String(event.message ?? "Local runtime error"));
+          unsub();
+          reject(new Error(errMsg));
         } else {
-          const payload = browserStreamEventToCoreEvent(event, requestId);
-          if (payload) chatApi.notifyChatStreamEvent(payload);
+          // activity, plan_update, reasoning, tool_result, queued, retry
+          const legacyType = kind === "tool" ? "tool_result" : kind;
+          chatApi.notifyChatStreamEvent({
+            type: legacyType as CoreChatStreamEvent["type"],
+            request_id: requestId,
+            text: payload.text ? String(payload.text) : undefined,
+            markdown: payload.markdown ? String(payload.markdown) : undefined,
+            payload,
+          } as CoreChatStreamEvent);
         }
-      }
-    }
+      });
+    });
   } finally {
     keepDesktopAwake(false);
   }

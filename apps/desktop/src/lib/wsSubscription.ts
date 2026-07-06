@@ -14,7 +14,7 @@
  *   wsSubscription.disconnect();            // at shutdown
  */
 
-import { DESKTOP_GATEWAY_URL, currentGatewayToken } from "./gatewayConfig";
+import { DESKTOP_GATEWAY_URL } from "./gatewayConfig";
 
 /** A server message received on the WS. The `type` field discriminates. */
 export interface ServerMessage {
@@ -44,10 +44,8 @@ class WSSubscription {
     this.shouldReconnect = true;
 
     const wsBase = DESKTOP_GATEWAY_URL.replace(/^http/, "ws");
-    const token = currentGatewayToken();
-    // WS can't carry Bearer header in the browser, so pass token as query param
-    // (the gateway route /api/ws is ungated, like noVNC).
-    const url = token ? `${wsBase}/api/ws?token=${encodeURIComponent(token)}` : `${wsBase}/api/ws`;
+    // The /api/ws route is ungated (like noVNC), so no token needed.
+    const url = `${wsBase}/api/ws`;
 
     try {
       this.ws = new WebSocket(url);
