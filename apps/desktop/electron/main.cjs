@@ -358,7 +358,11 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      webSecurity: true,
+      // Dev mode loads the renderer from Vite (127.0.0.1:1420) but the gateway
+      // is on a different port (18765). The unified WebSocket connects cross-origin
+      // (1420→18765), which webSecurity blocks. Disable in dev only — production
+      // loads from file:// where localhost calls are same-origin safe.
+      webSecurity: !process.env.HOMUN_DESKTOP_URL,
     },
   });
   mainWindows.add(window);
