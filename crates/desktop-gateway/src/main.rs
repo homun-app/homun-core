@@ -14117,10 +14117,16 @@ async fn improve_prompt(
 and complete, WITHOUT executing them and without answering the request. Keep the SAME language \
 and the user's intent; make criteria, constraints and expected format explicit only if implicit. \
 Return ONLY the rewritten prompt, as plain text, without preamble, quotes or explanations.";
+    // Generous ceiling for REASONING models: they spend tokens on a hidden
+    // `reasoning` field before emitting `content`, so a tight cap (fine for an
+    // instruct model) can be burned mid-thought, leaving `content` empty and
+    // silently degrading to the unchanged draft. A high ceiling costs nothing for
+    // instruct models (they stop at the rewrite, finish_reason=stop). 4000 also
+    // covers a genuinely long rewrite. See the note on `generate_thread_title`.
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0.3,
-        "max_tokens": 600,
+        "max_tokens": 4000,
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": format!("Rewrite this prompt:\n\n{draft}") },
@@ -14137,13 +14143,26 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
         .json(&payload)
         .send()
         .await
-        .map_err(|error| GatewayError {
-            status: StatusCode::BAD_GATEWAY,
-            code: "improve_prompt_failed",
-            message: format!("Provider unreachable: {error}"),
+        .map_err(|error| {
+            tracing::warn!(
+                target: "chat::improve_prompt",
+                %error, model = %model, %endpoint,
+                "improve-prompt LLM request errored"
+            );
+            GatewayError {
+                status: StatusCode::BAD_GATEWAY,
+                code: "improve_prompt_failed",
+                message: format!("Provider unreachable: {error}"),
+            }
         })?;
     if !resp.status().is_success() {
         let status = resp.status();
+        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+        tracing::warn!(
+            target: "chat::improve_prompt",
+            %status, model = %model, %endpoint, body = %body,
+            "improve-prompt LLM call failed"
+        );
         return Err(GatewayError {
             status: StatusCode::BAD_GATEWAY,
             code: "improve_prompt_failed",
@@ -14166,6 +14185,14 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
         .trim_matches('"')
         .to_string();
     let improved = if improved.is_empty() {
+        // 2xx but no usable content — the reasoning-budget trap. Log it instead of
+        // silently returning the unchanged draft as if the rewrite were a no-op.
+        let snippet: String = body.to_string().chars().take(300).collect();
+        tracing::warn!(
+            target: "chat::improve_prompt",
+            model = %model, %endpoint, body = %snippet,
+            "improve-prompt LLM returned 2xx but no content — keeping the original draft"
+        );
         draft.to_string()
     } else {
         improved
@@ -14209,10 +14236,15 @@ without numbering, dashes or quotes. Return ONLY the 3 lines.";
         request.prompt.chars().take(2000).collect::<String>(),
         request.answer.chars().take(4000).collect::<String>()
     );
+    // Generous ceiling: a reasoning model spends the budget "thinking" before
+    // emitting content, so 160 tokens (fine for 3 short lines from an instruct
+    // model) can be burned mid-thought, returning empty content and silently
+    // showing no suggestions. A high ceiling costs nothing for instruct models
+    // (they stop after the 3 lines). See the note on `generate_thread_title`.
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0.5,
-        "max_tokens": 160,
+        "max_tokens": 2000,
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": user },
@@ -14225,10 +14257,25 @@ without numbering, dashes or quotes. Return ONLY the 3 lines.";
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
-    let Ok(resp) = builder.json(&payload).send().await else {
-        return empty;
+    let resp = match builder.json(&payload).send().await {
+        Ok(resp) => resp,
+        Err(error) => {
+            tracing::warn!(
+                target: "chat::suggestions",
+                %error, model = %model, %endpoint,
+                "suggestions LLM request errored — showing no suggestions"
+            );
+            return empty;
+        }
     };
     if !resp.status().is_success() {
+        let status = resp.status();
+        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+        tracing::warn!(
+            target: "chat::suggestions",
+            %status, model = %model, %endpoint, body = %body,
+            "suggestions LLM call failed — showing no suggestions"
+        );
         return empty;
     }
     let Ok(body) = resp.json::<serde_json::Value>().await else {
@@ -14241,6 +14288,16 @@ without numbering, dashes or quotes. Return ONLY the 3 lines.";
         .and_then(|m| m.get("content"))
         .and_then(|c| c.as_str())
         .unwrap_or("");
+    if content.trim().is_empty() {
+        // 2xx but no usable content (e.g. reasoning-budget starvation) — surface it
+        // rather than silently rendering an empty suggestions strip.
+        let snippet: String = body.to_string().chars().take(300).collect();
+        tracing::warn!(
+            target: "chat::suggestions",
+            model = %model, %endpoint, body = %snippet,
+            "suggestions LLM returned 2xx but no content — showing no suggestions"
+        );
+    }
     let suggestions = content
         .lines()
         .map(|line| {
@@ -14278,6 +14335,10 @@ async fn generate_thread_title(state: &AppState, prompt: &str, answer: &str) -> 
         }
     };
     let Some((base_url, model, api_key)) = chat_openai_stream_config() else {
+        tracing::warn!(
+            target: "chat::autotitle",
+            "no chat model configured (orchestrator role unresolved) — falling back to prompt truncation"
+        );
         return fallback();
     };
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -14288,10 +14349,17 @@ language as the user. Only the title, without quotes, final punctuation or prefi
         prompt.chars().take(1500).collect::<String>(),
         answer.chars().take(1500).collect::<String>()
     );
+    // max_tokens must budget for REASONING models: they spend tokens on a hidden
+    // `reasoning` field before emitting `content`. A tiny 24-token cap (fine for an
+    // instruct model) let a reasoning model like deepseek-v4-pro burn the whole
+    // budget mid-thought and return an EMPTY title, silently degrading to raw
+    // prompt truncation. A generous ceiling costs nothing for instruct models
+    // (they stop at the short title, finish_reason=stop) while giving reasoning
+    // models room to think and then produce the title.
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0.3,
-        "max_tokens": 24,
+        "max_tokens": 2000,
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": user },
@@ -14300,33 +14368,77 @@ language as the user. Only the title, without quotes, final punctuation or prefi
     let mut builder = state
         .http
         .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(20));
+        // Reasoning models now think before emitting the title (see max_tokens note),
+        // so allow more headroom than the old 20s before falling back.
+        .timeout(std::time::Duration::from_secs(30));
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
+    // Errors here were previously swallowed into an empty string, silently degrading
+    // to the raw-truncation fallback (a title cut mid-word). Log the actual reason —
+    // status + body on an HTTP error, the transport error otherwise — so a broken
+    // title model (e.g. an unsigned `:cloud` Ollama model returning 401) is visible.
     let title = match builder.json(&payload).send().await {
-        Ok(resp) if resp.status().is_success() => resp
-            .json::<serde_json::Value>()
-            .await
-            .ok()
-            .and_then(|b| {
-                b.get("choices")
-                    .and_then(|c| c.get(0))
-                    .and_then(|c| c.get("message"))
-                    .and_then(|m| m.get("content"))
-                    .and_then(|c| c.as_str())
-                    .map(|s| {
-                        s.trim()
-                            .trim_matches('"')
-                            .lines()
-                            .next()
-                            .unwrap_or("")
-                            .trim()
-                            .to_string()
-                    })
-            })
-            .unwrap_or_default(),
-        _ => String::new(),
+        Ok(resp) if resp.status().is_success() => {
+            let body = resp.json::<serde_json::Value>().await.ok();
+            let extracted = body
+                .as_ref()
+                .and_then(|b| {
+                    b.get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("message"))
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_str())
+                        .map(|s| {
+                            s.trim()
+                                .trim_matches('"')
+                                .lines()
+                                .next()
+                                .unwrap_or("")
+                                .trim()
+                                .to_string()
+                        })
+                })
+                .unwrap_or_default();
+            if extracted.trim().is_empty() {
+                let snippet: String = body
+                    .map(|b| b.to_string())
+                    .unwrap_or_default()
+                    .chars()
+                    .take(300)
+                    .collect();
+                tracing::warn!(
+                    target: "chat::autotitle",
+                    model = %model, %endpoint, body = %snippet,
+                    "title LLM returned 2xx but no usable content — falling back to prompt truncation"
+                );
+            }
+            extracted
+        }
+        Ok(resp) => {
+            let status = resp.status();
+            let body: String = resp
+                .text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(300)
+                .collect();
+            tracing::warn!(
+                target: "chat::autotitle",
+                %status, model = %model, %endpoint, body = %body,
+                "title LLM call failed — falling back to prompt truncation"
+            );
+            String::new()
+        }
+        Err(err) => {
+            tracing::warn!(
+                target: "chat::autotitle",
+                error = %err, model = %model, %endpoint,
+                "title LLM request errored — falling back to prompt truncation"
+            );
+            String::new()
+        }
     };
     if title.is_empty() {
         fallback()
@@ -14344,7 +14456,14 @@ async fn autotitle_chat_thread(
     {
         let store = lock_store(&state)?;
         if let Some(thread) = store.thread(&thread_id).map_err(GatewayError::store)? {
-            if !is_placeholder_chat_title(&thread.title) {
+            // Two-phase titling: the turn broker now sets a PROVISIONAL title
+            // (`compact_thread_title(prompt)`) at turn start so the sidebar updates
+            // immediately. Here we upgrade that provisional to a polished LLM title.
+            // So we refine when the stored title is either the "New task" placeholder
+            // OR still exactly the auto-derived provisional (the user hasn't renamed
+            // it). If it differs from both, the user set it deliberately — leave it.
+            let is_provisional = thread.title == compact_thread_title(&request.prompt);
+            if !is_placeholder_chat_title(&thread.title) && !is_provisional {
                 return Ok(Json(
                     store
                         .select_thread(&thread_id)
@@ -14829,10 +14948,17 @@ async fn classify_sensitive_input_with_privacy_guard_model(
     let (base_url, model, api_key) = privacy_guard_openai_config()?;
     let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let system = "You are Homun Privacy Guard. Classify the user's message BEFORE the main assistant sees it. Detect sensitive personal data in any language, including payment cards, CVV, identity documents, tax IDs, license plates, health data, credentials, API keys, private addresses, and other secrets. Return STRICT JSON only: {\"has_sensitive_data\": boolean, \"items\": [{\"category\": \"payments|identity|health|vehicles|credentials|private_notes\", \"kind\": \"short_snake_case\", \"label\": \"short user-visible label\", \"secret_value\": \"exact substring from the user message\", \"confidence\": 0.0-1.0}]}. Use exact substrings only; do not infer or invent values.";
+    // Generous ceiling for REASONING models: they spend the budget on a hidden
+    // `reasoning` field before emitting `content`. A tight cap (fine for an
+    // instruct model) can leave `content` empty — which here means an empty
+    // classification, i.e. a SILENT FAIL-OPEN that misses sensitive data.
+    // `privacy_guard_openai_config()` prefers local non-reasoning models but can
+    // still resolve a local reasoning one, so budget for it. A high ceiling costs
+    // nothing for instruct models. See the note on `generate_thread_title`.
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0,
-        "max_tokens": 700,
+        "max_tokens": 2000,
         "messages": [
             { "role": "system", "content": system },
             { "role": "user", "content": text },
@@ -14844,15 +14970,52 @@ async fn classify_sensitive_input_with_privacy_guard_model(
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
-    let resp = builder.json(&payload).send().await.ok()?;
+    // Every failure below fails OPEN (returns None → caller treats the input as
+    // clean). Log the reason so a broken guard model is never silently trusted.
+    let resp = match builder.json(&payload).send().await {
+        Ok(resp) => resp,
+        Err(error) => {
+            tracing::warn!(
+                target: "privacy::guard",
+                %error, model = %model, %endpoint,
+                "privacy-guard LLM request errored — input NOT classified (failing open)"
+            );
+            return None;
+        }
+    };
     if !resp.status().is_success() {
+        let status = resp.status();
+        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+        tracing::warn!(
+            target: "privacy::guard",
+            %status, model = %model, %endpoint, body = %body,
+            "privacy-guard LLM call failed — input NOT classified (failing open)"
+        );
         return None;
     }
-    let body = resp.json::<serde_json::Value>().await.ok()?;
+    let body = match resp.json::<serde_json::Value>().await {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::warn!(
+                target: "privacy::guard",
+                %error, model = %model, %endpoint,
+                "privacy-guard LLM returned an unparseable body — input NOT classified (failing open)"
+            );
+            return None;
+        }
+    };
     let content = body
         .pointer("/choices/0/message/content")
         .and_then(|c| c.as_str())
         .unwrap_or("");
+    if content.trim().is_empty() {
+        let snippet: String = body.to_string().chars().take(300).collect();
+        tracing::warn!(
+            target: "privacy::guard",
+            model = %model, %endpoint, body = %snippet,
+            "privacy-guard LLM returned 2xx but no content (e.g. reasoning-budget starvation) — input NOT classified (failing open)"
+        );
+    }
     privacy_guard::decision_from_model_output(text, content)
 }
 
@@ -14934,10 +15097,15 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
         },
         evidence.chars().take(6000).collect::<String>()
     );
+    // Generous ceiling for REASONING models on the `memory` role: they spend the
+    // budget "thinking" before emitting `content`, so 200 tokens can be burned
+    // mid-thought, returning empty content — which fails OPEN here (the step is
+    // trusted, the gate silently no-ops). A high ceiling costs nothing for instruct
+    // models (they stop at the short JSON). See the note on `generate_thread_title`.
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0,
-        "max_tokens": 200,
+        "max_tokens": 2000,
         "response_format": orchestration_judge_response_format("step_completion"),
         "messages": [
             { "role": "system", "content": system },
@@ -14950,10 +15118,25 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
-    let Ok(resp) = builder.json(&payload).send().await else {
-        return (true, String::new());
+    let resp = match builder.json(&payload).send().await {
+        Ok(resp) => resp,
+        Err(error) => {
+            tracing::warn!(
+                target: "orchestration::verify_step",
+                %error, model = %model, %endpoint,
+                "step-verify LLM request errored — passing the step (fail-open)"
+            );
+            return (true, String::new());
+        }
     };
     if !resp.status().is_success() {
+        let status = resp.status();
+        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+        tracing::warn!(
+            target: "orchestration::verify_step",
+            %status, model = %model, %endpoint, body = %body,
+            "step-verify LLM call failed — passing the step (fail-open)"
+        );
         return (true, String::new());
     }
     let Ok(body) = resp.json::<serde_json::Value>().await else {
@@ -14966,7 +15149,15 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
     // Tolerant parse: the model may wrap the JSON in prose or code fences.
     let json_slice = match (content.find('{'), content.rfind('}')) {
         (Some(a), Some(b)) if b > a => &content[a..=b],
-        _ => return (true, String::new()),
+        _ => {
+            let snippet: String = body.to_string().chars().take(300).collect();
+            tracing::warn!(
+                target: "orchestration::verify_step",
+                model = %model, %endpoint, body = %snippet,
+                "step-verify LLM returned no JSON object (e.g. reasoning-budget starvation) — passing the step (fail-open)"
+            );
+            return (true, String::new());
+        }
     };
     match serde_json::from_str::<serde_json::Value>(json_slice) {
         Ok(v) => {
@@ -15004,10 +15195,15 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
         request.chars().take(2000).collect::<String>(),
         work.chars().take(4000).collect::<String>()
     );
+    // Generous ceiling for REASONING models on the `memory` role: they spend the
+    // budget "thinking" before emitting `content`, so 200 tokens can be burned
+    // mid-thought, returning empty content — which fails OPEN here (assumed
+    // complete, no nudge). A high ceiling costs nothing for instruct models (they
+    // stop at the short JSON). See the note on `generate_thread_title`.
     let payload = serde_json::json!({
         "model": model,
         "temperature": 0,
-        "max_tokens": 200,
+        "max_tokens": 2000,
         "response_format": orchestration_judge_response_format("task_completion"),
         "messages": [
             { "role": "system", "content": system },
@@ -15020,10 +15216,25 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
     if let Some(key) = api_key.as_ref() {
         builder = builder.bearer_auth(key);
     }
-    let Ok(resp) = builder.json(&payload).send().await else {
-        return false;
+    let resp = match builder.json(&payload).send().await {
+        Ok(resp) => resp,
+        Err(error) => {
+            tracing::warn!(
+                target: "orchestration::task_complete",
+                %error, model = %model, %endpoint,
+                "task-complete judge request errored — assuming complete (fail-open)"
+            );
+            return false;
+        }
     };
     if !resp.status().is_success() {
+        let status = resp.status();
+        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+        tracing::warn!(
+            target: "orchestration::task_complete",
+            %status, model = %model, %endpoint, body = %body,
+            "task-complete judge call failed — assuming complete (fail-open)"
+        );
         return false;
     }
     let Ok(body) = resp.json::<serde_json::Value>().await else {
@@ -15036,7 +15247,15 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
     // Tolerant parse: the model may wrap the JSON in prose or code fences.
     let json_slice = match (content.find('{'), content.rfind('}')) {
         (Some(a), Some(b)) if b > a => &content[a..=b],
-        _ => return false,
+        _ => {
+            let snippet: String = body.to_string().chars().take(300).collect();
+            tracing::warn!(
+                target: "orchestration::task_complete",
+                model = %model, %endpoint, body = %snippet,
+                "task-complete judge returned no JSON object (e.g. reasoning-budget starvation) — assuming complete (fail-open)"
+            );
+            return false;
+        }
     };
     match serde_json::from_str::<serde_json::Value>(json_slice) {
         // `complete` defaults to true on any parse gap → NOT incomplete → no nudge (fail-open).
@@ -29385,17 +29604,34 @@ fn start_visible_conversation_turn(
     };
     match lock_store(state) {
         Ok(store) => {
+            // Persist via commit_prompt_result (not two bare append_assistant_message
+            // calls): it inserts both messages AND synthesizes the provisional thread
+            // title from the first user prompt when the title is still a placeholder.
+            // The bare-append path passed `None` for the prompt, so the title stayed
+            // "New task" for the whole turn and only got written at the END (by the
+            // frontend /autotitle call) — the reason a new thread's title appeared to
+            // update "a fine sessione" instead of immediately. The thread.turn_started
+            // event below then carries the fresh title to the sidebar at turn start.
             store
-                .append_assistant_message(thread_id, &user_message)
-                .ok()?;
-            store
-                .append_assistant_message(thread_id, &assistant_message)
+                .commit_prompt_result(thread_id, &user_message, &assistant_message, None)
                 .ok()?;
         }
         Err(_) => return None,
     }
+    // Re-read the (now provisional) title so the event reflects what was persisted,
+    // rather than echoing the raw prompt passed in by the caller.
+    let started_title = lock_store(state)
+        .ok()
+        .and_then(|store| store.thread(thread_id).ok().flatten())
+        .map(|t| t.title)
+        .unwrap_or_else(|| title.to_string());
     publish_app_event(thread_turn_started_event(
-        thread_id, workspace, source, channel, title, &turn,
+        thread_id,
+        workspace,
+        source,
+        channel,
+        &started_title,
+        &turn,
     ));
     Some(turn)
 }
@@ -41139,7 +41375,14 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
         );
         let request = GenerateJsonRequest {
             prompt,
-            max_tokens: 200,
+            // Generous ceiling: the role's heuristic model runs this selection and
+            // may be a REASONING model that spends the budget "thinking" before
+            // emitting the `{"model_id": ...}` JSON. A tight 200-token cap could be
+            // burned mid-thought, yielding invalid JSON that silently drops the
+            // semantic router back to the heuristic. `generate_json` has repair +
+            // a `valid` flag, so this only needs headroom, not extra logging. A high
+            // ceiling costs nothing for instruct models (they stop at the short JSON).
+            max_tokens: 2000,
             temperature: 0.0,
             wait_if_busy: true,
             request_timeout_seconds: Some(30.0),
