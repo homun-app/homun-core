@@ -2,15 +2,16 @@
 
 > **Punto d'ingresso unico.** Da qui si parte e si torna. Questo file è SEMPRE
 > aggiornato: se cambia una scelta importante, si aggiorna qui (o nel doc linkato).
-> Ultimo aggiornamento: 2026-06-27.
+> Ultimo aggiornamento: 2026-07-06.
 >
-> **SEI QUI (2026-06-27):** linea attiva = **convergenza dalle fondamenta** →
-> [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md).
-> Scoperta trasversale: ogni sottosistema ha DUE implementazioni e la canonica è dormiente
-> (caposaldo #5 violato system-wide). Mappe sottosistemi accurate (reverse-engineered) in
-> [architecture/](architecture/). Regola ripristinata: niente codice fuori dalla mappa; ogni
-> modifica aggiorna la pagina architecture + cita il caposaldo. Si parte da L0 (normalizzazione
-> modello). NB: il blocco "Stato esecuzione" sotto è un changelog storico da archiviare.
+> **SEI QUI (2026-07-06):** lo **stato vivo** è in [STATO.md](STATO.md), riscritto da zero contro
+> il codice reale (reset chirurgico della doc). In sintesi: mergiata su `main` la fase
+> **turn-queue-broker + unified WebSocket** (broker default-on = path chat unico; un solo `/api/ws`).
+> Il **motore** è il single guarded loop ReAct (ADR 0021) e vive **in `main.rs`** (≈58.9k righe):
+> `crates/engine` **non esiste ancora** (ADR 0024 = *Proposed*), e neppure il memory-service
+> (`HOMUN_MEMORY_SERVICE`, ADR 0022 = *Proposed*). Non fidarti di riferimenti a quei crate/flag:
+> verifica sempre col codice. Il blocco "Stato esecuzione" più in basso è un **changelog storico
+> superato** (snapshot pre-reset in [archive/2026-07-06-pre-reset/](archive/2026-07-06-pre-reset/)).
 
 ## North Star
 
@@ -42,7 +43,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Principi** (cosa non si viola) | [CAPISALDI.md](CAPISALDI.md) |
 | **Metodo** (come si lavora) | [METHODOLOGY.md](METHODOLOGY.md) |
 | **Stato vivo** (dove siamo / ripartenza) | [STATO.md](STATO.md) |
-| **Scelte precise** (perché abbiamo deciso X) | [decisions/](decisions/) — ADR 0001-0016 (immutabili) |
+| **Scelte precise** (perché abbiamo deciso X) | [decisions/](decisions/) — ADR **0001-0024** (immutabili; 0021 = motore corrente, 0022/0024 = *Proposed*) |
 | **Com'è fatto** (architettura + diagrammi, reverse-engineered 2026-06-27) | [architecture/](architecture/) — overview · system-map · **agent-loop** · **model-io** · **browser** · **mcp** · **skills** · **connectors-composio** · **contacts-channels** · **capability-registry** · memory · plugins |
 | **Piano corrente** (fondamenta → obiettivo) | [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md) |
 | **Dove siamo / cosa manca** (backlog corrente) | [plans/2026-06-22-…](plans/2026-06-22-batch-1042-artifacts-memory.md) |
@@ -50,7 +51,13 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
 | **Storico** (changelog, vecchi piani, snapshot) | [archive/](archive/) — non più "corrente", solo memoria storica |
 
-## Stato esecuzione — "SEI QUI" (aggiornato 2026-06-26, anti-compattazione)
+## ⚠️ Stato esecuzione — CHANGELOG STORICO SUPERATO (fino al 2026-06-26)
+
+> **Non è più lo stato corrente.** Lo stato vivo è in [STATO.md](STATO.md). Quanto segue è
+> conservato solo come memoria storica (snapshot pre-reset in
+> [archive/2026-07-06-pre-reset/](archive/2026-07-06-pre-reset/)) e verrà potato.
+
+### (storico) — "SEI QUI" (aggiornato 2026-06-26, anti-compattazione)
 
 > Se il contesto si è compattato: rileggi QUESTO blocco + il
 > [backlog](plans/2026-06-22-batch-1042-artifacts-memory.md) (gli stati ☐/✅ = i loop
