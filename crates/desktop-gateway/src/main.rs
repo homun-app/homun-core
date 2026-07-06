@@ -43851,22 +43851,32 @@ async fn memory_project_briefing(
     let facade = lock_memory_facade(&state)?;
     let items = facade.list_memories_for_ui(&user, &ws).unwrap_or_default();
     // Objective (goals) + decisions + open-loops, con provenance thread_id.
-    let pick_with_provenance = |t: &str| -> Vec<serde_json::Value> {
-        items
-            .iter()
-            .filter(|m| {
-                m.memory_type == t
-                    && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
-            })
-            .map(|m| {
-                let origin_thread = m.metadata.get("thread_id").and_then(|v| v.as_str());
-                serde_json::json!({
-                    "reference": m.reference.to_string(),
-                    "text": m.text,
-                    "thread_id": origin_thread,
-                })
-            })
-            .collect()
+    // Dedup by normalized text and cap: accepting the SAME repeated proactive card
+    // (e.g. a recurring automation-failure card) stacks up many near-identical loops,
+    // which flooded the context panel. `cap` bounds each list so the "cockpit" stays a
+    // glanceable summary, not an unbounded dump.
+    let pick_with_provenance = |t: &str, cap: usize| -> Vec<serde_json::Value> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out: Vec<serde_json::Value> = Vec::new();
+        for m in items.iter().filter(|m| {
+            m.memory_type == t
+                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+        }) {
+            let key: String = m.text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+            if !seen.insert(key) {
+                continue; // near-identical to one already picked
+            }
+            let origin_thread = m.metadata.get("thread_id").and_then(|v| v.as_str());
+            out.push(serde_json::json!({
+                "reference": m.reference.to_string(),
+                "text": m.text,
+                "thread_id": origin_thread,
+            }));
+            if out.len() >= cap {
+                break;
+            }
+        }
+        out
     };
     // Brief: la wiki page `brief.md`.
     let brief = facade
@@ -43881,9 +43891,9 @@ async fn memory_project_briefing(
         "is_project": true,
         "objective": objective_text,
         "brief": brief,
-        "open_loops": pick_with_provenance("open_loop"),
-        "decisions": pick_with_provenance("decision"),
-        "goals": pick_with_provenance("goal"),
+        "open_loops": pick_with_provenance("open_loop", 6),
+        "decisions": pick_with_provenance("decision", 8),
+        "goals": pick_with_provenance("goal", 8),
     })))
 }
 
