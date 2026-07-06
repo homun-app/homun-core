@@ -5,7 +5,6 @@ import {
   CalendarClock,
   CheckCircle2,
   Cpu,
-  Database,
   FileText,
   GalleryVerticalEnd,
   Globe2,
@@ -41,10 +40,9 @@ import type {
 // l'addon ne fa sparire la voce di nav.
 export const navItems: NavItem[] = [
   { id: "chat", label: "chat.newTask", icon: MessageSquare },
-  // ADR 0022 (Piano UI A4): Memory torna nel nav top-level come vista dedicata
-  // (la memoria è un differenziatore di prodotto; averla visibile e raggiungibile
-  // direttamente la valorizza). Resta raggiungibile anche da Impostazioni → Memory.
-  { id: "memory", label: "nav.memory", icon: Database, navSection: "workspace" },
+  // Memory lives ONLY in Settings → Memory (rendered there as <MemoryView embedded />).
+  // The top-level nav entry (ADR 0022 Piano UI A4) was removed: it duplicated the exact
+  // same MemoryView already reachable from Settings.
   // "Pianificato" (coda dei run) è confluito in Automazioni: la regola è la cosa
   // di prima classe; i run si vedono nei thread. Manteniamo l'icona-calendario.
   { id: "automations", label: "nav.automations", icon: CalendarClock },

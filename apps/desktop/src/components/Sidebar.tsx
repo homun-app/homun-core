@@ -43,7 +43,7 @@ const NAV_SECTION_LABELS: Record<NonNullable<NavItem["navSection"]>, string> = {
 function navSectionForItem(item: NavItem): NonNullable<NavItem["navSection"]> {
   if (item.navSection) return item.navSection;
   if (item.id === "automations" || item.id === "tasks") return "work";
-  if (item.id === "memory" || item.id === "connections" || item.id === "browser") return "workspace";
+  if (item.id === "connections" || item.id === "browser") return "workspace";
   return "more";
 }
 
@@ -51,7 +51,6 @@ function navOrder(item: NavItem): number {
   if (typeof item.order === "number") return item.order;
   if (item.id === "automations") return 20;
   if (item.id === "tasks") return 10;
-  if (item.id === "memory") return 20;
   if (item.id === "connections") return 30;
   if (item.id === "browser") return 90;
   return 50;

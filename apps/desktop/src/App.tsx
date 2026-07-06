@@ -6,7 +6,6 @@ import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
-import { MemoryView } from "./components/MemoryView";
 import { Shell } from "./components/Shell";
 import { LoginGate } from "./components/LoginGate";
 import { NotificationsView } from "./components/NotificationsView";
@@ -1510,10 +1509,8 @@ export default function App() {
             proposals={automationProposals}
           />
         )}
-        {/* ADR 0022 (Piano UI A4): MemoryView al nav — la vista memoria (440 righe,
-            già completa) era raggiungibile solo da Settings → Memory. Ora ha una
-            voce di nav top-level. */}
-        {activeView === "memory" && <MemoryView />}
+        {/* Memory has no top-level view: it lives in Settings → Memory only
+            (SettingsView renders <MemoryView embedded />). */}
         {activeView === "settings" && (
           <SettingsView
             connections={connectionItems}
