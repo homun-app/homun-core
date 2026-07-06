@@ -45,7 +45,7 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 | **Stato vivo** (dove siamo / ripartenza) | [STATO.md](STATO.md) |
 | **Scelte precise** (perché abbiamo deciso X) | [decisions/](decisions/) — ADR **0001-0024** (immutabili; 0021 = motore corrente, 0022/0024 = *Proposed*) |
 | **Com'è fatto** (architettura + diagrammi, reverse-engineered 2026-06-27) | [architecture/](architecture/) — overview · system-map · **agent-loop** · **model-io** · **browser** · **mcp** · **skills** · **connectors-composio** · **contacts-channels** · **capability-registry** · memory · plugins |
-| **Piano corrente** (fondamenta → obiettivo) | [plans/2026-06-27-foundations-up-convergence.md](plans/2026-06-27-foundations-up-convergence.md) |
+| **Prossimo passo / candidati** | [STATO.md](STATO.md) §"Prossimo passo" (il piano "foundations-up-convergence" è **superato** → `archive/plans-2026-06/`) |
 | **Dove siamo / cosa manca** (backlog corrente) | [plans/2026-06-22-…](plans/2026-06-22-batch-1042-artifacts-memory.md) |
 | **La memoria** (contratto operativo + visione + struttura) | [MEMORIA.md](MEMORIA.md) · [memory-vision.md](memory-vision.md) · [memory-architecture.md](memory-architecture.md) |
 | **Prodotto / distribuzione / self-host** | [PRODUCT_LOOP.md](PRODUCT_LOOP.md) · [distribution.md](distribution.md) · [self-host.md](self-host.md) · [release-macos.md](release-macos.md) |
