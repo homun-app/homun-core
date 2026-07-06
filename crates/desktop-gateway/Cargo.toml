@@ -2,6 +2,11 @@
 name = "local-first-desktop-gateway"
 version = "0.1.0"
 edition = "2024"
+# The crate ships a second helper binary (`homun-linux-sandbox`, the Linux Landlock
+# fence, ADR 0023). Without this, `cargo run -p local-first-desktop-gateway` (used by
+# apps/desktop/electron/main.cjs in dev) is ambiguous and fails with exit 101, so the
+# gateway never boots. Pin the primary binary as the default run target.
+default-run = "local-first-desktop-gateway"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
