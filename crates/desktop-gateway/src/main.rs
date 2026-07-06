@@ -29613,6 +29613,21 @@ fn thread_turn_started_event(
     event
 }
 
+/// A store error a retry (fresh transaction) can plausibly clear: SQLite BUSY/LOCKED
+/// under the unified homun.sqlite/WAL when another writer is active. `busy_timeout`
+/// handles pure busy-waiting, but a write-write snapshot conflict returns immediately —
+/// only re-running the transaction (not waiting) resolves it.
+fn is_transient_store_error(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(e, _)
+            if matches!(
+                e.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+    )
+}
+
 fn start_visible_conversation_turn(
     state: &AppState,
     thread_id: &str,
@@ -29633,21 +29648,53 @@ fn start_visible_conversation_turn(
         user_message_id: user_message.id.clone(),
         assistant_message_id: assistant_message.id.clone(),
     };
-    match lock_store(state) {
-        Ok(store) => {
-            // Persist via commit_prompt_result (not two bare append_assistant_message
-            // calls): it inserts both messages AND synthesizes the provisional thread
-            // title from the first user prompt when the title is still a placeholder.
-            // The bare-append path passed `None` for the prompt, so the title stayed
-            // "New task" for the whole turn and only got written at the END (by the
-            // frontend /autotitle call) — the reason a new thread's title appeared to
-            // update "a fine sessione" instead of immediately. The thread.turn_started
-            // event below then carries the fresh title to the sidebar at turn start.
-            store
-                .commit_prompt_result(thread_id, &user_message, &assistant_message, None)
-                .ok()?;
+    // Persist the visible turn via commit_prompt_result (inserts both messages AND
+    // synthesizes the provisional title from the first prompt when the thread is still
+    // titled "New task"). This is a fail-closed safety boundary: a failure here aborts
+    // the whole turn ("could not start a visible ... turn").
+    //
+    // Under the UNIFIED homun.sqlite (chat + task stores on ONE WAL file), a concurrent
+    // writer can make this hit a TRANSIENT `SQLITE_BUSY`/`LOCKED`. `busy_timeout` alone
+    // doesn't cover a write-write *snapshot* conflict (it returns immediately; only a
+    // fresh transaction — a retry — resolves it, not waiting). That's why unattended
+    // automations failed intermittently (e.g. 09:00 ok, 09:06 "failed") while
+    // interactive chats mostly succeeded. So retry a few times before giving up, and
+    // never swallow the error silently.
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        let persisted = match lock_store(state) {
+            Ok(store) => {
+                store.commit_prompt_result(thread_id, &user_message, &assistant_message, None)
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: "gateway::visible_turn",
+                    %thread_id, %source, error = %error.message,
+                    "start_visible_conversation_turn: chat store lock failed"
+                );
+                return None;
+            }
+        };
+        match persisted {
+            Ok(_) => break,
+            Err(error) if is_transient_store_error(&error) && attempt < 5 => {
+                tracing::warn!(
+                    target: "gateway::visible_turn",
+                    %thread_id, %source, attempt, error = %error,
+                    "start_visible_conversation_turn: transient store contention — retrying"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(u64::from(attempt) * 40));
+            }
+            Err(error) => {
+                tracing::error!(
+                    target: "gateway::visible_turn",
+                    %thread_id, %source, attempt, error = %error,
+                    "start_visible_conversation_turn: could not persist the turn — failing closed"
+                );
+                return None;
+            }
         }
-        Err(_) => return None,
     }
     // Re-read the (now provisional) title so the event reflects what was persisted,
     // rather than echoing the raw prompt passed in by the caller.
