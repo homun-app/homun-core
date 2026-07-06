@@ -61,6 +61,19 @@ export function ChatComputerPanel({
     return unsub;
   }, []);
 
+  // Watching = activity. The WS migration moved live DATA to a server push that
+  // deliberately does NOT reset the container's idle clock, so while the user is
+  // actually viewing the live screen (expanded/full) we ping the live endpoint — which
+  // touches the idle timer server-side — otherwise the reaper recycles the container
+  // out from under them mid-view. Cheap: one small request every 20s, only while open.
+  useEffect(() => {
+    if (view === "bar") return;
+    const ping = () => void coreBridge.containedComputerLive().catch(() => {});
+    ping();
+    const id = window.setInterval(ping, 20_000);
+    return () => window.clearInterval(id);
+  }, [view]);
+
   // Reset the "last activity" clock whenever the step list or activity label changes.
   useEffect(() => {
     const liveSteps = live?.steps ?? [];

@@ -46997,6 +46997,11 @@ async fn local_computer_start() -> Json<LocalComputerActionResponse> {
             message: Some("Docker is not available on this deployment.".to_string()),
         });
     }
+    // An explicit START is a clear intent to use the container: reset the idle clock so
+    // the reaper gives it a full window. Without this, if the gateway has been up a
+    // while (idle timer already past the threshold) the reaper recycled the just-started
+    // container within ~60s — the "I click start, it comes up, then it dies" report.
+    touch_cc_activity();
     if sandbox::container_up() {
         return Json(LocalComputerActionResponse {
             ok: true,

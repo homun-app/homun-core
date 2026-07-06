@@ -14,16 +14,24 @@ export function ContainedComputerView() {
 
   useEffect(() => {
     let cancelled = false;
-    coreBridge
-      .containedComputerLive()
-      .then((value) => {
-        if (!cancelled) setLive(value);
-      })
-      .catch(() => {
-        if (!cancelled) setError(true);
-      });
+    const fetchLive = (seed: boolean) =>
+      coreBridge
+        .containedComputerLive()
+        .then((value) => {
+          if (!cancelled) setLive(value);
+        })
+        .catch(() => {
+          if (!cancelled && seed) setError(true);
+        });
+    fetchLive(true);
+    // Keepalive: this whole page IS the live view, so being mounted means the user is
+    // watching. Re-fetching touches the container's idle clock server-side (the WS
+    // migration's push does not), so the reaper won't recycle it out from under the
+    // user while they watch. One small request every 20s; stops on unmount.
+    const id = window.setInterval(() => void fetchLive(false), 20_000);
     return () => {
       cancelled = true;
+      window.clearInterval(id);
     };
   }, []);
 
