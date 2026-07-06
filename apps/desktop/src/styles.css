@@ -2459,6 +2459,19 @@ body.resizing-drawer {
   background: var(--surface-muted);
 }
 
+/* The step being worked on RIGHT NOW: accent arrow + soft accent fill so you can tell
+   at a glance which one it's on (whether the model marked it "doing" or we inferred it
+   as the first still-open step). */
+.wi-steps li.active {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--brand-soft);
+}
+
+.wi-steps li.active svg {
+  color: var(--brand);
+}
+
 .wi-steps li.blocked {
   color: var(--red);
 }

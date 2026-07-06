@@ -30,6 +30,7 @@ import {
   FolderOpen,
   GitMerge,
   AlertTriangle,
+  ArrowRight,
   Globe2,
   HardDrive,
   ListTodo,
@@ -2460,6 +2461,10 @@ function WorkspaceIsland({
   const openSteps = planSteps.filter((step) => step.status !== "done");
   const runningPlan = planSteps.find((step) => step.status === "doing");
   const blockedPlan = planSteps.find((step) => step.status === "blocked");
+  // The step being worked on RIGHT NOW. Models (esp. weak ones) often forget to mark a
+  // step "doing" — they just flip steps to "done" as they go — so fall back to the first
+  // still-open step. Guarantees the island always highlights "which one is it on".
+  const activeStep = runningPlan ?? openSteps.find((step) => step.status === "todo") ?? null;
   const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
   const artifactsCount = artifacts.length;
   const hasWorkspaceState =
@@ -2657,12 +2662,26 @@ function WorkspaceIsland({
               )}
               {openSteps.length > 0 && (
                 <ol className="wi-steps">
-                  {openSteps.slice(0, 5).map((step, index) => (
-                    <li key={`open-${index}-${step.title}`} className={step.status}>
-                      <span>{step.status === "done" ? <Check size={12} /> : <span />}</span>
-                      <em>{step.title}</em>
-                    </li>
-                  ))}
+                  {openSteps.slice(0, 5).map((step, index) => {
+                    const isActive = step === activeStep;
+                    return (
+                      <li
+                        key={`open-${index}-${step.title}`}
+                        className={`${step.status}${isActive ? " active" : ""}`}
+                      >
+                        <span>
+                          {step.status === "blocked" ? (
+                            <AlertTriangle size={12} />
+                          ) : isActive ? (
+                            <ArrowRight size={12} />
+                          ) : (
+                            <span />
+                          )}
+                        </span>
+                        <em>{step.title}</em>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
               {completedExpanded && completedSteps.length > 0 && (
