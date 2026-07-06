@@ -21650,6 +21650,17 @@ an uncertain date.",
                 } else {
                     true
                 };
+            // Snapshot the step evidence ONCE for the whole batch of claims. Previously
+            // the first verified step cleared `step_evidence` mid-loop, so the REST of a
+            // batch saw "(no tool activity)" and the strict judge rejected them — leaving
+            // steps the model actually finished stuck at "doing" (the real reason
+            // "progress never advances" even on a strong model). And with NO evidence to
+            // verify against, don't hold a step hostage: trust the claim (there is nothing
+            // to check) — the adaptive OnRisk intent, applied even while the floor is in
+            // shadow mode.
+            let batch_evidence = ctx.step_evidence.join("\n");
+            let has_evidence = !batch_evidence.is_empty();
+            let mut any_verified = false;
             let mut rejection: Option<String> = None;
             for i in claims {
                 let title = plan_step_title(&plan_steps[i]).to_string();
@@ -21658,20 +21669,16 @@ an uncertain date.",
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let (ok, reason) = if verify {
-                    let evidence = if ctx.step_evidence.is_empty() {
-                        "(no tool activity recorded for this step)".to_string()
-                    } else {
-                        ctx.step_evidence.join("\n")
-                    };
+                let (ok, reason) = if verify && has_evidence {
                     verify_step_complete(
                         &ctx.state.http,
                         &title,
                         &criterion,
-                        &evidence,
+                        &batch_evidence,
                     )
                     .await
                 } else {
+                    // Verification off, or nothing to verify against → trust the claim.
                     (true, String::new())
                 };
                 if ok {
@@ -21691,7 +21698,7 @@ an uncertain date.",
                     .await;
                     *ctx.plan = runtime_execution_plan(&plan_steps);
                     *ctx.progress_anchor_round = ctx.round; // F1: real progress
-                    ctx.step_evidence.clear();
+                    any_verified = true;
                     ctx.last_round_sig.clear();
                     *ctx.repeat_count = 0;
                     *ctx.pending_compaction = true; // F3
@@ -21718,6 +21725,11 @@ an uncertain date.",
                     ));
                     break;
                 }
+            }
+            // The verified step(s) consumed this evidence window — clear it ONCE, after
+            // the whole batch, so no step in the batch is starved of evidence.
+            if any_verified {
+                ctx.step_evidence.clear();
             }
             // Marker rendered from the CANONICAL plan — the single source of
             // truth (verified state), not the model's raw claim. This is what
