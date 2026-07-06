@@ -104,11 +104,29 @@ export function ChatComputerPanel({
   const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running));
   const hasLiveActivity = browserRunning || terminalRunning;
   const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId;
+  // Only bubble a CHANGED status up to ChatView. The unified-WS publisher pushes
+  // `computer.live` ~1×/s while the container is alive (now that it stays alive across
+  // idle), and `live.activity` changes each frame — but for a thread that doesn't own
+  // the live session the reported status is a constant {active:false, activity:null}.
+  // Without this guard we called onLiveChange (→ setComputerLiveStatus, a NEW object)
+  // every second, re-rendering ChatView ~1Hz and wiping the composer draft mid-typing.
+  const lastSentRef = useRef<{ active: boolean; activity: string | null }>({
+    active: false,
+    activity: null,
+  });
   useEffect(() => {
-    onLiveChange?.({
+    const next = {
       active: Boolean(ownedLiveActivity),
       activity: ownedLiveActivity ? (live?.activity ?? null) : null,
-    });
+    };
+    if (
+      lastSentRef.current.active === next.active &&
+      lastSentRef.current.activity === next.activity
+    ) {
+      return;
+    }
+    lastSentRef.current = next;
+    onLiveChange?.(next);
   }, [live?.activity, onLiveChange, ownedLiveActivity]);
   if (!ownedLiveActivity) return null;
 
