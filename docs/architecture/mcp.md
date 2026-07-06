@@ -1,5 +1,7 @@
 # Architettura — MCP (Model Context Protocol)
 
+> Verificato vs codice 2026-07-06.
+>
 > Stato: **2026-06-27** — *reverse-engineered* dal codice reale, **punto fermo**
 > (descrive ciò che esiste oggi, non un piano). Crate principale:
 > `desktop-gateway` (orchestrazione, transport, loop) + `local-first-capabilities`
@@ -37,17 +39,18 @@ sottosistema parallelo, è un *provider kind* in più (`CapabilityProviderKind::
 
 - **stdio** — `McpStdioTransport::spawn` (`mcp.rs:151`): lancia il comando come
   child process (`stdin`/`stdout` piped, `stderr` null), parla JSON-RPC riga per
-  riga, fa match per `id` (`mcp.rs:196`), uccide il child su `Drop` (`mcp.rs:256`).
+  riga, fa match per `id` (`McpStdioTransport::request`, `mcp.rs:197`), uccide il
+  child su `Drop` (`mcp.rs:256`).
 - **HTTP (streamable-HTTP, spec 2025)** — `McpHttpTransport`
   (`desktop-gateway/src/mcp_http.rs:26`): `reqwest::blocking`, POST JSON-RPC,
   accetta sia `application/json` sia SSE (`text/event-stream`) e seleziona il
   messaggio col proprio `id` (`mcp_http.rs:106`); porta avanti l'header
   `Mcp-Session-Id` restituito a `initialize` (`mcp_http.rs:62`,`77`); header di
   auth opzionali.
-- **`McpAnyTransport`** (`main.rs:31706`) — enum `Stdio | Http` che implementa
-  `McpTransport`, così **un solo** `McpCapabilityProvider<McpAnyTransport>` copre
-  entrambi i flavor. Costruito da `build_mcp_transport` leggendo il campo
-  `transport` della metadata (`main.rs:31728`).
+- **`McpAnyTransport`** (`main.rs`, `enum McpAnyTransport`) — enum `Stdio | Http`
+  che implementa `McpTransport`, così **un solo**
+  `McpCapabilityProvider<McpAnyTransport>` copre entrambi i flavor. Costruito da
+  `build_mcp_transport` leggendo il campo `transport` della metadata.
 - `InMemoryMcpTransport` (`mcp.rs:80`) + bin `fake_mcp_stdio.rs` per i test.
 
 ### Provider (livello capability)
@@ -69,18 +72,18 @@ chiedano conferma.
 ### Connect & discovery
 
 - Endpoint `POST /api/capabilities/mcp/connect` → `connect_mcp` →
-  `connect_mcp_blocking` (`main.rs:31820`). Richiede `name` + (`command` stdio
-  **oppure** `url` remoto). Slugifica il nome con `mcp_provider_slug`
-  (`main.rs:31763`) → `provider_id = mcp:{slug}`, `connection_id = mcp-{slug}`.
+  `connect_mcp_blocking` (`main.rs`). Richiede `name` + (`command` stdio
+  **oppure** `url` remoto). Slugifica il nome con `mcp_provider_slug` →
+  `provider_id = mcp:{slug}`, `connection_id = mcp-{slug}`.
 - Scrive nel registry: `upsert_provider_config`, `upsert_provider_grant`
   (azioni concesse: `Read` + `WriteWithConfirmation`, autonomia max 3),
   `upsert_connection_config` con la **metadata di transport** serializzata da
-  `mcp_stdio_config_to_metadata` (`main.rs:31674`) o `mcp_http_config_to_metadata`
-  (`main.rs:31689`). La coppia config→metadata→config è round-trip testata per
-  garantire che ciò che `connect` scrive sia esattamente ciò che l'executor
-  rilegge (`mcp_stdio_config_from_metadata`, `main.rs:31634`).
+  `mcp_stdio_config_to_metadata` o `mcp_http_config_to_metadata`. La coppia
+  config→metadata→config è round-trip testata per garantire che ciò che `connect`
+  scrive sia esattamente ciò che l'executor rilegge
+  (`mcp_stdio_config_from_metadata`).
 - **Tool discovery best-effort** — `mcp_discover_and_cache_tools`
-  (`main.rs:31920`): costruisce il transport, `initialize("2024-11-05")`,
+  (`main.rs`): costruisce il transport, `initialize("2024-11-05")`,
   `list_tools`, poi `upsert_cached_tool` per ogni tool nel registry. Se il server
   non parte la registrazione **resta** e si restituisce `discovery_error` (mai
   swallowed): la UI può dire "registrato ma irraggiungibile".
@@ -90,33 +93,33 @@ chiedano conferma.
   preset install-ready (comando stdio `npx`/`uvx`/`docker`, oppure endpoint
   remoto) + i `inputs` che l'utente deve fornire (path, API key/secret, header
   auth). Esposto da `GET /api/capabilities/mcp/registry` → `mcp_registry_search`
-  (`main.rs:34318`) e usato dal meta-tool `suggest_capabilities`
-  (`main.rs:32858`). La registry attesta la **provenienza** (namespace verificati),
+  (`main.rs`) e usato dal meta-tool `suggest_capabilities` (`main.rs`). La
+  registry attesta la **provenienza** (namespace verificati),
   **non** la sicurezza del codice → si mostra publisher + comando e si richiede
   conferma esplicita prima del lancio.
 
 ### Tool nel loop di chat
 
-- `mcp_chat_tool_name` (`main.rs:32659`) produce `mcp__{slug}__{tool}`;
-  `parse_mcp_chat_name` (`main.rs:32667`) è l'inverso e funge da **router**
-  (`None` per qualsiasi nome non-MCP).
-- `mcp_chat_tools` (`main.rs:32692`) legge **solo dalla cache SQLite** (nessuna
-  rete): per ogni connection MCP costruisce gli schema OpenAI `function` da
+- `mcp_chat_tool_name` (`main.rs`) produce `mcp__{slug}__{tool}`;
+  `parse_mcp_chat_name` (`main.rs`) è l'inverso e funge da **router** (`None` per
+  qualsiasi nome non-MCP).
+- `mcp_chat_tools` (`main.rs`) legge **solo dalla cache SQLite** (nessuna rete):
+  per ogni connection MCP costruisce gli schema OpenAI `function` da
   `cached_tools` e raccoglie l'insieme dei *write* (`McpChatTools{schemas, writes}`).
   Un nome read-looking non viene mai gated anche se cached col vecchio default.
-- **Iniezione nel turno** (`main.rs:18158`–`18193`): i tool MCP entrano nella
+- **Iniezione nel turno** (`main.rs`, intorno alla costruzione di
+  `composio_writes` che congela i write Composio+MCP): i tool MCP entrano nella
   **stessa** superficie di discovery di Composio; i loro write si uniscono a
   `composio_writes` (insieme congelato dei tool che richiedono conferma). Se i
-  tool MCP sono pochi (≤ `MCP_ALWAYS_LOAD_MAX = 24`, `main.rs:18744`) vengono
-  caricati **direttamente** nel toolset live (non dietro `find_capability`),
-  perché i server MCP si installano deliberatamente e sono pochi; oltre il cap
-  ricadono in `find_capability` come il grande catalogo Composio
-  (`mcp_capability_entries`, `main.rs:17597`).
-- **Dispatch** (`main.rs:22493`): nel match dei tool, se `parse_mcp_chat_name`
-  riconosce il nome → branch MCP. Read → esecuzione diretta via
-  `run_mcp_chat_tool` (`main.rs:32752`) su `spawn_blocking`, con **timeout**
-  (`mcp_call_timeout`) e classificazione errori (`mcp_error_hint`,
-  `main.rs:33732`, traduce auth/ratelimit/unavailable in istruzioni per l'utente).
+  tool MCP sono pochi (≤ `MCP_ALWAYS_LOAD_MAX = 24`) vengono caricati
+  **direttamente** nel toolset live (non dietro `find_capability`), perché i
+  server MCP si installano deliberatamente e sono pochi; oltre il cap ricadono in
+  `find_capability` come il grande catalogo Composio (`mcp_capability_entries`).
+- **Dispatch** (`main.rs`, branch `parse_mcp_chat_name` nel match dei tool): se
+  `parse_mcp_chat_name` riconosce il nome → branch MCP. Read → esecuzione diretta
+  via `run_mcp_chat_tool` (`main.rs`) su `spawn_blocking`, con **timeout**
+  (`mcp_call_timeout`) e classificazione errori (`mcp_error_hint`, traduce
+  auth/ratelimit/unavailable in istruzioni per l'utente).
   `run_mcp_chat_tool` apre un transport **fresco per chiamata**, fa `initialize`,
   registra il provider in una `CapabilityFacade` one-shot e chiama `tools/call`;
   il child viene ucciso al ritorno (transport droppato).
@@ -125,23 +128,25 @@ chiedano conferma.
 
 - Un write (e non `autonomous`, e non *workspace-scoped*) **non esegue**: si crea
   una pending approval e si emette la confirm-card
-  `‹‹MCP_CONFIRM››{approval_id,tool,arguments}‹‹/MCP_CONFIRM››` (`main.rs:22509`–
-  `22538`); il modello viene istruito a NON dire che l'azione è stata eseguita.
+  `‹‹MCP_CONFIRM››{approval_id,tool,arguments}‹‹/MCP_CONFIRM››` (`main.rs`, branch
+  di dispatch MCP); il modello viene istruito a NON dire che l'azione è stata
+  eseguita.
 - L'esecuzione confermata passa per `POST /api/capabilities/mcp/execute` →
-  `mcp_execute` (`main.rs:34708`): verifica che il messaggio d'origine contenga
-  esattamente quella card (`mcp_confirm_matches`, match su tool **e** argomenti,
-  `main.rs:34627`) — altrimenti `403 mcp_confirmation_required`. Poi esegue
-  `run_mcp_chat_tool` con lo stesso timeout, **riscrive** la card a "done"
-  (`rewrite_mcp_confirm_to_done`, `main.rs:34657`) così non si può rieseguire, e
-  riprende il task dopo l'approvazione (`resume_thread_after_approval`).
+  `mcp_execute` (`main.rs`): verifica che il messaggio d'origine contenga
+  esattamente quella card (`mcp_confirm_matches`, match su tool **e** argomenti)
+  — altrimenti `403 mcp_confirmation_required`. Poi esegue `run_mcp_chat_tool` con
+  lo stesso timeout, **riscrive** la card a "done" (`rewrite_mcp_confirm_to_done`)
+  così non si può rieseguire, e riprende il task dopo l'approvazione
+  (`resume_thread_after_approval`).
 - **Allow di server (policy B)** — con `allow_server` si registra il marker
   `mcp__{server}__*` (`add_composio_tool_allow`); `composio_tool_allowed`
-  (`main.rs:33796`) fa passare ogni write di quel server senza più chiedere.
-- **Workspace-scoped bypass** — `workspace_scoped_mcp_write` (`main.rs:11403`):
-  se un write del Filesystem MCP tocca solo path **dentro** la project-root del
-  thread (`jail_absolute_in_root`), salta la card (è già confinato per
-  costruzione, ADR 0009). La connection resta globale; la root è il confine di
-  autorizzazione per-thread (`project_filesystem_mcp_instruction`, `main.rs:11421`).
+  (`main.rs`) fa passare ogni write di quel server senza più chiedere.
+- **Workspace-scoped bypass** — `workspace_scoped_mcp_write` (`main.rs`, delega a
+  `workspace_scoped_mcp_write_for_root`): se un write del Filesystem MCP tocca
+  solo path **dentro** la project-root del thread (`jail_absolute_in_root`), salta
+  la card (è già confinato per costruzione, ADR 0009). La connection resta
+  globale; la root è il confine di autorizzazione per-thread
+  (`project_filesystem_mcp_instruction`).
 
 ### Diagramma
 
@@ -283,7 +288,7 @@ prefilter/guardrail, non verità primaria di routing. Tocca anche il **#10**
 | `crates/capabilities/src/mcp.rs` | Trait `McpTransport`, `McpStdioTransport`, `InMemoryMcpTransport`, `McpCapabilityProvider`, classificazione read/write (`name_is_read_only`) |
 | `crates/desktop-gateway/src/mcp_http.rs` | Transport streamable-HTTP (JSON-RPC + SSE + `Mcp-Session-Id`) |
 | `crates/desktop-gateway/src/mcp_registry.rs` | Client della official MCP Registry → preset install-ready |
-| `crates/desktop-gateway/src/main.rs` | Orchestrazione: `build_mcp_transport`/`McpAnyTransport` (31706), `connect_mcp_blocking` (31820), `mcp_discover_and_cache_tools` (31920), `mcp_chat_tool_name`/`parse_mcp_chat_name` (32659), `mcp_chat_tools` (32692), `run_mcp_chat_tool` (32752), dispatch nel loop (22493), confirm + `mcp_execute` (34708), `mcp_error_hint` (33732), `mcp_provider_slug` (31763), `workspace_scoped_mcp_write` (11403) |
+| `crates/desktop-gateway/src/main.rs` | Orchestrazione (grep i simboli, `main.rs` è ~59k righe e cambia di continuo): `build_mcp_transport`/`McpAnyTransport`, `connect_mcp_blocking`, `mcp_discover_and_cache_tools`, `mcp_chat_tool_name`/`parse_mcp_chat_name`, `mcp_chat_tools`, `run_mcp_chat_tool`, dispatch nel loop (branch `parse_mcp_chat_name`), confirm + `mcp_execute`, `mcp_error_hint`, `mcp_provider_slug`, `workspace_scoped_mcp_write` |
 | `crates/capabilities/src/bin/fake_mcp_stdio.rs` | Server MCP fittizio per i test stdio |
 | `docs/decisions/0013-connector-auth-and-capability-routing.md` | ADR: capability routing = Tool Search (core + deferred) |
 | `docs/CAPISALDI.md` (#7) | Principio: registry unico interrogabile |

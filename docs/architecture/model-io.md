@@ -1,9 +1,15 @@
 # I/O e normalizzazione dei modelli (L0)
 
+> Verificato vs codice 2026-07-06.
+>
 > **Stato** — Data: 2026-06-27. Pagina **reverse-engineered** dal codice reale
 > (`crates/desktop-gateway/src/main.rs`, `crates/inference/`). È il **punto fermo**
 > dello strato fondamentale L0: come ogni modello risponde e come lo riportiamo a una
 > forma unica. **Ogni modifica al sottosistema aggiorna questa pagina.**
+>
+> ⚠️ `main.rs` è un monolite ~59k righe editato di continuo: i riferimenti sono ai
+> **simboli/funzioni**, non a numeri di riga (che invecchiano a ogni edit). Ri-grep il
+> simbolo, non fidarti di un `main.rs:NNNN`.
 
 ## Cosa fa
 
@@ -20,36 +26,42 @@ domata prima che l'agent-loop la veda.
 
 ## Come funziona OGGI
 
-Il flusso reale di un turno di chat (percorso principale: `generate_with_tools`, il loop a
-round attorno a `crates/desktop-gateway/src/main.rs:18948` in poi):
+Il flusso reale di un turno di chat gira nel **loop a round unico guardato** (ADR 0021):
+`for round in 0..hard_round_ceiling()` nel percorso agent-loop di `main.rs`, che a ogni round
+POSTa la richiesta e chiama uno dei due collector:
 
-1. **Selezione provider** — `is_ollama_base` (`main.rs:14347`) decide il path dal base URL
+1. **Selezione provider** — `is_ollama_base` decide il path dal base URL
    (`ollama.com` o `:11434` → Ollama; tutto il resto → OpenAI-compat). `chat_endpoint`
-   (`main.rs:14370`) calcola l'URL: Ollama → strip di un eventuale `/v1` finale e
+   calcola l'URL: Ollama → strip di un eventuale `/v1` finale e
    `…/api/chat`; gli altri → `…/chat/completions`. Si usa il **native** per Ollama perché la
    shim OpenAI-compat `/v1` storicamente *droppava* i tool-call in streaming (ollama#12557).
 
-2. **Build payload** — `build_chat_payload` (`main.rs:14591`) produce due shape diverse:
+2. **Build payload** — `build_chat_payload` produce due shape diverse. Il budget di output è
+   `chat_payload_max_tokens(is_final_round, …)`: **6000** di default, con l'`is_final_round`
+   che serve a togliere i tool nell'ultimo round (round finale = sola sintesi, niente tool):
    - **Ollama native**: `{model, messages: to_ollama_messages(...), stream:true,
-     keep_alive:"10m", options:{temperature, num_predict:6000}}`; i `tools` vanno in
-     `payload["tools"]` solo se non è il round finale. `to_ollama_messages` (`main.rs:14386`)
+     keep_alive:"10m", options:{temperature, num_predict:<max_tokens>}}`; i `tools` vanno in
+     `payload["tools"]` solo se non è il round finale. `to_ollama_messages`
      converte: content-parts multimodali → `{content, images:[base64]}` (senza prefisso
      `data:`), e arguments dei `tool_calls` da **stringa JSON → oggetto** (il native vuole un
-     oggetto).
-   - **OpenAI-compat**: `{model, messages, temperature, max_tokens:6000, stream:true}` +
-     `tool_choice:"auto"` quando ci sono tools. Per z.ai (`is_zai_base`, `main.rs:14354`) si
+     oggetto). Il `think:true` (traccia `message.thinking` separata) è aggiunto **solo** ai
+     modelli thinking noti, via `ollama_thinking_supported` (vedi profilo capacità).
+   - **OpenAI-compat**: `{model, messages, temperature, max_tokens:<…>, stream:true}` +
+     `tool_choice:"auto"` quando ci sono tools. Per z.ai (`is_zai_base`) si
      aggiunge `thinking:{type:"disabled"}` salvo `HOMUN_ZAI_THINKING=1`.
 
 3. **Streaming + riassemblaggio** — due collector simmetrici producono **la stessa forma**:
-   - OpenAI: `collect_openai_stream` (`main.rs:14246`) bufferizza le righe SSE `data:`,
+   - OpenAI: `collect_openai_stream` bufferizza le righe SSE `data:`,
      emette ogni `delta.content` LIVE alla UI, e a fine stream chiama
-     `reassemble_openai_stream` (`main.rs:14137`) che accumula `content`, `reasoning`
+     `reassemble_openai_stream` che accumula `content`, `reasoning`
      (`reasoning_content` con alias `reasoning`) e i `tool_calls` per `index` (id/name/args
      concatenati).
-   - Ollama: `collect_ollama_native_stream` (`main.rs:14517`) legge NDJSON; ogni riga passa
-     da `process_ollama_line` (`main.rs:14465`) che streama il `message.content`, accumula, e
-     converte i `tool_calls` (arguments oggetto → **stringa JSON**, id sintetico
-     `ollama_call_N`). Gestisce sia lo stream sia un singolo oggetto non-streamed (tail).
+   - Ollama: `collect_ollama_native_stream` legge NDJSON; ogni riga passa
+     da `process_ollama_line` che streama il `message.content`, accumula la traccia
+     `message.thinking` (+ alias `reasoning`/`reasoning_content`) come reasoning **separato**,
+     e converte i `tool_calls` via `model_normalize::ollama_tool_call` (arguments oggetto →
+     **stringa JSON**, id sintetico `ollama_call_N`). Gestisce sia lo stream sia un singolo
+     oggetto non-streamed (tail).
    - Entrambi i collector hanno timeout **per-chunk** (`first_token` generoso, default 300s
      via `HOMUN_MODEL_FIRST_TOKEN_SECS`, poi `idle` più stretto) e **salvano l'output
      parziale** su stallo/errore mid-stream se è già arrivato qualcosa, invece di uccidere il
@@ -61,7 +73,7 @@ round attorno a `crates/desktop-gateway/src/main.rs:18948` in poi):
    (`saw_event=false`), lo si usa così com'è.
 
 5. **Tool-call come testo + sanitize** — quando il `message` riassemblato non ha
-   `tool_calls` strutturati, l'agent-loop (`main.rs:~19759`) tenta
+   `tool_calls` strutturati, l'agent-loop tenta
    `model_normalize::parse_text_tool_calls`: estrae call Hermes/Qwen
    (`<tool_call>{json}</tool_call>`) e Claude/MiniMax (`<invoke name=…><parameter…>`),
    filtrate ai soli tool **noti**, e le trasforma in struttura via
@@ -70,13 +82,16 @@ round attorno a `crates/desktop-gateway/src/main.rs:18948` in poi):
    `<think>`/`<tool_call>`/`<invoke>`/`<function_calls>` e i token spuri (es. minimax).
 
 6. **Output strutturato (deliverable/judge)** — per il JSON forzato (deck, giudici di
-   orchestrazione) si usa `response_format`. Il provider OpenAI-compat del crate inference
-   (`crates/inference/src/openai_compat.rs:106`) prova prima `json_schema` strict (decoding
-   vincolato — il "floor" cross-modello) e **degrada UNA volta a `json_object` su un 400**.
-   Stesso pattern duplicato nel gateway per il deck (`generate_deck_content`,
-   `main.rs:16289` — attempts `json_schema` → `json_object`), con parsing **tollerante** a
-   valle (`extract_deck_object`, `main.rs:16213`) perché alcuni provider accettano lo schema
-   ma non lo *applicano*.
+   orchestrazione) si usa `response_format`, la cui shape è ora **convergiuta** in un'unica
+   funzione pura `local_first_inference::structured_response_format(name, schema)`
+   (`crates/inference/src/openai_compat.rs`, F0.6): `Some(schema)` → `json_schema` strict
+   (decoding vincolato — il "floor" cross-modello), `None` → `json_object` (che è anche il
+   target di degrado dopo un 400). Il provider OpenAI-compat (`build_request_body` nello
+   stesso file) prova prima lo strict e **degrada UNA volta a `json_object` su un 400**.
+   La stessa funzione è chiamata dal gateway per il deck (`generate_deck_content` — attempts
+   `json_schema` → `json_object`) e per il judge (`orchestration_judge_response_format`), con
+   parsing **tollerante** a valle (`extract_deck_object`) perché alcuni provider accettano lo
+   schema ma non lo *applicano*.
 
 ```mermaid
 flowchart TD
@@ -115,9 +130,9 @@ flowchart TD
   sul tier locale, che è il prodotto (caposaldo 2). Il collector native gestisce comunque il
   caso non-streamed, così resta robusto.
 - **Temperatura bassa**: la temperatura della chat arriva dalla richiesta del frontend, ma
-  ogni percorso *deterministico* — giudici di completamento step/task (`main.rs:13809`,
-  `:13879`), generazione strutturata — gira a **0/0.0**: l'harness possiede il control-flow e
-  vuole decisioni ripetibili, non creatività (capisaldi 2 e 6). Il deck usa 0.4 (un po' di
+  ogni percorso *deterministico* — giudici di completamento step/task, generazione
+  strutturata — gira a **0/0.0**: l'harness possiede il control-flow e
+  vuole decisioni ripetibili, non creatività (capisaldi 2 e 6). Il deck usa **0.4** (un po' di
   varietà narrativa con schema a vincolare la forma).
 - **Fallback tool-as-text**: modelli deboli/locali (minimax via Ollama, alcuni template
   Hermes/Qwen/Claude) emettono i tool-call come **testo** nel loro template invece che nel
@@ -265,25 +280,33 @@ Invarianti:
   canonico (ADR 0019) è la direzione per togliere le regex dal frontend.
 - **ADR 0016** — harness-owned task engine cross-modello: il floor `json_schema`→`json_object`
   e la temperatura 0 sui path deterministici.
-- **ADR 0019** — NormalizerStage / eventi canonici tipizzati: il piano per consolidare tutto
-  quanto sopra in `model_normalize` (oggi solo lo step 1, `PLAN_PROPOSE`).
+- **ADR 0019** — NormalizerStage / eventi canonici tipizzati: la coda L0 è **consolidata** in
+  `model_normalize` (builder canonico `assistant_response` + reasoning-fallback, estrazione
+  `<think>`, `ollama_tool_call`, `sanitize_model_text`, tool-as-text, `parse_plan_propose`).
+  Resta come futuro (non ancora nel codice) il **canale d'evento separato** per il reasoning
+  (`TurnEvent::Reasoning`): oggi il reasoning è solo fallback del content, non un evento a sé.
 
 ## File chiave
 
-- `crates/desktop-gateway/src/main.rs`
-  - `reassemble_openai_stream` (`:14137`), `collect_openai_stream` (`:14246`)
-  - `is_ollama_base` (`:14347`), `is_zai_base` (`:14354`), `chat_endpoint` (`:14370`)
-  - `to_ollama_messages` (`:14386`), `process_ollama_line` (`:14465`),
-    `collect_ollama_native_stream` (`:14517`)
-  - `build_chat_payload` (`:14591`)
-  - `extract_deck_object` (`:15713`), `generate_deck_content` (`:16217`)
-  - `build_browser_inference_router` (`:37381`)
+- `crates/desktop-gateway/src/main.rs` (monolite ~59k righe — ri-grep i simboli, no line-ref):
+  - `reassemble_openai_stream`, `collect_openai_stream`
+  - `is_ollama_base`, `is_zai_base`, `chat_endpoint`
+  - `to_ollama_messages`, `process_ollama_line`, `collect_ollama_native_stream`
+  - `build_chat_payload`, `chat_payload_max_tokens` (budget output = 6000 default)
+  - `ollama_thinking_supported`, `warm_ollama_capabilities`, `registry_model_capabilities`,
+    `autofill_model_entry_capabilities` (profilo capacità Ollama)
+  - `resolve_context_budget_chars`, `chat_context_budget_chars` (budget prompt su finestra reale)
+  - `orchestration_judge_response_format`, `extract_deck_object`, `generate_deck_content`
+  - il loop a round unico guardato: `for round in 0..hard_round_ceiling()` (ADR 0021)
+  - `build_browser_inference_router`
 - `crates/desktop-gateway/src/model_normalize.rs` — **normalizzatore canonico CABLATO** (ADR 0019):
   `assistant_response`, `split_reasoning_from_content`, `ollama_tool_call`, `sanitize_model_text`,
   `parse_text_tool_calls` + `synthesize_tool_calls`, `parse_plan_propose`
-- `crates/desktop-gateway/src/model_registry.rs` — `infer_context_window` (`:288`), shape provider/role
-- `crates/inference/src/openai_compat.rs` — `build_request_body` / schema-downgrade (`:77`, `:106`)
-- `crates/inference/src/router.rs` — `ModelRouter`, `select`, `active_context_window` (`:58`)
+- `crates/desktop-gateway/src/model_registry.rs` — `infer_context_window`, `ModelEntry`
+  (`vision/tools/reasoning/context_window`), shape provider/role
+- `crates/inference/src/openai_compat.rs` — `structured_response_format` (la **singola**
+  definizione del floor `json_schema`→`json_object`), `build_request_body` / schema-downgrade
+- `crates/inference/src/router.rs` — `ModelRouter`, `select`, `active_context_window`
 - `docs/decisions/0016-harness-owned-task-engine-cross-model.md`
 - `docs/decisions/0019-model-output-normalizer-canonical-events.md`
 - `docs/CAPISALDI.md`

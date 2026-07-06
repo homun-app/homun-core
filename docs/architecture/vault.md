@@ -1,5 +1,13 @@
 # Sottosistema Vault
 
+> Verificato vs codice 2026-07-06. Il crate `crates/vault`
+> (`local-first-vault`), gli endpoint `/api/vault/*`, i simboli
+> (`classify_sensitive_text`, `redact_text`, `VaultRecord`, `SecretRef`,
+> `LocalPinVerifier`, `PaymentApprovalSnapshot`, `validate_payment_approval`) e le
+> tabelle SQLite (`vault_records`, `vault_secret_material`, `vault_local_pin`,
+> `vault_local_keyring`) risultano tutti presenti come descritto. Il keychain di
+> sistema vive nel crate accanto `crates/secrets` (`local-first-secrets`).
+
 > Stato: 2026-06-30. MVP foundation implementata a livello Rust/frontend con
 > persistenza metadata-only delle proposte Vault e runtime locale di approval
 > pagamento PIN+CVV one-shot. Spec di riferimento:

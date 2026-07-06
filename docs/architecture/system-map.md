@@ -1,18 +1,33 @@
 # System Map
 
+> Verificato vs codice 2026-07-06 (broker+WS; niente crates/engine).
+
 Questo documento e' la mappa operativa del progetto. Va tenuto aggiornato insieme a
 `docs/architecture/final-roadmap.md` e `docs/work-memory.md` quando cambiano
 scopo, componenti, responsabilita' o ordine di implementazione.
 
-> **Stato 2026-06-05.** Lo stato per-componente piu' sotto e' in parte storico
-> (scritto a fine maggio). Realta' attuale: il gateway espone gia' i read model
-> operativi (task, memoria, capability, Local Computer); chat, canali (WhatsApp/
-> Telegram), contatti, artifacts/files e la sidebar a progetti sono in esercizio;
-> il modello e' **capable-first** (registry + ruoli verso modelli SOTA, MLX/Gemma
-> come fallback piccolo), quindi i riferimenti a "Gemma" vanno letti come
-> "modello attivo del ruolo"; il browser e' stato riscritto in stile OpenClaw
-> (tool granulari guidati dal modello) e affianca il planner legacy ancora vivo
-> per i task durevoli. Le priorita' correnti sono in `docs/roadmap.md`.
+> **Stato 2026-06-05 (aggiornato 2026-07-06).** Lo stato per-componente piu' sotto
+> e' in parte storico (scritto a fine maggio). Realta' attuale: il gateway espone
+> gia' i read model operativi (task, memoria, capability, Local Computer); chat,
+> canali (WhatsApp/Telegram), contatti, artifacts/files e la sidebar a progetti
+> sono in esercizio; il modello e' **capable-first** (registry + ruoli verso
+> modelli SOTA, MLX/Gemma come fallback piccolo), quindi i riferimenti a "Gemma"
+> vanno letti come "modello attivo del ruolo"; il browser e' stato riscritto in
+> stile OpenClaw (tool granulari guidati dal modello) e affianca il planner legacy
+> ancora vivo per i task durevoli.
+>
+> **Motore chat e trasporto (verificato vs codice).** Il motore canonico e' il
+> **singolo loop ReAct guidato** (ADR 0021), che vive **dentro
+> `crates/desktop-gateway/src/main.rs`** (`run_agent_turn_into_message` /
+> `run_agent_turn_into_message_with_fanout`) — **non esiste un `crates/engine`**.
+> `main.rs` e' il monolite (~59k righe) in estrazione incrementale. `crates/orchestrator`
+> resta il **cervello plan-execute alternativo dormiente** (non cablato come motore
+> chat; ADR 0021 ha scelto il loop unico). Il percorso richiesta chat e' passato al
+> **turn broker + WebSocket unificato**: `POST /api/chat/turns` → coda → executor
+> (`turn_executor.rs`, `execute_chat_turn_task`) → eventi su `/api/ws`
+> (`ws_gateway.rs`, `ws_handler`; client `apps/desktop/src/lib/wsSubscription.ts`),
+> al posto del vecchio NDJSON + polling. Le priorita' correnti sono in
+> `docs/roadmap.md`.
 
 ## Scopo Prodotto
 
@@ -39,14 +54,19 @@ osservabilita', memoria e apprendimento.
 ```mermaid
 flowchart TD
   U["Utente"] --> UI["Desktop UI Electron"]
-  UI --> Gateway["Desktop HTTP Gateway Rust"]
-  Gateway --> Thread["Chat Thread"]
+  UI -->|"POST /api/chat/turns"| Broker["Turn Broker + Coda (turn_executor)"]
+  UI -->|"WS /api/ws (wsSubscription)"| WS["WebSocket Gateway (ws_gateway)"]
+  Broker --> Executor["execute_chat_turn_task"]
+  Executor --> Engine["Loop ReAct guidato (main.rs: run_agent_turn_into_message)"]
+  Executor -->|"eventi turno"| WS
+  WS --> UI
+  Engine --> Thread["Chat Thread"]
   Thread --> Core["Rust Core / Crates"]
-  Core --> Brain["Orchestrator Brain"]
+  Core --> Brain["Motore chat: loop ReAct guidato in desktop-gateway"]
 
   Brain --> Memory["Memory Layer"]
   Brain --> Registry["Capability Registry"]
-  Brain --> Planner["Plan Validator"]
+  Brain --> Planner["Plan (tool, non secondo motore)"]
   Planner --> Tasks["Durable Task Runtime"]
 
   Registry --> MCP["MCP Providers"]
@@ -130,11 +150,17 @@ Stato attuale:
   `docs/decisions/0004-desktop-chat-http-gateway.md`;
 - primo slice Electron creato in `apps/desktop/electron`;
 - Tauri e `apps/desktop/src-tauri` sono stati rimossi dal desktop app;
-- `crates/desktop-gateway` e' il processo Rust autonomo per la chat;
+- `crates/desktop-gateway` e' il processo Rust autonomo per la chat e ospita anche
+  il **motore chat** (il loop ReAct guidato in `main.rs`);
 - `apps/desktop/src/lib/chatApi.ts` usa il gateway per thread, messaggi, pin,
   archivio, delete e commit delle risposte, con cache locale solo come fallback;
-- `apps/desktop/src/lib/coreBridge.ts` usa il gateway per stream/cancel; il
-  renderer non instrada direttamente verso il provider di inferenza;
+- il percorso richiesta/streaming e' ora il **turn broker + WebSocket unificato**:
+  `POST /api/chat/turns` accoda il turno (`turn_executor.rs`), l'executor
+  (`execute_chat_turn_task`) lo esegue e pubblica gli eventi su `/api/ws`
+  (`ws_gateway.rs`, `ws_handler`); il client `apps/desktop/src/lib/wsSubscription.ts`
+  sottoscrive gli eventi. Questo ha sostituito il vecchio NDJSON + polling
+  (`coreBridge.ts`) come default;
+- il renderer non instrada direttamente verso il provider di inferenza;
 - prossimo step: estendere il gateway a task, memoria, capability, Local
   Computer e packaging/log diagnostici dei runtime locali.
 
@@ -188,14 +214,22 @@ Non deve:
 Stato attuale:
 
 - i crate Rust per task, processi, capability, memoria, Local Computer,
-  orchestrator, subagenti, skill runtime e secrets restano la base operativa;
+  subagenti, skill runtime, secrets e vault restano la base operativa (il motore
+  chat vive in `desktop-gateway/src/main.rs`; `crates/orchestrator` e' dormiente);
 - il vecchio core desktop legato alla shell e' stato rimosso con Tauri;
 - `crates/desktop-gateway` espone gia' prompt, stream/cancel, runtime
   health/warmup/shutdown, thread e messaggi chat persistenti;
 - restano da esporre nel gateway task, memory, capability, Local Computer,
   artifact preview, audit, log runtime e packaging produzione.
 
-### Orchestrator Brain
+### Motore chat (loop ReAct guidato)
+
+> Il "Brain" canonico e' il **singolo loop ReAct guidato** (ADR 0021) dentro
+> `crates/desktop-gateway/src/main.rs` (`run_agent_turn_into_message[_with_fanout]`).
+> **Non esiste `crates/engine`.** `crates/orchestrator` e' il cervello plan-execute
+> alternativo **dormiente** (non cablato come motore chat); i riferimenti a
+> "orchestrator" in `main.rs` sono il **ruolo di registry** del modello, non quel
+> crate. Il "plan" e' un **tool**, non un secondo motore.
 
 Responsabilita':
 

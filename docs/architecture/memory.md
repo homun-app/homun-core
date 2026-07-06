@@ -1,9 +1,22 @@
 # Architettura — Memoria (SQL + grafo + markdown)
 
+> Verificato vs codice 2026-07-06 (memory-service ADR 0022 = Proposed, oggi in-path).
+>
 > Stato: **2026-06-27 — verificato vs codice. Punto fermo.** Questo è il diagramma vivo
 > e accurato del sottosistema memoria. Il *perché* di prodotto → [memory-vision.md](../memory-vision.md);
 > i principi vincolanti → [CAPISALDI.md](../CAPISALDI.md) Parte 1 + caposaldi #1 e #12.
-> Crate `local-first-memory` (directory `crates/memory/`); DB `~/.homun/memory.sqlite`.
+> Crate `local-first-memory` (directory `crates/memory/`, ~5958 righe); DB `~/.homun/memory.sqlite`.
+>
+> ⚠️ **Dove gira l'orchestrazione, oggi.** Lo *store* (schema, grafo, wiki, RRF, merge
+> canonico) vive nel crate `crates/memory/`. Ma il *ciclo di orchestrazione* per-turno
+> — recall / learn / consolidate / brief — è ancora **in-path dentro
+> `crates/desktop-gateway/src/main.rs`**, non un servizio separato. Estrarlo out-of-path
+> dietro `HOMUN_MEMORY_SERVICE` / `HOMUN_MEMORY_POOL` è l'oggetto dell'**ADR 0022 = Proposed
+> (NON iniziato:** quei flag hanno 0 occorrenze nel codice). Non leggere questo documento
+> come se la memoria fosse già un servizio a sé.
+>
+> Le referenze `main.rs:NNNN` invecchiano a ogni edit: fidati dei **nomi di simbolo**
+> (`fn relevant_memory_for_prompt`, …) e ri-greppa, mai del numero.
 
 ## Cosa fa
 
@@ -26,22 +39,26 @@ Verità = SQL + grafo; il markdown è **proiezione + superficie editabile + expo
 
 `memories` · `entities` · `relations` · `memory_events` (timeline episodica) ·
 `memory_embeddings` (vettori densi) · `memory_evidence` (memoria → prova) ·
-`wiki_pages` · `routines` / `automation_candidates` · `access_audit` · `tombstones`.
-Confermato 1:1 con CAPISALDI Parte 1: lo schema è ancora vero.
+`wiki_pages` · `routines` / `automation_candidates` · `access_audit` · `tombstones` ·
+`schema_metadata`. Tutte create in `store.rs`; confermato 1:1 con CAPISALDI Parte 1.
+`crates/memory/src/schema.rs` è un **layer tipato** sopra le primitive generiche (la forma
+`Decision` col PERCHÉ), NON un secondo schema: una decisione resta un `MemoryRecord`.
 
-- `MemoryRecord` (`types.rs:95`): `memory_type` (`fact | preference | decision | goal |
-  episode | open_loop | artifact`), `text`, `confidence`, `status`, `privacy_domain` +
-  `sensitivity`, `metadata`, `created/updated/last_seen`, e i campi di versionamento/
-  autocorrezione `supersedes` / `superseded_by` / `correction_of`.
-- `MemoryStatus` (`types.rs:73`): `Candidate | Confirmed | Rejected | Stale | Deleted`.
-- `MemoryEntity` (`types.rs:117`): `entity_type`, `name`, `canonical_key`, `aliases` —
-  il nodo del grafo, con merge canonico (sotto).
+- `MemoryRecord` (`types.rs`, `pub struct MemoryRecord`): `memory_type` (`fact | preference |
+  decision | goal | episode | open_loop | artifact`), `text`, `confidence`, `status`,
+  `privacy_domain` + `sensitivity`, `metadata`, `created/updated/last_seen`, e i campi di
+  versionamento/autocorrezione `supersedes` / `superseded_by` / `correction_of`.
+- `MemoryStatus` (`types.rs`, `pub enum MemoryStatus`): `Candidate | Confirmed | Rejected |
+  Stale | Deleted`.
+- `MemoryEntity` (`types.rs`, `pub struct MemoryEntity`): `entity_type`, `name`,
+  `canonical_key`, `aliases` — il nodo del grafo, con merge canonico (sotto).
 
 ## Come funziona OGGI
 
 Il ciclo per-turno è orchestrato dall'**harness** in `crates/desktop-gateway/src/main.rs`,
-non dal modello. Cinque fasi: recall ibrido → briefing sempre-attivo → iniezione →
-estrazione post-turno → consolidamento in background.
+non dal modello — e **oggi vive qui, in-path**, non in un servizio separato (l'estrazione
+out-of-path è ADR 0022, *Proposed*). Cinque fasi: recall ibrido → briefing sempre-attivo →
+iniezione → estrazione post-turno → consolidamento in background.
 
 ```mermaid
 flowchart TD
@@ -68,12 +85,11 @@ flowchart TD
   WIKI -. edit utente .-> SYNC[import_wiki_correction] -.-> SQL
 ```
 
-1. **Recall ibrido** — `relevant_memory_for_prompt` (`main.rs:12726`). Scoped al
+1. **Recall ibrido** — `fn relevant_memory_for_prompt` (in `main.rs`). Scoped al
    **workspace attivo** (isolamento progetto: "di cosa abbiamo discusso?" resta su QUESTO
    progetto). Due pass:
    - **lessicale** FTS5/bm25 via `facade.search_memories(...)` filtrato per policy, su
-     `open_loop | goal | decision | fact | preference`, statuses `Confirmed + Candidate`
-     (`main.rs:12770`);
+     `open_loop | goal | decision | fact | preference`, statuses `Confirmed + Candidate`;
    - **semantico** denso: embedding della query (off-lock) → `MemoryFacade::search_embeddings`
      (contratto `MemoryVectorIndex`) con floor rilassato `sim >= 0.5` e top-k. La prima
      implementazione runtime è `MemoryVectorIndexCache`, costruita dagli embedding SQLite
@@ -83,8 +99,8 @@ flowchart TD
      se già calda. È una proiezione derivata e sostituibile, non una seconda memoria.
    I due rank si fondono con **RRF (K = 60)** + boost di **importanza** (`0.012 *
    importance`) + **recency** (decay esponenziale ~30 giorni, `0.008 * exp(-age/30)`) in
-   `hybrid_memory_score` (`main.rs:12706`). In testa, se pertinente, vengono inserite righe
-   di stato workflow / provenienza artefatto (`main.rs:12846`). Cap 10 righe.
+   `fn hybrid_memory_score` (in `main.rs`). In testa, se pertinente, vengono inserite righe
+   di stato workflow / provenienza artefatto. Cap 10 righe.
    La query embedding e' bounded: prima passa da una cache in memoria LRU/TTL keyed su
    endpoint, modello, workspace e query normalizzata; poi viene calcolata con timeout
    (`HOMUN_MEMORY_QUERY_EMBED_TIMEOUT_MS`, default 700 ms). Se l'embed fallisce o supera
@@ -97,37 +113,34 @@ flowchart TD
    l'introduzione dell'indice vettoriale.
 2. **Briefing sempre-attivo** — separato dal RAG per-prompt, raggiunge il modello **ogni
    turno**:
-   - `gather_profile_memory` (`main.rs:2302`) via `context_pack`: identità + preferenze
-     stabili. In un PROGETTO il personale contribuisce **solo le preferenze** (tier
-     sempre-rilevante); i fatti episodici personali restano al personale e arrivano al
+   - `fn gather_profile_memory_for_prompt` (in `main.rs`) via `context_pack`: identità +
+     preferenze stabili. In un PROGETTO il personale contribuisce **solo le preferenze**
+     (tier sempre-rilevante); i fatti episodici personali restano al personale e arrivano al
      progetto solo on-demand via RAG;
-   - `gather_open_loops` (`main.rs:1211`): i `open_loop` attivi, con **priorità di budget**
+   - `fn gather_open_loops` (in `main.rs`): i `open_loop` attivi, con **priorità di budget**
      garantita (il lavoro non chiuso non deve mai cadere).
-3. **Iniezione** — `format_memory_block` (`main.rs:2355`) compone le sezioni `OPEN LOOPS`
+3. **Iniezione** — `fn format_memory_block` (in `main.rs`) compone le sezioni `OPEN LOOPS`
    (per prime, budget prioritario) → `Personal` → `Project` entro un budget di caratteri,
-   con marcatore di troncamento. Chiamato al `main.rs:18406`; il blocco RAG per-prompt è
-   aggiunto subito dopo (`main.rs:18454`).
-4. **Estrazione post-turno** — `learn_from_exchange` (`main.rs:5588`, invocata ai siti
-   `:23035`, `:26928`, `:40147`). Un modello estrattore (`extractor_openai_config`,
-   `main.rs:14773`) ricava da fatti/preferenze, **decisioni con il PERCHÉ** e alternative
-   scartate, **open_loop** (lo stato completo: fatto / mancante / bloccato e perché),
-   stati salienti e **negativi** ("non esiste ancora il file…"). Gating: `is_salient_exchange`
-   OPPURE una conferma OPPURE un turno che ha **fatto** azioni concrete (`main.rs:5614`).
-   I nuovi atomi entrano come **`Candidate`**.
-5. **Sync piano** — `upsert_runtime_plan_memory_from_state` (`main.rs:9026`) proietta lo
+   con marcatore di troncamento; il blocco RAG per-prompt è aggiunto subito dopo.
+4. **Estrazione post-turno** — `fn learn_from_exchange` (in `main.rs`, invocata dai siti che
+   chiudono un turno). Un modello estrattore (`fn extractor_openai_config`) ricava da
+   fatti/preferenze, **decisioni con il PERCHÉ** e alternative scartate, **open_loop** (lo
+   stato completo: fatto / mancante / bloccato e perché), stati salienti e **negativi** ("non
+   esiste ancora il file…"). Gating: `is_salient_exchange` OPPURE una conferma OPPURE un
+   turno che ha **fatto** azioni concrete. I nuovi atomi entrano come **`Candidate`**.
+5. **Sync piano** — `fn upsert_runtime_plan_memory_from_state` (in `main.rs`) proietta lo
    stato del piano runtime in memoria (`upsert_runtime_plan_memory`) e ricostruisce la wiki
    di stato — il piano è memoria, non uno store a parte.
-6. **Consolidamento in background** — `spawn_memory_consolidation_tick` (`main.rs:1568`,
-   intervallo da `HOMUN_AUTO_CONSOLIDATE_HOURS`, **off di default**) → `consolidate_scope`
-   (`main.rs:4763`): dedup degli open_loop, dedup near-duplicate via **Jaccard**
-   (`DEDUP_JACCARD`, `jaccard` a `main.rs:2542`), supersede / correzione,
-   **`Candidate → Confirmed`**, e ricostruzione della wiki. Complementare:
-   `spawn_embedding_catchup` (`main.rs:1597`) vettorizza a regime ogni memoria ancora priva
+6. **Consolidamento in background** — `fn spawn_memory_consolidation_tick` (in `main.rs`,
+   intervallo da `HOMUN_AUTO_CONSOLIDATE_HOURS`, **off di default**) → `fn consolidate_scope`:
+   dedup degli open_loop, dedup near-duplicate via **Jaccard** (`DEDUP_JACCARD`, `fn jaccard`),
+   supersede / correzione, **`Candidate → Confirmed`**, e ricostruzione della wiki.
+   Complementare: `fn spawn_embedding_catchup` vettorizza a regime ogni memoria ancora priva
    di embedding (chiude il gap di recall denso).
 
 ### Merge canonico delle entità
 
-`MemoryFacade::merge_entities` (`facade.rs:515`) fonde due nodi mantenendo il `survivor`,
+`MemoryFacade::merge_entities` (`facade.rs`) fonde due nodi mantenendo il `survivor`,
 assorbendo `name` / `canonical_key` / `aliases` dell'altro come alias (mai sovrascrivendo
 la `canonical_key` del survivor) e unendo i metadata con motivazione. È il meccanismo che
 tiene **un solo nodo per entità reale** nel grafo (es. dedup di persone/simboli).
@@ -146,7 +159,8 @@ tiene **un solo nodo per entità reale** nel grafo (es. dedup di persone/simboli
   il primo adapter maturo (soprattutto codice), l'obiettivo è graphificare anche artifact,
   decisioni, piano ed esiti con **archi causali**.
 - **Scope per workspace + privacy/sensitivity + audit**: local-first e governato; niente
-  fuga di dati personali nei progetti (l'isolamento è esplicito nel recall, `main.rs:12735`).
+  fuga di dati personali nei progetti (l'isolamento è esplicito nel recall, in
+  `fn relevant_memory_for_prompt`).
 - **Candidate→Confirmed + supersede/correction + tombstones**: la memoria **si autocorregge
   e versiona**, non accumula spazzatura.
 
@@ -154,8 +168,9 @@ tiene **un solo nodo per entità reale** nel grafo (es. dedup di persone/simboli
 
 **La regola del caposaldo #1.** La memoria è IL differenziatore ed è il **layer condiviso**:
 ogni capacità — chat, canali, automazioni, sub-agent, artefatti, piano — fa **recall +
-write-back attraverso l'UNICO `MemoryFacade`** (`facade.rs:22`; aperto via `open_brain_memory`
-`main.rs:35740`, acquisito via `lock_memory_facade` `main.rs:43530`). **Mai** uno store
+write-back attraverso l'UNICO `MemoryFacade`** (`pub struct MemoryFacade` in `facade.rs`;
+aperto via `fn open_brain_memory`, acquisito via `fn lock_memory_facade`, entrambi in
+`main.rs`). **Mai** uno store
 parallelo che diventi una seconda verità semantica. Ogni output/cache esterna (graphify-out,
 wiki markdown, read-model operativi) resta **derivata** e deve **convergere** sullo store
 canonico (`entities` / `relations` / `memories`).
@@ -169,8 +184,14 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
 
 ## Divergenze / debolezze
 
+- **Orchestrazione ancora in-path (ADR 0022 = Proposed)**: recall / learn / consolidate /
+  brief girano dentro `crates/desktop-gateway/src/main.rs`, non in un servizio di memoria
+  separato. L'estrazione out-of-path dietro `HOMUN_MEMORY_SERVICE` / `HOMUN_MEMORY_POOL`
+  è **decisa ma NON iniziata** (i due flag hanno 0 occorrenze nel codice). Fino ad allora
+  lo *store* è nel crate `memory`, ma il *ciclo* resta nel monolite del gateway.
 - **`contact_relationships` / `contacts` / `contact_identities`** vivono nel DB della chat
-  (`crates/desktop-gateway/src/chat_store.rs:2057+`, `2124`), **non** in `MemoryFacade`. Sono
+  (`crates/desktop-gateway/src/chat_store.rs`, tabelle `contact_*`), **non** in
+  `MemoryFacade`. Sono
   un **read-model UX** (rubrica curata): ammessi dal caposaldo #5 *solo se
   mirrorati/convergenti* — la conoscenza ABOUT un contatto deve restare nella memoria,
   collegata per handle (`entity_ref` sul contatto). Da sorvegliare perché **non diventino**
@@ -200,22 +221,28 @@ richiesto con tool minimizzati e auditati. Vedi [vault.md](vault.md).
 
 ## File chiave
 
-- `crates/memory/src/facade.rs` — `MemoryFacade` (`:22`), `merge_memories` (`:201`),
-  `merge_entities` (`:515`), `search_memories` (`:714`), `list_memories_for_ui` (`:989`).
-- `crates/memory/src/types.rs` — `MemoryRecord` (`:95`), `MemoryStatus` (`:73`),
-  `MemoryEntity` (`:117`).
-- `crates/memory/src/store.rs` — schema SQLite (tutte le tabelle), `search_memory_refs`,
-  `search_code_entities`, `search_embeddings`.
-- `crates/memory/src/vector_index.rs` — contratto `MemoryVectorIndex`, `VectorHit`, backend
-  exact derivato dagli embedding SQLite e backend opzionale `usearch-index`.
-- `crates/memory/src/{graph,graphify,wiki,wiki_sync,search,policy,lifecycle}.rs` — grafo,
-  adapter Graphify, proiezione/sync markdown, recall, policy, ciclo di vita.
-- `crates/desktop-gateway/src/main.rs` — orchestrazione del ciclo per-turno:
-  `relevant_memory_for_prompt` (`:12726`), `hybrid_memory_score` (`:12706`),
-  `gather_profile_memory` (`:2302`), `gather_open_loops` (`:1211`),
-  `format_memory_block` (`:2355`), `learn_from_exchange` (`:5588`),
-  `upsert_runtime_plan_memory_from_state` (`:9026`),
-  `spawn_memory_consolidation_tick` (`:1568`), `consolidate_scope` (`:4763`),
-  `open_brain_memory` (`:35740`), `lock_memory_facade` (`:43530`).
+(Numeri di riga volutamente omessi: ri-greppa per nome di simbolo.)
+
+- `crates/memory/src/facade.rs` — `MemoryFacade`, `merge_memories`, `merge_entities`,
+  `search_memories`, `list_memories_for_ui`, `search_embeddings`.
+- `crates/memory/src/types.rs` — `MemoryRecord`, `MemoryStatus`, `MemoryEntity`.
+- `crates/memory/src/store.rs` — schema SQLite (tutte le tabelle: `memories`, `entities`,
+  `relations`, `memory_events`, `memory_embeddings`, `memory_evidence`, `wiki_pages`,
+  `routines`, `automation_candidates`, `access_audit`, `tombstones`, `schema_metadata`),
+  `search_embeddings`.
+- `crates/memory/src/schema.rs` — layer tipato sopra le primitive (forma `Decision`/PERCHÉ),
+  non un secondo schema.
+- `crates/memory/src/vector_index.rs` — contratto `MemoryVectorIndex`, `MemoryVectorIndexCache`,
+  `UsearchMemoryVectorIndex` (default `usearch-index`) e `ExactMemoryVectorIndex` (fallback
+  `--no-default-features`), derivati dagli embedding SQLite canonici.
+- `crates/memory/src/{graph,graphify,wiki,wiki_sync,search,policy,lifecycle,operations,crypto,learning_ui,redaction}.rs`
+  — grafo, adapter Graphify, proiezione/sync markdown, recall, policy, ciclo di vita,
+  operazioni, crypto, UI di apprendimento, redazione Vault.
+- `crates/desktop-gateway/src/main.rs` — orchestrazione del ciclo per-turno **in-path**
+  (ADR 0022 non ancora estratto): `fn relevant_memory_for_prompt`, `fn hybrid_memory_score`,
+  `fn gather_profile_memory_for_prompt`, `fn gather_open_loops`, `fn format_memory_block`,
+  `fn learn_from_exchange`, `fn upsert_runtime_plan_memory_from_state`,
+  `fn spawn_memory_consolidation_tick`, `fn consolidate_scope`, `fn open_brain_memory`,
+  `fn lock_memory_facade`.
 - `crates/desktop-gateway/src/chat_store.rs` — read-model UX `contacts` /
-  `contact_relationships` (`:2057+`), da tenere convergente con la memoria.
+  `contact_relationships` / `contact_identities`, da tenere convergente con la memoria.

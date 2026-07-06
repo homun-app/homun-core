@@ -1,22 +1,56 @@
 # Agent Loop — come funziona OGGI (mappa accurata)
 
-> Stato: 2026-06-30. Reverse-engineered da `crates/desktop-gateway/src/main.rs`
-> (`stream_chat_via_openai`, ~:17897→:22990) e da `crates/orchestrator`. Questa pagina
-> descrive la **realtà attuale**, incluse le **divergenze dai [capisaldi](../CAPISALDI.md)**.
-> È un punto fermo: ogni modifica al loop aggiorna questa pagina + il diagramma.
-> Decisione di fondo: [ADR 0016](../decisions/0016-harness-owned-task-engine-cross-model.md),
+> Verificato vs codice 2026-07-06 (broker+WS).
+> Reverse-engineered da `crates/desktop-gateway/src/main.rs` (il loop canonico:
+> `stream_chat_via_openai`, chiamato via `run_agent_turn_into_message` /
+> `run_agent_turn_into_message_with_fanout`) e da `crates/orchestrator` (motore dormiente).
+> Questa pagina descrive la **realtà attuale**, incluse le **divergenze dai
+> [capisaldi](../CAPISALDI.md)**. È un punto fermo: ogni modifica al loop aggiorna questa
+> pagina + il diagramma. Decisione di fondo: [ADR 0016](../decisions/0016-harness-owned-task-engine-cross-model.md),
 > [0018](../decisions/0018-adaptive-harness-subagents-triggers.md),
-> [0020](../decisions/0020-converge-chat-loop-onto-orchestrator.md) e
-> [0021](../decisions/0021-single-guarded-loop-planning-as-tool.md).
+> [0020](../decisions/0020-converge-chat-loop-onto-orchestrator.md),
+> [0021](../decisions/0021-single-guarded-loop-planning-as-tool.md) (loop unico guardato,
+> **scelto**) e [0024](../decisions/0024-engine-extraction-from-monolith.md) (estrazione del loop in un
+> crate `engine` — **Proposta**, `crates/engine` NON esiste ancora).
+>
+> **Il loop è UNO solo** (ADR 0021): il ReAct guardato con native tool-calling +
+> plan-as-a-tool, che vive **dentro `main.rs`**. `crates/orchestrator` (planner/driver/
+> step_executor) è l'alternativa **dormiente**, NON instradata. Non esiste alcun
+> `crates/engine` né flag `HOMUN_ENGINE_CRATE`.
 
 ## Cosa fa
 
 Prende un messaggio utente, sceglie e chiama strumenti (browser, sandbox, filesystem,
 skill, MCP, connettori) in più round, mantiene un **piano canonico**, e produce una
 risposta finale aggiornando **memoria** e **artefatti**. È il cuore operativo del prodotto.
-Condiviso da chat (`generate_stream`) e canali/automazioni (`run_agent_turn`).
+Il loop vero e proprio è `stream_chat_via_openai`, invocato via
+`run_agent_turn_into_message` / `run_agent_turn_into_message_with_fanout`
+(main.rs), condiviso da chat e canali/automazioni.
 
-## Come funziona OGGI
+## Come una richiesta entra e stream-a (TURN BROKER + WS unificato)
+
+Il **percorso della richiesta** oggi passa dal **turn broker** (default-on,
+`turn_broker_enabled()` in `main.rs`), che ha sostituito il vecchio NDJSON-per-turno +
+polling:
+
+1. **POST `/api/chat/turns`** (`enqueue_turn`, `main.rs`) accoda un task `chat_turn`
+   sul `TaskStore` e ritorna subito un `turn_id`.
+2. **L'executor** (`crates/desktop-gateway/src/turn_executor.rs`) esegue il task:
+   chiama `start_visible_conversation_turn` poi
+   `run_agent_turn_into_message_with_fanout`, cioè fa girare il **loop canonico**.
+   Ogni evento (delta/activity/plan_update/reasoning/tool/done/…) viene fatto **fan-out**
+   da `emit_turn_event` su TRE sink: (a) la tabella durabile `turn_events` (per il resume
+   dopo reconnect), (b) un canale broadcast per-turno (stream NDJSON `/api/chat/turns/{id}/events`
+   — **transitorio**, tenuto finché il WS unificato non è l'unico client), (c) la `WsRegistry`.
+3. **Gli eventi vengono streamati sul WEBSOCKET unificato `/api/ws`**
+   (`crates/desktop-gateway/src/ws_gateway.rs`, handler `ws_handler`): un'unica connessione
+   persistente che fa fan-out di tutti gli eventi server→client (`turn.event`, `computer.live`,
+   `app.event`, …). Il client desktop si sottoscrive via
+   `apps/desktop/src/lib/wsSubscription.ts`.
+
+Il loop descritto sotto è ciò che l'executor esegue **dentro** questo percorso.
+
+## Come funziona OGGI (il loop)
 
 ```mermaid
 flowchart TD
@@ -53,9 +87,10 @@ flowchart TD
     FINAL --> MEM[Estrazione memoria post-turn]
 ```
 
-Punti caldi (con `file:line` in `main.rs`):
+Punti caldi (cita il **simbolo** in `main.rs`, non il numero di riga — main.rs è
+editato di continuo, re-grep il simbolo):
 
-- **Seed piano** (`:~18979`): prima dal **runtime-plan store durevole**
+- **Seed piano**: prima dal **runtime-plan store durevole**
   (`load_runtime_plan_from_state`), poi dal marker `‹‹PLAN››` in contesto; opzionale
   planner orchestrator dietro `HOMUN_ORCHESTRATED_CHAT` (ADR 0020 P1).
 - **Privacy Guard pre-turn**: prima del loop e prima del modello chat, classifica
@@ -63,11 +98,13 @@ Punti caldi (con `file:line` in `main.rs`):
   dati sensibili, emette solo `VAULT_PROPOSE`, passa al frontend il testo utente
   redatto per il commit e conserva il raw in un sidecar `pending_id` consumabile
   con PIN. Il loop ReAct non parte e il raw non entra nella history del modello chat.
-- **Round loop** (`:~19031`, `for round in 0..hard_round_ceiling()`).
-- **Guardie harness** (deterministiche): budget per-step F1 (`rounds_since_progress`,
-  `:~19042`), wander-cap (`:~19046`), no-progress identico (`:~19574`), `is_final_round`
-  (`:~19186`) che **rimuove i tool** dal payload sull'ultimo round.
-- **Stream live tipizzato**: `emit_stream_event` espande i vecchi delta marker in eventi NDJSON
+- **Round loop** (`for round in 0..hard_round_ceiling()`).
+- **Guardie harness** (deterministiche): budget per-step F1 (`rounds_since_progress`),
+  wander-cap, no-progress identico, `is_final_round` che **rimuove i tool** dal payload
+  sull'ultimo round.
+- **Stream live tipizzato** (nota: gli eventi viaggiano oggi sul **WS unificato `/api/ws`**
+  via il fan-out del broker, vedi §percorso richiesta; il canale NDJSON per-turno è
+  transitorio): `emit_stream_event` espande i vecchi delta marker in eventi
   canonici prima di inviare il delta legacy: `activity`, `plan_update`, `reasoning`,
   `choice_prompt`, `vault_propose`, `vault_reveal`, `payment_approval`. I marker restano nel
   testo solo come compatibilità/persistenza storica; il frontend espone `CoreChatStreamEvent`,
@@ -82,23 +119,29 @@ Punti caldi (con `file:line` in `main.rs`):
   così il rendering storico non dipende esclusivamente da regex sul testo. Le nuove seed card
   assistente possono passare `event_parts` espliciti (es. `choice_prompt`) senza incorporare marker
   nel testo persistito.
-- **Fork act-vs-answer** (`:~19552`): il **modello** decide se chiamare tool o rispondere.
+- **Fork act-vs-answer**: il **modello** decide se chiamare tool o rispondere.
   Punto di **massima varianza**.
-- **F2 verify** (`verify_step_complete`, `:~13783`): un `done` rivendicato è tenuto
+- **F2 verify** (`verify_step_complete`): un `done` rivendicato è tenuto
   `doing` finché un giudice LLM non lo conferma sulle evidenze `step_evidence`.
-- **Nudge F5** (`:~22771`, cap `MAX_PLAN_NUDGES=8`) + **over-running guard** (`:~22782`).
-- **Sintesi forzata** (`:~22907`, ramo `!final_done`).
+- **Nudge F5** (cap `MAX_PLAN_NUDGES=8`) + **over-running guard**.
+- **Sintesi forzata** (ramo `!final_done`).
 
-## I DUE motori (caposaldo #5: convergere, non duplicare → oggi VIOLATO)
+## Il motore vivo e quello dormiente (ADR 0021: loop unico guardato — **scelto**)
 
-| | Motore #1 — produzione | Motore #2 — in convergenza (F3) |
+**Decisione presa (ADR 0021):** il prodotto ha **un solo** motore vivo — il loop guardato
+di motore #1. `crates/orchestrator` (motore #2) resta in albero ma è **DORMIENTE / non
+instradato**: NON è "in convergenza", non guida alcun turno di chat. La tabella descrive
+i due per contesto storico (ADR 0016/0018/0020 esploravano la convergenza; ADR 0021 ha
+scelto il loop unico e retrocesso il drive come motore di esecuzione).
+
+| | Motore #1 — **LIVE (l'unico)** | Motore #2 — **DORMIENTE (non instradato)** |
 |---|---|---|
 | Dove | `stream_chat_via_openai` (`main.rs`) | `crates/orchestrator` `OrchestratorBrain` |
-| Guida | **il modello** (prompt-prosa ~2000 righe) | un piano DAG tipizzato |
-| Piano | `Vec<Value>` mergiato — **`merge_plan` per TITOLO** (`:~6747`) | `ExecutionPlan` con `step_id` stabili + `depends_on` |
-| Esecuzione | round loop con tool inline | due path: `execute_plan` (materializza task durabili) **e** `drive` (driver sincrono in-turn + arg-fill model-fills-slot, F3) |
-| Subagenti | n/d (il loop fa tutto) | durabile = `generate_json`-only; **nel driver = loop agentico bounded read/gather** (`agentic.rs`, F3.2c, validato su gemma4) |
-| Uso live | tutto | planner `plan_only` semina motore #1 (ADR 0020 P1); `drive` non ancora instradato |
+| Guida | **il modello** (native tool-calling + plan-as-a-tool) | un piano DAG tipizzato |
+| Piano | `Vec<Value>` mergiato — **`merge_plan` per TITOLO** | `ExecutionPlan` con `step_id` stabili + `depends_on` |
+| Esecuzione | round loop con tool inline | due path: `execute_plan` (materializza task durabili) **e** `drive` (driver sincrono in-turn + arg-fill model-fills-slot) |
+| Subagenti | n/d (il loop fa tutto) | durabile = `generate_json`-only; **nel driver = loop agentico bounded read/gather** (`agentic.rs`, validato su gemma4) |
+| Uso live | **tutto** | **nessuno** — il planner `plan_only` può seminare motore #1 dietro `HOMUN_ORCHESTRATED_CHAT` (ADR 0020 P1, flag-off); `drive` non è instradato |
 
 ### Precisazione su `execute_plan` e `depends_on` (correzione 2026-06-28)
 
@@ -153,11 +196,13 @@ l'estrazione & delega (Increment B, in corso).
 **Validato su gemma4:** `orchestrated_brain_drives_plan_on_gemma4` (CapabilityCall: planner→driver→
 arg-fill→execute→done) e `orchestrated_subagent_gathers_on_gemma4` (F3.2c: gemma4 sceglie il tool,
 riempie la query vincolata, raccoglie, sintetizza — `evidence=[gather:web_search]`). Il verticale di
-motore #2 regge sul tier debole (caposaldo #2). **Residuo F3:** (a) **instradare il turno** di
-`stream_chat_via_openai` sul `drive` dietro `HOMUN_ORCHESTRATED_CHAT`, validare flag-ON vs motore #1
-(F3.3 — il pezzo rischioso sul path vivo); (b) ritirare `merge_plan` per-titolo e il prompt-prosa di
-control-flow (F3.4); (c) estendere lo scope agentico oltre read/gather (scritture single-threaded +
-approval).
+motore #2 regge sul tier debole (caposaldo #2). **Aggiornamento ADR 0021:** l'idea di
+"instradare il turno di chat sul `drive`" (F3.3) è stata **abbandonata** — ADR 0021 ha
+scelto il **loop unico guardato** con planning-as-a-tool e ha retrocesso il drive come
+motore di esecuzione della chat. La convergenza corretta è **within** il loop di motore #1
+(guardie deterministiche + plan-as-a-tool), non un secondo motore che guida il turno.
+Il vettore vivo è ora l'**estrazione del loop** in `crates/engine` (ADR 0024, **Proposta**,
+crate non ancora creato) — behavior-preserving, non un cambio di motore.
 
 ## Gli strati (su cui ricostruire, bottom-up)
 
@@ -169,7 +214,9 @@ approval).
 - **L2 — Loop di controllo**: questa pagina. Harness possiede l'envelope; inner loop
   **dovrebbe** essere libero per i capaci / scaffolded per i deboli (ADR 0018, **non
   implementato**: floor default-off).
-- **L3 — Convergenza**: ADR 0020 — instradare il turno su UN motore guidato.
+- **L3 — Convergenza**: **RISOLTA** da ADR 0021 → il turno gira su **un solo** loop
+  guardato (motore #1). L'idea ADR 0020 di instradare il turno sull'orchestrator è stata
+  superata; il lavoro attivo è l'estrazione del loop (ADR 0024, Proposta).
 
 ## Divergenze dai capisaldi (da chiudere)
 
@@ -177,8 +224,10 @@ approval).
   **bug di design**"): **VIOLATO**. Il control-flow (act-vs-answer, quale tool, quando
   `done`, quando fermarsi) è del **modello**; l'harness interviene solo reattivamente.
 - **Caposaldo #6** ("stato e control-flow di CODICE; identità non inferita"): **parziale**.
-  `merge_plan` inferisce l'identità per **titolo** (`:~6747`) sotto la vernice `ExecutionPlan`.
-- **Caposaldo #5** ("un solo motore"): **violato** — due motori coesistono.
+  `merge_plan` inferisce l'identità per **titolo** (main.rs, re-grep `fn merge_plan`).
+- **Caposaldo #5** ("un solo motore"): **rispettato in scelta, non ancora in albero**.
+  ADR 0021 ha scelto il loop unico; `crates/orchestrator` resta in albero ma **dormiente**
+  (non instradato). Convergere = ritirare/rimuovere il motore #2 parallelo, non wire-arlo.
 - **ADR 0018** (inner loop tier-adattivo): **parziale, default-off**. Il meccanismo È cablato:
   `scaffold_for(turn_tier)` (`scaffold.rs`) deriva le manopole e, sotto `adaptive_floor=on`,
   **workflow_bias** rilassa la rotta (`relax_route_for_tier`) e **verify_depth** modula il gate
@@ -247,7 +296,13 @@ approval).
 
 ## File chiave
 
-- Loop: `crates/desktop-gateway/src/main.rs` → `stream_chat_via_openai`.
+- Loop canonico: `crates/desktop-gateway/src/main.rs` → `stream_chat_via_openai`
+  (invocato via `run_agent_turn_into_message` / `run_agent_turn_into_message_with_fanout`).
+- Percorso richiesta (broker + WS): `main.rs` `turn_broker_enabled()` / `enqueue_turn`
+  (`POST /api/chat/turns`); `crates/desktop-gateway/src/turn_executor.rs`
+  (`start_visible_conversation_turn` → `run_agent_turn_into_message_with_fanout`,
+  `emit_turn_event`); `crates/desktop-gateway/src/ws_gateway.rs` (`/api/ws`, `ws_handler`);
+  client `apps/desktop/src/lib/wsSubscription.ts`.
 - Stream live: `local_first_subagents::GenerateStreamEvent`, `emit_stream_event`,
   `expand_legacy_delta_to_chat_events`, `apps/desktop/src/lib/coreBridge.ts` /
   `chatApi.ts` (`CoreChatStreamEvent`).
@@ -256,6 +311,6 @@ approval).
   come `ChatMessage.event_parts` e `apps/desktop/src/App.tsx` la mappa in `ChatMessage.eventParts`.
 - Piano: `runtime_execution_plan`, `merge_execution_plan`/`merge_plan`, `verify_step_complete`,
   `load_runtime_plan_from_state`, `parse_plan_marker`, `collapse_plan_markers`.
-- Motore #2: `crates/orchestrator` (`brain.rs` incl. `drive`, `driver.rs` il driver in-turn +
-  seam `StepExecutor`/`StepVerifier`, `step_executor.rs` `CapabilityStepExecutor`, `types.rs`,
-  `planner.rs`).
+- Motore #2 (**dormiente, non instradato**): `crates/orchestrator` (`brain.rs` incl. `drive`,
+  `driver.rs` il driver in-turn + seam `StepExecutor`/`StepVerifier`, `step_executor.rs`
+  `CapabilityStepExecutor`, `types.rs`, `planner.rs`).

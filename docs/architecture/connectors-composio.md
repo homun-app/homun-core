@@ -1,11 +1,16 @@
 # Connettori / Composio (servizi connessi)
 
+> Verificato vs codice 2026-07-06.
+
 **Stato:** 2026-06-27 · reverse-engineered dal codice · punto fermo.
 
 Documenta il sottosistema dei **servizi connessi** (Gmail, Google Calendar, GitHub,
-Notion, Slack, …) mediati da [Composio](https://composio.dev). È una descrizione del
-codice **com'è oggi**, non un progetto: `file:line` puntano a `crates/desktop-gateway`
-e `crates/capabilities` di questo repo.
+Notion, Slack, …) mediati da [Composio](https://composio.dev) come **managed provider**
+opt-in (`CapabilityProviderKind::Managed`). È una descrizione del codice **com'è oggi**,
+non un progetto. ⚠️ I `file:line` numerici di `crates/desktop-gateway/src/main.rs` (~59k
+righe, editato di continuo) sono **omessi**: si citano solo i **nomi di funzione**, da
+ri-greppare. Composio è instradato dal capability router (ADR 0013) e eseguito dal **loop
+ReAct guardato unico** in `main.rs` (ADR 0021) — non esiste un crate `engine` separato.
 
 ---
 
@@ -42,96 +47,96 @@ sorgente di eventi per le automazioni (caposaldo #10).
 ### 1) Auth / connessione (schema-driven, ADR 0013)
 
 1. **Connessione dell'account Composio** (la API key del broker):
-   `connect_composio` → `connect_composio_blocking` (`main.rs:35229`, `:32075`). Verifica
+   `connect_composio` → `connect_composio_blocking` (`main.rs`). Verifica
    la key contro `GET /toolkits` PRIMA di persistere, poi salva la key come **secret**
-   (`SecretRef user/workspace/"composio"/"default"`, `main.rs:32114`) e fa
-   `upsert_provider_config` nel registry (`main.rs:32129`). Nel registry finisce solo il
+   (`SecretRef user/workspace/"composio"/"default"`, `main.rs`) e fa
+   `upsert_provider_config` nel registry (`main.rs`). Nel registry finisce solo il
    **ref**, mai la key in chiaro.
 2. **Toolkit auth schema-driven**: `GET /toolkits/{slug}/auth` →
-   `parse_composio_fields` (`main.rs:34811`) legge l'`auth_config_details` reale del
+   `parse_composio_fields` (`main.rs`) legge l'`auth_config_details` reale del
    toolkit e ritorna gli `schemes[]` (OAUTH2 | API_KEY | …, managed vs custom). Il
    `ConnectModal` costruisce la form DA questi schemi: OAuth managed → bottone
    one-click; OAuth custom → Client ID/Secret + redirect-URI da whitelistare; API_KEY →
    campo chiave.
-3. **Link della connessione**: `composio_link` → `composio_link_blocking` (`main.rs:35036`)
-   → `composio_auth_config_resolve` (`main.rs:34940`) crea l'auth_config e inizia la
+3. **Link della connessione**: `composio_link` → `composio_link_blocking` (`main.rs`)
+   → `composio_auth_config_resolve` (`main.rs`) crea l'auth_config e inizia la
    connessione. OAuth → ritorna un `redirect_url` (pagina di consenso hosted da
    Composio); API_KEY → connette subito.
-4. **Trasporto** per le chiamate: `composio_transport_for` (`main.rs:32197`) risolve la
+4. **Trasporto** per le chiamate: `composio_transport_for` (`main.rs`) risolve la
    connection config dal registry, recupera la key dal secret store e costruisce un
    `GatewayComposioTransport { base_url, api_key }`. L'entità Composio è
-   `composio_entity_id()` = base workspace (`main.rs:32373`), così gli account connessi
+   `composio_entity_id()` = base workspace (`main.rs`), così gli account connessi
    si risolvono in qualunque progetto.
 
 ### 2) I tool entrano nel registry / catalogo
 
 Catalogo costruito a runtime, non statico:
 
-- `composio_connected_toolkits` (`main.rs:32496`) → `GET /connected_accounts?user_ids=…`,
+- `composio_connected_toolkits` (`main.rs`) → `GET /connected_accounts?user_ids=…`,
   restituisce `(slug, is_active)`; un toolkit è attivo se **almeno un** account è ACTIVE.
-- `composio_chat_tools` (`main.rs:32578`) fa fan-out **un toolkit per richiesta**
+- `composio_chat_tools` (`main.rs`) fa fan-out **un toolkit per richiesta**
   (`GET /tools?toolkit_slug={slug}&limit=…` — v3 ignora i parametri plurali, verificato),
   converte ogni tool in schema funzione OpenAI e popola `ComposioChatTools { schemas,
-  writes, inactive }` (`main.rs:32383`). `writes` = slug classificati scrittura.
-- `composio_chat_tools_cached` (`main.rs:32559`) cachea per `cap` con TTL
-  `HOMUN_COMPOSIO_CACHE_SECS` (default 60s); `composio_catalog_invalidate` (`main.rs:32550`)
+  writes, inactive }` (`main.rs`). `writes` = slug classificati scrittura.
+- `composio_chat_tools_cached` (`main.rs`) cachea per `cap` con TTL
+  `HOMUN_COMPOSIO_CACHE_SECS` (default 60s); `composio_catalog_invalidate` (`main.rs`)
   svuota la cache su connect/link/disconnect.
 - I tool MCP confluiscono **nella stessa superficie** di discovery dei Composio
-  (`main.rs:18158`).
+  (`main.rs`).
 
 ### 3) Discovery nel loop — `find_capability` (Tool Search)
 
 Il catalogo Composio è grande → resta **deferred**, dietro `find_capability`
-(`main.rs:18750`, `has_composio`). Il modello chiama `find_capability(intent)`
-(`main.rs:21960`): i tool nativi/skill passano per BM25, i connettori per
-`search_connector_capability_entries` / `search_composio_catalog` (`main.rs:17770`,
+(`main.rs`, `has_composio`). Il modello chiama `find_capability(intent)`
+(`main.rs`): i tool nativi/skill passano per BM25, i connettori per
+`search_connector_capability_entries` / `search_composio_catalog` (`main.rs`,
 toolkit-aware: attiva l'intero set CRUD del servizio insieme). I match vengono
 **pushati nel toolset live** per i round successivi. Filtri di perimetro qui:
 `read_only`+`composio_tool_is_read`, `can_see_calendar`/`tool_touches_calendar`,
-`can_see_contacts`/`tool_touches_contacts` (`main.rs:22023`).
+`can_see_contacts`/`tool_touches_contacts` (`main.rs`).
 
 ### 4) Dispatch: read vs write → approval
 
-Quando il modello chiama un tool connesso (`main.rs:22615`):
+Quando il modello chiama un tool connesso (`main.rs`):
 
 - `needs_confirm = composio_writes.contains(name) && !composio_tool_allowed(name) && !autonomous`
-  (`main.rs:22619`).
+  (`main.rs`).
 - **Read (o write già "always-allow", o run autonomo)** → esegue subito via
-  `composio_execute_tool` (`main.rs:33587` → `POST /tools/execute/{tool}`).
+  `composio_execute_tool` (`main.rs` → `POST /tools/execute/{tool}`).
 - **Write** → NON esegue: emette una **card** `‹‹COMPOSIO_CONFIRM››{approval_id?,tool,
-  arguments}‹‹/COMPOSIO_CONFIRM››` (`main.rs:22645`), setta `pending_confirm` e dice al
+  arguments}‹‹/COMPOSIO_CONFIRM››` (`main.rs`), setta `pending_confirm` e dice al
   modello «AWAITING USER CONFIRMATION — non dire che è fatto». L'esecuzione vera arriva
-  dalla card: endpoint `composio_execute` (`main.rs:34238`) che **rifiuta** se la card non
+  dalla card: endpoint `composio_execute` (`main.rs`) che **rifiuta** se la card non
   combacia (`composio_confirm_matches`, FORBIDDEN `composio_confirmation_required`),
   opzionalmente registra "always" (`add_composio_tool_allow`), esegue, e riscrive la card
   in "done" per evitare riesecuzioni.
-- `create_pending_approval` (`main.rs:32994`) crea una riga di approvazione **solo per i
+- `create_pending_approval` (`main.rs`) crea una riga di approvazione **solo per i
   canali remoti** (Telegram, `approval_channel != "in_app"`); in-app ritorna `None` (la
   card È il meccanismo in-app).
 - Composio risponde **HTTP 200 anche se il tool è fallito** (`successful:false`):
-  `composio_execution_error` (`main.rs:33749`) lo intercetta così non si dichiara "fatto"
+  `composio_execution_error` (`main.rs`) lo intercetta così non si dichiara "fatto"
   un'azione fallita.
 
 ### 5) Errori → istruzioni azionabili
 
-`classify_connector_error` (`main.rs:33640`) mappa il testo d'errore (euristica) in
-`ConnectorErrorKind { Auth, RateLimit, Forbidden, Unavailable }` (`main.rs:33629`).
-`connector_error_hint` (Composio, `main.rs:33674`) e `mcp_error_hint` (`main.rs:33732`)
+`classify_connector_error` (`main.rs`) mappa il testo d'errore (euristica) in
+`ConnectorErrorKind { Auth, RateLimit, Forbidden, Unavailable }` (`main.rs`).
+`connector_error_hint` (Composio, `main.rs`) e `mcp_error_hint` (`main.rs`)
 producono l'istruzione: Auth → reconnect + marker `‹‹COMPOSIO_RECONNECT››<slug>`;
 RateLimit → aspetta; Forbidden → riconnetti con più scope; Unavailable → servizio
-offline. `record_connector_run` (`main.rs:33708`) logga ogni run (kind, ok, error_kind,
+offline. `record_connector_run` (`main.rs`) logga ogni run (kind, ok, error_kind,
 durata) nell'audit.
 
 ### 6) Polling come event source (caposaldo #10)
 
-`spawn_connector_event_poller` (`main.rs:10118`) ogni `connector_poll_interval`
+`spawn_connector_event_poller` (`main.rs`) ogni `connector_poll_interval`
 (`HOMUN_CONNECTOR_POLL_SECS`, min 30s, default 300s) chiama `connector_poll_tick`
-(`main.rs:10127`): per ogni automazione `EventTrigger::ConnectorPoll { tool, args,
-key_field, label }` (`task-runtime/src/types.rs:341`) esegue il tool (MCP o Composio),
-estrae gli item via `extract_poll_items` (`main.rs:10081`, primo array i cui elementi
+(`main.rs`): per ogni automazione `EventTrigger::ConnectorPoll { tool, args,
+key_field, label }` (`task-runtime/src/types.rs`) esegue il tool (MCP o Composio),
+estrae gli item via `extract_poll_items` (`main.rs`, primo array i cui elementi
 hanno `key_field`), e **firea un run per ogni item nuovo** (watermark `seen` bounded a
 1000). Il **primo poll** solo semina il watermark (`initialized`) senza firare.
-`connector_fire_run` (`main.rs:10269`) materializza il run con l'item come contesto
+`connector_fire_run` (`main.rs`) materializza il run con l'item come contesto
 evento.
 
 ### Diagramma
@@ -209,7 +214,7 @@ secret (mai in chiaro nel registry). I singoli toolkit si connettono schema-driv
 Entità Composio = base workspace, così gli account si risolvono in ogni progetto.
 
 **Read vs write.** Classificazione dal solo slug — `composio_tool_is_read`
-(`main.rs:32398`): read = presenza di un verbo di lettura (FETCH/GET/LIST/SEARCH/…) E
+(`main.rs`): read = presenza di un verbo di lettura (FETCH/GET/LIST/SEARCH/…) E
 assenza di un verbo di scrittura (SEND/CREATE/DELETE/UPDATE/…). Ambiguo ⇒ write.
 `ComposioChatTools.writes` è il set autorevole usato al dispatch.
 
@@ -222,7 +227,7 @@ ancorata a una card combaciante. Le approvazioni via canale remoto passano per
 
 **Error kinds.** `auth` (401/expired/not connected → reconnect), `rate_limit`
 (429/quota → wait), `forbidden` (403/scope → re-grant), `unavailable` (transport
-down → offline). Stringhe stabili da `connector_error_kind_str` (`main.rs:33697`) per
+down → offline). Stringhe stabili da `connector_error_kind_str` (`main.rs`) per
 audit/UI; `None` quando non classificabile ⇒ `"other"`.
 
 ---
@@ -276,22 +281,22 @@ audit/UI; `None` quando non classificabile ⇒ `"other"`.
   - esecuzione task-runtime gated: `execute_capability_generic` arm `Managed`,
     `authorize_managed_capability_tool` (gate deny-by-default, riusa
     `CapabilityPolicy::tool_access`), `composio_execute_tool` (v3).
-  - auth/connessione: `connect_composio_blocking:32075`, `parse_composio_fields:34811`,
-    `composio_auth_config_resolve:34940`, `composio_link_blocking:35036`,
-    `composio_transport_for:32197`, `composio_entity_id:32373`.
-  - catalogo/registry: `composio_connected_toolkits:32496`, `composio_chat_tools:32578`,
-    `composio_chat_tools_cached:32559`, `ComposioChatTools:32383`.
-  - discovery/loop: `find_capability` dispatch `:21960`, `search_composio_catalog:17770`,
-    `auto_retrieve_composio:17628`, `CORE_TOOL_NAMES:17493`.
-  - dispatch read/write/approval: `:22615`, `composio_tool_is_read:32398`,
-    `composio_tool_allowed:33796`, `humanize_composio_tool:32465`,
-    `create_pending_approval:32994`, `composio_execute:34238`,
-    `composio_execute_tool:33587`, `composio_execution_error:33749`.
-  - errori: `classify_connector_error:33640`, `connector_error_hint:33674`,
-    `mcp_error_hint:33732`, `connector_error_kind_str:33697`, `record_connector_run:33708`.
-  - polling: `spawn_connector_event_poller:10118`, `connector_poll_tick:10127`,
-    `extract_poll_items:10081`, `connector_fire_run:10269`.
-- `crates/task-runtime/src/types.rs` — `EventTrigger::ConnectorPoll:341`.
+  - auth/connessione: `connect_composio_blocking`, `parse_composio_fields`,
+    `composio_auth_config_resolve`, `composio_link_blocking`,
+    `composio_transport_for`, `composio_entity_id`.
+  - catalogo/registry: `composio_connected_toolkits`, `composio_chat_tools`,
+    `composio_chat_tools_cached`, `ComposioChatTools`.
+  - discovery/loop: `find_capability` dispatch, `search_composio_catalog`,
+    `auto_retrieve_composio`, `CORE_TOOL_NAMES`.
+  - dispatch read/write/approval: `composio_tool_is_read`,
+    `composio_tool_allowed`, `humanize_composio_tool`,
+    `create_pending_approval`, `composio_execute`,
+    `composio_execute_tool`, `composio_execution_error`.
+  - errori: `classify_connector_error`, `connector_error_hint`,
+    `mcp_error_hint`, `connector_error_kind_str`, `record_connector_run`.
+  - polling: `spawn_connector_event_poller`, `connector_poll_tick`,
+    `extract_poll_items`, `connector_fire_run`.
+- `crates/task-runtime/src/types.rs` — `EventTrigger::ConnectorPoll`.
 - `docs/CAPISALDI.md` — caposaldi #7 (registry) e #10 (automazioni).
 - `docs/decisions/0013-connector-auth-and-capability-routing.md` — auth schema-driven +
   Tool Search routing.

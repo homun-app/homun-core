@@ -1,9 +1,20 @@
 # Architettura — Skill, Capability & Addon
 
+> Verificato vs codice 2026-07-06.
+
 > Diagramma vivo. Decisioni: [ADR 0011 (core agnostico + ecosistema addon)](../decisions/0011-agnostic-core-addon-ecosystem.md),
 > [ADR 0009 (capability execution containment)](../decisions/0009-capability-execution-containment.md),
 > [ADR 0013 (connector auth & routing)](../decisions/0013-connector-auth-and-capability-routing.md),
 > [ADR 0017 (plugin distribution & licensing)](../decisions/0017-plugin-distribution-and-licensing.md).
+>
+> Mappa crate: i **contratti del manifest plugin** vivono in `crates/capabilities`
+> (`local-first-capabilities`, vedi `types.rs` + `skill_plugin.rs`); le **skill** in
+> `crates/skill-runtime` + `crates/process-skill`; il caricamento skill nel loop è il
+> tool `use_skill`; il routing capability è `find_capability` /
+> registry nativo (`make_deck`, `make_document`, `pdf_atomic` → `run_in_sandbox`), tutti
+> nel gateway `crates/desktop-gateway/src/main.rs`. Il "Core agnostico"/`ENG` del
+> diagramma è il **single guarded ReAct loop** (ADR 0021) che vive in `main.rs`: NON
+> esiste un `crates/engine`, e `crates/orchestrator` è dormiente.
 
 ## Principio
 

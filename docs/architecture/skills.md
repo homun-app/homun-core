@@ -1,5 +1,7 @@
 # Architettura — Skills (Agent Skills, cartelle `SKILL.md`)
 
+> Verificato vs codice 2026-07-06.
+>
 > Stato: **2026-06-27**, documento *reverse-engineered* dal codice reale, **punto
 > fermo** (descrive com'è OGGI, non com'è disegnato in futuro). Sottoinsieme del
 > caposaldo #7 (registry unico) e legato a [plugins.md](plugins.md) /
@@ -48,65 +50,64 @@ Scoperta / management (read-only, per UI e prompt):
   per cartella con `SKILL.md`, ordinate per nome, esclude `.`-dir.
 - `crates/desktop-gateway/src/skills.rs:322` `load_detail` — summary + body +
   file-tree (cap depth 4 / 300 nodi); `is_safe_id` (`:348`) blocca traversal.
-- `crates/desktop-gateway/src/main.rs:36261` `skills_dir` → `~/.homun/skills`
-  (via `gateway_data_dir`).
+- `crates/desktop-gateway/src/main.rs` `skills_dir` → `~/.homun/skills` (via
+  `gateway_data_dir`).
 
 Seeder + hashing dell'albero (auto-update non distruttivo):
-- `crates/desktop-gateway/src/main.rs:589` chiama `seed_default_skills()` all'avvio.
-- `crates/desktop-gateway/src/main.rs:36270` `default_skills_dir` — sorgente
-  bundled (`resources/default-skills`, override `HOMUN_DEFAULT_SKILLS_DIR`).
-- `crates/desktop-gateway/src/main.rs:36305` `skill_tree_hash` — hash
+- `crates/desktop-gateway/src/main.rs` chiama `seed_default_skills()` all'avvio.
+- `crates/desktop-gateway/src/main.rs` `default_skills_dir` — sorgente bundled
+  (`resources/default-skills`, override `HOMUN_DEFAULT_SKILLS_DIR`).
+- `crates/desktop-gateway/src/main.rs` `skill_tree_hash` — hash
   **non-crittografico** (`DefaultHasher`) sull'**intero albero** (path + bytes di
   ogni file, ordinati), non solo `SKILL.md`: così un update di script/asset
   bundled è rilevato. Richiede la presenza di `SKILL.md` o ritorna `None`.
-- `crates/desktop-gateway/src/main.rs:36350` `seed_default_skills` — record
+- `crates/desktop-gateway/src/main.rs` `seed_default_skills` — record
   per-skill `id<TAB>hash` in `.seeded-defaults`: installa nuovi default,
   **aggiorna** un default solo se l'utente NON l'ha editato (hash on-disk ==
   hash seminato), rispetta cancellazioni e edit utente; migra dal vecchio marker
   one-shot `.defaults-seeded`. Unisce il manifest `homuncoder-skills.txt`.
 
 Esposizione al modello (prompt L1 + corpus capability):
-- `crates/desktop-gateway/src/main.rs:15109` `enabled_skills_summary` — `(id,
-  name, desc)` delle skill abilitate.
-- `crates/desktop-gateway/src/main.rs:15125` `homuncoder_skill_ids` — le ~30
-  skill di metodologia, mostrate SOLO nelle chat di progetto (`:18248`).
-- `crates/desktop-gateway/src/main.rs:18322` blocco `INSTALLED SKILLS` nel system
-  prompt: una riga per skill + istruzione "PREFER it over the browser → call
-  `use_skill`"; nelle chat progetto si aggiunge il blocco METHODOLOGY (`:18313`).
-- `crates/desktop-gateway/src/main.rs:18795` le skill abilitate entrano nel
+- `crates/desktop-gateway/src/main.rs` `enabled_skills_summary` — `(id, name,
+  desc)` delle skill abilitate.
+- `crates/desktop-gateway/src/main.rs` `homuncoder_skill_ids` — le ~30 skill di
+  metodologia, mostrate SOLO nelle chat di progetto.
+- `crates/desktop-gateway/src/main.rs` blocco `INSTALLED SKILLS` nel system
+  prompt: una riga per skill + istruzione "use them and call `use_skill`"; nelle
+  chat progetto si aggiunge il blocco METHODOLOGY (HomunCoder).
+- `crates/desktop-gateway/src/main.rs` le skill abilitate entrano nel
   `capability_corpus` con `is_skill: true`, `schema: None`.
-- `crates/desktop-gateway/src/main.rs:18703` se ci sono skill, il tool
-  `use_skill` viene aggiunto al toolset live (`use_skill_tool_schema` `:15181`).
+- `crates/desktop-gateway/src/main.rs` se ci sono skill, il tool `use_skill`
+  viene aggiunto al toolset live (`use_skill_tool_schema`).
 
 `find_capability` (registry unico, BM25):
-- `crates/desktop-gateway/src/main.rs:21960` handler `find_capability`:
-  `bm25_rank(&capability_corpus, intent, 6)` (`:21991`). Per una skill emette
-  `skill «id»: desc → load it with use_skill("id")` (`:21993`) — **non** carica
-  uno schema (le skill non hanno tool), a differenza dei tool nativi/MCP che
-  vengono attivati nel toolset live.
+- `crates/desktop-gateway/src/main.rs` handler `find_capability`:
+  `bm25_rank(&capability_corpus, &intent, 6)`. Per una skill emette
+  `skill «id»: desc → load it with use_skill("id")` — **non** carica uno schema
+  (le skill non hanno tool), a differenza dei tool nativi/MCP che vengono attivati
+  nel toolset live.
 
 Caricamento / iniezione nel loop (progressive disclosure L2):
-- `crates/desktop-gateway/src/main.rs:20491` handler `use_skill`: legge `id`,
-  narra `‹‹ACT›› Using the skill «...»`, poi `load_skill_body(id)`.
-- `crates/desktop-gateway/src/main.rs:15142` `load_skill_body` → `load_detail`
-  + `adapt_skill_body`.
-- `crates/desktop-gateway/src/main.rs:15170` `adapt_skill_body` — sostituisce
+- `crates/desktop-gateway/src/main.rs` handler `use_skill`: legge `id`, narra
+  `‹‹ACT›› Using the skill «...»`, poi `load_skill_body(id)`.
+- `crates/desktop-gateway/src/main.rs` `load_skill_body` → `load_detail` +
+  `adapt_skill_body`.
+- `crates/desktop-gateway/src/main.rs` `adapt_skill_body` — sostituisce
   `{baseDir}`/`${baseDir}`/`$BASEDIR`… con `sandbox::container_skill_dir(id)`
   (`sandbox.rs:66` → `/home/agent/skills/<id>`).
-- Il body (cap 8000 char, `:20529`) torna al modello come messaggio
-  "Instructions for the skill … FOLLOW THEM": **istruzioni iniettate**, il loop
-  prosegue normale.
+- Il body (cap 8000 char) torna al modello come messaggio "Instructions for the
+  skill … FOLLOW THEM": **istruzioni iniettate**, il loop prosegue normale.
 
 Esecuzione + security scan:
-- `crates/desktop-gateway/src/main.rs:20533` handler `run_in_sandbox`: prima di
-  eseguire, `skill_security::scan_blobs([(command)])` (`:20550`); se
-  `scan.blocked` il comando NON parte (`:20554`).
-- `crates/desktop-gateway/src/main.rs:20602` deriva lo `skill_id` dal path
-  `/home/agent/skills/<id>/…` (`skill_id_from_command` `:15155`) se omesso, fa
+- `crates/desktop-gateway/src/main.rs` handler `run_in_sandbox`: prima di
+  eseguire, `skill_security::scan_blobs([(command)])`; se `scan.blocked` il
+  comando NON parte.
+- `crates/desktop-gateway/src/main.rs` deriva lo `skill_id` dal path
+  `/home/agent/skills/<id>/…` (`skill_id_from_command`) se omesso, fa
   `sandbox::sync_skill` (`sandbox.rs:671`, `docker cp` dell'albero skill nel
   container) e poi `sandbox::run_command` (`sandbox.rs:691`, `docker exec` come
   utente non-root `agent`, timeout 60s, output cap 8000). I file generati vanno
-  in `$OUTPUT_DIR` (`:20597`) bind-montato → diventano artifact scaricabili.
+  in `$OUTPUT_DIR` bind-montato → diventano artifact scaricabili.
 - `crates/desktop-gateway/src/skill_security.rs:340` `scan_blobs` /
   `:349` `scan_dir`: regole substring + combo (pipe-to-shell, base64, netcat -e),
   severità Critical(55)/Warning(18), `BLOCK_THRESHOLD=60`, `blocked` se c'è un
@@ -273,7 +274,7 @@ allowed-tools: [Read, Bash] # opzionale (parsato ma NON enforced nel gateway)
 - **Addon / Process Skill dormienti.** Il crate `process-skill` (ADR 0011:
   trigger → steps → approval + contratto di personalizzazione) è il livello
   "plugin/addon" sopra le skill, ma i relativi tool sono off di default
-  (`HOMUN_ADDONS=1`, `main.rs:18694`). Le skill `SKILL.md` di oggi sono solo il
+  (`HOMUN_ADDONS=1`, `main.rs`). Le skill `SKILL.md` di oggi sono solo il
   pezzo "istruzioni + risorse", non l'addon completo.
 - **Skill dichiarative (ADR 0016 Fase 3) non implementate:** oggi le skill sono
   prosa eseguita opportunisticamente, non workflow runner.
@@ -293,10 +294,11 @@ allowed-tools: [Read, Bash] # opzionale (parsato ma NON enforced nel gateway)
 
 - `crates/desktop-gateway/src/skills.rs` — scanner + parser frontmatter +
   file-tree (management read-only).
-- `crates/desktop-gateway/src/main.rs` — seeder (`:36350`), `skill_tree_hash`
-  (`:36305`), `enabled_skills_summary` (`:15109`), prompt L1 (`:18322`), corpus
-  (`:18795`), `use_skill`/`load_skill_body`/`adapt_skill_body` (`:15142`,
-  `:15170`, `:20491`), `run_in_sandbox` (`:20533`), `find_capability` (`:21960`).
+- `crates/desktop-gateway/src/main.rs` — grep i simboli (`main.rs` è ~59k righe
+  e cambia di continuo): `seed_default_skills`, `skill_tree_hash`,
+  `enabled_skills_summary`, prompt L1 (`INSTALLED SKILLS`), corpus
+  (`capability_corpus`, `is_skill: true`), `use_skill`/`load_skill_body`/
+  `adapt_skill_body`, `run_in_sandbox`, `find_capability`.
 - `crates/desktop-gateway/src/skill_security.rs` — scan statico (regole, score,
   block threshold).
 - `crates/desktop-gateway/src/skills_catalog.rs` — catalogo ClawHub (fetch,
