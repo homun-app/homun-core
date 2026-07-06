@@ -810,8 +810,12 @@ export default function App() {
       }
     });
     return () => {
+      // Drop only this component's handler. The WS is a process-lifetime
+      // singleton ("connect at boot / disconnect at shutdown"): a React unmount
+      // is NOT app shutdown. Under StrictMode's mount→unmount→remount, calling
+      // disconnect() here closed a still-CONNECTING socket and left the singleton
+      // wedged (isConnecting stuck true), permanently dead-locking connect().
       unsub();
-      wsSubscription.disconnect();
     };
   }, []);
 

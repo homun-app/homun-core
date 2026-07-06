@@ -102,8 +102,17 @@ class WSSubscription {
     this.shouldReconnect = false;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.stopPingWatchdog();
-    this.ws?.close();
+    // Detach handlers before closing: closing a CONNECTING socket fires onerror
+    // asynchronously, which would otherwise schedule a reconnect we don't want.
+    if (this.ws) {
+      this.ws.onopen = this.ws.onmessage = this.ws.onclose = this.ws.onerror = null;
+      this.ws.close();
+    }
     this.ws = null;
+    // Reset the in-flight guard synchronously. Previously this was only cleared by
+    // the async onclose handler, so a connect() racing right after disconnect()
+    // (e.g. StrictMode remount) saw isConnecting===true and no-op'd forever.
+    this.isConnecting = false;
   }
 
   /**
