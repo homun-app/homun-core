@@ -1930,14 +1930,24 @@ export interface VaultProposalActionInput {
   pin?: string;
   thread_id?: string;
   message_id?: string;
+  /** How to resolve a dedup conflict: "add" | "update" | "ignore". */
+  resolution?: "add" | "update" | "ignore";
+  /** The existing record targeted by an "update"/"ignore" resolution. */
+  record_id?: string;
 }
 
 export interface VaultProposalAcceptResult {
   ok: boolean;
+  /** "created" | "ignored" (identical record already existed) | "conflict". */
+  status: string;
   record_id: string;
   category: string;
   label: string;
   redacted_preview: string;
+  /** Set on a conflict: "key" (same category+field) or "value" (same value). */
+  match_type?: string;
+  /** The pre-existing record involved in an "ignored"/"conflict" outcome. */
+  existing?: VaultRecordSummary;
 }
 
 export interface VaultPinStatus {

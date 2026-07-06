@@ -14,6 +14,16 @@ use std::sync::Mutex;
 const VAULT_MASTER_KEY_LEN: usize = 32;
 const VAULT_KEY_NONCE_LEN: usize = 24;
 
+/// Master key wrapped by a PIN-derived key. Legacy algorithm: the PIN
+/// cryptographically gates all machine use, so unattended automations are
+/// impossible without it. Kept for read/migration only — never written anew.
+const VAULT_KEYRING_PIN_ALGORITHM: &str = "xchacha20poly1305-pin-v1";
+/// Master key wrapped by a random 256-bit key held in the OS keychain. The
+/// system can obtain the master key with NO PIN, so it can inject/compare vault
+/// values autonomously. At-rest protection is delegated to the OS keychain
+/// (like password-manager autofill) — a deliberate trade-off for autonomy.
+const VAULT_KEYRING_SYSTEM_ALGORITHM: &str = "xchacha20poly1305-syskey-v1";
+
 pub trait VaultStore {
     fn put(&self, record: VaultRecord) -> Result<(), String>;
     fn get(&self, id: &VaultRecordId) -> Result<Option<VaultRecord>, String>;
@@ -159,7 +169,7 @@ impl SQLiteVaultStore {
         let Some((algorithm, nonce, ciphertext)) = row else {
             return Err("Vault master key is not configured".to_string());
         };
-        if algorithm != "xchacha20poly1305-pin-v1" {
+        if algorithm != VAULT_KEYRING_PIN_ALGORITHM {
             return Err("unsupported vault master key algorithm".to_string());
         }
         let plaintext = decrypt_master_key(verifier, pin, &nonce, &ciphertext)?;
@@ -182,6 +192,99 @@ impl SQLiteVaultStore {
         self.store_wrapped_master_key(new_verifier, new_pin, &key)
     }
 
+    /// The wrapping algorithm currently stored in the keyring, if any. Lets
+    /// callers tell a legacy PIN-wrapped vault (`-pin-v1`) apart from a
+    /// system-wrapped one (`-syskey-v1`) so they can migrate or use accordingly.
+    pub fn keyring_algorithm(&self) -> Result<Option<String>, String> {
+        Ok(self
+            .load_wrapped_master_key()?
+            .map(|(algorithm, _, _)| algorithm))
+    }
+
+    /// Return the system-wrapped master key, creating a fresh random one on the
+    /// first call (fresh install). No PIN — the system uses this for injection
+    /// and dedup. Idempotent: an existing key is never rotated.
+    pub fn ensure_local_master_key_system(
+        &self,
+        wrap_key: &[u8; VAULT_MASTER_KEY_LEN],
+    ) -> Result<[u8; VAULT_MASTER_KEY_LEN], String> {
+        match self.unlock_local_master_key_system(wrap_key) {
+            Ok(key) => Ok(key),
+            Err(error) if error == "Vault master key is not configured" => {
+                let mut key = [0_u8; VAULT_MASTER_KEY_LEN];
+                rand::rngs::OsRng.fill_bytes(&mut key);
+                self.store_wrapped_master_key_system(wrap_key, &key)?;
+                Ok(key)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Unwrap the master key with the system wrap key (no PIN). Errors if the
+    /// keyring is absent or is still PIN-wrapped (migration required first).
+    pub fn unlock_local_master_key_system(
+        &self,
+        wrap_key: &[u8; VAULT_MASTER_KEY_LEN],
+    ) -> Result<[u8; VAULT_MASTER_KEY_LEN], String> {
+        let Some((algorithm, nonce, ciphertext)) = self.load_wrapped_master_key()? else {
+            return Err("Vault master key is not configured".to_string());
+        };
+        if algorithm != VAULT_KEYRING_SYSTEM_ALGORITHM {
+            return Err("vault master key is not wrapped with the system key".to_string());
+        }
+        // The wrap key is a random 256-bit key, so it doubles directly as the
+        // AEAD key — no KDF needed (unlike the PIN path).
+        let plaintext = decrypt_with_master_key(wrap_key, &nonce, &ciphertext)?;
+        if plaintext.len() != VAULT_MASTER_KEY_LEN {
+            return Err("invalid vault master key length".to_string());
+        }
+        let mut key = [0_u8; VAULT_MASTER_KEY_LEN];
+        key.copy_from_slice(&plaintext);
+        Ok(key)
+    }
+
+    /// Wrap `master_key` under the system wrap key and persist it in the keyring
+    /// tagged `-syskey-v1`. Overwrites any prior wrapping (this is how migration
+    /// re-wraps the same master key without touching per-record ciphertext).
+    pub fn store_wrapped_master_key_system(
+        &self,
+        wrap_key: &[u8; VAULT_MASTER_KEY_LEN],
+        master_key: &[u8; VAULT_MASTER_KEY_LEN],
+    ) -> Result<(), String> {
+        let (nonce, ciphertext) = encrypt_with_master_key(wrap_key, master_key.as_ref())?;
+        self.conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?
+            .execute(
+                "insert into vault_local_keyring (id, algorithm, nonce, ciphertext)
+                 values (1, ?1, ?2, ?3)
+                 on conflict(id) do update set
+                    algorithm=excluded.algorithm,
+                    nonce=excluded.nonce,
+                    ciphertext=excluded.ciphertext,
+                    updated_at=CURRENT_TIMESTAMP",
+                params![VAULT_KEYRING_SYSTEM_ALGORITHM, nonce, ciphertext],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// One-time migration for legacy vaults: unwrap the PIN-wrapped master key
+    /// (requires the PIN once) and re-wrap it under the system key. The master
+    /// key VALUE is preserved, so every per-record ciphertext stays valid.
+    pub fn migrate_pin_wrapped_master_key_to_system(
+        &self,
+        verifier: &LocalPinVerifier,
+        pin: &str,
+        wrap_key: &[u8; VAULT_MASTER_KEY_LEN],
+    ) -> Result<[u8; VAULT_MASTER_KEY_LEN], String> {
+        // unlock_local_master_key enforces that the keyring is `-pin-v1`, so this
+        // rejects double-migration (a `-syskey-v1` keyring errors cleanly).
+        let key = self.unlock_local_master_key(verifier, pin)?;
+        self.store_wrapped_master_key_system(wrap_key, &key)?;
+        Ok(key)
+    }
+
     fn store_wrapped_master_key(
         &self,
         verifier: &LocalPinVerifier,
@@ -195,6 +298,7 @@ impl SQLiteVaultStore {
             .execute(
                 "insert into vault_local_keyring (id, algorithm, nonce, ciphertext)
                  values (1, 'xchacha20poly1305-pin-v1', ?1, ?2)
+                 -- algorithm literal matches VAULT_KEYRING_PIN_ALGORITHM (legacy write path)
                  on conflict(id) do update set
                     algorithm=excluded.algorithm,
                     nonce=excluded.nonce,
@@ -818,6 +922,100 @@ mod tests {
         let db = String::from_utf8_lossy(&bytes);
         assert!(!db.contains("4111111111111111"));
         let _ = std::fs::remove_file(path);
+    }
+
+    // ADR: system-key wrapping. The 32-byte wrap key stands in for the value
+    // held in the OS keychain; unit tests inject it directly so the crypto is
+    // exercised without touching the platform keychain (`security` CLI).
+    const TEST_WRAP_KEY: [u8; VAULT_MASTER_KEY_LEN] = [7_u8; VAULT_MASTER_KEY_LEN];
+
+    #[test]
+    fn sqlite_vault_master_key_round_trips_under_system_wrap_key() {
+        let store = SQLiteVaultStore::open_in_memory().unwrap();
+
+        // Fresh vault: no keyring yet.
+        assert_eq!(store.keyring_algorithm().unwrap(), None);
+
+        let key = store
+            .ensure_local_master_key_system(&TEST_WRAP_KEY)
+            .expect("ensure system master key");
+        assert_eq!(
+            store.keyring_algorithm().unwrap().as_deref(),
+            Some("xchacha20poly1305-syskey-v1")
+        );
+
+        // Unlock with the same wrap key returns the same master key, no PIN.
+        assert_eq!(
+            store
+                .unlock_local_master_key_system(&TEST_WRAP_KEY)
+                .expect("unlock system master key"),
+            key
+        );
+        // ensure is idempotent: it does not rotate an existing key.
+        assert_eq!(
+            store
+                .ensure_local_master_key_system(&TEST_WRAP_KEY)
+                .expect("ensure is idempotent"),
+            key
+        );
+
+        // A different wrap key must not decrypt the master key.
+        let mut wrong = TEST_WRAP_KEY;
+        wrong[0] ^= 0xff;
+        assert!(store.unlock_local_master_key_system(&wrong).is_err());
+    }
+
+    #[test]
+    fn sqlite_vault_migration_pin_to_system_preserves_all_secret_values() {
+        let store = SQLiteVaultStore::open_in_memory().unwrap();
+        let verifier = LocalPinVerifier::create("123456").unwrap();
+        store.set_local_pin_verifier(verifier.clone()).unwrap();
+
+        // Legacy state: master key wrapped by the PIN, records encrypted under it.
+        let master_key = store
+            .ensure_local_master_key(&verifier, "123456")
+            .expect("legacy master key");
+        assert_eq!(
+            store.keyring_algorithm().unwrap().as_deref(),
+            Some("xchacha20poly1305-pin-v1")
+        );
+        let record_id = VaultRecordId::new("vault_card_1").unwrap();
+        store
+            .put_secret_material(
+                &record_id,
+                &master_key,
+                local_first_secrets::SecretMaterial::from_string("4111111111111111"),
+            )
+            .expect("put legacy secret");
+
+        // Migrate the WRAPPING only (pin -> syskey). The master key value is unchanged.
+        let migrated = store
+            .migrate_pin_wrapped_master_key_to_system(&verifier, "123456", &TEST_WRAP_KEY)
+            .expect("migrate to syskey");
+        assert_eq!(migrated, master_key);
+        assert_eq!(
+            store.keyring_algorithm().unwrap().as_deref(),
+            Some("xchacha20poly1305-syskey-v1")
+        );
+
+        // The pre-existing ciphertext is still decryptable with the SAME master key,
+        // now obtained via the system wrap key with NO PIN.
+        let system_key = store
+            .unlock_local_master_key_system(&TEST_WRAP_KEY)
+            .expect("unlock via syskey");
+        assert_eq!(system_key, master_key);
+        let recovered = store
+            .get_secret_material(&record_id, &system_key)
+            .expect("get secret after migration")
+            .expect("secret present");
+        assert_eq!(recovered.expose_utf8().unwrap(), "4111111111111111");
+
+        // Migrating from a non-pin keyring (already migrated) must fail cleanly.
+        assert!(
+            store
+                .migrate_pin_wrapped_master_key_to_system(&verifier, "123456", &TEST_WRAP_KEY)
+                .is_err()
+        );
     }
 
     #[test]

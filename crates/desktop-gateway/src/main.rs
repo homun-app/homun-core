@@ -173,6 +173,11 @@ pub(crate) struct AppState {
     /// `Some` solo quando `HOMUN_MEMORY_SERVICE=on`; `None` → orchestrazione inline attuale.
     memory_service: Option<Arc<dyn MemoryRecallService>>,
     vault_store: Arc<Mutex<SQLiteVaultStore>>,
+    /// 32-byte key that WRAPS the vault master key (ADR: system-usable vault
+    /// values). Sourced from the OS keychain at boot so the system can obtain the
+    /// master key with NO PIN — the PIN is now a reveal-only human-authorization
+    /// gate. Read once at startup; stable for the life of the vault.
+    vault_wrap_key: Arc<[u8; 32]>,
     pending_vault_proposals: Arc<privacy_guard::PendingVaultProposalStore>,
     capability_registry: Arc<Mutex<CapabilityRegistryStore>>,
     task_executor_status: Arc<Mutex<TaskExecutorStatus>>,
@@ -238,6 +243,7 @@ impl AppState {
             vault_store: Arc::new(Mutex::new(
                 SQLiteVaultStore::open_in_memory().expect("in-memory vault store"),
             )),
+            vault_wrap_key: Arc::new([7u8; 32]),
             pending_vault_proposals: Arc::new(privacy_guard::PendingVaultProposalStore::default()),
             capability_registry: Arc::new(Mutex::new(
                 CapabilityRegistryStore::open_in_memory().expect("in-memory capability store"),
@@ -756,6 +762,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SQLiteVaultStore::open(gateway_vault_database_path()?)
                 .map_err(std::io::Error::other)?,
         )),
+        vault_wrap_key: Arc::new(resolve_vault_wrap_key()?),
         pending_vault_proposals: Arc::new(privacy_guard::PendingVaultProposalStore::default()),
         capability_registry: Arc::new(Mutex::new(open_seeded_capability_registry()?)),
         task_executor_status: Arc::new(Mutex::new(TaskExecutorStatus::new(
@@ -37071,15 +37078,35 @@ struct VaultProposalActionRequest {
     thread_id: Option<String>,
     #[serde(default)]
     message_id: Option<String>,
+    /// How to resolve a dedup conflict surfaced by a prior accept:
+    /// "add" (create anyway), "update" (overwrite `record_id`), "ignore" (discard).
+    /// Absent on the first attempt → the server runs dedup and may return a conflict.
+    #[serde(default)]
+    resolution: Option<String>,
+    /// The existing record targeted by an "update"/"ignore" resolution.
+    #[serde(default)]
+    record_id: Option<String>,
 }
 
+/// Outcome of an accept. `status` drives the frontend:
+/// - "created": a new record was stored (or overwritten via "update").
+/// - "ignored": an identical (key+value) record already existed; nothing created.
+/// - "conflict": a partial match needs the user to choose add/update/ignore.
 #[derive(Debug, Serialize)]
 struct VaultProposalAcceptResponse {
     ok: bool,
+    status: String,
     record_id: String,
     category: String,
     label: String,
     redacted_preview: String,
+    /// Set only when `status == "conflict"`: "key" (same category+field, different
+    /// value) or "value" (same value, different key).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    match_type: Option<String>,
+    /// The pre-existing record involved in an "ignored"/"conflict" outcome.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    existing: Option<VaultRecordSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -37182,9 +37209,15 @@ async fn vault_proposal_accept(
     State(state): State<AppState>,
     Json(request): Json<VaultProposalActionRequest>,
 ) -> Result<Json<VaultProposalAcceptResponse>, GatewayError> {
+    let wrap_key = *state.vault_wrap_key;
     let vault_store = lock_vault_store(&state)?;
-    accept_vault_proposal_with_pending(&vault_store, Some(&state.pending_vault_proposals), &request)
-        .map(Json)
+    accept_vault_proposal(
+        &vault_store,
+        Some(&state.pending_vault_proposals),
+        &wrap_key,
+        &request,
+    )
+    .map(Json)
 }
 
 async fn vault_proposal_dismiss(
@@ -37222,8 +37255,9 @@ async fn vault_record_update(
     Json(request): Json<VaultRecordUpdateRequest>,
 ) -> Result<Json<VaultRecordUpdateResponse>, GatewayError> {
     let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+    let wrap_key = *state.vault_wrap_key;
     let vault_store = lock_vault_store(&state)?;
-    update_vault_record(&vault_store, &record_id, &request).map(Json)
+    update_vault_record(&vault_store, &wrap_key, &record_id, &request).map(Json)
 }
 
 async fn vault_record_reveal(
@@ -37232,10 +37266,12 @@ async fn vault_record_reveal(
     Json(request): Json<VaultRecordRevealRequest>,
 ) -> Result<Json<VaultRecordRevealResponse>, GatewayError> {
     let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+    let wrap_key = *state.vault_wrap_key;
     let vault_store = lock_vault_store(&state)?;
     reveal_vault_record_secret(
         &vault_store,
         Some(&state.pending_vault_proposals),
+        &wrap_key,
         &record_id,
         &request,
     )
@@ -37256,13 +37292,15 @@ async fn vault_pin_setup(
     State(state): State<AppState>,
     Json(request): Json<VaultPinSetupRequest>,
 ) -> Result<Json<VaultPinSetupResponse>, GatewayError> {
+    let wrap_key = *state.vault_wrap_key;
     let vault_store = lock_vault_store(&state)?;
-    apply_vault_pin_setup(&vault_store, &request)?;
+    apply_vault_pin_setup(&vault_store, &wrap_key, &request)?;
     Ok(Json(VaultPinSetupResponse { configured: true }))
 }
 
 fn apply_vault_pin_setup(
     vault_store: &SQLiteVaultStore,
+    wrap_key: &[u8; 32],
     request: &VaultPinSetupRequest,
 ) -> Result<(), GatewayError> {
     let existing = vault_store
@@ -37270,31 +37308,34 @@ fn apply_vault_pin_setup(
         .map_err(vault_store_error)?;
     let new_verifier =
         local_pin_setup_verifier(existing.as_ref(), &request).map_err(invalid_vault_pin)?;
-    if let Some(existing) = existing.as_ref() {
-        let current_pin = request.current_pin.as_deref().ok_or_else(|| {
-            invalid_vault_pin("Current Vault PIN is required to change the PIN".to_string())
-        })?;
-        match vault_store.rewrap_local_master_key(
-            existing,
-            current_pin,
-            &new_verifier,
-            &request.pin,
-        ) {
-            Ok(()) => {}
-            Err(error) if error == "Vault master key is not configured" => {
-                vault_store
-                    .ensure_local_master_key(existing, current_pin)
-                    .map_err(vault_store_error)?;
-                vault_store
-                    .rewrap_local_master_key(existing, current_pin, &new_verifier, &request.pin)
-                    .map_err(vault_store_error)?;
-            }
-            Err(error) => return Err(vault_store_error(error)),
+    // New security model: the master key is wrapped by the system key, NOT the
+    // PIN. The PIN verifier is a reveal-only human-authorization gate stored
+    // separately. So setting/changing the PIN never re-wraps the master key; it
+    // only (a) ensures a syskey-wrapped master key exists, and (b) migrates a
+    // legacy PIN-wrapped key once, using the CURRENT PIN we just verified.
+    match vault_store.keyring_algorithm().map_err(vault_store_error)? {
+        None => {
+            vault_store
+                .ensure_local_master_key_system(wrap_key)
+                .map_err(vault_store_error)?;
         }
-    } else {
-        vault_store
-            .ensure_local_master_key(&new_verifier, &request.pin)
-            .map_err(vault_store_error)?;
+        Some(algorithm) if algorithm == "xchacha20poly1305-syskey-v1" => {
+            // Already system-wrapped and independent of the PIN — nothing to do.
+        }
+        Some(_legacy_pin_wrapped) => {
+            // Migrate the wrapping (pin -> syskey) using the current PIN. On a
+            // PIN change `existing`/`current_pin` are present and verified above;
+            // if somehow absent we cannot unwrap, so surface a clear error.
+            let existing = existing.as_ref().ok_or_else(|| {
+                invalid_vault_pin("Current Vault PIN is required to migrate the vault".to_string())
+            })?;
+            let current_pin = request.current_pin.as_deref().ok_or_else(|| {
+                invalid_vault_pin("Current Vault PIN is required to migrate the vault".to_string())
+            })?;
+            vault_store
+                .migrate_pin_wrapped_master_key_to_system(existing, current_pin, wrap_key)
+                .map_err(vault_store_error)?;
+        }
     }
     vault_store
         .set_local_pin_verifier(new_verifier)
@@ -37458,30 +37499,91 @@ fn load_vault_record(
         })
 }
 
-fn unlock_vault_master_key(
+/// Obtain the vault master key via the system wrap key, with NO PIN — the path
+/// the system uses to inject and dedup values autonomously. Handles the three
+/// keyring states: fresh (create a syskey-wrapped key), already system-wrapped
+/// (unlock), or legacy PIN-wrapped (migrate inline if a valid PIN rides along,
+/// otherwise error asking the user to migrate via a reveal / PIN entry).
+fn obtain_system_master_key(
     vault_store: &SQLiteVaultStore,
+    wrap_key: &[u8; 32],
+    pin: Option<&str>,
+) -> Result<[u8; 32], GatewayError> {
+    match vault_store.keyring_algorithm().map_err(vault_store_error)? {
+        None => vault_store
+            .ensure_local_master_key_system(wrap_key)
+            .map_err(vault_store_error),
+        Some(algorithm) if algorithm == "xchacha20poly1305-syskey-v1" => vault_store
+            .unlock_local_master_key_system(wrap_key)
+            .map_err(vault_store_error),
+        Some(_legacy_pin_wrapped) => {
+            let pin = pin
+                .map(str::trim)
+                .filter(|pin| !pin.is_empty())
+                .ok_or_else(|| {
+                    invalid_vault_pin(
+                        "Vault must be migrated before autonomous use: reveal a record or \
+                         re-enter your PIN once to enable it."
+                            .to_string(),
+                    )
+                })?;
+            let verifier = vault_store
+                .local_pin_verifier()
+                .map_err(vault_store_error)?
+                .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+            if !verifier.verify(pin) {
+                return Err(invalid_vault_pin("Invalid Vault PIN".to_string()));
+            }
+            vault_store
+                .migrate_pin_wrapped_master_key_to_system(&verifier, pin, wrap_key)
+                .map_err(vault_store_error)
+        }
+    }
+}
+
+/// Reveal-path master-key acquisition: the PIN has already been verified as human
+/// authorization, so this just maps keyring state to the master key (creating a
+/// fresh key or migrating a legacy PIN-wrapped one as needed) using that PIN.
+fn obtain_or_migrate_master_key_with_pin(
+    vault_store: &SQLiteVaultStore,
+    wrap_key: &[u8; 32],
+    verifier: &LocalPinVerifier,
     pin: &str,
 ) -> Result<[u8; 32], GatewayError> {
-    let verifier = vault_store
-        .local_pin_verifier()
-        .map_err(vault_store_error)?
-        .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
-    if !verifier.verify(pin) {
-        return Err(invalid_vault_pin("Invalid Vault PIN".to_string()));
+    match vault_store.keyring_algorithm().map_err(vault_store_error)? {
+        None => vault_store
+            .ensure_local_master_key_system(wrap_key)
+            .map_err(vault_store_error),
+        Some(algorithm) if algorithm == "xchacha20poly1305-syskey-v1" => vault_store
+            .unlock_local_master_key_system(wrap_key)
+            .map_err(vault_store_error),
+        Some(_legacy_pin_wrapped) => vault_store
+            .migrate_pin_wrapped_master_key_to_system(verifier, pin, wrap_key)
+            .map_err(vault_store_error),
     }
-    vault_store
-        .unlock_local_master_key(&verifier, pin)
-        .map_err(vault_store_error)
 }
 
 fn reveal_vault_record_secret(
     vault_store: &SQLiteVaultStore,
     pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
+    wrap_key: &[u8; 32],
     record_id: &VaultRecordId,
     request: &VaultRecordRevealRequest,
 ) -> Result<VaultRecordRevealResponse, GatewayError> {
     let record = load_vault_record(vault_store, record_id)?;
-    let master_key = unlock_vault_master_key(vault_store, &request.pin)?;
+    // The PIN is now a HUMAN-AUTHORIZATION gate for showing plaintext on screen —
+    // it no longer cryptographically gates machine use. Verify it, then obtain the
+    // master key via the system key (migrating a legacy PIN-wrapped vault now that
+    // we hold a verified PIN).
+    let verifier = vault_store
+        .local_pin_verifier()
+        .map_err(vault_store_error)?
+        .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
+    if !verifier.verify(&request.pin) {
+        return Err(invalid_vault_pin("Invalid Vault PIN".to_string()));
+    }
+    let master_key =
+        obtain_or_migrate_master_key_with_pin(vault_store, wrap_key, &verifier, &request.pin)?;
     let secret = match vault_store
         .get_secret_material(record_id, &master_key)
         .map_err(vault_store_error)?
@@ -37548,6 +37650,7 @@ fn materialize_pending_vault_secret(
 
 fn update_vault_record(
     vault_store: &SQLiteVaultStore,
+    wrap_key: &[u8; 32],
     record_id: &VaultRecordId,
     request: &VaultRecordUpdateRequest,
 ) -> Result<VaultRecordUpdateResponse, GatewayError> {
@@ -37575,10 +37678,10 @@ fn update_vault_record(
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        let pin = request.pin.as_deref().ok_or_else(|| {
-            invalid_vault_pin("Vault PIN is required to update secret material".to_string())
-        })?;
-        let master_key = unlock_vault_master_key(vault_store, pin)?;
+        // Writing a value is a machine operation: obtain the master key via the
+        // system key (no PIN). A legacy PIN-wrapped vault migrates inline using
+        // the PIN the edit flow already collected to unlock the value.
+        let master_key = obtain_system_master_key(vault_store, wrap_key, request.pin.as_deref())?;
         vault_store
             .put_secret_material(
                 record_id,
@@ -37593,53 +37696,125 @@ fn update_vault_record(
     })
 }
 
-fn accept_vault_proposal(
+/// The redacted marker stored in a record's metadata (`[VAULT:category:field…]`).
+fn record_redacted_preview(record: &VaultRecord) -> &str {
+    record
+        .metadata
+        .get("redacted_preview")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+}
+
+/// The stable logical field of a record, derived from its redacted marker
+/// `[VAULT:category:field…]`. Used together with the category as the dedup key.
+/// Value-bearing segments (`last4=1111`) are dropped so the field is independent
+/// of the secret value.
+fn vault_logical_field(redacted_preview: &str) -> String {
+    let inner = redacted_preview
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    let mut segments = inner.split(':');
+    if segments.next() != Some("VAULT") {
+        // Not a standard marker; fall back to the whole (normalized) preview.
+        return inner.trim().to_ascii_lowercase();
+    }
+    let _category = segments.next();
+    segments
+        .map(|segment| segment.trim())
+        .filter(|segment| !segment.is_empty() && !segment.contains('='))
+        .collect::<Vec<_>>()
+        .join(":")
+        .to_ascii_lowercase()
+}
+
+/// Dedup outcome for a save, comparing the incoming (category, field, value)
+/// against every existing record.
+enum VaultDedupOutcome {
+    Create,
+    /// Same key AND same value already stored → ignore (no new record).
+    Ignore(VaultRecord),
+    /// Partial match ("key" = same category+field, different value; "value" =
+    /// same value under a different key) → the user must choose add/update/ignore.
+    Conflict {
+        match_type: &'static str,
+        existing: VaultRecord,
+    },
+}
+
+/// Compare an incoming save against existing records now that vault values are
+/// system-readable. Value comparison decrypts each candidate's material with the
+/// system master key. A key+value duplicate short-circuits to Ignore; otherwise
+/// key-only wins over value-only for the surfaced conflict.
+fn classify_vault_dedup(
     vault_store: &SQLiteVaultStore,
+    master_key: &[u8; 32],
+    category_key: &str,
+    field: &str,
+    incoming_value: Option<&str>,
+) -> Result<VaultDedupOutcome, GatewayError> {
+    let mut key_only: Option<VaultRecord> = None;
+    let mut value_only: Option<VaultRecord> = None;
+    for record in vault_store.list().map_err(vault_store_error)? {
+        let record_category = vault_category_key(record.category);
+        let record_field = vault_logical_field(record_redacted_preview(&record));
+        let key_match = record_category == category_key && record_field == field;
+        let value_match = match incoming_value {
+            // A record we cannot decrypt (e.g. poisoned/foreign ciphertext) must
+            // not block saves: treat it as "no value match" rather than erroring.
+            Some(value) => {
+                vault_store
+                    .get_secret_material(&record.id, master_key)
+                    .ok()
+                    .flatten()
+                    .and_then(|material| material.expose_utf8().ok())
+                    .as_deref()
+                    == Some(value)
+            }
+            None => false,
+        };
+        if key_match && value_match {
+            return Ok(VaultDedupOutcome::Ignore(record));
+        }
+        if key_match && key_only.is_none() {
+            key_only = Some(record.clone());
+        }
+        if value_match && value_only.is_none() {
+            value_only = Some(record);
+        }
+    }
+    if let Some(existing) = key_only {
+        return Ok(VaultDedupOutcome::Conflict {
+            match_type: "key",
+            existing,
+        });
+    }
+    if let Some(existing) = value_only {
+        return Ok(VaultDedupOutcome::Conflict {
+            match_type: "value",
+            existing,
+        });
+    }
+    Ok(VaultDedupOutcome::Create)
+}
+
+/// Resolve the plaintext value a save should store, plus (if it came from a
+/// pending proposal) the pending id to consume once the save completes. A pending
+/// proposal is validated against the card it claims to fulfil.
+fn resolve_incoming_vault_value(
+    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
     request: &VaultProposalActionRequest,
-) -> Result<VaultProposalAcceptResponse, GatewayError> {
-    let record = vault_record_from_proposal(request).map_err(invalid_vault_proposal)?;
-    if let Some(secret_value) = request
+) -> Result<(Option<String>, Option<String>), GatewayError> {
+    if let Some(value) = request
         .secret_value
         .as_ref()
         .map(|value| value.trim())
         .filter(|value| !value.is_empty())
     {
-        let pin = request.pin.as_deref().ok_or_else(|| {
-            invalid_vault_pin("Vault PIN is required to save secret material".to_string())
-        })?;
-        let verifier = vault_store
-            .local_pin_verifier()
-            .map_err(vault_store_error)?
-            .ok_or_else(|| invalid_vault_pin("Vault PIN is not configured".to_string()))?;
-        let master_key = vault_store
-            .ensure_local_master_key(&verifier, pin)
-            .map_err(vault_store_error)?;
-        vault_store
-            .put_secret_material(
-                &record.id,
-                &master_key,
-                SecretMaterial::from_string(secret_value.to_string()),
-            )
-            .map_err(vault_store_error)?;
+        return Ok((Some(value.to_string()), None));
     }
-    let response = VaultProposalAcceptResponse {
-        ok: true,
-        record_id: record.id.to_string(),
-        category: request.category.clone(),
-        label: request.label.clone(),
-        redacted_preview: request.redacted_preview.clone(),
-    };
-    vault_store.put(record).map_err(vault_store_error)?;
-    Ok(response)
-}
-
-fn accept_vault_proposal_with_pending(
-    vault_store: &SQLiteVaultStore,
-    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
-    request: &VaultProposalActionRequest,
-) -> Result<VaultProposalAcceptResponse, GatewayError> {
     let Some(pending_id) = request.pending_id.as_deref().filter(|id| !id.is_empty()) else {
-        return accept_vault_proposal(vault_store, request);
+        return Ok((None, None));
     };
     let pending_store = pending_store.ok_or_else(|| {
         invalid_vault_proposal("Pending Vault proposal store is unavailable".to_string())
@@ -37655,27 +37830,184 @@ fn accept_vault_proposal_with_pending(
             "Pending Vault proposal does not match this card".to_string(),
         ));
     }
-    if request
-        .pin
-        .as_deref()
-        .map(str::trim)
-        .filter(|pin| !pin.is_empty())
-        .is_none()
-    {
-        return accept_vault_proposal(vault_store, request);
+    Ok((Some(pending.secret_value), Some(pending_id.to_string())))
+}
+
+fn vault_accept_response(
+    status: &str,
+    record_id: String,
+    category: String,
+    label: String,
+    redacted_preview: String,
+    match_type: Option<&str>,
+    existing: Option<VaultRecordSummary>,
+) -> VaultProposalAcceptResponse {
+    VaultProposalAcceptResponse {
+        ok: true,
+        status: status.to_string(),
+        record_id,
+        category,
+        label,
+        redacted_preview,
+        match_type: match_type.map(str::to_string),
+        existing,
     }
-    let resolved = VaultProposalActionRequest {
-        category: request.category.clone(),
-        label: request.label.clone(),
-        redacted_preview: request.redacted_preview.clone(),
-        secret_value: Some(pending.secret_value),
-        pending_id: None,
-        pin: request.pin.clone(),
-        thread_id: request.thread_id.clone(),
-        message_id: request.message_id.clone(),
+}
+
+fn ignored_accept_response(existing: VaultRecord) -> VaultProposalAcceptResponse {
+    let summary = vault_record_summary(existing);
+    vault_accept_response(
+        "ignored",
+        summary.id.clone(),
+        summary.category.clone(),
+        summary.label.clone(),
+        summary.redacted_preview.clone(),
+        None,
+        Some(summary),
+    )
+}
+
+/// Accept/save a vault proposal. Now that values are system-readable, this
+/// obtains the master key via the system key (NO PIN), resolves any pending
+/// value, dedups against existing records, and creates/ignores/conflicts or
+/// applies an explicit add/update/ignore resolution. The pending proposal is
+/// consumed on every terminal outcome (create/ignore/update) — closing the
+/// idempotency gap that let the same proposal create identical duplicates — but
+/// NOT on an unresolved conflict, whose resolving re-submit needs it again.
+fn accept_vault_proposal(
+    vault_store: &SQLiteVaultStore,
+    pending_store: Option<&privacy_guard::PendingVaultProposalStore>,
+    wrap_key: &[u8; 32],
+    request: &VaultProposalActionRequest,
+) -> Result<VaultProposalAcceptResponse, GatewayError> {
+    let (incoming_value, pending_to_consume) = resolve_incoming_vault_value(pending_store, request)?;
+    let master_key = obtain_system_master_key(vault_store, wrap_key, request.pin.as_deref())?;
+
+    let consume_pending = |pending_to_consume: &Option<String>| {
+        if let (Some(store), Some(pending_id)) = (pending_store, pending_to_consume.as_deref()) {
+            let _ = store.take(pending_id);
+        }
     };
-    let response = accept_vault_proposal(vault_store, &resolved)?;
-    let _ = pending_store.take(pending_id);
+
+    match request.resolution.as_deref().map(str::trim) {
+        Some("update") => {
+            let target = request
+                .record_id
+                .as_deref()
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    invalid_vault_proposal(
+                        "Update resolution requires the target record_id".to_string(),
+                    )
+                })?;
+            let target_id = VaultRecordId::new(target).map_err(invalid_vault_proposal)?;
+            let existing = load_vault_record(vault_store, &target_id)?;
+            let value = incoming_value.as_deref().ok_or_else(|| {
+                invalid_vault_proposal("Cannot update: no secret value provided".to_string())
+            })?;
+            vault_store
+                .put_secret_material(
+                    &existing.id,
+                    &master_key,
+                    SecretMaterial::from_string(value.to_string()),
+                )
+                .map_err(vault_store_error)?;
+            consume_pending(&pending_to_consume);
+            let summary = vault_record_summary(existing);
+            return Ok(vault_accept_response(
+                "created",
+                summary.id.clone(),
+                summary.category.clone(),
+                summary.label.clone(),
+                summary.redacted_preview.clone(),
+                None,
+                Some(summary),
+            ));
+        }
+        Some("ignore") => {
+            consume_pending(&pending_to_consume);
+            let existing = match request.record_id.as_deref().filter(|id| !id.is_empty()) {
+                Some(id) => {
+                    let record_id = VaultRecordId::new(id).map_err(invalid_vault_proposal)?;
+                    vault_store.get(&record_id).map_err(vault_store_error)?
+                }
+                None => None,
+            };
+            return Ok(match existing {
+                Some(record) => ignored_accept_response(record),
+                None => vault_accept_response(
+                    "ignored",
+                    request.record_id.clone().unwrap_or_default(),
+                    request.category.clone(),
+                    request.label.clone(),
+                    request.redacted_preview.clone(),
+                    None,
+                    None,
+                ),
+            });
+        }
+        Some("add") => {
+            // Force-create below, skipping dedup.
+        }
+        _ => {
+            let category =
+                vault_category_from_marker(&request.category).map_err(invalid_vault_proposal)?;
+            let category_key = vault_category_key(category);
+            let field = vault_logical_field(&request.redacted_preview);
+            match classify_vault_dedup(
+                vault_store,
+                &master_key,
+                category_key,
+                &field,
+                incoming_value.as_deref(),
+            )? {
+                VaultDedupOutcome::Ignore(existing) => {
+                    consume_pending(&pending_to_consume);
+                    return Ok(ignored_accept_response(existing));
+                }
+                VaultDedupOutcome::Conflict {
+                    match_type,
+                    existing,
+                } => {
+                    // Leave the pending intact: the user still has to resolve, and
+                    // the resolving re-submit needs the pending value again.
+                    let summary = vault_record_summary(existing);
+                    return Ok(vault_accept_response(
+                        "conflict",
+                        summary.id.clone(),
+                        summary.category.clone(),
+                        summary.label.clone(),
+                        summary.redacted_preview.clone(),
+                        Some(match_type),
+                        Some(summary),
+                    ));
+                }
+                VaultDedupOutcome::Create => {}
+            }
+        }
+    }
+
+    let record = vault_record_from_proposal(request).map_err(invalid_vault_proposal)?;
+    if let Some(value) = incoming_value.as_deref() {
+        vault_store
+            .put_secret_material(
+                &record.id,
+                &master_key,
+                SecretMaterial::from_string(value.to_string()),
+            )
+            .map_err(vault_store_error)?;
+    }
+    let response = vault_accept_response(
+        "created",
+        record.id.to_string(),
+        request.category.clone(),
+        request.label.clone(),
+        request.redacted_preview.clone(),
+        None,
+        None,
+    );
+    vault_store.put(record).map_err(vault_store_error)?;
+    consume_pending(&pending_to_consume);
     Ok(response)
 }
 
@@ -48257,6 +48589,100 @@ fn gateway_vault_database_path() -> Result<PathBuf, std::io::Error> {
     Ok(base.join("vault.sqlite"))
 }
 
+/// Keychain service under which the vault wrap key lives (macOS).
+#[cfg(target_os = "macos")]
+const VAULT_WRAP_KEY_KEYCHAIN_SERVICE: &str = "homun-vault-master-wrap";
+
+/// Load-or-create the 32-byte key that WRAPS the vault master key (ADR:
+/// system-usable vault values). At-rest protection of THIS key is delegated to
+/// the OS keychain, mirroring how a password manager guards its autofill key.
+/// Precedence:
+///   1. `HOMUN_VAULT_WRAP_KEY` (base64) — tests/CI; never touches the keychain.
+///   2. OS keychain (macOS) — the production home for this key.
+///   3. A 0600 file under the data dir — Linux/dev, or if the keychain errors.
+/// The key MUST stay stable for the life of the vault: losing it makes the
+/// master key (and every record) unrecoverable, exactly like losing a keychain.
+/// So we only ever GENERATE when the key is definitively absent, never on a
+/// decode error (which would silently rotate and brick the vault).
+fn resolve_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
+    if let Ok(encoded) = env::var("HOMUN_VAULT_WRAP_KEY") {
+        let encoded = encoded.trim();
+        if !encoded.is_empty() {
+            return decode_vault_wrap_key(encoded).ok_or_else(|| {
+                std::io::Error::other("HOMUN_VAULT_WRAP_KEY must be 32 base64-encoded bytes")
+            });
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        match keychain_vault_wrap_key() {
+            Ok(key) => return Ok(key),
+            Err(error) => {
+                eprintln!(
+                    "[gateway] vault wrap key: keychain unavailable ({error}); using file fallback"
+                );
+            }
+        }
+    }
+    file_vault_wrap_key()
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
+    use local_first_secrets::{SecretMaterial, SecretRef, SecretStore};
+    let store =
+        local_first_secrets::SystemKeychainSecretStore::new(VAULT_WRAP_KEY_KEYCHAIN_SERVICE);
+    let reference =
+        SecretRef::new("homun", "local", "vault", "master-wrap").map_err(std::io::Error::other)?;
+    if let Some(material) = store.get(&reference).map_err(std::io::Error::other)? {
+        let encoded = material.expose_utf8().map_err(std::io::Error::other)?;
+        return decode_vault_wrap_key(encoded.trim()).ok_or_else(|| {
+            std::io::Error::other("vault wrap key in keychain is corrupt (expected 32 base64 bytes)")
+        });
+    }
+    let key = generate_vault_wrap_key();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+    store
+        .put(reference, SecretMaterial::from_string(encoded))
+        .map_err(std::io::Error::other)?;
+    Ok(key)
+}
+
+/// File fallback for the vault wrap key (0600). Used on platforms without a
+/// keychain backend (Linux/CI) or when the keychain is unreachable.
+fn file_vault_wrap_key() -> Result<[u8; 32], std::io::Error> {
+    let path = gateway_data_dir()?.join("vault-wrap-key");
+    if let Ok(bytes) = fs::read(&path) {
+        if let Some(key) = decode_vault_wrap_key(String::from_utf8_lossy(&bytes).trim()) {
+            return Ok(key);
+        }
+    }
+    let key = generate_vault_wrap_key();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+    write_private_file(&path, encoded.as_bytes())?;
+    Ok(key)
+}
+
+/// Mirrors `gateway_secret_key_seed`: two UUIDv4 (getrandom-backed) = 32 bytes.
+fn generate_vault_wrap_key() -> [u8; 32] {
+    let mut key = [0u8; 32];
+    key[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    key[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    key
+}
+
+fn decode_vault_wrap_key(encoded: &str) -> Option<[u8; 32]> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    if bytes.len() != 32 {
+        return None;
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&bytes);
+    Some(key)
+}
+
 /// Directory for human-readable/editable memory wiki markdown pages.
 fn gateway_memory_wiki_dir() -> Result<PathBuf, std::io::Error> {
     if let Ok(path) = env::var("HOMUN_MEMORY_WIKI_DIR") {
@@ -50365,6 +50791,10 @@ prs.save(Path({path:?}))
         assert!(guidance.contains("Continue only after the user"));
     }
 
+    // Stand-in for the OS-keychain-held vault wrap key; injected so vault tests
+    // exercise the syskey crypto without touching the real keychain.
+    const TEST_VAULT_WRAP_KEY: [u8; 32] = [7u8; 32];
+
     #[test]
     fn vault_record_from_proposal_creates_metadata_only_record() {
         let request = super::VaultProposalActionRequest {
@@ -50376,6 +50806,8 @@ prs.save(Path({path:?}))
             pin: None,
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
+            resolution: None,
+            record_id: None,
         };
         let record = super::vault_record_from_proposal(&request).expect("record");
         assert_eq!(record.category, local_first_vault::VaultCategory::Payments);
@@ -50398,7 +50830,7 @@ prs.save(Path({path:?}))
             pin: "123456".to_string(),
             current_pin: None,
         };
-        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        super::apply_vault_pin_setup(&vault, &TEST_VAULT_WRAP_KEY, &setup).expect("setup pin");
         let request = super::VaultProposalActionRequest {
             category: "payments".to_string(),
             label: "Carta personale".to_string(),
@@ -50408,13 +50840,14 @@ prs.save(Path({path:?}))
             pin: Some("123456".to_string()),
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
+            resolution: None,
+            record_id: None,
         };
 
-        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
         let record_id = response.record_id.parse().unwrap();
-        let verifier = vault.local_pin_verifier().unwrap().unwrap();
         let key = vault
-            .unlock_local_master_key(&verifier, "123456")
+            .unlock_local_master_key_system(&TEST_VAULT_WRAP_KEY)
             .expect("master key");
         let secret = vault
             .get_secret_material(&record_id, &key)
@@ -50446,14 +50879,15 @@ prs.save(Path({path:?}))
             pin: Some("123456".to_string()),
             thread_id: None,
             message_id: None,
+            resolution: None,
+            record_id: None,
         };
 
-        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
 
         let record_id = response.record_id.parse().unwrap();
-        let verifier = vault.local_pin_verifier().unwrap().unwrap();
         let key = vault
-            .unlock_local_master_key(&verifier, "123456")
+            .unlock_local_master_key_system(&TEST_VAULT_WRAP_KEY)
             .expect("master key");
         let secret = vault
             .get_secret_material(&record_id, &key)
@@ -50474,8 +50908,10 @@ prs.save(Path({path:?}))
             pin: None,
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
+            resolution: None,
+            record_id: None,
         };
-        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
         let summaries = vault
             .list()
             .expect("list")
@@ -50514,16 +50950,19 @@ prs.save(Path({path:?}))
             pin: Some("123456".to_string()),
             thread_id: None,
             message_id: None,
+            resolution: None,
+            record_id: None,
         };
         super::apply_vault_pin_setup(
             &vault,
+            &TEST_VAULT_WRAP_KEY,
             &super::VaultPinSetupRequest {
                 pin: "123456".to_string(),
                 current_pin: None,
             },
         )
         .expect("pin");
-        super::accept_vault_proposal(&vault, &request).expect("accept");
+        super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
 
         let found =
             super::search_vault_records(&vault, "qual è il mio codice fiscale", 5).expect("search");
@@ -50541,6 +50980,7 @@ prs.save(Path({path:?}))
         let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
         super::apply_vault_pin_setup(
             &vault,
+            &TEST_VAULT_WRAP_KEY,
             &super::VaultPinSetupRequest {
                 pin: "123456".to_string(),
                 current_pin: None,
@@ -50556,8 +50996,10 @@ prs.save(Path({path:?}))
             pin: Some("123456".to_string()),
             thread_id: None,
             message_id: None,
+            resolution: None,
+            record_id: None,
         };
-        super::accept_vault_proposal(&vault, &request).expect("accept");
+        super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
 
         let answer = super::recall_memory_response_with_vault_fallback(
             &vault,
@@ -50597,6 +51039,7 @@ prs.save(Path({path:?}))
         let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
         super::apply_vault_pin_setup(
             &vault,
+            &TEST_VAULT_WRAP_KEY,
             &super::VaultPinSetupRequest {
                 pin: "123456".to_string(),
                 current_pin: None,
@@ -50612,8 +51055,10 @@ prs.save(Path({path:?}))
             pin: Some("123456".to_string()),
             thread_id: None,
             message_id: None,
+            resolution: None,
+            record_id: None,
         };
-        super::accept_vault_proposal(&vault, &request).expect("accept");
+        super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
 
         let answer = super::recall_memory_response_with_vault_fallback(
             &vault,
@@ -50699,7 +51144,7 @@ prs.save(Path({path:?}))
             pin: "123456".to_string(),
             current_pin: None,
         };
-        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        super::apply_vault_pin_setup(&vault, &TEST_VAULT_WRAP_KEY, &setup).expect("setup pin");
         let request = super::VaultProposalActionRequest {
             category: "payments".to_string(),
             label: "Carta personale".to_string(),
@@ -50709,8 +51154,10 @@ prs.save(Path({path:?}))
             pin: Some("123456".to_string()),
             thread_id: Some("thread_1".to_string()),
             message_id: Some("msg_1".to_string()),
+            resolution: None,
+            record_id: None,
         };
-        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
         let record_id = response.record_id.parse().unwrap();
         let update = super::VaultRecordUpdateRequest {
             category: "private_notes".to_string(),
@@ -50720,7 +51167,7 @@ prs.save(Path({path:?}))
         };
 
         let updated =
-            super::update_vault_record(&vault, &record_id, &update).expect("update metadata");
+            super::update_vault_record(&vault, &TEST_VAULT_WRAP_KEY, &record_id, &update).expect("update metadata");
 
         assert!(updated.ok);
         assert_eq!(updated.record.id, response.record_id);
@@ -50730,9 +51177,8 @@ prs.save(Path({path:?}))
             updated.record.redacted_preview,
             "[VAULT:payments:card:last4=1111]"
         );
-        let verifier = vault.local_pin_verifier().unwrap().unwrap();
         let key = vault
-            .unlock_local_master_key(&verifier, "123456")
+            .unlock_local_master_key_system(&TEST_VAULT_WRAP_KEY)
             .expect("master key");
         let secret = vault
             .get_secret_material(&record_id, &key)
@@ -50757,7 +51203,7 @@ prs.save(Path({path:?}))
             pin: "123456".to_string(),
             current_pin: None,
         };
-        super::apply_vault_pin_setup(&vault, &setup).expect("setup pin");
+        super::apply_vault_pin_setup(&vault, &TEST_VAULT_WRAP_KEY, &setup).expect("setup pin");
         let request = super::VaultProposalActionRequest {
             category: "identity".to_string(),
             label: "Codice Fiscale".to_string(),
@@ -50767,13 +51213,16 @@ prs.save(Path({path:?}))
             pin: Some("123456".to_string()),
             thread_id: None,
             message_id: None,
+            resolution: None,
+            record_id: None,
         };
-        let response = super::accept_vault_proposal(&vault, &request).expect("accept");
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
         let record_id = response.record_id.parse().unwrap();
 
         let revealed = super::reveal_vault_record_secret(
             &vault,
             None,
+            &TEST_VAULT_WRAP_KEY,
             &record_id,
             &super::VaultRecordRevealRequest {
                 pin: "123456".to_string(),
@@ -50786,6 +51235,7 @@ prs.save(Path({path:?}))
         let wrong_pin = super::reveal_vault_record_secret(
             &vault,
             None,
+            &TEST_VAULT_WRAP_KEY,
             &record_id,
             &super::VaultRecordRevealRequest {
                 pin: "000000".to_string(),
@@ -50799,12 +51249,13 @@ prs.save(Path({path:?}))
             secret_value: Some("CNTFBA76L16F839Z".to_string()),
             pin: Some("123456".to_string()),
         };
-        let updated = super::update_vault_record(&vault, &record_id, &update).expect("update");
+        let updated = super::update_vault_record(&vault, &TEST_VAULT_WRAP_KEY, &record_id, &update).expect("update");
 
         assert_eq!(updated.record.label, "Codice Fiscale corretto");
         let revealed = super::reveal_vault_record_secret(
             &vault,
             None,
+            &TEST_VAULT_WRAP_KEY,
             &record_id,
             &super::VaultRecordRevealRequest {
                 pin: "123456".to_string(),
@@ -50815,10 +51266,11 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn vault_proposal_accept_saves_pending_without_pin_then_reveal_materializes_secret() {
+    fn vault_proposal_accept_stores_pending_value_without_pin_and_consumes_it() {
         let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
         super::apply_vault_pin_setup(
             &vault,
+            &TEST_VAULT_WRAP_KEY,
             &super::VaultPinSetupRequest {
                 pin: "123456".to_string(),
                 current_pin: None,
@@ -50841,16 +51293,23 @@ prs.save(Path({path:?}))
             pin: None,
             thread_id: None,
             message_id: None,
+            resolution: None,
+            record_id: None,
         };
 
-        let response = super::accept_vault_proposal_with_pending(&vault, Some(&pending), &request)
-            .expect("accept");
-        assert!(pending.get(&pending_id).is_some());
+        let response =
+            super::accept_vault_proposal(&vault, Some(&pending), &TEST_VAULT_WRAP_KEY, &request)
+                .expect("accept");
+        assert_eq!(response.status, "created");
+        // The value is stored immediately with NO PIN, and the pending is consumed
+        // — closing the idempotency gap that let a re-accept create a duplicate.
+        assert!(pending.get(&pending_id).is_none());
 
         let record_id = response.record_id.parse().unwrap();
         let revealed = super::reveal_vault_record_secret(
             &vault,
             Some(&pending),
+            &TEST_VAULT_WRAP_KEY,
             &record_id,
             &super::VaultRecordRevealRequest {
                 pin: "123456".to_string(),
@@ -50858,7 +51317,297 @@ prs.save(Path({path:?}))
         )
         .expect("reveal");
         assert_eq!(revealed.secret_value, "FM470BN");
-        assert!(pending.take(&pending_id).is_none());
+    }
+
+    // ---- Part C: dedup on save, now that vault values are system-readable ----
+
+    /// Minimal accept request builder for the dedup tests (no pending, no PIN).
+    fn vault_action_request(
+        category: &str,
+        label: &str,
+        redacted_preview: &str,
+        secret_value: Option<&str>,
+    ) -> super::VaultProposalActionRequest {
+        super::VaultProposalActionRequest {
+            category: category.to_string(),
+            label: label.to_string(),
+            redacted_preview: redacted_preview.to_string(),
+            secret_value: secret_value.map(str::to_string),
+            pending_id: None,
+            pin: None,
+            thread_id: None,
+            message_id: None,
+            resolution: None,
+            record_id: None,
+        }
+    }
+
+    fn read_secret_no_pin(
+        vault: &local_first_vault::SQLiteVaultStore,
+        record_id_text: &str,
+    ) -> String {
+        let record_id = record_id_text.parse().unwrap();
+        let key = vault
+            .unlock_local_master_key_system(&TEST_VAULT_WRAP_KEY)
+            .expect("no-pin master key");
+        vault
+            .get_secret_material(&record_id, &key)
+            .unwrap()
+            .unwrap()
+            .expose_utf8()
+            .unwrap()
+    }
+
+    #[test]
+    fn vault_dedup_ignores_identical_key_and_value() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let request = vault_action_request(
+            "private_notes",
+            "Percorso file",
+            "[VAULT:private_notes:local_file_path]",
+            Some("/Users/fabio/segreto.txt"),
+        );
+        let first = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("first save");
+        assert_eq!(first.status, "created");
+
+        // Same key AND same value → ignored, no duplicate (the proven double-accept bug).
+        let second = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request)
+            .expect("second save");
+        assert_eq!(second.status, "ignored");
+        assert_eq!(second.record_id, first.record_id);
+        assert_eq!(vault.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn vault_dedup_reports_key_only_conflict() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "private_notes",
+                "Percorso file",
+                "[VAULT:private_notes:local_file_path]",
+                Some("/old/path"),
+            ),
+        )
+        .expect("first");
+
+        // Same category+field, DIFFERENT value → conflict("key"), nothing created.
+        let conflict = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "private_notes",
+                "Percorso file",
+                "[VAULT:private_notes:local_file_path]",
+                Some("/new/path"),
+            ),
+        )
+        .expect("conflict");
+        assert_eq!(conflict.status, "conflict");
+        assert_eq!(conflict.match_type.as_deref(), Some("key"));
+        assert!(conflict.existing.is_some());
+        assert_eq!(vault.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn vault_dedup_reports_value_only_conflict() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "identity",
+                "Codice Fiscale",
+                "[VAULT:identity:fiscal_code]",
+                Some("SHARED-SECRET"),
+            ),
+        )
+        .expect("first");
+
+        // Same value under a DIFFERENT key → conflict("value").
+        let conflict = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "vehicles",
+                "Targa",
+                "[VAULT:vehicles:plate]",
+                Some("SHARED-SECRET"),
+            ),
+        )
+        .expect("conflict");
+        assert_eq!(conflict.status, "conflict");
+        assert_eq!(conflict.match_type.as_deref(), Some("value"));
+        assert_eq!(vault.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn vault_dedup_creates_when_neither_key_nor_value_match() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request("identity", "CF", "[VAULT:identity:fiscal_code]", Some("A")),
+        )
+        .expect("first");
+        let second = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request("vehicles", "Targa", "[VAULT:vehicles:plate]", Some("B")),
+        )
+        .expect("second");
+        assert_eq!(second.status, "created");
+        assert_eq!(vault.list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn vault_conflict_resolution_add_creates_a_second_record() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "private_notes",
+                "Percorso",
+                "[VAULT:private_notes:local_file_path]",
+                Some("/a"),
+            ),
+        )
+        .expect("first");
+        let mut add = vault_action_request(
+            "private_notes",
+            "Percorso",
+            "[VAULT:private_notes:local_file_path]",
+            Some("/b"),
+        );
+        add.resolution = Some("add".to_string());
+        let response =
+            super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &add).expect("add");
+        assert_eq!(response.status, "created");
+        assert_eq!(vault.list().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn vault_conflict_resolution_update_overwrites_the_targeted_value() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let first = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "private_notes",
+                "Percorso",
+                "[VAULT:private_notes:local_file_path]",
+                Some("/old"),
+            ),
+        )
+        .expect("first");
+        let mut update = vault_action_request(
+            "private_notes",
+            "Percorso",
+            "[VAULT:private_notes:local_file_path]",
+            Some("/new"),
+        );
+        update.resolution = Some("update".to_string());
+        update.record_id = Some(first.record_id.clone());
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &update)
+            .expect("update");
+        assert_eq!(response.status, "created");
+        assert_eq!(vault.list().unwrap().len(), 1);
+        assert_eq!(read_secret_no_pin(&vault, &first.record_id), "/new");
+    }
+
+    #[test]
+    fn vault_conflict_resolution_ignore_keeps_existing_and_creates_nothing() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let first = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "private_notes",
+                "Percorso",
+                "[VAULT:private_notes:local_file_path]",
+                Some("/keep"),
+            ),
+        )
+        .expect("first");
+        let mut ignore = vault_action_request(
+            "private_notes",
+            "Percorso",
+            "[VAULT:private_notes:local_file_path]",
+            Some("/discard"),
+        );
+        ignore.resolution = Some("ignore".to_string());
+        ignore.record_id = Some(first.record_id.clone());
+        let response = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &ignore)
+            .expect("ignore");
+        assert_eq!(response.status, "ignored");
+        assert_eq!(vault.list().unwrap().len(), 1);
+        assert_eq!(read_secret_no_pin(&vault, &first.record_id), "/keep");
+    }
+
+    #[test]
+    fn vault_use_path_reads_value_with_no_pin_after_syskey_save() {
+        // The whole point of the refactor: the system reads a saved value with NO PIN.
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let saved = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request("identity", "CF", "[VAULT:identity:fiscal_code]", Some("VALUE-1")),
+        )
+        .expect("save without pin");
+        assert_eq!(read_secret_no_pin(&vault, &saved.record_id), "VALUE-1");
+    }
+
+    #[test]
+    fn vault_legacy_pin_wrapped_blocks_no_pin_save_until_migrated() {
+        // A legacy PIN-wrapped vault cannot store a NEW readable value without the
+        // PIN (the master key is still PIN-locked). A save carrying the PIN migrates
+        // it inline; afterwards the system stores/dedups values with no PIN.
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let verifier = local_first_vault::LocalPinVerifier::create("123456").unwrap();
+        vault.set_local_pin_verifier(verifier.clone()).unwrap();
+        vault
+            .ensure_local_master_key(&verifier, "123456")
+            .expect("legacy master key");
+
+        let no_pin = vault_action_request("identity", "CF", "[VAULT:identity:fiscal_code]", Some("X"));
+        let err = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &no_pin)
+            .expect_err("blocked before migration");
+        assert_eq!(err.code, "invalid_vault_pin");
+
+        let mut with_pin =
+            vault_action_request("identity", "CF", "[VAULT:identity:fiscal_code]", Some("X"));
+        with_pin.pin = Some("123456".to_string());
+        let ok = super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &with_pin)
+            .expect("migrated save");
+        assert_eq!(ok.status, "created");
+        assert_eq!(
+            vault.keyring_algorithm().unwrap().as_deref(),
+            Some("xchacha20poly1305-syskey-v1")
+        );
+
+        // Autonomous (no-PIN) dedup now works against the migrated vault.
+        let dup = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request("identity", "CF", "[VAULT:identity:fiscal_code]", Some("X")),
+        )
+        .expect("dedup with no pin");
+        assert_eq!(dup.status, "ignored");
     }
 
     #[tokio::test]
@@ -50971,54 +51720,77 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn vault_pin_setup_creates_and_rewraps_local_master_key() {
+    fn vault_pin_setup_establishes_system_wrapped_master_key_independent_of_pin() {
         let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
         let first_setup = super::VaultPinSetupRequest {
             pin: "123456".to_string(),
             current_pin: None,
         };
 
-        super::apply_vault_pin_setup(&vault, &first_setup).expect("first setup");
-        let first_verifier = vault.local_pin_verifier().unwrap().unwrap();
-        let master_key = vault
-            .unlock_local_master_key(&first_verifier, "123456")
-            .expect("master key");
+        super::apply_vault_pin_setup(&vault, &TEST_VAULT_WRAP_KEY, &first_setup)
+            .expect("first setup");
 
+        // New model: the master key is wrapped by the SYSTEM key, not the PIN.
+        assert_eq!(
+            vault.keyring_algorithm().unwrap().as_deref(),
+            Some("xchacha20poly1305-syskey-v1")
+        );
+        let master_key = vault
+            .unlock_local_master_key_system(&TEST_VAULT_WRAP_KEY)
+            .expect("system master key");
+
+        // Changing the PIN neither rotates nor re-wraps the master key: the PIN is
+        // a reveal-only gate now, cryptographically independent of the master key.
         let change = super::VaultPinSetupRequest {
             pin: "654321".to_string(),
             current_pin: Some("123456".to_string()),
         };
-        super::apply_vault_pin_setup(&vault, &change).expect("pin change");
-        let new_verifier = vault.local_pin_verifier().unwrap().unwrap();
+        super::apply_vault_pin_setup(&vault, &TEST_VAULT_WRAP_KEY, &change).expect("pin change");
 
         assert_eq!(
             vault
-                .unlock_local_master_key(&new_verifier, "654321")
-                .expect("rewrapped master key"),
+                .unlock_local_master_key_system(&TEST_VAULT_WRAP_KEY)
+                .expect("master key unchanged after pin change"),
             master_key
         );
-        assert!(
-            vault
-                .unlock_local_master_key(&new_verifier, "123456")
-                .is_err()
-        );
+        let new_verifier = vault.local_pin_verifier().unwrap().unwrap();
+        assert!(new_verifier.verify("654321"));
+        assert!(!new_verifier.verify("123456"));
     }
 
     #[test]
-    fn vault_pin_change_migrates_legacy_pin_without_master_key() {
+    fn vault_pin_change_migrates_legacy_pin_wrapped_master_key_to_system() {
         let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
-        vault
-            .set_local_pin_verifier(local_first_vault::LocalPinVerifier::create("123456").unwrap())
-            .unwrap();
+        // Legacy state: a PIN-wrapped master key already exists.
+        let verifier = local_first_vault::LocalPinVerifier::create("123456").unwrap();
+        vault.set_local_pin_verifier(verifier.clone()).unwrap();
+        let legacy_key = vault
+            .ensure_local_master_key(&verifier, "123456")
+            .expect("legacy master key");
+        assert_eq!(
+            vault.keyring_algorithm().unwrap().as_deref(),
+            Some("xchacha20poly1305-pin-v1")
+        );
+
+        // A PIN change carries the current PIN, which the setup uses to migrate the
+        // wrapping (pin -> syskey) exactly once, preserving the master key value.
         let change = super::VaultPinSetupRequest {
             pin: "654321".to_string(),
             current_pin: Some("123456".to_string()),
         };
+        super::apply_vault_pin_setup(&vault, &TEST_VAULT_WRAP_KEY, &change)
+            .expect("legacy pin change");
 
-        super::apply_vault_pin_setup(&vault, &change).expect("legacy pin change");
-        let verifier = vault.local_pin_verifier().unwrap().unwrap();
-
-        assert!(vault.unlock_local_master_key(&verifier, "654321").is_ok());
+        assert_eq!(
+            vault.keyring_algorithm().unwrap().as_deref(),
+            Some("xchacha20poly1305-syskey-v1")
+        );
+        assert_eq!(
+            vault
+                .unlock_local_master_key_system(&TEST_VAULT_WRAP_KEY)
+                .expect("migrated master key"),
+            legacy_key
+        );
     }
 
     fn payment_snapshot() -> local_first_vault::PaymentApprovalSnapshot {
@@ -55948,6 +56720,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             vault_store: std::sync::Arc::new(std::sync::Mutex::new(
                 local_first_vault::SQLiteVaultStore::open_in_memory().expect("vault store"),
             )),
+            vault_wrap_key: std::sync::Arc::new([7u8; 32]),
             pending_vault_proposals: std::sync::Arc::new(
                 crate::privacy_guard::PendingVaultProposalStore::default(),
             ),

@@ -61,6 +61,7 @@ import {
   type PluginPackageUpdatesView,
   type TrustedPluginPublicKeysView,
   type VaultRecordSummary,
+  type VaultProposalAcceptResult,
   type LanguageInfo,
   type LlmConcurrencyView,
   type ProviderModelView,
@@ -2307,6 +2308,9 @@ function VaultPane() {
   const [manualSecretPin, setManualSecretPin] = useState("");
   const [vaultTab, setVaultTab] = useState<"sensitive" | "pin">("sensitive");
   const [vaultAddOpen, setVaultAddOpen] = useState(false);
+  // A pending dedup conflict from the Add flow; the user resolves it add/update/ignore.
+  const [manualSecretConflict, setManualSecretConflict] =
+    useState<VaultProposalAcceptResult | null>(null);
   const [vaultRecords, setVaultRecords] = useState<VaultRecordSummary[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [editingVaultRecord, setEditingVaultRecord] = useState<VaultRecordSummary | null>(null);
@@ -2355,6 +2359,7 @@ function VaultPane() {
     setVaultAddOpen(false);
     setManualSecretValue("");
     setManualSecretPin("");
+    setManualSecretConflict(null);
     setError(null);
   }
 
@@ -2446,19 +2451,61 @@ function VaultPane() {
     }
     setBusy(true);
     try {
-      const result = await coreBridge.vaultProposalAccept({
-        category: manualSecretCategory,
-        label,
-        redacted_preview: `[VAULT:${manualSecretCategory}:${label}]`,
-        secret_value: manualSecretValue.trim(),
-        pin: manualSecretPin,
-      });
-      setManualSecretLabel("");
-      setManualSecretValue("");
-      setManualSecretPin("");
-      setVaultAddOpen(false);
-      await refreshVaultRecords();
-      setNote(t("settings.vaultManualSaved", { id: result.record_id }));
+      await applyManualSecretResult(
+        await coreBridge.vaultProposalAccept({
+          category: manualSecretCategory,
+          label,
+          redacted_preview: `[VAULT:${manualSecretCategory}:${label}]`,
+          secret_value: manualSecretValue.trim(),
+          pin: manualSecretPin,
+        }),
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // A save returns "created", "ignored" (identical record already existed), or
+  // "conflict" (a partial match to resolve). Only a resolved/created save clears
+  // the form; a conflict opens the resolution dialog.
+  async function applyManualSecretResult(result: VaultProposalAcceptResult) {
+    if (result.status === "conflict") {
+      setManualSecretConflict(result);
+      return;
+    }
+    setManualSecretConflict(null);
+    setManualSecretLabel("");
+    setManualSecretValue("");
+    setManualSecretPin("");
+    setVaultAddOpen(false);
+    await refreshVaultRecords();
+    setNote(
+      result.status === "ignored"
+        ? t("settings.vaultManualDuplicate", { label: result.label })
+        : t("settings.vaultManualSaved", { id: result.record_id }),
+    );
+  }
+
+  async function resolveManualSecretConflict(resolution: "add" | "update" | "ignore") {
+    setError(null);
+    setNote(null);
+    setBusy(true);
+    try {
+      await applyManualSecretResult(
+        await coreBridge.vaultProposalAccept({
+          category: manualSecretCategory,
+          label: manualSecretLabel.trim(),
+          redacted_preview: `[VAULT:${manualSecretCategory}:${manualSecretLabel.trim()}]`,
+          secret_value: manualSecretValue.trim(),
+          pin: manualSecretPin,
+          resolution,
+          ...(resolution === "add"
+            ? {}
+            : { record_id: manualSecretConflict?.existing?.id }),
+        }),
+      );
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -2906,6 +2953,45 @@ function VaultPane() {
                     {t("settings.vaultSave")}
                   </button>
                 </div>
+                {manualSecretConflict && (
+                  <div className="vault-conflict">
+                    <p className="cmp-confirm-note">
+                      {manualSecretConflict.match_type === "key"
+                        ? t("settings.vaultConflictKey", {
+                            label: manualSecretConflict.existing?.label ?? "",
+                          })
+                        : t("settings.vaultConflictValue", {
+                            label: manualSecretConflict.existing?.label ?? "",
+                          })}
+                    </p>
+                    <div className="vault-modal-actions">
+                      <button
+                        className="set-btn primary"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void resolveManualSecretConflict("update")}
+                      >
+                        {t("settings.vaultConflictUpdate")}
+                      </button>
+                      <button
+                        className="set-btn"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void resolveManualSecretConflict("add")}
+                      >
+                        {t("settings.vaultConflictAdd")}
+                      </button>
+                      <button
+                        className="set-btn"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void resolveManualSecretConflict("ignore")}
+                      >
+                        {t("settings.vaultConflictIgnore")}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {error && <p className="cmp-confirm-err">{error}</p>}
               </div>
             </div>
