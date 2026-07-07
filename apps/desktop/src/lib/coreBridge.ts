@@ -1,5 +1,5 @@
 import { chatApi } from "./chatApi";
-import { enqueueTurn, openTurnStream } from "./chatApi";
+import { cancelTurn, enqueueTurn, openTurnStream } from "./chatApi";
 import { wsSubscription } from "./wsSubscription";
 export type { CoreBranchPoint, CoreBranchOption } from "./chatApi";
 import {
@@ -3116,10 +3116,10 @@ export const coreBridge = {
 };
 
 async function cancelChatPromptStream(requestId: string) {
-  // Cancellation = stop reading the SSE stream client-side. There is no
-  // server-side "cancel" endpoint: the provider stream is aborted when the
-  // gateway connection closes.
-  await chatApi.cancelChatPromptStream(requestId);
+  // Cancel the running turn on the broker (DELETE /turns/{id}). The turn_id is
+  // derived from the requestId the same way the enqueue does (`turn_{requestId}`),
+  // so Stop actually aborts the turn server-side instead of being a no-op.
+  await cancelTurn(`turn_${requestId}`);
 }
 
 function electronCoreStatus(): CoreBridgeStatus {

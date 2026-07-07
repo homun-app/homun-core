@@ -213,8 +213,8 @@ assertContains("src/App.tsx", "pendingEventThreadIdsRef", "event-driven thread n
 assertContains("src/App.tsx", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
 assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");
 assertContains("src/components/ChatView.tsx", "eventParts: normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must preserve structured event parts from the gateway result");
-assertContains("src/lib/chatApi.ts", "const activeStreamSockets = new Map<string, WebSocket>();", "chat stream cancellation must track sockets by request id");
-assertContains("src/lib/chatApi.ts", "activeStreamSockets.get(requestId)?.close(4000, \"cancelled by user\");", "chat stream cancellation must close the matching WebSocket");
+assertContains("src/lib/chatApi.ts", "export async function cancelTurn(", "chat cancellation must call the broker cancel_turn endpoint (DELETE /turns/{id})");
+assertContains("src/lib/coreBridge.ts", "await cancelTurn(`turn_${requestId}`)", "Stop must cancel the running turn on the broker by its derived turn id, not a client-side socket close");
 assertContains("src/plugins/registry.tsx", "navSection?: \"work\" | \"create\" | \"workspace\" | \"more\"", "plugin manifest must declare sidebar placement by operational role");
 assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", "presentations addon must be promoted into the create section");
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");
@@ -325,8 +325,8 @@ assertContains("src/lib/coreBridge.ts", "attachments?: CoreChatAttachment[]", "s
 
 assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream", "composer must submit prompts through the local chat transport");
 assertContains("src/lib/coreBridge.ts", "submitBrowserRuntimeChatPromptStream", "Electron bridge must stream from the local Gemma runtime through Electron-safe transport");
-assertContains("src/lib/coreBridge.ts", "openChatStreamWithGateway", "Electron bridge must stream through the Rust desktop gateway");
-assertContains("src/lib/coreBridge.ts", "/api/chat/generate_stream", "Electron bridge must call the local gateway streaming endpoint");
+assertContains("src/lib/coreBridge.ts", "enqueueTurn(", "Electron bridge must submit chat turns through the Rust gateway's turn broker");
+assertContains("src/lib/chatApi.ts", "/api/chat/turns", "broker turn API must POST turns to the local gateway endpoint");
 assertNotContains("src/lib/coreBridge.ts", "127.0.0.1:8765", "renderer must not call Gemma runtime directly");
 assertContains("src/lib/gatewayConfig.ts", "localFirstDesktop", "desktop renderer must receive packaged gateway config through Electron preload");
 assertContains("src/lib/gatewayConfig.ts", "VITE_HOMUN_DESKTOP_GATEWAY_TOKEN", "desktop renderer may receive the local gateway token through Vite env in tests/dev");
@@ -358,11 +358,9 @@ assertContains("src/App.tsx", "mapCoreCapabilitySnapshot", "desktop connections 
 assertContains("src/lib/chatApi.ts", "/api/chat/threads", "chat threads must load from the local Rust gateway first");
 assertContains("src/lib/chatApi.ts", "hydrateThreadSnapshot", "chat API must keep a local cache synchronized with gateway thread snapshots");
 assertContains("src/lib/chatApi.ts", "localThreads", "chat threads must keep an Electron-safe fallback cache");
-assertContains("src/lib/chatApi.ts", "commitChatPromptResult", "Electron chat fallback must persist completed streamed answers before read model refresh");
-assertContains("src/lib/chatApi.ts", "commitChatContinuetionResult", "Electron chat fallback must persist automatic continuations before read model refresh");
-assertContains("src/lib/coreBridge.ts", "await chatApi.commitChatPromptResult", "streamed chat answers must be committed before the UI refreshes the thread read model");
-assertContains("src/lib/coreBridge.ts", "result.computer_session = await electronLocalComputerSession", "streamed prompt results must refresh the real local computer read model after commit");
-assertContains("src/lib/coreBridge.ts", "await chatApi.commitChatContinuetionResult", "automatic continuations must be committed before the UI refreshes the thread read model");
+// NOTE: client-side commit assertions removed — the turn broker is now the source of truth
+// and persists the assistant message server-side on done (no client commit_prompt_result).
+assertContains("src/lib/coreBridge.ts", "result.computer_session = await electronLocalComputerSession", "streamed prompt results must refresh the real local computer read model after the turn completes");
 assertContains("src/lib/coreBridge.ts", "trimRepeatedContinuetionPrefix", "automatic continuation joins must avoid duplicating overlapping model output");
 assertContains("src/lib/chatApi.ts", "recentChatContext", "Electron chat fallback must expose recent thread context to the local prompt builder");
 assertContains("src/lib/chatApi.ts", "rawRecentChatContext", "Electron chat must expose raw recent context for Rust-side budgeting");

@@ -12,48 +12,6 @@ import type {
 import { buildJuicePromptChatContext } from "./contextBudget";
 import { DESKTOP_GATEWAY_URL, gatewayHeaders } from "./gatewayConfig";
 
-type StreamEvent =
-  | {
-      type: "accepted";
-      request_id: string;
-      thread_id: string;
-    }
-  | {
-      type: "delta";
-      request_id: string;
-      text: string;
-    }
-  | {
-      type:
-        | "reasoning"
-        | "activity"
-        | "plan_update"
-        | "choice_prompt"
-        | "vault_propose"
-        | "vault_reveal"
-        | "payment_approval"
-        | "tool_result"
-        | "recall"
-        | "diff";
-      request_id: string;
-      text?: string;
-      markdown?: string;
-      payload?: unknown;
-    }
-  | {
-      type: "done";
-      request_id: string;
-      result: CorePromptSubmissionResult;
-      metrics?: Partial<CoreChatMessageMetrics>;
-    }
-  | {
-      type: "error";
-      request_id: string;
-      code?: string;
-      message?: string;
-      retryable?: boolean;
-    };
-
 // One alternative at a branch point: the sibling node and the leaf to activate to
 // display its branch, plus an optional name (Phase 4).
 export interface CoreBranchOption {
@@ -70,7 +28,6 @@ export interface CoreBranchPoint {
 
 const streamEventListeners = new Set<(payload: CoreChatStreamEvent) => void>();
 const streamListeners = new Set<(payload: CoreChatStreamDelta) => void>();
-const activeStreamSockets = new Map<string, WebSocket>();
 let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
   {
@@ -320,58 +277,6 @@ export const chatApi = {
     return Promise.resolve(chatMessagesSnapshot(threadId));
   },
 
-  async commitChatPromptResult(
-    threadId: string,
-    result: CorePromptSubmissionResult,
-    branchFromId?: string | null,
-  ) {
-    const snapshot = commitLocalPromptResult(threadId, result);
-    try {
-      return hydrateMessagesSnapshot(
-        await gatewayJson<CoreChatMessagesSnapshot>(
-          `/api/chat/threads/${encodeURIComponent(threadId)}/messages/commit_prompt_result`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              user_message: corePromptMessageToChatMessage(result.user_message),
-              assistant_message: corePromptMessageToChatMessage(result.assistant_message),
-              // Edit-as-branch: the gateway commits the new turn as a sibling of
-              // this message, preserving the old branch in the chat tree.
-              branch_from_id: branchFromId ?? null,
-            }),
-          },
-        ),
-      );
-    } catch {
-      return snapshot;
-    }
-  },
-
-  // Regenerated answer → a SIBLING of the previous one under the prompting user
-  // message (persisted branch, navigable with the ‹ n/m › switcher).
-  async commitChatRegeneratedResult(
-    threadId: string,
-    userMessageId: string,
-    result: CorePromptSubmissionResult,
-  ) {
-    const snapshot = commitLocalContinuetionResult(threadId, result.assistant_message.id, result);
-    try {
-      return hydrateMessagesSnapshot(
-        await gatewayJson<CoreChatMessagesSnapshot>(
-          `/api/chat/threads/${encodeURIComponent(threadId)}/messages/commit_regenerated_result`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              user_message_id: userMessageId,
-              assistant_message: corePromptMessageToChatMessage(result.assistant_message),
-            }),
-          },
-        ),
-      );
-    } catch {
-      return snapshot;
-    }
-  },
 
   // Branch switcher data: every node on the active path that has alternatives.
   async chatBranches(threadId: string): Promise<CoreBranchPoint[]> {
@@ -458,28 +363,6 @@ export const chatApi = {
     );
   },
 
-  async commitChatContinuetionResult(
-    threadId: string,
-    messageId: string,
-    result: CorePromptSubmissionResult,
-  ) {
-    const snapshot = commitLocalContinuetionResult(threadId, messageId, result);
-    try {
-      return hydrateMessagesSnapshot(
-        await gatewayJson<CoreChatMessagesSnapshot>(
-          `/api/chat/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/commit_continuation_result`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              assistant_message: corePromptMessageToChatMessage(result.assistant_message),
-            }),
-          },
-        ),
-      );
-    } catch {
-      return snapshot;
-    }
-  },
 
   listenChatStreamDelta(handler: (payload: CoreChatStreamDelta) => void) {
     streamListeners.add(handler);
@@ -493,41 +376,6 @@ export const chatApi = {
     return Promise.resolve(() => {
       streamEventListeners.delete(handler);
     });
-  },
-
-  async submitChatPromptStream(
-    requestId: string,
-    threadId: string,
-    prompt: string,
-    attachments: ChatAttachmentInput[] = [],
-    visiblePrompt?: string,
-  ): Promise<CorePromptSubmissionResult> {
-    return consumeChatWebSocketStream(requestId, {
-      kind: "submit",
-      request_id: requestId,
-      thread_id: threadId,
-      prompt,
-      visible_prompt: visiblePrompt,
-      attachments: attachments.map(toGatewayAttachmentInput),
-    });
-  },
-
-  async continueChatMessageStream(
-    requestId: string,
-    threadId: string,
-    messageId: string,
-  ): Promise<CorePromptSubmissionResult> {
-    return consumeChatWebSocketStream(requestId, {
-      kind: "continue",
-      request_id: requestId,
-      thread_id: threadId,
-      message_id: messageId,
-    });
-  },
-
-  async cancelChatPromptStream(requestId: string) {
-    activeStreamSockets.get(requestId)?.close(4000, "cancelled by user");
-    activeStreamSockets.delete(requestId);
   },
 
   debugChatStream(
@@ -638,154 +486,6 @@ function commitLocalContinuetionResult(
   return chatMessagesSnapshot(threadId);
 }
 
-async function consumeChatStreamResponse(
-  response: Response,
-  requestId: string,
-): Promise<CorePromptSubmissionResult> {
-    if (!response.ok) {
-      throw new Error(await gatewayErrorMessage(response));
-    }
-    if (!response.body) {
-      throw new Error("The local chat gateway did not open the stream.");
-    }
-
-    const reader: ReadableStreamDefaultReader<Uint8Array> =
-      response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let result: CorePromptSubmissionResult | null = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const event = parseStreamEvent(line);
-        if (!event || event.request_id !== requestId) continue;
-        if (event.type === "delta") {
-          notifyChatStreamDelta({ type: "delta", request_id: requestId, delta: event.text });
-        } else if (event.type === "done") {
-          notifyChatStreamEvent({ type: "done", request_id: requestId });
-          result = event.result;
-        } else if (event.type === "error") {
-          notifyChatStreamEvent({
-            type: "error",
-            request_id: requestId,
-            message: event.message,
-          });
-          throw new Error(event.message ?? "Local chat gateway error");
-        } else {
-          const payload = streamEventToCoreEvent(event, requestId);
-          if (payload) notifyChatStreamEvent(payload);
-        }
-      }
-    }
-
-    if (!result) {
-      throw new Error("The local chat gateway closed the stream with no result.");
-    }
-    return result;
-}
-
-async function consumeChatWebSocketStream(
-  requestId: string,
-  request: Record<string, unknown>,
-): Promise<CorePromptSubmissionResult> {
-  const url = await chatStreamWebSocketUrl();
-  return new Promise<CorePromptSubmissionResult>((resolve, reject) => {
-    let settled = false;
-    let opened = false;
-    let chunks = 0;
-    let chars = 0;
-    const startedAt = performance.now();
-    let lastDebugChunks = 0;
-    const socket = new WebSocket(url);
-    activeStreamSockets.set(requestId, socket);
-
-    function debug(stage: string, detail?: string) {
-      void chatApi.debugChatStream(requestId, {
-        stage,
-        chunks,
-        chars,
-        elapsed_ms: performance.now() - startedAt,
-        detail,
-      });
-    }
-
-    function settle(
-      action: (value: CorePromptSubmissionResult) => void,
-      value: CorePromptSubmissionResult,
-    ) {
-      if (settled) return;
-      settled = true;
-      activeStreamSockets.delete(requestId);
-      socket.close();
-      action(value);
-    }
-
-    function fail(error: Error) {
-      if (settled) return;
-      settled = true;
-      activeStreamSockets.delete(requestId);
-      socket.close();
-      reject(error);
-    }
-
-    socket.addEventListener("open", () => {
-      opened = true;
-      debug("ws_open");
-      socket.send(JSON.stringify(request));
-    });
-    socket.addEventListener("message", (message) => {
-      const event = parseStreamEvent(String(message.data));
-      if (!event || event.request_id !== requestId) return;
-      if (event.type === "delta") {
-        chunks += 1;
-        chars += event.text.length;
-        if (chunks === 1 || chunks - lastDebugChunks >= 50) {
-          lastDebugChunks = chunks;
-          debug("client_received_delta");
-        }
-        notifyChatStreamDelta({ type: "delta", request_id: requestId, delta: event.text });
-      } else if (event.type === "done") {
-        debug("client_received_done");
-        notifyChatStreamEvent({ type: "done", request_id: requestId });
-        settle(resolve, event.result);
-      } else if (event.type === "error") {
-        debug("client_received_error", event.message);
-        notifyChatStreamEvent({
-          type: "error",
-          request_id: requestId,
-          message: event.message,
-        });
-        fail(new Error(event.message ?? "Local chat gateway error"));
-      } else {
-        const payload = streamEventToCoreEvent(event, requestId);
-        if (payload) notifyChatStreamEvent(payload);
-      }
-    });
-    socket.addEventListener("error", () => {
-      fail(
-        new Error(
-          opened
-            ? "Chat WebSocket stream interrupted."
-            : "Chat WebSocket gateway unavailable.",
-        ),
-      );
-    });
-    socket.addEventListener("close", () => {
-      if (!settled) {
-        fail(new Error("The local chat gateway closed the WebSocket with no result."));
-      }
-    });
-  });
-}
-
-async function chatStreamWebSocketUrl(): Promise<string> {
-  throw new Error("Rust chat gateway not yet extracted as a standalone service.");
-}
 
 function notifyChatStreamDelta(payload: CoreChatStreamDelta) {
   notifyChatStreamEvent(payload);
@@ -801,46 +501,6 @@ function notifyChatStreamEvent(payload: CoreChatStreamEvent) {
   }
 }
 
-function streamEventToCoreEvent(
-  event: StreamEvent,
-  requestId: string,
-): CoreChatStreamEvent | null {
-  switch (event.type) {
-    case "reasoning":
-      return { type: "reasoning", request_id: requestId, text: String(event.text ?? "") };
-    case "activity":
-      return { type: "activity", request_id: requestId, text: String(event.text ?? "") };
-    case "plan_update":
-      return {
-        type: "plan_update",
-        request_id: requestId,
-        markdown: String(event.markdown ?? ""),
-      };
-    case "choice_prompt":
-    case "vault_propose":
-    case "vault_reveal":
-    case "payment_approval":
-    case "tool_result":
-    case "recall":
-    case "diff":
-      // Payload raw dallo stream (JSON.parse → unknown). La validazione runtime
-      // avviene nei parser downstream (parseVaultProposalPayload, ecc.); qui
-      // trasportiamo il payload nel tipo dichiarato dell'evento (B2/A1).
-      return {
-        type: event.type,
-        request_id: requestId,
-        payload: event.payload,
-      } as CoreChatStreamEvent;
-    default:
-      return null;
-  }
-}
-
-function parseStreamEvent(line: string): StreamEvent | null {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  return JSON.parse(trimmed) as StreamEvent;
-}
 
 async function gatewayErrorMessage(response: Response) {
   try {
@@ -1026,12 +686,11 @@ function currentTimestampSeconds() {
   return Math.floor(Date.now() / 1000).toString();
 }
 
-// ── Broker turn API (POST /api/chat/turns + GET /turns/{id}/stream) ──────────
-// These helpers talk to the persistent turn broker. The bridge uses them when
-// the gateway reports HOMUN_TURN_BROKER=on (see isBrokerEnabled). The broker is
+// ── Broker turn API (POST /api/chat/turns, GET /turns/{id}/stream, DELETE /turns/{id}) ──
+// These helpers talk to the persistent turn broker (the only chat path). The broker is
 // the server-owned source of truth: it persists the user message atomically with
 // the enqueue, runs the turn, persists the assistant message on done, and emits
-// durable turn_events for the live stream.
+// durable turn_events (delivered live over the unified WebSocket /api/ws).
 
 /** Response body for POST /api/chat/turns. */
 export interface EnqueueTurnResponse {
@@ -1104,16 +763,15 @@ export async function openTurnStream(turnId: string, since: number = 0): Promise
   return res;
 }
 
-/** Reports whether the gateway has the broker path active (HOMUN_TURN_BROKER=on). */
-export async function isBrokerEnabled(): Promise<boolean> {
-  try {
-    const res = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/broker_enabled`, {
-      headers: gatewayHeaders(),
-    });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { enabled?: boolean };
-    return body.enabled === true;
-  } catch {
-    return false;
-  }
+/**
+ * Cancel a running turn: DELETE /api/chat/turns/{id}. The broker marks the turn
+ * cancelled and notifies the executor. 202 = accepted, 404 = no active turn
+ * (already finished) — both are fine for a best-effort Stop, so we don't throw.
+ */
+export async function cancelTurn(turnId: string): Promise<void> {
+  await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/turns/${encodeURIComponent(turnId)}`, {
+    method: "DELETE",
+    headers: gatewayHeaders(),
+  });
 }
+
