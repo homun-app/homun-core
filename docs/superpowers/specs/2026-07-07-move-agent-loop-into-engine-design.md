@@ -108,11 +108,30 @@ granulari). Il suo rollout "passo 0 = estrazione motore (ADR 0024)" È questo in
   (~850 righe, verbatim, behavior-preserving). Materializza il confine-browser: il seam che 0025 rimpiazza
   con `browse` ricorsivo, e lascia `execute_chat_tool` = i ~47 tool puliti. Gate: `cargo check` pulito +
   506/507 gateway (1 rosso `soffice` ambientale).
-- **5d.1:** `execute_chat_tool` (senza browser) diventa l'impl di `CapabilityExecutor`. La firma del trait
-  va raffinata per portare gli **effetti loop-owned** dei ~47 tool (plan, append ad `accumulated`, tool da
-  caricare, trace/evidence, flag `pending_confirm`/`pending_compaction`) come **ritorno**, non mutazione di
-  `ctx` — un `ToolOutcome{ result, effects }` che l'engine applica al proprio stato di loop. Piccolo e
-  circoscritto (niente stato browser).
+- **5d.1a ✅ (questa sessione, commit 6e8a97dc):** raffinato il contratto. `CapabilityExecutor::execute_tool`
+  ritorna `Result<ToolOutcome, String>` (`ToolOutcome{ result, effects: ToolEffects }`). `ToolEffects` è
+  radicato 1:1 nelle mutazioni `ctx` reali di `execute_chat_tool` (post-estrazione browser), mappate questa
+  sessione: `append_output`→`accumulated`, `plan`, `load_tools`→`loaded_tools`/`tool_schemas`, `trace`,
+  `clear_evidence`, `request_confirm`, `request_compaction`, `reset_stall_guards` (il reset di progresso-reale
+  dell'arm `update_plan`). Mock+test aggiornati; nessuno implementa ancora il trait → engine-only. Gate: engine 6/6.
+- **5d.1b (prossimo — la conversione, con rischio):** `execute_chat_tool` smette di mutare `ctx` e ritorna
+  `(String, ToolEffects)`; il call site nel loop applica gli effetti (`apply_tool_effects(&mut ctx, effects)`)
+  subito dopo la chiamata. **Analisi read-after-write fatta** (tutto entro `execute_chat_tool`, righe 19858–22209):
+  - **Write-only / read-before-write → differibili senza rischio:** `step_evidence` (letto a 21276/21289/21315
+    *prima* del `clear` 21360), `tool_trace` (len-check prima del push), `progress_anchor_round`, `repeat_count`,
+    `pending_compaction`, `pending_confirm`, `tool_schemas`, `last_round_sig`, `loaded_tools` (il dedup legge lo
+    stato pre-call → corretto).
+  - **UNICO hazard read-after-write: `ctx.plan`.** Nell'arm `update_plan`/`step_advance`, `*ctx.plan` è un
+    **accumulatore in un `for`** (scritto a 21327 a ogni step verificato) e **riletto a 21365**
+    (`execution_plan_steps(ctx.plan)`) per rendere il marker canonico. Conversione = usare un **accumulatore
+    locale** `let mut current_plan = ctx.plan.clone()` nell'arm, mutarlo nel loop, rileggerlo a 21365 dal
+    locale, ed emettere `effects.plan = Some(current_plan)` a fine arm. Arm **critico per la correttezza**
+    (avanzamento piano).
+  - **`accumulated` a 20388/20737:** passato **by-ref** agli helper deck (che appendono) → vanno fatti
+    appendere a un buffer locale, poi confluito in `effects.append_output`.
+  - **Gate 5d.1b:** full gateway suite **+ validazione LIVE** dell'avanzamento piano (STATO nota che i test
+    coprono poco il plan-engine; la validazione live richiede l'app, non è esercitabile headless) → da fare
+    quando l'app è pilotabile.
 - **5d.2:** il ramo browser (`execute_browser_tool`) resta un seam **temporaneo lato gateway** che il loop
   invoca per i tool browser; comunica indietro risultato + gli effetti browser (nuovo binding di modello
   alla `ProviderBinding`, `browser_used`) — esplicitamente **provvisorio, cancellato da 0025**.

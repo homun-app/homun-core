@@ -91,10 +91,18 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   ricorsivo (niente protocollo-effetti-browser usa-e-getta). Gate: `cargo check` pulito (nessun nuovo
   warning) + 506/507 gateway (1 rosso `soffice` ambientale). **Strategia già scritta:**
   [ADR 0025](decisions/0025-browser-as-delegated-subagent.md) (browse-as-recursion; il suo "passo 0" È inc 5).
-  **Prossimo:** 5d.1 = `execute_chat_tool`(senza-browser) → impl `CapabilityExecutor`, raffinando il trait a
-  ritornare gli **effetti loop-owned** (`ToolOutcome{result,effects}`) invece di mutare `ctx` → 5d.2 (seam
-  browser temporaneo, binding-modello alla `ProviderBinding`) → 5e (muovere il loop dietro
-  `HOMUN_ENGINE_CRATE`) → 0025/5f (browse ricorsivo, ritiro band-aid). Mini-design:
+  **5d.1a ✅ (2026-07-07, commit 6e8a97dc):** raffinato il contratto — `CapabilityExecutor::execute_tool`
+  ritorna `Result<ToolOutcome,String>` (`ToolOutcome{result, effects: ToolEffects}`), la metà-contratto della
+  ridefinizione ctx→effetti: l'executor smette di mutare `ctx` e **ritorna** cosa cambia (append_output/plan/
+  load_tools/trace/clear_evidence/request_confirm/request_compaction/reset_stall_guards), radicato 1:1 nelle
+  mutazioni reali di `execute_chat_tool`. Mock+test aggiornati; engine-only (nessuno implementa ancora il
+  trait). Gate: engine 6/6 + gateway check pulito. **Prossimo:** 5d.1b = la **conversione** (execute_chat_tool
+  smette di mutare ctx, ritorna gli effetti, il call site li applica). Analisi read-after-write fatta: tutto
+  differibile TRANNE l'arm `update_plan` (`ctx.plan` accumulatore scritto@21327 e riletto@21365 → serve
+  accumulatore locale) + gli append `accumulated` by-ref agli helper deck. **Gate 5d.1b = full gateway suite +
+  validazione LIVE del plan-engine** (i test lo coprono poco; non esercitabile headless → da fare nell'app) →
+  5d.2 (seam browser temporaneo) → 5e (muovere il loop dietro `HOMUN_ENGINE_CRATE`) → 0025/5f (browse
+  ricorsivo, ritiro band-aid). Mini-design:
   [spec inc5](superpowers/specs/2026-07-07-move-agent-loop-into-engine-design.md).
 
 - **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,
