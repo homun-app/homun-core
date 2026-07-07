@@ -146,12 +146,30 @@ granulari). Il suo rollout "passo 0 = estrazione motore (ADR 0024)" È questo in
     `CapabilityExecutor` **`&self` pulito è bloccato** finché lo stato browser non lascia `ctx` (0025 / lo
     **split di `ctx`** a 5e: loop-state→engine, tool/browser-state→executor gateway). `&mut ctx` tenuto solo
     per `Send`; gli arm non lo mutano.
-- **5e:** spostare il corpo del loop in `engine` dietro `HOMUN_ENGINE_CRATE`, parità turno-per-turno; il loop
-  consuma i port (`ModelClient`/`CapabilityExecutor`/`EventSink`/`MemoryRecallService`/`PlanProgress`) + il
-  seam browser temporaneo. **Prerequisito emerso da 5d.2:** lo **split di `ChatToolCtx`** — i campi loop-state
-  (piano, accumulated, tool_trace, evidence, flag…) vanno al motore; i campi browser/tool-state (browser
-  session non-Sync, ecc.) restano nell'impl gateway del `CapabilityExecutor`. È lo split che rende il
-  loop-state `Sync`/iniettabile e sblocca il `&self`.
+- **5e.1+5e.2 ✅ (commit 32a93c00):** lo **split di `ctx` (Sync-unblock)**. `browser_session` — l'UNICO campo
+  non-Sync di `ChatToolCtx` (i `Cell`/`RefCell` del `BrowserAutomationClient`) — tolto dalla struct; il loop
+  lo possiede come locale e lo passa a `execute_browser_tool` diretto. Gli altri 8 campi browser sono Sync →
+  restano (0025 li raggrupperà nel sotto-agente). Con `browser_session` fuori, `ChatToolCtx` è **`Sync`** →
+  future `&ctx` condiviso è `Send` nel `tokio::spawn` → `execute_chat_tool`+`emit_approval_card` prendono
+  **`&ctx`**. `execute_chat_tool` è ora la fn pura `name+args → (result, effects)`.
+- **5e.3a ✅ (commit b7685f6e):** `GatewayCapabilityExecutor{ctx: &ChatToolCtx}` implementa
+  `engine::CapabilityExecutor` delegando a `execute_chat_tool` (non-browser; browser resta branch separato del
+  loop fino a 0025). `+ Send` aggiunto al trait. **Tutti i 5 seam hanno ora impl gateway** (ModelClient,
+  EventSink, PlanProgress, CapabilityExecutor, MemoryRecallService) — port cablati, pronti per il loop-move.
+  Dead-code fino a 5e.3.
+- **5e.3 (la RELOCAZIONE — grande, NON completabile headless):** spostare il corpo del loop (`for round in
+  0..hard_round_ceiling()`, ~860 righe) in `engine` dietro `HOMUN_ENGINE_CRATE`, parità turno-per-turno.
+  **Evidenza di accoppiamento (scan del corpo loop):** chiama **decine** di helper gateway —
+  `sanitize_model_text`, `replace_latest_plan_marker`, `collapse_plan_markers`,
+  `append_vault_reveal_marker_if_missing`, `plan_steps_reconciled_on_delivery`, `fonti_section`,
+  `extract_markers`, `end_browser_activity`, `workflow_route_blocked_tool_message`, `gateway_logs_dir`,
+  `hash_hex`, … → vanno **portati nel crate o iniettati** (molti). Serve inoltre:
+  - **3-way split di `ChatToolCtx`**: loop-state (piano, messages, accumulated, tool_trace, evidence, flag,
+    provider) → struct engine-owned; tool-context (state, thread_id, request, read_only, autonomous, …) →
+    contesto iniettato; browser-state → seam.
+  - **validazione LIVE parità** turno-per-turno (query browsing tipo Polymarket) — NON esercitabile headless.
+  → effort multi-sessione; da fare quando l'app è pilotabile. I 9 slice precedenti (5a→5e.3a) sono la PREP
+  completa: tutti i port definiti+cablati, `ctx` Sync, chokepoint puro.
 - **0025 / 5f (=inc 6):** sostituire il seam browser temporaneo con `browse(goal)` ricorsivo (il browser =
   sotto-agente che gira il loop del motore); ritirare model-switch + `try_advance_frontier` + parallela inline.
 

@@ -115,8 +115,17 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   `&T` richiede T:Sync). Il `CapabilityExecutor` `&self` pulito è **bloccato** finché il browser non lascia
   `ctx` → **5e deve fare lo SPLIT di `ChatToolCtx`** (loop-state→motore, browser/tool-state→executor gateway).
   `&mut ctx` tenuto solo per Send. Gate: `cargo check` pulito (42 warning baseline) + gateway 506/507 (soffice).
-  **Prossimo:** 5e (split `ctx` + muovere il loop dietro `HOMUN_ENGINE_CRATE`) → 0025/5f (browse ricorsivo,
-  ritiro band-aid). Mini-design:
+  **5e.1+5e.2 ✅ (commit 32a93c00):** split di `ctx` (Sync-unblock). `browser_session` (unico campo non-Sync)
+  tolto da `ChatToolCtx` → la struct è `Sync` → `execute_chat_tool`+`emit_approval_card` prendono `&ctx`;
+  `execute_chat_tool` è ora la fn pura `name+args→(result,effects)`. **5e.3a ✅ (commit b7685f6e):**
+  `GatewayCapabilityExecutor` implementa `engine::CapabilityExecutor` delegando a `execute_chat_tool` (+Send
+  sul trait). **Tutti i 5 seam hanno impl gateway** (ModelClient/EventSink/PlanProgress/CapabilityExecutor/
+  MemoryRecallService) — port cablati. **5e.3 (RELOCAZIONE del corpo loop nel crate — NON completabile
+  headless):** il corpo loop chiama **decine** di helper gateway (marker/plan/vault/synthesis/logging) → vanno
+  portati/iniettati; serve il **3-way split di `ChatToolCtx`** (loop-state→motore, tool-context→iniettato,
+  browser→seam) + **validazione LIVE** parità turno-per-turno (non headless). Effort multi-sessione. I 9 slice
+  5a→5e.3a sono la PREP completa. **Prossimo (quando l'app è pilotabile):** 5e.3 loop-move → 0025/5f (browse
+  ricorsivo, ritiro band-aid). Mini-design:
   [spec inc5](superpowers/specs/2026-07-07-move-agent-loop-into-engine-design.md).
 
 - **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,
