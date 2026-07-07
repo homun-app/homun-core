@@ -79,15 +79,48 @@ piegarli in `MemoryRecallService`. **No, port separato**, perché:
 4. ADR 0025 (browse-as-recursion) **ritira** questo intero meccanismo (il manager giudica le risposte, non
    un verifier a metà turno): un port standalone si cancella in un colpo solo, non intrecciato in memoria.
 
+## Il nodo del 5d — e come si scioglie (la scoperta di questa sessione)
+
+Provando a partire dal 5d è emerso un **ciclo**: per spostare il loop nell'engine (5e) ogni tool
+dev'essere dietro un seam; ma `execute_chat_tool` non diventa un `CapabilityExecutor` pulito
+(`name+args → risultato`, senza mutare `ctx`) **a causa del ramo browser** — dei ~54 mutamenti di
+`ctx`, **~37 sono il ramo browser** (`browser_session`×14, snapshot/target×13, `browser_used`×2, e lo
+**switch di modello a metà turno**, main.rs 19069–19071). E quel ramo è *proprio ciò che ADR 0025
+elimina* (browse-as-recursion). Inoltre il runner sotto-agente attuale è `run_generate_json`
+(forced-JSON, `crates/subagents/runner.rs:25`), **non** il loop ReAct → 0025 richiede il loop estratto
+(5e). Quindi "0025 prima" è impossibile: 0025 dipende da 5e, 5e dipende dal domare il ramo browser, il
+ramo browser è pulito solo da 0025.
+
+**Si rompe il ciclo con un confine, non con una riscrittura.** Isolando il ramo browser dietro una
+funzione dedicata, il *resto* di `execute_chat_tool` (~47 tool a mutazione leggera/nulla) diventa il
+`CapabilityExecutor` pulito, il loop può muoversi (5e), e il ramo browser isolato è **esattamente** il
+seam che 0025 sostituisce con un `browse` ricorsivo. Niente protocollo-effetti-browser usa-e-getta.
+
+La strategia browse-as-recursion **è già decisa e scritta**: vedi
+[ADR 0025](../../decisions/0025-browser-as-delegated-subagent.md) (browser = loop guardato invocato
+ricorsivamente, il manager resta driver, si ritirano model-switch + `try_advance_frontier` + tool
+granulari). Il suo rollout "passo 0 = estrazione motore (ADR 0024)" È questo inc 5.
+
 ## Sequenza (behavior-preserving, gated `HOMUN_ENGINE_CRATE` all'atto del 5e)
 
-- **5c (questa sessione):** definire `PlanProgress` + mock + impl-gateway. Loop **invariato** (chiama
-  ancora le fn concrete); l'adapter è consumato a 5e (dead-code annotato). Gate: engine test + gateway compila.
-- 5d: avvolgere `execute_chat_tool` come `CapabilityExecutor::execute_tool` — la ridefinizione `&mut ctx →
-  effetti applicati dall'engine` (il crux; precondizione ADR 0025).
-- 5e: spostare il corpo del loop in `engine` dietro `HOMUN_ENGINE_CRATE`, parità turno-per-turno; il loop
-  consuma i port (`ModelClient`/`CapabilityExecutor`/`EventSink`/`MemoryRecallService`/`PlanProgress`).
-- 5f (=inc 6): ritirare la parallela inline + i band-aid.
+- **5c ✅:** `PlanProgress` + mock + impl-gateway. Loop invariato (adapter dead-code fino a 5e). Gate verde.
+- **5d.0 ✅ (questa sessione, commit 8e0c1fd7):** estratto `execute_browser_tool` da `execute_chat_tool`
+  (~850 righe, verbatim, behavior-preserving). Materializza il confine-browser: il seam che 0025 rimpiazza
+  con `browse` ricorsivo, e lascia `execute_chat_tool` = i ~47 tool puliti. Gate: `cargo check` pulito +
+  506/507 gateway (1 rosso `soffice` ambientale).
+- **5d.1:** `execute_chat_tool` (senza browser) diventa l'impl di `CapabilityExecutor`. La firma del trait
+  va raffinata per portare gli **effetti loop-owned** dei ~47 tool (plan, append ad `accumulated`, tool da
+  caricare, trace/evidence, flag `pending_confirm`/`pending_compaction`) come **ritorno**, non mutazione di
+  `ctx` — un `ToolOutcome{ result, effects }` che l'engine applica al proprio stato di loop. Piccolo e
+  circoscritto (niente stato browser).
+- **5d.2:** il ramo browser (`execute_browser_tool`) resta un seam **temporaneo lato gateway** che il loop
+  invoca per i tool browser; comunica indietro risultato + gli effetti browser (nuovo binding di modello
+  alla `ProviderBinding`, `browser_used`) — esplicitamente **provvisorio, cancellato da 0025**.
+- **5e:** spostare il corpo del loop in `engine` dietro `HOMUN_ENGINE_CRATE`, parità turno-per-turno; il loop
+  consuma i port (`ModelClient`/`CapabilityExecutor`/`EventSink`/`MemoryRecallService`/`PlanProgress`) + il
+  seam browser temporaneo.
+- **0025 / 5f (=inc 6):** sostituire il seam browser temporaneo con `browse(goal)` ricorsivo (il browser =
+  sotto-agente che gira il loop del motore); ritirare model-switch + `try_advance_frontier` + parallela inline.
 
 ## Criteri d'accettazione 5c
 

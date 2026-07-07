@@ -80,9 +80,21 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   backend durevole; `verify` è inferenza, non memoria → SRP + ADR 0025 lo ritira in un colpo). La sintesi
   forzata (empty-answer) riusa `ModelClient` (`is_final_round`). **Behavior-preserving** (loop invariato).
   **Gate:** engine 6/6 (incl. nuovo mock) + gateway `cargo check`/`--tests` puliti, nessun nuovo warning.
-  **Prossimo:** 5d = avvolgere `execute_chat_tool` come `CapabilityExecutor::execute_tool` (ridefinizione
-  `&mut ctx → effetti applicati dall'engine`, il crux, precondizione ADR 0025) → 5e (muovere il corpo del
-  loop dietro `HOMUN_ENGINE_CRATE`) → 5f/inc6 (ritirare la parallela inline). Mini-design:
+  **5d.0 ✅ (2026-07-07, commit 8e0c1fd7):** estratto **`execute_browser_tool`** da `execute_chat_tool`
+  (~850 righe, verbatim, behavior-preserving). **Perché così e non "0025 prima":** provando il 5d è emerso
+  un *ciclo* — spostare il loop (5e) richiede ogni tool dietro un seam, ma `execute_chat_tool` non diventa
+  un `CapabilityExecutor` pulito **per colpa del ramo browser** (~37 dei ~54 mutamenti `ctx` + lo switch
+  modello), che è *proprio ciò che ADR 0025 cancella*; e 0025 richiede il loop estratto (il runner
+  sotto-agente oggi è `run_generate_json`, non il loop ReAct). Si rompe il ciclo con **un confine, non una
+  riscrittura**: isolato il ramo browser dietro una fn, il resto (~47 tool puliti) diventa il
+  `CapabilityExecutor`, il loop può muoversi, e il ramo isolato È il seam che 0025 rimpiazza con `browse`
+  ricorsivo (niente protocollo-effetti-browser usa-e-getta). Gate: `cargo check` pulito (nessun nuovo
+  warning) + 506/507 gateway (1 rosso `soffice` ambientale). **Strategia già scritta:**
+  [ADR 0025](decisions/0025-browser-as-delegated-subagent.md) (browse-as-recursion; il suo "passo 0" È inc 5).
+  **Prossimo:** 5d.1 = `execute_chat_tool`(senza-browser) → impl `CapabilityExecutor`, raffinando il trait a
+  ritornare gli **effetti loop-owned** (`ToolOutcome{result,effects}`) invece di mutare `ctx` → 5d.2 (seam
+  browser temporaneo, binding-modello alla `ProviderBinding`) → 5e (muovere il loop dietro
+  `HOMUN_ENGINE_CRATE`) → 0025/5f (browse ricorsivo, ritiro band-aid). Mini-design:
   [spec inc5](superpowers/specs/2026-07-07-move-agent-loop-into-engine-design.md).
 
 - **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,
