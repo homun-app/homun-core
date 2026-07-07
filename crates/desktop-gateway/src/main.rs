@@ -90,6 +90,13 @@ use local_first_desktop_gateway::{
     EnqueueTurnRequest, SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest,
     build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
 };
+// The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
+// unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
+use local_first_engine::plan::{
+    advance_plan_frontier, build_plan_markdown, enforce_monotonic_plan_progress, parse_plan_marker,
+    plan_done_count, plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
+    plan_step_id, plan_step_status, plan_step_title,
+};
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
     PrivacyPolicy, Requirements, structured_response_format,
@@ -6391,82 +6398,6 @@ fn step_advance_tool_schema() -> serde_json::Value {
     })
 }
 
-fn plan_status_marker(status: &str) -> char {
-    match status {
-        "done" => 'x',
-        "doing" | "running" => '-',
-        "blocked" => '!',
-        _ => ' ',
-    }
-}
-
-/// Parse the latest ‹‹PLAN›› marker back into a canonical plan (id/title/status/detail
-/// objects). The marker is the cross-turn persistence: rebuilding from it on turn start
-/// RESUMES an interrupted task on the SAME authoritative state. A `done` step in the
-/// marker is genuinely done (the canonical marker only shows done once verified).
-fn parse_plan_marker(text: &str) -> Vec<serde_json::Value> {
-    let (Some(s), Some(e)) = (text.rfind("‹‹PLAN››"), text.rfind("‹‹/PLAN››"))
-    else {
-        return Vec::new();
-    };
-    if e <= s {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for line in text[s..e].lines() {
-        // Locate the bullet anywhere on the line — the first step is glued to the
-        // opening ‹‹PLAN›› marker (no newline between them), so a `starts_with` check
-        // would silently drop step 1 (and break F4 resume).
-        let Some(bi) = line.find("- [") else {
-            continue;
-        };
-        let t = &line[bi..];
-        let status = if t.starts_with("- [x]") {
-            "done"
-        } else if t.starts_with("- [-]") {
-            "doing"
-        } else if t.starts_with("- [!]") {
-            "blocked"
-        } else if t.starts_with("- [ ]") {
-            "todo"
-        } else {
-            continue;
-        };
-        // `- [m] **Title** (`id`): detail`
-        let title = t
-            .find("**")
-            .and_then(|a| {
-                t[a + 2..]
-                    .find("**")
-                    .map(|b| t[a + 2..a + 2 + b].trim().to_string())
-            })
-            .unwrap_or_default();
-        if title.is_empty() {
-            continue;
-        }
-        let id = t
-            .find("(`")
-            .and_then(|a| {
-                t[a + 2..]
-                    .find("`)")
-                    .map(|b| t[a + 2..a + 2 + b].to_string())
-            })
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| format!("s{}", out.len() + 1));
-        let detail = t
-            .rsplit("): ")
-            .next()
-            .map(|d| d.trim())
-            .filter(|d| !d.is_empty() && *d != "—")
-            .unwrap_or("")
-            .to_string();
-        out.push(serde_json::json!({
-            "id": id, "title": title, "status": status, "detail": detail
-        }));
-    }
-    out
-}
-
 /// Anti-churn: the harness appends a fresh ‹‹PLAN›› marker to the running message on
 /// EVERY `update_plan`/`step_advance` call so the plan card animates live. The PERSISTED
 /// message, though, must carry the plan card exactly ONCE — the latest canonical state —
@@ -6598,31 +6529,6 @@ fn reconcile_final_plan_marker_on_delivery(plan: &ExecutionPlan, text: &str) -> 
     }
 }
 
-fn plan_step_status(step: &serde_json::Value) -> &str {
-    step.get("status")
-        .and_then(|s| s.as_str())
-        .unwrap_or("todo")
-}
-fn plan_step_title(step: &serde_json::Value) -> &str {
-    step.get("title").and_then(|s| s.as_str()).unwrap_or("")
-}
-
-/// Count of canonically-DONE steps (the single source of truth for progress).
-fn plan_done_count(plan: &[serde_json::Value]) -> usize {
-    plan.iter()
-        .filter(|s| plan_step_status(s) == "done")
-        .count()
-}
-
-/// Title of the first step that isn't done and isn't blocked — the next action. None
-/// when the plan is complete (all done) or fully blocked. Drives the directive nudge.
-fn plan_next_open(plan: &[serde_json::Value]) -> Option<String> {
-    plan.iter()
-        .find(|s| matches!(plan_step_status(s), "todo" | "doing"))
-        .map(|s| plan_step_title(s).to_string())
-        .filter(|t| !t.is_empty())
-}
-
 fn plan_step_depends_on(step: &serde_json::Value) -> Vec<String> {
     step.get("depends_on")
         .and_then(|value| value.as_array())
@@ -6633,22 +6539,6 @@ fn plan_step_depends_on(step: &serde_json::Value) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .collect()
-}
-
-fn plan_is_complete(plan: &[serde_json::Value]) -> bool {
-    !plan.is_empty() && plan_done_count(plan) == plan.len()
-}
-
-fn plan_incomplete_reason(plan: &[serde_json::Value]) -> Option<String> {
-    if plan.is_empty() || plan_is_complete(plan) {
-        return None;
-    }
-    let done = plan_done_count(plan);
-    let total = plan.len();
-    let next = plan_next_open(plan).unwrap_or_else(|| "blocked or unfinished step".to_string());
-    Some(format!(
-        "plan is incomplete ({done}/{total}); next step: {next}"
-    ))
 }
 
 // --- F4: cross-turn plan-stall guard -------------------------------------------------
@@ -6678,17 +6568,6 @@ fn next_plan_stall(prior_stall: u32, last_resume_done: usize, current_done: usiz
 
 fn plan_stall_exhausted(stall: u32) -> bool {
     stall >= MAX_PLAN_STALL_RESUMES
-}
-
-/// A plan is SETTLED when every step is terminal (`done` or `blocked`) — nothing runnable
-/// remains. Distinct from `plan_is_complete` (all `done`): a plan with a permanently-blocked
-/// step is finished, not in-progress, so it must STOP auto-resuming. This is what lets a
-/// blocked step actually terminate the plan instead of keeping it forever "active".
-fn plan_is_settled(plan: &[serde_json::Value]) -> bool {
-    !plan.is_empty()
-        && plan
-            .iter()
-            .all(|s| matches!(plan_step_status(s), "done" | "blocked"))
 }
 
 /// Block the first runnable (`todo`/`doing`) step — the F4 abort action once a plan has
@@ -6748,6 +6627,17 @@ fn plan_reconcile_on_delivery_flag(value: Option<&str>) -> bool {
 
 fn plan_reconcile_on_delivery_enabled() -> bool {
     plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_RECONCILE").ok().as_deref())
+}
+
+/// Harness-driven plan progress during a browsing turn. When the driver switches to the
+/// (weaker) browser model for the rest of the turn (see the browser branch), that model stops
+/// calling `step_advance`, so the Plan card freezes at the frontier while markets are actually
+/// being read — then jumps to N/N only at the final delivery reconcile. With this ON the harness
+/// itself advances the frontier step as soon as the gathered evidence VERIFIES it (reusing the
+/// F2 judge), so progress rises in real time without trusting the weak model. Same default-on +
+/// diagnostic opt-out (`HOMUN_PLAN_AUTOADVANCE=0`/`off`) as the delivery reconcile.
+fn plan_autoadvance_from_evidence_enabled() -> bool {
+    plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_AUTOADVANCE").ok().as_deref())
 }
 
 /// ADR 0022 — Tappa 1: instrada brief/recall/learn tramite `MemoryRecallService`
@@ -6901,37 +6791,6 @@ fn execution_plan_steps(plan: &ExecutionPlan) -> Vec<serde_json::Value> {
             })
         })
         .collect()
-}
-
-/// Harness-owned MONOTONIC progress: a plan runs in order, so once a step is `doing`
-/// (or `done`), every earlier still-open step is finished — mark it `done`. Models,
-/// especially weak ones, advance the `doing` pointer without ever marking prior steps
-/// `done` (and even re-emit the whole plan with completed steps back to `todo`), which
-/// left "Progress" stuck at 0/N despite real work. Derive completion deterministically
-/// instead of trusting the model. Lives at the plan source, so EVERY client (chat,
-/// Telegram/WhatsApp, future surfaces) gets correct progress. Blocked steps are left
-/// untouched (a stalled step before the frontier stays visible as blocked).
-fn enforce_monotonic_plan_progress(steps: &mut [serde_json::Value]) {
-    let Some(frontier) = steps
-        .iter()
-        .rposition(|s| matches!(plan_step_status(s), "doing" | "done"))
-    else {
-        return;
-    };
-    for step in steps.iter_mut().take(frontier) {
-        // Every step BEFORE the frontier is behind the current work → close it. This covers
-        // `todo` (never started) AND a stale `doing` the model left open when it moved the
-        // pointer forward without ever marking the prior step done. Enforces the invariant
-        // "at most one active step" (the frontier). Without closing `doing`, `plan_next_open`
-        // keeps returning the FIRST `doing` and the harness nudge points the model back at
-        // step 1 forever — the observed "dice step 1 fatto ma resta sullo step 1 / rifà cose
-        // già fatte" symptom (deepseek: s1 doing + s2 doing → s1 never advanced to done).
-        // The just-claimed step is the LAST doing (the frontier) so it stays doing → F2
-        // verification of the current claim is untouched. `blocked` stays blocked.
-        if matches!(plan_step_status(step), "todo" | "doing") {
-            step["status"] = serde_json::json!("done");
-        }
-    }
 }
 
 fn merge_execution_plan(plan: &mut ExecutionPlan, sent: &[serde_json::Value]) -> Vec<usize> {
@@ -8842,13 +8701,6 @@ fn runtime_plan_step_outcome_matches(
         && memory.metadata.get("step_id").and_then(|v| v.as_str()) == Some(step_id)
 }
 
-fn plan_step_id(step: &serde_json::Value) -> Option<&str> {
-    step.get("id")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
 fn record_runtime_plan_step_outcome(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -9422,45 +9274,6 @@ fn merge_plan(plan: &mut Vec<serde_json::Value>, sent: &[serde_json::Value]) -> 
 
 /// Formats the agent's plan steps into the exact Markdown the Workbench "Piano" panel
 /// parses (`- [m] **Title** (\`id\`): detail`).
-fn build_plan_markdown(steps: &[serde_json::Value]) -> String {
-    let mut lines = Vec::new();
-    for (index, step) in steps.iter().enumerate() {
-        let title = step
-            .get("title")
-            .and_then(|t| t.as_str())
-            .unwrap_or("")
-            .trim();
-        if title.is_empty() {
-            continue;
-        }
-        let status = step
-            .get("status")
-            .and_then(|s| s.as_str())
-            .unwrap_or("todo");
-        let detail = step
-            .get("detail")
-            .and_then(|d| d.as_str())
-            .map(str::trim)
-            .filter(|d| !d.is_empty())
-            .unwrap_or("—");
-        // Stable id: the canonical plan carries an `id`; fall back to positional.
-        let id = step
-            .get("id")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .unwrap_or_else(|| format!("s{}", index + 1));
-        lines.push(format!(
-            "- [{}] **{}** (`{}`): {}",
-            plan_status_marker(status),
-            title,
-            id,
-            detail
-        ));
-    }
-    lines.join("\n")
-}
-
 /// Read-only query over the active project's CODE graph (imported by the project-map
 /// builder). Answers "what calls X / what does X call / where does X live" by
 /// traversing the calls/contains/method edges already in SQLite — no Graphify needed.
@@ -19300,6 +19113,10 @@ struct ChatToolCtx<'a> {
     last_round_sig: &'a mut String,
     repeat_count: &'a mut u32,
     progress_anchor_round: &'a mut usize,
+    // Evidence-count at the last harness-driven plan auto-advance attempt — the stride gate so
+    // we don't run the (cheap) verifier on every single tool result (see
+    // `try_advance_frontier_from_evidence`).
+    progress_verify_anchor: &'a mut usize,
     pending_compaction: &'a mut bool,
     pending_vault_reveal_marker: &'a mut Option<String>,
     pending_confirm: &'a mut bool,
@@ -19340,6 +19157,89 @@ struct ChatToolCtx<'a> {
 /// `LazyLock`) so tests can toggle the env var per case.
 fn tool_safety_enabled() -> bool {
     std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
+}
+
+/// Harness-driven plan progress from VERIFIED evidence. Called after each work tool result: if
+/// the plan has a frontier `doing` step and enough new evidence has accrued, ask the F2 judge
+/// whether that step is genuinely complete; if so, mark it done, advance the frontier, and emit
+/// the ‹‹PLAN›› card + persist — the same canonical live+durable update the model's own
+/// `step_advance` produces. This is the ONLY way progress rises during a browsing turn, where the
+/// driver is the weak browser model that never calls `step_advance` (see the browser branch: the
+/// switch lasts the rest of the turn, no return to the manager). Verified-only, so thrashing on a
+/// hard-to-find market never fakes progress. Stride-gated so the (cheap `memory`-role) judge runs
+/// at most once per few tool results.
+async fn try_advance_frontier_from_evidence(ctx: &mut ChatToolCtx<'_>) {
+    if !plan_autoadvance_from_evidence_enabled() || !step_verification_enabled() {
+        return;
+    }
+    // Evidence stride: only re-check after a few new tool outcomes since the last attempt.
+    const EVIDENCE_STRIDE: usize = 3;
+    if ctx.step_evidence.len() < ctx.progress_verify_anchor.saturating_add(EVIDENCE_STRIDE) {
+        return;
+    }
+    *ctx.progress_verify_anchor = ctx.step_evidence.len();
+    let batch_evidence = ctx.step_evidence.join("\n");
+    if batch_evidence.is_empty() {
+        return;
+    }
+    // Advance as many consecutive frontier steps as this evidence window confirms — bounded so a
+    // single evidence window can never sweep the whole plan to done (that's the delivery reconcile's
+    // job, not a mid-turn judge call).
+    for _ in 0..2u8 {
+        let plan_steps = execution_plan_steps(ctx.plan);
+        let Some(idx) = plan_steps
+            .iter()
+            .position(|s| plan_step_status(s) == "doing")
+        else {
+            return; // nothing in progress (plan complete or not started)
+        };
+        let title = plan_step_title(&plan_steps[idx]).to_string();
+        let criterion = plan_steps[idx]
+            .get("done_criterion")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let (ok, _reason) =
+            verify_step_complete(&ctx.state.http, &title, &criterion, &batch_evidence).await;
+        if !ok {
+            return; // frontier step not proven done yet → leave it doing
+        }
+        let mut plan_steps = plan_steps;
+        advance_plan_frontier(&mut plan_steps);
+        let verified_step = plan_steps[idx].clone();
+        let verified_evidence = ctx.step_evidence.clone();
+        let st = ctx.state.clone();
+        let thread_for_memory = ctx.thread_id.map(|s| s.to_string());
+        let _ = tokio::task::spawn_blocking(move || {
+            record_runtime_plan_step_outcome_from_state(
+                &st,
+                thread_for_memory.as_deref(),
+                &verified_step,
+                &verified_evidence,
+            );
+        })
+        .await;
+        *ctx.plan = runtime_execution_plan(&plan_steps);
+        *ctx.progress_anchor_round = ctx.round; // F1: real progress → reset the stall guard
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: format!(
+                    "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
+                    title.chars().take(60).collect::<String>()
+                ),
+            },
+        )
+        .await;
+        // The canonical live plan card (→ plan_update event) + durable runtime plan, exactly like
+        // the model's own step_advance path.
+        let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
+        let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: plan_mark }).await;
+        upsert_runtime_plan_memory_from_state(ctx.state, ctx.thread_id, &plan_steps);
+        // This evidence window was consumed by the advance — reset it + the stride anchor.
+        ctx.step_evidence.clear();
+        *ctx.progress_verify_anchor = 0;
+    }
 }
 
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
@@ -23970,6 +23870,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // keeps going for as long as it KEEPS CLOSING STEPS, while a turn stuck on one
         // step still trips the per-step budget.
         let mut progress_anchor_round: usize = 0;
+        let mut progress_verify_anchor: usize = 0;
         // CANONICAL PLAN: the single source of truth for the task's steps + their status,
         // owned by the runtime (not rebuilt from the model's text each call). update_plan
         // MERGES into this by id/title and can never reset a done step; F1 budget reset,
@@ -24766,6 +24667,7 @@ check/update the key in Settings → Model & Runtime."
                         last_round_sig: &mut last_round_sig,
                         repeat_count: &mut repeat_count,
                         progress_anchor_round: &mut progress_anchor_round,
+                        progress_verify_anchor: &mut progress_verify_anchor,
                         pending_compaction: &mut pending_compaction,
                         pending_vault_reveal_marker: &mut pending_vault_reveal_marker,
                         pending_confirm: &mut pending_confirm,
@@ -24929,6 +24831,9 @@ check/update the key in Settings → Model & Runtime."
                         if ctx.step_evidence.len() > 60 {
                             ctx.step_evidence.remove(0);
                         }
+                        // Harness-derived progress: advance the plan frontier when the gathered
+                        // evidence VERIFIES the current step (the weak browser model never does).
+                        try_advance_frontier_from_evidence(&mut ctx).await;
                     }
                     // Parity harness: compute the result-derived fingerprint fields
                     // from `&result` BEFORE the push moves `result` into the message.
@@ -49879,7 +49784,8 @@ mod tests {
         fonti_section, format_memory_block, humanize_task_kind, hybrid_memory_score,
         inbound_action, is_auto_confirmable, is_confirmation_reply, is_internal_task_kind,
         is_low_value_source_url, is_salient_exchange, is_semantic_duplicate, jail_in_root,
-        enforce_monotonic_plan_progress, legacy_dir_action, llm_concurrency_view, mcp_error_hint,
+        advance_plan_frontier, enforce_monotonic_plan_progress, legacy_dir_action,
+        llm_concurrency_view, mcp_error_hint,
         mcp_provider_slug, mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata,
         memory_age_days, merge_plan,
         message_has_image_url, next_plan_stall, normalize_for_dedup, parse_plan_marker,
@@ -52263,6 +52169,23 @@ prs.save(Path({path:?}))
         assert_eq!(plan_step_status(&steps[1]), "done", "before frontier → done");
         assert_eq!(plan_step_status(&steps[2]), "doing", "frontier stays doing");
         assert_eq!(plan_step_status(&steps[3]), "todo", "after frontier stays todo");
+    }
+
+    #[test]
+    fn advance_plan_frontier_moves_the_doing_pointer() {
+        let mut steps = vec![
+            serde_json::json!({ "id": "s1", "title": "A", "status": "done", "detail": "" }),
+            serde_json::json!({ "id": "s2", "title": "B", "status": "doing", "detail": "" }),
+            serde_json::json!({ "id": "s3", "title": "C", "status": "todo", "detail": "" }),
+        ];
+        assert_eq!(advance_plan_frontier(&mut steps), Some(1));
+        assert_eq!(plan_step_status(&steps[1]), "done", "frontier closed");
+        assert_eq!(plan_step_status(&steps[2]), "doing", "next todo promoted");
+        // Last step doing, no todo after → closes it, no new doing, plan complete.
+        assert_eq!(advance_plan_frontier(&mut steps), Some(2));
+        assert_eq!(plan_done_count(&steps), 3);
+        // Nothing in progress → None.
+        assert_eq!(advance_plan_frontier(&mut steps), None);
     }
 
     #[test]

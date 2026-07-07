@@ -3,6 +3,7 @@ members = [
     "crates/memory",
     "crates/subagents",
     "crates/capabilities",
+    "crates/engine",
     "crates/task-runtime",
     "crates/browser-automation",
     "crates/process-manager",

@@ -24,6 +24,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 local-first-context-compression = { path = "../context-compression" }
 local-first-capabilities = { path = "../capabilities" }
+local-first-engine = { path = "../engine" }
 local-first-browser-automation = { path = "../browser-automation" }
 local-first-inference = { path = "../inference" }
 local-first-local-computer-session = { path = "../local-computer-session" }

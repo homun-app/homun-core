@@ -1,0 +1,16 @@
+[package]
+name = "local-first-engine"
+version = "0.1.0"
+edition = "2024"
+
+# The agentic ReAct loop (motore #1, ADR 0021) extracted out of the gateway monolith
+# (ADR 0024). The gateway becomes the postman (HTTP/auth/transport); the engine owns the
+# guarded loop and executes tools through a single injected chokepoint. Kept pure and
+# testable: dependencies cross the boundary as traits, never the concrete `AppState`.
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
