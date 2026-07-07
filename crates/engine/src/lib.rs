@@ -20,6 +20,9 @@ pub mod contract;
 /// The pure plan state machine — the engine's control-flow core (ADR 0024, increment 3).
 pub mod plan;
 
+/// Structured stream events the engine emits (ADR 0024 inc 5a).
+pub mod events;
+
 pub use contract::{
     CapabilityExecutor, ModelCall, ModelCallError, ModelClient, ModelRoundOutput, ProviderBinding,
 };

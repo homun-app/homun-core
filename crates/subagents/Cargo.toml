@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+local-first-engine = { path = "../engine" }
 local-first-capabilities = { path = "../capabilities" }
 local-first-memory = { path = "../memory" }
 local-first-task-runtime = { path = "../task-runtime" }
