@@ -67,9 +67,22 @@ pub struct ModelRoundOutput {
     pub provider: ProviderBinding, // il provider su cui l'impl è FINITA (dopo eventuali swap)
 }
 
+/// Errore tipizzato: preserva la PARITÀ del fallback finale. Oggi `last_model_error`
+/// (main.rs) è settato SOLO sugli errori di stato upstream (→ diventa la risposta committata
+/// se il turno non produce altro), NON sui fallimenti di stream/trasporto. Un `String` piatto
+/// perderebbe questa distinzione una volta spostata la logica fuori dal loop.
+pub enum ModelCallError {
+    /// Stato d'errore upstream (401/400/5xx…): porta la ragione umana. Il loop la mette in
+    /// `last_model_error`. Il messaggio è GIÀ stato streammato live.
+    Upstream(String),
+    /// Fallimento di trasporto/stream dopo i retry: una notifica generica è già stata
+    /// streammata; NON popola `last_model_error`.
+    Transport(String),
+}
+
 pub trait ModelClient {
     fn generate(&self, call: &ModelCall<'_>, on_delta: &dyn Fn(&str))
-        -> impl Future<Output = Result<ModelRoundOutput, String>>;
+        -> impl Future<Output = Result<ModelRoundOutput, ModelCallError>>;
 }
 ```
 
@@ -120,12 +133,15 @@ match out {
         endpoint = chat_endpoint(&base_url);
         message = o.message;
     }
-    Err(_) => break,   // l'impl ha già emesso la ragione umana su tx (last_model_error incluso)
+    // parità: solo l'errore upstream popola last_model_error (→ risposta committata)
+    Err(ModelCallError::Upstream(reason)) => { last_model_error = Some(reason); break; }
+    Err(ModelCallError::Transport(_)) => break, // notifica generica già streammata
 }
 ```
 
-Da verificare nel lift: `last_model_error` (oggi settato nel ramo errore) deve restare coerente —
-o resta settato dentro l'impl prima del `break`, o l'errore ritornato lo trasporta. Il piano lo fissa.
+`endpoint` non è nel `ProviderBinding`: è derivato (`chat_endpoint(&base_url)`) e il loop lo
+ricalcola. La diagnostica `[model-error]` perde solo il campo `round=` (contatore interno al loop,
+fuori dal contratto `ModelCall`): parità accettata su una riga di `eprintln` di debug.
 
 ## Note di onestà (esplicite, non aggirate)
 
