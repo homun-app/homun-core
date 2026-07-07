@@ -94,9 +94,10 @@ use local_first_desktop_gateway::{
 // The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
 use local_first_engine::plan::{
-    advance_plan_frontier, build_plan_markdown, enforce_monotonic_plan_progress, parse_plan_marker,
-    plan_done_count, plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
-    plan_step_id, plan_step_status, plan_step_title,
+    advance_plan_frontier, build_plan_markdown, collapse_plan_markers,
+    enforce_monotonic_plan_progress, parse_plan_marker, plan_done_count, plan_incomplete_reason,
+    plan_is_complete, plan_is_settled, plan_next_open, plan_step_id, plan_step_status,
+    plan_step_title, replace_latest_plan_marker,
 };
 // The trait must be in scope to call `GatewayModelClient::generate` (ADR 0024).
 use local_first_engine::ModelClient;
@@ -6272,57 +6273,6 @@ fn strip_chat_markers(text: &str) -> String {
 /// an empty remainder means there is no real answer to show.
 fn answer_body_is_empty(content: &str) -> bool {
     strip_chat_markers(content).trim().is_empty()
-}
-
-fn collapse_plan_markers(text: &str) -> String {
-    const OPEN: &str = "‹‹PLAN››";
-    const CLOSE: &str = "‹‹/PLAN››";
-    let mut spans: Vec<(usize, usize)> = Vec::new();
-    let mut search = 0usize;
-    while let Some(rel_o) = text[search..].find(OPEN) {
-        let o = search + rel_o;
-        let Some(rel_c) = text[o..].find(CLOSE) else {
-            break;
-        };
-        let c = o + rel_c + CLOSE.len();
-        spans.push((o, c));
-        search = c;
-    }
-    if spans.len() <= 1 {
-        return text.to_string();
-    }
-    let first_start = spans[0].0;
-    let (ls, le) = spans[spans.len() - 1];
-    let latest = &text[ls..le];
-    let mut out = String::with_capacity(text.len());
-    let mut cursor = 0usize;
-    for &(s, e) in &spans {
-        out.push_str(&text[cursor..s]);
-        if s == first_start {
-            out.push_str(latest);
-        }
-        cursor = e;
-    }
-    out.push_str(&text[cursor..]);
-    out
-}
-
-fn replace_latest_plan_marker(text: &str, steps: &[serde_json::Value]) -> String {
-    const OPEN: &str = "‹‹PLAN››";
-    const CLOSE: &str = "‹‹/PLAN››";
-    let (Some(start), Some(close_start)) = (text.rfind(OPEN), text.rfind(CLOSE)) else {
-        return text.to_string();
-    };
-    if close_start <= start {
-        return text.to_string();
-    }
-    let close_end = close_start + CLOSE.len();
-    let marker = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(steps));
-    let mut out = String::with_capacity(text.len() + marker.len());
-    out.push_str(&text[..start]);
-    out.push_str(&marker);
-    out.push_str(&text[close_end..]);
-    out
 }
 
 /// The plan steps reconciled for delivery: EVERY still-open step forced to `done`, `blocked`
