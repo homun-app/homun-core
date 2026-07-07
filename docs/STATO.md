@@ -95,14 +95,20 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   ritorna `Result<ToolOutcome,String>` (`ToolOutcome{result, effects: ToolEffects}`), la metà-contratto della
   ridefinizione ctx→effetti: l'executor smette di mutare `ctx` e **ritorna** cosa cambia (append_output/plan/
   load_tools/trace/clear_evidence/request_confirm/request_compaction/reset_stall_guards), radicato 1:1 nelle
-  mutazioni reali di `execute_chat_tool`. Mock+test aggiornati; engine-only (nessuno implementa ancora il
-  trait). Gate: engine 6/6 + gateway check pulito. **Prossimo:** 5d.1b = la **conversione** (execute_chat_tool
-  smette di mutare ctx, ritorna gli effetti, il call site li applica). Analisi read-after-write fatta: tutto
-  differibile TRANNE l'arm `update_plan` (`ctx.plan` accumulatore scritto@21327 e riletto@21365 → serve
-  accumulatore locale) + gli append `accumulated` by-ref agli helper deck. **Gate 5d.1b = full gateway suite +
-  validazione LIVE del plan-engine** (i test lo coprono poco; non esercitabile headless → da fare nell'app) →
-  5d.2 (seam browser temporaneo) → 5e (muovere il loop dietro `HOMUN_ENGINE_CRATE`) → 0025/5f (browse
-  ricorsivo, ritiro band-aid). Mini-design:
+  mutazioni reali di `execute_chat_tool`. Mock+test aggiornati; engine-only. Gate: engine 6/6 + gateway check pulito.
+  **5d.1b ✅ (2026-07-07, commit a5e8039d):** la **conversione**. `execute_chat_tool` ritorna
+  `(String, ToolEffects)`; gli arm non-browser scrivono in un buffer `effects`, il call site applica con
+  `apply_tool_effects` subito dopo. **Behavior-preserving per costruzione**, completezza verificata da
+  compiler + grep (0 mutazioni `ctx` residue). Trappole risolte: `merge_execution_plan(ctx.plan)` mutava
+  **in place** (mutazione nascosta) + `*ctx.plan` accumulatore riletto → `current_plan` locale; `effects.plan`
+  porta l'**intero piano serializzato** (round-trip serde, non solo gli step — `ExecutionPlan` ha
+  route/direct_answer/… che un rebuild-da-step perderebbe); reset F1/F3/clear-evidence idempotenti issati a un
+  `if any_verified`; helper deck by-ref → buffer locale. **Gate:** `cargo check` pulito (42 warning = baseline,
+  0 nuovi) + engine 6/6 + gateway 506/507 (1 rosso `soffice` ambientale) + tutti i test plan/merge/step verdi.
+  **Caveat onesto:** rilocazione behavior-preserving ma **validazione LIVE del plan-engine** ancora consigliata
+  (i test lo coprono poco; non esercitabile headless). **Prossimo:** 5d.2 (seam browser temporaneo:
+  `execute_browser_tool` ritorna risultato + effetti browser, binding-modello alla `ProviderBinding`) → 5e
+  (muovere il loop dietro `HOMUN_ENGINE_CRATE`) → 0025/5f (browse ricorsivo, ritiro band-aid). Mini-design:
   [spec inc5](superpowers/specs/2026-07-07-move-agent-loop-into-engine-design.md).
 
 - **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,
