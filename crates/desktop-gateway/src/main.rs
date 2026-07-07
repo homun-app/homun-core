@@ -18899,7 +18899,10 @@ async fn try_advance_frontier_from_evidence(ctx: &mut ChatToolCtx<'_>) {
 /// unaffected. Side-effects (push to `accumulated`, stream the delta, set
 /// `pending_confirm`) are preserved in the same order.
 async fn emit_approval_card(
+    // `&mut` for `Send` (see `execute_chat_tool`); the body only READS `ctx` — the card append and the
+    // confirm flag are recorded in `effects`, not mutated on `ctx`.
     ctx: &mut ChatToolCtx<'_>,
+    effects: &mut local_first_engine::ToolEffects,
     marker_open: &str,
     marker_close: &str,
     name: &str,
@@ -18920,9 +18923,9 @@ async fn emit_approval_card(
     let card = format!(
         "\n\nI need your confirmation for the action below.\n{marker_open}{marker}{marker_close}\n"
     );
-    ctx.accumulated.push_str(&card);
+    effects.append_output.push(card.clone());
     let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
-    *ctx.pending_confirm = true;
+    effects.request_confirm = true;
     "AWAITING USER CONFIRMATION: the action was proposed via a \
 confirmation card in the interface. Do NOT say it was executed."
         .to_string()
@@ -18979,6 +18982,22 @@ fn shadow_log_sandbox(state: &AppState, thread_id: Option<&str>, name: &str, arg
             "SANDBOX-SHADOW tool={name} footprint={footprint:?} policy={policy_label} verdict=allow"
         ),
     }
+}
+
+/// The granular browser tools the main agent drives one micro-action at a time. Dispatched to
+/// `execute_browser_tool` (the temporary `&mut ctx` seam) at the loop call site, NOT through the pure
+/// `execute_chat_tool` — so the latter can take `&ctx` (ADR 0024 inc 5d.2). ADR 0025 folds this into a
+/// single recursive `browse` and this predicate goes away.
+fn is_browser_granular_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "browser_navigate"
+            | "browser_snapshot"
+            | "browser_act"
+            | "browser_screenshot"
+            | "browser_tabs"
+            | "browser_dialog"
+    )
 }
 
 // ADR 0025 seam: the granular-browser-tools arm of `execute_chat_tool`, lifted VERBATIM into its
@@ -19856,10 +19875,16 @@ Use the text snapshot."
 /// borrows preserved); `name`/`args_raw`/`call_id` are the per-call parse results. The
 /// caller keeps the harness snapshots, the blocked-guard, and the post-result push.
 async fn execute_chat_tool(
+    // `&mut` only because `ChatToolCtx` isn't `Sync` (the browser session's `Cell`/`RefCell`), so a
+    // shared `&ctx` future wouldn't be `Send` inside the loop's `tokio::spawn`. The arms no longer
+    // MUTATE `ctx` (all changes flow through the returned `ToolEffects`, 5d.1b); this becomes a pure
+    // `&ctx` once the browser state leaves `ctx` (ADR 0025 / the ctx-split at 5e).
     ctx: &mut ChatToolCtx<'_>,
     name: &str,
     args_raw: &str,
-    call_id: &str,
+    // Unused since the browser dispatch (its only user) moved to the call site (5d.2); kept for the
+    // `CapabilityExecutor::execute_tool(name, args, call_id)` signature this becomes at 5e.
+    _call_id: &str,
 ) -> (String, local_first_engine::ToolEffects) {
     // ADR 0023 step 2b, SHADOW: observe-only sandbox classification/log. Gated by
     // `tool_safety_enabled()` (default off → one env read, no-op). NEVER blocks or
@@ -19894,16 +19919,6 @@ async fn execute_chat_tool(
         "Action not available from the channel: operations with effects \
 require your confirmation in the app. Propose it and stop."
             .to_string()
-    } else if matches!(
-        name,
-        "browser_navigate"
-            | "browser_snapshot"
-            | "browser_act"
-            | "browser_screenshot"
-            | "browser_tabs"
-            | "browser_dialog"
-    ) {
-        execute_browser_tool(ctx, name, args_raw, call_id).await
     } else if name == "github_search" {
         // Fast, structured GitHub repo search via the API (no browser).
         let query = serde_json::from_str::<serde_json::Value>(args_raw)
@@ -21803,6 +21818,7 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                 // unsandboxed via /api/capabilities/run/escalate.
                 emit_approval_card(
                     ctx,
+                    &mut effects,
                     SANDBOX_ESCALATE_OPEN,
                     SANDBOX_ESCALATE_CLOSE,
                     "run_in_project",
@@ -22021,6 +22037,7 @@ require your confirmation in the app. Propose it and stop."
         if needs_confirm {
             emit_approval_card(
                 ctx,
+                &mut effects,
                 MCP_CONFIRM_OPEN,
                 MCP_CONFIRM_CLOSE,
                 name,
@@ -22139,6 +22156,7 @@ Connectors → MCP; do NOT claim it's done.",
                 .unwrap_or_else(|_| serde_json::json!({}));
             emit_approval_card(
                 ctx,
+                &mut effects,
                 COMPOSIO_CONFIRM_OPEN,
                 COMPOSIO_CONFIRM_CLOSE,
                 name,
@@ -24245,8 +24263,16 @@ missing, give what you have and note the gap in one short line.",
                         }
                     }
 
-                    let (result, tool_effects) =
-                        execute_chat_tool(&mut ctx, name, args_raw, &call_id).await;
+                    let (result, tool_effects) = if is_browser_granular_tool(name) {
+                        // Temporary browser seam (ADR 0024 inc 5d.2): the browser branch still mutates
+                        // `ctx` directly (browser session, snapshots, the mid-turn model-switch). It
+                        // folds into the CapabilityExecutor impl — with the model-switch surfaced as an
+                        // effect — at 5e/ADR 0025. Keeping it here lets `execute_chat_tool` be pure `&ctx`.
+                        let r = execute_browser_tool(&mut ctx, name, args_raw, &call_id).await;
+                        (r, local_first_engine::ToolEffects::default())
+                    } else {
+                        execute_chat_tool(&mut ctx, name, args_raw, &call_id).await
+                    };
                     // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                     // loop reads any field they populate (plan, accumulated, …) — net state as inline.
                     apply_tool_effects(&mut ctx, tool_effects);
