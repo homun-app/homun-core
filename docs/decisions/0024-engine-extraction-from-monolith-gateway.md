@@ -112,6 +112,34 @@ incrementalmente quando si tocca un'area).
 4. **Pulizia:** rimuovere la parallela inline una volta che il crate è default (caposaldo #1 igiene).
 5. **(Fase B, ADR futura):** valutare il processo satellite se serve blast-radius isolation.
 
+## Addendum 2026-07-07 — l'ordinamento è stato corretto leggendo il codice reale
+
+L'estrazione è **iniziata** (commit `842df465`). Leggendo il codice (5 giorni dopo la stesura) due
+premesse della sequenza sopra **non reggono** e vanno emendate:
+
+- **Il passo 2 "chokepoint via `CapabilityFacade::call_tool`" è sbagliato per la realtà attuale.**
+  `execute_chat_tool` **è già** l'unico entry del dispatch tool della chat, ma (a) è **intrecciato con
+  `ChatToolCtx`** — eseguire un tool muta l'intero contesto del turno (tab browser, messaggi, piano,
+  eventi via `tx`), NON è un puro `name+args → result`; e (b) i suoi ~53 rami sono **built-in del
+  gateway** (`update_plan`, `browser_navigate`, `generate_image`, `make_deck`…), NON provider del
+  `CapabilityFacade` (che serve capability REGISTRATE Composio/MCP con `list_tools`). Convergerli su
+  `call_tool` significherebbe registrare ogni built-in come capability esterna: refactor semantico
+  enorme e probabilmente sbagliato. **Conseguenza:** il seam `CapabilityExecutor` (il cui impl-gateway
+  È `execute_chat_tool`) si estrae **INSIEME** al corpo del loop (passo 3), non prima — non può
+  diventare un trait pulito finché è legato a `ctx`.
+
+- **Ordine reale per accoppiamento (mappa delle dipendenze, easiest→hardest):** piano puro (fatto,
+  inc 3) → **`ModelClient`** (chiamata modello: `build_chat_payload` + retry/fallback + collector;
+  serve solo `http` + 2 cache ollama) → event sink → `execute_chat_tool` + round loop (il grosso,
+  20+ `state.clone()` verso memory/chat/task/capability/browser). Quindi l'inc 4 reale è il
+  **`ModelClient`**; il chokepoint tool viaggia con l'inc 5. Wrinkle noto del `ModelClient`: il
+  fallback provider **muta** `model/base_url/endpoint/api_key` a metà turno → `generate` deve
+  restituire (o prendere `&mut`) la config effettiva, ed emette eventi ‹‹ACT›› di retry/fallback →
+  serve il sink.
+
+- Stato ADR 0022 (`MemoryRecallService` come trait iniettabile) è **pronto** da usare come port
+  memoria del confine (risponde alla domanda aperta "ordine vs 0022").
+
 ## Domande aperte
 
 - **Granularità dei trait store:** quali store attraversano davvero il confine del loop (chat, task) e
