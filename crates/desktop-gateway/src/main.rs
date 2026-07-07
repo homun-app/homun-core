@@ -88,7 +88,6 @@ use local_first_capabilities::{
 use local_first_desktop_gateway::{
     BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
-    CommitContinuationResultRequest, CommitPromptResultRequest, CommitRegeneratedResultRequest,
     EnqueueTurnRequest, SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest,
     build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
 };
@@ -912,18 +911,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
-        .route(
-            "/api/chat/threads/{thread_id}/messages/commit_prompt_result",
-            post(commit_prompt_result),
-        )
-        .route(
-            "/api/chat/threads/{thread_id}/messages/{message_id}/commit_continuation_result",
-            post(commit_continuation_result),
-        )
-        .route(
-            "/api/chat/threads/{thread_id}/messages/commit_regenerated_result",
-            post(commit_regenerated_result),
-        )
         .route("/api/chat/threads/{thread_id}/branches", get(chat_branches))
         .route(
             "/api/chat/threads/{thread_id}/active_leaf",
@@ -942,10 +929,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(save_chat_message_to_memory),
         )
         .route("/api/chat/build_prompt", post(build_prompt))
-        .route("/api/chat/generate_stream", post(generate_stream))
-        // Always-mounted capability probe: lets the client pick broker vs legacy
-        // path. NOT gated by the flag — must be visible so the client can decide.
-        .route("/api/chat/broker_enabled", get(broker_enabled))
         .route("/api/chat/stream_resume/{request_id}", get(resume_stream))
         .route("/api/chat/active_streams", get(active_streams))
         .route("/api/events", get(app_events))
@@ -2346,140 +2329,6 @@ async fn chat_messages(
             .messages(&thread_id)
             .map_err(GatewayError::store)?,
     ))
-}
-
-async fn commit_prompt_result(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-    Json(request): Json<CommitPromptResultRequest>,
-) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    // Just persist the streamed result. We no longer keyword-sniff the prompt to
-    // auto-spawn a durable operational task here: the streaming tool-calling chat
-    // has already done the model-driven work, so a keyword-matched task was
-    // redundant (and was pure keyword-activation, against de-gemma).
-    let snapshot = lock_store(&state)?
-        .commit_prompt_result(
-            &thread_id,
-            &request.user_message,
-            &request.assistant_message,
-            request.branch_from_id.as_deref(),
-        )
-        .map_err(GatewayError::store)?;
-    activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
-    mirror_app_reply_to_channel_thread(&state, &thread_id, &request.assistant_message).await;
-    Ok(Json(snapshot))
-}
-
-async fn commit_continuation_result(
-    State(state): State<AppState>,
-    Path((thread_id, message_id)): Path<(String, String)>,
-    Json(request): Json<CommitContinuationResultRequest>,
-) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    let snapshot = lock_store(&state)?
-        .commit_continuation_result(&thread_id, &message_id, &request.assistant_message)
-        .map_err(GatewayError::store)?;
-    activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
-    mirror_app_reply_to_channel_thread(&state, &thread_id, &request.assistant_message).await;
-    Ok(Json(snapshot))
-}
-
-async fn commit_regenerated_result(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-    Json(request): Json<CommitRegeneratedResultRequest>,
-) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
-    let snapshot = lock_store(&state)?
-        .commit_regenerated_answer(
-            &thread_id,
-            &request.user_message_id,
-            &request.assistant_message,
-        )
-        .map_err(GatewayError::store)?;
-    activate_remote_approvals_from_message(&state, &thread_id, &request.assistant_message).await;
-    mirror_app_reply_to_channel_thread(&state, &thread_id, &request.assistant_message).await;
-    Ok(Json(snapshot))
-}
-
-async fn mirror_app_reply_to_channel_thread(
-    state: &AppState,
-    thread_id: &str,
-    assistant_message: &ChatMessage,
-) {
-    if assistant_message.role != "assistant" {
-        return;
-    }
-    // Channels render PLAIN text: strip app-only control markers (‹‹PLAN››, ‹‹ACT››,
-    // ‹‹REASONING››, …) so Telegram/WhatsApp never see raw markers. A reasoning-only turn
-    // becomes empty here → skipped below (the trace is not the answer).
-    let stripped = strip_chat_markers(&assistant_message.text);
-    let text = stripped.trim();
-    if text.is_empty() || text == "…" {
-        return;
-    }
-    let thread = match lock_store(state)
-        .and_then(|store| store.thread(thread_id).map_err(GatewayError::store))
-    {
-        Ok(Some(thread)) => thread,
-        Ok(None) => return,
-        Err(error) => {
-            eprintln!(
-                "channel/app-mirror: unable to load thread {thread_id}: {}",
-                error.message
-            );
-            return;
-        }
-    };
-    let Some(target) = app_channel_reply_target(&thread) else {
-        return;
-    };
-    let result = match target.channel.as_str() {
-        "whatsapp" => channel_send(state, WHATSAPP_HTTP_PORT, &target.recipient, text).await,
-        "telegram" => telegram_send_with_rebind(state, &target.recipient, text).await,
-        _ => return,
-    };
-    match result {
-        Ok(()) => eprintln!(
-            "channel/{}: app reply mirrored to {} from thread {}",
-            target.channel, target.recipient, thread_id
-        ),
-        Err(error) => eprintln!(
-            "channel/{}: app reply mirror FAILED to {} from thread {}: {}",
-            target.channel, target.recipient, thread_id, error
-        ),
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AppChannelReplyTarget {
-    channel: String,
-    recipient: String,
-}
-
-fn app_channel_reply_target(thread: &ChatThread) -> Option<AppChannelReplyTarget> {
-    let channel = thread.source.as_deref()?;
-    if !matches!(channel, "whatsapp" | "telegram") {
-        return None;
-    }
-    let recipient = thread
-        .channel_recipient
-        .as_deref()
-        .map(str::trim)
-        .filter(|recipient| !recipient.is_empty())
-        .map(str::to_string)
-        .or_else(|| fallback_channel_recipient_from_thread_id(channel, &thread.thread_id))?;
-    Some(AppChannelReplyTarget {
-        channel: channel.to_string(),
-        recipient,
-    })
-}
-
-fn fallback_channel_recipient_from_thread_id(channel: &str, thread_id: &str) -> Option<String> {
-    let prefix = format!("channel_{channel}_");
-    thread_id
-        .strip_prefix(&prefix)
-        .map(str::trim)
-        .filter(|recipient| !recipient.is_empty())
-        .map(str::to_string)
 }
 
 async fn activate_remote_approvals_from_message(
@@ -13519,173 +13368,6 @@ fn append_vault_reveal_marker_if_missing(mut text: String, marker: Option<&str>)
     text
 }
 
-async fn generate_stream(
-    State(state): State<AppState>,
-    Json(request): Json<ChatGenerateStreamRequest>,
-) -> Result<Response, GatewayError> {
-    // Phase 1a: when the broker is enabled, redirect through the broker instead of streaming
-    // inline. The client gets a 201 with a stream_url and subscribes to the broker stream
-    // (Phase 2 client concern). When the flag is off, the legacy direct path runs unchanged.
-    if turn_broker_enabled() {
-        return generate_stream_via_broker(State(state), Json(request)).await;
-    }
-    // Chat runs through the configured OpenAI-compatible provider. The local
-    // MLX/Gemma fallback was removed: a provider is required. Project chats use the
-    // "coding" role when bound (else the orchestrator).
-    if let Some((mut base_url, mut model, mut api_key)) =
-        chat_role_config_for_thread(&state, request.thread_id.as_deref())
-    {
-        // Per-message model override (inline composer selector). The picker lists models
-        // from ALL providers, so switch to the chosen model's OWN provider (endpoint +
-        // key), not just its name on the role's provider — otherwise a cross-provider
-        // pick hits the wrong server and silently falls back to the settings model.
-        if let Some(override_model) = request
-            .model
-            .as_ref()
-            .map(|m| m.trim())
-            .filter(|m| !m.is_empty())
-        {
-            // The grouped picker sends "<provider_id>::<model>" (disambiguates a model id
-            // present in several providers); the plain form "<model>" is also accepted.
-            let resolved = match override_model.split_once("::") {
-                Some((pid, mid)) => {
-                    provider_config_by_id(pid, mid).or_else(|| provider_config_for_model(mid))
-                }
-                None => provider_config_for_model(override_model),
-            };
-            if let Some((ov_base, ov_model, ov_key)) = resolved {
-                base_url = ov_base;
-                model = ov_model;
-                api_key = ov_key;
-            } else {
-                model = override_model
-                    .rsplit("::")
-                    .next()
-                    .unwrap_or(override_model)
-                    .to_string();
-            }
-        }
-        // Expose the EFFECTIVE model on the response so the UI can label the message
-        // with what actually ran (not the global default) and so the override is
-        // verifiable without log access.
-        let mut response =
-            stream_chat_via_openai(&state, request, base_url, model.clone(), api_key).await?;
-        if let Ok(value) = axum::http::HeaderValue::from_str(&model) {
-            response.headers_mut().insert("x-effective-model", value);
-        }
-        return Ok(response);
-    }
-    Err(GatewayError {
-        status: StatusCode::SERVICE_UNAVAILABLE,
-        code: "no_inference_provider",
-        message: "No provider configured. Set an OpenAI-compatible endpoint in \
-Settings → Model & Runtime."
-            .to_string(),
-    })
-}
-
-/// Phase 1a broker shim for `generate_stream`. Enqueues the turn and returns a JSON body
-/// pointing the client at the broker stream, instead of streaming inline. The direct
-/// streaming path is a Phase 2 client concern (SSE bridge over turn events).
-async fn generate_stream_via_broker(
-    State(state): State<AppState>,
-    Json(request): Json<ChatGenerateStreamRequest>,
-) -> Result<Response, GatewayError> {
-    let thread_id = request
-        .thread_id
-        .clone()
-        .unwrap_or_else(|| format!("thread_{}", now_epoch_secs()));
-    let request_id = request.request_id.clone();
-    let input = local_first_task_runtime::broker::ChatTurnInput {
-        thread_id: thread_id.clone(),
-        request_id: request_id.clone(),
-        prompt: request.prompt.clone(),
-        visible_prompt: None,
-        attachments: None,
-        mode: None,
-        model: request.model.clone(),
-        source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
-        approval: local_first_task_runtime::broker::TurnApproval::Full,
-    };
-    let store = state.task_store.lock().map_err(|e| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "broker_store_lock",
-        message: format!("lock: {e}"),
-    })?;
-    let user_id = gateway_user_id();
-    let workspace_id = gateway_workspace_id();
-    let user_message_id = format!("local_user_{request_id}");
-    let user_message_prompt = input.prompt.clone();
-    let user_message_thread = input.thread_id.clone();
-    let user_message_ts = now_epoch_secs().to_string();
-    match local_first_task_runtime::broker::enqueue_chat_turn_atomic(
-        &store,
-        &user_id,
-        &workspace_id,
-        &input,
-        |tx| {
-            tx.execute(
-                "INSERT OR IGNORE INTO chat_messages (id, thread_id, role, text, timestamp)
-                 VALUES (?1, ?2, 'user', ?3, ?4)",
-                rusqlite::params![
-                    user_message_id,
-                    user_message_thread,
-                    user_message_prompt,
-                    user_message_ts,
-                ],
-            )
-            .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))?;
-            Ok(())
-        },
-    ) {
-        Ok(enqueued) => {
-            let turn_id = enqueued.task_id.as_str().to_string();
-            let body = axum::body::Body::from(serde_json::to_vec(&serde_json::json!({
-                "turn_id": turn_id,
-                "request_id": request_id,
-                "thread_id": thread_id,
-                "status": "queued",
-                "stream_url": format!("/api/chat/turns/{turn_id}/stream"),
-            }))
-            .unwrap_or_default());
-            Ok(Response::builder()
-                .status(StatusCode::CREATED)
-                .header("content-type", "application/json")
-                .body(body)
-                .map_err(|e| GatewayError {
-                    status: StatusCode::INTERNAL_SERVER_ERROR,
-                    code: "broker_response_build",
-                    message: format!("response: {e}"),
-                })?)
-        }
-        Err(local_first_task_runtime::broker::EnqueueError::ThreadBusy {
-            thread_id,
-            active_turn_id,
-        }) => {
-            let body = axum::body::Body::from(serde_json::to_vec(&serde_json::json!({
-                "error": "thread_busy",
-                "thread_id": thread_id,
-                "active_turn_id": active_turn_id,
-            }))
-            .unwrap_or_default());
-            Ok(Response::builder()
-                .status(StatusCode::CONFLICT)
-                .header("content-type", "application/json")
-                .body(body)
-                .map_err(|e| GatewayError {
-                    status: StatusCode::INTERNAL_SERVER_ERROR,
-                    code: "broker_response_build",
-                    message: format!("response: {e}"),
-                })?)
-        }
-        Err(local_first_task_runtime::broker::EnqueueError::Store(e)) => Err(GatewayError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "broker_enqueue_store",
-            message: format!("enqueue: {e}"),
-        }),
-    }
-}
-
 #[derive(Debug, Deserialize)]
 struct ImprovePromptRequest {
     prompt: String,
@@ -15893,36 +15575,6 @@ fn chat_role_config_for_thread(
         }
     }
     chat_openai_stream_config()
-}
-
-/// Full provider config (base_url, model, api_key) for an EXPLICITLY chosen model id,
-/// found by scanning every provider's catalog. The per-message override picker lists
-/// models from ALL providers, so picking one must switch the ENDPOINT + KEY too — not
-/// just rename the model on the role's provider (which would hit the wrong server with
-/// an unknown model, the bug where the inline pick "did nothing"). Returns None when no
-/// configured provider owns that model (caller then falls back to a bare name swap).
-fn provider_config_for_model(model_id: &str) -> Option<(String, String, Option<String>)> {
-    let registry = load_provider_registry();
-    let provider = registry
-        .providers
-        .iter()
-        .find(|p| p.models.iter().any(|m| m.id == model_id))?;
-    let api_key = provider_api_key(&provider.id).or_else(env_inference_api_key);
-    Some((provider.base_url.clone(), model_id.to_string(), api_key))
-}
-
-/// Full config for an EXPLICIT (provider_id, model) pair. The grouped composer picker
-/// sends "<provider_id>::<model>" so the SAME model id present in two providers (e.g.
-/// glm-4.6 on both Ollama and Z.ai) resolves to the provider the user actually chose,
-/// not just the first match. Returns None when the provider id is unknown.
-fn provider_config_by_id(
-    provider_id: &str,
-    model_id: &str,
-) -> Option<(String, String, Option<String>)> {
-    let registry = load_provider_registry();
-    let provider = registry.providers.iter().find(|p| p.id == provider_id)?;
-    let api_key = provider_api_key(&provider.id).or_else(env_inference_api_key);
-    Some((provider.base_url.clone(), model_id.to_string(), api_key))
 }
 
 /// Provider/model for the granular browser tools. With the OpenClaw-style rewrite
@@ -32748,17 +32400,6 @@ fn turn_broker_enabled() -> bool {
     )
 }
 
-/// Capability probe for the client: tells it whether to use the broker path
-/// (POST /turns + GET /turns/{id}/stream) or the legacy direct NDJSON path
-/// (POST /generate_stream). Always mounted (NOT behind the flag).
-async fn broker_enabled() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "enabled": turn_broker_enabled() }))
-}
-
-/// Number of independent background workers. Each worker is a self-contained
-/// polling loop with its own lease id; the ResourceGovernor is the actual
-/// concurrency gate, so raising this only adds parallelism for tasks whose
-/// resources are NOT contended (e.g. network_io + filesystem_io together).
 fn task_executor_worker_count() -> usize {
     std::env::var("HOMUN_TASK_WORKER_COUNT")
         .ok()
@@ -60162,48 +59803,6 @@ data: [DONE]\n";
             source: source.map(str::to_string),
             channel_recipient: channel_recipient.map(str::to_string),
         }
-    }
-
-    #[test]
-    fn app_channel_reply_target_uses_persisted_recipient() {
-        let thread = test_thread(
-            "channel_whatsapp_sender-lid",
-            Some("whatsapp"),
-            Some("393331234567@s.whatsapp.net"),
-        );
-
-        assert_eq!(
-            super::app_channel_reply_target(&thread),
-            Some(super::AppChannelReplyTarget {
-                channel: "whatsapp".to_string(),
-                recipient: "393331234567@s.whatsapp.net".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn app_channel_reply_target_supports_legacy_threads_and_skips_non_channels() {
-        let telegram = test_thread("channel_telegram_8205578468", Some("telegram"), None);
-        assert_eq!(
-            super::app_channel_reply_target(&telegram),
-            Some(super::AppChannelReplyTarget {
-                channel: "telegram".to_string(),
-                recipient: "8205578468".to_string(),
-            })
-        );
-
-        assert_eq!(
-            super::app_channel_reply_target(&test_thread(
-                "channel_scheduled_autorun_abc",
-                Some("scheduled"),
-                Some("autorun_abc"),
-            )),
-            None
-        );
-        assert_eq!(
-            super::app_channel_reply_target(&test_thread("thread_normal", None, None)),
-            None
-        );
     }
 
     #[test]
