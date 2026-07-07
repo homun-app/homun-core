@@ -18981,54 +18981,17 @@ fn shadow_log_sandbox(state: &AppState, thread_id: Option<&str>, name: &str, arg
     }
 }
 
-/// Pure per-tool-call dispatch for the chat loop: the single `if name == … else if …`
-/// chain, extracted verbatim from `stream_chat_via_openai`'s dispatch loop (fase 1b).
-/// Turn-state is read/mutated through `ctx.<field>` exactly as inline (disjoint field
-/// borrows preserved); `name`/`args_raw`/`call_id` are the per-call parse results. The
-/// caller keeps the harness snapshots, the blocked-guard, and the post-result push.
-async fn execute_chat_tool(
+// ADR 0025 seam: the granular-browser-tools arm of `execute_chat_tool`, lifted VERBATIM into its
+// own fn (behavior-preserving responsibility split). Isolates the browser branch — the ~850 lines +
+// the mid-turn model-switch that hijack a chat turn — behind ONE boundary: the exact seam ADR 0025
+// will swap for a recursive `browse(goal)` sub-agent (the manager keeps its model). Body kept at its
+// original indentation (faithful move; the file isn't rustfmt-clean, so nothing is reformatted).
+async fn execute_browser_tool(
     ctx: &mut ChatToolCtx<'_>,
     name: &str,
     args_raw: &str,
     call_id: &str,
 ) -> String {
-    // ADR 0023 step 2b, SHADOW: observe-only sandbox classification/log. Gated by
-    // `tool_safety_enabled()` (default off → one env read, no-op). NEVER blocks or
-    // alters `result`; it only reads state and logs.
-    if tool_safety_enabled() {
-        shadow_log_sandbox(ctx.state, ctx.thread_id, name, args_raw);
-    }
-    let result = if ctx.read_only
-        && matches!(
-            name,
-            "run_in_sandbox"
-                | "create_artifact"
-                | "generate_image"
-                | "save_artifact"
-                | "read_file"
-                | "write_file"
-                | "edit_file"
-                | "list_files"
-                | "run_in_project"
-                | "schedule_task"
-                | "cancel_scheduled_task"
-                | "customize_addon"
-                | "create_skill"
-        ) {
-        // Defensive: these aren't offered in read-only mode, but if the
-        // model calls one anyway, refuse instead of executing.
-        "Action not available from the channel: operations with effects \
-require your confirmation in the app. Propose it and stop."
-            .to_string()
-    } else if matches!(
-        name,
-        "browser_navigate"
-            | "browser_snapshot"
-            | "browser_act"
-            | "browser_screenshot"
-            | "browser_tabs"
-            | "browser_dialog"
-    ) {
         // Granular browser tools (HOMUN_CHAT_BROWSER_GRANULAR):
         // the main agent drives the browser one micro-action at a
         // time against a per-turn session.
@@ -19885,6 +19848,57 @@ Use the text snapshot."
             Ok(text) => text,
             Err(text) => text,
         }
+}
+
+/// Pure per-tool-call dispatch for the chat loop: the single `if name == … else if …`
+/// chain, extracted verbatim from `stream_chat_via_openai`'s dispatch loop (fase 1b).
+/// Turn-state is read/mutated through `ctx.<field>` exactly as inline (disjoint field
+/// borrows preserved); `name`/`args_raw`/`call_id` are the per-call parse results. The
+/// caller keeps the harness snapshots, the blocked-guard, and the post-result push.
+async fn execute_chat_tool(
+    ctx: &mut ChatToolCtx<'_>,
+    name: &str,
+    args_raw: &str,
+    call_id: &str,
+) -> String {
+    // ADR 0023 step 2b, SHADOW: observe-only sandbox classification/log. Gated by
+    // `tool_safety_enabled()` (default off → one env read, no-op). NEVER blocks or
+    // alters `result`; it only reads state and logs.
+    if tool_safety_enabled() {
+        shadow_log_sandbox(ctx.state, ctx.thread_id, name, args_raw);
+    }
+    let result = if ctx.read_only
+        && matches!(
+            name,
+            "run_in_sandbox"
+                | "create_artifact"
+                | "generate_image"
+                | "save_artifact"
+                | "read_file"
+                | "write_file"
+                | "edit_file"
+                | "list_files"
+                | "run_in_project"
+                | "schedule_task"
+                | "cancel_scheduled_task"
+                | "customize_addon"
+                | "create_skill"
+        ) {
+        // Defensive: these aren't offered in read-only mode, but if the
+        // model calls one anyway, refuse instead of executing.
+        "Action not available from the channel: operations with effects \
+require your confirmation in the app. Propose it and stop."
+            .to_string()
+    } else if matches!(
+        name,
+        "browser_navigate"
+            | "browser_snapshot"
+            | "browser_act"
+            | "browser_screenshot"
+            | "browser_tabs"
+            | "browser_dialog"
+    ) {
+        execute_browser_tool(ctx, name, args_raw, call_id).await
     } else if name == "github_search" {
         // Fast, structured GitHub repo search via the API (no browser).
         let query = serde_json::from_str::<serde_json::Value>(args_raw)
