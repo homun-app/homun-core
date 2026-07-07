@@ -27,6 +27,20 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
 
 ## Dove siamo
 
+- **⭐ PULIZIA TRANSPORT CHAT + FIX STOP (2026-07-07).** Convergenza sul path unico broker: la UI
+  accoda con POST `/turns` e riceve gli eventi live sul **WebSocket unificato `/api/ws`**
+  (`wsSubscription`); NDJSON resta solo come body prodotto+specchiato e per replay/resume
+  (`/turns/{id}/stream`). Rimosso il codice morto della vecchia era NDJSON-diretta: cluster client
+  (2° WS client, legacy stream fns, 3× commit client, `type StreamEvent`), endpoint server
+  (`/generate_stream`, `/broker_enabled`, 3× `/messages/commit_*_result`) + cascata
+  (`mirror_app_reply_to_channel_thread`, `provider_config_by_id/for_model`), `ServerMessage::Ping/Pong`.
+  Asserzioni `check-ui-contract.mjs` stale (imponevano il morto) aggiornate agli invarianti broker.
+  **🐛 Fix:** lo **Stop era un no-op** sul path broker (chiudeva un socket in `activeStreamSockets`
+  mai popolata) → ora `cancelTurn` chiama `DELETE /turns/{id}` (`cancel_turn`), Stop cancella davvero
+  il turno. **Runtime da verificare** in-app. Gate verdi: tsc + `test:ui-contract` + `npm run build`
+  (client), `cargo check`/`test` (server, 506 ok + 1 rosso `soffice` ambientale). Commit 5328f864→85433dcf.
+  **Rimandato:** collapse del flag `HOMUN_TURN_BROKER` (route+boot sempre-on, elimina `turn_broker_enabled()`)
+  — tocca boot/routing, pass dedicato con verifica runtime; il flag resta default-ON (innocuo).
 - **⭐ ADR 0024 — GIUNTURA `ModelClient` ESTRATTA (2026-07-07).** La chiamata al modello di un round
   ReAct non è più inline in `stream_chat_via_openai`: vive dietro `local_first_engine::ModelClient`,
   implementata da `GatewayModelClient` (`crates/desktop-gateway/src/model_client.rs`). L'impl possiede
