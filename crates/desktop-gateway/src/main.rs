@@ -30964,6 +30964,14 @@ pub(crate) struct StreamSink {
     entry: std::sync::Arc<StreamEntry>,
 }
 
+// The engine's output seam (ADR 0024 inc 5b): the future loop-in-the-engine emits every stream
+// event through `EventSink`; the gateway fans it onto the transport here (NDJSON body + WS mirror).
+impl local_first_engine::EventSink for StreamSink {
+    async fn emit(&self, event: GenerateStreamEvent) {
+        let _ = emit_stream_event(self, event).await;
+    }
+}
+
 fn stream_registry()
 -> &'static std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<StreamEntry>>> {
     static CELL: std::sync::OnceLock<

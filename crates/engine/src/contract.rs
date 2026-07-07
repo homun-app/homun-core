@@ -5,11 +5,12 @@
 //! them. Kept deliberately decoupled — only `serde_json` crosses here, so the engine stays a
 //! low-level, mockable crate (no heavy `subagents`/`capabilities`/reqwest deps leak in).
 //!
-//! Two seams are defined now (the two ADR 0024 names). The engine's OWN output-event contract
-//! (the `GenerateStreamEvent` sink) is resolved when the loop body itself moves (increment 5),
-//! since that decides where `GenerateStreamEvent` should live (today it sits in the heavy
-//! `subagents` crate — the wrong direction for the engine to depend on).
+//! Three seams: `ModelClient` (the model call), `CapabilityExecutor` (the single tool chokepoint),
+//! and `EventSink` (the loop's output — every stream event it produces). `GenerateStreamEvent` now
+//! lives in this crate (`engine::events`, inc 5a), so `EventSink` can be defined here (inc 5b) ahead
+//! of the loop move (inc 5e) that consumes it — the same contract-first pattern as the seams above.
 
+use crate::events::GenerateStreamEvent;
 use serde_json::Value;
 use std::future::Future;
 
@@ -88,6 +89,14 @@ pub trait CapabilityExecutor {
     ) -> impl Future<Output = Result<String, String>>;
 }
 
+/// The engine's output seam: every stream event the loop produces (delta, activity, plan, tool
+/// result, done, error, …) goes through here. The gateway's impl fans it onto the transport (the
+/// NDJSON turn body + the unified WS). `Send` because the loop runs inside a `tokio::spawn` (same
+/// reason as `ModelClient`). Defined ahead of the loop move (inc 5e) that will consume it.
+pub trait EventSink {
+    fn emit(&self, event: GenerateStreamEvent) -> impl Future<Output = ()> + Send;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +165,29 @@ mod tests {
             tools.execute_tool("browse", &Value::Null, "c1").await.unwrap(),
             "ran browse"
         );
+    }
+
+    // An in-memory sink proves the EventSink seam is usable + mockable (drive the future loop's
+    // output with no transport). The gateway's `StreamSink` is the real impl.
+    #[derive(Default)]
+    struct CollectingSink(std::sync::Mutex<Vec<GenerateStreamEvent>>);
+    impl EventSink for CollectingSink {
+        async fn emit(&self, event: GenerateStreamEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn event_sink_is_usable_with_a_mock() {
+        let sink = CollectingSink::default();
+        sink.emit(GenerateStreamEvent::Delta { text: "hi".into() }).await;
+        sink.emit(GenerateStreamEvent::Error {
+            code: "e".into(),
+            message: "boom".into(),
+        })
+        .await;
+        let got = sink.0.lock().unwrap();
+        assert_eq!(got.len(), 2);
+        assert!(matches!(got[0], GenerateStreamEvent::Delta { .. }));
     }
 }
