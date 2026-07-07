@@ -60,10 +60,30 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   ADR "Send all'inc 5" era sbagliata sui tempi). ~300 righe tolte a `main.rs`. **Gate:** engine test +
   508/509 gateway (l'1 rosso è `soffice` mancante, ambientale) + `cargo build` verdi. **PENDING:** smoke
   a runtime (turno reale + 401 forzato per confermare la persistenza dello swap) — non esercitabile
-  headless, da fare nell'app. **Prossimo:** inc 5 (spostare il corpo del loop nel crate) — decisioni
-  aperte: dove vive `GenerateStreamEvent`, attivazione reale di `on_delta`. Vedi
+  headless, da fare nell'app.
   [spec](superpowers/specs/2026-07-07-extract-modelclient-design.md) +
   [piano](superpowers/plans/2026-07-07-extract-modelclient.md).
+
+- **⭐ ADR 0024 — inc 5 in corso (estrazione del corpo del loop nel crate `engine`). Slice fatte:**
+  **5a** (`GenerateStreamEvent`+payload → `engine::events`), **5b** (`EventSink` seam + `impl EventSink
+  for StreamSink`), **5c ✅ (2026-07-07, commit 183b6c46).** 5c = **port `PlanProgress`** per l'unico
+  accoppiamento `AppState` che *resta al loop* (oltre a ModelClient/EventSink/CapabilityExecutor/
+  MemoryRecallService): il cluster **progresso-piano runtime** — `persist_plan`/`record_step_outcome`/
+  `verify_step_complete`. **Correzione importante:** letto il range solo-loop (`main.rs` 23810–24672,
+  `for round in 0..hard_round_ceiling()`), l'ipotesi "servono port chat/task/browser" era **sbagliata** —
+  chat/task/browser/recall/connettori/pagamenti/vault stanno tutti **dentro `execute_chat_tool`** (viaggiano
+  col seam `CapabilityExecutor` a **5d**) o nel **setup pre-loop** (privacy-guard/briefing → restano
+  lato gateway, costruiscono il ctx iniettato). Trait `engine::PlanProgress` (3 metodi async `+Send`) +
+  mock; adapter gateway `GatewayPlanProgress{state: AppState}` (in `main.rs` accanto a `EventSink`, delega
+  verbatim ai tre helper esistenti; `#[allow(dead_code)]` finché 5e lo costruisce). **Port a sé, NON dentro
+  `MemoryRecallService`** (il piano runtime è *stato di control-flow* dell'harness, lo store memoria è solo
+  backend durevole; `verify` è inferenza, non memoria → SRP + ADR 0025 lo ritira in un colpo). La sintesi
+  forzata (empty-answer) riusa `ModelClient` (`is_final_round`). **Behavior-preserving** (loop invariato).
+  **Gate:** engine 6/6 (incl. nuovo mock) + gateway `cargo check`/`--tests` puliti, nessun nuovo warning.
+  **Prossimo:** 5d = avvolgere `execute_chat_tool` come `CapabilityExecutor::execute_tool` (ridefinizione
+  `&mut ctx → effetti applicati dall'engine`, il crux, precondizione ADR 0025) → 5e (muovere il corpo del
+  loop dietro `HOMUN_ENGINE_CRATE`) → 5f/inc6 (ritirare la parallela inline). Mini-design:
+  [spec inc5](superpowers/specs/2026-07-07-move-agent-loop-into-engine-design.md).
 
 - **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,
   ReAct + native tool-calling), piano come *tool*, NON un secondo motore plan-execute. Supersede la
