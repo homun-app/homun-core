@@ -15053,7 +15053,7 @@ async fn set_llm_concurrency(
 /// need far more than the old fixed 180s — and editors like Zed don't cap total time
 /// at all because they STREAM (the proper fix; see roadmap). Override with
 /// HOMUN_MODEL_TIMEOUT_SECS.
-fn model_request_timeout_secs() -> u64 {
+pub(crate) fn model_request_timeout_secs() -> u64 {
     // High ceiling: with streaming the real governors are the first-token + idle
     // timeouts (below). A total cap that fires mid-stream is reported by reqwest as
     // "error decoding response body" (#2839), so keep it well above any real turn.
@@ -15068,7 +15068,7 @@ fn model_request_timeout_secs() -> u64 {
 /// governor is INACTIVITY, not total time: a generation that keeps emitting tokens
 /// never dies, only a genuine stall (no token for this long) does. Default 180s;
 /// override with HOMUN_MODEL_IDLE_TIMEOUT_SECS.
-fn model_idle_timeout_secs() -> u64 {
+pub(crate) fn model_idle_timeout_secs() -> u64 {
     std::env::var("HOMUN_MODEL_IDLE_TIMEOUT_SECS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
@@ -15183,7 +15183,7 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
 /// committed text is the authoritative `Done` payload, so the raw live preview is
 /// cleanly replaced). Returns the reassembled non-streaming body (content +
 /// tool_calls), or an error string on a genuine stall / stream error.
-async fn collect_openai_stream(
+pub(crate) async fn collect_openai_stream(
     resp: reqwest::Response,
     first_token: std::time::Duration,
     idle: std::time::Duration,
@@ -15283,7 +15283,7 @@ async fn collect_openai_stream(
 /// Generous budget for the FIRST token (seconds): Ollama may cold-load a big model
 /// or the cloud may take a moment before the first byte. Inter-token gaps use the
 /// tighter idle. Override with HOMUN_MODEL_FIRST_TOKEN_SECS.
-fn model_first_token_timeout_secs() -> u64 {
+pub(crate) fn model_first_token_timeout_secs() -> u64 {
     std::env::var("HOMUN_MODEL_FIRST_TOKEN_SECS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
@@ -15295,7 +15295,7 @@ fn model_first_token_timeout_secs() -> u64 {
 /// use the NATIVE `/api/chat` API: the OpenAI-compat `/v1` layer SILENTLY DROPS tool
 /// calls when streaming (ollama#12557) — the native API supports streaming + tools
 /// together (what Zed does).
-fn is_ollama_base(base_url: &str) -> bool {
+pub(crate) fn is_ollama_base(base_url: &str) -> bool {
     let b = base_url.to_ascii_lowercase();
     b.contains("ollama.com") || b.contains(":11434")
 }
@@ -15318,7 +15318,7 @@ fn zai_thinking_enabled() -> bool {
 
 /// The chat completions endpoint for a provider: Ollama → native `/api/chat`
 /// (strip a trailing `/v1`); everyone else → OpenAI-compat `/chat/completions`.
-fn chat_endpoint(base_url: &str) -> String {
+pub(crate) fn chat_endpoint(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     if is_ollama_base(base_url) {
         let root = trimmed
@@ -15633,7 +15633,7 @@ async fn process_ollama_line(
 /// streamed NDJSON form (one JSON object per line) AND a non-streamed single object
 /// (the trailing-buffer step, like ollama-rs) — so it works whether `stream` is true
 /// or false. Emits content live; normalizes tool_calls; salvages partial output.
-async fn collect_ollama_native_stream(
+pub(crate) async fn collect_ollama_native_stream(
     resp: reqwest::Response,
     first_token: std::time::Duration,
     idle: std::time::Duration,
@@ -15731,7 +15731,7 @@ async fn collect_ollama_native_stream(
 /// Ollama native (`/api/chat`: `options.num_predict`, native messages) vs OpenAI
 /// (`/v1`: `max_tokens`, `tool_choice`). Rebuilt on fallback so switching provider
 /// type mid-turn (e.g. Ollama → Z.ai) sends the correct shape.
-fn build_chat_payload(
+pub(crate) fn build_chat_payload(
     model: &str,
     base_url: &str,
     messages: &[serde_json::Value],
@@ -15809,7 +15809,7 @@ fn chat_payload_max_tokens(is_final_round: bool, debug_override: Option<&str>) -
         .unwrap_or(DEFAULT_CHAT_MAX_TOKENS)
 }
 
-fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
+pub(crate) fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
     let registry = load_provider_registry();
     // 1) Any provider with a key + a usable model different from the failing one.
     for provider in &registry.providers {
@@ -15843,7 +15843,7 @@ fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<S
 /// A provider can serve normal chat yet reject a tool-bearing request. Recover with
 /// the explicitly configured orchestrator role, but only for that one failed round:
 /// auth and transport fallbacks below retain their own retry budget.
-fn tool_compatibility_fallback_config(
+pub(crate) fn tool_compatibility_fallback_config(
     failing_base_url: &str,
     failing_model: &str,
 ) -> Option<(String, String, Option<String>)> {
@@ -15856,7 +15856,7 @@ fn tool_compatibility_fallback_config(
     Some((fallback.base_url, fallback.model, api_key))
 }
 
-fn should_try_tool_compatibility_fallback(
+pub(crate) fn should_try_tool_compatibility_fallback(
     status_code: u16,
     payload_has_tools: bool,
     already_tried: bool,
@@ -31597,7 +31597,7 @@ struct StreamEntry {
 
 /// Sink the generation emits to: tees every event to the ORIGINAL live response
 /// (mpsc, unchanged behaviour) AND to the resume registry (buffer + broadcast).
-struct StreamSink {
+pub(crate) struct StreamSink {
     mpsc: tokio::sync::mpsc::Sender<Result<Bytes, std::io::Error>>,
     entry: std::sync::Arc<StreamEntry>,
 }
@@ -32260,7 +32260,7 @@ async fn emit_single_stream_event(sink: &StreamSink, event: GenerateStreamEvent)
     Ok(())
 }
 
-async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
+pub(crate) async fn emit_stream_event(sink: &StreamSink, event: GenerateStreamEvent) -> Result<(), ()> {
     match event {
         GenerateStreamEvent::Delta { text } => {
             for expanded in expand_legacy_delta_to_chat_events_with_mode(
