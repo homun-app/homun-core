@@ -134,7 +134,7 @@ pub trait CapabilityExecutor {
         name: &str,
         args: &Value,
         call_id: &str,
-    ) -> impl Future<Output = Result<ToolOutcome, String>>;
+    ) -> impl Future<Output = Result<ToolOutcome, String>> + Send;
 }
 
 /// The engine's output seam: every stream event the loop produces (delta, activity, plan, tool

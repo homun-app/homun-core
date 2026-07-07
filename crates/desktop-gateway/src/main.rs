@@ -22293,6 +22293,31 @@ fn apply_tool_effects(ctx: &mut ChatToolCtx<'_>, effects: local_first_engine::To
     }
 }
 
+/// The gateway's `CapabilityExecutor` (ADR 0024): wraps the pure `execute_chat_tool` (`&ctx` →
+/// result + effects) as the engine's single NON-browser tool chokepoint. Browser tools stay a
+/// separate loop branch (the temporary `&mut` seam) until ADR 0025 folds them into a recursive
+/// `browse`. Holds `&ctx` (Sync since 5e.1), so the future is `Send` for the loop's `tokio::spawn`.
+/// Constructed per round by the loop-move (5e.3); dead code until then.
+#[allow(dead_code)]
+struct GatewayCapabilityExecutor<'a> {
+    ctx: &'a ChatToolCtx<'a>,
+}
+
+impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
+    async fn execute_tool(
+        &self,
+        name: &str,
+        args: &serde_json::Value,
+        call_id: &str,
+    ) -> Result<local_first_engine::ToolOutcome, String> {
+        // The engine parses the model's tool-call args into a `Value`; `execute_chat_tool` re-parses
+        // a JSON string, so round-trip through `to_string` (semantically identical — tools parse it).
+        let args_raw = args.to_string();
+        let (result, effects) = execute_chat_tool(self.ctx, name, &args_raw, call_id).await;
+        Ok(local_first_engine::ToolOutcome { result, effects })
+    }
+}
+
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,
