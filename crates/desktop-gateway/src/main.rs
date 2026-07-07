@@ -833,15 +833,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // proactivity cards. Cancel any check-in still scheduled from a previous version
     // so the old "sfilza di domande" push stops (the thread stays as inert data).
     cancel_homun_checkins(&state);
-    eprintln!(
-        "turn broker: enabled={} (HOMUN_TURN_BROKER); Phase 0 = foundation primitives only",
-        turn_broker_enabled()
-    );
+    eprintln!("turn broker: the only chat path; running lease-aware boot recovery");
     // Phase 1a: lease-aware boot recovery. Bump the process generation, then re-queue any
     // chat_turn left Running by a previous (now-dead) process. Must run BEFORE the worker
     // pool starts AND before the background VACUUM (VACUUM takes an exclusive lock that
     // would collide with bump_process_generation on the unified DB → "database is locked").
-    if turn_broker_enabled() {
+    // Bare block scopes the task_store lock guard so it is released before the VACUUM below.
+    {
         let store = state.task_store.lock().expect("task store lock at boot");
         let generation = store.bump_process_generation().expect("bump process generation");
         let user_id = gateway_user_id();
@@ -1298,21 +1296,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/capabilities/composio/allowed-tools/{slug}",
             delete(composio_revoke_allowed_tool),
         );
-    // Turn broker HTTP surface — only mounted when HOMUN_TURN_BROKER is on, so the
-    // flag-off path is byte-for-byte unchanged. Registered before the token layer is
-    // applied (below) so these routes are still bearer-gated like the rest of /api.
-    let chat_routes = if turn_broker_enabled() {
-        chat_routes
-            .route("/api/chat/turns", post(enqueue_turn))
-            .route(
-                "/api/chat/turns/{turn_id}",
-                get(get_turn).delete(cancel_turn),
-            )
-            .route("/api/chat/turns/{turn_id}/events", get(get_turn_events))
-            .route("/api/chat/turns/{turn_id}/stream", get(subscribe_turn_stream))
-    } else {
-        chat_routes
-    };
+    // Turn broker HTTP surface — the only chat path. Registered before the token layer
+    // is applied (below) so these routes are still bearer-gated like the rest of /api.
+    let chat_routes = chat_routes
+        .route("/api/chat/turns", post(enqueue_turn))
+        .route(
+            "/api/chat/turns/{turn_id}",
+            get(get_turn).delete(cancel_turn),
+        )
+        .route("/api/chat/turns/{turn_id}/events", get(get_turn_events))
+        .route("/api/chat/turns/{turn_id}/stream", get(subscribe_turn_stream));
     let chat_routes = chat_routes.route_layer(middleware::from_fn_with_state(
         state.clone(),
         require_gateway_token,
@@ -31186,7 +31179,7 @@ async fn resume_stream(Path(request_id): Path<String>) -> Result<Response, Gatew
     }
 }
 
-// ── Turn broker HTTP surface (behind turn_broker_enabled()) ───────────────────
+// ── Turn broker HTTP surface (the only chat path) ─────────────────────────────
 //
 // POST   /api/chat/turns                    — enqueue a chat turn (201 / 409)
 // GET    /api/chat/turns/{turn_id}          — turn status
@@ -32204,6 +32197,32 @@ fn run_next_task_once(
             .map_err(GatewayError::task)?;
     }
     append_task_observation_to_session(state, &task, &outcome)?;
+    // Guard: a turn cancelled mid-flight (cancel_chat_turn set status=Cancelled while the
+    // executor was racing to a stop via its select! on the cancel Notify) must NOT be
+    // resurrected by its late outcome. Reload the authoritative status; if it's already
+    // Cancelled, release resources and close out WITHOUT overwriting it — otherwise
+    // mark_task_completed / handle_failed_task_run would clobber Cancelled with Completed/Failed
+    // and leave the thread stuck (the "thread is busy" symptom).
+    let externally_cancelled = lock_task_store(state)
+        .ok()
+        .and_then(|store| store.get_task(&task.task_id, &user, &workspace).ok().flatten())
+        .is_some_and(|t| t.status == TaskStatus::Cancelled);
+    if externally_cancelled {
+        if let Ok(store) = lock_task_store(state) {
+            let _ = store.release_resources(&task);
+        }
+        append_task_result_to_chat(state, &task_id, &outcome.chat_message)?;
+        return Ok(TaskRunBatchResponse {
+            status: "cancelled".to_string(),
+            completed: 0,
+            stopped_reason: Some("cancelled by user".to_string()),
+            results: vec![TaskRunStepResponse {
+                status: "cancelled".to_string(),
+                task_id: Some(task_id),
+                message: outcome.summary,
+            }],
+        });
+    }
     if outcome.completed {
         record_subagent_task_step_outcome(state, &task, &outcome);
         mark_task_completed(state, &mut task)?;
@@ -32387,17 +32406,6 @@ fn task_executor_worker_enabled() -> bool {
             !matches!(normalized.as_str(), "0" | "false" | "off" | "disabled")
         })
         .unwrap_or(true)
-}
-
-/// Feature flag for the turn broker. Default OFF in Phase 0 (no behavior change).
-/// ON enables the broker path for chat_turn (Phase 1). Read once at startup.
-fn turn_broker_enabled() -> bool {
-    // Broker is now the ONLY path (legacy NDJSON removed from the client).
-    // The env override is kept for backwards compatibility but defaults to true.
-    !matches!(
-        std::env::var("HOMUN_TURN_BROKER").as_deref(),
-        Ok("off") | Ok("0") | Ok("false")
-    )
 }
 
 fn task_executor_worker_count() -> usize {

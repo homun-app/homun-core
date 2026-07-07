@@ -169,7 +169,7 @@ pub fn execute_chat_turn_task(
 
     // 3. Register the live turn broadcast (Task 1a.2). Cancellation + the
     //    per-turn SSE/WS fan-out key off this. Always unregistered on exit.
-    let _broadcast = register_turn(turn_id);
+    let broadcast = register_turn(turn_id);
 
     // 4. Open the visible turn: persists user + assistant placeholder messages
     //    and emits `thread.turn_started`. Fail closed if it cannot be persisted
@@ -193,16 +193,31 @@ pub fn execute_chat_turn_task(
     //    just delegates to the existing drainer.
     tracing::info!(target: "broker::executor", turn_id = %turn_id, thread_id = %thread_id, "agent-loop starting");
     let drain_started = std::time::Instant::now();
-    let answer = tokio::runtime::Handle::current()
-        .block_on(crate::run_agent_turn_into_message_with_fanout(
-            state,
-            thread_id,
-            prompt,
-            tool_policy,
-            &visible_turn.user_message_id,
-            &visible_turn.assistant_message_id,
-            turn_id,
-        ))
+    // Race the turn against its cancel signal (fired by `cancel_chat_turn` →
+    // `GatewayCancelNotify`). Dropping the turn future on cancel aborts the in-flight
+    // model/tool work; on cancel we SKIP the Completed finalize below so the `Cancelled`
+    // status `cancel_chat_turn` already persisted survives (the runner also guards against
+    // resurrecting an externally-cancelled task). Without this select the `notify_one()` had
+    // no waiter in production and the turn always ran to completion, overwriting `Cancelled`.
+    let cancel = broadcast.cancel.clone();
+    let run = tokio::runtime::Handle::current().block_on(async {
+        tokio::select! {
+            biased;
+            _ = cancel.notified() => None,
+            answer = crate::run_agent_turn_into_message_with_fanout(
+                state,
+                thread_id,
+                prompt,
+                tool_policy,
+                &visible_turn.user_message_id,
+                &visible_turn.assistant_message_id,
+                turn_id,
+            ) => Some(answer),
+        }
+    });
+    let cancelled = run.is_none();
+    let answer = run
+        .flatten()
         .unwrap_or_else(|| "No reply generated.".to_string());
     tracing::info!(
         target: "broker::executor",
@@ -212,45 +227,56 @@ pub fn execute_chat_turn_task(
         "agent-loop completed — persisting assistant message"
     );
 
-    // 6. Finalize the assistant message. The legacy path persists the full
-    // streamed text (which includes ‹‹ACT›› activity markers as inline deltas),
-    // so the working island can parse them out of `message.text`. The broker
-    // separates activity into its own event kind, so to keep the island working
-    // we re-prefix the activity markers (collected from the turn_events emitted
-    // during the drain) ahead of the clean answer text.
-    let activity_prefix = build_activity_prefix_from_turn_events(state, turn_id);
-    let full_text = if activity_prefix.is_empty() {
-        answer.clone()
-    } else {
-        format!("{activity_prefix}\n{answer}")
-    };
-    crate::update_channel_assistant_message(
-        state,
-        thread_id,
-        &visible_turn.assistant_message_id,
-        &full_text,
-    );
-
-    // 7. Emit the terminal `done` turn event (durable + best-effort live).
-    tracing::info!(target: "broker::executor", turn_id = %turn_id, "emitting done event");
-    if let Ok(store) = state.task_store.lock() {
-        let _ = emit_turn_event(
+    // 6+7. Finalize — ONLY when the turn ran to completion. On cancel we skip both the
+    // assistant-message finalize and the `done` event: `cancel_chat_turn` already persisted
+    // the `Cancelled` status and emitted the `Cancelled` turn event, so writing a `done`/full
+    // answer here would resurrect a cancelled turn.
+    if !cancelled {
+        // 6. Finalize the assistant message. The legacy path persists the full
+        // streamed text (which includes ‹‹ACT›› activity markers as inline deltas),
+        // so the working island can parse them out of `message.text`. The broker
+        // separates activity into its own event kind, so to keep the island working
+        // we re-prefix the activity markers (collected from the turn_events emitted
+        // during the drain) ahead of the clean answer text.
+        let activity_prefix = build_activity_prefix_from_turn_events(state, turn_id);
+        let full_text = if activity_prefix.is_empty() {
+            answer.clone()
+        } else {
+            format!("{activity_prefix}\n{answer}")
+        };
+        crate::update_channel_assistant_message(
             state,
-            &store,
-            turn_id,
-            local_first_task_runtime::TurnEventKind::Done,
-            serde_json::json!({
-                "assistant_message_id": visible_turn.assistant_message_id,
-                "user_message_id": visible_turn.user_message_id,
-            }),
+            thread_id,
+            &visible_turn.assistant_message_id,
+            &full_text,
         );
+
+        // 7. Emit the terminal `done` turn event (durable + best-effort live).
+        tracing::info!(target: "broker::executor", turn_id = %turn_id, "emitting done event");
+        if let Ok(store) = state.task_store.lock() {
+            let _ = emit_turn_event(
+                state,
+                &store,
+                turn_id,
+                local_first_task_runtime::TurnEventKind::Done,
+                serde_json::json!({
+                    "assistant_message_id": visible_turn.assistant_message_id,
+                    "user_message_id": visible_turn.user_message_id,
+                }),
+            );
+        }
+    } else {
+        tracing::info!(target: "broker::executor", turn_id = %turn_id, "turn cancelled mid-flight — skipping finalize + done event");
     }
 
     // 8. Drop the live broadcast (subscribers see the channel close).
     unregister_turn(turn_id);
 
-    // 9. Build the outcome — same shape as `execute_proactive_prompt_task`.
-    let completed = !answer.trim().is_empty()
+    // 9. Build the outcome — same shape as `execute_proactive_prompt_task`. A cancelled
+    // turn is never "completed"; the runner sees completed=false + the store's Cancelled
+    // status and closes out without overwriting it.
+    let completed = !cancelled
+        && !answer.trim().is_empty()
         && answer.trim() != "No reply generated.";
     tracing::info!(
         target: "broker::executor",
