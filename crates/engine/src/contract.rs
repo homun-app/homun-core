@@ -5,10 +5,11 @@
 //! them. Kept deliberately decoupled — only `serde_json` crosses here, so the engine stays a
 //! low-level, mockable crate (no heavy `subagents`/`capabilities`/reqwest deps leak in).
 //!
-//! Three seams: `ModelClient` (the model call), `CapabilityExecutor` (the single tool chokepoint),
-//! and `EventSink` (the loop's output — every stream event it produces). `GenerateStreamEvent` now
-//! lives in this crate (`engine::events`, inc 5a), so `EventSink` can be defined here (inc 5b) ahead
-//! of the loop move (inc 5e) that consumes it — the same contract-first pattern as the seams above.
+//! Four seams: `ModelClient` (the model call), `CapabilityExecutor` (the single tool chokepoint),
+//! `EventSink` (the loop's output — every stream event it produces), and `PlanProgress` (the loop's
+//! runtime-plan persistence + step-verification port). `GenerateStreamEvent` now lives in this crate
+//! (`engine::events`, inc 5a), so `EventSink` can be defined here (inc 5b) — and `PlanProgress`
+//! (inc 5c) — ahead of the loop move (inc 5e) that consumes them: the same contract-first pattern.
 
 use crate::events::GenerateStreamEvent;
 use serde_json::Value;
@@ -95,6 +96,43 @@ pub trait CapabilityExecutor {
 /// reason as `ModelClient`). Defined ahead of the loop move (inc 5e) that will consume it.
 pub trait EventSink {
     fn emit(&self, event: GenerateStreamEvent) -> impl Future<Output = ()> + Send;
+}
+
+/// The loop's runtime-plan progress port (ADR 0024, increment 5c). The harness — not the model —
+/// owns plan control-flow; the durable plan lives in the memory store and the step judge is an LLM
+/// call. Both are `AppState`-shaped, so the engine reaches them through this narrow seam.
+///
+/// STANDALONE, deliberately not folded into `MemoryRecallService`: the runtime plan is harness
+/// control-flow *state* that merely uses the memory store as its durable backend (not recalled
+/// knowledge), and `verify_step_complete` is inference, not a memory op — one trait per concern keeps
+/// both contracts coherent (SRP) and lets ADR 0025 (browse-as-recursion) retire this whole mechanism
+/// in a single delete. `Send` for the same reason as the seams above (the loop runs in `tokio::spawn`).
+/// Defined ahead of the loop move (inc 5e) that will consume it — the same contract-first pattern.
+pub trait PlanProgress {
+    /// Persist the thread's runtime plan durably (cross-turn continuity). The delivery reconcile and
+    /// each mid-turn frontier advance call this; `None` thread = no persistence scope (a no-op impl).
+    fn persist_plan(
+        &self,
+        thread: Option<&str>,
+        steps: &[Value],
+    ) -> impl Future<Output = ()> + Send;
+
+    /// Record a VERIFIED frontier-step outcome as episodic evidence in the memory layer.
+    fn record_step_outcome(
+        &self,
+        thread: Option<&str>,
+        step: &Value,
+        evidence: &[String],
+    ) -> impl Future<Output = ()> + Send;
+
+    /// Strict LLM judge: is this frontier step genuinely complete given the evidence?
+    /// Returns `(done, reason)` — the loop advances the frontier only on `true`.
+    fn verify_step_complete(
+        &self,
+        title: &str,
+        criterion: &str,
+        evidence: &str,
+    ) -> impl Future<Output = (bool, String)> + Send;
 }
 
 #[cfg(test)]
@@ -189,5 +227,41 @@ mod tests {
         let got = sink.0.lock().unwrap();
         assert_eq!(got.len(), 2);
         assert!(matches!(got[0], GenerateStreamEvent::Delta { .. }));
+    }
+
+    // An in-memory plan-progress port proves the seam is usable + mockable: the future loop can be
+    // driven with a scripted judge (no LLM) and an inspectable persistence log (no memory store).
+    #[derive(Default)]
+    struct RecordingPlan {
+        persisted: std::sync::Mutex<Vec<usize>>, // step-count of each persist_plan call
+        outcomes: std::sync::Mutex<usize>,       // how many step outcomes were recorded
+        judge: bool,                             // scripted verify verdict
+    }
+    impl PlanProgress for RecordingPlan {
+        async fn persist_plan(&self, _thread: Option<&str>, steps: &[Value]) {
+            self.persisted.lock().unwrap().push(steps.len());
+        }
+        async fn record_step_outcome(&self, _thread: Option<&str>, _step: &Value, _evidence: &[String]) {
+            *self.outcomes.lock().unwrap() += 1;
+        }
+        async fn verify_step_complete(
+            &self,
+            _title: &str,
+            _criterion: &str,
+            _evidence: &str,
+        ) -> (bool, String) {
+            (self.judge, String::new())
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn plan_progress_is_usable_with_a_mock() {
+        let plan = RecordingPlan { judge: true, ..Default::default() };
+        plan.persist_plan(Some("t1"), &[Value::Null, Value::Null]).await;
+        let (done, _why) = plan.verify_step_complete("step", "crit", "did the thing").await;
+        assert!(done, "scripted judge said complete");
+        plan.record_step_outcome(Some("t1"), &Value::Null, &["evidence".into()]).await;
+        assert_eq!(*plan.persisted.lock().unwrap(), vec![2], "persisted a 2-step plan");
+        assert_eq!(*plan.outcomes.lock().unwrap(), 1, "recorded one verified outcome");
     }
 }

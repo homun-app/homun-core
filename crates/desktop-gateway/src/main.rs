@@ -30972,6 +30972,53 @@ impl local_first_engine::EventSink for StreamSink {
     }
 }
 
+/// The engine's runtime-plan progress port (ADR 0024 inc 5c): when the loop moves into the engine it
+/// persists/records/verifies plan progress through this seam instead of reaching into `AppState`. Owns
+/// a cheap `AppState` clone (all-`Arc` fields) because `persist_plan`/`record_step_outcome` move it into
+/// `spawn_blocking` (the memory facade is sync). Delegates verbatim to the three existing helpers, so
+/// behavior is unchanged — the loop still calls them directly until inc 5e adopts this adapter.
+#[allow(dead_code)] // constructed by the gateway wiring at inc 5e (the loop move); defined now, contract-first.
+pub(crate) struct GatewayPlanProgress {
+    pub state: AppState,
+}
+
+impl local_first_engine::PlanProgress for GatewayPlanProgress {
+    async fn persist_plan(&self, thread: Option<&str>, steps: &[serde_json::Value]) {
+        let st = self.state.clone();
+        let thread = thread.map(str::to_string);
+        let steps = steps.to_vec();
+        let _ = tokio::task::spawn_blocking(move || {
+            upsert_runtime_plan_memory_from_state(&st, thread.as_deref(), &steps);
+        })
+        .await;
+    }
+
+    async fn record_step_outcome(
+        &self,
+        thread: Option<&str>,
+        step: &serde_json::Value,
+        evidence: &[String],
+    ) {
+        let st = self.state.clone();
+        let thread = thread.map(str::to_string);
+        let step = step.clone();
+        let evidence = evidence.to_vec();
+        let _ = tokio::task::spawn_blocking(move || {
+            record_runtime_plan_step_outcome_from_state(&st, thread.as_deref(), &step, &evidence);
+        })
+        .await;
+    }
+
+    async fn verify_step_complete(
+        &self,
+        title: &str,
+        criterion: &str,
+        evidence: &str,
+    ) -> (bool, String) {
+        verify_step_complete(&self.state.http, title, criterion, evidence).await
+    }
+}
+
 fn stream_registry()
 -> &'static std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<StreamEntry>>> {
     static CELL: std::sync::OnceLock<

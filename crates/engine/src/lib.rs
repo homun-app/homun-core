@@ -25,5 +25,5 @@ pub mod events;
 
 pub use contract::{
     CapabilityExecutor, EventSink, ModelCall, ModelCallError, ModelClient, ModelRoundOutput,
-    ProviderBinding,
+    PlanProgress, ProviderBinding,
 };
