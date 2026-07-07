@@ -124,8 +124,14 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   headless):** il corpo loop chiama **decine** di helper gateway (marker/plan/vault/synthesis/logging) → vanno
   portati/iniettati; serve il **3-way split di `ChatToolCtx`** (loop-state→motore, tool-context→iniettato,
   browser→seam) + **validazione LIVE** parità turno-per-turno (non headless). Effort multi-sessione. I 9 slice
-  5a→5e.3a sono la PREP completa. **Prossimo (quando l'app è pilotabile):** 5e.3 loop-move → 0025/5f (browse
-  ricorsivo, ritiro band-aid). Mini-design:
+  5a→5e.3a sono la PREP completa. **5e.3 prep avviata (commit d7f5dd9d):** spostati in `engine::plan` i 2
+  helper puri di plan-marker del loop (`collapse_plan_markers`, `replace_latest_plan_marker`), verbatim +
+  re-export (behavior-preserving); riduce l'accoppiamento gateway del loop e chippa `main.rs`. Gli altri
+  helper del loop hanno o home ambigua (`fonti_section`, puro ma senza modulo) o dipendenze a cascata
+  (`append_vault_reveal_marker_if_missing`→const, `plan_steps_reconciled_on_delivery`→env-flag+`ExecutionPlan`)
+  → estrazioni da fare presidiato (scelte di struttura moduli), non nella corsa autonoma notturna.
+  **Prossimo (quando l'app è pilotabile):** 5e.3 loop-move (3-way ctx split + relocazione con parità LIVE) →
+  0025/5f (browse ricorsivo, ritiro band-aid). Mini-design:
   [spec inc5](superpowers/specs/2026-07-07-move-agent-loop-into-engine-design.md).
 
 - **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,
