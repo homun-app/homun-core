@@ -31,17 +31,42 @@ pub struct ModelCall<'a> {
     pub is_final_round: bool,
 }
 
+/// The provider binding a round ran against. Returned so a mid-turn fallback (401/timeout/
+/// tool-400 swap) inside the impl propagates back to the loop, which reuses it next round. Without
+/// this, a swap would be invisible to subsequent rounds (the loop passes the provider by `&`).
+pub struct ProviderBinding {
+    pub model: String,
+    pub base_url: String,
+    pub api_key: Option<String>,
+}
+
+/// One round's output: the assembled assistant message plus the provider the impl ended on.
+pub struct ModelRoundOutput {
+    pub message: Value,
+    pub provider: ProviderBinding,
+}
+
+/// Typed failure. Preserves parity: only an UPSTREAM status error should surface as the turn's
+/// committed final answer (the gateway's `last_model_error`); a transport/stream failure already
+/// streamed a generic live notice and must NOT overwrite that fallback. A flat `String` would lose
+/// this distinction once the branch moves out of the loop.
+#[derive(Debug)]
+pub enum ModelCallError {
+    Upstream(String),
+    Transport(String),
+}
+
 /// The single model seam. One `generate` per ReAct round. NOTE: `Send`/`Sync` bounds are added
 /// when the loop body moves into a `tokio::spawn` (increment 5) — the skeleton fixes the SHAPE.
 pub trait ModelClient {
     /// Run one model round. Stream raw token text through `on_delta` as it arrives, and return the
-    /// assembled assistant message value (content + `tool_calls`). Errors are the human-readable
-    /// reason after the impl has exhausted its own retries/fallbacks.
+    /// assembled assistant message (content + `tool_calls`) plus the provider the impl ended on.
+    /// Errors are typed (see `ModelCallError`) after the impl has exhausted its retries/fallbacks.
     fn generate(
         &self,
         call: &ModelCall<'_>,
         on_delta: &dyn Fn(&str),
-    ) -> impl Future<Output = Result<Value, String>>;
+    ) -> impl Future<Output = Result<ModelRoundOutput, ModelCallError>>;
 }
 
 /// The SINGLE tool-execution chokepoint (ADR 0024). The engine executes EVERY tool through this;
@@ -70,9 +95,16 @@ mod tests {
             &self,
             call: &ModelCall<'_>,
             on_delta: &dyn Fn(&str),
-        ) -> Result<Value, String> {
+        ) -> Result<ModelRoundOutput, ModelCallError> {
             on_delta("hi");
-            Ok(serde_json::json!({ "role": "assistant", "content": call.model }))
+            Ok(ModelRoundOutput {
+                message: serde_json::json!({ "role": "assistant", "content": call.model }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: call.api_key.map(str::to_string),
+                },
+            })
         }
     }
 
@@ -93,7 +125,7 @@ mod tests {
         use std::cell::RefCell;
         let m = EchoModel;
         let streamed = RefCell::new(String::new());
-        let msg = m
+        let out = m
             .generate(
                 &ModelCall {
                     base_url: "http://x",
@@ -108,7 +140,9 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(msg["content"], "test-model");
+        assert_eq!(out.message["content"], "test-model");
+        assert_eq!(out.provider.model, "test-model");
+        assert_eq!(out.provider.base_url, "http://x");
         assert_eq!(*streamed.borrow(), "hi", "on_delta streamed the live token");
 
         let tools = FixedTools;
