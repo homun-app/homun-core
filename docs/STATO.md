@@ -106,9 +106,17 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   `if any_verified`; helper deck by-ref → buffer locale. **Gate:** `cargo check` pulito (42 warning = baseline,
   0 nuovi) + engine 6/6 + gateway 506/507 (1 rosso `soffice` ambientale) + tutti i test plan/merge/step verdi.
   **Caveat onesto:** rilocazione behavior-preserving ma **validazione LIVE del plan-engine** ancora consigliata
-  (i test lo coprono poco; non esercitabile headless). **Prossimo:** 5d.2 (seam browser temporaneo:
-  `execute_browser_tool` ritorna risultato + effetti browser, binding-modello alla `ProviderBinding`) → 5e
-  (muovere il loop dietro `HOMUN_ENGINE_CRATE`) → 0025/5f (browse ricorsivo, ritiro band-aid). Mini-design:
+  (i test lo coprono poco; non esercitabile headless). **5d.2 ✅ (2026-07-07, commit df5ba8d4):** dispatch browser spostato **fuori** da `execute_chat_tool`, al
+  call site (`is_browser_granular_tool` → `execute_browser_tool`, seam `&mut ctx` temporaneo per 0025);
+  convertito anche `emit_approval_card` → effetti (mutazione nascosta che lo scan di 5d.1b aveva perso,
+  trovata dal compiler). Ora `execute_chat_tool`+`emit_approval_card` = **0 mutazioni `ctx`**. **⭐ Scoperta che
+  vincola 5e:** `execute_chat_tool` **non può ancora prendere `&ctx`** — `ChatToolCtx` non è `Sync` (Cell/RefCell
+  della browser session) → future con `&ctx` non-`Send` nel `tokio::spawn` del loop (`&mut T` Send se T:Send;
+  `&T` richiede T:Sync). Il `CapabilityExecutor` `&self` pulito è **bloccato** finché il browser non lascia
+  `ctx` → **5e deve fare lo SPLIT di `ChatToolCtx`** (loop-state→motore, browser/tool-state→executor gateway).
+  `&mut ctx` tenuto solo per Send. Gate: `cargo check` pulito (42 warning baseline) + gateway 506/507 (soffice).
+  **Prossimo:** 5e (split `ctx` + muovere il loop dietro `HOMUN_ENGINE_CRATE`) → 0025/5f (browse ricorsivo,
+  ritiro band-aid). Mini-design:
   [spec inc5](superpowers/specs/2026-07-07-move-agent-loop-into-engine-design.md).
 
 - **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,

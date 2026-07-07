@@ -134,12 +134,24 @@ granulari). Il suo rollout "passo 0 = estrazione motore (ADR 0024)" È questo in
     (i test coprono poco l'avanzamento piano) — non esercitabile headless.
   - **Nota:** `execute_chat_tool` tiene ancora `&mut ctx` solo per delegare a `execute_browser_tool` (il seam
     browser temporaneo, 5d.2); i suoi arm non toccano più `ctx`.
-- **5d.2:** il ramo browser (`execute_browser_tool`) resta un seam **temporaneo lato gateway** che il loop
-  invoca per i tool browser; comunica indietro risultato + gli effetti browser (nuovo binding di modello
-  alla `ProviderBinding`, `browser_used`) — esplicitamente **provvisorio, cancellato da 0025**.
+- **5d.2 ✅ (questa sessione, commit df5ba8d4):** dispatch browser spostato **fuori** da `execute_chat_tool`,
+  al call site del loop (`is_browser_granular_tool(name)` → `execute_browser_tool`, il seam `&mut ctx`
+  temporaneo, che muta ancora `ctx` diretto e confluirà nell'impl `CapabilityExecutor` — col model-switch
+  come effetto — a 5e/0025). Convertito anche `emit_approval_card` (helper che lo scan di 5d.1b aveva perso:
+  mutava `accumulated`/`pending_confirm`) → effetti; scoperto dal **compiler** tentando `&ctx`. Ora
+  `execute_chat_tool` + `emit_approval_card` hanno **0 mutazioni `ctx`**.
+  - **⭐ SCOPERTA che vincola 5e:** `execute_chat_tool` **non può ancora prendere `&ctx`**. `ChatToolCtx`
+    non è `Sync` (i `Cell`/`RefCell` della browser session), e una future con `&ctx` condiviso non è `Send`
+    dentro il `tokio::spawn` del loop (`&mut T` è Send se `T:Send`; `&T` richiede `T:Sync`). Quindi il
+    `CapabilityExecutor` **`&self` pulito è bloccato** finché lo stato browser non lascia `ctx` (0025 / lo
+    **split di `ctx`** a 5e: loop-state→engine, tool/browser-state→executor gateway). `&mut ctx` tenuto solo
+    per `Send`; gli arm non lo mutano.
 - **5e:** spostare il corpo del loop in `engine` dietro `HOMUN_ENGINE_CRATE`, parità turno-per-turno; il loop
   consuma i port (`ModelClient`/`CapabilityExecutor`/`EventSink`/`MemoryRecallService`/`PlanProgress`) + il
-  seam browser temporaneo.
+  seam browser temporaneo. **Prerequisito emerso da 5d.2:** lo **split di `ChatToolCtx`** — i campi loop-state
+  (piano, accumulated, tool_trace, evidence, flag…) vanno al motore; i campi browser/tool-state (browser
+  session non-Sync, ecc.) restano nell'impl gateway del `CapabilityExecutor`. È lo split che rende il
+  loop-state `Sync`/iniettabile e sblocca il `&self`.
 - **0025 / 5f (=inc 6):** sostituire il seam browser temporaneo con `browse(goal)` ricorsivo (il browser =
   sotto-agente che gira il loop del motore); ritirare model-switch + `try_advance_frontier` + parallela inline.
 
