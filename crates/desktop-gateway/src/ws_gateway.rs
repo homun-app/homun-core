@@ -21,9 +21,6 @@ pub enum ServerMessage {
     /// Sent immediately when the WS connection is established.
     #[serde(rename = "hello")]
     Hello { session_id: String },
-    /// Keepalive probe (every 30s). Client must respond with Pong.
-    #[serde(rename = "ping")]
-    Ping,
     /// A turn stream event (delta, activity, plan, reasoning, tool, done, queued, retry, error).
     #[serde(rename = "turn.event")]
     TurnEvent {
@@ -57,8 +54,6 @@ pub enum ServerMessage {
 pub enum ClientMessage {
     /// Request replay of turn events with seq > since, then live continuation.
     Resume { turn_id: String, since: i64 },
-    /// Response to a Ping keepalive.
-    Pong,
 }
 
 /// Process-wide registry of active WS subscribers. Each subscriber has an mpsc::Sender
@@ -194,9 +189,6 @@ async fn ws_connection_loop(socket: axum::extract::ws::WebSocket, state: AppStat
             Ok(axum::extract::ws::Message::Text(text)) => {
                 let parsed: Result<ClientMessage, _> = serde_json::from_str(&text);
                 match parsed {
-                    Ok(ClientMessage::Pong) => {
-                        // Keepalive response — nothing to do
-                    }
                     Ok(ClientMessage::Resume { turn_id, since }) => {
                         handle_resume(&state, &turn_id, since).await;
                     }
