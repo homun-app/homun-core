@@ -22,10 +22,26 @@ il 2026-07-06 sono state riunite (merge). Le due linee:
 
 **Nota onestà:** il "reset doc" del 2026-07-06 (STATO/ADR/architecture) era stato fatto sulla linea B,
 **cieca** alla linea A → alcune affermazioni ("ADR 0023 non esiste", "memory-service non iniziato")
-erano sbagliate. Corrette dal merge. `crates/engine` **resta assente** (ADR 0024 = *Proposed*, vero
-su entrambe le linee).
+erano sbagliate. Corrette dal merge. `crates/engine` **ora esiste** (ADR 0024 in corso: contratto +
+plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo").
 
 ## Dove siamo
+
+- **⭐ ADR 0024 — GIUNTURA `ModelClient` ESTRATTA (2026-07-07).** La chiamata al modello di un round
+  ReAct non è più inline in `stream_chat_via_openai`: vive dietro `local_first_engine::ModelClient`,
+  implementata da `GatewayModelClient` (`crates/desktop-gateway/src/model_client.rs`). L'impl possiede
+  HTTP, retry/backoff, il fallback provider (401 / tool-400 / timeout, con swap mid-turn) e i collector
+  stream OpenAI/Ollama. Lo swap risale al loop via `ProviderBinding` (output esplicito, non più mutazione
+  nascosta di variabili di loop); `finish_reason` è ritornato per la diagnostica empty-answer; errori
+  **tipizzati** (`ModelCallError::Upstream` preserva la parità di `last_model_error`, `Transport` no).
+  Future `+ Send` / `on_delta` `Send + Sync` perché il loop gira **già** dentro `tokio::spawn` (la nota
+  ADR "Send all'inc 5" era sbagliata sui tempi). ~300 righe tolte a `main.rs`. **Gate:** engine test +
+  508/509 gateway (l'1 rosso è `soffice` mancante, ambientale) + `cargo build` verdi. **PENDING:** smoke
+  a runtime (turno reale + 401 forzato per confermare la persistenza dello swap) — non esercitabile
+  headless, da fare nell'app. **Prossimo:** inc 5 (spostare il corpo del loop nel crate) — decisioni
+  aperte: dove vive `GenerateStreamEvent`, attivazione reale di `on_delta`. Vedi
+  [spec](superpowers/specs/2026-07-07-extract-modelclient-design.md) +
+  [piano](superpowers/plans/2026-07-07-extract-modelclient.md).
 
 - **DECISIONE D'ARCHITETTURA (ADR 0021, 2026-06-29):** convergere su **UN loop guardato** (motore #1,
   ReAct + native tool-calling), piano come *tool*, NON un secondo motore plan-execute. Supersede la
