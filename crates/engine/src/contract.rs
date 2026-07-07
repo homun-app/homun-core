@@ -76,18 +76,64 @@ pub trait ModelClient {
     ) -> impl Future<Output = Result<ModelRoundOutput, ModelCallError>> + Send;
 }
 
+/// A tool schema the loop should start offering mid-turn (dynamic capability loading:
+/// `find_capability` / `use_skill`). `key` dedups against what's already loaded.
+pub struct LoadedTool {
+    pub key: String,
+    pub schema: Value,
+}
+
+/// The loop-state changes a tool execution requests. Returned (not applied by the executor) so the
+/// executor stays decoupled from the loop's `&mut` state — the ENGINE applies these to its own loop
+/// state after the call. This is the ctx→effects redesign (ADR 0024 inc 5d): today `execute_chat_tool`
+/// mutates `ctx.<field>` inline; every such mutation becomes a field here. Default = empty (the common
+/// case — most tools change nothing but produce a `result`). Each field maps 1:1 to a current mutation:
+/// `append_output`→`ctx.accumulated`, `plan`→`*ctx.plan`, `load_tools`→`ctx.loaded_tools`/`tool_schemas`,
+/// `trace`→`ctx.tool_trace` (capped), `clear_evidence`→`ctx.step_evidence.clear()`,
+/// `request_confirm`→`*ctx.pending_confirm`, `request_compaction`→`*ctx.pending_compaction`,
+/// `reset_stall_guards`→ real-progress reset (`progress_anchor_round=round`, `repeat_count=0`,
+/// `last_round_sig.clear()`), which today fire together in the `update_plan`/`step_advance` arm.
+#[derive(Default)]
+pub struct ToolEffects {
+    /// Text to append to the assistant's accumulated output, in order (artifact/plan markers, cards).
+    pub append_output: Vec<String>,
+    /// The tool replaced the runtime plan (canonical, verified state).
+    pub plan: Option<Value>,
+    /// Tool schemas to begin offering this turn (deduped by `LoadedTool::key`).
+    pub load_tools: Vec<LoadedTool>,
+    /// Trace lines to record (the loop caps the trace length).
+    pub trace: Vec<String>,
+    /// A verified plan advance consumed the evidence window → clear it once.
+    pub clear_evidence: bool,
+    /// The tool needs the user's write-confirm before its effect lands (approval gate).
+    pub request_confirm: bool,
+    /// The tool asks the loop to compact context before continuing (F3).
+    pub request_compaction: bool,
+    /// Real progress happened → reset the stall guards (F1): anchor the round, zero the repeat
+    /// counter, clear the last-round signature.
+    pub reset_stall_guards: bool,
+}
+
+/// One tool execution's output: the result text (pushed into the conversation as the tool message)
+/// plus the loop-state effects the engine applies. Replaces the bare `String` so the executor can
+/// stop mutating the loop's `ctx` (the ctx→effects redesign, inc 5d).
+pub struct ToolOutcome {
+    pub result: String,
+    pub effects: ToolEffects,
+}
+
 /// The SINGLE tool-execution chokepoint (ADR 0024). The engine executes EVERY tool through this;
-/// the gateway's impl routes to `CapabilityFacade::call_tool`, where ADR 0023's sandbox fence and
-/// the unified approval policy live. `name` + JSON `args` in, the tool's result text out — the
-/// exact shape today's `execute_chat_tool` already produces, so the migration is a re-route, not
-/// a re-design.
+/// the gateway's impl routes to today's `execute_chat_tool` (minus the browser branch, which is a
+/// separate seam headed for ADR 0025). `name` + JSON `args` in, `ToolOutcome` out — result text plus
+/// the loop-state effects the engine applies. `&self` (no `&mut` loop state) is the whole point: the
+/// effects channel is what lets the executor be a decoupled service rather than a `ctx` mutator.
 pub trait CapabilityExecutor {
     fn execute_tool(
         &self,
         name: &str,
         args: &Value,
         call_id: &str,
-    ) -> impl Future<Output = Result<String, String>>;
+    ) -> impl Future<Output = Result<ToolOutcome, String>>;
 }
 
 /// The engine's output seam: every stream event the loop produces (delta, activity, plan, tool
@@ -168,8 +214,16 @@ mod tests {
             name: &str,
             _args: &Value,
             _call_id: &str,
-        ) -> Result<String, String> {
-            Ok(format!("ran {name}"))
+        ) -> Result<ToolOutcome, String> {
+            // A tool that produces a result AND requests one loop effect (append narration) —
+            // proves the effects channel round-trips, not just the result text.
+            Ok(ToolOutcome {
+                result: format!("ran {name}"),
+                effects: ToolEffects {
+                    append_output: vec![format!("did {name}")],
+                    ..Default::default()
+                },
+            })
         }
     }
 
@@ -199,10 +253,10 @@ mod tests {
         assert_eq!(*streamed.lock().unwrap(), "hi", "on_delta streamed the live token");
 
         let tools = FixedTools;
-        assert_eq!(
-            tools.execute_tool("browse", &Value::Null, "c1").await.unwrap(),
-            "ran browse"
-        );
+        let outcome = tools.execute_tool("browse", &Value::Null, "c1").await.unwrap();
+        assert_eq!(outcome.result, "ran browse");
+        assert_eq!(outcome.effects.append_output, vec!["did browse".to_string()]);
+        assert!(!outcome.effects.request_confirm, "default effects are empty");
     }
 
     // An in-memory sink proves the EventSink seam is usable + mockable (drive the future loop's
