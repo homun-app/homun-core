@@ -5,6 +5,8 @@ mod browser_safety;
 mod chat_store;
 // One-shot fuse of the two legacy SQLite files into the unified homun.sqlite.
 mod db_migrate;
+// The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
+mod model_client;
 // Multi-provider inference registry (Phase 1 of per-role model routing).
 mod model_normalize;
 mod model_registry;
@@ -97,6 +99,8 @@ use local_first_engine::plan::{
     plan_done_count, plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
     plan_step_id, plan_step_status, plan_step_title,
 };
+// The trait must be in scope to call `GatewayModelClient::generate` (ADR 0024).
+use local_first_engine::ModelClient;
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
     PrivacyPolicy, Requirements, structured_response_format,
@@ -23359,13 +23363,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     };
     let system = system.as_str();
     let mut endpoint = chat_endpoint(&base_url);
-    // Resilience: a 401 (the chosen model can't authenticate, e.g. an Ollama
-    // `:cloud` model without `ollama signin`) self-heals ONCE to the orchestrator's
-    // manual binding (a provider with a valid key) instead of dead-ending the turn.
-    let mut fallback_tried = false;
-    // Kept separate from auth/transport recovery: a compatibility retry must not
-    // consume the distinct recovery path for a later network or credentials failure.
-    let mut tool_compatibility_fallback_tried = false;
+    // (The 401/tool-compat/timeout fallback flags moved into GatewayModelClient::generate,
+    // which now owns the per-round provider swap — ADR 0024.)
     // Channel turns run read-only: offer only tools without side effects (search,
     // recall, skill instructions, Composio reads). Side-effecting tools (write
     // files, run sandbox, Composio writes) are withheld → Phase 2 routes them to
@@ -24158,6 +24157,8 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             warm_ollama_capabilities(&http, &base_url, &model).await;
         }
 
+        // The concrete model seam (ADR 0024): borrows the turn's client + sink for the loop.
+        let model_client = crate::model_client::GatewayModelClient { http: &http, tx: &tx };
         // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
         // (the normal 5 rounds until a browser tool is actually used, then the
         // larger browser budget). This keeps non-browser turns identical to today.
@@ -24247,319 +24248,40 @@ do NOT promise further work — output the finished result itself. If some data 
 missing, give what you have and note the gap in one short line.",
                 }));
             }
-            // Ollama (local or cloud) must use the NATIVE /api/chat: its OpenAI-compat
-            // /v1 layer drops tool calls when streaming (ollama#12557). The payload
-            // shape is provider-specific; both stream from upstream so the governor is
-            // INACTIVITY (idle timeout) not total time.
-            let payload_has_tools = !is_final_round && !tool_schemas.is_empty();
-            let mut payload = build_chat_payload(
-                &model,
-                &base_url,
-                &messages,
-                &tool_schemas,
-                temperature,
-                is_final_round,
-            );
-            // Model proxies (e.g. ollama.com) occasionally return 502/timeout. Retry
-            // transient failures a couple of times with backoff + a configurable
-            // timeout (default 600s — slow reasoning models need far more than the old
-            // 180s), and surface a CLEAN message (not raw upstream JSON) if it persists.
-            let request_timeout = std::time::Duration::from_secs(model_request_timeout_secs());
-            let resp = {
-                let mut attempt: u32 = 0;
-                loop {
-                    let mut builder = http.post(&endpoint).timeout(request_timeout);
-                    if let Some(key) = api_key.as_ref() {
-                        builder = builder.bearer_auth(key);
-                    }
-                    match builder.json(&payload).send().await {
-                        Ok(value) if value.status().is_success() => break Some(value),
-                        Ok(value) => {
-                            let code = value.status();
-                            // DIAGNOSTIC (task #105): log the upstream error body —
-                            // swallowing it turned a payload bug (400 on the mid-turn
-                            // model switch) into a generic, undebuggable fallback.
-                            let err_body: String = value
-                                .text()
-                                .await
-                                .unwrap_or_default()
-                                .chars()
-                                .take(600)
-                                .collect();
-                            eprintln!(
-                                "[model-error] {code} model={model} endpoint={endpoint} \
-round={round} tools={payload_has_tools} tool_count={} body={err_body}",
-                                tool_schemas.len()
-                            );
-                            // Shape map of the failing payload: which message carries
-                            // tool_calls with non-string arguments (the classic
-                            // cross-provider 400).
-                            if let Some(arr) = payload.get("messages").and_then(|m| m.as_array()) {
-                                let shapes: Vec<String> = arr
-                                    .iter()
-                                    .map(|m| {
-                                        let role =
-                                            m.get("role").and_then(|r| r.as_str()).unwrap_or("?");
-                                        match m.get("tool_calls").and_then(|t| t.as_array()) {
-                                            None => role.to_string(),
-                                            Some(calls) => {
-                                                let kinds = calls
-                                                    .iter()
-                                                    .map(|c| {
-                                                        match c.pointer("/function/arguments") {
-                                                            Some(serde_json::Value::String(_)) => {
-                                                                "str"
-                                                            }
-                                                            Some(_) => "OBJ",
-                                                            None => "none",
-                                                        }
-                                                    })
-                                                    .collect::<Vec<_>>()
-                                                    .join(",");
-                                                format!("{role}[tc:{kinds}]")
-                                            }
-                                        }
-                                    })
-                                    .collect();
-                                eprintln!("[model-error] shapes: {}", shapes.join(" | "));
-                            }
-                            // A project can intentionally route Auto to its coding
-                            // provider. If that provider rejects this actual TOOLS
-                            // payload, do not print a generic 400 and then continue
-                            // with a no-tools synthesis: retry the same round once
-                            // through the configured orchestrator, which owns the
-                            // general agent/tool contract.
-                            if should_try_tool_compatibility_fallback(
-                                code.as_u16(),
-                                payload_has_tools,
-                                tool_compatibility_fallback_tried,
-                            ) {
-                                if let Some((fb_base, fb_model, fb_key)) =
-                                    tool_compatibility_fallback_config(&base_url, &model)
-                                {
-                                    tool_compatibility_fallback_tried = true;
-                                    let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                        text: format!(
-                                            "‹‹ACT››↩ «{model}» rejected the tool request (400); \
-retrying through «{fb_model}»…‹‹/ACT››"
-                                        ),
-                                    })
-                                    .await;
-                                    model = fb_model;
-                                    base_url = fb_base;
-                                    endpoint = chat_endpoint(&base_url);
-                                    api_key = fb_key;
-                                    payload = build_chat_payload(
-                                        &model,
-                                        &base_url,
-                                        &messages,
-                                        &tool_schemas,
-                                        temperature,
-                                        is_final_round,
-                                    );
-                                    attempt = 0;
-                                    continue;
-                                }
-                            }
-                            let transient =
-                                matches!(code.as_u16(), 408 | 429 | 500 | 502 | 503 | 504);
-                            if transient && attempt < 2 {
-                                attempt += 1;
-                                let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››⏳ The model isn't responding ({code}), retrying ({attempt}/2)…‹‹/ACT››"),
-                                })
-                                .await;
-                                tokio::time::sleep(std::time::Duration::from_millis(
-                                    800 * u64::from(attempt),
-                                ))
-                                .await;
-                                continue;
-                            }
-                            // Self-heal on 401: retry once with a provider that has a
-                            // valid key (or a local no-auth model) — even when the
-                            // FAILING model is the orchestrator itself, so an
-                            // unauthenticated binding doesn't break the turn.
-                            if code.as_u16() == 401 && !fallback_tried {
-                                if let Some((fb_base, fb_model, fb_key)) =
-                                    auth_fallback_config(&model)
-                                {
-                                    if fb_model != model {
-                                        fallback_tried = true;
-                                        let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ACT››↩ «{model}» not authenticated (401): falling back to «{fb_model}»…‹‹/ACT››"),
-                                        })
-                                        .await;
-                                        model = fb_model;
-                                        base_url = fb_base;
-                                        endpoint = chat_endpoint(&base_url);
-                                        api_key = fb_key;
-                                        payload = build_chat_payload(
-                                            &model,
-                                            &base_url,
-                                            &messages,
-                                            &tool_schemas,
-                                            temperature,
-                                            is_final_round,
-                                        );
-                                        attempt = 0;
-                                        continue;
-                                    }
-                                }
-                            }
-                            // 401 on a `:cloud` Ollama model = the cloud service
-                            // needs auth (the local Ollama has no key). Make the
-                            // fix actionable instead of a generic "check provider".
-                            let hint = if code.as_u16() == 401 {
-                                if model.contains(":cloud") {
-                                    format!(
-                                        " The model «{model}» is a CLOUD Ollama model that \
-requires authentication: run `ollama signin` (or add the provider key in Settings → \
-Model & Runtime), or select a LOCAL model."
-                                    )
-                                } else {
-                                    " It looks like a provider authentication problem: \
-check/update the key in Settings → Model & Runtime."
-                                        .to_string()
-                                }
-                            } else {
-                                String::new()
-                            };
-                            // Pull the human reason out of the upstream body (e.g.
-                            // "glm-4.6 was retired at 2026-06-16") so the user sees WHY,
-                            // not a silent dead end. Falls back to the raw body, then a
-                            // bare status. Stored AND streamed so the same message is the
-                            // committed final text (the synthesis Done would otherwise
-                            // overwrite this Delta with a generic fallback).
-                            let detail = serde_json::from_str::<serde_json::Value>(&err_body)
-                                .ok()
-                                .and_then(|v| {
-                                    v.get("error")
-                                        .and_then(|e| {
-                                            e.as_str().map(str::to_string).or_else(|| {
-                                                e.get("message")
-                                                    .and_then(|m| m.as_str())
-                                                    .map(str::to_string)
-                                            })
-                                        })
-                                        .or_else(|| {
-                                            v.get("message")
-                                                .and_then(|m| m.as_str())
-                                                .map(str::to_string)
-                                        })
-                                })
-                                .map(|s| s.trim().to_string())
-                                .filter(|s| !s.is_empty())
-                                .unwrap_or_else(|| err_body.trim().chars().take(240).collect());
-                            let reason = if detail.is_empty() {
-                                format!("The model «{model}» responded with an error ({code}).")
-                            } else {
-                                format!("The model «{model}» is unavailable ({code}): {detail}")
-                            };
-                            let tail = if hint.is_empty() {
-                                " — pick another model in Settings → Model & Runtime.".to_string()
-                            } else {
-                                hint
-                            };
-                            let message = format!("{reason}{tail}");
-                            last_model_error = Some(message.clone());
-                            let _ = emit_stream_event(
-                                &tx,
-                                GenerateStreamEvent::Delta { text: message },
-                            )
-                            .await;
-                            break None;
-                        }
-                        Err(error) => {
-                            let transient = error.is_timeout() || error.is_connect();
-                            if transient && attempt < 2 {
-                                attempt += 1;
-                                let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                    text: format!("‹‹ACT››⏳ Network to the model unstable, retrying ({attempt}/2)…‹‹/ACT››"),
-                                })
-                                .await;
-                                tokio::time::sleep(std::time::Duration::from_millis(
-                                    800 * u64::from(attempt),
-                                ))
-                                .await;
-                                continue;
-                            }
-                            // Persistent timeout/connect (e.g. a huge/slow cloud model,
-                            // or a `:cloud` model on the local daemon): self-heal once
-                            // onto a provider that has a key — same as the 401 path.
-                            if transient && !fallback_tried {
-                                if let Some((fb_base, fb_model, fb_key)) =
-                                    auth_fallback_config(&model)
-                                {
-                                    if fb_model != model {
-                                        fallback_tried = true;
-                                        let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                            text: format!("‹‹ACT››↩ «{model}» isn't responding (timeout): falling back to «{fb_model}»…‹‹/ACT››"),
-                                        })
-                                        .await;
-                                        model = fb_model;
-                                        base_url = fb_base;
-                                        endpoint = chat_endpoint(&base_url);
-                                        api_key = fb_key;
-                                        payload = build_chat_payload(
-                                            &model,
-                                            &base_url,
-                                            &messages,
-                                            &tool_schemas,
-                                            temperature,
-                                            is_final_round,
-                                        );
-                                        attempt = 0;
-                                        continue;
-                                    }
-                                }
-                            }
-                            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
-                                text: "The model didn't respond (timeout/network). Try again shortly.".to_string(),
-                            })
-                            .await;
-                            break None;
-                        }
-                    }
+            // The per-round model call now lives in the engine::ModelClient impl (ADR 0024):
+            // HTTP, retry/backoff, provider fallback, and the OpenAI/Ollama stream collectors are
+            // owned there. A mid-round provider swap comes back via ProviderBinding so the next
+            // rounds use the effective provider.
+            let out = model_client
+                .generate(
+                    &local_first_engine::ModelCall {
+                        base_url: &base_url,
+                        model: &model,
+                        api_key: api_key.as_deref(),
+                        messages: &messages,
+                        tools: &tool_schemas,
+                        temperature,
+                        is_final_round,
+                    },
+                    &|_tok| {},
+                )
+                .await;
+            let (message, round_finish_reason) = match out {
+                Ok(o) => {
+                    // Adopt any mid-turn fallback swap for the remaining rounds.
+                    model = o.provider.model;
+                    base_url = o.provider.base_url;
+                    api_key = o.provider.api_key;
+                    endpoint = chat_endpoint(&base_url);
+                    (o.message, o.finish_reason)
                 }
-            };
-            let Some(resp) = resp else {
-                break;
-            };
-            // Consume the streamed completion with a generous FIRST-token budget +
-            // a tight inter-token idle timeout (not a total-time cap), then reassemble
-            // it into the non-streaming body shape. Ollama → NDJSON native parser;
-            // others → OpenAI SSE parser.
-            let first_token = std::time::Duration::from_secs(model_first_token_timeout_secs());
-            let idle = std::time::Duration::from_secs(model_idle_timeout_secs());
-            // Reflect the provider actually used (a 401/timeout fallback may have
-            // switched it) so we parse the right stream format.
-            let ollama = is_ollama_base(&base_url);
-            let collected = if ollama {
-                collect_ollama_native_stream(resp, first_token, idle, &tx).await
-            } else {
-                collect_openai_stream(resp, first_token, idle, &tx).await
-            };
-            let body: serde_json::Value = match collected {
-                Ok(value) => value,
-                Err(error) => {
-                    let _ = emit_stream_event(
-                        &tx,
-                        GenerateStreamEvent::Delta {
-                            text: format!(
-                                "The model interrupted the response ({error}). Try again shortly."
-                            ),
-                        },
-                    )
-                    .await;
+                // Parity: only an upstream status error becomes the committed final answer.
+                Err(local_first_engine::ModelCallError::Upstream(reason)) => {
+                    last_model_error = Some(reason);
                     break;
                 }
+                Err(local_first_engine::ModelCallError::Transport(_)) => break,
             };
-            let message = body
-                .get("choices")
-                .and_then(|choices| choices.get(0))
-                .and_then(|choice| choice.get("message"))
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
             let raw_content = message
                 .get("content")
                 .and_then(|c| c.as_str())
@@ -25068,12 +24790,7 @@ check/update the key in Settings → Model & Runtime."
             // if it too comes back empty, its own fallback chain ends the turn cleanly.
             if should_force_synthesis_for_empty_visible_answer(&accumulated, &content) {
                 if verbose_debug() {
-                    let fr = body
-                        .get("choices")
-                        .and_then(|c| c.get(0))
-                        .and_then(|c| c.get("finish_reason"))
-                        .and_then(|f| f.as_str())
-                        .unwrap_or("");
+                    let fr = round_finish_reason.as_deref().unwrap_or("");
                     eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
                 }
                 // Keep the reasoning trace in context so the synthesis builds on it.

@@ -40,10 +40,13 @@ pub struct ProviderBinding {
     pub api_key: Option<String>,
 }
 
-/// One round's output: the assembled assistant message plus the provider the impl ended on.
+/// One round's output: the assembled assistant message, the provider the impl ended on, and the
+/// completion's `finish_reason` (a provider-neutral signal — e.g. `length` when a reasoning model
+/// burned its budget with no visible answer, which the loop's empty-answer recovery logs/branches on).
 pub struct ModelRoundOutput {
     pub message: Value,
     pub provider: ProviderBinding,
+    pub finish_reason: Option<String>,
 }
 
 /// Typed failure. Preserves parity: only an UPSTREAM status error should surface as the turn's
@@ -56,8 +59,10 @@ pub enum ModelCallError {
     Transport(String),
 }
 
-/// The single model seam. One `generate` per ReAct round. NOTE: `Send`/`Sync` bounds are added
-/// when the loop body moves into a `tokio::spawn` (increment 5) — the skeleton fixes the SHAPE.
+/// The single model seam. One `generate` per ReAct round. The future is `+ Send` and `on_delta` is
+/// `Send + Sync` because the gateway already drives the loop inside a `tokio::spawn` (a multi-thread
+/// runtime) — the round future is held across `.await` in a `Send` task, so both bounds are required
+/// today, not deferred to the loop-move increment.
 pub trait ModelClient {
     /// Run one model round. Stream raw token text through `on_delta` as it arrives, and return the
     /// assembled assistant message (content + `tool_calls`) plus the provider the impl ended on.
@@ -65,8 +70,8 @@ pub trait ModelClient {
     fn generate(
         &self,
         call: &ModelCall<'_>,
-        on_delta: &dyn Fn(&str),
-    ) -> impl Future<Output = Result<ModelRoundOutput, ModelCallError>>;
+        on_delta: &(dyn Fn(&str) + Send + Sync),
+    ) -> impl Future<Output = Result<ModelRoundOutput, ModelCallError>> + Send;
 }
 
 /// The SINGLE tool-execution chokepoint (ADR 0024). The engine executes EVERY tool through this;
@@ -94,7 +99,7 @@ mod tests {
         async fn generate(
             &self,
             call: &ModelCall<'_>,
-            on_delta: &dyn Fn(&str),
+            on_delta: &(dyn Fn(&str) + Send + Sync),
         ) -> Result<ModelRoundOutput, ModelCallError> {
             on_delta("hi");
             Ok(ModelRoundOutput {
@@ -104,6 +109,7 @@ mod tests {
                     base_url: call.base_url.to_string(),
                     api_key: call.api_key.map(str::to_string),
                 },
+                finish_reason: None,
             })
         }
     }
@@ -122,9 +128,9 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn seams_are_usable_with_a_mock() {
-        use std::cell::RefCell;
+        use std::sync::Mutex; // the on_delta sink must be Send + Sync (see the trait bound)
         let m = EchoModel;
-        let streamed = RefCell::new(String::new());
+        let streamed = Mutex::new(String::new());
         let out = m
             .generate(
                 &ModelCall {
@@ -136,14 +142,14 @@ mod tests {
                     temperature: 0.0,
                     is_final_round: false,
                 },
-                &|d| streamed.borrow_mut().push_str(d),
+                &|d| streamed.lock().unwrap().push_str(d),
             )
             .await
             .unwrap();
         assert_eq!(out.message["content"], "test-model");
         assert_eq!(out.provider.model, "test-model");
         assert_eq!(out.provider.base_url, "http://x");
-        assert_eq!(*streamed.borrow(), "hi", "on_delta streamed the live token");
+        assert_eq!(*streamed.lock().unwrap(), "hi", "on_delta streamed the live token");
 
         let tools = FixedTools;
         assert_eq!(
