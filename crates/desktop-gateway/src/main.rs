@@ -19860,13 +19860,18 @@ async fn execute_chat_tool(
     name: &str,
     args_raw: &str,
     call_id: &str,
-) -> String {
+) -> (String, local_first_engine::ToolEffects) {
     // ADR 0023 step 2b, SHADOW: observe-only sandbox classification/log. Gated by
     // `tool_safety_enabled()` (default off → one env read, no-op). NEVER blocks or
     // alters `result`; it only reads state and logs.
     if tool_safety_enabled() {
         shadow_log_sandbox(ctx.state, ctx.thread_id, name, args_raw);
     }
+    // ADR 0024 inc 5d.1b: tools no longer mutate `ctx` inline; the non-browser arms record their
+    // loop-state changes here and the caller applies them (`apply_tool_effects`) right after the call
+    // — behavior-preserving. (The browser arm still delegates to `execute_browser_tool`, the temporary
+    // seam headed for ADR 0025, which keeps mutating `ctx` directly for now.)
+    let mut effects = local_first_engine::ToolEffects::default();
     let result = if ctx.read_only
         && matches!(
             name,
@@ -20082,7 +20087,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     // Persist in the committed answer so the UI can
                     // render the download card + Artefatti panel (the
                     // Done payload is authoritative).
-                    ctx.accumulated.push_str(&artifact_mark);
+                    effects.append_output.push(artifact_mark.clone());
                     let _ = emit_stream_event(
                         ctx.tx,
                         GenerateStreamEvent::Delta {
@@ -20167,7 +20172,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 // authoritative): the UI parses ‹‹ARTIFACT›› from the
                 // saved message to render the download card + the
                 // Artefatti panel. Without this the artifact vanishes.
-                ctx.accumulated.push_str(&artifact_mark);
+                effects.append_output.push(artifact_mark.clone());
                 let _ = emit_stream_event(
                     ctx.tx,
                     GenerateStreamEvent::Delta {
@@ -20250,7 +20255,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             });
                             let artifact_mark =
                                 format!("‹‹ARTIFACT››{marker}‹‹/ARTIFACT››");
-                            ctx.accumulated.push_str(&artifact_mark);
+                            effects.append_output.push(artifact_mark.clone());
                             let _ = emit_stream_event(
                                 ctx.tx,
                                 GenerateStreamEvent::Delta {
@@ -20382,16 +20387,20 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 let qa_result = rendered_deck_qa_result(&render_out);
                 let quality_metadata =
                     deck_quality_metadata_from_qa_result(qa_result.as_ref());
+                // 5d.1b: the helper appends artifact markers to a local buffer; flushed to `effects`
+                // (→ ctx.accumulated) after the call, preserving the inline order.
+                let mut deck_out = String::new();
                 let produced = emit_rendered_deck_artifacts(
                     ctx.state,
                     ctx.tx,
-                    ctx.accumulated,
+                    &mut deck_out,
                     ctx.thread_id,
                     &thread_slug,
                     "render_deck",
                     quality_metadata.as_ref(),
                 )
                 .await;
+                effects.append_output.push(deck_out);
                 if let Some(error) = rendered_deck_qa_failure(&render_out) {
                     format!(
                         "Deck rendered with visual QA issues: {error}. Files available: {}. Renderer output:\n{}",
@@ -20731,16 +20740,19 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             .as_object()
                             .filter(|metadata| !metadata.is_empty())
                             .map(|_| &artifact_metadata);
+                        // 5d.1b: append to a local buffer, flushed to `effects` after the call.
+                        let mut deck_out = String::new();
                         let produced = emit_rendered_deck_artifacts(
                             ctx.state,
                             ctx.tx,
-                            ctx.accumulated,
+                            &mut deck_out,
                             ctx.thread_id,
                             &thread_slug,
                             "make_deck",
                             artifact_metadata_ref,
                         )
                         .await;
+                        effects.append_output.push(deck_out);
                         if let Some(error) = rendered_deck_qa_failure(&render_out) {
                             format!(
                                 "Deck created via workflow {} with visual QA issues: {error}. Files available: {}. The .pptx is editable; .html/.pdf are previews.",
@@ -20963,7 +20975,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                                     let artifact_mark = format!(
                                         "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
                                     );
-                                    ctx.accumulated.push_str(&artifact_mark);
+                                    effects.append_output.push(artifact_mark.clone());
                                     let _ = emit_stream_event(
                                         ctx.tx,
                                         GenerateStreamEvent::Delta {
@@ -21233,11 +21245,14 @@ an uncertain date.",
                 .cloned()
                 .unwrap_or_default()
         };
+        // 5d.1b: work on a LOCAL copy of the plan (merge mutates in place, and the arm rereads it
+        // below); the final plan is returned as an effect (`effects.plan`) and applied after the call.
+        let mut current_plan = ctx.plan.clone();
         // MERGE the model's steps into the CANONICAL plan (never replace);
         // returns the canonical indices newly claimed done (held `doing`
         // until F2 verifies). See `merge_plan` for the anti-reset rule.
-        let claims = merge_execution_plan(ctx.plan, &sent);
-        let mut plan_steps = execution_plan_steps(ctx.plan);
+        let claims = merge_execution_plan(&mut current_plan, &sent);
+        let mut plan_steps = execution_plan_steps(&current_plan);
         // DIAG (HOMUN_DEBUG): the plan lifecycle, to see if the model
         // re-proposes the whole plan (churn) or advances one step, and
         // whether a re-proposal RESETS statuses (the "il piano riparta"
@@ -21324,12 +21339,10 @@ an uncertain date.",
                         );
                     })
                     .await;
-                    *ctx.plan = runtime_execution_plan(&plan_steps);
-                    *ctx.progress_anchor_round = ctx.round; // F1: real progress
+                    current_plan = runtime_execution_plan(&plan_steps);
                     any_verified = true;
-                    ctx.last_round_sig.clear();
-                    *ctx.repeat_count = 0;
-                    *ctx.pending_compaction = true; // F3
+                    // The stall-guard reset (F1), compaction request (F3), and evidence clear are
+                    // idempotent per verified step → hoisted to one `if any_verified` below (effects).
                     if verify {
                         let _ = emit_stream_event(
                             ctx.tx,
@@ -21354,18 +21367,23 @@ an uncertain date.",
                     break;
                 }
             }
-            // The verified step(s) consumed this evidence window — clear it ONCE, after
-            // the whole batch, so no step in the batch is starved of evidence.
+            // The verified step(s) consumed this evidence window — clear it ONCE, after the whole
+            // batch. On real progress also reset the stall guards (F1) and request compaction (F3):
+            // all three were per-step-idempotent inline, hoisted here as effects.
             if any_verified {
-                ctx.step_evidence.clear();
+                effects.clear_evidence = true;
+                effects.reset_stall_guards = true;
+                effects.request_compaction = true;
             }
             // Marker rendered from the CANONICAL plan — the single source of
             // truth (verified state), not the model's raw claim. This is what
             // the UI shows and what the next turn resumes from.
-            plan_steps = execution_plan_steps(ctx.plan);
+            plan_steps = execution_plan_steps(&current_plan);
+            // The whole merged/verified plan is the effect the caller applies to `ctx.plan`.
+            effects.plan = Some(serde_json::to_value(&current_plan).unwrap_or_default());
             let plan_mark =
                 format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
-            ctx.accumulated.push_str(&plan_mark);
+            effects.append_output.push(plan_mark.clone());
             let _ = emit_stream_event(
                 ctx.tx,
                 GenerateStreamEvent::Delta { text: plan_mark },
@@ -21457,9 +21475,10 @@ an uncertain date.",
                 ));
                 discovered_entries.push(entry.clone());
             } else if let Some(schema) = &entry.schema {
-                if ctx.loaded_tools.insert(entry.key.clone()) {
-                    ctx.tool_schemas.push(schema.clone());
-                }
+                effects.load_tools.push(local_first_engine::LoadedTool {
+                    key: entry.key.clone(),
+                    schema: Some(schema.clone()),
+                });
                 let label = capability_source_label(entry.source);
                 lines.push(format!("- {label} «{}»: {}", entry.key, entry.desc));
                 discovered_entries.push(entry.clone());
@@ -21486,11 +21505,10 @@ an uncertain date.",
                 if !ctx.can_see_contacts && tool_touches_contacts(&entry.key) {
                     continue;
                 }
-                if ctx.loaded_tools.insert(entry.key.clone()) {
-                    if let Some(schema) = &entry.schema {
-                        ctx.tool_schemas.push(schema.clone());
-                    }
-                }
+                effects.load_tools.push(local_first_engine::LoadedTool {
+                    key: entry.key.clone(),
+                    schema: entry.schema.clone(),
+                });
                 lines.push(format!("- connector «{}»: {}", entry.key, entry.desc));
                 discovered_entries.push(entry);
             }
@@ -21499,7 +21517,7 @@ an uncertain date.",
             if let Some(trace_line) =
                 capability_discovery_trace_line(&intent, &discovered_entries)
             {
-                ctx.tool_trace.push(trace_line);
+                effects.trace.push(trace_line);
             }
         }
         if lines.is_empty() {
@@ -21747,13 +21765,13 @@ loaded with use_skill):\n{}",
                     "\n\nTo access this folder I need your authorization.\n\
 ‹‹FS_AUTHORIZE››{marker}‹‹/FS_AUTHORIZE››\n"
                 );
-                ctx.accumulated.push_str(&card);
+                effects.append_output.push(card.clone());
                 let _ = emit_stream_event(
                     ctx.tx,
                     GenerateStreamEvent::Delta { text: card },
                 )
                 .await;
-                *ctx.pending_confirm = true;
+                effects.request_confirm = true;
                 "AWAITING AUTHORIZATION: I showed the user a card with the \
 button to authorize access to the folder. Do NOT say you have read/listed it."
                     .to_string()
@@ -21892,13 +21910,13 @@ button to authorize access to the folder. Do NOT say you have read/listed it."
                     "\n\nHere's what I can connect for this. Choose below.\n\
 ‹‹CONNECT_SUGGEST››{marker}‹‹/CONNECT_SUGGEST››\n"
                 );
-                ctx.accumulated.push_str(&card_text);
+                effects.append_output.push(card_text.clone());
                 let _ = emit_stream_event(
                     ctx.tx,
                     GenerateStreamEvent::Delta { text: card_text },
                 )
                 .await;
-                *ctx.pending_confirm = true;
+                effects.request_confirm = true;
                 "AWAITING: I showed the user clickable cards to \
 connect the suggested connectors (skill/MCP/Composio). Do NOT say you have already connected anything."
                     .to_string()
@@ -22203,7 +22221,53 @@ Tell the user clearly; do NOT claim it's done."
     } else {
         format!("Tool not available: {name}")
     };
-    result
+    (result, effects)
+}
+
+/// Apply a tool's returned loop-state effects to the turn context (ADR 0024 inc 5d.1b). The executor
+/// stopped mutating `ctx` inline; the loop applies the effects here, right after the call, so the net
+/// state matches the old inline mutation exactly. Each branch mirrors one former `ctx.<field>` write.
+fn apply_tool_effects(ctx: &mut ChatToolCtx<'_>, effects: local_first_engine::ToolEffects) {
+    for line in &effects.append_output {
+        ctx.accumulated.push_str(line);
+    }
+    // The engine carries the plan as an opaque `Value` (it can't know the gateway's `ExecutionPlan`);
+    // the gateway round-trips it faithfully via serde, preserving the WHOLE plan (route/steps/…) exactly
+    // as the inline `*ctx.plan = …` did — not just the steps.
+    if let Some(plan_val) = effects.plan {
+        if let Ok(plan) = serde_json::from_value::<ExecutionPlan>(plan_val) {
+            *ctx.plan = plan;
+        }
+    }
+    for tool in effects.load_tools {
+        // Same dedup-then-add as inline: `insert` returns false if already loaded → skip; add a schema
+        // only when present (a connector key can be marked loaded with no schema).
+        if ctx.loaded_tools.insert(tool.key) {
+            if let Some(schema) = tool.schema {
+                ctx.tool_schemas.push(schema);
+            }
+        }
+    }
+    for line in effects.trace {
+        if ctx.tool_trace.len() < 20 {
+            ctx.tool_trace.push(line);
+        }
+    }
+    if effects.clear_evidence {
+        ctx.step_evidence.clear();
+    }
+    if effects.request_confirm {
+        *ctx.pending_confirm = true;
+    }
+    if effects.request_compaction {
+        *ctx.pending_compaction = true;
+    }
+    if effects.reset_stall_guards {
+        // F1: real progress → anchor this round, zero the repeat counter, clear the last-round sig.
+        *ctx.progress_anchor_round = ctx.round;
+        *ctx.repeat_count = 0;
+        ctx.last_round_sig.clear();
+    }
 }
 
 async fn stream_chat_via_openai(
@@ -24181,7 +24245,11 @@ missing, give what you have and note the gap in one short line.",
                         }
                     }
 
-                    let result = execute_chat_tool(&mut ctx, name, args_raw, &call_id).await;
+                    let (result, tool_effects) =
+                        execute_chat_tool(&mut ctx, name, args_raw, &call_id).await;
+                    // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
+                    // loop reads any field they populate (plan, accumulated, …) — net state as inline.
+                    apply_tool_effects(&mut ctx, tool_effects);
 
                     // Collect source URLs from browser results so the final
                     // answer can carry a deterministic "Fonti" section. The

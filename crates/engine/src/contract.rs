@@ -76,11 +76,12 @@ pub trait ModelClient {
     ) -> impl Future<Output = Result<ModelRoundOutput, ModelCallError>> + Send;
 }
 
-/// A tool schema the loop should start offering mid-turn (dynamic capability loading:
-/// `find_capability` / `use_skill`). `key` dedups against what's already loaded.
+/// A tool the loop should mark loaded mid-turn (dynamic capability loading: `find_capability` /
+/// `use_skill`). `key` dedups against what's already loaded; `schema` is `None` when the key is only
+/// being marked loaded (a connector entry with no schema) — the loop adds a schema only when `Some`.
 pub struct LoadedTool {
     pub key: String,
-    pub schema: Value,
+    pub schema: Option<Value>,
 }
 
 /// The loop-state changes a tool execution requests. Returned (not applied by the executor) so the
