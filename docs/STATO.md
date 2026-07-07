@@ -35,12 +35,20 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   (`/generate_stream`, `/broker_enabled`, 3× `/messages/commit_*_result`) + cascata
   (`mirror_app_reply_to_channel_thread`, `provider_config_by_id/for_model`), `ServerMessage::Ping/Pong`.
   Asserzioni `check-ui-contract.mjs` stale (imponevano il morto) aggiornate agli invarianti broker.
-  **🐛 Fix:** lo **Stop era un no-op** sul path broker (chiudeva un socket in `activeStreamSockets`
-  mai popolata) → ora `cancelTurn` chiama `DELETE /turns/{id}` (`cancel_turn`), Stop cancella davvero
-  il turno. **Runtime da verificare** in-app. Gate verdi: tsc + `test:ui-contract` + `npm run build`
-  (client), `cargo check`/`test` (server, 506 ok + 1 rosso `soffice` ambientale). Commit 5328f864→85433dcf.
-  **Rimandato:** collapse del flag `HOMUN_TURN_BROKER` (route+boot sempre-on, elimina `turn_broker_enabled()`)
-  — tocca boot/routing, pass dedicato con verifica runtime; il flag resta default-ON (innocuo).
+  **🐛 Fix STOP — COMPLETO e VERIFICATO end-to-end (3 layer + root cause nascosto):** (1) client
+  `cancelTurn`→`DELETE /turns/{id}`; (2) esecutore (`turn_executor.rs`) corre il turno in `tokio::select!`
+  contro `cancel.notified()` → su cancel aborta e salta il finalize; (3) runner (`main.rs`) guard che non
+  fa sovrascrivere `Cancelled`; **(root cause)** `enqueue_turn` **rigenerava** il `request_id` → il `DELETE`
+  del client (`turn_{clientRequestId}`) faceva 404 → ora il server **onora** il `request_id` del client
+  (ripara anche il *resume*). Commit 981ee3f2 + f02cfbd1. **Verificato dal vivo:** Stop lascia il turno
+  `cancelled` (evento `Cancelled`, nessun `done`), thread libero, ripresa OK (confermato via DB + utente).
+  Gate verdi: tsc + `test:ui-contract` + `npm run build` (client), `cargo check`/`test` (server, 506 ok +
+  1 rosso `soffice` ambientale). Commit pulizia transport 5328f864→85433dcf.
+  **Fatto (collapse flag `HOMUN_TURN_BROKER`):** boot-recovery e route `/api/chat/turns*` ora
+  sempre montate (rimosso il wrapper `if turn_broker_enabled()`), fn `turn_broker_enabled()` eliminata,
+  env rimossa da `test-turn-broker-e2e.py`. Verifica runtime: e2e broker (10 TEST, senza più il flag)
+  tutti verdi contro il binario reale — enqueue+stream confermati. Gate: `cargo check`/`test` (506 ok +
+  1 rosso `soffice` ambientale) + e2e.
 - **⭐ ADR 0024 — GIUNTURA `ModelClient` ESTRATTA (2026-07-07).** La chiamata al modello di un round
   ReAct non è più inline in `stream_chat_via_openai`: vive dietro `local_first_engine::ModelClient`,
   implementata da `GatewayModelClient` (`crates/desktop-gateway/src/model_client.rs`). L'impl possiede
