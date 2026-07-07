@@ -2,8 +2,8 @@
 """
 End-to-end test for the Turn Queue Broker (Phase 1a / Slice 1a).
 
-Starts the real gateway binary with HOMUN_TURN_BROKER=on in an ISOLATED
-temporary data dir, then exercises the 5 broker routes via HTTP:
+Starts the real gateway binary in an ISOLATED temporary data dir, then
+exercises the 5 broker routes via HTTP (the broker is now the only chat path):
 
   1. POST   /api/chat/turns          → 201 (enqueue)
   2. POST   /api/chat/turns (same thread) → 409 (thread_busy)
@@ -82,7 +82,7 @@ def start_gateway(data_dir: Path) -> subprocess.Popen:
     env["HOMUN_DATA_DIR"] = str(data_dir)
     env["HOMUN_DESKTOP_GATEWAY_TOKEN"] = GATEWAY_TOKEN
     env["HOMUN_DESKTOP_GATEWAY_PORT"] = str(GATEWAY_PORT)
-    env["HOMUN_TURN_BROKER"] = "on"
+    # HOMUN_TURN_BROKER removed: the broker is now the only chat path (flag collapsed 2026-07-07).
     # Disable optional background workers that would slow boot or pollute logs.
     env["HOMUN_TASK_EXECUTOR_WORKER"] = "on"  # MUST be on for the broker
     env["RUST_LOG"] = "warn"
