@@ -109,6 +109,11 @@ pub struct ChatGenerateStreamRequest {
 pub struct EnqueueTurnRequest {
     pub thread_id: String,
     pub prompt: String,
+    /// Client-generated correlation id. The turn_id is `turn_{request_id}`, so the client can
+    /// derive it for cancel (DELETE /turns/{id}) and resume WITHOUT waiting for the response.
+    /// Server falls back to a generated id when absent/blank (e.g. non-interactive callers).
+    #[serde(default)]
+    pub request_id: Option<String>,
     #[serde(default)]
     pub visible_prompt: Option<String>,
     #[serde(default)]

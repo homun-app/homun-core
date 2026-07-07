@@ -31199,11 +31199,23 @@ async fn enqueue_turn(
         source = ?req.source.as_deref().unwrap_or("interactive"),
         "turn enqueue requested"
     );
-    let request_id = format!(
-        "chat_stream_{}_{}",
-        now_epoch_secs(),
-        uuid::Uuid::new_v4().simple()
-    );
+    // Honor the client's request_id so turn_id == `turn_{request_id}` is predictable client-side
+    // (cancel via DELETE /turns/{id} and resume both derive it). Regenerating it here silently
+    // broke Stop: the client's DELETE hit `turn_{clientRequestId}` while the turn lived under a
+    // server-minted id → 404, cancel never reached the turn. Fall back to a fresh id for callers
+    // that don't supply one (some non-interactive sources).
+    let request_id = req
+        .request_id
+        .clone()
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "chat_stream_{}_{}",
+                now_epoch_secs(),
+                uuid::Uuid::new_v4().simple()
+            )
+        });
     let source = match req.source.as_deref().unwrap_or("interactive") {
         "automation" => local_first_task_runtime::broker::ChatTurnSource::Automation,
         "channel" => local_first_task_runtime::broker::ChatTurnSource::Channel,
