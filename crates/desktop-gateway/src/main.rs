@@ -18745,7 +18745,9 @@ struct ChatToolCtx<'a> {
     // `&mut` — mutated inside the dispatch loop.
     messages: &'a mut Vec<serde_json::Value>,
     accumulated: &'a mut String,
-    browser_session: &'a mut Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    // NB: browser_session is NOT here — its `Cell`/`RefCell` made `ChatToolCtx` non-`Sync`, blocking a
+    // shared-`&ctx` CapabilityExecutor (the 5d.2 finding). The loop owns it and threads it to
+    // `execute_browser_tool` directly (5e.1). The rest of the browser fields are `Sync`, so they stay.
     browser_used: &'a mut bool,
     last_snapshot: &'a mut String,
     pending_browser_image: &'a mut Option<String>,
@@ -18899,9 +18901,9 @@ async fn try_advance_frontier_from_evidence(ctx: &mut ChatToolCtx<'_>) {
 /// unaffected. Side-effects (push to `accumulated`, stream the delta, set
 /// `pending_confirm`) are preserved in the same order.
 async fn emit_approval_card(
-    // `&mut` for `Send` (see `execute_chat_tool`); the body only READS `ctx` — the card append and the
-    // confirm flag are recorded in `effects`, not mutated on `ctx`.
-    ctx: &mut ChatToolCtx<'_>,
+    // `&ctx` (shared): the body only READS `ctx`; the card append and confirm flag go to `effects`.
+    // `Send`-safe now that `ChatToolCtx` is `Sync` (5e.1).
+    ctx: &ChatToolCtx<'_>,
     effects: &mut local_first_engine::ToolEffects,
     marker_open: &str,
     marker_close: &str,
@@ -19007,6 +19009,9 @@ fn is_browser_granular_tool(name: &str) -> bool {
 // original indentation (faithful move; the file isn't rustfmt-clean, so nothing is reformatted).
 async fn execute_browser_tool(
     ctx: &mut ChatToolCtx<'_>,
+    // 5e.1: browser_session lives OUTSIDE ChatToolCtx (its Cell/RefCell made the ctx non-Sync,
+    // blocking a shared-&ctx CapabilityExecutor). The loop owns it and threads it to this seam.
+    browser_session: &mut Option<BrowserAutomationClient<BrowserSidecarSession>>,
     name: &str,
     args_raw: &str,
     call_id: &str,
@@ -19062,7 +19067,7 @@ async fn execute_browser_tool(
                 }
             }
         }
-        if ctx.browser_session.is_none() {
+        if browser_session.is_none() {
             let reused = match ctx.thread_id {
                 Some(t) => {
                     let st = ctx.state.clone();
@@ -19083,7 +19088,7 @@ async fn execute_browser_tool(
                 ctx.opened_targets.push("chat_0".to_string());
             }
             match reused {
-                Some(existing) => *ctx.browser_session = Some(existing),
+                Some(existing) => *browser_session = Some(existing),
                 None => {
                     // Self-heal: a wedged contained-computer CDP makes the
                     // sidecar's connectOverCDP time out. Health-check BEFORE
@@ -19109,7 +19114,7 @@ async fn execute_browser_tool(
                         .await;
                         match spawned {
                             Ok(Ok(session)) => {
-                                *ctx.browser_session =
+                                *browser_session =
                                     Some(BrowserAutomationClient::new(session));
                                 break;
                             }
@@ -19136,7 +19141,7 @@ async fn execute_browser_tool(
         ctx.browser_tool_call_ids.insert(call_id.to_string());
         // We hold the session for the duration of this branch; the
         // GLOBAL lock is acquired only around each single call.
-        let outcome: Result<String, String> = match ctx.browser_session.take() {
+        let outcome: Result<String, String> = match browser_session.take() {
             None => {
                 push_browser_step(
                     "browser: session unavailable".to_string(),
@@ -19172,7 +19177,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         .unwrap_or("")
                         .to_string();
                     if url.trim().is_empty() {
-                        *ctx.browser_session = Some(client);
+                        *browser_session = Some(client);
                         Err("Missing URL for browser_navigate.".to_string())
                     } else {
                         let _ = emit_stream_event(
@@ -19228,7 +19233,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             Err(nav_err.clone().unwrap_or_default())
                         };
                         drop(guard);
-                        *ctx.browser_session = client_now;
+                        *browser_session = client_now;
                         // Mark this tab opened once the Open/Navigate succeeds.
                         if nav_err.is_none()
                             && !ctx.opened_targets.iter().any(|t| t.as_str() == ctx.current_target.as_str())
@@ -19265,7 +19270,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                         ctx.state,
                                     )
                                     .await;
-                                    *ctx.browser_session = None;
+                                    *browser_session = None;
                                     ctx.opened_targets.clear();
                                     if healed {
                                         Err("The browser was wedged; I recycled the contained computer. Retry the SAME navigation now.".to_string())
@@ -19337,7 +19342,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     )
                     .await;
                     drop(guard);
-                    *ctx.browser_session = client_back;
+                    *browser_session = client_back;
                     match snap {
                         Ok(value) => {
                             let snap = browser_snapshot_text(&value);
@@ -19439,11 +19444,11 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         }
                     });
                     if let Some(error) = preflight_error {
-                        *ctx.browser_session = Some(client);
+                        *browser_session = Some(client);
                         Err(error)
                     } else if let Some(reason) = blocked {
                         eprintln!("browser-gate: BLOCKED ({reason})");
-                        *ctx.browser_session = Some(client);
+                        *browser_session = Some(client);
                         push_browser_step(
                             format!(
                                 "action blocked: {}",
@@ -19478,7 +19483,7 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                             chat_browser_call(client, BrowserMethod::Act, action)
                                 .await;
                         drop(guard);
-                        *ctx.browser_session = client_back;
+                        *browser_session = client_back;
                         match act_res {
                             Ok(value) => {
                                 let snap = browser_snapshot_text(&value);
@@ -19564,7 +19569,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                     let e = error.to_lowercase();
                                     e.contains("stale") || e.contains("detached")
                                 };
-                                match (stale, ctx.browser_session.take()) {
+                                match (stale, browser_session.take()) {
                                     (true, Some(c)) => {
                                         let guard = browse_web_lock().lock().await;
                                         let (c_back, snap_res) = chat_browser_call(
@@ -19576,7 +19581,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                         )
                                         .await;
                                         drop(guard);
-                                        *ctx.browser_session = c_back;
+                                        *browser_session = c_back;
                                         let snap = snap_res
                                             .as_ref()
                                             .map(browser_snapshot_text)
@@ -19596,7 +19601,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                         }
                                     }
                                     (_, restored) => {
-                                        *ctx.browser_session = restored;
+                                        *browser_session = restored;
                                         Err(format!(
                                             "Action failed: {error}{}",
                                             browser_act_error_hint(&error)
@@ -19644,7 +19649,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                     )
                     .await;
                     drop(guard);
-                    *ctx.browser_session = client_back;
+                    *browser_session = client_back;
                     match shot_res {
                         Ok(value) => {
                             let path = value
@@ -19752,7 +19757,7 @@ Use the text snapshot."
                     )
                     .await;
                     drop(guard);
-                    *ctx.browser_session = client_back;
+                    *browser_session = client_back;
                     match tabs_res {
                         Ok(value) => {
                             // Sidecar shape: { tabs: [ { targetId, url,
@@ -19841,7 +19846,7 @@ Use the text snapshot."
                     )
                     .await;
                     drop(guard);
-                    *ctx.browser_session = client_back;
+                    *browser_session = client_back;
                     match dialog_res {
                         Ok(value) => {
                             let msg = value
@@ -19875,11 +19880,11 @@ Use the text snapshot."
 /// borrows preserved); `name`/`args_raw`/`call_id` are the per-call parse results. The
 /// caller keeps the harness snapshots, the blocked-guard, and the post-result push.
 async fn execute_chat_tool(
-    // `&mut` only because `ChatToolCtx` isn't `Sync` (the browser session's `Cell`/`RefCell`), so a
-    // shared `&ctx` future wouldn't be `Send` inside the loop's `tokio::spawn`. The arms no longer
-    // MUTATE `ctx` (all changes flow through the returned `ToolEffects`, 5d.1b); this becomes a pure
-    // `&ctx` once the browser state leaves `ctx` (ADR 0025 / the ctx-split at 5e).
-    ctx: &mut ChatToolCtx<'_>,
+    // `&ctx` (shared): the arms no longer MUTATE `ctx` (all changes flow through the returned
+    // `ToolEffects`, 5d.1b), and `ChatToolCtx` is now `Sync` (browser_session left it, 5e.1) so a
+    // shared-`&ctx` future is `Send` inside the loop's `tokio::spawn`. This is the pure
+    // `name+args → (result, effects)` shape the `&self` CapabilityExecutor wraps at 5e.
+    ctx: &ChatToolCtx<'_>,
     name: &str,
     args_raw: &str,
     // Unused since the browser dispatch (its only user) moved to the call site (5d.2); kept for the
@@ -24113,7 +24118,6 @@ missing, give what you have and note the gap in one short line.",
                     let mut ctx = ChatToolCtx {
                         messages: &mut messages,
                         accumulated: &mut accumulated,
-                        browser_session: &mut browser_session,
                         browser_used: &mut browser_used,
                         last_snapshot: &mut last_snapshot,
                         pending_browser_image: &mut pending_browser_image,
@@ -24268,10 +24272,17 @@ missing, give what you have and note the gap in one short line.",
                         // `ctx` directly (browser session, snapshots, the mid-turn model-switch). It
                         // folds into the CapabilityExecutor impl — with the model-switch surfaced as an
                         // effect — at 5e/ADR 0025. Keeping it here lets `execute_chat_tool` be pure `&ctx`.
-                        let r = execute_browser_tool(&mut ctx, name, args_raw, &call_id).await;
+                        let r = execute_browser_tool(
+                            &mut ctx,
+                            &mut browser_session,
+                            name,
+                            args_raw,
+                            &call_id,
+                        )
+                        .await;
                         (r, local_first_engine::ToolEffects::default())
                     } else {
-                        execute_chat_tool(&mut ctx, name, args_raw, &call_id).await
+                        execute_chat_tool(&ctx, name, args_raw, &call_id).await
                     };
                     // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                     // loop reads any field they populate (plan, accumulated, …) — net state as inline.
