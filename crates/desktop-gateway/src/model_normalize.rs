@@ -304,6 +304,8 @@ pub fn sanitize_model_text(text: &str) -> String {
     ] {
         s = s.replace(stray, "");
     }
+    // Collapse degenerate ‹‹REASONING›› floods (weak browser models spew orphan closings).
+    s = local_first_desktop_gateway::markers::normalize_reasoning_markers(&s);
     s.trim().to_string()
 }
 
@@ -415,6 +417,25 @@ mod tests {
         assert_eq!(sanitize_model_text("x<｜tool▁calls▁begin｜>y"), "xy");
         // Plain text is untouched (besides trim).
         assert_eq!(sanitize_model_text("  hello  "), "hello");
+    }
+
+    #[test]
+    fn balance_reasoning_collapses_minimax_flood() {
+        // MiniMax degeneration: a run of orphan closings (split single-› variant) → all dropped.
+        let flood = "‹‹/REASONING›".repeat(200);
+        assert_eq!(sanitize_model_text(&format!("Answer.{flood}")), "Answer.");
+        // A real reasoning block is preserved (and the split open normalized to `‹‹››`).
+        assert_eq!(
+            sanitize_model_text("‹‹REASONING›thinking‹‹/REASONING››\nBody."),
+            "‹‹REASONING››thinking‹‹/REASONING››\nBody."
+        );
+        // Duplicate opens collapse to one; a dangling open is closed.
+        assert_eq!(
+            sanitize_model_text("‹‹REASONING››‹‹REASONING››still thinking"),
+            "‹‹REASONING››still thinking‹‹/REASONING››"
+        );
+        // Other markers pass through untouched.
+        assert_eq!(sanitize_model_text("‹‹PLAN››- [x] a‹‹/PLAN››"), "‹‹PLAN››- [x] a‹‹/PLAN››");
     }
 
     #[test]

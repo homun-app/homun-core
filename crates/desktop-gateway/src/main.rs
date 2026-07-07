@@ -6548,25 +6548,54 @@ fn replace_latest_plan_marker(text: &str, steps: &[serde_json::Value]) -> String
     out
 }
 
-fn reconcile_final_plan_marker_on_delivery(plan: &ExecutionPlan, text: &str) -> String {
-    let mut plan_steps = execution_plan_steps(plan);
-    let open_left = plan_steps
-        .iter()
-        .filter(|step| plan_step_status(step) != "done")
-        .count();
+/// The plan steps reconciled for delivery: EVERY still-open step forced to `done`, `blocked`
+/// preserved. Returns `Some` only when reconciliation is enabled, a substantial answer was
+/// delivered, and something actually changed — otherwise `None` (nothing to reconcile).
+///
+/// This is the single source of truth shared by the displayed ‹‹PLAN›› marker AND the
+/// persisted runtime plan, so the two can never diverge (a text-only reconcile would show
+/// the user 7/7 while the durable plan stays at 3/7 → `thread_has_active_runtime_plan` keeps
+/// firing and the NEXT turn falsely resumes it).
+///
+/// It runs ONLY on the delivery path (25127/25242) — after the round loop has already DECIDED
+/// to stop (nudges spent, round budget hit, or the model concluded). At that instant nothing
+/// is "in progress" anymore, so a substantial final answer means the plan's work is delivered.
+/// Models routinely answer the whole request but stop calling `step_advance` for the tail
+/// (deepseek delivered all 7 markets yet left the plan frozen at 3/7 with a phantom "active"
+/// step — the "non so a che punto è arrivato" symptom). `blocked` stays blocked: it's an
+/// explicit failure the model recorded, not something to launder into success. The char floor
+/// guards the genuinely-truncated case (budget burned, empty/short answer). NOTE: deliberately
+/// does NOT reuse `answer_concludes_plan` — that predicate must stay conservative for the
+/// *nudge* decision (25001), where many open steps means "keep pushing", the opposite intent.
+fn plan_steps_reconciled_on_delivery(
+    plan: &ExecutionPlan,
+    text: &str,
+) -> Option<Vec<serde_json::Value>> {
     if !plan_reconcile_on_delivery_enabled()
-        || !answer_concludes_plan(open_left, strip_chat_markers(text).trim().chars().count())
+        || strip_chat_markers(text).trim().chars().count() < MIN_DELIVERED_CHARS_TO_CONCLUDE
     {
-        return text.to_string();
+        return None;
     }
-    if let Some(open_index) = plan_steps
-        .iter()
-        .position(|step| plan_step_status(step) != "done")
-    {
-        plan_steps[open_index]["status"] = serde_json::json!("done");
-        return replace_latest_plan_marker(text, &plan_steps);
+    let mut plan_steps = execution_plan_steps(plan);
+    let mut changed = false;
+    for step in plan_steps.iter_mut() {
+        if !matches!(plan_step_status(step), "done" | "blocked") {
+            step["status"] = serde_json::json!("done");
+            changed = true;
+        }
     }
-    text.to_string()
+    changed.then_some(plan_steps)
+}
+
+/// Thin text-only wrapper over `plan_steps_reconciled_on_delivery` — the delivery call sites
+/// need the reconciled steps to ALSO persist the runtime plan, so they use the helper directly;
+/// this convenience form (marker replacement only) is kept for the delivery-reconcile tests.
+#[cfg(test)]
+fn reconcile_final_plan_marker_on_delivery(plan: &ExecutionPlan, text: &str) -> String {
+    match plan_steps_reconciled_on_delivery(plan, text) {
+        Some(plan_steps) => replace_latest_plan_marker(text, &plan_steps),
+        None => text.to_string(),
+    }
 }
 
 fn plan_step_status(step: &serde_json::Value) -> &str {
@@ -6890,7 +6919,16 @@ fn enforce_monotonic_plan_progress(steps: &mut [serde_json::Value]) {
         return;
     };
     for step in steps.iter_mut().take(frontier) {
-        if plan_step_status(step) == "todo" {
+        // Every step BEFORE the frontier is behind the current work → close it. This covers
+        // `todo` (never started) AND a stale `doing` the model left open when it moved the
+        // pointer forward without ever marking the prior step done. Enforces the invariant
+        // "at most one active step" (the frontier). Without closing `doing`, `plan_next_open`
+        // keeps returning the FIRST `doing` and the harness nudge points the model back at
+        // step 1 forever — the observed "dice step 1 fatto ma resta sullo step 1 / rifà cose
+        // già fatte" symptom (deepseek: s1 doing + s2 doing → s1 never advanced to done).
+        // The just-claimed step is the LAST doing (the frontier) so it stays doing → F2
+        // verification of the current claim is untouched. `blocked` stays blocked.
+        if matches!(plan_step_status(step), "todo" | "doing") {
             step["status"] = serde_json::json!("done");
         }
     }
@@ -15342,6 +15380,11 @@ async fn collect_openai_stream(
     let mut stream = resp.bytes_stream();
     let mut raw = String::new();
     let mut pending = String::new();
+    // The ONE streaming marker filter (shared with the Ollama-native collector): keeps `‹‹NAME››`
+    // delimiters whole across Delta events and drops a weak model's ‹‹REASONING›› flood before it
+    // reaches the UI. Independent of `raw` (the authoritative final body) — the LIVE preview is
+    // filtered but the committed text is untouched.
+    let mut markers = local_first_desktop_gateway::markers::StreamMarkerFilter::default();
     let mut done = false;
     let mut got_any = false;
     while !done {
@@ -15388,13 +15431,14 @@ async fn collect_openai_stream(
                             .and_then(|v| v.as_str())
                             .filter(|s| !s.is_empty())
                         {
-                            let _ = emit_stream_event(
-                                sink,
-                                GenerateStreamEvent::Delta {
-                                    text: fragment.to_string(),
-                                },
-                            )
-                            .await;
+                            let out = markers.push(fragment);
+                            if !out.is_empty() {
+                                let _ = emit_stream_event(
+                                    sink,
+                                    GenerateStreamEvent::Delta { text: out },
+                                )
+                                .await;
+                            }
                         }
                     }
                 }
@@ -15414,6 +15458,11 @@ async fn collect_openai_stream(
                 break;
             }
         }
+    }
+    // Drain the filter at stream end (held partial marker + close a dangling reasoning block).
+    let tail = markers.flush();
+    if !tail.is_empty() {
+        let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: tail }).await;
     }
     Ok(reassemble_openai_stream(&raw))
 }
@@ -15723,6 +15772,7 @@ async fn process_ollama_line(
     content: &mut String,
     reasoning: &mut String,
     tool_calls: &mut Vec<serde_json::Value>,
+    markers: &mut local_first_desktop_gateway::markers::StreamMarkerFilter,
     sink: &StreamSink,
 ) -> bool {
     if let Some(message) = json.get("message") {
@@ -15732,13 +15782,12 @@ async fn process_ollama_line(
             .filter(|s| !s.is_empty())
         {
             content.push_str(fragment);
-            let _ = emit_stream_event(
-                sink,
-                GenerateStreamEvent::Delta {
-                    text: fragment.to_string(),
-                },
-            )
-            .await;
+            // The SAME streaming filter as the OpenAI path (the browser sub-model MiniMax via
+            // Ollama native splits `‹‹REASONING››` and can flood orphan closings).
+            let out = markers.push(fragment);
+            if !out.is_empty() {
+                let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: out }).await;
+            }
         }
         // Reasoning trace: Ollama native exposes it as `message.thinking` for thinking models
         // (deepseek-r1, qwen3, …), separate from `content`. Accumulate it so the canonical
@@ -15783,6 +15832,8 @@ async fn collect_ollama_native_stream(
     let mut content = String::new();
     let mut reasoning = String::new();
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
+    // The ONE streaming marker filter, shared with the OpenAI collector.
+    let mut markers = local_first_desktop_gateway::markers::StreamMarkerFilter::default();
     let mut got_any = false;
     let mut done = false;
     while !done {
@@ -15821,6 +15872,7 @@ async fn collect_ollama_native_stream(
                             &mut content,
                             &mut reasoning,
                             &mut tool_calls,
+                            &mut markers,
                             sink,
                         )
                         .await
@@ -15838,8 +15890,21 @@ async fn collect_ollama_native_stream(
     let tail = pending.trim().to_string();
     if !tail.is_empty() {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tail) {
-            process_ollama_line(&json, &mut content, &mut reasoning, &mut tool_calls, sink).await;
+            process_ollama_line(
+                &json,
+                &mut content,
+                &mut reasoning,
+                &mut tool_calls,
+                &mut markers,
+                sink,
+            )
+            .await;
         }
+    }
+    // Drain the filter (held partial marker + close a dangling reasoning block).
+    let tail_delta = markers.flush();
+    if !tail_delta.is_empty() {
+        let _ = emit_stream_event(sink, GenerateStreamEvent::Delta { text: tail_delta }).await;
     }
     // Canonical assembly (F0 / ADR 0019), shared with the OpenAI collector. `reasoning` is the
     // `message.thinking` trace accumulated by `process_ollama_line` (thinking models like
@@ -25123,13 +25188,23 @@ check/update the key in Settings → Model & Runtime."
             }
             // Anti-churn: the live stream carried one ‹‹PLAN›› block per plan tool call;
             // the PERSISTED answer keeps the plan card exactly once (latest state).
-            let final_answer = append_vault_reveal_marker_if_missing(
-                reconcile_final_plan_marker_on_delivery(
-                    &plan,
-                    &collapse_plan_markers(&accumulated),
-                ),
-                pending_vault_reveal_marker.as_deref(),
-            );
+            // Reconcile the plan ONE last time on delivery — mark every still-open step done
+            // (see plan_steps_reconciled_on_delivery) — and PERSIST it, so the runtime plan is
+            // settled → the next turn won't falsely resume a plan this answer already finished.
+            let delivered = collapse_plan_markers(&accumulated);
+            let delivered = match plan_steps_reconciled_on_delivery(&plan, &delivered) {
+                Some(reconciled) => {
+                    upsert_runtime_plan_memory_from_state(
+                        &state_owned,
+                        thread_id.as_deref(),
+                        &reconciled,
+                    );
+                    replace_latest_plan_marker(&delivered, &reconciled)
+                }
+                None => delivered,
+            };
+            let final_answer =
+                append_vault_reveal_marker_if_missing(delivered, pending_vault_reveal_marker.as_deref());
             memory_answer = final_answer.clone();
             let _ = emit_stream_event(
                 &tx,
@@ -25237,11 +25312,22 @@ Tell me if you want me to retry or rephrase."
                 final_text.push_str(&fonti);
             }
             // Anti-churn safety net for the `accumulated` fallback (synth_text never
-            // carries plan blocks, so this is a no-op when synthesis succeeded).
-            let final_text = append_vault_reveal_marker_if_missing(
-                reconcile_final_plan_marker_on_delivery(&plan, &collapse_plan_markers(&final_text)),
-                pending_vault_reveal_marker.as_deref(),
-            );
+            // carries plan blocks, so this is a no-op when synthesis succeeded). Reconcile +
+            // persist the plan on this exit path too, so a synthesis delivery also settles it.
+            let delivered = collapse_plan_markers(&final_text);
+            let delivered = match plan_steps_reconciled_on_delivery(&plan, &delivered) {
+                Some(reconciled) => {
+                    upsert_runtime_plan_memory_from_state(
+                        &state_owned,
+                        thread_id.as_deref(),
+                        &reconciled,
+                    );
+                    replace_latest_plan_marker(&delivered, &reconciled)
+                }
+                None => delivered,
+            };
+            let final_text =
+                append_vault_reveal_marker_if_missing(delivered, pending_vault_reveal_marker.as_deref());
             memory_answer = final_text.clone();
             let _ = emit_stream_event(
                 &tx,
@@ -31623,18 +31709,9 @@ fn stream_event_is_terminal(line: &str) -> bool {
     line.contains("\"type\":\"done\"") || line.contains("\"type\":\"error\"")
 }
 
-fn legacy_marker_body<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
-    let trimmed = text.trim();
-    if trimmed.starts_with(open) && trimmed.ends_with(close) {
-        Some(&trimmed[open.len()..trimmed.len() - close.len()])
-    } else {
-        None
-    }
-}
-
-fn legacy_marker_json(text: &str, open: &str, close: &str) -> Option<serde_json::Value> {
-    legacy_marker_body(text, open, close).and_then(|body| serde_json::from_str(body).ok())
-}
+// The whole-text marker parsers now live in the single `markers` module; aliased so the
+// per-delta expander below reads unchanged.
+use local_first_desktop_gateway::markers::{body as legacy_marker_body, json_body as legacy_marker_json};
 
 fn expand_legacy_delta_to_chat_events_with_mode(
     text: &str,
@@ -52074,6 +52151,53 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn reconcile_final_plan_closes_all_open_steps_but_keeps_blocked() {
+        // Regression: deepseek delivered the whole answer but left the plan frozen at 1/4 with
+        // a phantom "active" step. On a substantial delivery EVERY open step must close — except
+        // `blocked`, which is an explicit failure the model recorded and must survive.
+        let plan = super::runtime_execution_plan(&[
+            serde_json::json!({"id":"s1","title":"Vincitrice","status":"done","detail":"ok"}),
+            serde_json::json!({"id":"s2","title":"Girone","status":"doing","detail":"wip"}),
+            serde_json::json!({"id":"s3","title":"Finale","status":"todo","detail":""}),
+            serde_json::json!({"id":"s4","title":"Haaland","status":"blocked","detail":"n/a"}),
+        ]);
+        let answer = format!(
+            "‹‹PLAN››{}‹‹/PLAN››\n{}",
+            super::build_plan_markdown(&super::execution_plan_steps(&plan)),
+            "Risposta completa con tutti i mercati coperti. ".repeat(30)
+        );
+
+        let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+        // s2 (doing) and s3 (todo) both close…
+        assert!(updated.contains("- [x] **Girone** (`s2`)"));
+        assert!(updated.contains("- [x] **Finale** (`s3`)"));
+        // …but the blocked step is preserved, not laundered into success.
+        assert!(updated.contains("- [!] **Haaland** (`s4`)"));
+        assert!(!updated.contains("- [x] **Haaland**"));
+    }
+
+    #[test]
+    fn reconcile_final_plan_noop_on_short_answer() {
+        // Char floor: a truncated / empty delivery (budget burned) means the work isn't really
+        // done — do NOT auto-close the plan, or we'd fake completion on a genuine stop.
+        let plan = super::runtime_execution_plan(&[
+            serde_json::json!({"id":"s1","title":"Emit card","status":"done","detail":"ok"}),
+            serde_json::json!({"id":"s2","title":"Deliver","status":"doing","detail":"wip"}),
+        ]);
+        let answer = format!(
+            "‹‹PLAN››{}‹‹/PLAN››\nDone.",
+            super::build_plan_markdown(&super::execution_plan_steps(&plan)),
+        );
+
+        let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
+
+        // Unchanged: the still-open step stays open (doing marker `[-]`).
+        assert!(updated.contains("- [-] **Deliver** (`s2`)"));
+        assert!(!updated.contains("- [x] **Deliver**"));
+    }
+
+    #[test]
     fn merge_plan_creates_then_keeps_stable_ids() {
         let mut plan = Vec::new();
         let claims = merge_plan(
@@ -52139,6 +52263,24 @@ prs.save(Path({path:?}))
         assert_eq!(plan_step_status(&steps[1]), "done", "before frontier → done");
         assert_eq!(plan_step_status(&steps[2]), "doing", "frontier stays doing");
         assert_eq!(plan_step_status(&steps[3]), "todo", "after frontier stays todo");
+    }
+
+    #[test]
+    fn monotonic_progress_closes_stale_doing_before_frontier() {
+        // Regression (deepseek trace): the model set s1 `doing`, read its result, then set s2
+        // `doing` WITHOUT ever marking s1 done. s1 must close so `plan_next_open` returns s2
+        // (not s1) and the nudge stops sending the model back to step 1.
+        let mut steps = vec![
+            serde_json::json!({ "id": "s1", "title": "Vincitrice", "status": "doing", "detail": "read" }),
+            serde_json::json!({ "id": "s2", "title": "Girone", "status": "doing", "detail": "" }),
+            serde_json::json!({ "id": "s3", "title": "Finale", "status": "todo", "detail": "" }),
+        ];
+        enforce_monotonic_plan_progress(&mut steps);
+        assert_eq!(plan_step_status(&steps[0]), "done", "stale earlier doing → done");
+        assert_eq!(plan_step_status(&steps[1]), "doing", "frontier (last doing) stays doing");
+        assert_eq!(plan_step_status(&steps[2]), "todo", "after frontier stays todo");
+        assert_eq!(plan_next_open(&steps).as_deref(), Some("Girone"), "next open is the frontier, not step 1");
+        assert_eq!(plan_done_count(&steps), 1, "progress reflects the closed step");
     }
 
     #[test]

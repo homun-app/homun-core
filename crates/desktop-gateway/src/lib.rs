@@ -1,5 +1,9 @@
 //! Local HTTP gateway contracts for the Electron desktop shell.
 
+/// The single control-marker toolkit (‹‹NAME››…‹‹/NAME›› protocol), shared by the lib and the
+/// binary — see the module docs. The mirror of the frontend's `lib/markers.ts`.
+pub mod markers;
+
 use local_first_context_compression::{
     CompressionMetrics, CompressionPolicy, CompressionResult, ContextCompressor, ContextItem,
     ContextKind,
@@ -386,16 +390,10 @@ const DISPLAY_MARKER_TAGS: [&str; 7] = [
 /// is dropped to end-of-string — there is no real answer body after an unterminated trace.
 pub fn strip_display_markers(text: &str) -> String {
     let mut out = text.to_string();
+    // One strip primitive for the whole backend (see `markers`); this stays the canonical
+    // list of which markers are display-only.
     for tag in DISPLAY_MARKER_TAGS {
-        let open = format!("‹‹{tag}››");
-        let close = format!("‹‹/{tag}››");
-        while let Some(start) = out.find(&open) {
-            let end = match out[start..].find(&close) {
-                Some(rel) => start + rel + close.len(),
-                None => out.len(),
-            };
-            out.replace_range(start..end, "");
-        }
+        out = crate::markers::strip_blocks(&out, tag);
     }
     out
 }

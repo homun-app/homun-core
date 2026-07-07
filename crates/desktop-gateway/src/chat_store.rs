@@ -2,6 +2,9 @@ use local_first_desktop_gateway::{
     ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, compact_thread_title,
     seeded_ready_message,
 };
+// The generic marker parsers live in the single `markers` module now; aliased so the local
+// call sites read unchanged.
+use local_first_desktop_gateway::markers::{bodies as marker_bodies, strip_blocks as strip_marker_blocks};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::{
     collections::{HashMap, HashSet},
@@ -3137,37 +3140,6 @@ fn push_json_marker_part(
             }));
         }
     }
-}
-
-fn marker_bodies(text: &str, marker: &str) -> Vec<String> {
-    let open = format!("‹‹{marker}››");
-    let close = format!("‹‹/{marker}››");
-    let mut bodies = Vec::new();
-    let mut cursor = 0usize;
-    while let Some(open_rel) = text[cursor..].find(&open) {
-        let body_start = cursor + open_rel + open.len();
-        let Some(close_rel) = text[body_start..].find(&close) else {
-            break;
-        };
-        let body_end = body_start + close_rel;
-        bodies.push(text[body_start..body_end].to_string());
-        cursor = body_end + close.len();
-    }
-    bodies
-}
-
-fn strip_marker_blocks(text: &str, marker: &str) -> String {
-    let open = format!("‹‹{marker}››");
-    let close = format!("‹‹/{marker}››");
-    let mut out = text.to_string();
-    while let Some(start) = out.find(&open) {
-        let end = match out[start..].find(&close) {
-            Some(rel) => start + rel + close.len(),
-            None => out.len(),
-        };
-        out.replace_range(start..end, "");
-    }
-    out
 }
 
 fn attachments_from_row(
