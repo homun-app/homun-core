@@ -42,6 +42,13 @@ pub mod loop_state;
 /// leaf engine never reads env.
 pub mod config;
 
+/// Pure browser-support helpers (ADR 0024 inc 5, 5.D1c.2): tool-name canonicalization + message
+/// history pruning, relocated from the gateway so the moved loop calls them locally.
+pub mod browser;
+
+/// Pure tool-trace helpers (ADR 0024 inc 5, 5.D1c.2): per-tool decision-memory trace lines.
+pub mod tools;
+
 pub use contract::{
     BrowserExecutor, CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError,
     ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,

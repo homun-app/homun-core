@@ -109,6 +109,12 @@ use local_first_engine::markers::{
 use local_first_engine::ModelClient;
 // Pure loop-delivery text helpers relocated to the engine crate (ADR 0024 inc 5e.3).
 use local_first_engine::text::{extract_source_urls, fonti_section, is_low_value_source_url};
+// 5.D1c.2: pure loop helpers relocated into the engine; the gateway keeps calling them unqualified.
+// `message_has_image_url` / `PRUNED_SNAPSHOT_STUB` are used only by tests → imported in `mod tests`.
+use local_first_engine::browser::{
+    is_browser_granular_tool, prune_browser_history, resolve_browser_chat_tool_name,
+};
+use local_first_engine::tools::{connected_capability_execution_trace_line, summarize_tool_action};
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
     PrivacyPolicy, Requirements, structured_response_format,
@@ -5794,55 +5800,6 @@ fn memory_hygiene_suggestions_for_scope(
         }
     }
     Ok(out)
-}
-
-/// M2/M3: after a chat turn, mine the exchange for durable facts, preferences and
-/// DECISIONS (with the why), plus graph entities/relations — routing each to its
-/// scope (personal vs active project) and auto-confirming the low-risk ones.
-/// Fire-and-forget: best-effort, never blocks the response, swallows all errors.
-/// One-line summary of a CONSEQUENTIAL (mutating) tool action, for the decision
-/// memory; `None` for pure reads/queries (no "why" worth recording). Domain-agnostic
-/// (code, documents/artifacts, scheduling). Connector (Composio/MCP) writes are
-/// captured by the caller via the write allow-list, not here.
-fn summarize_tool_action(name: &str, args_raw: &str) -> Option<String> {
-    let value: serde_json::Value =
-        serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
-    let field = |key: &str| {
-        value
-            .get(key)
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string()
-    };
-    let clip = |text: String, n: usize| text.chars().take(n).collect::<String>();
-    let line = match name {
-        "write_file" | "edit_file" => format!("edited file {}", field("path")),
-        "create_artifact" => format!("created artifact {}", field("name")),
-        "save_artifact" => {
-            let target = if field("name").is_empty() {
-                field("path")
-            } else {
-                field("name")
-            };
-            format!("saved {target}")
-        }
-        "run_in_project" => format!("ran in the project: {}", clip(field("command"), 120)),
-        "run_in_sandbox" => format!("ran in sandbox: {}", clip(field("command"), 120)),
-        "create_skill" => format!("created skill {}", field("name")),
-        "customize_addon" => format!("customized addon {}", field("addon_id")),
-        "schedule_task" => format!("scheduled task: {}", clip(field("prompt"), 80)),
-        "cancel_scheduled_task" => format!("cancelled task {}", field("task_id")),
-        // Pure reads / discovery → nothing to remember.
-        "read_file"
-        | "read_text_file"
-        | "list_files"
-        | "list_directory"
-        | "recall_memory"
-        | "suggest_capabilities" => return None,
-        _ => return None,
-    };
-    Some(line)
 }
 
 /// Tool schema for on-demand deep memory recall (M3). The always-on profile is a
@@ -18664,19 +18621,6 @@ fn capability_discovery_trace_line(intent: &str, entries: &[CapabilityEntry]) ->
     Some(format!("capability discovery `{intent}` -> {names}"))
 }
 
-fn connected_capability_execution_trace_line(
-    name: &str,
-    connector_index: &[(String, String, serde_json::Value)],
-) -> Option<String> {
-    if parse_mcp_chat_name(name).is_some() {
-        return Some(format!("capability execution mcp:{name}"));
-    }
-    if connector_index.iter().any(|(slug, _, _)| slug == name) {
-        return Some(format!("capability execution connector:{name}"));
-    }
-    None
-}
-
 /// Capable (OpenAI-compatible) chat path with NATIVE TOOL-CALLING. The model is
 /// given real tools and decides when to use them (no keyword routing). Tool
 /// rounds run non-streamed; the final assistant answer is emitted as Delta+Done
@@ -18934,22 +18878,6 @@ fn shadow_log_sandbox(state: &AppState, thread_id: Option<&str>, name: &str, arg
             "SANDBOX-SHADOW tool={name} footprint={footprint:?} policy={policy_label} verdict=allow"
         ),
     }
-}
-
-/// The granular browser tools the main agent drives one micro-action at a time. Dispatched to
-/// `execute_browser_tool` (the temporary `&mut ctx` seam) at the loop call site, NOT through the pure
-/// `execute_chat_tool` — so the latter can take `&ctx` (ADR 0024 inc 5d.2). ADR 0025 folds this into a
-/// single recursive `browse` and this predicate goes away.
-fn is_browser_granular_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "browser_navigate"
-            | "browser_snapshot"
-            | "browser_act"
-            | "browser_screenshot"
-            | "browser_tabs"
-            | "browser_dialog"
-    )
 }
 
 // ADR 0025 seam: the granular-browser-tools arm of `execute_chat_tool`, lifted VERBATIM into its
@@ -22197,57 +22125,6 @@ Tell the user clearly; do NOT claim it's done."
     (result, effects)
 }
 
-/// Apply a tool's returned loop-state effects to the turn context (ADR 0024 inc 5d.1b). The executor
-/// stopped mutating `ctx` inline; the loop applies the effects here, right after the call, so the net
-/// state matches the old inline mutation exactly. Each branch mirrors one former `ctx.<field>` write.
-// ADR 0026 (5.D1b): applies a tool's effects directly to `LoopState` (+ the per-round
-// `pending_confirm` flag), NOT through a `ChatToolCtx` — so the loop no longer needs to hold a
-// per-round ctx borrowing `&mut ls`. `round` is passed by value (the F1 progress anchor).
-fn apply_tool_effects(
-    ls: &mut local_first_engine::LoopState,
-    pending_confirm: &mut bool,
-    round: usize,
-    effects: local_first_engine::ToolEffects,
-) {
-    for line in &effects.append_output {
-        ls.accumulated.push_str(line);
-    }
-    // P5: `ls.plan` is the opaque `Value`, so the effect (already the whole plan serialized by the
-    // update_plan arm) is assigned directly — no deserialize round-trip, same whole-plan result.
-    if let Some(plan_val) = effects.plan {
-        ls.plan = plan_val;
-    }
-    for tool in effects.load_tools {
-        // Same dedup-then-add as inline: `insert` returns false if already loaded → skip; add a schema
-        // only when present (a connector key can be marked loaded with no schema).
-        if ls.loaded_tools.insert(tool.key) {
-            if let Some(schema) = tool.schema {
-                ls.tool_schemas.push(schema);
-            }
-        }
-    }
-    for line in effects.trace {
-        if ls.tool_trace.len() < 20 {
-            ls.tool_trace.push(line);
-        }
-    }
-    if effects.clear_evidence {
-        ls.step_evidence.clear();
-    }
-    if effects.request_confirm {
-        *pending_confirm = true;
-    }
-    if effects.request_compaction {
-        ls.pending_compaction = true;
-    }
-    if effects.reset_stall_guards {
-        // F1: real progress → anchor this round, zero the repeat counter, clear the last-round sig.
-        ls.progress_anchor_round = round;
-        ls.repeat_count = 0;
-        ls.last_round_sig.clear();
-    }
-}
-
 /// The gateway's `CapabilityExecutor` (ADR 0024): wraps the pure `execute_chat_tool` (`&ctx` →
 /// result + effects) as the engine's single NON-browser tool chokepoint. Browser tools stay a
 /// separate loop branch (the temporary `&mut` seam) until ADR 0025 folds them into a recursive
@@ -24427,7 +24304,7 @@ missing, give what you have and note the gap in one short line.",
                 };
                 // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                 // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
-                apply_tool_effects(&mut ls, &mut pending_confirm, round, tool_effects);
+                ls.apply_effects(&mut pending_confirm, round, tool_effects);
 
                 // Collect source URLs from browser results so the final
                 // answer can carry a deterministic "Fonti" section. The
@@ -26603,82 +26480,6 @@ fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-/// Placeholder substituted for an old browser-snapshot tool result so the model
-/// still sees the call happened but the giant snapshot text is dropped.
-const PRUNED_SNAPSHOT_STUB: &str =
-    "[previous snapshot removed — call browser_snapshot again if needed]";
-
-/// Context hygiene for the 32-round browser loop. Each browser snapshot/act tool
-/// result and each screenshot image is large; at 32 rounds they would overflow
-/// the context window and silently truncate the conversation, making the model
-/// "forget" the page. Called at the TOP of each round, this keeps only the LATEST
-/// browser tool-result (whose id is in `browser_tool_call_ids`) and the LATEST
-/// user message carrying an `image_url`, stubbing all older ones. It never touches
-/// the system message, the original first user message, or non-browser tool
-/// results.
-fn prune_browser_history(
-    messages: &mut [serde_json::Value],
-    browser_tool_call_ids: &std::collections::BTreeSet<String>,
-) {
-    if browser_tool_call_ids.is_empty() {
-        // No browser tool ran yet: only image pruning could apply, and that is
-        // driven by browser screenshots too, so nothing to do.
-        return;
-    }
-    // 1) Snapshots: keep only the LATEST browser tool-result; stub older ones.
-    let mut latest_browser_tool: Option<usize> = None;
-    for (idx, message) in messages.iter().enumerate() {
-        let is_browser_tool = message.get("role").and_then(|r| r.as_str()) == Some("tool")
-            && message
-                .get("tool_call_id")
-                .and_then(|c| c.as_str())
-                .map(|id| browser_tool_call_ids.contains(id))
-                .unwrap_or(false);
-        if is_browser_tool {
-            latest_browser_tool = Some(idx);
-        }
-    }
-    if let Some(keep) = latest_browser_tool {
-        for (idx, message) in messages.iter_mut().enumerate() {
-            if idx == keep {
-                continue;
-            }
-            let is_browser_tool = message.get("role").and_then(|r| r.as_str()) == Some("tool")
-                && message
-                    .get("tool_call_id")
-                    .and_then(|c| c.as_str())
-                    .map(|id| browser_tool_call_ids.contains(id))
-                    .unwrap_or(false);
-            if is_browser_tool {
-                if let Some(obj) = message.as_object_mut() {
-                    obj.insert(
-                        "content".to_string(),
-                        serde_json::Value::String(PRUNED_SNAPSHOT_STUB.to_string()),
-                    );
-                }
-            }
-        }
-    }
-    // 2) Images: keep only the LATEST user message that has an image_url part;
-    //    strip image parts from older ones (down to a text stub).
-    let mut latest_image_msg: Option<usize> = None;
-    for (idx, message) in messages.iter().enumerate() {
-        if message_has_image_url(message) {
-            latest_image_msg = Some(idx);
-        }
-    }
-    if let Some(keep) = latest_image_msg {
-        for (idx, message) in messages.iter_mut().enumerate() {
-            if idx == keep {
-                continue;
-            }
-            if message_has_image_url(message) {
-                strip_image_url_parts(message);
-            }
-        }
-    }
-}
-
 /// Runs ONE blocking `client.call` off the async runtime, moving the client in
 /// and handing it back out (so the turn keeps ownership of the warm session —
 /// mirrors `BrowserLoopRunner::into_client`). The global `browse_web_lock` MUST be
@@ -26742,42 +26543,6 @@ fn browser_snapshot_text(value: &serde_json::Value) -> String {
         .and_then(|s| s.as_str())
         .unwrap_or("")
         .to_string()
-}
-
-/// True if a message's `content` is an array containing an `image_url` part.
-fn message_has_image_url(message: &serde_json::Value) -> bool {
-    message
-        .get("content")
-        .and_then(|c| c.as_array())
-        .map(|parts| {
-            parts
-                .iter()
-                .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url"))
-        })
-        .unwrap_or(false)
-}
-
-/// Replaces the `image_url` parts of a multimodal message with a short text stub,
-/// keeping any existing text parts intact.
-fn strip_image_url_parts(message: &mut serde_json::Value) {
-    let Some(parts) = message.get_mut("content").and_then(|c| c.as_array_mut()) else {
-        return;
-    };
-    let mut had_image = false;
-    parts.retain(|p| {
-        if p.get("type").and_then(|t| t.as_str()) == Some("image_url") {
-            had_image = true;
-            false
-        } else {
-            true
-        }
-    });
-    if had_image {
-        parts.push(serde_json::json!({
-            "type": "text",
-            "text": "[previous image removed — capture a new screenshot if needed]"
-        }));
-    }
 }
 
 /// How long a per-thread browser session may sit idle before it is reaped.
@@ -39612,74 +39377,6 @@ fn browser_method_for_chat_tool(tool_name: &str) -> Option<BrowserMethod> {
     }
 }
 
-/// The six native browser tools the chat loop dispatches inline.
-const NATIVE_BROWSER_TOOLS: [&str; 6] = [
-    "browser_navigate",
-    "browser_snapshot",
-    "browser_act",
-    "browser_screenshot",
-    "browser_tabs",
-    "browser_dialog",
-];
-
-/// Plain Levenshtein edit distance (small inputs: tool names). Used only to recover a
-/// near-miss browser tool name; no external crate needed.
-fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    let mut cur = vec![0usize; b.len() + 1];
-    for (i, ca) in a.iter().enumerate() {
-        cur[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let cost = if ca == cb { 0 } else { 1 };
-            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
-        }
-        std::mem::swap(&mut prev, &mut cur);
-    }
-    prev[b.len()]
-}
-
-/// Canonicalize a possibly-typo'd native browser tool name. The model occasionally
-/// hallucinates a near-miss (observed: `browser_tavigate` for `browser_navigate`);
-/// the arguments are usually right, so recovering the NAME lets the call dispatch
-/// natively. WHY this matters: `browser_` is a RESERVED native namespace, but the chat
-/// dispatch ends in a Composio catch-all — a misspelled `browser_*` name matches no
-/// native arm and falls through to Composio, which 404s, and the model then loops on
-/// it. Conservative: exact match first; otherwise the UNIQUE closest of the six native
-/// names within edit distance ≤ 2. Returns `None` for anything not clearly a browser
-/// tool, so non-browser tool names are left untouched.
-fn resolve_browser_chat_tool_name(name: &str) -> Option<&'static str> {
-    if let Some(exact) = NATIVE_BROWSER_TOOLS
-        .iter()
-        .copied()
-        .find(|candidate| *candidate == name)
-    {
-        return Some(exact);
-    }
-    if !name.starts_with("browser_") {
-        return None;
-    }
-    let mut best: Option<(&'static str, usize)> = None;
-    let mut tied = false;
-    for candidate in NATIVE_BROWSER_TOOLS {
-        let distance = levenshtein(name, candidate);
-        match best {
-            None => best = Some((candidate, distance)),
-            Some((_, current)) if distance < current => {
-                best = Some((candidate, distance));
-                tied = false;
-            }
-            Some((_, current)) if distance == current => tied = true,
-            _ => {}
-        }
-    }
-    match best {
-        Some((candidate, distance)) if distance <= 2 && !tied => Some(candidate),
-        _ => None,
-    }
-}
-
 /// A synthetic `TaskRecord` so `call_shared_browser_sidecar` (built for the durable
 /// runtime) can be reused from a chat turn. The sidecar only reads it for the spawn
 /// env (workspace/profile), so a lightweight record scoped to the owner is enough.
@@ -49396,7 +49093,7 @@ mod tests {
         llm_concurrency_view, mcp_error_hint,
         mcp_provider_slug, mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata,
         memory_age_days, merge_plan,
-        message_has_image_url, next_plan_stall, normalize_for_dedup, parse_plan_marker,
+        next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
         proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
@@ -49412,6 +49109,9 @@ mod tests {
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
+    // 5.D1c.2: test-only engine helpers (not used by non-test gateway code, so imported here, not at
+    // the crate top where they'd read as unused).
+    use local_first_engine::browser::{message_has_image_url, PRUNED_SNAPSHOT_STUB};
     use local_first_browser_automation::BrowserAutomationError;
     use local_first_browser_automation::BrowserMethod;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
@@ -59474,7 +59174,7 @@ data: [DONE]\n";
         assert_eq!(messages[1]["content"], serde_json::json!("original"));
         assert_eq!(
             messages[3]["content"],
-            serde_json::json!(super::PRUNED_SNAPSHOT_STUB)
+            serde_json::json!(PRUNED_SNAPSHOT_STUB)
         );
         assert_eq!(messages[4]["content"], serde_json::json!("composio result"));
         assert_eq!(messages[5]["content"], serde_json::json!("SNAP-NEW huge"));

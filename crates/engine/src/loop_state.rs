@@ -15,7 +15,7 @@
 //! in a downstream crate the leaf `engine` can't reference) and the provider binding;
 //! browser state stays gateway-side behind the temporary seam until ADR 0025.
 
-use crate::contract::ProviderBinding;
+use crate::contract::{ProviderBinding, ToolEffects};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -100,6 +100,51 @@ impl LoopState {
     /// so future seeded fields have one place to land.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Apply a tool's returned loop-state effects (ADR 0024 inc 5d.1b; relocated to a method in
+    /// 5.D1c.2). The executor stopped mutating a `ctx` inline; the loop calls this right after the
+    /// call so the net state matches the old inline mutation exactly. Each branch mirrors one former
+    /// `ctx.<field>` write. `pending_confirm` is the per-ROUND approval flag (reset each iteration, so
+    /// it stays a loop local, not a field); `round` is the F1 progress anchor.
+    pub fn apply_effects(&mut self, pending_confirm: &mut bool, round: usize, effects: ToolEffects) {
+        for line in &effects.append_output {
+            self.accumulated.push_str(line);
+        }
+        // P5: `plan` is the opaque `Value`, so the effect (already the whole plan serialized by the
+        // update_plan arm) is assigned directly — no deserialize round-trip, same whole-plan result.
+        if let Some(plan_val) = effects.plan {
+            self.plan = plan_val;
+        }
+        for tool in effects.load_tools {
+            // Same dedup-then-add as inline: `insert` returns false if already loaded → skip; add a
+            // schema only when present (a connector key can be marked loaded with no schema).
+            if self.loaded_tools.insert(tool.key) {
+                if let Some(schema) = tool.schema {
+                    self.tool_schemas.push(schema);
+                }
+            }
+        }
+        for line in effects.trace {
+            if self.tool_trace.len() < 20 {
+                self.tool_trace.push(line);
+            }
+        }
+        if effects.clear_evidence {
+            self.step_evidence.clear();
+        }
+        if effects.request_confirm {
+            *pending_confirm = true;
+        }
+        if effects.request_compaction {
+            self.pending_compaction = true;
+        }
+        if effects.reset_stall_guards {
+            // F1: real progress → anchor this round, zero the repeat counter, clear the last-round sig.
+            self.progress_anchor_round = round;
+            self.repeat_count = 0;
+            self.last_round_sig.clear();
+        }
     }
 }
 
