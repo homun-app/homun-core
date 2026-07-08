@@ -18687,17 +18687,13 @@ const ATTACHMENT_TEXT_BUDGET_CHARS: usize = 120_000;
 /// most-recent files win.
 const ATTACHMENT_CONTEXT_IMAGES: usize = 12;
 
-/// Turn-level state that the per-tool-call dispatch loop reads and mutates. Bundled
-/// into one struct so the loop body can address it through `ctx.<field>` — the seam a
-/// LATER refactor extracts into a standalone `dispatch_one_tool_call` function. The
-/// struct is rebuilt once per `for round` iteration (so `round` is a plain `usize`),
-/// and its scope ends right after the dispatch loop so the borrows release before the
-/// post-loop reads (screenshot push, `if pending_confirm`) touch the raw locals.
-struct ChatToolCtx<'a> {
-    // `&mut` — mutated inside the dispatch loop.
-    // NB: browser_session is NOT here — its `Cell`/`RefCell` made `ChatToolCtx` non-`Sync`, blocking a
-    // shared-`&ctx` CapabilityExecutor (the 5d.2 finding). The loop owns it and threads it to
-    // `execute_browser_tool` directly (5e.1). The rest of the browser fields are `Sync`, so they stay.
+/// The browser branch's tool context (ADR 0026 / inc 5, 5.D1b slice 3). SPLIT out of `ChatToolCtx`
+/// because `execute_browser_tool` and `execute_chat_tool` have DISJOINT read-sets: the browser
+/// tool reads the browser cluster + provider + a few read-only fields, and nothing execute_chat_tool
+/// reads. Keeping them separate lets each seam build ONLY the fields its tool touches (the browser
+/// branch stays the temporary seam ADR 0025 replaces with a recursive `browse`). `browser_session`
+/// is threaded separately (its Cell/RefCell would make this non-`Sync`).
+struct BrowserToolCtx<'a> {
     browser_used: &'a mut bool,
     last_snapshot: &'a mut String,
     pending_browser_image: &'a mut Option<String>,
@@ -18705,15 +18701,28 @@ struct ChatToolCtx<'a> {
     current_target: &'a mut String,
     opened_targets: &'a mut Vec<String>,
     nav_failures: &'a mut std::collections::HashMap<String, u32>,
+    base_url: &'a mut String,
+    model: &'a mut String,
+    api_key: &'a mut Option<String>,
+    state: &'a AppState,
+    tx: &'a StreamSink,
+    thread_id: Option<&'a str>,
+    prompt: &'a str,
+    request: &'a ChatGenerateStreamRequest,
+    read_only: bool,
+    channel_owner: bool,
+}
+
+/// The NON-browser tool context (ADR 0026 / inc 5): the read-set of `execute_chat_tool` only —
+/// LoopState reads (plan/step_evidence/tool_trace) + provider + the turn-constant read-only fields.
+/// The `CapabilityExecutor` seam builds this per-call from `&mut LoopState` + its held read-only.
+struct ChatToolCtx<'a> {
     // Carried as an opaque `Value` (the serialized `ExecutionPlan`) so it lives in `LoopState`
     // (engine-owned, can't reference the gateway's typed plan); `plan_value_from`/`plan_value_steps`
     // bridge to the ExecutionPlan-only helpers. See ADR 0024 inc 5 (P5).
     plan: &'a mut serde_json::Value,
     step_evidence: &'a mut Vec<String>,
     tool_trace: &'a mut Vec<String>,
-    // Evidence-count at the last harness-driven plan auto-advance attempt — the stride gate so
-    // we don't run the (cheap) verifier on every single tool result (see
-    // `try_advance_frontier_from_evidence`).
     base_url: &'a mut String,
     model: &'a mut String,
     api_key: &'a mut Option<String>,
@@ -18721,13 +18730,7 @@ struct ChatToolCtx<'a> {
     state: &'a AppState,
     tx: &'a StreamSink,
     thread_id: Option<&'a str>,
-    prompt: &'a str,
-    // The original per-turn request (read-only): the dispatch reads
-    // `request.model` to detect an EXPLICIT per-message model override before
-    // switching to the browser driver model. Turn-constant.
-    request: &'a ChatGenerateStreamRequest,
     read_only: bool,
-    channel_owner: bool,
     contact_only: bool,
     can_see_contacts: bool,
     can_see_calendar: bool,
@@ -18955,7 +18958,7 @@ fn is_browser_granular_tool(name: &str) -> bool {
 // will swap for a recursive `browse(goal)` sub-agent (the manager keeps its model). Body kept at its
 // original indentation (faithful move; the file isn't rustfmt-clean, so nothing is reformatted).
 async fn execute_browser_tool(
-    ctx: &mut ChatToolCtx<'_>,
+    ctx: &mut BrowserToolCtx<'_>,
     // 5e.1: browser_session lives OUTSIDE ChatToolCtx (its Cell/RefCell made the ctx non-Sync,
     // blocking a shared-&ctx CapabilityExecutor). The loop owns it and threads it to this seam.
     browser_session: &mut Option<BrowserAutomationClient<BrowserSidecarSession>>,
@@ -24250,57 +24253,60 @@ missing, give what you have and note the gap in one short line.",
                     }
                 }
 
-                let (result, tool_effects) = {
-                let mut ctx = ChatToolCtx {
-                    browser_used: &mut browser_used,
-                    last_snapshot: &mut last_snapshot,
-                    pending_browser_image: &mut pending_browser_image,
-                    browser_tool_call_ids: &mut browser_tool_call_ids,
-                    current_target: &mut current_target,
-                    opened_targets: &mut opened_targets,
-                    nav_failures: &mut nav_failures,
-                    plan: &mut ls.plan,
-                    step_evidence: &mut ls.step_evidence,
-                    tool_trace: &mut ls.tool_trace,
-                    base_url: &mut ls.provider.base_url,
-                    model: &mut ls.provider.model,
-                    api_key: &mut ls.provider.api_key,
-                    state: &state_owned,
-                    tx: &tx,
-                    thread_id: thread_id.as_deref(),
-                    prompt: &prompt,
-                    request: &request,
-                    read_only,
-                    channel_owner,
-                    contact_only,
-                    can_see_contacts,
-                    can_see_calendar,
-                    autonomous,
-                    composio_writes: &composio_writes,
-                    catalog_index: &catalog_index,
-                    capability_corpus: &capability_corpus,
-                    automation_user_id: &automation_user_id,
-                    automation_workspace_id: &automation_workspace_id,
-                    turn_scaffold: &turn_scaffold,
-                    floor_acting,
-                };
-                if is_browser_granular_tool(name) {
-                    // Temporary browser seam (ADR 0024 inc 5d.2): the browser branch still mutates
-                    // `ctx` directly (browser session, snapshots, the mid-turn model-switch). It
-                    // folds into the CapabilityExecutor impl — with the model-switch surfaced as an
-                    // effect — at 5e/ADR 0025. Keeping it here lets `execute_chat_tool` be pure `&ctx`.
-                    let r = execute_browser_tool(
-                        &mut ctx,
-                        &mut browser_session,
-                        name,
-                        args_raw,
-                        &call_id,
-                    )
-                    .await;
+                let (result, tool_effects) = if is_browser_granular_tool(name) {
+                    // Temporary browser seam (ADR 0024 inc 5d.2 / ADR 0025): the branch builds its OWN
+                    // BrowserToolCtx (disjoint read-set) and mutates it directly (browser session,
+                    // snapshots, mid-turn model-switch). Folds into a recursive `browse` at ADR 0025.
+                    let mut bctx = BrowserToolCtx {
+                        browser_used: &mut browser_used,
+                        last_snapshot: &mut last_snapshot,
+                        pending_browser_image: &mut pending_browser_image,
+                        browser_tool_call_ids: &mut browser_tool_call_ids,
+                        current_target: &mut current_target,
+                        opened_targets: &mut opened_targets,
+                        nav_failures: &mut nav_failures,
+                        base_url: &mut ls.provider.base_url,
+                        model: &mut ls.provider.model,
+                        api_key: &mut ls.provider.api_key,
+                        state: &state_owned,
+                        tx: &tx,
+                        thread_id: thread_id.as_deref(),
+                        prompt: &prompt,
+                        request: &request,
+                        read_only,
+                        channel_owner,
+                    };
+                    let r =
+                        execute_browser_tool(&mut bctx, &mut browser_session, name, args_raw, &call_id)
+                            .await;
                     (r, local_first_engine::ToolEffects::default())
                 } else {
+                    // Non-browser: the CapabilityExecutor read-set only (ADR 0026). `&ctx` is read-only;
+                    // effects are returned + applied to `ls` after the ctx scope closes.
+                    let ctx = ChatToolCtx {
+                        plan: &mut ls.plan,
+                        step_evidence: &mut ls.step_evidence,
+                        tool_trace: &mut ls.tool_trace,
+                        base_url: &mut ls.provider.base_url,
+                        model: &mut ls.provider.model,
+                        api_key: &mut ls.provider.api_key,
+                        state: &state_owned,
+                        tx: &tx,
+                        thread_id: thread_id.as_deref(),
+                        read_only,
+                        contact_only,
+                        can_see_contacts,
+                        can_see_calendar,
+                        autonomous,
+                        composio_writes: &composio_writes,
+                        catalog_index: &catalog_index,
+                        capability_corpus: &capability_corpus,
+                        automation_user_id: &automation_user_id,
+                        automation_workspace_id: &automation_workspace_id,
+                        turn_scaffold: &turn_scaffold,
+                        floor_acting,
+                    };
                     execute_chat_tool(&ctx, name, args_raw, &call_id).await
-                }
                 };
                 // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                 // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
