@@ -18695,8 +18695,6 @@ const ATTACHMENT_CONTEXT_IMAGES: usize = 12;
 /// post-loop reads (screenshot push, `if pending_confirm`) touch the raw locals.
 struct ChatToolCtx<'a> {
     // `&mut` — mutated inside the dispatch loop.
-    messages: &'a mut Vec<serde_json::Value>,
-    accumulated: &'a mut String,
     // NB: browser_session is NOT here — its `Cell`/`RefCell` made `ChatToolCtx` non-`Sync`, blocking a
     // shared-`&ctx` CapabilityExecutor (the 5d.2 finding). The loop owns it and threads it to
     // `execute_browser_tool` directly (5e.1). The rest of the browser fields are `Sync`, so they stay.
@@ -18707,25 +18705,15 @@ struct ChatToolCtx<'a> {
     current_target: &'a mut String,
     opened_targets: &'a mut Vec<String>,
     nav_failures: &'a mut std::collections::HashMap<String, u32>,
-    browse_sources: &'a mut Vec<String>,
     // Carried as an opaque `Value` (the serialized `ExecutionPlan`) so it lives in `LoopState`
     // (engine-owned, can't reference the gateway's typed plan); `plan_value_from`/`plan_value_steps`
     // bridge to the ExecutionPlan-only helpers. See ADR 0024 inc 5 (P5).
     plan: &'a mut serde_json::Value,
     step_evidence: &'a mut Vec<String>,
     tool_trace: &'a mut Vec<String>,
-    loaded_tools: &'a mut std::collections::BTreeSet<String>,
-    tool_schemas: &'a mut Vec<serde_json::Value>,
-    last_round_sig: &'a mut String,
-    repeat_count: &'a mut u32,
-    progress_anchor_round: &'a mut usize,
     // Evidence-count at the last harness-driven plan auto-advance attempt — the stride gate so
     // we don't run the (cheap) verifier on every single tool result (see
     // `try_advance_frontier_from_evidence`).
-    progress_verify_anchor: &'a mut usize,
-    pending_compaction: &'a mut bool,
-    pending_vault_reveal_marker: &'a mut Option<String>,
-    pending_confirm: &'a mut bool,
     base_url: &'a mut String,
     model: &'a mut String,
     api_key: &'a mut Option<String>,
@@ -18751,7 +18739,6 @@ struct ChatToolCtx<'a> {
     automation_workspace_id: &'a WorkspaceId,
     turn_scaffold: &'a scaffold::ScaffoldProfile,
     floor_acting: bool,
-    round: usize,
 }
 
 /// ADR 0023 (`docs/decisions/0023-sandbox-enforcement-and-unified-approval.md`)
@@ -24265,8 +24252,6 @@ missing, give what you have and note the gap in one short line.",
 
                 let (result, tool_effects) = {
                 let mut ctx = ChatToolCtx {
-                    messages: &mut ls.messages,
-                    accumulated: &mut ls.accumulated,
                     browser_used: &mut browser_used,
                     last_snapshot: &mut last_snapshot,
                     pending_browser_image: &mut pending_browser_image,
@@ -24274,19 +24259,9 @@ missing, give what you have and note the gap in one short line.",
                     current_target: &mut current_target,
                     opened_targets: &mut opened_targets,
                     nav_failures: &mut nav_failures,
-                    browse_sources: &mut browse_sources,
                     plan: &mut ls.plan,
                     step_evidence: &mut ls.step_evidence,
                     tool_trace: &mut ls.tool_trace,
-                    loaded_tools: &mut ls.loaded_tools,
-                    tool_schemas: &mut ls.tool_schemas,
-                    last_round_sig: &mut ls.last_round_sig,
-                    repeat_count: &mut ls.repeat_count,
-                    progress_anchor_round: &mut ls.progress_anchor_round,
-                    progress_verify_anchor: &mut ls.progress_verify_anchor,
-                    pending_compaction: &mut ls.pending_compaction,
-                    pending_vault_reveal_marker: &mut ls.pending_vault_reveal_marker,
-                    pending_confirm: &mut pending_confirm,
                     base_url: &mut ls.provider.base_url,
                     model: &mut ls.provider.model,
                     api_key: &mut ls.provider.api_key,
@@ -24308,7 +24283,6 @@ missing, give what you have and note the gap in one short line.",
                     automation_workspace_id: &automation_workspace_id,
                     turn_scaffold: &turn_scaffold,
                     floor_acting,
-                    round,
                 };
                 if is_browser_granular_tool(name) {
                     // Temporary browser seam (ADR 0024 inc 5d.2): the browser branch still mutates
