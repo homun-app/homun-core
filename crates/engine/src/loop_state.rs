@@ -68,6 +68,11 @@ pub struct LoopState {
     /// The tool schemas exposed to the model this turn: seeded gateway-side with the base
     /// toolset (trimmed by policy), then extended as capabilities load (see `loaded_tools`).
     pub tool_schemas: Vec<Value>,
+    /// The canonical runtime plan, carried as an opaque `Value` (the serialized `ExecutionPlan`)
+    /// because that type lives in a downstream crate the leaf `engine` can't reference. The gateway
+    /// seeds it (resume) and round-trips it faithfully via serde at the plan-helper boundaries; the
+    /// pure step queries live in `engine::plan` (which already operates on `Value` steps).
+    pub plan: Value,
 }
 
 impl LoopState {
@@ -102,5 +107,6 @@ mod tests {
         assert!(!ls.pending_compaction);
         assert!(ls.loaded_tools.is_empty());
         assert!(ls.tool_schemas.is_empty());
+        assert!(ls.plan.is_null(), "plan starts as Null until the gateway seeds it");
     }
 }

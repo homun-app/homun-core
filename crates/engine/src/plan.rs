@@ -19,6 +19,16 @@ pub fn plan_status_marker(status: &str) -> char {
     }
 }
 
+/// The step array of a whole-plan `Value` (the serialized `ExecutionPlan`, `{route,steps,…}`).
+/// The Value form of the gateway's `execution_plan_steps` adapter, so the loop can read steps off
+/// `LoopState.plan` without converting back to the gateway's typed plan. Missing/malformed → empty.
+pub fn plan_value_steps(plan: &Value) -> Vec<Value> {
+    plan.get("steps")
+        .and_then(|s| s.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
 /// Parse the latest ‹‹PLAN›› marker back into a canonical plan (id/title/status/detail
 /// objects). The marker is the cross-turn persistence: rebuilding from it on turn start
 /// RESUMES an interrupted task on the SAME authoritative state. A `done` step in the
@@ -279,6 +289,20 @@ pub fn answer_concludes_plan(open_steps: usize, delivered_chars: usize) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_value_steps_reads_steps_and_tolerates_missing() {
+        let plan = serde_json::json!({
+            "route": "MixedWorkflow",
+            "steps": [{"id":"s1","title":"A","status":"done"}, {"id":"s2","title":"B","status":"doing"}],
+        });
+        let steps = plan_value_steps(&plan);
+        assert_eq!(steps.len(), 2);
+        assert_eq!(plan_step_status(&steps[1]), "doing");
+        // Missing/Null/malformed → empty (never panics).
+        assert!(plan_value_steps(&Value::Null).is_empty());
+        assert!(plan_value_steps(&serde_json::json!({"route":"X"})).is_empty());
+    }
 
     #[test]
     fn markdown_round_trips_through_parse() {

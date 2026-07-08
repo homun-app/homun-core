@@ -98,7 +98,7 @@ use local_first_engine::plan::{
     advance_plan_frontier, answer_concludes_plan, build_plan_markdown, collapse_plan_markers,
     enforce_monotonic_plan_progress, parse_plan_marker, plan_done_count, plan_incomplete_reason,
     plan_is_complete, plan_is_settled, plan_next_open, plan_step_id, plan_step_status,
-    plan_step_title, replace_latest_plan_marker, MIN_DELIVERED_CHARS_TO_CONCLUDE,
+    plan_step_title, plan_value_steps, replace_latest_plan_marker, MIN_DELIVERED_CHARS_TO_CONCLUDE,
 };
 // Vault-reveal markers relocated to the engine crate (ADR 0024 inc 5e.3).
 use local_first_engine::markers::{
@@ -6503,6 +6503,16 @@ fn runtime_plan_memory_metadata(
         "steps": plan,
         "execution_plan": runtime_execution_plan(plan),
     })
+}
+
+/// The gateway's typed `ExecutionPlan` from `LoopState.plan`'s opaque `Value` (ADR 0024 inc 5,
+/// P5). The inverse of `serde_json::to_value(&ExecutionPlan)`: the loop carries the plan as a
+/// `Value` (engine-safe), but the ExecutionPlan-only helpers (`merge_execution_plan`,
+/// `plan_steps_reconciled_on_delivery`) still need the typed form. A faithful round-trip in
+/// practice (the Value is always `to_value(&ExecutionPlan)`); an empty plan is the safe fallback
+/// for `Null`/malformed, matching the old `runtime_execution_plan(&[])` seed.
+fn plan_value_from(plan: &serde_json::Value) -> ExecutionPlan {
+    serde_json::from_value::<ExecutionPlan>(plan.clone()).unwrap_or_else(|_| runtime_execution_plan(&[]))
 }
 
 fn runtime_execution_plan(plan: &[serde_json::Value]) -> ExecutionPlan {
@@ -18698,7 +18708,10 @@ struct ChatToolCtx<'a> {
     opened_targets: &'a mut Vec<String>,
     nav_failures: &'a mut std::collections::HashMap<String, u32>,
     browse_sources: &'a mut Vec<String>,
-    plan: &'a mut ExecutionPlan,
+    // Carried as an opaque `Value` (the serialized `ExecutionPlan`) so it lives in `LoopState`
+    // (engine-owned, can't reference the gateway's typed plan); `plan_value_from`/`plan_value_steps`
+    // bridge to the ExecutionPlan-only helpers. See ADR 0024 inc 5 (P5).
+    plan: &'a mut serde_json::Value,
     step_evidence: &'a mut Vec<String>,
     tool_trace: &'a mut Vec<String>,
     loaded_tools: &'a mut std::collections::BTreeSet<String>,
@@ -18779,7 +18792,7 @@ async fn try_advance_frontier_from_evidence(ctx: &mut ChatToolCtx<'_>) {
     // single evidence window can never sweep the whole plan to done (that's the delivery reconcile's
     // job, not a mid-turn judge call).
     for _ in 0..2u8 {
-        let plan_steps = execution_plan_steps(ctx.plan);
+        let plan_steps = plan_value_steps(ctx.plan);
         let Some(idx) = plan_steps
             .iter()
             .position(|s| plan_step_status(s) == "doing")
@@ -18812,7 +18825,7 @@ async fn try_advance_frontier_from_evidence(ctx: &mut ChatToolCtx<'_>) {
             );
         })
         .await;
-        *ctx.plan = runtime_execution_plan(&plan_steps);
+        *ctx.plan = serde_json::to_value(runtime_execution_plan(&plan_steps)).unwrap_or_default();
         *ctx.progress_anchor_round = ctx.round; // F1: real progress → reset the stall guard
         let _ = emit_stream_event(
             ctx.tx,
@@ -21209,7 +21222,8 @@ an uncertain date.",
         };
         // 5d.1b: work on a LOCAL copy of the plan (merge mutates in place, and the arm rereads it
         // below); the final plan is returned as an effect (`effects.plan`) and applied after the call.
-        let mut current_plan = ctx.plan.clone();
+        // P5: `ctx.plan` is now the opaque `Value`; convert to the typed plan the merge needs.
+        let mut current_plan = plan_value_from(ctx.plan);
         // MERGE the model's steps into the CANONICAL plan (never replace);
         // returns the canonical indices newly claimed done (held `doing`
         // until F2 verifies). See `merge_plan` for the anti-reset rule.
@@ -22196,13 +22210,10 @@ fn apply_tool_effects(ctx: &mut ChatToolCtx<'_>, effects: local_first_engine::To
     for line in &effects.append_output {
         ctx.accumulated.push_str(line);
     }
-    // The engine carries the plan as an opaque `Value` (it can't know the gateway's `ExecutionPlan`);
-    // the gateway round-trips it faithfully via serde, preserving the WHOLE plan (route/steps/…) exactly
-    // as the inline `*ctx.plan = …` did — not just the steps.
+    // P5: `ctx.plan` is now the opaque `Value` too, so the effect (already the whole plan serialized
+    // by the update_plan arm) is assigned directly — no deserialize round-trip, same whole-plan result.
     if let Some(plan_val) = effects.plan {
-        if let Ok(plan) = serde_json::from_value::<ExecutionPlan>(plan_val) {
-            *ctx.plan = plan;
-        }
+        *ctx.plan = plan_val;
     }
     for tool in effects.load_tools {
         // Same dedup-then-add as inline: `insert` returns false if already loaded → skip; add a schema
@@ -23584,7 +23595,8 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // MERGES into this by id/title and can never reset a done step; F1 budget reset,
         // F2 verification, F5 next-step and the ‹‹PLAN›› marker all read THIS. Seeded from
         // the prior conversation (F4 resume). A step is `done` only after F2 verified it.
-        let mut plan: ExecutionPlan = runtime_execution_plan(&resume_plan);
+        // P5: carried as an opaque `Value` in `LoopState` (engine-safe); seeded here from the resume.
+        ls.plan = serde_json::to_value(runtime_execution_plan(&resume_plan)).unwrap_or_default();
         if verbose_debug() {
             let done = resume_plan
                 .iter()
@@ -24084,7 +24096,7 @@ missing, give what you have and note the gap in one short line.",
                         opened_targets: &mut opened_targets,
                         nav_failures: &mut nav_failures,
                         browse_sources: &mut browse_sources,
-                        plan: &mut plan,
+                        plan: &mut ls.plan,
                         step_evidence: &mut ls.step_evidence,
                         tool_trace: &mut ls.tool_trace,
                         loaded_tools: &mut ls.loaded_tools,
@@ -24398,7 +24410,7 @@ missing, give what you have and note the gap in one short line.",
             // have budget, nudge the model to keep going instead of ending the turn.
             // Bounded by MAX_PLAN_NUDGES (reset on progress) AND the per-step round budget.
             if !is_final_round && plan_nudges < MAX_PLAN_NUDGES {
-                let mut plan_steps = execution_plan_steps(&plan);
+                let mut plan_steps = plan_value_steps(&ls.plan);
                 if let Some(step) = plan_next_open(&plan_steps) {
                     // F5 over-running guard: when only the LAST step is still open AND the
                     // model already wrote a substantial answer, it almost certainly FINISHED
@@ -24536,7 +24548,7 @@ missing, give what you have and note the gap in one short line.",
             // (see plan_steps_reconciled_on_delivery) — and PERSIST it, so the runtime plan is
             // settled → the next turn won't falsely resume a plan this answer already finished.
             let delivered = collapse_plan_markers(&ls.accumulated);
-            let delivered = match plan_steps_reconciled_on_delivery(&plan, &delivered) {
+            let delivered = match plan_steps_reconciled_on_delivery(&plan_value_from(&ls.plan), &delivered) {
                 Some(reconciled) => {
                     upsert_runtime_plan_memory_from_state(
                         &state_owned,
@@ -24657,7 +24669,7 @@ Tell me if you want me to retry or rephrase."
             // carries plan blocks, so this is a no-op when synthesis succeeded). Reconcile +
             // persist the plan on this exit path too, so a synthesis delivery also settles it.
             let delivered = collapse_plan_markers(&final_text);
-            let delivered = match plan_steps_reconciled_on_delivery(&plan, &delivered) {
+            let delivered = match plan_steps_reconciled_on_delivery(&plan_value_from(&ls.plan), &delivered) {
                 Some(reconciled) => {
                     upsert_runtime_plan_memory_from_state(
                         &state_owned,
