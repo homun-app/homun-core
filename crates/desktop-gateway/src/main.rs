@@ -23881,11 +23881,9 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // message AFTER all the round's tool results. `browser_tool_call_ids`
         // tracks which tool results carry big snapshots so pruning can stub them.
         let browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>> = None;
-        let browser_used = false;
+        // browser_used / pending_browser_image / browser_tool_call_ids now live in `ls` (slice 5a):
+        // they are the browser fields the loop body reads outside the browser branch.
         let last_snapshot = String::new();
-        let pending_browser_image: Option<String> = None;
-        let browser_tool_call_ids: std::collections::BTreeSet<String> =
-            std::collections::BTreeSet::new();
         // Multi-tab support: a turn-local CURRENT TAB the tools operate on, plus
         // the set of tab ids we've already Opened (or reused) this turn. A tab id
         // is "opened" once we've done Open (or reused a warm session) on it; the
@@ -23919,7 +23917,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // larger browser budget). This keeps non-browser turns identical to today.
         // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
         ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
-        run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, browser_session, browser_used, last_snapshot, pending_browser_image, browser_tool_call_ids, current_target, opened_targets, nav_failures).await;
+        run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, browser_session, last_snapshot, current_target, opened_targets, nav_failures).await;
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -23973,10 +23971,11 @@ async fn run_agent_rounds(
     turn_scaffold: scaffold::ScaffoldProfile,
     mut browse_sources: Vec<String>,
     mut browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
-    mut browser_used: bool,
+    // Browser-private turn state (last snapshot, target/tab bookkeeping, nav failures): still
+    // run_agent_rounds params for now — 5.D1b slice 5b moves them into the browser executor. The
+    // loop-read browser fields (browser_used / pending_browser_image / browser_tool_call_ids) already
+    // live in `ls` (slice 5a).
     mut last_snapshot: String,
-    mut pending_browser_image: Option<String>,
-    mut browser_tool_call_ids: std::collections::BTreeSet<String>,
     mut current_target: String,
     mut opened_targets: Vec<String>,
     mut nav_failures: std::collections::HashMap<String, u32>,
@@ -24005,7 +24004,7 @@ async fn run_agent_rounds(
         floor_acting,
     };
     for round in 0..hard_round_ceiling() {
-        let max_rounds = if browser_used {
+        let max_rounds = if ls.browser_used {
             chat_browser_max_rounds()
         } else {
             chat_max_rounds()
@@ -24026,7 +24025,7 @@ async fn run_agent_rounds(
         // data). `ls.step_evidence` is cleared on every step close, so this counts
         // navigations for the CURRENT step only. Restores 64f08e4d's budget control
         // for the distinct-URL case (cold-context consent walls → wander → burn).
-        if browser_used {
+        if ls.browser_used {
             let step_navs = ls.step_evidence
                 .iter()
                 .filter(|e| e.starts_with("browser_navigate"))
@@ -24047,7 +24046,7 @@ gathered‹‹/ACT››"
         // Context hygiene: at up to 32 rounds the ls.accumulated snapshots/images
         // would overflow the window and silently truncate the page. Stub all
         // but the latest browser snapshot + the latest screenshot image.
-        prune_browser_history(&mut ls.messages, &browser_tool_call_ids);
+        prune_browser_history(&mut ls.messages, &ls.browser_tool_call_ids);
         // F3: a step was verified last round → collapse its ls.messages into a summary
         // now (safe boundary: all prior tool results are flushed). Keeps a long
         // multi-step turn from overflowing the context window.
@@ -24290,7 +24289,7 @@ missing, give what you have and note the gap in one short line.",
                             pending_confirm_raised: pending_confirm && !pc_before,
                             msgs_pushed: ls.messages.len().saturating_sub(msgs_before),
                             blocked: true,
-                            browser_image_set: pending_browser_image.is_some(),
+                            browser_image_set: ls.pending_browser_image.is_some(),
                         };
                         if let Ok(dir) = gateway_logs_dir() {
                             crate::tool_trace_dump::append(&dir, &rec);
@@ -24318,10 +24317,10 @@ missing, give what you have and note the gap in one short line.",
                     // BrowserToolCtx (disjoint read-set) and mutates it directly (browser session,
                     // snapshots, mid-turn model-switch). Folds into a recursive `browse` at ADR 0025.
                     let mut bctx = BrowserToolCtx {
-                        browser_used: &mut browser_used,
+                        browser_used: &mut ls.browser_used,
                         last_snapshot: &mut last_snapshot,
-                        pending_browser_image: &mut pending_browser_image,
-                        browser_tool_call_ids: &mut browser_tool_call_ids,
+                        pending_browser_image: &mut ls.pending_browser_image,
+                        browser_tool_call_ids: &mut ls.browser_tool_call_ids,
                         current_target: &mut current_target,
                         opened_targets: &mut opened_targets,
                         nav_failures: &mut nav_failures,
@@ -24435,7 +24434,7 @@ missing, give what you have and note the gap in one short line.",
                         // Set by the browser_screenshot arm (if it ran) to queue a
                         // SECOND message pushed AFTER this loop — invisible to
                         // `msgs_pushed`, so we fingerprint the side effect here.
-                        browser_image_set: pending_browser_image.is_some(),
+                        browser_image_set: ls.pending_browser_image.is_some(),
                     };
                     if let Ok(dir) = gateway_logs_dir() {
                         crate::tool_trace_dump::append(&dir, &rec);
@@ -24448,7 +24447,7 @@ missing, give what you have and note the gap in one short line.",
             // result of this round (OpenAI-compat requires each assistant
             // tool_call to be immediately followed by its tool message; the
             // image cannot sit between them).
-            if let Some(dataurl) = pending_browser_image.take() {
+            if let Some(dataurl) = ls.pending_browser_image.take() {
                 // Send the image ONLY to a vision-capable model. Skip ONLY when /api/show
                 // confidently reports no `vision` capability (undetected/cloud → send, as
                 // today); a non-vision model would otherwise error on the image part — feed
@@ -24695,7 +24694,7 @@ missing, give what you have and note the gap in one short line.",
                 .await;
             }
         }
-    } else if browser_used {
+    } else if ls.browser_used {
         // Session was lost mid-turn (spawn failed / call panicked): still clear
         // the live activity indicator.
         end_browser_activity();

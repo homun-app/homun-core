@@ -79,6 +79,19 @@ pub struct LoopState {
     /// Lives here (not turn-constant) because a tool's own model call and the next round read it, and
     /// the swap changes it per-round — so it must travel with the per-call state (ADR 0026).
     pub provider: ProviderBinding,
+    /// Browser-turn state the LOOP itself reads (ADR 0024 inc 5, 5.D1b slice 5a). Only the fields the
+    /// loop body touches OUTSIDE the browser branch live here: `browser_used` drives the round budget
+    /// (a browsing turn earns the larger ceiling) and the final-answer assembly; `pending_browser_image`
+    /// is consumed by the loop to inject the latest screenshot as a vision message and reported in the
+    /// trace-dump; `browser_tool_call_ids` drives `prune_browser_history` (keep only the newest browser
+    /// result). The browser-PRIVATE state (last snapshot, target/tab bookkeeping, per-URL nav failures)
+    /// and the gateway-typed `browser_session` stay OWNED BY the browser executor, not here — the
+    /// engine-safe `LoopState` carries only what the engine loop must see (ADR 0025 seam boundary).
+    pub browser_used: bool,
+    /// A screenshot data-URL captured this round, pending injection into `messages` as a vision turn.
+    pub pending_browser_image: Option<String>,
+    /// The tool-call ids of browser results, so `prune_browser_history` keeps only the freshest one.
+    pub browser_tool_call_ids: BTreeSet<String>,
 }
 
 impl LoopState {
@@ -115,5 +128,8 @@ mod tests {
         assert!(ls.tool_schemas.is_empty());
         assert!(ls.plan.is_null(), "plan starts as Null until the gateway seeds it");
         assert!(ls.provider.model.is_empty() && ls.provider.base_url.is_empty());
+        assert!(!ls.browser_used);
+        assert!(ls.pending_browser_image.is_none());
+        assert!(ls.browser_tool_call_ids.is_empty());
     }
 }
