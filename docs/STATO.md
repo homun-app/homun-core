@@ -47,9 +47,20 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
 `orchestrator`, l'engine leaf non può referenziarlo → converti al crate-boundary, una volta sola) + provider binding
 `model/base_url/api_key/endpoint` (nomi collision-prone; pulito quando il loop tiene `ls.provider: ProviderBinding`).
 
-**Punto 5 (⭐ il grosso):** spostare il corpo loop (~860 righe, `for round in 0..hard_round_ceiling()`) in `engine`
-dietro `HOMUN_ENGINE_CRATE` (default OFF) — fold di plan+provider, port/stato, **parità LIVE turno-per-turno**.
-**Punto 6:** wire + flip default + ritiro parallela inline (→ 5f/inc6 = ADR 0025).
+**Punto 5 (⭐ il grosso) — IN CORSO (autonomo):**
+- **5.B1 ✅ (`164b0443`) — `plan`→`Value` in `LoopState`**: ultimo campo engine-unsafe foldato. Bridge:
+  `engine::plan::plan_value_steps(&Value)` (read) + gateway `plan_value_from(&Value)->ExecutionPlan` (per
+  merge/reconcile). `ChatToolCtx.plan: &mut Value`, apply assegna `effects.plan` diretto. Compiler-verified,
+  engine 33/33, gateway 492/1-soffice. **LIVE (app riavviata, binario nuovo, 2 turni):** branching 1-root ✓,
+  browsing/delivery/fonti/tabella ✓, 0 errori `from_value`; il merge/reconcile con piano reale non è scattato
+  (modello one-shot) ma la logica è unchanged + coperta dai unit test verdi (il boundary è solo serde round-trip).
+- **provider binding → NON slice a sé: foldato in-context al 5.D** (57 usi di `model` collision-prone; e senza
+  barriera di tipo `LoopState` è già engine-safe → anticiparlo aggiunge rischio invece di toglierlo).
+- **5.C1 (next, headless):** `engine::EngineTurnCtx` (parte read-only del ctx) + closure/port per gli stateful
+  non-seamed. **5.D:** relocazione ~860 righe dietro `HOMUN_ENGINE_CRATE` (default OFF) + fold provider + parità LIVE.
+  Helper puri del loop: solo `summarize_tool_action` è zero-drag; gli altri (`should_force_synthesis`→strip-chain,
+  `chat_endpoint`→`is_ollama_base`, `workflow_route_blocked`→tipo) si **iniettano** al 5.D, non si spostano.
+**Punto 6:** flip default ON + ritiro parallela inline (→ 5f/inc6 = ADR 0025).
 
 **DEBITI validazione LIVE — SALDATI 2026-07-08** (vedi blocco ✅ in cima al checkpoint): (a) branching ✅,
 (b) move P4 ✅, (c) P2b happy-path ✅. Resta solo la parità LIVE del **Punto 5** (quando si sposta il corpo loop).
