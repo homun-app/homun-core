@@ -3533,6 +3533,7 @@ name = "local-first-subagents"
 version = "0.1.0"
 dependencies = [
  "local-first-capabilities",
+ "local-first-engine",
  "local-first-memory",
  "local-first-task-runtime",
  "reqwest 0.12.28",
