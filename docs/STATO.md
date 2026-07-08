@@ -5,29 +5,41 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-08.**
 
-## ⭐ CHECKPOINT 2026-07-08 — inc 5 PREP completa+validata; loop-body è il prossimo sforzo focalizzato
+## ⭐ CHECKPOINT 2026-07-08 — Punto 2+4 headless-safe FATTO; restano P2b (LIVE) + Punto 5
 
-Tree pulito, workspace verde (engine 30/30, gateway check 0 err). Riparti da qui.
+Tree pulito, workspace verde (engine 32/32, gateway 492 pass /1 rosso `soffice` ambientale, 34-warn baseline).
+Riparti da qui.
 
-**FATTO:** inc 5 prep (5c→5e.3a) — tutti i 5 seam hanno impl gateway, `ChatToolCtx` è `Sync`,
-`execute_chat_tool` è la fn pura `&ctx → (result, effects)`. **5d.1b LIVE-VALIDATO** (piano 1/3→3/3 dal
-vivo). Logica core pura convergiuta nel crate `engine`: `plan`/`text`/`markers`/`model_normalize` +
-`answer_concludes_plan`/vault (Punto 1 "prep sicura" chiuso, `58db7161`). **Bug branching FIXATO+committato**
-(`945194f9`, task_df176621) — *validazione live ancora da fare*.
+**FATTO prima (prep 5c→5e.3a):** tutti i 5 seam hanno impl gateway, `ChatToolCtx` è `Sync`,
+`execute_chat_tool` è la fn pura `&ctx → (result, effects)`. **5d.1b LIVE-VALIDATO** (piano 1/3→3/3). Logica
+core pura nel crate `engine`. **Bug branching FIXATO+committato** (`945194f9`) — *validazione live da fare*.
 
-**PROSSIMO SFORZO (coeso, attended, con parità LIVE) = relocazione del corpo loop.** In ordine:
-1. **Punto 2 (transport → port):** `task_appears_incomplete` (giudice puro → port facile), `compact_completed_step`
-   (muta `messages` → forma dipende dal `LoopState`, quindi si fa col Punto 4), convergenza **sintesi→`ModelClient`**
-   (cambio comportamentale, valida live). *NON è prep sicura isolata: intrecciato coi Punti 4-5.*
-2. **Punto 4 (`LoopState` + contesto iniettato):** struct engine-owned, tipi semplici (`ExecutionPlan`→`Value`);
-   browser-state resta lato gateway (seam temporaneo).
-3. **Punto 5 (⭐ il grosso):** spostare il corpo loop (~860 righe, main.rs ~23886) in `engine` dietro
-   `HOMUN_ENGINE_CRATE` (default OFF), adattando ogni chiamata a port/stato. Mappa dipendenze completa fatta (Explore).
-4. **Punto 6:** wire + **parità LIVE turno-per-turno** + flip default + ritiro parallela inline (→ 5f/inc6 = ADR 0025).
+**FATTO ora — batch Punto 2+4 (le slice headless-safe, tutte behavior-preserving, compiler-verified):**
+- **P2a** (`8e812e1a`): seam `engine::TurnCompletionJudge` per `task_appears_incomplete` (+`GatewayTurnCompletionJudge`,
+  dead-code fino al move; SRP separato da `PlanProgress`).
+- **P4a** (`f75aa737`): `engine::LoopState` + adozione in-place dei **10 accumulatori puri** (accumulated/tool_trace/
+  step_evidence/loaded_tools/last_round_sig/repeat_count/progress_anchor_round/progress_verify_anchor/
+  pending_compaction/pending_vault_reveal_marker). `pending_confirm` resta **per-round** (non turn-carried).
+- **P4b.1** (`3d897d6b`): `messages`+`step_messages_start` in `LoopState` (**P2c assorbita**: `compact_completed_step`
+  chiamata su `&mut ls.messages,&mut ls.step_messages_start`, firma invariata — resta helper gateway HTTP+role).
+- **P4b.2** (`c1574a50`): `tool_schemas` in `LoopState`.
 
-**DEBITI validazione LIVE (fare con l'app pilotata):** (a) fix branching — turn→cambia chat→torna → prompt+risposta;
-(b) un turno per confermare i move helper (behavior-preserving, basso rischio). L'app che gira ora ha il codice
-VECCHIO (avviata prima di questi commit) → riavviare per validare.
+**RESTA del batch — P2b (l'unico cambio COMPORTAMENTALE → LIVE obbligatoria):** convergenza **sintesi forzata
+post-loop → `ModelClient`** (`is_final_round:true`). Oggi la sintesi `if !final_done` (main.rs ~24603) costruisce
+il payload **inline** (`build_chat_payload`+`collect_openai_stream`) → NON passa dal seam (niente retry/fallback).
+Routarla dà retry/backoff/fallback anche alla sintesi = cambio di comportamento → valida col vivo.
+
+**SCESO al Punto 5** (il codice dice che il confine è lì, non prep isolabile): `plan`→`Value` (`ExecutionPlan` sta in
+`orchestrator`, l'engine leaf non può referenziarlo → converti al crate-boundary, una volta sola) + provider binding
+`model/base_url/api_key/endpoint` (nomi collision-prone; pulito quando il loop tiene `ls.provider: ProviderBinding`).
+
+**Punto 5 (⭐ il grosso):** spostare il corpo loop (~860 righe, `for round in 0..hard_round_ceiling()`) in `engine`
+dietro `HOMUN_ENGINE_CRATE` (default OFF) — fold di plan+provider, port/stato, **parità LIVE turno-per-turno**.
+**Punto 6:** wire + flip default + ritiro parallela inline (→ 5f/inc6 = ADR 0025).
+
+**DEBITI validazione LIVE (con l'app pilotata, `npm run electron:dev` per prendere il binario nuovo):**
+(a) fix branching (`945194f9`) — turn→cambia chat→torna → prompt+risposta entrambi; (b) 1 turno per confermare i
+move P4 (behavior-preserving, basso rischio); (c) **P2b** quando implementata (turno empty-answer + turno normale).
 
 ## ⭐ Merge 2026-07-06 — due linee riunite su `main`
 
