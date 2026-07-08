@@ -24,6 +24,14 @@ dietro `HOMUN_ENGINE_CRATE` (default OFF, additivo); le 7 costruzioni Gateway* +
 chiamante, run_turn diventa generico sui seam. Parità via `tool_trace_dump` diff (io guido i turni API) + LIVE
 (tu confermi delivery/sintesi/reconcile/browser). Poi **5.D2 flip default ON + cancella copia inline (con utente)**.
 
+**⭐ DECISIONE FISSATA (2026-07-08) — flag: stato finale SENZA flag.** Il flag `HOMUN_ENGINE_CRATE` è uno scaffold
+di atterraggio, non una feature d'architettura. **Stato finale = NO-FLAG** (un solo `engine::run_turn`, copia inline
++ flag cancellati) — imposto da "converge, don't duplicate": un flag permanente = due motori mantenuti per sempre =
+l'anti-pattern che 0020→0021→0024 elimina. **Durante .10 si USA il flag ma TRANSITORIO** (default OFF, vive solo tra
+.10 e 5.D2, delete già schedulato): il loop è il path più critico → OFF resta la prod provata finché non flippi con
+utente sull'evidenza dei dump. È il pattern sanzionato (dup transitorio con cancellazione programmata ≠ dup durevole).
+Dettaglio in `specs/2026-07-07-move-agent-loop-into-engine-design.md` → "DECISIONE FISSATA".
+
 **5.D1b seam-wire COMPLETO (slice 1→5b):** i due chokepoint di tool (`CapabilityExecutor` non-browser slice 4 +
 `BrowserExecutor` browser slice 5b) sono LIVE dietro trait `engine`; il **dispatch e il cleanup di `run_agent_rounds`
 sono ora engine-safe** (nessun tipo gateway nel control-flow, solo la costruzione degli executor). Prossimo = **5.D1c**,

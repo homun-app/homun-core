@@ -311,14 +311,25 @@ BrowserExecutor**, che già è il chokepoint dei tool → esce dal corpo.)
 10. **5.D1c.10 — IL MOVE**: il corpo ora referenzia solo tipi engine + seam + `TurnConfig` + `LoopState`. **Copia** il corpo in `engine::run_turn`, tieni la copia inline gateway, il dispatch sceglie su `HOMUN_ENGINE_CRATE` (default OFF, additivo = zero rischio prod). Parità via diff `tool_trace_dump` (io guido i turni API) + LIVE (utente co-pilota delivery/sintesi/reconcile).
 11. **5.D2 — flip default ON + cancella la copia inline** — SOLO con parità dimostrata, **con l'utente presente**.
 
-### Nota sul "duplicato temporaneo" (converge-don't-duplicate)
+### ⭐ DECISIONE FISSATA (2026-07-08): stato finale SENZA flag; flag solo transitorio in .10→5.D2
 
-Il passo .10 crea una copia ~860-righe (inline gateway OFF vs `engine::run_turn` ON). È il pattern sanzionato
-di estrazione behavior-preserving con via-di-fuga: **dup transitorio con cancellazione già schedulata** (5.D2).
-Vive solo tra .10 e .2. Se preferisci evitare del tutto il dup: le slice 1→9 rendono il move meccanico e
-l'oracolo prova la parità → si può spostare senza flag (nessuna copia OFF) e affidarsi a oracolo+test+LIVE.
-Trade-off: flag = zero-rischio-prod al primo atterraggio ma 860 righe duplicate per poco; no-flag = niente dup
-ma nessun interruttore di sicurezza runtime. **Raccomando il flag** (coerente con la metodologia del progetto).
+**Lo stato finale è NO-FLAG.** Un solo `engine::run_turn` canonico, copia inline cancellata, `HOMUN_ENGINE_CRATE`
+rimosso. Non è opinabile: un flag *permanente* = due implementazioni del loop mantenute per sempre con uno switch
+runtime = esattamente l'anti-pattern che tutto l'arco 0020→0021→0024 esiste per eliminare ("converge, don't
+duplicate"). Un fallback che non riceve i fix marcisce → diventa un rischio, non una rete; dopo lo ship si fixa
+avanti sul motore unico. Il flag è per-processo (env), non per-utente → non è nemmeno un rollout graduale reale;
+e questo è un refactor behavior-preserving, non una feature da A/B.
+
+**Durante .10 SI USA il flag, ma transitorio** (default OFF, vive SOLO tra .10 e 5.D2, delete già schedulato). Il
+loop è il path più critico che esiste (una regressione rompe OGNI turno): il flag rende .10 committabile/shippabile
+prima che la parità LIVE sia confermata al 100% (la produzione resta su OFF finché non flippi, con utente presente),
+ed è il pattern sanzionato "estrazione con via di fuga = dup transitorio con cancellazione programmata" (≠ dup
+durevole vietato: la differenza è proprio la delete schedulata). Costo: ~830 righe duplicate SOLO nella finestra
+.10→5.D2 (possono stare anche nella stessa sessione se la parità LIVE convince subito). L'unico caso per saltare
+il flag anche in .10: fare .10 e 5.D2 back-to-back con validazione LIVE lì per lì — ma il flag costa una `if` nel
+dispatch e compra margine sul motore, quindi si tiene comunque.
+
+In una riga: **flag durante l'atterraggio (de-risk del motore), zero flag nello stato finale.**
 
 ### Ordine di rischio/effort
 
