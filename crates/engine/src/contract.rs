@@ -36,6 +36,7 @@ pub struct ModelCall<'a> {
 /// The provider binding a round ran against. Returned so a mid-turn fallback (401/timeout/
 /// tool-400 swap) inside the impl propagates back to the loop, which reuses it next round. Without
 /// this, a swap would be invisible to subsequent rounds (the loop passes the provider by `&`).
+#[derive(Debug, Default, Clone)]
 pub struct ProviderBinding {
     pub model: String,
     pub base_url: String,

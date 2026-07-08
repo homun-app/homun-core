@@ -15,6 +15,7 @@
 //! in a downstream crate the leaf `engine` can't reference) and the provider binding;
 //! browser state stays gateway-side behind the temporary seam until ADR 0025.
 
+use crate::contract::ProviderBinding;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -73,6 +74,11 @@ pub struct LoopState {
     /// seeds it (resume) and round-trips it faithfully via serde at the plan-helper boundaries; the
     /// pure step queries live in `engine::plan` (which already operates on `Value` steps).
     pub plan: Value,
+    /// The effective provider for the CURRENT round (model + base_url + api_key). Seeded from the
+    /// turn's model, then REPLACED wholesale by a mid-turn fallback swap (`ls.provider = out.provider`).
+    /// Lives here (not turn-constant) because a tool's own model call and the next round read it, and
+    /// the swap changes it per-round — so it must travel with the per-call state (ADR 0026).
+    pub provider: ProviderBinding,
 }
 
 impl LoopState {
@@ -108,5 +114,6 @@ mod tests {
         assert!(ls.loaded_tools.is_empty());
         assert!(ls.tool_schemas.is_empty());
         assert!(ls.plan.is_null(), "plan starts as Null until the gateway seeds it");
+        assert!(ls.provider.model.is_empty() && ls.provider.base_url.is_empty());
     }
 }

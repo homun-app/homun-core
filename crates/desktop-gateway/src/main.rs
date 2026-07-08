@@ -23874,7 +23874,9 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // The outer ceiling is the BROWSER budget; the EFFECTIVE budget is dynamic
         // (the normal 5 rounds until a browser tool is actually used, then the
         // larger browser budget). This keeps non-browser turns identical to today.
-        run_agent_rounds(ls, &tx, http, state_owned, base_url, model, api_key, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, browser_session, browser_used, last_snapshot, pending_browser_image, browser_tool_call_ids, current_target, opened_targets, nav_failures).await;
+        // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
+        ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
+        run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, browser_session, browser_used, last_snapshot, pending_browser_image, browser_tool_call_ids, current_target, opened_targets, nav_failures).await;
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -23901,9 +23903,6 @@ async fn run_agent_rounds(
     tx: &StreamSink,
     http: reqwest::Client,
     state_owned: AppState,
-    mut base_url: String,
-    mut model: String,
-    mut api_key: Option<String>,
     request: ChatGenerateStreamRequest,
     temperature: f64,
     prompt: String,
@@ -24034,9 +24033,9 @@ missing, give what you have and note the gap in one short line.",
         let out = model_client
             .generate(
                 &local_first_engine::ModelCall {
-                    base_url: &base_url,
-                    model: &model,
-                    api_key: api_key.as_deref(),
+                    base_url: &ls.provider.base_url,
+                    model: &ls.provider.model,
+                    api_key: ls.provider.api_key.as_deref(),
                     messages: &ls.messages,
                     tools: &ls.tool_schemas,
                     temperature,
@@ -24048,9 +24047,7 @@ missing, give what you have and note the gap in one short line.",
         let (message, round_finish_reason) = match out {
             Ok(o) => {
                 // Adopt any mid-turn fallback swap for the remaining rounds.
-                model = o.provider.model;
-                base_url = o.provider.base_url;
-                api_key = o.provider.api_key;
+                ls.provider = o.provider;
                 (o.message, o.finish_reason)
             }
             // Parity: only an upstream status error becomes the committed final answer.
@@ -24170,9 +24167,9 @@ missing, give what you have and note the gap in one short line.",
                     pending_compaction: &mut ls.pending_compaction,
                     pending_vault_reveal_marker: &mut ls.pending_vault_reveal_marker,
                     pending_confirm: &mut pending_confirm,
-                    base_url: &mut base_url,
-                    model: &mut model,
-                    api_key: &mut api_key,
+                    base_url: &mut ls.provider.base_url,
+                    model: &mut ls.provider.model,
+                    api_key: &mut ls.provider.api_key,
                     state: &state_owned,
                     tx: &tx,
                     thread_id: thread_id.as_deref(),
@@ -24416,7 +24413,7 @@ missing, give what you have and note the gap in one short line.",
                 // confidently reports no `vision` capability (undetected/cloud → send, as
                 // today); a non-vision model would otherwise error on the image part — feed
                 // it a text note so it falls back to the page's text snapshot.
-                let vision_capable = ollama_capabilities(&base_url, &model)
+                let vision_capable = ollama_capabilities(&ls.provider.base_url, &ls.provider.model)
                     .map(|c| c.vision)
                     .unwrap_or(true);
                 if vision_capable {
@@ -24689,9 +24686,9 @@ to proceed."
         let synth_out = model_client
             .generate(
                 &local_first_engine::ModelCall {
-                    base_url: &base_url,
-                    model: &model,
-                    api_key: api_key.as_deref(),
+                    base_url: &ls.provider.base_url,
+                    model: &ls.provider.model,
+                    api_key: ls.provider.api_key.as_deref(),
                     messages: &ls.messages,
                     tools: &[],
                     temperature,
