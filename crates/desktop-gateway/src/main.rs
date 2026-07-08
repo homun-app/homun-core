@@ -48,7 +48,7 @@ mod tool_exec;
 // Codex-style tool-safety policy vocabulary + pure decision fn (ADR 0023, step 1;
 // not wired yet — seam types only).
 mod tool_safety;
-mod tool_trace_dump;
+// tool_trace_dump moved to `local_first_engine::trace` (5.D1c.9); the loop calls it there.
 
 // ADR 0023 tool-safety vocabulary + pure decision fn, used by the write-confirm
 // branches in `execute_chat_tool` behind `HOMUN_TOOL_SAFETY`.
@@ -23880,7 +23880,12 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let tail_state = state_owned.clone();
         let tail_user = memory_user_message.clone();
         let tail_thread = thread_id.clone();
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg).await;
+        // 5.D1c.9: resolve the trace-dump dir gateway-side (armed only when HOMUN_TRACE_DUMP=1) and
+        // inject it, so the engine loop appends without calling the gateway's path resolver.
+        let trace_dir = local_first_engine::trace::dump_enabled()
+            .then(gateway_logs_dir)
+            .and_then(Result::ok);
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir).await;
         // M2: mine this exchange for durable personal memory (fire-and-forget, off the response path).
         // Best-effort; never blocks or fails the turn. Skip for channel turns (read_only): the inbound
         // is from a CONTACT, not the user, and the channel handler runs its own speaker-attributed learn
@@ -23974,6 +23979,9 @@ async fn run_agent_rounds(
     turn_scaffold: scaffold::ScaffoldProfile,
     mut browse_sources: Vec<String>,
     cfg: local_first_engine::TurnConfig,
+    // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
+    // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
+    trace_dir: Option<std::path::PathBuf>,
 ) -> local_first_engine::TurnOutcome {
     // model_client borrows http+tx; built here (was in setup) so the borrows are local.
     let model_client = crate::model_client::GatewayModelClient { http: &http, tx };
@@ -24277,13 +24285,13 @@ missing, give what you have and note the gap in one short line.",
                     // Compute the `blocked`-derived fingerprint fields BEFORE the
                     // push moves `blocked` into the message. Fully gated → no cost
                     // when disarmed.
-                    let blocked_trace = if crate::tool_trace_dump::dump_enabled() {
-                        let normalized = crate::tool_trace_dump::normalize(&blocked);
+                    let blocked_trace = if local_first_engine::trace::dump_enabled() {
+                        let normalized = local_first_engine::trace::normalize(&blocked);
                         Some((
-                            crate::tool_trace_dump::hash_hex(
-                                &crate::tool_trace_dump::normalize(args_raw),
+                            local_first_engine::trace::hash_hex(
+                                &local_first_engine::trace::normalize(args_raw),
                             ),
-                            crate::tool_trace_dump::hash_hex(&normalized),
+                            local_first_engine::trace::hash_hex(&normalized),
                             blocked.chars().count(),
                             normalized.chars().take(120).collect::<String>(),
                         ))
@@ -24298,7 +24306,7 @@ missing, give what you have and note the gap in one short line.",
                     if let Some((args_hash, result_hash, result_len, result_head)) =
                         blocked_trace
                     {
-                        let rec = crate::tool_trace_dump::ToolTraceRecord {
+                        let rec = local_first_engine::trace::ToolTraceRecord {
                             round: round,
                             idx,
                             name: name.to_string(),
@@ -24307,7 +24315,7 @@ missing, give what you have and note the gap in one short line.",
                             result_len,
                             result_head,
                             acc_delta_len: ls.accumulated.len().saturating_sub(acc_before),
-                            acc_markers: crate::tool_trace_dump::extract_markers(
+                            acc_markers: local_first_engine::trace::extract_markers(
                                 acc_before,
                                 &ls.accumulated,
                             ),
@@ -24316,8 +24324,8 @@ missing, give what you have and note the gap in one short line.",
                             blocked: true,
                             browser_image_set: ls.pending_browser_image.is_some(),
                         };
-                        if let Ok(dir) = gateway_logs_dir() {
-                            crate::tool_trace_dump::append(&dir, &rec);
+                        if let Some(dir) = trace_dir.as_deref() {
+                            local_first_engine::trace::append(dir, &rec);
                         }
                     }
                     continue;
@@ -24398,13 +24406,13 @@ missing, give what you have and note the gap in one short line.",
                 // Parity harness: compute the result-derived fingerprint fields
                 // from `&result` BEFORE the push moves `result` into the message.
                 // Gated on `dump_enabled()` so there is no cost when disarmed.
-                let trace_fields = if crate::tool_trace_dump::dump_enabled() {
-                    let normalized = crate::tool_trace_dump::normalize(&result);
+                let trace_fields = if local_first_engine::trace::dump_enabled() {
+                    let normalized = local_first_engine::trace::normalize(&result);
                     Some((
-                        crate::tool_trace_dump::hash_hex(
-                            &crate::tool_trace_dump::normalize(args_raw),
+                        local_first_engine::trace::hash_hex(
+                            &local_first_engine::trace::normalize(args_raw),
                         ),
-                        crate::tool_trace_dump::hash_hex(&normalized),
+                        local_first_engine::trace::hash_hex(&normalized),
                         result.chars().count(),
                         normalized.chars().take(120).collect::<String>(),
                     ))
@@ -24422,7 +24430,7 @@ missing, give what you have and note the gap in one short line.",
                 // side effect is instead fingerprinted by `browser_image_set`
                 // below.
                 if let Some((args_hash, result_hash, result_len, result_head)) = trace_fields {
-                    let rec = crate::tool_trace_dump::ToolTraceRecord {
+                    let rec = local_first_engine::trace::ToolTraceRecord {
                         round: round,
                         idx,
                         name: name.to_string(),
@@ -24431,7 +24439,7 @@ missing, give what you have and note the gap in one short line.",
                         result_len,
                         result_head,
                         acc_delta_len: ls.accumulated.len().saturating_sub(acc_before),
-                        acc_markers: crate::tool_trace_dump::extract_markers(
+                        acc_markers: local_first_engine::trace::extract_markers(
                             acc_before,
                             &ls.accumulated,
                         ),
@@ -24443,8 +24451,8 @@ missing, give what you have and note the gap in one short line.",
                         // `msgs_pushed`, so we fingerprint the side effect here.
                         browser_image_set: ls.pending_browser_image.is_some(),
                     };
-                    if let Ok(dir) = gateway_logs_dir() {
-                        crate::tool_trace_dump::append(&dir, &rec);
+                    if let Some(dir) = trace_dir.as_deref() {
+                        local_first_engine::trace::append(dir, &rec);
                     }
                 }
             }

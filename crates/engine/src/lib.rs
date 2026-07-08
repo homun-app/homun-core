@@ -52,6 +52,9 @@ pub mod tools;
 /// The turn's result for the gateway's post-turn tail (ADR 0024 inc 5, 5.D1c.8).
 pub mod outcome;
 
+/// The parity oracle for the loop move (ADR 0024 inc 5, 5.D1c.9): normalized per-tool-call fingerprints.
+pub mod trace;
+
 pub use contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, LoadedTool, ModelCall,
     ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects,

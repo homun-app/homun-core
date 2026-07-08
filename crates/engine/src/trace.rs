@@ -1,12 +1,13 @@
 #![allow(dead_code)]
-//! Observation harness for the per-tool-call dispatch loop in
-//! `stream_chat_via_openai`.
+//! Parity oracle for the agent loop's per-tool-call dispatch (ADR 0024 inc 5).
 //!
-//! Purpose: before we extract the ~3200-line tool-dispatch if/else block into a
-//! standalone function, we need to PROVE the extraction is behavior-preserving.
-//! This module records, per tool call, a *normalized* fingerprint of what
-//! happened — captured at the loop boundary so it observes the same thing
-//! whether the dispatch body is inline or extracted.
+//! Purpose: PROVE the loop's move into this crate (5.D1c.10) is behavior-preserving. This module
+//! records, per tool call, a *normalized* fingerprint of what happened — captured at the loop boundary
+//! so it observes the same thing whether the loop runs inline in the gateway or here in the engine.
+//! Relocated verbatim from the gateway (5.D1c.9) so the moved loop calls it locally; `append` takes an
+//! explicit dir (the gateway resolves `~/.homun/logs` and injects it), and the two `std::env` reads
+//! (`HOME` for path-stripping, `HOMUN_TRACE_DUMP` for the arm switch) are a deliberate debug-only
+//! exception to the crate's no-env rule.
 //!
 //! The dump is gated behind `HOMUN_TRACE_DUMP=1` and, when off, costs nothing
 //! beyond two `len()` snapshots at the call site. On ANY IO error the append is
