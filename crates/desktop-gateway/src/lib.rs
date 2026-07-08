@@ -373,36 +373,10 @@ fn render_runtime_prompt(prompt: &str, compressed_context: &str) -> String {
     .join("\n")
 }
 
-/// App-only control markers carried inside message text and rendered by the UI:
-/// ‹‹PLAN›› (workbench plan card), ‹‹ACT›› (live activity), ‹‹ARTIFACT›› (artifact chip),
-/// ‹‹REASONING›› (collapsed thinking trace), ‹‹COMPOSIO_*›› (confirm/done/reconnect cards).
-const DISPLAY_MARKER_TAGS: [&str; 7] = [
-    "PLAN",
-    "ACT",
-    "ARTIFACT",
-    "REASONING",
-    "COMPOSIO_CONFIRM",
-    "COMPOSIO_DONE",
-    "COMPOSIO_RECONNECT",
-];
-
-/// Remove the app-only control-marker BLOCKS (marker + content) from message text. These
-/// markers are display-only: the UI renders them (collapsed reasoning, plan card, …) and they
-/// must never reach the model as conversational content — otherwise a reasoning model re-reads
-/// its own ‹‹REASONING›› trace from the history and treats it as pasted text (the "il testo che
-/// hai incollato è già completo" confusion on a follow-up / Continue turn). The single canonical
-/// stripper, shared by the in-app context renderer here and the channel mirror in the gateway
-/// (caposaldo #5). An UNCLOSED marker (e.g. a reasoning trace truncated by `finish_reason:length`)
-/// is dropped to end-of-string — there is no real answer body after an unterminated trace.
-pub fn strip_display_markers(text: &str) -> String {
-    let mut out = text.to_string();
-    // One strip primitive for the whole backend (see `markers`); this stays the canonical
-    // list of which markers are display-only.
-    for tag in DISPLAY_MARKER_TAGS {
-        out = crate::markers::strip_blocks(&out, tag);
-    }
-    out
-}
+// The canonical display-marker stripper + tag list now live in `local_first_engine::markers`
+// (5.D1c: caposaldo #5 — one strip primitive for the whole backend). Re-exported here so this crate's
+// callers (in-app context renderer, channel mirror) keep using `strip_display_markers` unchanged.
+pub use local_first_engine::markers::strip_display_markers;
 
 fn normalize_context_text(text: &str, max_message_chars: usize) -> String {
     // Strip display-only markers BEFORE compressing: the model must see the prior answer's

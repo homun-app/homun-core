@@ -102,8 +102,8 @@ use local_first_engine::plan::{
 };
 // Vault-reveal markers relocated to the engine crate (ADR 0024 inc 5e.3).
 use local_first_engine::markers::{
-    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker, VAULT_REVEAL_CLOSE,
-    VAULT_REVEAL_OPEN,
+    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
+    should_force_synthesis_for_empty_visible_answer, VAULT_REVEAL_CLOSE, VAULT_REVEAL_OPEN,
 };
 // The trait must be in scope to call `GatewayModelClient::generate` (ADR 0024).
 use local_first_engine::ModelClient;
@@ -2884,12 +2884,6 @@ fn should_inject_relevant_memory_for_prompt(user_message: &str) -> bool {
     should_inject_cross_thread_memory_for_prompt(user_message)
 }
 
-fn should_force_synthesis_for_empty_visible_answer(accumulated: &str, content: &str) -> bool {
-    let mut combined = String::with_capacity(accumulated.len() + content.len());
-    combined.push_str(accumulated);
-    combined.push_str(content);
-    answer_body_is_empty(&combined)
-}
 
 /// Auto-confirm policy (M2): only durable, high-confidence knowledge enters memory
 /// without asking. The ceiling is `Private` — NOT `Internal` — on purpose: the
@@ -6230,15 +6224,9 @@ fn strip_chat_markers(text: &str) -> String {
     strip_display_markers(text).trim().to_string()
 }
 
-/// F3-deep: true when an assembled answer carries NO answer body — only control markers
-/// (chiefly a ‹‹REASONING›› trace) or nothing. This is the "non produce la risposta" failure:
-/// a reasoning model that spent its whole token budget thinking (`finish_reason:length` with
-/// empty content) leaves `‹‹REASONING››…‹‹/REASONING››` and no prose, so committing it would
-/// Done an empty / reasoning-only bubble. `strip_chat_markers` removes every marker block, so
-/// an empty remainder means there is no real answer to show.
-fn answer_body_is_empty(content: &str) -> bool {
-    strip_chat_markers(content).trim().is_empty()
-}
+// `answer_body_is_empty` folded into `local_first_engine::markers::
+// should_force_synthesis_for_empty_visible_answer` (5.D1c) — the empty-answer check now lives with the
+// stripper it depends on, in the engine.
 
 /// The plan steps reconciled for delivery: EVERY still-open step forced to `done`, `blocked`
 /// preserved. Returns `Some` only when reconciliation is enabled, a substantial answer was
@@ -49140,7 +49128,7 @@ mod tests {
         ActiveModelInputs, ChannelSettings, ConnectorErrorKind, InboundAction, LegacyDirAction,
         MAX_PLAN_STALL_RESUMES, MemoryCandidate, MemoryDataSensitivity,
         TASK_EXECUTOR_DEFAULT_WORKER_COUNT, active_llm_concurrency, adapt_skill_body,
-        aggregate_session_state_from_counts, answer_body_is_empty,
+        aggregate_session_state_from_counts,
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
         browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_plan_markdown,
@@ -55472,22 +55460,23 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     #[test]
     fn answer_body_is_empty_detects_reasoning_only_completions() {
         // The "non produce la risposta" failure: a reasoning model spends its whole token
-        // budget thinking, leaving only a ‹‹REASONING›› trace and no prose.
-        assert!(answer_body_is_empty(""));
-        assert!(answer_body_is_empty("   \n  "));
-        assert!(answer_body_is_empty(
-            "‹‹REASONING››long chain of thought‹‹/REASONING››"
-        ));
-        assert!(answer_body_is_empty("‹‹PLAN››- [x] step‹‹/PLAN››"));
+        // budget thinking, leaving only a ‹‹REASONING›› trace and no prose. The empty-answer
+        // check now lives in `local_first_engine::markers` (5.D1c); exercise it through the
+        // loop's entry point `should_force_synthesis_for_empty_visible_answer(accumulated, content)`
+        // (with an empty accumulator == the old `answer_body_is_empty(content)`).
+        let empty =
+            |content: &str| super::should_force_synthesis_for_empty_visible_answer("", content);
+        assert!(empty(""));
+        assert!(empty("   \n  "));
+        assert!(empty("‹‹REASONING››long chain of thought‹‹/REASONING››"));
+        assert!(empty("‹‹PLAN››- [x] step‹‹/PLAN››"));
         assert!(super::should_force_synthesis_for_empty_visible_answer(
             "‹‹PLAN››- [x] **Step** (`s1`): done‹‹/PLAN››‹‹ARTIFACT››{\"name\":\"x.md\",\"size\":1,\"thread\":\"t\"}‹‹/ARTIFACT››",
             "‹‹REASONING››The final answer is hidden in reasoning.‹‹/REASONING››"
         ));
         // A real answer — with or without a reasoning trace above it — is NOT empty.
-        assert!(!answer_body_is_empty("Here is the answer."));
-        assert!(!answer_body_is_empty(
-            "‹‹REASONING››thought‹‹/REASONING››\nHere is the answer."
-        ));
+        assert!(!empty("Here is the answer."));
+        assert!(!empty("‹‹REASONING››thought‹‹/REASONING››\nHere is the answer."));
         assert!(!super::should_force_synthesis_for_empty_visible_answer(
             "‹‹PLAN››- [x] **Step** (`s1`): done‹‹/PLAN››",
             "\nHere is the answer."

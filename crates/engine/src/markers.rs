@@ -79,6 +79,42 @@ pub fn strip_blocks(text: &str, marker: &str) -> String {
     out
 }
 
+/// The DISPLAY-only control markers: the UI renders them (plan card, activity, artifact chips,
+/// reasoning trace, confirmation cards) but they are NOT answer prose. The canonical list for the
+/// whole backend (ADR 0024 inc 5, 5.D1c: relocated here from the gateway — caposaldo #5, "one strip
+/// primitive for the whole backend").
+const DISPLAY_MARKER_TAGS: [&str; 7] = [
+    "PLAN",
+    "ACT",
+    "ARTIFACT",
+    "REASONING",
+    "COMPOSIO_CONFIRM",
+    "COMPOSIO_DONE",
+    "COMPOSIO_RECONNECT",
+];
+
+/// Strip every display-only marker block, leaving only the answer prose. The canonical stripper
+/// shared by the in-app context renderer, the channel mirror, and the loop's empty-answer check.
+pub fn strip_display_markers(text: &str) -> String {
+    let mut out = text.to_string();
+    for tag in DISPLAY_MARKER_TAGS {
+        out = strip_blocks(&out, tag);
+    }
+    out
+}
+
+/// True when the turn produced NO answer body — only display markers (chiefly a `‹‹REASONING››`
+/// trace) or nothing. The "non produce la risposta" failure: a reasoning model that burned its whole
+/// budget thinking (`finish_reason:length`, empty content) leaves markers and no prose, so committing
+/// it would deliver an empty bubble. The loop checks `accumulated + content` and, when empty, forces a
+/// no-tools synthesis pass. Relocated from the gateway (5.D1c) so the moved loop calls it locally.
+pub fn should_force_synthesis_for_empty_visible_answer(accumulated: &str, content: &str) -> bool {
+    let mut combined = String::with_capacity(accumulated.len() + content.len());
+    combined.push_str(accumulated);
+    combined.push_str(content);
+    strip_display_markers(&combined).trim().is_empty()
+}
+
 /// Split streamed text at a control-marker boundary so a `‹‹NAME››` / `‹‹/NAME››` delimiter is
 /// never cut across two Delta events. Reasoning/coding models put our markers in `content` and
 /// their tokenizer splits `‹‹REASONING››` into `‹‹REASONING›` + `›`; a split delimiter otherwise
@@ -228,6 +264,33 @@ pub fn append_vault_reveal_marker_if_missing(mut text: String, marker: Option<&s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_display_markers_removes_all_display_blocks() {
+        // Every display tag is stripped; real prose survives.
+        assert_eq!(strip_display_markers("‹‹PLAN››- [x] step‹‹/PLAN››").trim(), "");
+        assert_eq!(
+            strip_display_markers("‹‹REASONING››thought‹‹/REASONING››\nHi").trim(),
+            "Hi"
+        );
+    }
+
+    #[test]
+    fn should_force_synthesis_on_reasoning_only() {
+        // Empty / whitespace / marker-only → force synthesis.
+        assert!(should_force_synthesis_for_empty_visible_answer("", ""));
+        assert!(should_force_synthesis_for_empty_visible_answer("", "   \n "));
+        assert!(should_force_synthesis_for_empty_visible_answer(
+            "‹‹PLAN››- [x] done‹‹/PLAN››",
+            "‹‹REASONING››hidden answer‹‹/REASONING››"
+        ));
+        // A real answer body (in either arg) → do NOT force.
+        assert!(!should_force_synthesis_for_empty_visible_answer("", "Here is the answer."));
+        assert!(!should_force_synthesis_for_empty_visible_answer(
+            "‹‹PLAN››- [x] done‹‹/PLAN››",
+            "\nHere is the answer."
+        ));
+    }
 
     #[test]
     fn open_close_derive_delimiters() {
