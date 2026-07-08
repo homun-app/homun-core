@@ -22254,21 +22254,60 @@ fn apply_tool_effects(
 /// `browse`. Holds `&ctx` (Sync since 5e.1), so the future is `Send` for the loop's `tokio::spawn`.
 /// Constructed per round by the loop-move (5e.3); dead code until then.
 #[allow(dead_code)]
+/// The gateway's `CapabilityExecutor` (ADR 0026): holds ONLY the turn-constant read-only context
+/// execute_chat_tool needs; per call it builds a `ChatToolCtx` from the passed `&mut LoopState`
+/// (plan/step_evidence/tool_trace + provider) + that held context, and delegates. Passing `ls` per
+/// call (not capturing it) is what lets the engine loop keep `&mut ls` without a double borrow.
 struct GatewayCapabilityExecutor<'a> {
-    ctx: &'a ChatToolCtx<'a>,
+    state: &'a AppState,
+    tx: &'a StreamSink,
+    thread_id: Option<&'a str>,
+    read_only: bool,
+    contact_only: bool,
+    can_see_contacts: bool,
+    can_see_calendar: bool,
+    autonomous: bool,
+    composio_writes: &'a std::collections::BTreeSet<String>,
+    catalog_index: &'a [(String, String, serde_json::Value)],
+    capability_corpus: &'a [CapabilityEntry],
+    automation_user_id: &'a UserId,
+    automation_workspace_id: &'a WorkspaceId,
+    turn_scaffold: &'a scaffold::ScaffoldProfile,
+    floor_acting: bool,
 }
 
 impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
     async fn execute_tool(
         &self,
         name: &str,
-        args: &serde_json::Value,
+        args_raw: &str,
         call_id: &str,
+        ls: &mut local_first_engine::LoopState,
     ) -> Result<local_first_engine::ToolOutcome, String> {
-        // The engine parses the model's tool-call args into a `Value`; `execute_chat_tool` re-parses
-        // a JSON string, so round-trip through `to_string` (semantically identical — tools parse it).
-        let args_raw = args.to_string();
-        let (result, effects) = execute_chat_tool(self.ctx, name, &args_raw, call_id).await;
+        let ctx = ChatToolCtx {
+            plan: &mut ls.plan,
+            step_evidence: &mut ls.step_evidence,
+            tool_trace: &mut ls.tool_trace,
+            base_url: &mut ls.provider.base_url,
+            model: &mut ls.provider.model,
+            api_key: &mut ls.provider.api_key,
+            state: self.state,
+            tx: self.tx,
+            thread_id: self.thread_id,
+            read_only: self.read_only,
+            contact_only: self.contact_only,
+            can_see_contacts: self.can_see_contacts,
+            can_see_calendar: self.can_see_calendar,
+            autonomous: self.autonomous,
+            composio_writes: self.composio_writes,
+            catalog_index: self.catalog_index,
+            capability_corpus: self.capability_corpus,
+            automation_user_id: self.automation_user_id,
+            automation_workspace_id: self.automation_workspace_id,
+            turn_scaffold: self.turn_scaffold,
+            floor_acting: self.floor_acting,
+        };
+        let (result, effects) = execute_chat_tool(&ctx, name, &args_raw, call_id).await;
         Ok(local_first_engine::ToolOutcome { result, effects })
     }
 }
@@ -23944,6 +23983,27 @@ async fn run_agent_rounds(
 ) {
     // model_client borrows http+tx; built here (was in setup) so the borrows are local.
     let model_client = crate::model_client::GatewayModelClient { http: &http, tx };
+    // ADR 0026: the non-browser tool chokepoint = the CapabilityExecutor seam. Built ONCE per turn
+    // holding the turn-constant read-only context; each call passes `&mut ls` so it builds the
+    // per-call ChatToolCtx without capturing (and double-borrowing) the loop state.
+    use local_first_engine::CapabilityExecutor as _;
+    let capability_executor = GatewayCapabilityExecutor {
+        state: &state_owned,
+        tx: &tx,
+        thread_id: thread_id.as_deref(),
+        read_only,
+        contact_only,
+        can_see_contacts,
+        can_see_calendar,
+        autonomous,
+        composio_writes: &composio_writes,
+        catalog_index: &catalog_index,
+        capability_corpus: &capability_corpus,
+        automation_user_id: &automation_user_id,
+        automation_workspace_id: &automation_workspace_id,
+        turn_scaffold: &turn_scaffold,
+        floor_acting,
+    };
     for round in 0..hard_round_ceiling() {
         let max_rounds = if browser_used {
             chat_browser_max_rounds()
@@ -24281,32 +24341,16 @@ missing, give what you have and note the gap in one short line.",
                             .await;
                     (r, local_first_engine::ToolEffects::default())
                 } else {
-                    // Non-browser: the CapabilityExecutor read-set only (ADR 0026). `&ctx` is read-only;
-                    // effects are returned + applied to `ls` after the ctx scope closes.
-                    let ctx = ChatToolCtx {
-                        plan: &mut ls.plan,
-                        step_evidence: &mut ls.step_evidence,
-                        tool_trace: &mut ls.tool_trace,
-                        base_url: &mut ls.provider.base_url,
-                        model: &mut ls.provider.model,
-                        api_key: &mut ls.provider.api_key,
-                        state: &state_owned,
-                        tx: &tx,
-                        thread_id: thread_id.as_deref(),
-                        read_only,
-                        contact_only,
-                        can_see_contacts,
-                        can_see_calendar,
-                        autonomous,
-                        composio_writes: &composio_writes,
-                        catalog_index: &catalog_index,
-                        capability_corpus: &capability_corpus,
-                        automation_user_id: &automation_user_id,
-                        automation_workspace_id: &automation_workspace_id,
-                        turn_scaffold: &turn_scaffold,
-                        floor_acting,
-                    };
-                    execute_chat_tool(&ctx, name, args_raw, &call_id).await
+                    // Non-browser: through the CapabilityExecutor seam (ADR 0026). The executor builds
+                    // the per-call ChatToolCtx from `&mut ls` + its held read-only context. `args_raw`
+                    // (the model's exact JSON string) is passed through unchanged — no round-trip.
+                    match capability_executor
+                        .execute_tool(name, args_raw, &call_id, &mut ls)
+                        .await
+                    {
+                        Ok(o) => (o.result, o.effects),
+                        Err(e) => (e, local_first_engine::ToolEffects::default()),
+                    }
                 };
                 // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                 // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.

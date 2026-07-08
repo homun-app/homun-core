@@ -130,11 +130,15 @@ pub struct ToolOutcome {
 /// the loop-state effects the engine applies. `&self` (no `&mut` loop state) is the whole point: the
 /// effects channel is what lets the executor be a decoupled service rather than a `ctx` mutator.
 pub trait CapabilityExecutor {
+    /// Execute one tool. `state: &mut LoopState` is passed PER CALL (ADR 0026) — the executor does
+    /// NOT capture turn state (it would double-borrow `&mut ls` with the loop); it holds only the
+    /// turn-constant read-only context and builds its per-call tool ctx from `state` + that context.
     fn execute_tool(
         &self,
         name: &str,
-        args: &Value,
+        args_raw: &str,
         call_id: &str,
+        state: &mut crate::loop_state::LoopState,
     ) -> impl Future<Output = Result<ToolOutcome, String>> + Send;
 }
 
@@ -237,8 +241,9 @@ mod tests {
         async fn execute_tool(
             &self,
             name: &str,
-            _args: &Value,
+            _args_raw: &str,
             _call_id: &str,
+            _state: &mut crate::loop_state::LoopState,
         ) -> Result<ToolOutcome, String> {
             // A tool that produces a result AND requests one loop effect (append narration) —
             // proves the effects channel round-trips, not just the result text.
@@ -278,7 +283,8 @@ mod tests {
         assert_eq!(*streamed.lock().unwrap(), "hi", "on_delta streamed the live token");
 
         let tools = FixedTools;
-        let outcome = tools.execute_tool("browse", &Value::Null, "c1").await.unwrap();
+        let mut ls = crate::loop_state::LoopState::new();
+        let outcome = tools.execute_tool("browse", "{}", "c1", &mut ls).await.unwrap();
         assert_eq!(outcome.result, "ran browse");
         assert_eq!(outcome.effects.append_output, vec!["did browse".to_string()]);
         assert!(!outcome.effects.request_confirm, "default effects are empty");
