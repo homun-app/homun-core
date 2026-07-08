@@ -3,7 +3,31 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-06.**
+> **Ultimo aggiornamento: 2026-07-08.**
+
+## ⭐ CHECKPOINT 2026-07-08 — inc 5 PREP completa+validata; loop-body è il prossimo sforzo focalizzato
+
+Tree pulito, workspace verde (engine 30/30, gateway check 0 err). Riparti da qui.
+
+**FATTO:** inc 5 prep (5c→5e.3a) — tutti i 5 seam hanno impl gateway, `ChatToolCtx` è `Sync`,
+`execute_chat_tool` è la fn pura `&ctx → (result, effects)`. **5d.1b LIVE-VALIDATO** (piano 1/3→3/3 dal
+vivo). Logica core pura convergiuta nel crate `engine`: `plan`/`text`/`markers`/`model_normalize` +
+`answer_concludes_plan`/vault (Punto 1 "prep sicura" chiuso, `58db7161`). **Bug branching FIXATO+committato**
+(`945194f9`, task_df176621) — *validazione live ancora da fare*.
+
+**PROSSIMO SFORZO (coeso, attended, con parità LIVE) = relocazione del corpo loop.** In ordine:
+1. **Punto 2 (transport → port):** `task_appears_incomplete` (giudice puro → port facile), `compact_completed_step`
+   (muta `messages` → forma dipende dal `LoopState`, quindi si fa col Punto 4), convergenza **sintesi→`ModelClient`**
+   (cambio comportamentale, valida live). *NON è prep sicura isolata: intrecciato coi Punti 4-5.*
+2. **Punto 4 (`LoopState` + contesto iniettato):** struct engine-owned, tipi semplici (`ExecutionPlan`→`Value`);
+   browser-state resta lato gateway (seam temporaneo).
+3. **Punto 5 (⭐ il grosso):** spostare il corpo loop (~860 righe, main.rs ~23886) in `engine` dietro
+   `HOMUN_ENGINE_CRATE` (default OFF), adattando ogni chiamata a port/stato. Mappa dipendenze completa fatta (Explore).
+4. **Punto 6:** wire + **parità LIVE turno-per-turno** + flip default + ritiro parallela inline (→ 5f/inc6 = ADR 0025).
+
+**DEBITI validazione LIVE (fare con l'app pilotata):** (a) fix branching — turn→cambia chat→torna → prompt+risposta;
+(b) un turno per confermare i move helper (behavior-preserving, basso rischio). L'app che gira ora ha il codice
+VECCHIO (avviata prima di questi commit) → riavviare per validare.
 
 ## ⭐ Merge 2026-07-06 — due linee riunite su `main`
 
