@@ -64,6 +64,15 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   [spec](superpowers/specs/2026-07-07-extract-modelclient-design.md) +
   [piano](superpowers/plans/2026-07-07-extract-modelclient.md).
 
+- **⭐ VALIDAZIONE LIVE inc 5 (2026-07-08) — 5d.1b confermato dal vivo.** App avviata col binario nuovo
+  (`cargo run` dev). Turno browsing: browser naviga (5d.2 + 5e.1), risposta pulita, fonti, 1 `done`, 0 errori.
+  Turno con **piano forzato**: `plan_update` avanza **1/3 → 2/3 → 3/3** monotòno (s1 done con evidenza, s2 doing,
+  …), delivery-reconcile chiude il marker consegnato a `[x][x][x]`, tabella+fonti, 0 errori → **l'arm plan-engine
+  di 5d.1b (il pezzo che i test coprono poco) è un punto fermo validato**. Sfumatura nota (pre-esistente): gli
+  eventi `plan_update` live si fermano a 2/3, il 3/3 lo chiude il reconcile aggiornando il *marker consegnato*
+  (non ri-emette `plan_update`). **Bug SEPARATO trovato e LOGGATO** (non da inc 5): branching che duplica il
+  messaggio-utente per turno → albero a 2 root → la risposta sparisce al reload; root cause completa in
+  [[homun-chat-branching-duplicate-user-bug]] + task `task_df176621`, da fixare dopo inc 5.
 - **⭐ ADR 0024 — inc 5 in corso (estrazione del corpo del loop nel crate `engine`). Slice fatte:**
   **5a** (`GenerateStreamEvent`+payload → `engine::events`), **5b** (`EventSink` seam + `impl EventSink
   for StreamSink`), **5c ✅ (2026-07-07, commit 183b6c46).** 5c = **port `PlanProgress`** per l'unico
