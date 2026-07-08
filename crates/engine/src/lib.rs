@@ -23,6 +23,9 @@ pub mod plan;
 /// Structured stream events the engine emits (ADR 0024 inc 5a).
 pub mod events;
 
+/// Pure text/answer helpers the loop uses on delivery (ADR 0024 inc 5e.3).
+pub mod text;
+
 pub use contract::{
     CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError, ModelClient,
     ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,
