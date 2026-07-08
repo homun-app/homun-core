@@ -88,9 +88,16 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
     acc_delta/blocked/pconf/img/markers), un browser_navigate con args_hash coincidente **byte-identico**; (b) **turno
     pilotato in-app** ("Confronta 3 framework agenti AI") → deliverable completo (tabella 12-dim + raccomandazione +
     fonti), piano tracciato, 1 root, 0 errori. Compiler + 492 test verdi. **Il refactor per-call è chiuso.**
-  - **slice 3-4 (next) — seam wire:** spostare la costruzione `ctx` (ora piccola, per-call) dentro `GatewayCapabilityExecutor`
-    col contratto `execute_tool(&mut LoopState)`; il loop chiama il seam invece di `execute_chat_tool`. Poi `ChatToolCtx`
-    non è più referenziato da `run_agent_rounds` → sbloccato il crate-move (5.D1c). Rollout in ADR 0026.
+  - **slice 3 ✅ (`6b589331`) — split `ChatToolCtx`→`BrowserToolCtx`:** read-set disgiunti (chat vs browser) →
+    ogni seam costruisce solo i campi del suo tool. `ChatToolCtx` = read-set puro execute_chat_tool.
+  - **slice 4 ✅ (`61f87a20`) — CapabilityExecutor seam LIVE:** contratto `execute_tool(name, args_raw:&str, call_id,
+    state:&mut LoopState)` (ls per-call, no doppio borrow; `args_raw` esatto → no round-trip). `GatewayCapabilityExecutor`
+    tiene solo i read-only turn-costanti, costruisce `ChatToolCtx` per-call da `ls`+tenuti. Il ramo chat chiama il seam;
+    **`run_agent_rounds` non referenzia più `ChatToolCtx` per il non-browser** (usa il trait `engine`). engine 33/33,
+    gateway 492/1-soffice, 34-warn baseline. Behavior-preserving (compiler+test); ri-validare col trace-dump.
+  - **slice 5 (next) — browser seam:** wrappare `execute_browser_tool`+`BrowserToolCtx` come un trait `BrowserExecutor`
+    (come CapabilityExecutor) → il ramo browser smette di referenziare `BrowserToolCtx` in `run_agent_rounds`. Poi
+    `run_agent_rounds` è engine-safe sul dispatch → **sblocca 5.D1c** (crate-move). Rollout in ADR 0026.
 - **5.D1c — MOVE TO CRATE:** `run_agent_rounds`→`engine::run_turn`, adatta i tipi al crate-boundary, wire dietro
   `HOMUN_ENGINE_CRATE` (default OFF, additivo). **Parità (serve co-pilotaggio):** io guido i prompt via API con
   `HOMUN_TRACE_DUMP=1` e diffo i dump OFF/ON; tu confermi LIVE delivery/sintesi/reconcile su gattino/Rust/piano/browser.
