@@ -5,9 +5,18 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-08.**
 
-## ⭐ CHECKPOINT 2026-07-08 — 5.D1c.1→.9 DONE, corpo loop ORA ENGINE-SAFE; prossimo = 5.D1c.10 (IL MOVE, con utente)
+## ⭐ CHECKPOINT 2026-07-08 — 5.D1c.10 IL MOVE LANDED (flag OFF); prossimo = PARITY VALIDATION poi 5.D2 flip (con utente)
 
-Tree pulito, workspace verde (engine 60/60, gateway 474 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
+Tree pulito, workspace verde (engine 61/61, gateway 474 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
+
+**⭐ 5.D1c.10 FATTO (additivo, `HOMUN_ENGINE_CRATE` default OFF = ZERO rischio prod):** il loop agentico è ESTRATTO in
+`engine::agent_loop::run_turn` (copia generica sui 8 seam, 733 righe, trasformata solo `local_first_engine::→crate::` +
+`tx→event_sink`). `.10a` `3a00a7b4` = try_advance→engine; `.10` `d6cadfb5` = run_turn + dispatch dentro run_agent_rounds
+(costruiti gli executor UNA volta, ON ritorna `run_turn(&quegli-executor…)`, OFF cade sulla copia inline provata);
+smoke-test `a4a7a4ba` = **PRIMA esecuzione reale di run_turn** (8 seam mockati, no network) → happy-path completa (model
+risponde, commit answer, Done, TurnOutcome) senza panic/hang. **NEXT = PARITY VALIDATION** (trace-dump OFF-vs-ON su un
+turno reale — io la guido via API se riavvii col binario nuovo; tu confermi LIVE delivery/sintesi/reconcile/browser),
+poi **5.D2 flip default ON + cancella copia inline (con utente)**. Vedi blocco DECISIONE FISSATA sul flag (finale = no-flag).
 
 **5.D1c COMPLETO fino a .9 + le 2 code (task_appears_incomplete + marker cluster).** Il corpo di `run_agent_rounds`
 (832 righe) è ora **ENGINE-SAFE**: audit fn-gateway×chiamate-nel-corpo = ZERO free-fn/tipi gateway nel control-flow;
