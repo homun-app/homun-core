@@ -23980,6 +23980,9 @@ async fn run_agent_rounds(
     // moves the plan persist + step verification onto the same adapter.
     use local_first_engine::PlanProgress as _;
     let plan_progress = GatewayPlanProgress { state: state_owned.clone() };
+    // 5.D1c.6: the F3 context-compaction seam (wraps the step-summary LLM call).
+    use local_first_engine::ContextCompactor as _;
+    let compactor = GatewayContextCompactor { http: state_owned.http.clone() };
     for round in 0..cfg.hard_round_ceiling {
         let max_rounds = if ls.browser_used {
             cfg.browser_max_rounds
@@ -24028,8 +24031,7 @@ gathered‹‹/ACT››"
         // multi-step turn from overflowing the context window.
         if ls.pending_compaction {
             ls.pending_compaction = false;
-            compact_completed_step(&state_owned.http, &mut ls.messages, &mut ls.step_messages_start)
-                .await;
+            compactor.compact(&mut ls.messages, &mut ls.step_messages_start).await;
         }
         // On the LAST allowed round, forbid tools so the model MUST synthesize
         // a final answer from what it already gathered — otherwise it can burn
@@ -30945,6 +30947,19 @@ impl local_first_engine::PlanProgress for GatewayPlanProgress {
         // The other half of the bridge (5.D1c.5): serialize a fresh step list as the canonical plan
         // Value. Pure — no `self.state` needed.
         serde_json::to_value(runtime_execution_plan(steps)).unwrap_or_default()
+    }
+}
+
+/// The gateway's `ContextCompactor` (ADR 0024 inc 5, 5.D1c.6): wraps `compact_completed_step` (the F3
+/// step-summary LLM call). Holds only the shared HTTP client (a cheap Arc clone) — the summarizer needs
+/// nothing else from `AppState`. Constructed live in run_agent_rounds.
+pub(crate) struct GatewayContextCompactor {
+    pub http: reqwest::Client,
+}
+
+impl local_first_engine::ContextCompactor for GatewayContextCompactor {
+    async fn compact(&self, messages: &mut Vec<serde_json::Value>, start: &mut usize) {
+        compact_completed_step(&self.http, messages, start).await;
     }
 }
 

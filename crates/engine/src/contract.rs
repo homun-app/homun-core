@@ -233,6 +233,23 @@ pub trait PlanProgress {
     fn plan_value_from_steps(&self, steps: &[Value]) -> Value;
 }
 
+/// The loop's F3 context-compaction port (ADR 0024 inc 5, 5.D1c.6). When a plan step completes, the
+/// loop collapses the messages that step produced into a single summary note so a long multi-step turn
+/// stays within the context window. That summary is a `memory`-role LLM call the gateway owns (payload
+/// shaping + collectors), so the engine reaches it through this narrow seam. BEST-EFFORT: the impl
+/// leaves `messages` untouched on any summarizer failure (less compaction, never data loss). `Send`
+/// because the loop runs inside `tokio::spawn`. Retired with the rest of the mid-turn machinery by ADR 0025.
+pub trait ContextCompactor {
+    /// Collapse `messages[*start..]` (a completed step's COMPLETE tool-call/result groups — safe only
+    /// at a round boundary) into one assistant summary message and advance `*start`. No-op when the
+    /// slice is empty or too small to be worth compacting.
+    fn compact(
+        &self,
+        messages: &mut Vec<Value>,
+        start: &mut usize,
+    ) -> impl Future<Output = ()> + Send;
+}
+
 /// The loop's turn-level completion judge (ADR 0024, increment 5, Point 2a). When the model ACTS but
 /// stops WITHOUT ever tracking a plan, the loop asks this judge whether the request is actually
 /// finished; a `true` (incomplete) verdict triggers the plan-bootstrap nudge. Like the `PlanProgress`
@@ -373,6 +390,33 @@ mod tests {
         assert_eq!(browser.calls, 1, "executor mutated its own subsystem state (&mut self)");
         browser.close_session(ls.browser_used).await;
         assert!(browser.closed, "close_session ran the teardown");
+    }
+
+    // A stub compactor proves the ContextCompactor seam is usable + mockable: it collapses the
+    // step slice to one note (the real impl's shape) so the loop can be driven with no LLM.
+    struct StubCompactor;
+    impl ContextCompactor for StubCompactor {
+        async fn compact(&self, messages: &mut Vec<Value>, start: &mut usize) {
+            if *start < messages.len() {
+                messages.truncate(*start);
+                messages.push(serde_json::json!({ "role": "assistant", "content": "[summary]" }));
+                *start = messages.len();
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn context_compactor_is_usable_with_a_mock() {
+        let c = StubCompactor;
+        let mut msgs = vec![
+            serde_json::json!({ "role": "system", "content": "s" }),
+            serde_json::json!({ "role": "tool", "content": "big result" }),
+        ];
+        let mut start = 1usize; // the step's work begins at index 1
+        c.compact(&mut msgs, &mut start).await;
+        assert_eq!(msgs.len(), 2, "the step slice collapsed to one summary note");
+        assert_eq!(msgs[1]["content"], "[summary]");
+        assert_eq!(start, 2, "start advanced past the summary");
     }
 
     // An in-memory sink proves the EventSink seam is usable + mockable (drive the future loop's

@@ -50,9 +50,9 @@ pub mod browser;
 pub mod tools;
 
 pub use contract::{
-    BrowserExecutor, CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError,
-    ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,
-    TurnCompletionJudge,
+    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, LoadedTool, ModelCall,
+    ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects,
+    ToolOutcome, TurnCompletionJudge,
 };
 pub use config::TurnConfig;
 pub use loop_state::LoopState;
