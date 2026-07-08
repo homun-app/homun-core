@@ -23539,8 +23539,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     }
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
-        let mut accumulated = String::new();
-        let mut pending_vault_reveal_marker: Option<String> = None;
+        let mut ls = local_first_engine::LoopState::new();
         // Last upstream model error this turn (e.g. a 410 "model retired"), already
         // human-readable. Surfaced as the final answer if the turn produces no text,
         // so a dead/blocked model is obvious instead of a generic "no answer".
@@ -23549,17 +23548,16 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let mut memory_answer = String::new();
         // Consequential actions performed this turn (any domain) → fed to the
         // memory extractor so the "why" of each mutation is remembered.
-        let mut tool_trace: Vec<String> = Vec::new();
         // Adaptive-floor telemetry (ADR 0018 Fase 1): persist the tier+profile decision into
         // the turn trace so it reaches the memory/learning substrate — not just stderr — and
         // the floor can later be VALIDATED against outcomes before it is switched on. Present
         // only in the observation modes (`shadow`|`on`); `off` keeps the trace clean. Shared
         // by chat and channel/automation turns (this is the one shared loop).
         if let Some(line) = &floor_trace {
-            tool_trace.push(line.clone());
+            ls.tool_trace.push(line.clone());
         }
         if let Some(route_line) = capability_route_trace_line(&capability_route_for_runtime) {
-            tool_trace.push(route_line.clone());
+            ls.tool_trace.push(route_line.clone());
             let _ = emit_stream_event(
                 &tx,
                 GenerateStreamEvent::Delta {
@@ -23572,8 +23570,6 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // round, it's stuck (not making progress) → stop and synthesize, instead of
         // burning the whole round budget on a loop. This is what lets the budget be
         // generous: real long tasks run, loops are caught fast.
-        let mut last_round_sig = String::new();
-        let mut repeat_count: u32 = 0;
         let mut final_done = false;
         // Long-horizon execution (F1): the round budget is measured from the LAST
         // verified progress, not from round 0. Whenever a canonical plan step becomes
@@ -23581,8 +23577,6 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // no-progress guard — so a big plan-driven task (10 slides, a long web research)
         // keeps going for as long as it KEEPS CLOSING STEPS, while a turn stuck on one
         // step still trips the per-step budget.
-        let mut progress_anchor_round: usize = 0;
-        let mut progress_verify_anchor: usize = 0;
         // CANONICAL PLAN: the single source of truth for the task's steps + their status,
         // owned by the runtime (not rebuilt from the model's text each call). update_plan
         // MERGES into this by id/title and can never reset a done step; F1 budget reset,
@@ -23780,16 +23774,14 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
         // cleared. A chat model can claim "done" without doing the work; the gate checks.
-        let mut step_evidence: Vec<String> = Vec::new();
         // F3 context compaction: `step_messages_start` is the index in `messages` where the
         // current step's work begins; once the step is verified, that slice is summarised
         // into one note so a long multi-step turn stays within the context window.
-        // `pending_compaction` defers the rewrite to the next round's safe boundary (never
+        // `ls.pending_compaction` defers the rewrite to the next round's safe boundary (never
         // mid tool-call/result group, which would break OpenAI-compat pairing).
         // Set right before the round loop (once the initial context is fully in
         // `messages`) so compaction never folds the system/user context into a summary.
         let mut step_messages_start: usize;
-        let mut pending_compaction = false;
         // Plan-completion enforcement: counts consecutive turns where the model STOPPED
         // (no tool call) while its plan still has open steps. Reset on any tool call.
         let mut plan_nudges: u32 = 0;
@@ -23828,8 +23820,6 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                 });
             }
         }
-        let mut loaded_tools: std::collections::BTreeSet<String> =
-            std::collections::BTreeSet::new();
         // Turn-local browser state for the granular tools. The sidecar session is
         // held for the WHOLE turn (lock acquired only around each single call) and
         // parked back at every exit path. `last_snapshot` feeds the safety gate so
@@ -23886,7 +23876,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             // measured from the last completed plan step (F1): `rounds_since_progress`
             // resets whenever a step closes, so a long plan-driven task isn't capped
             // by total rounds — only by getting STUCK on a single step.
-            let rounds_since_progress = round.saturating_sub(progress_anchor_round);
+            let rounds_since_progress = round.saturating_sub(ls.progress_anchor_round);
             if rounds_since_progress >= max_rounds {
                 break;
             }
@@ -23894,11 +23884,11 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             // without closing it → it's hopping across walled/SPA pages that won't read.
             // Stop browsing and synthesize from what we already gathered (the forced-
             // synthesis below runs because `final_done` is false; #3a compaction kept the
-            // data). `step_evidence` is cleared on every step close, so this counts
+            // data). `ls.step_evidence` is cleared on every step close, so this counts
             // navigations for the CURRENT step only. Restores 64f08e4d's budget control
             // for the distinct-URL case (cold-context consent walls → wander → burn).
             if browser_used {
-                let step_navs = step_evidence
+                let step_navs = ls.step_evidence
                     .iter()
                     .filter(|e| e.starts_with("browser_navigate"))
                     .count();
@@ -23915,15 +23905,15 @@ gathered‹‹/ACT››"
                     break;
                 }
             }
-            // Context hygiene: at up to 32 rounds the accumulated snapshots/images
+            // Context hygiene: at up to 32 rounds the ls.accumulated snapshots/images
             // would overflow the window and silently truncate the page. Stub all
             // but the latest browser snapshot + the latest screenshot image.
             prune_browser_history(&mut messages, &browser_tool_call_ids);
             // F3: a step was verified last round → collapse its messages into a summary
             // now (safe boundary: all prior tool results are flushed). Keeps a long
             // multi-step turn from overflowing the context window.
-            if pending_compaction {
-                pending_compaction = false;
+            if ls.pending_compaction {
+                ls.pending_compaction = false;
                 compact_completed_step(&state_owned.http, &mut messages, &mut step_messages_start)
                     .await;
             }
@@ -24052,9 +24042,9 @@ missing, give what you have and note the gap in one short line.",
                     })
                     .collect::<Vec<_>>()
                     .join("|");
-                if !round_sig.is_empty() && round_sig == last_round_sig {
-                    repeat_count += 1;
-                    if repeat_count >= 2 {
+                if !round_sig.is_empty() && round_sig == ls.last_round_sig {
+                    ls.repeat_count += 1;
+                    if ls.repeat_count >= 2 {
                         let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
                             text: "‹‹ACT››⏹️ Same actions repeated: stopping and summarizing‹‹/ACT››".to_string(),
                         })
@@ -24062,8 +24052,8 @@ missing, give what you have and note the gap in one short line.",
                         break;
                     }
                 } else {
-                    repeat_count = 0;
-                    last_round_sig = round_sig;
+                    ls.repeat_count = 0;
+                    ls.last_round_sig = round_sig;
                 }
                 // Echo the assistant's tool-call turn, then append each tool result.
                 // Content is sanitized so a leaked text tool-call doesn't pollute the
@@ -24084,7 +24074,7 @@ missing, give what you have and note the gap in one short line.",
                 {
                     let mut ctx = ChatToolCtx {
                         messages: &mut messages,
-                        accumulated: &mut accumulated,
+                        accumulated: &mut ls.accumulated,
                         browser_used: &mut browser_used,
                         last_snapshot: &mut last_snapshot,
                         pending_browser_image: &mut pending_browser_image,
@@ -24094,16 +24084,16 @@ missing, give what you have and note the gap in one short line.",
                         nav_failures: &mut nav_failures,
                         browse_sources: &mut browse_sources,
                         plan: &mut plan,
-                        step_evidence: &mut step_evidence,
-                        tool_trace: &mut tool_trace,
-                        loaded_tools: &mut loaded_tools,
+                        step_evidence: &mut ls.step_evidence,
+                        tool_trace: &mut ls.tool_trace,
+                        loaded_tools: &mut ls.loaded_tools,
                         tool_schemas: &mut tool_schemas,
-                        last_round_sig: &mut last_round_sig,
-                        repeat_count: &mut repeat_count,
-                        progress_anchor_round: &mut progress_anchor_round,
-                        progress_verify_anchor: &mut progress_verify_anchor,
-                        pending_compaction: &mut pending_compaction,
-                        pending_vault_reveal_marker: &mut pending_vault_reveal_marker,
+                        last_round_sig: &mut ls.last_round_sig,
+                        repeat_count: &mut ls.repeat_count,
+                        progress_anchor_round: &mut ls.progress_anchor_round,
+                        progress_verify_anchor: &mut ls.progress_verify_anchor,
+                        pending_compaction: &mut ls.pending_compaction,
+                        pending_vault_reveal_marker: &mut ls.pending_vault_reveal_marker,
                         pending_confirm: &mut pending_confirm,
                         base_url: &mut base_url,
                         model: &mut model,
@@ -24252,7 +24242,7 @@ missing, give what you have and note the gap in one short line.",
                         execute_chat_tool(&ctx, name, args_raw, &call_id).await
                     };
                     // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
-                    // loop reads any field they populate (plan, accumulated, …) — net state as inline.
+                    // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
                     apply_tool_effects(&mut ctx, tool_effects);
 
                     // Collect source URLs from browser results so the final
@@ -24374,8 +24364,8 @@ missing, give what you have and note the gap in one short line.",
                     // A write is awaiting the user's confirmation card — end the turn
                     // here (no synthesis, no further tool rounds).
                     let final_text = append_vault_reveal_marker_if_missing(
-                        collapse_plan_markers(&accumulated),
-                        pending_vault_reveal_marker.as_deref(),
+                        collapse_plan_markers(&ls.accumulated),
+                        ls.pending_vault_reveal_marker.as_deref(),
                     );
                     let _ = emit_stream_event(
                         &tx,
@@ -24519,7 +24509,7 @@ missing, give what you have and note the gap in one short line.",
             // token budget and an explicit "write the FINAL ANSWER now" directive. `break`
             // leaves the round loop, so the synthesis runs exactly once — no spin, no counter;
             // if it too comes back empty, its own fallback chain ends the turn cleanly.
-            if should_force_synthesis_for_empty_visible_answer(&accumulated, &content) {
+            if should_force_synthesis_for_empty_visible_answer(&ls.accumulated, &content) {
                 if verbose_debug() {
                     let fr = round_finish_reason.as_deref().unwrap_or("");
                     eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
@@ -24534,9 +24524,9 @@ missing, give what you have and note the gap in one short line.",
             // only accumulate the SANITIZED version, which becomes the authoritative
             // `Done` payload that the frontend uses as the final text (replacing the
             // raw live preview). No second content Delta — that would double it.
-            accumulated.push_str(&content);
-            if let Some(fonti) = fonti_section(&browse_sources, &accumulated) {
-                accumulated.push_str(&fonti);
+            ls.accumulated.push_str(&content);
+            if let Some(fonti) = fonti_section(&browse_sources, &ls.accumulated) {
+                ls.accumulated.push_str(&fonti);
                 let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: fonti }).await;
             }
             // Anti-churn: the live stream carried one ‹‹PLAN›› block per plan tool call;
@@ -24544,7 +24534,7 @@ missing, give what you have and note the gap in one short line.",
             // Reconcile the plan ONE last time on delivery — mark every still-open step done
             // (see plan_steps_reconciled_on_delivery) — and PERSIST it, so the runtime plan is
             // settled → the next turn won't falsely resume a plan this answer already finished.
-            let delivered = collapse_plan_markers(&accumulated);
+            let delivered = collapse_plan_markers(&ls.accumulated);
             let delivered = match plan_steps_reconciled_on_delivery(&plan, &delivered) {
                 Some(reconciled) => {
                     upsert_runtime_plan_memory_from_state(
@@ -24557,7 +24547,7 @@ missing, give what you have and note the gap in one short line.",
                 None => delivered,
             };
             let final_answer =
-                append_vault_reveal_marker_if_missing(delivered, pending_vault_reveal_marker.as_deref());
+                append_vault_reveal_marker_if_missing(delivered, ls.pending_vault_reveal_marker.as_deref());
             memory_answer = final_answer.clone();
             let _ = emit_stream_event(
                 &tx,
@@ -24650,8 +24640,8 @@ to proceed."
             // is the authoritative Done payload below.
             let mut final_text = if !synth_text.trim().is_empty() {
                 synth_text
-            } else if !accumulated.trim().is_empty() {
-                accumulated.clone()
+            } else if !ls.accumulated.trim().is_empty() {
+                ls.accumulated.clone()
             } else if let Some(err) = last_model_error.clone() {
                 // The model failed every call this turn (e.g. retired / unauthorized).
                 // Surface the real reason instead of a generic "no answer".
@@ -24664,7 +24654,7 @@ Tell me if you want me to retry or rephrase."
             if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
                 final_text.push_str(&fonti);
             }
-            // Anti-churn safety net for the `accumulated` fallback (synth_text never
+            // Anti-churn safety net for the `ls.accumulated` fallback (synth_text never
             // carries plan blocks, so this is a no-op when synthesis succeeded). Reconcile +
             // persist the plan on this exit path too, so a synthesis delivery also settles it.
             let delivered = collapse_plan_markers(&final_text);
@@ -24680,7 +24670,7 @@ Tell me if you want me to retry or rephrase."
                 None => delivered,
             };
             let final_text =
-                append_vault_reveal_marker_if_missing(delivered, pending_vault_reveal_marker.as_deref());
+                append_vault_reveal_marker_if_missing(delivered, ls.pending_vault_reveal_marker.as_deref());
             memory_answer = final_text.clone();
             let _ = emit_stream_event(
                 &tx,
@@ -24702,7 +24692,7 @@ Tell me if you want me to retry or rephrase."
             let learn_user = memory_user_message.clone();
             let learn_answer = memory_answer.clone();
             let learn_thread = thread_id.clone();
-            let learn_actions = tool_trace.join("\n");
+            let learn_actions = ls.tool_trace.join("\n");
             let learn_prev = memory_prev_assistant.clone();
             tokio::spawn(async move {
                 learn_via_service_or_inline(

@@ -34,8 +34,13 @@ pub mod markers;
 /// Pure (serde only); relocated whole from the gateway (ADR 0024 inc 5e.3) as loop-move prep.
 pub mod model_normalize;
 
+/// The loop's turn-carried state (ADR 0024 inc 5, Point 4) — bundled at its destination
+/// ahead of the loop-body move; the gateway constructs it and the inline loop mutates it.
+pub mod loop_state;
+
 pub use contract::{
     CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError, ModelClient,
     ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,
     TurnCompletionJudge,
 };
+pub use loop_state::LoopState;
