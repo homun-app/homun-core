@@ -49,6 +49,9 @@ pub mod browser;
 /// Pure tool-trace helpers (ADR 0024 inc 5, 5.D1c.2): per-tool decision-memory trace lines.
 pub mod tools;
 
+/// The turn's result for the gateway's post-turn tail (ADR 0024 inc 5, 5.D1c.8).
+pub mod outcome;
+
 pub use contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, LoadedTool, ModelCall,
     ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects,
@@ -56,3 +59,4 @@ pub use contract::{
 };
 pub use config::TurnConfig;
 pub use loop_state::LoopState;
+pub use outcome::TurnOutcome;

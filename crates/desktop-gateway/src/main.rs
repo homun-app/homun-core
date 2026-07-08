@@ -23874,7 +23874,54 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             step_verification: step_verification_enabled(),
             verbose: verbose_debug(),
         };
-        run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg).await;
+        // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern, so it
+        // runs HERE after the engine turn returns. Snapshot what it needs before the turn consumes the
+        // owned values (AppState is a cheap Arc clone; the strings are small).
+        let tail_state = state_owned.clone();
+        let tail_user = memory_user_message.clone();
+        let tail_thread = thread_id.clone();
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg).await;
+        // M2: mine this exchange for durable personal memory (fire-and-forget, off the response path).
+        // Best-effort; never blocks or fails the turn. Skip for channel turns (read_only): the inbound
+        // is from a CONTACT, not the user, and the channel handler runs its own speaker-attributed learn
+        // — this one (speaker=None) would mis-attribute the contact's facts to person:self.
+        if !outcome.memory_answer.trim().is_empty() && !read_only {
+            let learn_state = tail_state.clone();
+            let learn_user = tail_user;
+            let learn_answer = outcome.memory_answer.clone();
+            let learn_thread = tail_thread.clone();
+            let learn_actions = outcome.tool_actions.clone();
+            let learn_prev = memory_prev_assistant.clone();
+            tokio::spawn(async move {
+                learn_via_service_or_inline(
+                    &learn_state,
+                    &learn_user,
+                    &learn_answer,
+                    &learn_actions,
+                    learn_thread.as_deref(),
+                    None,
+                    learn_prev.as_deref(),
+                )
+                .await;
+            });
+        }
+        // Keep the code map FRESH on every turn in a mapped project — driven by GIT, not by who edited:
+        // spawn_project_graph_refresh re-extracts only if the git fingerprint changed since the last
+        // build, so it catches the AGENT's writes AND the user's own editor edits (and checkout/pull),
+        // while being a cheap no-op when nothing changed. Only refreshes already-mapped projects.
+        if !read_only {
+            if let Some(ws) = tail_thread
+                .as_deref()
+                .and_then(|tid| {
+                    lock_store(&tail_state)
+                        .ok()
+                        .and_then(|s| s.workspace_for_thread(tid).ok())
+                })
+                .filter(|w| !w.trim().is_empty())
+            {
+                spawn_project_graph_refresh(&tail_state, &ws);
+            }
+        }
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -23913,7 +23960,6 @@ async fn run_agent_rounds(
     can_see_calendar: bool,
     floor_acting: bool,
     memory_user_message: String,
-    memory_prev_assistant: Option<String>,
     mut memory_answer: String,
     mut last_model_error: Option<String>,
     mut final_done: bool,
@@ -23928,7 +23974,7 @@ async fn run_agent_rounds(
     turn_scaffold: scaffold::ScaffoldProfile,
     mut browse_sources: Vec<String>,
     cfg: local_first_engine::TurnConfig,
-) {
+) -> local_first_engine::TurnOutcome {
     // model_client borrows http+tx; built here (was in setup) so the borrows are local.
     let model_client = crate::model_client::GatewayModelClient { http: &http, tx };
     // ADR 0026: the non-browser tool chokepoint = the CapabilityExecutor seam. Built ONCE per turn
@@ -24710,49 +24756,12 @@ Tell me if you want me to retry or rephrase."
         )
         .await;
     }
-    // M2: mine this exchange for durable personal memory (fire-and-forget, off
-    // the response path). Best-effort; never blocks or fails the turn.
-    // Skip for channel turns (read_only): the inbound is from a CONTACT, not the
-    // user, and the channel handler runs its own speaker-attributed learn — this
-    // one (speaker=None) would mis-attribute the contact's facts to person:self.
-    if !memory_answer.trim().is_empty() && !read_only {
-        let learn_state = state_owned.clone();
-        let learn_user = memory_user_message.clone();
-        let learn_answer = memory_answer.clone();
-        let learn_thread = thread_id.clone();
-        let learn_actions = ls.tool_trace.join("\n");
-        let learn_prev = memory_prev_assistant.clone();
-        tokio::spawn(async move {
-            learn_via_service_or_inline(
-                &learn_state,
-                &learn_user,
-                &learn_answer,
-                &learn_actions,
-                learn_thread.as_deref(),
-                None,
-                learn_prev.as_deref(),
-            )
-            .await;
-        });
-    }
-    // Keep the code map FRESH on every turn in a mapped project — driven by GIT,
-    // not by who edited: spawn_project_graph_refresh re-extracts only if the git
-    // fingerprint changed since the last build, so it catches the AGENT's writes AND
-    // the user's own editor edits (and checkout/pull) made between ls.messages, while
-    // being a cheap no-op when nothing changed. Only refreshes already-mapped
-    // projects (never auto-builds one the user hasn't opened).
-    if !read_only {
-        if let Some(ws) = thread_id
-            .as_deref()
-            .and_then(|tid| {
-                lock_store(&state_owned)
-                    .ok()
-                    .and_then(|s| s.workspace_for_thread(tid).ok())
-            })
-            .filter(|w| !w.trim().is_empty())
-        {
-            spawn_project_graph_refresh(&state_owned, &ws);
-        }
+    // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
+    // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
+    // engine's turn ends here.
+    local_first_engine::TurnOutcome {
+        memory_answer,
+        tool_actions: ls.tool_trace.join("\n"),
     }
 }
 
