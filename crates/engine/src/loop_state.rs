@@ -15,17 +15,29 @@
 //! in a downstream crate the leaf `engine` can't reference) and the provider binding;
 //! browser state stays gateway-side behind the temporary seam until ADR 0025.
 
+use serde_json::Value;
 use std::collections::BTreeSet;
 
 /// Turn-carried state of the single guarded loop. Fields are `pub` because the loop
 /// that mutates them still lives in the gateway; once the loop body moves into this
 /// crate (Point 5) the mutation is local and this can encapsulate if useful.
 ///
-/// `Default` gives the loop's start-of-turn zero value; every field currently starts
-/// at its default, so the gateway constructs it with [`LoopState::new`] and seeds
-/// nothing. `Send` (all fields are `Send`) because the loop runs inside `tokio::spawn`.
+/// `Default` gives the loop's start-of-turn zero value. Most fields start at their
+/// default; the gateway constructs it with [`LoopState::new`] and then SEEDS the fields
+/// that carry pre-loop setup — `messages` (the initial system+user context, built
+/// gateway-side) is the first such field. `Send` (all fields are `Send`) because the
+/// loop runs inside `tokio::spawn`.
 #[derive(Debug, Default)]
 pub struct LoopState {
+    /// The OpenAI-compat conversation array the model sees: seeded gateway-side with the
+    /// system+user messages, then grown by the loop (assistant turns, tool results,
+    /// F3 compaction). `Value` (not a typed message) because the loop builds these as
+    /// raw JSON and the crate stays serde-only.
+    pub messages: Vec<Value>,
+    /// Index into `messages` where the CURRENT plan step's work begins; once the step is
+    /// verified, that slice is compacted into one note (F3) so a long multi-step turn
+    /// stays within the context window.
+    pub step_messages_start: usize,
     /// The authoritative, SANITIZED answer text accumulated this turn — the payload the
     /// `Done` event delivers (the raw text already streamed live via the collectors).
     pub accumulated: String,
@@ -74,6 +86,8 @@ mod tests {
     #[test]
     fn new_is_all_empty() {
         let ls = LoopState::new();
+        assert!(ls.messages.is_empty());
+        assert_eq!(ls.step_messages_start, 0);
         assert!(ls.accumulated.is_empty());
         assert!(ls.pending_vault_reveal_marker.is_none());
         assert!(ls.tool_trace.is_empty());

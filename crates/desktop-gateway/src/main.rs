@@ -23364,7 +23364,8 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         }
         serde_json::Value::Array(parts)
     };
-    let mut messages = vec![
+    // Built once here, then moved into `ls.messages` at the loop's start (the loop grows it).
+    let messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
         serde_json::json!({ "role": "user", "content": user_content }),
     ];
@@ -23540,6 +23541,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut ls = local_first_engine::LoopState::new();
+        ls.messages = messages;
         // Last upstream model error this turn (e.g. a 410 "model retired"), already
         // human-readable. Surfaced as the final answer if the turn produces no text,
         // so a dead/blocked model is obvious instead of a generic "no answer".
@@ -23774,14 +23776,13 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // F2 verification gate: the running evidence (tool name → result snippet) for the
         // CURRENT plan step, fed to the verifier when the model marks the step done, then
         // cleared. A chat model can claim "done" without doing the work; the gate checks.
-        // F3 context compaction: `step_messages_start` is the index in `messages` where the
+        // F3 context compaction: `ls.step_messages_start` is the index in `ls.messages` where the
         // current step's work begins; once the step is verified, that slice is summarised
         // into one note so a long multi-step turn stays within the context window.
         // `ls.pending_compaction` defers the rewrite to the next round's safe boundary (never
         // mid tool-call/result group, which would break OpenAI-compat pairing).
         // Set right before the round loop (once the initial context is fully in
-        // `messages`) so compaction never folds the system/user context into a summary.
-        let mut step_messages_start: usize;
+        // `ls.messages`) so compaction never folds the system/user context into a summary.
         // Plan-completion enforcement: counts consecutive turns where the model STOPPED
         // (no tool call) while its plan still has open steps. Reset on any tool call.
         let mut plan_nudges: u32 = 0;
@@ -23850,7 +23851,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         sandbox_clear(thread_id.clone());
 
         // F3: the first plan step's work begins after the initial context is in place.
-        step_messages_start = messages.len();
+        ls.step_messages_start = ls.messages.len();
 
         // F0 / model-io: detect+cache this Ollama model's capability profile (thinking, tools,
         // vision, context window) via one /api/show, so the harness can ADAPT — send `think`
@@ -23908,13 +23909,13 @@ gathered‹‹/ACT››"
             // Context hygiene: at up to 32 rounds the ls.accumulated snapshots/images
             // would overflow the window and silently truncate the page. Stub all
             // but the latest browser snapshot + the latest screenshot image.
-            prune_browser_history(&mut messages, &browser_tool_call_ids);
-            // F3: a step was verified last round → collapse its messages into a summary
+            prune_browser_history(&mut ls.messages, &browser_tool_call_ids);
+            // F3: a step was verified last round → collapse its ls.messages into a summary
             // now (safe boundary: all prior tool results are flushed). Keeps a long
             // multi-step turn from overflowing the context window.
             if ls.pending_compaction {
                 ls.pending_compaction = false;
-                compact_completed_step(&state_owned.http, &mut messages, &mut step_messages_start)
+                compact_completed_step(&state_owned.http, &mut ls.messages, &mut ls.step_messages_start)
                     .await;
             }
             // On the LAST allowed round, forbid tools so the model MUST synthesize
@@ -23941,7 +23942,7 @@ gathered‹‹/ACT››"
             // separate forced-synthesis (`!final_done` path below) covers the case where the
             // model instead keeps calling tools until the budget breaks the loop.
             if is_final_round && turn_used_tools {
-                messages.push(serde_json::json!({
+                ls.messages.push(serde_json::json!({
                     "role": "user",
                     "content": "This is your FINAL step — no more tools or browsing are \
 available. Write the COMPLETE deliverable NOW from everything you already gathered: the full \
@@ -23961,7 +23962,7 @@ missing, give what you have and note the gap in one short line.",
                         base_url: &base_url,
                         model: &model,
                         api_key: api_key.as_deref(),
-                        messages: &messages,
+                        messages: &ls.messages,
                         tools: &tool_schemas,
                         temperature,
                         is_final_round,
@@ -24058,7 +24059,7 @@ missing, give what you have and note the gap in one short line.",
                 // Echo the assistant's tool-call turn, then append each tool result.
                 // Content is sanitized so a leaked text tool-call doesn't pollute the
                 // conversation history.
-                messages.push(serde_json::json!({
+                ls.messages.push(serde_json::json!({
                     "role": "assistant",
                     "content": model_normalize::sanitize_model_text(&raw_content),
                     "tool_calls": calls,
@@ -24073,7 +24074,7 @@ missing, give what you have and note the gap in one short line.",
                 // reads (screenshot push, `if pending_confirm`) touch the raw locals.
                 {
                     let mut ctx = ChatToolCtx {
-                        messages: &mut messages,
+                        messages: &mut ls.messages,
                         accumulated: &mut ls.accumulated,
                         browser_used: &mut browser_used,
                         last_snapshot: &mut last_snapshot,
@@ -24346,7 +24347,7 @@ missing, give what you have and note the gap in one short line.",
                         .map(|c| c.vision)
                         .unwrap_or(true);
                     if vision_capable {
-                        messages.push(serde_json::json!({
+                        ls.messages.push(serde_json::json!({
                             "role": "user",
                             "content": [
                                 { "type": "text", "text": "Screenshot of the current page:" },
@@ -24354,7 +24355,7 @@ missing, give what you have and note the gap in one short line.",
                             ],
                         }));
                     } else {
-                        messages.push(serde_json::json!({
+                        ls.messages.push(serde_json::json!({
                             "role": "user",
                             "content": "(A screenshot was captured, but this model cannot see images — rely on the page's TEXT snapshot instead.)",
                         }));
@@ -24414,14 +24415,14 @@ missing, give what you have and note the gap in one short line.",
                     if !answer_concludes_plan(open_left, content.trim().chars().count()) {
                         plan_nudges += 1;
                         if !content.trim().is_empty() {
-                            messages.push(
+                            ls.messages.push(
                                 serde_json::json!({ "role": "assistant", "content": content }),
                             );
                         }
                         // DIRECTIVE nudge: name the exact next step and forbid redoing work —
                         // weak-agentic models otherwise re-run the skill / regenerate images
                         // on a vague "continue" instead of advancing to the next step.
-                        messages.push(serde_json::json!({
+                        ls.messages.push(serde_json::json!({
                             "role": "user",
                             "content": format!(
                                 "Do NOT stop and do NOT re-run the skill. Your next unfinished plan \
@@ -24479,10 +24480,10 @@ missing, give what you have and note the gap in one short line.",
                     // stopping early). `make_deck` is exempt: one-call, never enters this loop.
                     plan_nudges += 1;
                     if !content.trim().is_empty() {
-                        messages
+                        ls.messages
                             .push(serde_json::json!({ "role": "assistant", "content": content }));
                     }
-                    messages.push(serde_json::json!({
+                    ls.messages.push(serde_json::json!({
                         "role": "user",
                         "content": "You stopped, but the request is NOT finished and you never made \
                             a plan. Call update_plan NOW with the COMPLETE list of steps needed to \
@@ -24516,7 +24517,7 @@ missing, give what you have and note the gap in one short line.",
                 }
                 // Keep the reasoning trace in context so the synthesis builds on it.
                 if !content.trim().is_empty() {
-                    messages.push(serde_json::json!({ "role": "assistant", "content": content }));
+                    ls.messages.push(serde_json::json!({ "role": "assistant", "content": content }));
                 }
                 break;
             }
@@ -24595,7 +24596,7 @@ missing, give what you have and note the gap in one short line.",
             // text answer (it kept calling tools). Force one final NO-TOOLS call so it
             // synthesizes from what it did, instead of dead-ending on "limite di passi".
             // GENERIC across domains (coding, documents, web), not travel-specific.
-            messages.push(serde_json::json!({
+            ls.messages.push(serde_json::json!({
                 "role": "user",
                 "content": "No more tools are available. Write the FINAL ANSWER NOW for \
 the user, synthesizing what you did and found in the previous steps: for a coding task \
@@ -24607,7 +24608,7 @@ to proceed."
             // vs OpenAI /v1) and stream the synthesis live. Previously this posted an
             // OpenAI-shaped body to the native endpoint → empty → canned fallback.
             let synth_payload =
-                build_chat_payload(&model, &base_url, &messages, &[], temperature, true);
+                build_chat_payload(&model, &base_url, &ls.messages, &[], temperature, true);
             let first_token = std::time::Duration::from_secs(model_first_token_timeout_secs());
             let idle = std::time::Duration::from_secs(model_idle_timeout_secs());
             let request_timeout = std::time::Duration::from_secs(model_request_timeout_secs());
@@ -24710,7 +24711,7 @@ Tell me if you want me to retry or rephrase."
         // Keep the code map FRESH on every turn in a mapped project — driven by GIT,
         // not by who edited: spawn_project_graph_refresh re-extracts only if the git
         // fingerprint changed since the last build, so it catches the AGENT's writes AND
-        // the user's own editor edits (and checkout/pull) made between messages, while
+        // the user's own editor edits (and checkout/pull) made between ls.messages, while
         // being a cheap no-op when nothing changed. Only refreshes already-mapped
         // projects (never auto-builds one the user hasn't opened).
         if !read_only {
