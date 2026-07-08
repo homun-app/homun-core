@@ -95,7 +95,7 @@ use local_first_desktop_gateway::{
 // The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
 use local_first_engine::plan::{
-    advance_plan_frontier, answer_concludes_plan, build_plan_markdown, collapse_plan_markers,
+    answer_concludes_plan, build_plan_markdown, collapse_plan_markers,
     enforce_monotonic_plan_progress, parse_plan_marker, plan_done_count, plan_incomplete_reason,
     plan_is_complete, plan_is_settled, plan_next_open, plan_step_id, plan_step_status,
     plan_step_title, plan_value_steps, replace_latest_plan_marker, MIN_DELIVERED_CHARS_TO_CONCLUDE,
@@ -18686,6 +18686,13 @@ fn tool_safety_enabled() -> bool {
     std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
 }
 
+/// ADR 0024 inc 5, 5.D1c.10 (THE MOVE): run the EXTRACTED agent loop (`engine::run_turn`) instead of
+/// the gateway's inline `run_agent_rounds` copy. Default OFF — additive, zero prod risk — until 5.D2
+/// proves parity (trace-dump OFF vs ON + LIVE) and flips it, then deletes the inline copy.
+fn engine_crate_enabled() -> bool {
+    std::env::var("HOMUN_ENGINE_CRATE").as_deref() == Ok("1")
+}
+
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
 /// Verbatim unification of the MCP and Composio confirmation blocks — the only
 /// per-family differences are the marker delimiters and the human label. The `card`
@@ -23945,6 +23952,40 @@ async fn run_agent_rounds(
     // Wire the turn-completion judge seam (was a direct free-fn call): the no-plan "did you finish?" judge.
     use local_first_engine::TurnCompletionJudge as _;
     let completion_judge = GatewayTurnCompletionJudge { state: state_owned.clone() };
+
+    // ADR 0024 inc 5, 5.D1c.10 — THE MOVE (additive, behind `HOMUN_ENGINE_CRATE`, default OFF). The
+    // seams are built once above; ON runs the EXTRACTED loop in `engine::run_turn` on those same
+    // executors, OFF falls through to the proven inline copy below. Parity is checked via the `trace`
+    // oracle (dump OFF vs ON) until 5.D2 flips the default and deletes this inline copy. Zero prod risk
+    // while OFF. `thread_id`/`composio_writes`/`catalog_index` go by-ref (the executors already borrow them).
+    if engine_crate_enabled() {
+        return local_first_engine::agent_loop::run_turn(
+            ls,
+            cfg,
+            &model_client,
+            &capability_executor,
+            &mut browser_executor,
+            &plan_progress,
+            &completion_judge,
+            &compactor,
+            &turn_policy,
+            tx,
+            temperature,
+            thread_id.as_deref(),
+            &composio_writes,
+            &catalog_index,
+            memory_user_message,
+            memory_answer,
+            last_model_error,
+            final_done,
+            plan_nudges,
+            turn_used_tools,
+            browse_sources,
+            trace_dir,
+        )
+        .await;
+    }
+
     for round in 0..cfg.hard_round_ceiling {
         let max_rounds = if ls.browser_used {
             cfg.browser_max_rounds
