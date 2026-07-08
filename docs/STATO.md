@@ -70,11 +70,14 @@ plan state machine + giuntura `ModelClient` — vedi voce in cima a "Dove siamo"
   con `preseeded_user_message_id` che riusa `local_user_{request_id}` → 1 solo messaggio-utente. Sub-bug
   titolo ("Step 2 in corso") fixato via `title_model_inputs`+`strip_display_markers`. Test verdi. **NON da
   inc 5** (commit `69d02d39`, 3gg prima). **Validazione LIVE (turn→cambia chat→torna) ancora da fare.**
-- **5e.3 prep helper (2026-07-08):** consolidati nel crate `engine` altri helper puri del loop —
+- **5e.3 prep — logica pura convergiuta nel crate `engine` (2026-07-08):**
   `collapse_plan_markers`/`replace_latest_plan_marker` → `engine::plan` (`d7f5dd9d`);
-  `extract_source_urls`/`is_low_value_source_url`/`fonti_section` → nuovo `engine::text` (`cb79722d`). Restano
-  molti helper (alcuni con const/dep a cascata) + il **grosso: relocazione del corpo loop** (multi-slice,
-  parità LIVE). Mappa dipendenze completa fatta (Explore).
+  `extract_source_urls`/`is_low_value_source_url`/`fonti_section` → nuovo `engine::text` (`cb79722d`);
+  **⭐ moduli INTERI `markers` (260) + `model_normalize` (588) → `engine`** (`41e96ac2`, ~848 righe pure,
+  re-export gateway, test spostati → engine 30/30). Il crate `engine` ha ora: contract, events, plan, text,
+  markers, model_normalize. Restano: helper puri minori (vault-const, `answer_body_is_empty`, ecc.) +
+  ~15 op **gateway-stateful** da portare a port (HTTP/AppState/globali) + il **grosso: relocazione del corpo
+  loop** (~860 righe, multi-slice, parità LIVE). Mappa dipendenze completa (Explore).
 - **⭐ VALIDAZIONE LIVE inc 5 (2026-07-08) — 5d.1b confermato dal vivo.** App avviata col binario nuovo
   (`cargo run` dev). Turno browsing: browser naviga (5d.2 + 5e.1), risposta pulita, fonti, 1 `done`, 0 errori.
   Turno con **piano forzato**: `plan_update` avanza **1/3 → 2/3 → 3/3** monotòno (s1 done con evidenza, s2 doing,
