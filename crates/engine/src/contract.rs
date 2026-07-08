@@ -215,6 +215,15 @@ pub trait PlanProgress {
         criterion: &str,
         evidence: &str,
     ) -> impl Future<Output = (bool, String)> + Send;
+
+    /// Reconcile the runtime plan at DELIVERY (ADR 0024 inc 5, 5.D1c.4): once a SUBSTANTIAL final
+    /// answer is delivered, force every still-open step to `done` (preserving `blocked`) and return
+    /// the reconciled steps — or `None` when reconciliation is disabled or nothing changed. The loop
+    /// then persists the returned steps (via [`persist_plan`]) so the next turn won't falsely resume a
+    /// plan this answer already finished. SYNC + pure (unlike the other methods it touches no store):
+    /// it lives on this seam ONLY because the reconcile logic needs the gateway's typed `ExecutionPlan`
+    /// while the leaf engine holds the plan as an opaque `Value`.
+    fn reconcile_on_delivery(&self, plan: &Value, delivered: &str) -> Option<Vec<Value>>;
 }
 
 /// The loop's turn-level completion judge (ADR 0024, increment 5, Point 2a). When the model ACTS but
@@ -406,6 +415,10 @@ mod tests {
         ) -> (bool, String) {
             (self.judge, String::new())
         }
+        fn reconcile_on_delivery(&self, _plan: &Value, _delivered: &str) -> Option<Vec<Value>> {
+            // Scripted: report one reconciled step so the seam's sync bridge is exercised.
+            Some(vec![Value::Null])
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -417,6 +430,11 @@ mod tests {
         plan.record_step_outcome(Some("t1"), &Value::Null, &["evidence".into()]).await;
         assert_eq!(*plan.persisted.lock().unwrap(), vec![2], "persisted a 2-step plan");
         assert_eq!(*plan.outcomes.lock().unwrap(), 1, "recorded one verified outcome");
+        assert_eq!(
+            plan.reconcile_on_delivery(&Value::Null, "a substantial delivered answer"),
+            Some(vec![Value::Null]),
+            "the sync reconcile bridge returns the reconciled steps"
+        );
     }
 
     // A scripted completion judge proves the seam is usable + mockable: the future loop can be driven

@@ -23976,6 +23976,11 @@ async fn run_agent_rounds(
         read_only,
         channel_owner,
     };
+    // 5.D1c.4: the plan-progress seam. Built once per turn (cheap all-Arc AppState clone). For now
+    // the loop routes only the delivery reconcile (the Value↔ExecutionPlan bridge) through it; 5.D1c.5
+    // moves the plan persist + step verification onto the same adapter.
+    use local_first_engine::PlanProgress as _;
+    let plan_progress = GatewayPlanProgress { state: state_owned.clone() };
     for round in 0..cfg.hard_round_ceiling {
         let max_rounds = if ls.browser_used {
             cfg.browser_max_rounds
@@ -24596,7 +24601,7 @@ missing, give what you have and note the gap in one short line.",
         // (see plan_steps_reconciled_on_delivery) — and PERSIST it, so the runtime plan is
         // settled → the next turn won't falsely resume a plan this answer already finished.
         let delivered = collapse_plan_markers(&ls.accumulated);
-        let delivered = match plan_steps_reconciled_on_delivery(&plan_value_from(&ls.plan), &delivered) {
+        let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
                 upsert_runtime_plan_memory_from_state(
                     &state_owned,
@@ -24693,7 +24698,7 @@ Tell me if you want me to retry or rephrase."
         // carries plan blocks, so this is a no-op when synthesis succeeded). Reconcile +
         // persist the plan on this exit path too, so a synthesis delivery also settles it.
         let delivered = collapse_plan_markers(&final_text);
-        let delivered = match plan_steps_reconciled_on_delivery(&plan_value_from(&ls.plan), &delivered) {
+        let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
                 upsert_runtime_plan_memory_from_state(
                     &state_owned,
@@ -30897,7 +30902,8 @@ impl local_first_engine::EventSink for StreamSink {
 /// a cheap `AppState` clone (all-`Arc` fields) because `persist_plan`/`record_step_outcome` move it into
 /// `spawn_blocking` (the memory facade is sync). Delegates verbatim to the three existing helpers, so
 /// behavior is unchanged — the loop still calls them directly until inc 5e adopts this adapter.
-#[allow(dead_code)] // constructed by the gateway wiring at inc 5e (the loop move); defined now, contract-first.
+// Constructed live in run_agent_rounds (5.D1c.4): the loop routes the delivery reconcile through this
+// adapter; 5.D1c.5 adds the plan persist + step verification paths.
 pub(crate) struct GatewayPlanProgress {
     pub state: AppState,
 }
@@ -30936,6 +30942,16 @@ impl local_first_engine::PlanProgress for GatewayPlanProgress {
         evidence: &str,
     ) -> (bool, String) {
         verify_step_complete(&self.state.http, title, criterion, evidence).await
+    }
+
+    fn reconcile_on_delivery(
+        &self,
+        plan: &serde_json::Value,
+        delivered: &str,
+    ) -> Option<Vec<serde_json::Value>> {
+        // The Value↔ExecutionPlan bridge (5.D1c.4): convert the engine's opaque plan `Value` to the
+        // typed `ExecutionPlan` and run the delivery reconcile. Pure — no `self.state` needed.
+        plan_steps_reconciled_on_delivery(&plan_value_from(plan), delivered)
     }
 }
 
