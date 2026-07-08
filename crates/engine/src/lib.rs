@@ -38,9 +38,14 @@ pub mod model_normalize;
 /// ahead of the loop-body move; the gateway constructs it and the inline loop mutates it.
 pub mod loop_state;
 
+/// The loop's turn-constant config (ADR 0024 inc 5, 5.D1c.1) — resolved gateway-side, injected so the
+/// leaf engine never reads env.
+pub mod config;
+
 pub use contract::{
     BrowserExecutor, CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError,
     ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,
     TurnCompletionJudge,
 };
+pub use config::TurnConfig;
 pub use loop_state::LoopState;

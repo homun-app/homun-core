@@ -23988,7 +23988,17 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // larger browser budget). This keeps non-browser turns identical to today.
         // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
         ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
-        run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources).await;
+        // 5.D1c.1: resolve the loop's turn-constant config ONCE (env-stable for the turn) so the moved
+        // loop never reads env. Behavior-preserving — same values the inline getters returned.
+        let cfg = local_first_engine::TurnConfig {
+            hard_round_ceiling: hard_round_ceiling(),
+            max_rounds: chat_max_rounds(),
+            browser_max_rounds: chat_browser_max_rounds(),
+            browser_nav_cap: chat_browser_nav_cap(),
+            reconcile_on_delivery: plan_reconcile_on_delivery_enabled(),
+            verbose: verbose_debug(),
+        };
+        run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg).await;
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -24041,6 +24051,7 @@ async fn run_agent_rounds(
     automation_workspace_id: WorkspaceId,
     turn_scaffold: scaffold::ScaffoldProfile,
     mut browse_sources: Vec<String>,
+    cfg: local_first_engine::TurnConfig,
 ) {
     // model_client borrows http+tx; built here (was in setup) so the borrows are local.
     let model_client = crate::model_client::GatewayModelClient { http: &http, tx };
@@ -24084,11 +24095,11 @@ async fn run_agent_rounds(
         read_only,
         channel_owner,
     };
-    for round in 0..hard_round_ceiling() {
+    for round in 0..cfg.hard_round_ceiling {
         let max_rounds = if ls.browser_used {
-            chat_browser_max_rounds()
+            cfg.browser_max_rounds
         } else {
-            chat_max_rounds()
+            cfg.max_rounds
         };
         // Hard stop once the effective budget is reached (the forced-synthesis
         // fallback below still runs because `final_done` is false). The budget is
@@ -24111,7 +24122,7 @@ async fn run_agent_rounds(
                 .iter()
                 .filter(|e| e.starts_with("browser_navigate"))
                 .count();
-            if step_navs >= chat_browser_nav_cap() {
+            if step_navs >= cfg.browser_nav_cap {
                 let _ = emit_stream_event(
                     &tx,
                     GenerateStreamEvent::Delta {
@@ -24621,7 +24632,7 @@ missing, give what you have and note the gap in one short line.",
                 // step to `done` + persist, so the runtime plan matches the delivered work
                 // and the NEXT turn doesn't falsely resume it. Reuses the canonical
                 // mark-done→persist path.
-                if plan_reconcile_on_delivery_enabled() {
+                if cfg.reconcile_on_delivery {
                     if let Some(open_index) = plan_steps
                         .iter()
                         .position(|s| plan_step_status(s) != "done")
@@ -24683,7 +24694,7 @@ missing, give what you have and note the gap in one short line.",
         // leaves the round loop, so the synthesis runs exactly once — no spin, no counter;
         // if it too comes back empty, its own fallback chain ends the turn cleanly.
         if should_force_synthesis_for_empty_visible_answer(&ls.accumulated, &content) {
-            if verbose_debug() {
+            if cfg.verbose {
                 let fr = round_finish_reason.as_deref().unwrap_or("");
                 eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
             }
