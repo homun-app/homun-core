@@ -7,8 +7,9 @@ mod chat_store;
 mod db_migrate;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod model_client;
-// Multi-provider inference registry (Phase 1 of per-role model routing).
-mod model_normalize;
+// Model-output normalization moved WHOLE into the engine crate (ADR 0024 inc 5e.3, pure serde
+// module); re-exported so `model_normalize::…` call sites are unchanged.
+use local_first_engine::model_normalize;
 mod model_registry;
 mod scaffold;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).

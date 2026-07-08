@@ -305,7 +305,7 @@ pub fn sanitize_model_text(text: &str) -> String {
         s = s.replace(stray, "");
     }
     // Collapse degenerate ‹‹REASONING›› floods (weak browser models spew orphan closings).
-    s = local_first_desktop_gateway::markers::normalize_reasoning_markers(&s);
+    s = crate::markers::normalize_reasoning_markers(&s);
     s.trim().to_string()
 }
 

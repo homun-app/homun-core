@@ -26,6 +26,14 @@ pub mod events;
 /// Pure text/answer helpers the loop uses on delivery (ADR 0024 inc 5e.3).
 pub mod text;
 
+/// The single marker toolkit (‹‹PLAN››/‹‹REASONING››/… parse, strip, balance, stream-filter).
+/// Pure; relocated whole from the gateway (ADR 0024 inc 5e.3) — `model_normalize` depends on it.
+pub mod markers;
+
+/// Model-output normalization (ADR 0019): raw model shapes → one canonical valid form.
+/// Pure (serde only); relocated whole from the gateway (ADR 0024 inc 5e.3) as loop-move prep.
+pub mod model_normalize;
+
 pub use contract::{
     CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError, ModelClient,
     ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,

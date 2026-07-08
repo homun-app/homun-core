@@ -1,8 +1,9 @@
 //! Local HTTP gateway contracts for the Electron desktop shell.
 
-/// The single control-marker toolkit (‹‹NAME››…‹‹/NAME›› protocol), shared by the lib and the
-/// binary — see the module docs. The mirror of the frontend's `lib/markers.ts`.
-pub mod markers;
+// The single control-marker toolkit (‹‹NAME››…‹‹/NAME›› protocol) moved WHOLE into the engine crate
+// (ADR 0024 inc 5e.3, pure); re-exported so `local_first_desktop_gateway::markers::…` call sites
+// (main.rs, chat_store.rs) are unchanged. Mirror of the frontend's `lib/markers.ts`.
+pub use local_first_engine::markers;
 
 use local_first_context_compression::{
     CompressionMetrics, CompressionPolicy, CompressionResult, ContextCompressor, ContextItem,
