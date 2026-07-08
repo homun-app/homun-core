@@ -144,6 +144,43 @@ pub fn marker_safe_split(buf: &str) -> (&str, &str) {
 /// Weak browser models (MiniMax) degenerate into a flood of bare `‹‹/REASONING›` closings that
 /// otherwise leak to the UI as literal text — this collapses that noise while preserving a real
 /// reasoning block. Other markers (‹‹PLAN››, ‹‹ACT››, …) pass through untouched. Appends to `out`.
+/// Fold the MALFORMED reasoning-delimiter variants weak models emit into the canonical
+/// `‹‹REASONING››` / `‹‹/REASONING››` form, so the balancer (and the display stripper) collapse them
+/// instead of leaking them to the UI. Each reasoning model degenerates into a DIFFERENT delimiter
+/// shape — canonicalizing the whole CLASS here (not one shape at a time) is what stops the recurring
+/// "reasoning trace leaked as literal text" whack-a-mole. Handles:
+///   - single-guillemet `‹REASONING›` / `‹/REASONING›` (one U+2039, vs the canonical double)
+///   - XML-style `<REASONING>` / `</REASONING>` (+ lowercase)
+/// (`<think>`/`<thinking>` are stripped upstream by `sanitize_model_text`; the STREAM filter strips
+/// them too — see `StreamMarkerFilter`.) The already-canonical double form is protected first (it
+/// CONTAINS the single form as a substring), via NUL placeholders that never occur in model text.
+pub fn canonicalize_reasoning_delimiters(s: &str) -> String {
+    if !s.contains('‹') && !s.contains('<') {
+        return s.to_string(); // fast path: no delimiter chars at all
+    }
+    const OPEN_PH: &str = "\u{0}RO\u{0}";
+    const CLOSE_PH: &str = "\u{0}RC\u{0}";
+    let mut t = s
+        // 1) protect the canonical DOUBLE forms first (longest close/open before short).
+        .replace("‹‹/REASONING››", CLOSE_PH)
+        .replace("‹‹/REASONING›", CLOSE_PH)
+        .replace("‹‹REASONING››", OPEN_PH)
+        .replace("‹‹REASONING›", OPEN_PH);
+    // 2) XML-style variants (close before open; common casings). `<think>`/`<thinking>` are the
+    //    reasoning models' native delimiter (deepseek et al.) — the committed path strips those blocks
+    //    upstream, but the STREAM filter relies on this to fold them into a display-strippable block.
+    for c in ["</REASONING>", "</reasoning>", "</think>", "</thinking>"] {
+        t = t.replace(c, CLOSE_PH);
+    }
+    for o in ["<REASONING>", "<reasoning>", "<think>", "<thinking>"] {
+        t = t.replace(o, OPEN_PH);
+    }
+    // 3) single-guillemet variants (close before open; now safe — doubles are placeholders).
+    t = t.replace("‹/REASONING›", CLOSE_PH).replace("‹REASONING›", OPEN_PH);
+    // 4) restore to the canonical double form.
+    t.replace(CLOSE_PH, "‹‹/REASONING››").replace(OPEN_PH, "‹‹REASONING››")
+}
+
 pub fn balance_reasoning_markers(s: &str, open_state: &mut bool, out: &mut String) {
     const CLOSE2: &str = "‹‹/REASONING››";
     const CLOSE1: &str = "‹‹/REASONING›";
@@ -189,9 +226,12 @@ pub fn balance_reasoning_markers(s: &str, open_state: &mut bool, out: &mut Strin
 /// One-shot balance for a complete text (final/persisted content): a fresh block state, and any
 /// left-open reasoning is closed so the marker never dangles into the visible answer.
 pub fn normalize_reasoning_markers(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
+    // Fold malformed variants (single-guillemet / XML) into canonical form FIRST, so the balancer
+    // collapses the whole flood regardless of the shape the model degenerated into.
+    let canon = canonicalize_reasoning_delimiters(s);
+    let mut out = String::with_capacity(canon.len());
     let mut open_state = false;
-    balance_reasoning_markers(s, &mut open_state, &mut out);
+    balance_reasoning_markers(&canon, &mut open_state, &mut out);
     if open_state {
         out.push_str("‹‹/REASONING››");
     }
@@ -214,15 +254,20 @@ impl StreamMarkerFilter {
     pub fn push(&mut self, fragment: &str) -> String {
         self.hold.push_str(fragment);
         let (emit, rest) = marker_safe_split(&self.hold);
-        let mut out = String::with_capacity(emit.len());
-        balance_reasoning_markers(emit, &mut self.reasoning_open, &mut out);
+        // Fold malformed reasoning delimiters (single-guillemet / XML `<think>`) in the emit portion to
+        // the canonical form BEFORE balancing, so a weak model's flood collapses live instead of leaking
+        // raw to the UI (the committed path does the same via sanitize_model_text → normalize).
+        let canon = canonicalize_reasoning_delimiters(emit);
+        let mut out = String::with_capacity(canon.len());
+        balance_reasoning_markers(&canon, &mut self.reasoning_open, &mut out);
         self.hold = rest.to_string();
         out
     }
 
     pub fn flush(&mut self) -> String {
+        let canon = canonicalize_reasoning_delimiters(&self.hold);
         let mut out = String::new();
-        balance_reasoning_markers(&self.hold, &mut self.reasoning_open, &mut out);
+        balance_reasoning_markers(&canon, &mut self.reasoning_open, &mut out);
         self.hold.clear();
         if self.reasoning_open {
             out.push_str("‹‹/REASONING››");
@@ -272,6 +317,67 @@ mod tests {
         assert_eq!(
             strip_display_markers("‹‹REASONING››thought‹‹/REASONING››\nHi").trim(),
             "Hi"
+        );
+    }
+
+    // GOLDEN: the recurring reasoning-flood. A weak browser model degenerated into MALFORMED
+    // reasoning delimiters — single-guillemet `‹/REASONING›` (one U+2039) and XML `<REASONING>` —
+    // that the canonical (double `‹‹››`) balancer used to miss, so they leaked to the UI as literal
+    // text (observed 2026-07-08 on a deepseek browser turn). Canonicalize folds the whole class to
+    // the double form so balance + display-strip clean it. Keep these cases: each is a shape a real
+    // model emitted.
+    #[test]
+    fn canonicalize_folds_single_guillemet_and_xml_reasoning() {
+        // single-guillemet open/close → canonical double
+        assert_eq!(
+            canonicalize_reasoning_delimiters("A‹REASONING›t‹/REASONING›B"),
+            "A‹‹REASONING››t‹‹/REASONING››B"
+        );
+        // XML-style → canonical double
+        assert_eq!(
+            canonicalize_reasoning_delimiters("A<REASONING>t</REASONING>B"),
+            "A‹‹REASONING››t‹‹/REASONING››B"
+        );
+        // already-canonical double is preserved (NOT double-mangled despite containing the single form)
+        assert_eq!(
+            canonicalize_reasoning_delimiters("‹‹REASONING››t‹‹/REASONING››"),
+            "‹‹REASONING››t‹‹/REASONING››"
+        );
+    }
+
+    // GOLDEN (streaming): the same malformed flood arriving through the live StreamMarkerFilter must
+    // be folded + collapsed, not leaked raw to the UI. Mirrors the committed-path golden above.
+    #[test]
+    fn stream_filter_folds_malformed_reasoning_flood_live() {
+        let mut f = StreamMarkerFilter::default();
+        let mut live = String::new();
+        // A degenerate chunk: single-guillemet + XML reasoning noise interleaved with real prose.
+        live.push_str(&f.push("Visible A. ‹/REASONING›‹/REASONING› more. "));
+        live.push_str(&f.push("<think>hidden</think>Visible B."));
+        live.push_str(&f.flush());
+        // After display-strip (what the UI renders) only the real prose survives — no raw ‹/REASONING›,
+        // no <think>, no guillemet garbage.
+        let rendered = strip_display_markers(&live);
+        assert!(!rendered.contains("REASONING"), "raw REASONING leaked: {rendered:?}");
+        assert!(!rendered.contains("<think"), "raw <think leaked: {rendered:?}");
+        assert!(rendered.contains("Visible A."));
+        assert!(rendered.contains("Visible B."));
+    }
+
+    #[test]
+    fn normalize_collapses_malformed_reasoning_flood() {
+        // A flood of orphan single-guillemet closings (the observed degenerate loop) → dropped.
+        let flood = "Answer body.‹/REASONING›‹/REASONING›‹/REASONING›‹/REASONING›";
+        assert_eq!(normalize_reasoning_markers(flood), "Answer body.");
+        // A malformed reasoning BLOCK becomes a well-formed one → then display-strip removes it.
+        let leaked = "‹REASONING›hidden chain of thought‹/REASONING›Visible.";
+        let normalized = normalize_reasoning_markers(leaked);
+        assert_eq!(normalized, "‹‹REASONING››hidden chain of thought‹‹/REASONING››Visible.");
+        assert_eq!(strip_display_markers(&normalized).trim(), "Visible.");
+        // XML flood likewise.
+        assert_eq!(
+            strip_display_markers(&normalize_reasoning_markers("</REASONING></REASONING>Done.")).trim(),
+            "Done."
         );
     }
 
