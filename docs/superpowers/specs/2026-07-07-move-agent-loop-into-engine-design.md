@@ -229,3 +229,100 @@ Il corpo che si sposta usa, oltre a `LoopState` (`&mut`) e ai 5 seam:
 Finché `HOMUN_ENGINE_CRATE` è OFF il gateway usa la copia inline invariata → un bug nella copia engine non
 tocca la produzione. Il commit del corpo-engine è quindi committabile anche prima della parità completa; il
 rischio si materializza **solo al flip** (5.D2), gated sull'evidenza dell'oracolo + LIVE.
+
+---
+
+## 5.D1c — DESIGN PASS (2026-07-08, dopo slice 5b)
+
+Il dispatch di `run_agent_rounds` è engine-safe (slice 4+5). Prima di spostare il corpo servirebbe azzerare
+la superficie di **helper gateway free-fn** che il corpo ancora chiama. Ho fatto l'inventario reale
+(intersezione fn-definite-nel-gateway × token-chiamati nel corpo `run_agent_rounds` 24013→24882, 869 righe).
+
+### Scoperta che ridimensiona il lavoro
+
+**Molta superficie è GIÀ nel crate o GIÀ dietro un seam.** I marker/text helper che l'arco temeva
+(`sanitize_model_text`, `replace_latest_plan_marker`, `collapse_plan_markers`,
+`append_vault_reveal_marker_if_missing`, `fonti_section`, `extract_source_urls`, `is_low_value_source_url`,
+`extract_vault_reveal_marker`) sono **tutti già in `crates/engine`** (`model_normalize`/`plan`/`markers`/`text`)
+→ zero lavoro al move. E `build_chat_payload`/`verify_step_complete`/`begin|end_browser_activity`/
+`set_memory_workspace` compaiono **0 volte** nel corpo: già assorbiti dentro gli impl dei seam (ModelClient/
+PlanProgress/BrowserExecutor). La superficie residua è piccola e localizzata.
+
+### Inventario residuo (per bucket → decisione)
+
+**Bucket A — PURE, da rilocare in `crates/engine`** (arg solo `str`/`Value`/primitivi/std → leaf-safe):
+| fn | firma | destinazione |
+|---|---|---|
+| `apply_tool_effects(&mut LoopState, &mut bool, usize, ToolEffects)` | pura su tipi engine | **`impl LoopState { fn apply_effects(…) }`** |
+| `prune_browser_history(&mut [Value], &BTreeSet<String>)` | pura | `engine` (mod nuovo o `text`) |
+| `summarize_tool_action(&str,&str)->Option<String>` | pura | `engine` |
+| `connected_capability_execution_trace_line(&str,&[(String,String,Value)])->Option<String>` | pura (tuple slice, NON CapabilityEntry) | `engine` |
+| `is_browser_granular_tool(&str)->bool` / `resolve_browser_chat_tool_name(&str)->Option<&'static str>` | pure | `engine` (accanto a BrowserExecutor) |
+| `should_force_synthesis_for_empty_visible_answer(&str,&str)->bool` | pura | `engine` |
+
+**Bucket B — CONFIG, da risolvere UNA volta gateway-side → `engine::TurnConfig`** (getter senza arg che
+leggono env; il leaf-crate non deve leggere l'env):
+`chat_max_rounds`, `chat_browser_max_rounds`, `chat_browser_nav_cap`, `hard_round_ceiling`,
+`plan_reconcile_on_delivery_enabled`, `step_verification_enabled`, `plan_autoadvance_from_evidence_enabled`,
+`dump_enabled`, `verbose_debug` (+ eventuali altri `*_enabled()` interni). Env-stabili nel turno → risolti
+una volta = behavior-preserving.
+
+**Bucket C — SEAM già esistente, basta sostituire la chiamata:**
+- `emit_stream_event(&tx, ev)` → `event_sink.emit(ev).await` — **solo 8 siti nel corpo** (gli emit pesanti
+  sono già dentro gli impl dei seam). Il corpo tiene un `&dyn EventSink` invece di `&StreamSink`.
+- `upsert_runtime_plan_memory_from_state(state, tid, plan)` → `PlanProgress::persist_plan` — 3 siti (righe
+  619/701/799 del corpo).
+
+**Bucket D — GATEWAY-shaped, serve un SEAM nuovo o iniezione:**
+- `try_advance_frontier_from_evidence(&mut ls, &AppState, tid, &StreamSink, round)` — composito: internamente
+  usa `verify_step_complete`(HTTP) + persist + emit → **ri-esprimere sui seam PlanProgress+EventSink**, poi
+  diventa pura (ls + seam) e si sposta.
+- `compact_completed_step(&reqwest::Client, &mut Vec<Value>, &mut usize)` (riga 124, F3) — è una chiamata LLM
+  di sintesi-compattazione → **seam nuovo `ContextCompactor`** (impl gateway avvolge la fn attuale).
+- `ollama_capabilities(&str,&str)->Option<OllamaCapabilities>` (gating vision per l'inject immagine) — tipo
+  gateway → **iniettare una probe `fn(&str,&str)->bool` (vision_capable)**, non spostare la cache.
+
+**Bucket E — BRIDGE `Value`↔`ExecutionPlan`, resta gateway** (`ExecutionPlan` vive in `crates/orchestrator`,
+il leaf `engine` non può referenziarlo):
+- `plan_value_from(&Value)->ExecutionPlan` + `plan_steps_reconciled_on_delivery(&ExecutionPlan,&str)->Option<Vec<Value>>`
+  → **un solo metodo-seam gateway-implementato** `reconcile_on_delivery(&Value,&str)->Option<Vec<Value>>` (fa
+  from_value + reconcile). Il corpo lo chiama via seam e resta ExecutionPlan-free. (Se ci sono altri usi di
+  `plan_value_from` nel merge di `update_plan`, passano dallo stesso bridge.)
+
+**Bucket F — TAIL (ultime ~40 righe, dopo riga 830): NON si sposta.** `learn_via_service_or_inline` (834),
+`lock_store`+`workspace_for_thread` (856-858), `spawn_project_graph_refresh` (862) + il cleanup transport
+(`tx.entry.finished`) sono coda post-turno. Decisione: **`run_turn` ritorna un `TurnOutcome`; la coda learn/
+graph/transport resta in `stream_chat_via_openai`** e consuma l'outcome. In un colpo esce dal corpo movibile
+tutta la superficie memory-write-back + store + graph-refresh. (`workflow_route_blocked_tool_message(route:
+&CapabilityRouteDecision,…)`: il gating workflow-route va **spostato dentro il seam CapabilityExecutor/
+BrowserExecutor**, che già è il chokepoint dei tool → esce dal corpo.)
+
+### Slice plan proposto (ognuna behavior-preserving, gated, committabile; loop ANCORA nel gateway fino a .10)
+
+1. **5.D1c.1 — `engine::TurnConfig`** (Bucket B): risolvi i getter una volta, passa la struct, il corpo legge `cfg.*`.
+2. **5.D1c.2 — riloca i PURE** (Bucket A) in `engine`; `apply_tool_effects`→`LoopState::apply_effects`. Gateway li chiama via `use`.
+3. **5.D1c.3 — EventSink swap** (Bucket C): gli 8 `emit_stream_event`→`event_sink.emit`; il corpo tiene `&dyn EventSink`.
+4. **5.D1c.4 — plan reconcile seam** (Bucket E): fold `plan_value_from`+`plan_steps_reconciled_on_delivery` dietro `reconcile_on_delivery`.
+5. **5.D1c.5 — plan-progress swap** (Bucket C+D): 3× `upsert_*`→`persist_plan`; ri-esprimi `try_advance_frontier_from_evidence` sui seam → diventa movibile.
+6. **5.D1c.6 — `ContextCompactor` seam** (Bucket D): avvolgi `compact_completed_step`.
+7. **5.D1c.7 — vision-probe + route-gate** (Bucket D/E): inietta la probe vision; sposta il workflow-route-block dentro il seam tool.
+8. **5.D1c.8 — split del TAIL** (Bucket F): `run_turn` ritorna `TurnOutcome`; learn/graph/store/transport restano gateway-side.
+9. **5.D1c.9 — trace-dump come sink iniettato** (Bucket A-debug): il record+`extract_markers`/`hash_hex` puri in engine, l'`append` file resta gateway dietro un `Option<TraceSink>` (debug-only; ammesso anche droppare-e-riaggiungere).
+10. **5.D1c.10 — IL MOVE**: il corpo ora referenzia solo tipi engine + seam + `TurnConfig` + `LoopState`. **Copia** il corpo in `engine::run_turn`, tieni la copia inline gateway, il dispatch sceglie su `HOMUN_ENGINE_CRATE` (default OFF, additivo = zero rischio prod). Parità via diff `tool_trace_dump` (io guido i turni API) + LIVE (utente co-pilota delivery/sintesi/reconcile).
+11. **5.D2 — flip default ON + cancella la copia inline** — SOLO con parità dimostrata, **con l'utente presente**.
+
+### Nota sul "duplicato temporaneo" (converge-don't-duplicate)
+
+Il passo .10 crea una copia ~860-righe (inline gateway OFF vs `engine::run_turn` ON). È il pattern sanzionato
+di estrazione behavior-preserving con via-di-fuga: **dup transitorio con cancellazione già schedulata** (5.D2).
+Vive solo tra .10 e .2. Se preferisci evitare del tutto il dup: le slice 1→9 rendono il move meccanico e
+l'oracolo prova la parità → si può spostare senza flag (nessuna copia OFF) e affidarsi a oracolo+test+LIVE.
+Trade-off: flag = zero-rischio-prod al primo atterraggio ma 860 righe duplicate per poco; no-flag = niente dup
+ma nessun interruttore di sicurezza runtime. **Raccomando il flag** (coerente con la metodologia del progetto).
+
+### Ordine di rischio/effort
+
+Basso e puramente meccanico: .1, .2, .3, .5(swap upsert). Medio (nuovo seam ma piccolo): .4, .6, .8.
+Piccolo/periferico: .7, .9. Alto (attended, LIVE): .10 e .2. Le slice 1→9 sono TUTTE behavior-preserving
+col loop ancora nel gateway → validabili con la suite + `tool_trace_dump` senza co-pilotaggio; il co-pilotaggio
+serve solo da .10.
