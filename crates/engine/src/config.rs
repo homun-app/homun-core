@@ -22,6 +22,10 @@ pub struct TurnConfig {
     pub browser_nav_cap: usize,
     /// Whether the delivery reconcile pass runs (`plan_reconcile_on_delivery_enabled`).
     pub reconcile_on_delivery: bool,
+    /// Whether the mid-turn evidence-driven frontier auto-advance runs (`plan_autoadvance_from_evidence_enabled`).
+    pub autoadvance_from_evidence: bool,
+    /// Whether the F2 step-verification judge runs at all (`step_verification_enabled`).
+    pub step_verification: bool,
     /// Dev-time verbose logging gate.
     pub verbose: bool,
 }

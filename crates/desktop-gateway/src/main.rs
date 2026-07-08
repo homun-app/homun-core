@@ -18707,14 +18707,20 @@ fn tool_safety_enabled() -> bool {
 /// switch lasts the rest of the turn, no return to the manager). Verified-only, so thrashing on a
 /// hard-to-find market never fakes progress. Stride-gated so the (cheap `memory`-role) judge runs
 /// at most once per few tool results.
+///
+/// 5.D1c.5: re-expressed over the seams (`PlanProgress` for verify/record/persist + the steps→Value
+/// bridge, `EventSink` for the card, `TurnConfig` for the flags) so it carries no `&AppState` /
+/// `&StreamSink` / `ExecutionPlan` and moves into the engine with the loop. Behavior unchanged — each
+/// seam call delegates to the exact former free-fn.
 async fn try_advance_frontier_from_evidence(
     ls: &mut local_first_engine::LoopState,
-    state: &AppState,
+    plan_progress: &impl local_first_engine::PlanProgress,
+    event_sink: &impl local_first_engine::EventSink,
+    cfg: &local_first_engine::TurnConfig,
     thread_id: Option<&str>,
-    tx: &StreamSink,
     round: usize,
 ) {
-    if !plan_autoadvance_from_evidence_enabled() || !step_verification_enabled() {
+    if !cfg.autoadvance_from_evidence || !cfg.step_verification {
         return;
     }
     // Evidence stride: only re-check after a few new tool outcomes since the last attempt.
@@ -18745,42 +18751,33 @@ async fn try_advance_frontier_from_evidence(
             .unwrap_or("")
             .to_string();
         let (ok, _reason) =
-            verify_step_complete(&state.http, &title, &criterion, &batch_evidence).await;
+            plan_progress.verify_step_complete(&title, &criterion, &batch_evidence).await;
         if !ok {
             return; // frontier step not proven done yet → leave it doing
         }
         let mut plan_steps = plan_steps;
         advance_plan_frontier(&mut plan_steps);
         let verified_step = plan_steps[idx].clone();
-        let verified_evidence = ls.step_evidence.clone();
-        let st = state.clone();
-        let thread_for_memory = thread_id.map(|s| s.to_string());
-        let _ = tokio::task::spawn_blocking(move || {
-            record_runtime_plan_step_outcome_from_state(
-                &st,
-                thread_for_memory.as_deref(),
-                &verified_step,
-                &verified_evidence,
-            );
-        })
-        .await;
-        ls.plan = serde_json::to_value(runtime_execution_plan(&plan_steps)).unwrap_or_default();
+        // record_step_outcome clones the evidence internally (its impl offloads to spawn_blocking),
+        // so pass the current window by ref — the same evidence the old inline clone captured pre-clear.
+        plan_progress
+            .record_step_outcome(thread_id, &verified_step, &ls.step_evidence)
+            .await;
+        ls.plan = plan_progress.plan_value_from_steps(&plan_steps);
         ls.progress_anchor_round = round; // F1: real progress → reset the stall guard
-        let _ = emit_stream_event(
-            tx,
-            GenerateStreamEvent::Delta {
+        event_sink
+            .emit(GenerateStreamEvent::Delta {
                 text: format!(
                     "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
                     title.chars().take(60).collect::<String>()
                 ),
-            },
-        )
-        .await;
+            })
+            .await;
         // The canonical live plan card (→ plan_update event) + durable runtime plan, exactly like
         // the model's own step_advance path.
         let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
-        let _ = emit_stream_event(tx, GenerateStreamEvent::Delta { text: plan_mark }).await;
-        upsert_runtime_plan_memory_from_state(state, thread_id, &plan_steps);
+        event_sink.emit(GenerateStreamEvent::Delta { text: plan_mark }).await;
+        plan_progress.persist_plan(thread_id, &plan_steps).await;
         // This evidence window was consumed by the advance — reset it + the stride anchor.
         ls.step_evidence.clear();
         ls.progress_verify_anchor = 0;
@@ -23873,6 +23870,8 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
             reconcile_on_delivery: plan_reconcile_on_delivery_enabled(),
+            autoadvance_from_evidence: plan_autoadvance_from_evidence_enabled(),
+            step_verification: step_verification_enabled(),
             verbose: verbose_debug(),
         };
         run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg).await;
@@ -24345,7 +24344,7 @@ missing, give what you have and note the gap in one short line.",
                     }
                     // Harness-derived progress: advance the plan frontier when the gathered
                     // evidence VERIFIES the current step (the weak browser model never does).
-                    try_advance_frontier_from_evidence(&mut ls, &state_owned, thread_id.as_deref(), &tx, round).await;
+                    try_advance_frontier_from_evidence(&mut ls, &plan_progress, tx, &cfg, thread_id.as_deref(), round).await;
                 }
                 // Parity harness: compute the result-derived fingerprint fields
                 // from `&result` BEFORE the push moves `result` into the message.
@@ -24522,11 +24521,7 @@ missing, give what you have and note the gap in one short line.",
                     {
                         plan_steps[open_index]["status"] = serde_json::json!("done");
                         content = replace_latest_plan_marker(&content, &plan_steps);
-                        upsert_runtime_plan_memory_from_state(
-                            &state_owned,
-                            thread_id.as_deref(),
-                            &plan_steps,
-                        );
+                        plan_progress.persist_plan(thread_id.as_deref(), &plan_steps).await;
                         if std::env::var("HOMUN_DEBUG").is_ok() {
                             eprintln!(
                                 "[plan] reconciled last open step to done on delivery: «{step}»"
@@ -24603,11 +24598,7 @@ missing, give what you have and note the gap in one short line.",
         let delivered = collapse_plan_markers(&ls.accumulated);
         let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
-                upsert_runtime_plan_memory_from_state(
-                    &state_owned,
-                    thread_id.as_deref(),
-                    &reconciled,
-                );
+                plan_progress.persist_plan(thread_id.as_deref(), &reconciled).await;
                 replace_latest_plan_marker(&delivered, &reconciled)
             }
             None => delivered,
@@ -24700,11 +24691,7 @@ Tell me if you want me to retry or rephrase."
         let delivered = collapse_plan_markers(&final_text);
         let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
-                upsert_runtime_plan_memory_from_state(
-                    &state_owned,
-                    thread_id.as_deref(),
-                    &reconciled,
-                );
+                plan_progress.persist_plan(thread_id.as_deref(), &reconciled).await;
                 replace_latest_plan_marker(&delivered, &reconciled)
             }
             None => delivered,
@@ -30952,6 +30939,12 @@ impl local_first_engine::PlanProgress for GatewayPlanProgress {
         // The Value↔ExecutionPlan bridge (5.D1c.4): convert the engine's opaque plan `Value` to the
         // typed `ExecutionPlan` and run the delivery reconcile. Pure — no `self.state` needed.
         plan_steps_reconciled_on_delivery(&plan_value_from(plan), delivered)
+    }
+
+    fn plan_value_from_steps(&self, steps: &[serde_json::Value]) -> serde_json::Value {
+        // The other half of the bridge (5.D1c.5): serialize a fresh step list as the canonical plan
+        // Value. Pure — no `self.state` needed.
+        serde_json::to_value(runtime_execution_plan(steps)).unwrap_or_default()
     }
 }
 

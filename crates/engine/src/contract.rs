@@ -224,6 +224,13 @@ pub trait PlanProgress {
     /// it lives on this seam ONLY because the reconcile logic needs the gateway's typed `ExecutionPlan`
     /// while the leaf engine holds the plan as an opaque `Value`.
     fn reconcile_on_delivery(&self, plan: &Value, delivered: &str) -> Option<Vec<Value>>;
+
+    /// Rebuild the plan `Value` from a fresh step list (ADR 0024 inc 5, 5.D1c.5): the other half of the
+    /// Value↔ExecutionPlan bridge. When the mid-turn frontier advance produces new steps, the loop
+    /// stores the canonical serialized plan via this method (gateway: `to_value(runtime_execution_plan
+    /// (steps))`). SYNC + pure, on this seam for the same reason as `reconcile_on_delivery` — the leaf
+    /// engine can't build the typed `ExecutionPlan`.
+    fn plan_value_from_steps(&self, steps: &[Value]) -> Value;
 }
 
 /// The loop's turn-level completion judge (ADR 0024, increment 5, Point 2a). When the model ACTS but
@@ -418,6 +425,10 @@ mod tests {
         fn reconcile_on_delivery(&self, _plan: &Value, _delivered: &str) -> Option<Vec<Value>> {
             // Scripted: report one reconciled step so the seam's sync bridge is exercised.
             Some(vec![Value::Null])
+        }
+        fn plan_value_from_steps(&self, steps: &[Value]) -> Value {
+            // Scripted: echo the steps under a `steps` key (a stand-in for the ExecutionPlan value).
+            serde_json::json!({ "steps": steps })
         }
     }
 
