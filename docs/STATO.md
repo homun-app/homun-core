@@ -30,8 +30,16 @@ island**/pannello Activity non persiste lo storico azioni — UX ORTOGONALE al m
 rimandato → task `task_58afe482`.) **Branch ancora non esercitati su ON: browser, approval/pending_confirm** (basso
 rischio: copia verbatim + BrowserExecutor già validato in sessioni precedenti).
 
-**NEXT = 5.D2 (con utente): flip default ON + CANCELLA la copia inline run_agent_rounds + il flag `HOMUN_ENGINE_CRATE`
-→ stato finale un-solo-loop-no-flag.** Opzionale-consigliato prima: un turno LIVE **browser** su ON per coprire quel ramo.
+Il turno LIVE **browser** su ON ha rivelato un **flood ‹‹REASONING›› garbled** (marker malformati che colano in UI).
+**Diagnosi: NON regressione dell'estrazione** — `run_turn` chiama `sanitize_model_text` come OFF; il filtro streaming è
+nel seam ModelClient CONDIVISO → OFF e ON identici. Era un **buco di copertura della difesa** (matchava solo il doppio
+‹‹››, non il single-guillemet `‹/REASONING›` né l'XML `<think>`/`<REASONING>`). **FIX `d066581e` (layer condiviso, OFF+ON):**
+`canonicalize_reasoning_delimiters` piega la CLASSE di varianti malformate al canonico, agganciato sia in
+`normalize_reasoning_markers` (committed) sia in `StreamMarkerFilter` (live); 3 golden test bloccano ogni forma osservata
+(no più whack-a-mole). engine 64/64.
+
+**NEXT: (1) ri-verifica LIVE il turno browser su ON (flood sparito) → (2) 5.D2 (con utente): flip default ON + CANCELLA la
+copia inline run_agent_rounds + il flag → stato finale un-solo-loop-no-flag.**
 
 **5.D1c COMPLETO fino a .9 + le 2 code (task_appears_incomplete + marker cluster).** Il corpo di `run_agent_rounds`
 (832 righe) è ora **ENGINE-SAFE**: audit fn-gateway×chiamate-nel-corpo = ZERO free-fn/tipi gateway nel control-flow;
