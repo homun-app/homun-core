@@ -39,8 +39,8 @@ pub mod model_normalize;
 pub mod loop_state;
 
 pub use contract::{
-    CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError, ModelClient,
-    ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,
+    BrowserExecutor, CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError,
+    ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,
     TurnCompletionJudge,
 };
 pub use loop_state::LoopState;

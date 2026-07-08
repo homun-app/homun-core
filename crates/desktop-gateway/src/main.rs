@@ -22312,6 +22312,95 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
     }
 }
 
+/// The gateway's `BrowserExecutor` (ADR 0024 inc 5, 5.D1b slice 5b; ADR 0025 seam). OWNS the browser
+/// subsystem's turn state — the live sidecar `browser_session` (a gateway type that can't live in the
+/// engine-safe `LoopState`) plus the browser-private bookkeeping (last snapshot, current tab / opened
+/// targets, per-URL nav failures) — because these are touched ONLY by the browser branch, never by the
+/// loop body. `&mut self` (see the trait) lets it mutate that state per call; the loop keeps it in a
+/// local separate from `&mut ls`, so there is no double borrow. Per call it rebuilds a `BrowserToolCtx`
+/// from its owned state + `&mut LoopState` (the loop-visible browser fields + provider) + held
+/// turn-constants, and delegates to `execute_browser_tool`. Constructed per turn by the loop-move
+/// (5e); `#[allow(dead_code)]` until the crate move wires it in.
+#[allow(dead_code)]
+struct GatewayBrowserExecutor<'a> {
+    browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    last_snapshot: String,
+    current_target: String,
+    opened_targets: Vec<String>,
+    nav_failures: std::collections::HashMap<String, u32>,
+    state: &'a AppState,
+    tx: &'a StreamSink,
+    thread_id: Option<&'a str>,
+    prompt: &'a str,
+    request: &'a ChatGenerateStreamRequest,
+    read_only: bool,
+    channel_owner: bool,
+}
+
+impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
+    async fn execute_browser(
+        &mut self,
+        name: &str,
+        args_raw: &str,
+        call_id: &str,
+        ls: &mut local_first_engine::LoopState,
+    ) -> String {
+        // The browser branch mutates its ctx directly (disjoint read-set): browser-private state from
+        // `&mut self`, loop-visible browser fields + provider from `&mut ls`. `browser_session` is
+        // threaded separately (its Cell/RefCell would make the ctx non-`Sync`). ADR 0025 folds this
+        // whole ctx into a recursive `browse(goal)` and the seam goes away.
+        let mut bctx = BrowserToolCtx {
+            browser_used: &mut ls.browser_used,
+            last_snapshot: &mut self.last_snapshot,
+            pending_browser_image: &mut ls.pending_browser_image,
+            browser_tool_call_ids: &mut ls.browser_tool_call_ids,
+            current_target: &mut self.current_target,
+            opened_targets: &mut self.opened_targets,
+            nav_failures: &mut self.nav_failures,
+            base_url: &mut ls.provider.base_url,
+            model: &mut ls.provider.model,
+            api_key: &mut ls.provider.api_key,
+            state: self.state,
+            tx: self.tx,
+            thread_id: self.thread_id,
+            prompt: self.prompt,
+            request: self.request,
+            read_only: self.read_only,
+            channel_owner: self.channel_owner,
+        };
+        execute_browser_tool(&mut bctx, &mut self.browser_session, name, args_raw, call_id).await
+    }
+
+    async fn close_session(&mut self, browser_used: bool) {
+        // Turn end (ALL exit paths converge here: normal answer, pending_confirm, round-budget break,
+        // natural exhaustion). Park the browser session warm for the thread's next turn, or stop it for
+        // an anonymous (thread-less) chat so the sidecar doesn't leak. Hide the "● LIVE" activity.
+        if let Some(client) = self.browser_session.take() {
+            end_browser_activity();
+            match self.thread_id {
+                Some(t) => {
+                    let st = self.state.clone();
+                    let t = t.to_string();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        store_thread_browser_session(&st, &t, client);
+                    })
+                    .await;
+                }
+                None => {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+                    })
+                    .await;
+                }
+            }
+        } else if browser_used {
+            // Session was lost mid-turn (spawn failed / call panicked): still clear
+            // the live activity indicator.
+            end_browser_activity();
+        }
+    }
+}
+
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,
@@ -23873,29 +23962,11 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                 });
             }
         }
-        // Turn-local browser state for the granular tools. The sidecar session is
-        // held for the WHOLE turn (lock acquired only around each single call) and
-        // parked back at every exit path. `last_snapshot` feeds the safety gate so
-        // it can resolve a ref's label. `browser_used` raises the round budget.
-        // `pending_browser_image` queues a screenshot data-url to inject as a user
-        // message AFTER all the round's tool results. `browser_tool_call_ids`
-        // tracks which tool results carry big snapshots so pruning can stub them.
-        let browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>> = None;
-        // browser_used / pending_browser_image / browser_tool_call_ids now live in `ls` (slice 5a):
-        // they are the browser fields the loop body reads outside the browser branch.
-        let last_snapshot = String::new();
-        // Multi-tab support: a turn-local CURRENT TAB the tools operate on, plus
-        // the set of tab ids we've already Opened (or reused) this turn. A tab id
-        // is "opened" once we've done Open (or reused a warm session) on it; the
-        // first navigate on a not-yet-opened id Opens it, later ones Navigate.
-        let current_target: String = "chat_0".to_string();
-        let opened_targets: Vec<String> = Vec::new();
-        // Per-URL navigation failure counter for THIS turn: when the model keeps hitting
-        // the same dead URL (the observed "navigate FIFA page 7× then loop" case), the
-        // harness nudges it to STOP retrying and pivot to a web search (caposaldo #2 —
-        // the harness owns recovery, the weak model won't pivot on its own).
-        let nav_failures: std::collections::HashMap<String, u32> =
-            std::collections::HashMap::new();
+        // Turn-local browser state now lives in the browser subsystem: the loop-visible fields
+        // (browser_used / pending_browser_image / browser_tool_call_ids) travel in `LoopState`
+        // (slice 5a), and the browser-private state (sidecar session, last snapshot, current tab /
+        // opened targets, per-URL nav failures) is OWNED by `GatewayBrowserExecutor`, constructed
+        // inside `run_agent_rounds` (slice 5b). Nothing to seed here.
         // Fresh terminal buffer for this request; the computer panel shows the
         // CLI commands + output run during THIS response.
         sandbox_clear(thread_id.clone());
@@ -23917,7 +23988,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // larger browser budget). This keeps non-browser turns identical to today.
         // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
         ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
-        run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, browser_session, last_snapshot, current_target, opened_targets, nav_failures).await;
+        run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_prev_assistant, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources).await;
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -23970,15 +24041,6 @@ async fn run_agent_rounds(
     automation_workspace_id: WorkspaceId,
     turn_scaffold: scaffold::ScaffoldProfile,
     mut browse_sources: Vec<String>,
-    mut browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
-    // Browser-private turn state (last snapshot, target/tab bookkeeping, nav failures): still
-    // run_agent_rounds params for now — 5.D1b slice 5b moves them into the browser executor. The
-    // loop-read browser fields (browser_used / pending_browser_image / browser_tool_call_ids) already
-    // live in `ls` (slice 5a).
-    mut last_snapshot: String,
-    mut current_target: String,
-    mut opened_targets: Vec<String>,
-    mut nav_failures: std::collections::HashMap<String, u32>,
 ) {
     // model_client borrows http+tx; built here (was in setup) so the borrows are local.
     let model_client = crate::model_client::GatewayModelClient { http: &http, tx };
@@ -24002,6 +24064,25 @@ async fn run_agent_rounds(
         automation_workspace_id: &automation_workspace_id,
         turn_scaffold: &turn_scaffold,
         floor_acting,
+    };
+    // ADR 0026 / ADR 0025 seam: the browser tool chokepoint = the BrowserExecutor seam. Built ONCE per
+    // turn OWNING the browser subsystem's private state (session + snapshot/tab/nav bookkeeping); each
+    // call passes `&mut ls` for the loop-visible browser fields + provider. `&mut self` (see the trait)
+    // never double-borrows because the executor is a local separate from `&mut ls`.
+    use local_first_engine::BrowserExecutor as _;
+    let mut browser_executor = GatewayBrowserExecutor {
+        browser_session: None,
+        last_snapshot: String::new(),
+        current_target: "chat_0".to_string(), // the first tab the tools operate on
+        opened_targets: Vec::new(),
+        nav_failures: std::collections::HashMap::new(),
+        state: &state_owned,
+        tx: &tx,
+        thread_id: thread_id.as_deref(),
+        prompt: &prompt,
+        request: &request,
+        read_only,
+        channel_owner,
     };
     for round in 0..hard_round_ceiling() {
         let max_rounds = if ls.browser_used {
@@ -24313,31 +24394,13 @@ missing, give what you have and note the gap in one short line.",
                 }
 
                 let (result, tool_effects) = if is_browser_granular_tool(name) {
-                    // Temporary browser seam (ADR 0024 inc 5d.2 / ADR 0025): the branch builds its OWN
-                    // BrowserToolCtx (disjoint read-set) and mutates it directly (browser session,
-                    // snapshots, mid-turn model-switch). Folds into a recursive `browse` at ADR 0025.
-                    let mut bctx = BrowserToolCtx {
-                        browser_used: &mut ls.browser_used,
-                        last_snapshot: &mut last_snapshot,
-                        pending_browser_image: &mut ls.pending_browser_image,
-                        browser_tool_call_ids: &mut ls.browser_tool_call_ids,
-                        current_target: &mut current_target,
-                        opened_targets: &mut opened_targets,
-                        nav_failures: &mut nav_failures,
-                        base_url: &mut ls.provider.base_url,
-                        model: &mut ls.provider.model,
-                        api_key: &mut ls.provider.api_key,
-                        state: &state_owned,
-                        tx: &tx,
-                        thread_id: thread_id.as_deref(),
-                        prompt: &prompt,
-                        request: &request,
-                        read_only,
-                        channel_owner,
-                    };
-                    let r =
-                        execute_browser_tool(&mut bctx, &mut browser_session, name, args_raw, &call_id)
-                            .await;
+                    // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
+                    // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
+                    // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
+                    // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
+                    let r = browser_executor
+                        .execute_browser(name, args_raw, &call_id, &mut ls)
+                        .await;
                     (r, local_first_engine::ToolEffects::default())
                 } else {
                     // Non-browser: through the CapabilityExecutor seam (ADR 0026). The executor builds
@@ -24672,33 +24735,10 @@ missing, give what you have and note the gap in one short line.",
         break;
     }
 
-    // Turn end (ALL exit paths converge here: normal answer, pending_confirm,
-    // round-budget break, natural exhaustion). Park the browser session warm
-    // for the thread's next turn, or stop it for an anonymous (thread-less)
-    // chat so the sidecar doesn't leak. Hide the "● LIVE" activity.
-    if let Some(client) = browser_session.take() {
-        end_browser_activity();
-        match thread_id.as_deref() {
-            Some(t) => {
-                let st = state_owned.clone();
-                let t = t.to_string();
-                let _ = tokio::task::spawn_blocking(move || {
-                    store_thread_browser_session(&st, &t, client);
-                })
-                .await;
-            }
-            None => {
-                let _ = tokio::task::spawn_blocking(move || {
-                    let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
-                })
-                .await;
-            }
-        }
-    } else if ls.browser_used {
-        // Session was lost mid-turn (spawn failed / call panicked): still clear
-        // the live activity indicator.
-        end_browser_activity();
-    }
+    // Turn end (ALL exit paths converge here: normal answer, pending_confirm, round-budget break,
+    // natural exhaustion). The browser executor parks its session warm for the thread's next turn (or
+    // stops it for an anonymous chat) and hides the "● LIVE" activity — see `close_session`.
+    browser_executor.close_session(ls.browser_used).await;
 
     if !final_done {
         // Guaranteed synthesis: the model exhausted the tool rounds without a

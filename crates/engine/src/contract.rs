@@ -142,6 +142,36 @@ pub trait CapabilityExecutor {
     ) -> impl Future<Output = Result<ToolOutcome, String>> + Send;
 }
 
+/// The BROWSER tool seam (ADR 0024 inc 5, 5.D1b slice 5b) — the temporary seam ADR 0025 replaces with
+/// a recursive `browse(goal)` sub-agent. SEPARATE from `CapabilityExecutor` for two reasons. First, a
+/// DISJOINT read-set: the browser branch reads the browser cluster + a few turn-constants and nothing
+/// `execute_chat_tool` touches. Second, and decisively, it carries its OWN mutable subsystem state
+/// across the turn — the live sidecar session (a gateway-typed handle that can NEVER enter the
+/// engine-safe `LoopState`) plus the browser-private bookkeeping (last snapshot, current tab / opened
+/// targets, per-URL nav failures). Hence `&mut self` (unlike the stateless `&self` capability
+/// chokepoint): the impl OWNS that state and mutates it per call. Because the loop keeps the executor
+/// in a local separate from `&mut ls`, `&mut self` + `&mut state` never double-borrow. The
+/// loop-VISIBLE browser fields (`browser_used` / `pending_browser_image` / `browser_tool_call_ids`)
+/// travel in `state: &mut LoopState`, passed per call exactly like `CapabilityExecutor`.
+pub trait BrowserExecutor {
+    /// Execute one granular browser tool (navigate / snapshot / act / screenshot / tabs / dialog)
+    /// against the turn's live session. Returns the raw tool-result text: the browser branch produces
+    /// no `ToolEffects` today (it mutates its own state directly), so a bare `String`, not `ToolOutcome`.
+    fn execute_browser(
+        &mut self,
+        name: &str,
+        args_raw: &str,
+        call_id: &str,
+        state: &mut crate::loop_state::LoopState,
+    ) -> impl Future<Output = String> + Send;
+
+    /// Turn-end teardown (ALL exit paths converge here): park the session warm for the thread's next
+    /// turn, or stop it for an anonymous chat so the sidecar doesn't leak; hide the live activity
+    /// indicator. `browser_used` (from `LoopState`) reports whether a session was ever meant to exist,
+    /// so a mid-turn session loss still clears the indicator. Idempotent — safe when none was opened.
+    fn close_session(&mut self, browser_used: bool) -> impl Future<Output = ()> + Send;
+}
+
 /// The engine's output seam: every stream event the loop produces (delta, activity, plan, tool
 /// result, done, error, …) goes through here. The gateway's impl fans it onto the transport (the
 /// NDJSON turn body + the unified WS). `Send` because the loop runs inside a `tokio::spawn` (same
@@ -288,6 +318,45 @@ mod tests {
         assert_eq!(outcome.result, "ran browse");
         assert_eq!(outcome.effects.append_output, vec!["did browse".to_string()]);
         assert!(!outcome.effects.request_confirm, "default effects are empty");
+    }
+
+    // A stub browser proves the BrowserExecutor seam is usable + mockable: `&mut self` lets it carry
+    // subsystem state (here a call counter standing in for the sidecar session) while a per-call
+    // `&mut LoopState` records the loop-visible effect (browser_used) — the exact split the real impl
+    // uses. The gateway's `GatewayBrowserExecutor` is the real impl.
+    #[derive(Default)]
+    struct StubBrowser {
+        calls: u32,   // subsystem state owned by the executor (session stand-in)
+        closed: bool, // set by close_session so the test can assert teardown ran
+    }
+    impl BrowserExecutor for StubBrowser {
+        async fn execute_browser(
+            &mut self,
+            name: &str,
+            _args_raw: &str,
+            _call_id: &str,
+            state: &mut crate::loop_state::LoopState,
+        ) -> String {
+            self.calls += 1;
+            state.browser_used = true; // the loop-visible field travels via LoopState
+            format!("browsed {name} (#{})", self.calls)
+        }
+        async fn close_session(&mut self, _browser_used: bool) {
+            self.closed = true;
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_executor_is_usable_with_a_mock() {
+        let mut browser = StubBrowser::default();
+        let mut ls = crate::loop_state::LoopState::new();
+        assert!(!ls.browser_used, "browser_used starts false");
+        let out = browser.execute_browser("browser_navigate", "{}", "c1", &mut ls).await;
+        assert_eq!(out, "browsed browser_navigate (#1)");
+        assert!(ls.browser_used, "execute_browser flipped the loop-visible flag via LoopState");
+        assert_eq!(browser.calls, 1, "executor mutated its own subsystem state (&mut self)");
+        browser.close_session(ls.browser_used).await;
+        assert!(browser.closed, "close_session ran the teardown");
     }
 
     // An in-memory sink proves the EventSink seam is usable + mockable (drive the future loop's
