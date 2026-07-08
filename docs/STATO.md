@@ -56,11 +56,20 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
   (modello one-shot) ma la logica è unchanged + coperta dai unit test verdi (il boundary è solo serde round-trip).
 - **provider binding → NON slice a sé: foldato in-context al 5.D** (57 usi di `model` collision-prone; e senza
   barriera di tipo `LoopState` è già engine-safe → anticiparlo aggiunge rischio invece di toglierlo).
-- **5.C1 (next, headless):** `engine::EngineTurnCtx` (parte read-only del ctx) + closure/port per gli stateful
-  non-seamed. **5.D:** relocazione ~860 righe dietro `HOMUN_ENGINE_CRATE` (default OFF) + fold provider + parità LIVE.
-  Helper puri del loop: solo `summarize_tool_action` è zero-drag; gli altri (`should_force_synthesis`→strip-chain,
-  `chat_endpoint`→`is_ollama_base`, `workflow_route_blocked`→tipo) si **iniettano** al 5.D, non si spostano.
-**Punto 6:** flip default ON + ritiro parallela inline (→ 5f/inc6 = ADR 0025).
+- **5.C1 ✅ SCOPING/DESIGN (`piano d'esecuzione nella spec inc5`):** interfaccia del corpo-move **enumerata dal
+  codice** (non speculativa): `EngineTurnCtx` è PICCOLO (thread_id, stringhe memoria, read_only, model-override,
+  mode) perché i campi read-only pesanti (capability_corpus/catalog_index/request/scaffold) restano in
+  `execute_chat_tool` → la costruzione `ChatToolCtx` resta lato `GatewayCapabilityExecutor`. Scalari interni
+  (`final_done`/`plan_nudges`/`turn_used_tools`/`memory_answer`/`last_model_error`) restano locali. Provider si
+  folda in-context. **⭐ Oracolo di parità TROVATO: `tool_trace_dump` (`HOMUN_TRACE_DUMP=1`) — già costruito per
+  QUESTA estrazione** (commenti "the upcoming extraction ... visible to the oracle"): cattura fingerprint per
+  tool-call → diff dump OFF-vs-ON = parità tool-dispatch deterministica.
+- **5.D1 (il body-move, ~860 righe — PROSSIMO, serve co-pilotaggio):** sequenza in spec = extract-to-gateway-fn
+  (compiler enumera l'interfaccia) → group in EngineTurnCtx+seam+provider → move to crate dietro `HOMUN_ENGINE_CRATE`
+  (default OFF, additivo=zero rischio prod). **Parità:** io guido i prompt via API con `HOMUN_TRACE_DUMP=1` e diffo i
+  dump OFF/ON; tu confermi LIVE delivery/sintesi/reconcile su gattino/Rust/piano/browser.
+- **5.D2 — flip default ON + ritiro copia inline, SOLO con parità dimostrata.**
+**Punto 6:** → 5f/inc6 = ADR 0025 (browse-as-recursion sul motore estratto).
 
 **DEBITI validazione LIVE — SALDATI 2026-07-08** (vedi blocco ✅ in cima al checkpoint): (a) branching ✅,
 (b) move P4 ✅, (c) P2b happy-path ✅. Resta solo la parità LIVE del **Punto 5** (quando si sposta il corpo loop).

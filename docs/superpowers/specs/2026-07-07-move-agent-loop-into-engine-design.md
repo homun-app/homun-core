@@ -179,3 +179,53 @@ granulari). Il suo rollout "passo 0 = estrazione motore (ADR 0024)" È questo in
 2. `impl PlanProgress for GatewayPlanProgress` compila; delega verbatim ai tre helper esistenti (zero
    cambi di comportamento — il loop non lo chiama ancora).
 3. `cargo test -p local-first-engine` verde; gateway `cargo check` verde; nessun nuovo warning.
+
+---
+
+## Piano d'esecuzione Punto 5 — la relocazione del corpo loop (aggiunto 2026-07-08)
+
+Stato prep completa: `LoopState` **completamente engine-safe** (13 campi + `plan` come `Value`, 5.B1);
+i 5 seam hanno impl gateway. Resta lo spostamento del corpo (`for round in 0..hard_round_ceiling()`
++ sintesi post-loop + epilogo, ~860 righe) nel crate dietro `HOMUN_ENGINE_CRATE` (default OFF).
+
+### Interfaccia scoperta (enumerata dal codice, non speculativa)
+
+Il corpo che si sposta usa, oltre a `LoopState` (`&mut`) e ai 5 seam:
+- **`EngineTurnCtx` (read-only, engine-safe):** `thread_id`, `memory_user_message`, `memory_prev_assistant`,
+  `read_only`, model-override (da `request.model`), `mode`. Piccolo: il grosso dei campi read-only del
+  vecchio `ChatToolCtx` (capability_corpus, catalog_index, request, scaffold, automation ids, composio_writes)
+  è usato **dentro `execute_chat_tool`** → la costruzione di `ChatToolCtx` **resta lato gateway** dentro
+  `GatewayCapabilityExecutor::execute_tool`, NON entra nel corpo engine.
+- **Provider binding** (`base_url`/`model`/`api_key`/`endpoint`): foldato **qui, in-context** come
+  `LoopState.provider: engine::ProviderBinding` + `endpoint` (57 usi di `model` collision-prone → si
+  riscrivono mentre il corpo si muove, non con un rename scoped separato).
+- **Closure/port iniettati** per gli stateful non-seamed che il corpo chiama: `learn_via_service_or_inline`
+  (post-turn), `gateway_logs_dir` (path), `spawn_project_graph_refresh`, `schedule_stream_registry_cleanup`,
+  lifecycle browser (`store_thread_browser_session`/`end_browser_activity`/`prune_browser_history`).
+- **Scalari interni al corpo** (`final_done`/`plan_nudges`/`turn_used_tools`/`memory_answer`/`last_model_error`)
+  → restano **locali** dentro la fn spostata (non passano ai tool → nessuna interfaccia).
+- **Helper puri**: solo `summarize_tool_action` è zero-drag (si sposta in `engine::text`); gli altri
+  (`should_force_synthesis`→strip-chain, `chat_endpoint`→`is_ollama_base`, `workflow_route_blocked`→tipo
+  gateway) si **iniettano**, non si spostano.
+
+### Sequenza (behavior-preserving, gated, additiva)
+
+1. **5.D1a — extract-to-gateway-fn:** estrarre il corpo in una `async fn run_agent_rounds(...)` **gateway-locale**
+   (main.rs), passando tutte le catture come parametri. Il **compilatore enumera l'interfaccia esatta** (niente
+   design speculativo). Behavior-preserving, nessun flag. Gate: check + suite.
+2. **5.D1b — group the interface:** raggruppare i parametri in `EngineTurnCtx` + `&mut LoopState` + i 5 seam +
+   provider + closure. Fold provider qui. Gate: check + suite.
+3. **5.D1c — move to crate:** spostare `run_agent_rounds` → `engine::run_turn`, adattando i tipi al crate-boundary;
+   wire dietro `HOMUN_ENGINE_CRATE` (ON→engine, OFF→copia inline). Additivo, default OFF = zero rischio produzione.
+4. **PARITÀ (serve co-pilotaggio):** oracolo deterministico = **`tool_trace_dump`** (`HOMUN_TRACE_DUMP=1`, già
+   costruito per QUESTA estrazione — vedi i commenti "the upcoming extraction ... visible to the oracle").
+   Guidare gli stessi prompt con flag OFF poi ON, **diffare i dump** (args/result hash, acc-delta, markers,
+   pending_confirm, msgs_pushed, blocked, browser_image per ogni tool-call) → identici = parità tool-dispatch.
+   Più LIVE su gattino / Rust / piano-forzato / browser per delivery+sintesi+reconcile.
+5. **5.D2 — flip:** default ON + ritiro copia inline, **solo con parità dimostrata**.
+
+### Perché additivo-dietro-flag è sicuro
+
+Finché `HOMUN_ENGINE_CRATE` è OFF il gateway usa la copia inline invariata → un bug nella copia engine non
+tocca la produzione. Il commit del corpo-engine è quindi committabile anche prima della parità completa; il
+rischio si materializza **solo al flip** (5.D2), gated sull'evidenza dell'oracolo + LIVE.
