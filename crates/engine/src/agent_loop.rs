@@ -891,3 +891,161 @@ Tell me if you want me to retry or rephrase."
         tool_actions: ls.tool_trace.join("\n"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contract::{
+        ModelCall, ModelCallError, ModelRoundOutput, ProviderBinding, ToolEffects, ToolOutcome,
+    };
+    use serde_json::{json, Value};
+    use std::sync::Mutex;
+
+    // Minimal seam mocks: the model answers immediately (no tool calls); everything else is a no-op.
+    struct AnswerModel;
+    impl ModelClient for AnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            on_delta("Final answer.");
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": "Final answer." }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+            })
+        }
+    }
+    struct NoTools;
+    impl CapabilityExecutor for NoTools {
+        async fn execute_tool(
+            &self,
+            name: &str,
+            _a: &str,
+            _c: &str,
+            _s: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            Ok(ToolOutcome { result: format!("ran {name}"), effects: ToolEffects::default() })
+        }
+    }
+    struct NoBrowser;
+    impl BrowserExecutor for NoBrowser {
+        async fn execute_browser(&mut self, _n: &str, _a: &str, _c: &str, _s: &mut LoopState) -> String {
+            String::new()
+        }
+        async fn close_session(&mut self, _b: bool) {}
+    }
+    struct NoPlan;
+    impl PlanProgress for NoPlan {
+        async fn persist_plan(&self, _t: Option<&str>, _s: &[Value]) {}
+        async fn record_step_outcome(&self, _t: Option<&str>, _s: &Value, _e: &[String]) {}
+        async fn verify_step_complete(&self, _t: &str, _c: &str, _e: &str) -> (bool, String) {
+            (false, String::new())
+        }
+        fn reconcile_on_delivery(&self, _p: &Value, _d: &str) -> Option<Vec<Value>> {
+            None
+        }
+        fn plan_value_from_steps(&self, _s: &[Value]) -> Value {
+            Value::Null
+        }
+    }
+    struct DoneJudge;
+    impl TurnCompletionJudge for DoneJudge {
+        async fn task_appears_incomplete(&self, _r: &str, _w: &str) -> bool {
+            false
+        }
+    }
+    struct NoCompact;
+    impl ContextCompactor for NoCompact {
+        async fn compact(&self, _m: &mut Vec<Value>, _s: &mut usize) {}
+    }
+    struct OpenPolicy;
+    impl TurnPolicy for OpenPolicy {
+        fn route_blocked(&self, _t: &str) -> Option<String> {
+            None
+        }
+        fn supports_vision(&self, _b: &str, _m: &str) -> bool {
+            true
+        }
+    }
+    #[derive(Default)]
+    struct Collect(Mutex<Vec<GenerateStreamEvent>>);
+    impl EventSink for Collect {
+        async fn emit(&self, e: GenerateStreamEvent) {
+            self.0.lock().unwrap().push(e);
+        }
+    }
+
+    fn cfg() -> TurnConfig {
+        TurnConfig {
+            hard_round_ceiling: 3,
+            max_rounds: 2,
+            browser_max_rounds: 8,
+            browser_nav_cap: 6,
+            reconcile_on_delivery: true,
+            autoadvance_from_evidence: true,
+            step_verification: true,
+            verbose: false,
+        }
+    }
+
+    // ⭐ The FIRST actual execution of `run_turn` (everything else is compile-time): drive a full turn
+    // with mock seams and no network. Proves the extracted loop runs the happy path (model answers with
+    // no tool calls) to completion — no panic, no hang (bounded by hard_round_ceiling), correct outcome.
+    #[tokio::test(flavor = "current_thread")]
+    async fn run_turn_happy_path_finishes_with_the_model_answer() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "hi" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let mut browser = NoBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &AnswerModel,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "hi".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+        )
+        .await;
+
+        // The model answered immediately → the turn commits that answer and ends.
+        assert!(
+            outcome.memory_answer.contains("Final answer"),
+            "expected the model answer, got: {:?}",
+            outcome.memory_answer
+        );
+        // A terminal Done event was emitted.
+        assert!(
+            sink.0.lock().unwrap().iter().any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
+            "expected a Done event"
+        );
+    }
+}
