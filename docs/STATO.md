@@ -64,10 +64,20 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
   folda in-context. **⭐ Oracolo di parità TROVATO: `tool_trace_dump` (`HOMUN_TRACE_DUMP=1`) — già costruito per
   QUESTA estrazione** (commenti "the upcoming extraction ... visible to the oracle"): cattura fingerprint per
   tool-call → diff dump OFF-vs-ON = parità tool-dispatch deterministica.
-- **5.D1 (il body-move, ~860 righe — PROSSIMO, serve co-pilotaggio):** sequenza in spec = extract-to-gateway-fn
-  (compiler enumera l'interfaccia) → group in EngineTurnCtx+seam+provider → move to crate dietro `HOMUN_ENGINE_CRATE`
-  (default OFF, additivo=zero rischio prod). **Parità:** io guido i prompt via API con `HOMUN_TRACE_DUMP=1` e diffo i
-  dump OFF/ON; tu confermi LIVE delivery/sintesi/reconcile su gattino/Rust/piano/browser.
+- **5.D1a ✅ (`7335ee77`) — EXTRACT-TO-GATEWAY-FN:** il corpo loop (~859 righe: for-round + sintesi + learn) estratto
+  VERBATIM in `async fn run_agent_rounds(42 param)`. **Interfaccia enumerata dal COMPILATORE** (firma vuota → 41
+  `cannot find value` + `model_client` E0423). Tutte le catture **by-value** (rispecchia `async move` → zero
+  borrow/lifetime), tranne `tx: &StreamSink` (usato dal cleanup dopo la call). Dead-code emerso e rimosso:
+  `endpoint` (scritto 3×, mai letto dopo il passaggio a ModelClient). Behavior-preserving, engine 33/33, gateway
+  492/1-soffice, 34-warn baseline.
+- **5.D1b (PROSSIMO, headless) — GROUP + SEAM-WIRE:** i param read-only pesanti (capability_corpus/catalog_index/
+  request/scaffold/automation ids/composio_writes/flags) servono SOLO a costruire `ChatToolCtx` per `execute_chat_tool`
+  → sostituire quelle call con il seam `CapabilityExecutor` (la costruzione ctx va in `GatewayCapabilityExecutor`) →
+  la firma crolla a `LoopState` + `EngineTurnCtx`(piccolo) + 5 seam + provider + browser + stringhe memoria. Questo È
+  il crux (tool-dispatch via seam), il punto a rischio comportamentale → validare col `tool_trace_dump`.
+- **5.D1c — MOVE TO CRATE:** `run_agent_rounds`→`engine::run_turn`, adatta i tipi al crate-boundary, wire dietro
+  `HOMUN_ENGINE_CRATE` (default OFF, additivo). **Parità (serve co-pilotaggio):** io guido i prompt via API con
+  `HOMUN_TRACE_DUMP=1` e diffo i dump OFF/ON; tu confermi LIVE delivery/sintesi/reconcile su gattino/Rust/piano/browser.
 - **5.D2 — flip default ON + ritiro copia inline, SOLO con parità dimostrata.**
 **Punto 6:** → 5f/inc6 = ADR 0025 (browse-as-recursion sul motore estratto).
 
