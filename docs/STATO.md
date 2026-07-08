@@ -5,9 +5,14 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-08.**
 
-## ⭐ CHECKPOINT 2026-07-08 — Punto 2+4 + 5.D1b (seam-wire, slice 1→5b) DONE; prossimo = 5.D1c (crate-move, design pass)
+## ⭐ CHECKPOINT 2026-07-08 — Punto 2+4 + 5.D1b + 5.D1c.1→.3 DONE; prossimo = 5.D1c.4 (seam nuovi, checkpoint con utente)
 
-Tree pulito, workspace verde (engine 34/34, gateway 492 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
+Tree pulito, workspace verde (engine 38/38, gateway 492 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
+
+**5.D1c design pass FATTO** (11 slice, spec aggiornato) **+ slice meccaniche .1→.3 FATTE:** TurnConfig (`08407b6e`),
+riloca 8 helper puri in `engine` = −309 righe da main.rs (`035139f7`), EventSink swap (`7759c919`). Il corpo del loop
+ora legge config dal crate, chiama i puri dal crate, emette via seam. **NEXT = .4→.9 (seam nuovi + split del tail) poi
+.10 IL MOVE** — le seam-slice sono più invasive → checkpoint con utente prima; il flip finale (5.D2) resta con utente.
 
 **5.D1b seam-wire COMPLETO (slice 1→5b):** i due chokepoint di tool (`CapabilityExecutor` non-browser slice 4 +
 `BrowserExecutor` browser slice 5b) sono LIVE dietro trait `engine`; il **dispatch e il cleanup di `run_agent_rounds`
@@ -112,15 +117,25 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
     **Risultato: dispatch+cleanup di `run_agent_rounds` sono trait-based — ZERO ref a BrowserToolCtx/execute_browser_tool/
     browser_session** (resta solo la COSTRUZIONE dell'executor, che va al chiamante in 5.D1c). engine 34/34 (+browser mock),
     gateway 492/1-soffice, 34-warn. Behavior-preserving (compiler+test).
-- **5.D1c — MOVE TO CRATE (⚠️ non triviale, serve design pass):** il dispatch è ora engine-safe, MA il corpo di
-  `run_agent_rounds` chiama ancora una LARGA superficie di helper gateway free-fn (config getter `chat_max_rounds`/
-  `hard_round_ceiling`, `emit_stream_event`, `prune_browser_history`, `verify_step_complete`, forced-synthesis, payload
-  builder, `summarize_tool_action`, `apply_tool_effects`, `try_advance_frontier_from_evidence`, …). Spostare il loop in
-  `engine::run_turn` = decidere PRIMA cosa fa ciascun helper: (a) è puro → si sposta nel crate; (b) è gateway-shaped →
-  diventa un altro seam o resta gateway e si inietta. Da progettare con l'utente prima di eseguire. Wire dietro
-  `HOMUN_ENGINE_CRATE` (default OFF, additivo). **Parità (serve co-pilotaggio):** io guido i prompt via API con
-  `HOMUN_TRACE_DUMP=1` e diffo i dump OFF/ON; tu confermi LIVE delivery/sintesi/reconcile su gattino/Rust/piano/browser.
-- **5.D2 — flip default ON + ritiro copia inline, SOLO con parità dimostrata.**
+- **5.D1c — MOVE TO CRATE (design pass FATTO, 11 slice — vedi `specs/2026-07-07-move-agent-loop-into-engine-design.md`).**
+  Inventario reale: molta superficie era già nel crate o già dietro seam (gli 8 marker/text helper già in `engine`;
+  build_chat_payload/verify_step_complete/begin|end_browser_activity assorbiti negli impl seam = 0 nel corpo). Residuo
+  in 6 bucket. **Slice meccaniche 1→3 FATTE:**
+  - **5.D1c.1 ✅ (`08407b6e`) — `engine::TurnConfig`:** i 6 getter env del corpo (hard_round_ceiling/max_rounds/
+    browser_max_rounds/browser_nav_cap/reconcile_on_delivery/verbose) risolti una volta gateway-side, iniettati; il corpo
+    legge `cfg.*`. Il leaf-crate non legge più env.
+  - **5.D1c.2 ✅ (`035139f7`) — riloca 8 helper puri in `engine`:** `apply_tool_effects`→`LoopState::apply_effects`; nuovi
+    `engine::browser` (is_browser_granular_tool, resolve_browser_chat_tool_name+levenshtein, prune_browser_history+
+    message_has_image_url/strip_image_url_parts) e `engine::tools` (summarize_tool_action, connected_capability_execution_
+    trace_line — mcp-check reimplementato puro per evitare il tipo capabilities). **−309 righe da main.rs.** +4 test engine.
+  - **5.D1c.3 ✅ (`7759c919`) — EventSink swap:** gli 8 `emit_stream_event(&tx,…)` del corpo → `tx.emit(…)` (metodo seam;
+    identico perché StreamSink::emit chiama emit_stream_event). NOTA: EventSink::emit ritorna `impl Future` (RPITIT) → NON
+    dyn-compatible; il corpo resta sul sink concreto finché il move lo rende generico sul seam.
+  - **PROSSIME (seam nuovi / split — checkpoint con utente prima):** .4 plan-reconcile seam (Value↔ExecutionPlan bridge),
+    .5 plan-progress swap + try_advance sui seam, .6 ContextCompactor seam, .7 vision-probe + route-gate, .8 split del TAIL
+    (run_turn ritorna TurnOutcome; learn/graph/store restano gateway), .9 trace-dump come sink iniettato, **.10 IL MOVE**
+    (copia in `engine::run_turn`, dispatch su `HOMUN_ENGINE_CRATE` default OFF; parità via tool_trace_dump + LIVE).
+- **5.D2 — flip default ON + ritiro copia inline, SOLO con parità dimostrata (con utente).**
 **Punto 6:** → 5f/inc6 = ADR 0025 (browse-as-recursion sul motore estratto).
 
 **DEBITI validazione LIVE — SALDATI 2026-07-08** (vedi blocco ✅ in cima al checkpoint): (a) branching ✅,
