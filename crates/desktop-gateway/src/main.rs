@@ -23936,6 +23936,10 @@ async fn run_agent_rounds(
     // holding the turn-constant read-only context; each call passes `&mut ls` so it builds the
     // per-call ChatToolCtx without capturing (and double-borrowing) the loop state.
     use local_first_engine::CapabilityExecutor as _;
+    // 5.D1c.3: the loop emits through the EventSink seam (`tx.emit`) instead of the pre-seam
+    // `emit_stream_event` free-fn. Identical behavior (StreamSink::emit just calls emit_stream_event),
+    // and it converges the loop's output onto the seam ahead of the crate move.
+    use local_first_engine::EventSink as _;
     let capability_executor = GatewayCapabilityExecutor {
         state: &state_owned,
         tx: &tx,
@@ -24000,8 +24004,7 @@ async fn run_agent_rounds(
                 .filter(|e| e.starts_with("browser_navigate"))
                 .count();
             if step_navs >= cfg.browser_nav_cap {
-                let _ = emit_stream_event(
-                    &tx,
+                let _ = tx.emit(
                     GenerateStreamEvent::Delta {
                         text: "‹‹ACT››⏹️ Enough sources visited — synthesizing from what I \
 gathered‹‹/ACT››"
@@ -24149,7 +24152,7 @@ missing, give what you have and note the gap in one short line.",
             if !round_sig.is_empty() && round_sig == ls.last_round_sig {
                 ls.repeat_count += 1;
                 if ls.repeat_count >= 2 {
-                    let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta {
+                    let _ = tx.emit(GenerateStreamEvent::Delta {
                         text: "‹‹ACT››⏹️ Same actions repeated: stopping and summarizing‹‹/ACT››".to_string(),
                     })
                     .await;
@@ -24428,8 +24431,7 @@ missing, give what you have and note the gap in one short line.",
                     collapse_plan_markers(&ls.accumulated),
                     ls.pending_vault_reveal_marker.as_deref(),
                 );
-                let _ = emit_stream_event(
-                    &tx,
+                let _ = tx.emit(
                     GenerateStreamEvent::Done {
                         text: final_text.clone(),
                         metrics: TokenMetrics::zero(),
@@ -24492,8 +24494,7 @@ missing, give what you have and note the gap in one short line.",
                              complete. No confirmation, no summary yet."
                         ),
                     }));
-                    let _ = emit_stream_event(
-                        &tx,
+                    let _ = tx.emit(
                         GenerateStreamEvent::Delta {
                             text: format!(
                                 "‹‹ACT››▶ Proseguo: {}‹‹/ACT››",
@@ -24551,8 +24552,7 @@ missing, give what you have and note the gap in one short line.",
                         anything you already produced, do not redo work. Mark steps done with \
                         update_plan/step_advance as you go. No summary yet.",
                 }));
-                let _ = emit_stream_event(
-                    &tx,
+                let _ = tx.emit(
                     GenerateStreamEvent::Delta {
                         text: "‹‹ACT››▶ Pianifico il lavoro rimanente‹‹/ACT››".to_string(),
                     },
@@ -24588,7 +24588,7 @@ missing, give what you have and note the gap in one short line.",
         ls.accumulated.push_str(&content);
         if let Some(fonti) = fonti_section(&browse_sources, &ls.accumulated) {
             ls.accumulated.push_str(&fonti);
-            let _ = emit_stream_event(&tx, GenerateStreamEvent::Delta { text: fonti }).await;
+            let _ = tx.emit(GenerateStreamEvent::Delta { text: fonti }).await;
         }
         // Anti-churn: the live stream carried one ‹‹PLAN›› block per plan tool call;
         // the PERSISTED answer keeps the plan card exactly once (latest state).
@@ -24610,8 +24610,7 @@ missing, give what you have and note the gap in one short line.",
         let final_answer =
             append_vault_reveal_marker_if_missing(delivered, ls.pending_vault_reveal_marker.as_deref());
         memory_answer = final_answer.clone();
-        let _ = emit_stream_event(
-            &tx,
+        let _ = tx.emit(
             GenerateStreamEvent::Done {
                 text: final_answer,
                 metrics: TokenMetrics::zero(),
@@ -24708,8 +24707,7 @@ Tell me if you want me to retry or rephrase."
         let final_text =
             append_vault_reveal_marker_if_missing(delivered, ls.pending_vault_reveal_marker.as_deref());
         memory_answer = final_text.clone();
-        let _ = emit_stream_event(
-            &tx,
+        let _ = tx.emit(
             GenerateStreamEvent::Done {
                 text: final_text,
                 metrics: TokenMetrics::zero(),
