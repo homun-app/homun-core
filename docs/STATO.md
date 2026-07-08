@@ -77,15 +77,20 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
   Verificato: `execute_chat_tool` legge 4 campi LoopState + provider + 15 read-only, **0 campi browser**.
   - **slice 1 ✅ (`06e6eb30`) — provider fold:** `ls.provider: ProviderBinding` (ultimo stato per-round fuori da
     LoopState); swap = `ls.provider = out.provider`. **LoopState ora COMPLETO.** engine 33/33, gateway 492/1-soffice.
-  - **⭐ slice 2-4 = UN SOLO refactor coeso per-call (NON slice indipendenti), scoperto mappando il codice:**
-    `ctx` è costruito **una volta per-round** e borrowa `&mut ls.*` per tutto il loop delle call → `apply_tool_effects→&mut ls`
-    e `loop→ls.*` diretto sono **impossibili finché `ctx` tiene `&mut ls`** (doppio borrow). Quindi apply→ls + loop→ls +
-    **ctx per-call** (l'executor riceve `ls` per-call, ADR 0026) + cambio contratto + wire = **un blocco unico**, non
-    sequenza. Mappa field-usage completa: `apply_tool_effects` scrive solo campi LoopState + `pending_confirm`(local);
-    `execute_chat_tool` legge 4 LoopState+provider+15 read-only, **0 browser**; `execute_browser_tool` usa provider+7
-    browser+read-only (read-set disgiunto → è già il seam separato di 0025). **È il core intricato (chokepoint tool),
-    rischio comportamentale reale → si scrive presidiato e si valida col `tool_trace_dump` (turni guidati OFF-vs-ON).**
-    Non fattibile bene in coda a una sessione lunga. Rollout in ADR 0026.
+  - **slice 2a ✅ (`f600f9d1`) — per-call ChatToolCtx:** il loop non tiene più un `ctx` per-round; usa `ls.*`/locali
+    diretti, `ctx` costruito **per-call** nello scope del dispatch. `apply_tool_effects(&mut LoopState, &mut
+    pending_confirm, round, effects)` + `try_advance_frontier_from_evidence(&mut LoopState, state, thread_id, tx, round)`
+    su `ls` diretto. Behavior-preserving.
+  - **slice 2b ✅ (`0937cd26`) — shrink ChatToolCtx:** rimossi i 13 campi resi never-read dal 2a (compiler-flagged);
+    `ChatToolCtx` = solo il read-set di execute_chat_tool/browser. **34-warn baseline ripristinata.**
+  - **⭐ LIVE-VALIDATO 2026-07-08:** (a) **parità `tool_trace_dump`** baseline(old-bin, 19 rec) vs after(new-bin) —
+    invarianti strutturali per-tool IDENTICI (browser_navigate/find_capability/step_advance/update_plan: msgs_pushed/
+    acc_delta/blocked/pconf/img/markers), un browser_navigate con args_hash coincidente **byte-identico**; (b) **turno
+    pilotato in-app** ("Confronta 3 framework agenti AI") → deliverable completo (tabella 12-dim + raccomandazione +
+    fonti), piano tracciato, 1 root, 0 errori. Compiler + 492 test verdi. **Il refactor per-call è chiuso.**
+  - **slice 3-4 (next) — seam wire:** spostare la costruzione `ctx` (ora piccola, per-call) dentro `GatewayCapabilityExecutor`
+    col contratto `execute_tool(&mut LoopState)`; il loop chiama il seam invece di `execute_chat_tool`. Poi `ChatToolCtx`
+    non è più referenziato da `run_agent_rounds` → sbloccato il crate-move (5.D1c). Rollout in ADR 0026.
 - **5.D1c — MOVE TO CRATE:** `run_agent_rounds`→`engine::run_turn`, adatta i tipi al crate-boundary, wire dietro
   `HOMUN_ENGINE_CRATE` (default OFF, additivo). **Parità (serve co-pilotaggio):** io guido i prompt via API con
   `HOMUN_TRACE_DUMP=1` e diffo i dump OFF/ON; tu confermi LIVE delivery/sintesi/reconcile su gattino/Rust/piano/browser.
