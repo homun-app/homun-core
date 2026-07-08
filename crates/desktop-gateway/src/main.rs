@@ -24604,36 +24604,34 @@ say what you created/modified and how it's used/run; for a search report the res
 details. Be complete and concrete. If something failed, say so clearly and propose how \
 to proceed."
             }));
-            // Use the SAME provider-aware path as the main loop (Ollama native /api/chat
-            // vs OpenAI /v1) and stream the synthesis live. Previously this posted an
-            // OpenAI-shaped body to the native endpoint → empty → canned fallback.
-            let synth_payload =
-                build_chat_payload(&model, &base_url, &ls.messages, &[], temperature, true);
-            let first_token = std::time::Duration::from_secs(model_first_token_timeout_secs());
-            let idle = std::time::Duration::from_secs(model_idle_timeout_secs());
-            let request_timeout = std::time::Duration::from_secs(model_request_timeout_secs());
-            let ollama = is_ollama_base(&base_url);
-            let mut builder = http.post(&endpoint).timeout(request_timeout);
-            if let Some(key) = api_key.as_ref() {
-                builder = builder.bearer_auth(key);
-            }
-            let body = match builder.json(&synth_payload).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    let collected = if ollama {
-                        collect_ollama_native_stream(resp, first_token, idle, &tx).await
-                    } else {
-                        collect_openai_stream(resp, first_token, idle, &tx).await
-                    };
-                    collected.ok()
-                }
-                _ => None,
-            };
+            // ADR 0024 inc 5 (P2b): the forced synthesis now goes through the SAME
+            // engine::ModelClient seam as the per-round call — `is_final_round: true` (no
+            // tools, fresh answer budget) — so it inherits retry/backoff, the mid-turn
+            // provider fallback and the OpenAI/Ollama-native collectors instead of the old
+            // single inline POST (which could dead-end on one transient failure). The impl
+            // streams the answer live via its captured StreamSink, exactly like the loop.
+            // A provider swap here is moot (the turn ends right after), and any error →
+            // empty synth, falling through to the accumulated / last_model_error / canned
+            // chain below (same fallback shape as before).
+            let synth_out = model_client
+                .generate(
+                    &local_first_engine::ModelCall {
+                        base_url: &base_url,
+                        model: &model,
+                        api_key: api_key.as_deref(),
+                        messages: &ls.messages,
+                        tools: &[],
+                        temperature,
+                        is_final_round: true,
+                    },
+                    &|_tok| {},
+                )
+                .await;
             let synth_text = model_normalize::sanitize_model_text(
-                body.as_ref()
-                    .and_then(|b| b.get("choices"))
-                    .and_then(|c| c.get(0))
-                    .and_then(|c| c.get("message"))
-                    .and_then(|m| m.get("content"))
+                synth_out
+                    .as_ref()
+                    .ok()
+                    .and_then(|o| o.message.get("content"))
                     .and_then(|c| c.as_str())
                     .unwrap_or(""),
             );
