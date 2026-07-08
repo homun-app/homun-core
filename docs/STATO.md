@@ -5,14 +5,24 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-08.**
 
-## ⭐ CHECKPOINT 2026-07-08 — Punto 2+4 + 5.D1b + 5.D1c.1→.3 DONE; prossimo = 5.D1c.4 (seam nuovi, checkpoint con utente)
+## ⭐ CHECKPOINT 2026-07-08 — 5.D1c.1→.9 DONE, corpo loop ORA ENGINE-SAFE; prossimo = 5.D1c.10 (IL MOVE, con utente)
 
-Tree pulito, workspace verde (engine 38/38, gateway 492 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
+Tree pulito, workspace verde (engine 60/60, gateway 474 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
 
-**5.D1c design pass FATTO** (11 slice, spec aggiornato) **+ slice meccaniche .1→.3 FATTE:** TurnConfig (`08407b6e`),
-riloca 8 helper puri in `engine` = −309 righe da main.rs (`035139f7`), EventSink swap (`7759c919`). Il corpo del loop
-ora legge config dal crate, chiama i puri dal crate, emette via seam. **NEXT = .4→.9 (seam nuovi + split del tail) poi
-.10 IL MOVE** — le seam-slice sono più invasive → checkpoint con utente prima; il flip finale (5.D2) resta con utente.
+**5.D1c COMPLETO fino a .9 + le 2 code (task_appears_incomplete + marker cluster).** Il corpo di `run_agent_rounds`
+(832 righe) è ora **ENGINE-SAFE**: audit fn-gateway×chiamate-nel-corpo = ZERO free-fn/tipi gateway nel control-flow;
+tutte le chiamate esterne passano per i seam engine o helper engine. L'UNICA superficie gateway rimasta = le 7
+**COSTRUZIONI** degli executor (`Gateway*`) dentro run_agent_rounds — che **.10 sposta nel chiamante** (run_turn le
+prende come `impl Trait`). Slice fatte:
+- .1 TurnConfig `08407b6e` · .2 riloca 8 puri (−309 righe) `035139f7` · .3 EventSink swap `7759c919`
+- .4 plan-reconcile seam `874a8da5` · .5 plan-progress swap + try_advance sui seam `f39e1875` · .6 ContextCompactor `6d71ac22`
+- .7 TurnPolicy (route+vision) `01eb25ac` · .8 split tail→TurnOutcome `5df13fd1` · .9 trace-dump→engine `089ee040`
+- code: TurnCompletionJudge wired `bfa00cd3` · display-marker cluster→engine `59ad4813`
+
+**NEXT = .10 IL MOVE (con utente, LIVE parity):** copia il corpo (+ try_advance, engine-safe) in `engine::run_turn`
+dietro `HOMUN_ENGINE_CRATE` (default OFF, additivo); le 7 costruzioni Gateway* + i param gateway-typed vanno al
+chiamante, run_turn diventa generico sui seam. Parità via `tool_trace_dump` diff (io guido i turni API) + LIVE
+(tu confermi delivery/sintesi/reconcile/browser). Poi **5.D2 flip default ON + cancella copia inline (con utente)**.
 
 **5.D1b seam-wire COMPLETO (slice 1→5b):** i due chokepoint di tool (`CapabilityExecutor` non-browser slice 4 +
 `BrowserExecutor` browser slice 5b) sono LIVE dietro trait `engine`; il **dispatch e il cleanup di `run_agent_rounds`
