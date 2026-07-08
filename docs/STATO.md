@@ -70,11 +70,17 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
   borrow/lifetime), tranne `tx: &StreamSink` (usato dal cleanup dopo la call). Dead-code emerso e rimosso:
   `endpoint` (scritto 3×, mai letto dopo il passaggio a ModelClient). Behavior-preserving, engine 33/33, gateway
   492/1-soffice, 34-warn baseline.
-- **5.D1b (PROSSIMO, headless) — GROUP + SEAM-WIRE:** i param read-only pesanti (capability_corpus/catalog_index/
-  request/scaffold/automation ids/composio_writes/flags) servono SOLO a costruire `ChatToolCtx` per `execute_chat_tool`
-  → sostituire quelle call con il seam `CapabilityExecutor` (la costruzione ctx va in `GatewayCapabilityExecutor`) →
-  la firma crolla a `LoopState` + `EngineTurnCtx`(piccolo) + 5 seam + provider + browser + stringhe memoria. Questo È
-  il crux (tool-dispatch via seam), il punto a rischio comportamentale → validare col `tool_trace_dump`.
+- **5.D1b — SEAM-WIRE (in corso). ⭐ Il nodo trovato + risolto in [ADR 0026](decisions/0026-capability-executor-takes-loopstate-per-call.md):**
+  `GatewayCapabilityExecutor{ctx:&ChatToolCtx}` borrowa `&mut ls` → doppio borrow col `&mut ls` di `run_turn` → non
+  compila. **Decisione (A):** il seam **riceve `&mut LoopState` per-call** (non lo cattura); l'executor tiene solo i
+  **15 read-only turn-costanti** che `execute_chat_tool` legge; costruisce `ChatToolCtx` per-call da `&mut ls`+tenuti.
+  Verificato: `execute_chat_tool` legge 4 campi LoopState + provider + 15 read-only, **0 campi browser**.
+  - **slice 1 ✅ (`06e6eb30`) — provider fold:** `ls.provider: ProviderBinding` (ultimo stato per-round fuori da
+    LoopState); swap = `ls.provider = out.provider`. **LoopState ora COMPLETO.** engine 33/33, gateway 492/1-soffice.
+  - **slice 2 (next) — restringere `ChatToolCtx`** al read-set (togliere browser/pending_confirm; il ramo browser
+    li prende diretti via `execute_browser_tool`). slice 3 — contratto `execute_tool(&mut LoopState)` + mock + impl
+    gateway (tiene i read-only, costruisce ctx per-call). slice 4 — wire in `run_agent_rounds`, diff `tool_trace_dump`.
+  - Rollout completo in ADR 0026. Sono i passi a rischio comportamentale → validare col parity-oracle.
 - **5.D1c — MOVE TO CRATE:** `run_agent_rounds`→`engine::run_turn`, adatta i tipi al crate-boundary, wire dietro
   `HOMUN_ENGINE_CRATE` (default OFF, additivo). **Parità (serve co-pilotaggio):** io guido i prompt via API con
   `HOMUN_TRACE_DUMP=1` e diffo i dump OFF/ON; tu confermi LIVE delivery/sintesi/reconcile su gattino/Rust/piano/browser.
