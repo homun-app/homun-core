@@ -13,10 +13,18 @@ Tree pulito, workspace verde (engine 61/61, gateway 474 pass / 1 `soffice`-ambie
 `engine::agent_loop::run_turn` (copia generica sui 8 seam, 733 righe, trasformata solo `local_first_engine::→crate::` +
 `tx→event_sink`). `.10a` `3a00a7b4` = try_advance→engine; `.10` `d6cadfb5` = run_turn + dispatch dentro run_agent_rounds
 (costruiti gli executor UNA volta, ON ritorna `run_turn(&quegli-executor…)`, OFF cade sulla copia inline provata);
-smoke-test `a4a7a4ba` = **PRIMA esecuzione reale di run_turn** (8 seam mockati, no network) → happy-path completa (model
-risponde, commit answer, Done, TurnOutcome) senza panic/hang. **NEXT = PARITY VALIDATION** (trace-dump OFF-vs-ON su un
-turno reale — io la guido via API se riavvii col binario nuovo; tu confermi LIVE delivery/sintesi/reconcile/browser),
-poi **5.D2 flip default ON + cancella copia inline (con utente)**. Vedi blocco DECISIONE FISSATA sul flag (finale = no-flag).
+smoke-test `a4a7a4ba` = PRIMA esecuzione reale di run_turn (mock, no network) → happy-path OK.
+
+**⭐ PARITY VALIDATION FATTA 2026-07-08 (LIVE, binario `.10`, io-guidata via API): ON path PROMOSSO.** Stesso prompt
+("pianifica+scrivi fattoriale Python") girato OFF (`HOMUN_ENGINE_CRATE` unset) poi ON (`=1`), entrambi con
+`HOMUN_TRACE_DUMP=1`, gateway headless lanciato da me. **ON = engine::run_turn ha girato un turno REALE end-to-end: 0
+panic/errori, risposta completa 1482 char (piano + codice Python + test), 7 tool-call.** Confronto invarianti strutturali
+per-tipo-tool: `run_in_sandbox` ✅ e `update_plan` ✅ (msgs_pushed=1, ‹‹PLAN›› marker) IDENTICI OFF-vs-ON; `write_file`/
+`find_capability` solo-ON = non-determinismo del modello (path più ricco), NON un problema di parità. Nessuna anomalia
+strutturale. **Branch non ancora coperti da questo turno: browser, approval/pending_confirm, forced-synthesis** → un
+turno LIVE (browser) nell'app rafforzerebbe prima del flip. **NEXT = 5.D2 (con utente): flip default ON + CANCELLA la copia
+inline run_agent_rounds + il flag → stato finale un-solo-loop-no-flag.** Consigliato: un giro LIVE in-app con
+`HOMUN_ENGINE_CRATE=1` (idealmente un turno browser) prima di 5.D2.
 
 **5.D1c COMPLETO fino a .9 + le 2 code (task_appears_incomplete + marker cluster).** Il corpo di `run_agent_rounds`
 (832 righe) è ora **ENGINE-SAFE**: audit fn-gateway×chiamate-nel-corpo = ZERO free-fn/tipi gateway nel control-flow;
