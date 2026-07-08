@@ -18684,6 +18684,14 @@ fn tool_safety_enabled() -> bool {
     std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
 }
 
+/// ADR 0025 (browse-as-recursion): expose the browser to the manager as a single delegated
+/// `browse(goal)` sub-agent (a recursive `run_turn`) instead of the granular tools + mid-turn
+/// model-switch. Default OFF until validated live; the granular-tools path stays the fallback.
+#[allow(dead_code)] // wired in ADR 0025 step 2 (manager tool); defined now for step 1.
+fn browse_subagent_enabled() -> bool {
+    std::env::var("HOMUN_CHAT_BROWSE_SUBAGENT").as_deref() == Ok("1")
+}
+
 
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
 /// Verbatim unification of the MCP and Composio confirmation blocks — the only

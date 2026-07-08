@@ -58,11 +58,15 @@ pub mod trace;
 /// The single guarded ReAct loop — motore #1 (ADR 0021), extracted here (ADR 0024 inc 5, 5.D1c.10).
 pub mod agent_loop;
 
+/// The `browse(goal) → BrowseResult` contract (ADR 0025): the browser as a delegated sub-agent.
+pub mod browse;
+
 pub use contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, LoadedTool, ModelCall,
     ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects,
     ToolOutcome, TurnCompletionJudge, TurnPolicy,
 };
+pub use browse::{BrowseResult, Confidence};
 pub use config::TurnConfig;
 pub use loop_state::LoopState;
 pub use outcome::TurnOutcome;
