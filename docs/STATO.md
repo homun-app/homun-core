@@ -5,10 +5,15 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-08.**
 
-## ⭐ CHECKPOINT 2026-07-08 — Punto 2+4 CODATO + LIVE-VALIDATO; prossimo = Punto 5 (il move)
+## ⭐ CHECKPOINT 2026-07-08 — Punto 2+4 + 5.D1b (seam-wire, slice 1→5b) DONE; prossimo = 5.D1c (crate-move, design pass)
 
-Tree pulito, workspace verde (engine 32/32, gateway 493 pass /0 fail — il `soffice` è flaky ambientale, 34-warn
-baseline). Riparti da qui.
+Tree pulito, workspace verde (engine 34/34, gateway 492 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
+
+**5.D1b seam-wire COMPLETO (slice 1→5b):** i due chokepoint di tool (`CapabilityExecutor` non-browser slice 4 +
+`BrowserExecutor` browser slice 5b) sono LIVE dietro trait `engine`; il **dispatch e il cleanup di `run_agent_rounds`
+sono ora engine-safe** (nessun tipo gateway nel control-flow, solo la costruzione degli executor). Prossimo = **5.D1c**,
+il vero spostamento del corpo loop in `crates/engine` — NON triviale (larga superficie di helper gateway), da
+**progettare con l'utente** prima di eseguire (vedi il blocco 5.D1c sotto). Il flip default (5.D2) resta con utente.
 
 **✅ VALIDAZIONE LIVE 2026-07-08 (app pilotata, binario nuovo, chat model `deepseek-v4-pro:cloud`)** — tutti i
 debiti del batch saldati con 2 turni:
@@ -95,10 +100,24 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
     tiene solo i read-only turn-costanti, costruisce `ChatToolCtx` per-call da `ls`+tenuti. Il ramo chat chiama il seam;
     **`run_agent_rounds` non referenzia più `ChatToolCtx` per il non-browser** (usa il trait `engine`). engine 33/33,
     gateway 492/1-soffice, 34-warn baseline. Behavior-preserving (compiler+test); ri-validare col trace-dump.
-  - **slice 5 (next) — browser seam:** wrappare `execute_browser_tool`+`BrowserToolCtx` come un trait `BrowserExecutor`
-    (come CapabilityExecutor) → il ramo browser smette di referenziare `BrowserToolCtx` in `run_agent_rounds`. Poi
-    `run_agent_rounds` è engine-safe sul dispatch → **sblocca 5.D1c** (crate-move). Rollout in ADR 0026.
-- **5.D1c — MOVE TO CRATE:** `run_agent_rounds`→`engine::run_turn`, adatta i tipi al crate-boundary, wire dietro
+  - **slice 5a ✅ (`8194e5c5`) — browser loop-state in LoopState:** i 3 campi browser che il *loop* legge fuori dal
+    ramo browser (`browser_used` budget+assembly, `pending_browser_image` vision-inject+trace, `browser_tool_call_ids`
+    prune) migrati da param di `run_agent_rounds` a `LoopState`. Gli altri 4 (browser-privati) restavano param. Behavior-
+    preserving (tutti default). engine 33/33, gateway 492/1-soffice, 34-warn.
+  - **slice 5b ✅ (`8e18e15d`) — BrowserExecutor seam:** `engine::contract::BrowserExecutor` (specchio di
+    CapabilityExecutor ma `&mut self` perché POSSIEDE lo stato del sottosistema browser) + mock test; impl gateway
+    `GatewayBrowserExecutor` che OWNa `browser_session` (tipo gateway, non entra in LoopState) + i 4 campi browser-privati
+    (last_snapshot/current_target/opened_targets/nav_failures, toccati solo dal ramo browser); per-call ricostruisce
+    `BrowserToolCtx` da self+`&mut ls` e delega a `execute_browser_tool`. Teardown → `close_session(browser_used)`.
+    **Risultato: dispatch+cleanup di `run_agent_rounds` sono trait-based — ZERO ref a BrowserToolCtx/execute_browser_tool/
+    browser_session** (resta solo la COSTRUZIONE dell'executor, che va al chiamante in 5.D1c). engine 34/34 (+browser mock),
+    gateway 492/1-soffice, 34-warn. Behavior-preserving (compiler+test).
+- **5.D1c — MOVE TO CRATE (⚠️ non triviale, serve design pass):** il dispatch è ora engine-safe, MA il corpo di
+  `run_agent_rounds` chiama ancora una LARGA superficie di helper gateway free-fn (config getter `chat_max_rounds`/
+  `hard_round_ceiling`, `emit_stream_event`, `prune_browser_history`, `verify_step_complete`, forced-synthesis, payload
+  builder, `summarize_tool_action`, `apply_tool_effects`, `try_advance_frontier_from_evidence`, …). Spostare il loop in
+  `engine::run_turn` = decidere PRIMA cosa fa ciascun helper: (a) è puro → si sposta nel crate; (b) è gateway-shaped →
+  diventa un altro seam o resta gateway e si inietta. Da progettare con l'utente prima di eseguire. Wire dietro
   `HOMUN_ENGINE_CRATE` (default OFF, additivo). **Parità (serve co-pilotaggio):** io guido i prompt via API con
   `HOMUN_TRACE_DUMP=1` e diffo i dump OFF/ON; tu confermi LIVE delivery/sintesi/reconcile su gattino/Rust/piano/browser.
 - **5.D2 — flip default ON + ritiro copia inline, SOLO con parità dimostrata.**
