@@ -2843,6 +2843,51 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Insert a crash-atomic user message that is a PROPER node of the thread tree,
+    /// on a caller-provided connection/transaction. Same tree-linkage invariant as
+    /// [`insert_message`] (read `active_leaf` → use it as `parent_id` → `INSERT OR
+    /// IGNORE` → advance the leaf ONLY if a row was inserted), but working on a raw
+    /// `&Connection` so the broker's atomic enqueue (user_message + chat_turn in ONE
+    /// tx on the unified homun.sqlite) can call it from inside its transaction.
+    ///
+    /// Why this exists: the enqueue path previously did a bare `INSERT` omitting
+    /// `parent_id` and never touched `active_leaf_id`, so the prompt landed as a
+    /// dangling SECOND root of the tree. Two roots break the root→`active_leaf`
+    /// display path, so on reload the UI showed the prompt with no answer. The turn
+    /// executor then reuses this exact id, so `commit_prompt_result`'s `INSERT OR
+    /// IGNORE` no-ops on it — exactly one user message, with the answer parented to it.
+    ///
+    /// `INSERT OR IGNORE` keyed on the stable `local_user_{request_id}` id keeps a
+    /// re-enqueue after a crash idempotent (no duplicate prompt).
+    pub(crate) fn insert_linked_user_message(
+        conn: &Connection,
+        thread_id: &str,
+        id: &str,
+        text: &str,
+        timestamp: &str,
+    ) -> rusqlite::Result<()> {
+        let parent_id: Option<String> = conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = ?1",
+                params![thread_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let inserted = conn.execute(
+            "insert or ignore into chat_messages (id, thread_id, role, text, timestamp, parent_id)
+             values (?1, ?2, 'user', ?3, ?4, ?5)",
+            params![id, thread_id, text, timestamp, parent_id],
+        )?;
+        if inserted == 1 {
+            conn.execute(
+                "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
+                params![id, thread_id],
+            )?;
+        }
+        Ok(())
+    }
+
     fn upsert_message(
         &self,
         thread_id: &str,
@@ -3826,6 +3871,94 @@ mod tests {
             )
             .unwrap();
         assert_eq!(leaf_after.as_deref(), Some("assistant_2"));
+    }
+
+    #[test]
+    fn atomic_enqueue_prompt_is_one_tree_node_then_reused_by_commit() {
+        // Regression: the broker's atomic enqueue used to raw-INSERT the prompt with no
+        // parent_id / active_leaf, so it landed as a dangling 2nd root; the turn executor
+        // then minted a DIFFERENT `msg_...` user message → two roots → the answer
+        // "disappeared" on reload. The fix links the enqueued prompt and the executor
+        // reuses its id (so commit's INSERT OR IGNORE no-ops on it).
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let tid = thread.thread_id.clone();
+        let seed_id = store.messages(&tid).unwrap().messages[0].id.clone();
+
+        let parent = |id: &str| -> Option<String> {
+            store
+                .conn
+                .query_row(
+                    "select parent_id from chat_messages where id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let leaf = || -> Option<String> {
+            store
+                .conn
+                .query_row(
+                    "select active_leaf_id from chat_threads where thread_id = ?1",
+                    params![tid],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+
+        // 1. Atomic enqueue links the prompt under the current leaf (the seed).
+        let enqueued_id = "local_user_req1";
+        ChatStore::insert_linked_user_message(&store.conn, &tid, enqueued_id, "hello", "100")
+            .unwrap();
+        assert_eq!(parent(enqueued_id).as_deref(), Some(seed_id.as_str()));
+        assert_eq!(leaf().as_deref(), Some(enqueued_id));
+
+        // 2. Turn executor reuses the SAME id: commit no-ops on the prompt (INSERT OR
+        //    IGNORE) and hangs the answer off it.
+        store
+            .commit_prompt_result(
+                &tid,
+                &mk_message(enqueued_id, "user"),
+                &mk_message("assistant_1", "assistant"),
+                None,
+            )
+            .unwrap();
+
+        // Exactly ONE user message for this prompt (no duplicate) …
+        let user_count: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from chat_messages where thread_id = ?1 and role = 'user'",
+                params![tid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_count, 1);
+        // … and exactly ONE root (the corruption was a 2nd NULL-parent root).
+        let root_count: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from chat_messages where thread_id = ?1 and parent_id is null",
+                params![tid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(root_count, 1);
+
+        // The answer parents to the prompt and the displayed path is a single line.
+        assert_eq!(parent("assistant_1").as_deref(), Some(enqueued_id));
+        assert_eq!(leaf().as_deref(), Some("assistant_1"));
+        let ids: Vec<String> = store
+            .messages(&tid)
+            .unwrap()
+            .messages
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![seed_id, enqueued_id.to_string(), "assistant_1".to_string()]
+        );
     }
 
     #[test]

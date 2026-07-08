@@ -101,6 +101,8 @@ use local_first_engine::plan::{
 };
 // The trait must be in scope to call `GatewayModelClient::generate` (ADR 0024).
 use local_first_engine::ModelClient;
+// Pure loop-delivery text helpers relocated to the engine crate (ADR 0024 inc 5e.3).
+use local_first_engine::text::{extract_source_urls, fonti_section, is_low_value_source_url};
 use local_first_inference::{
     AnthropicProvider, CapabilityDescriptor, Locality, ModelRouter, OpenAiCompatProvider,
     PrivacyPolicy, Requirements, structured_response_format,
@@ -13553,7 +13555,22 @@ struct AutoTitleRequest {
 
 /// Generates a concise thread title from the first exchange (LLM), with a plain
 /// fallback. Returns a short single line.
+/// Build the (prompt, answer) pair fed to the title model, with the app-only
+/// display markers stripped. WHY: the assistant text carries ‹‹PLAN››/‹‹ACT››/‹‹REASONING››
+/// blocks that the UI renders but the model must never read as content (caposaldo #5,
+/// same stripping as the context renderer / channel mirror). Without it, an agentic turn
+/// whose ‹‹PLAN›› card dominated the final message made the title model latch onto a
+/// mid-turn plan step ("Step 2 in corso – LangGraph (pro e contro)") instead of the topic.
+fn title_model_inputs(prompt: &str, answer: &str) -> (String, String) {
+    (
+        strip_display_markers(prompt).trim().to_string(),
+        strip_display_markers(answer).trim().to_string(),
+    )
+}
+
 async fn generate_thread_title(state: &AppState, prompt: &str, answer: &str) -> String {
+    let (prompt, answer) = title_model_inputs(prompt, answer);
+    let (prompt, answer) = (prompt.as_str(), answer.as_str());
     let fallback = || {
         let base = prompt.trim();
         if base.is_empty() {
@@ -28496,6 +28513,7 @@ async fn handle_channel_inbound(
                         Some(channel),
                         &title,
                         &content,
+                        None,
                     )
                 });
 
@@ -29246,8 +29264,17 @@ fn start_visible_conversation_turn(
     channel: Option<&str>,
     title: &str,
     user_text: &str,
+    // When the broker's atomic enqueue already persisted a tree-linked prompt
+    // (`local_user_{request_id}`), REUSE its id here so `commit_prompt_result`'s
+    // INSERT OR IGNORE no-ops on it instead of minting a second `msg_...` row.
+    // `None` for the inline paths (channel / automation / approval) that have no
+    // pre-seeded message and must mint a fresh id.
+    preseeded_user_message_id: Option<&str>,
 ) -> Option<VisibleConversationTurn> {
-    let user_message = channel_chat_message("user", user_text);
+    let user_message = match preseeded_user_message_id {
+        Some(id) => channel_chat_message_with_id("user", user_text, id),
+        None => channel_chat_message("user", user_text),
+    };
     let assistant_message = channel_chat_message("assistant", "…");
     let turn = VisibleConversationTurn {
         turn_id: format!(
@@ -30956,81 +30983,8 @@ fn detect_new_artifacts(dir: &std::path::Path, since: std::time::SystemTime) -> 
     out
 }
 
-/// Extracts http(s) URLs from a browser tool result (manual scan, no regex dep),
-/// trimming trailing punctuation. Used to build the deterministic "Fonti" footer.
-fn extract_source_urls(text: &str) -> Vec<String> {
-    let mut urls: Vec<String> = Vec::new();
-    let mut rest = text;
-    while let Some(pos) = rest.find("http") {
-        let candidate = &rest[pos..];
-        if candidate.starts_with("http://") || candidate.starts_with("https://") {
-            let end = candidate
-                .find(|c: char| {
-                    c.is_whitespace() || matches!(c, ')' | ']' | '"' | '<' | '>' | '`' | '|' | '\\')
-                })
-                .unwrap_or(candidate.len());
-            let mut url = candidate[..end].to_string();
-            while url.ends_with(['.', ',', ';', ':', '*', '!', '?']) {
-                url.pop();
-            }
-            if url.len() > 12 && !urls.contains(&url) {
-                urls.push(url);
-            }
-            rest = &candidate[end..];
-        } else {
-            rest = &candidate[4..];
-        }
-    }
-    urls
-}
-
-/// A scraped URL that is page CHROME / tracking, not a real content source — so it never
-/// pollutes the "Sources" footer (a Wikipedia article's donate / edit / history / Special:
-/// links, cookie/consent/login pages, marketing campaign params). Keeps the cited sources
-/// to the actual pages the answer drew from.
-fn is_low_value_source_url(url: &str) -> bool {
-    let u = url.to_lowercase();
-    [
-        "donate.",
-        "/w/index.php",
-        "action=edit",
-        "action=history",
-        "oldid=",
-        "/special:",
-        "uselang=",
-        "/login",
-        "signin",
-        "/cookie",
-        "cookie-policy",
-        "cookie-consent",
-        "/privacy",
-        "/preferences",
-        "intcmp=",
-        "utm_",
-        "wmf_",
-    ]
-    .iter()
-    .any(|needle| u.contains(needle))
-}
-
-/// Builds a "Fonti" markdown footer from collected source URLs, unless the answer
-/// already cites sources. Capped to keep it tidy.
-fn fonti_section(sources: &[String], answer: &str) -> Option<String> {
-    if sources.is_empty() {
-        return None;
-    }
-    let lower = answer.to_lowercase();
-    if lower.contains("**sources") || lower.contains("checked sources") {
-        return None;
-    }
-    let list = sources
-        .iter()
-        .take(6)
-        .map(|url| format!("- {url}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    Some(format!("\n\n**Sources**\n{list}"))
-}
+// `extract_source_urls`, `is_low_value_source_url`, `fonti_section` moved to `engine::text`
+// (ADR 0024 inc 5e.3, pure loop-delivery helpers); imported below.
 
 /// A live chat stream, kept in a server-side registry so a client that reloads
 /// mid-answer can REATTACH (replay the buffered events + continue live) instead
@@ -31410,15 +31364,16 @@ async fn enqueue_turn(
         &workspace_id,
         &input,
         |tx| {
-            tx.execute(
-                "INSERT OR IGNORE INTO chat_messages (id, thread_id, role, text, timestamp)
-                 VALUES (?1, ?2, 'user', ?3, ?4)",
-                rusqlite::params![
-                    user_message_id,
-                    user_message_thread,
-                    user_message_prompt,
-                    user_message_ts,
-                ],
+            // Link the enqueued prompt into the thread tree via the canonical helper
+            // (parent = active_leaf, advance the leaf) so it is a proper node, NOT a
+            // dangling 2nd root. The turn executor reuses this exact id, so the later
+            // commit_prompt_result INSERT OR IGNORE no-ops → one user message per turn.
+            ChatStore::insert_linked_user_message(
+                tx,
+                &user_message_thread,
+                &user_message_id,
+                &user_message_prompt,
+                &user_message_ts,
             )
             .map_err(|e| {
                 local_first_task_runtime::TaskRuntimeError::Store(e.to_string())
@@ -33530,6 +33485,7 @@ fn execute_proactive_prompt_task(
         thread_plan.channel.as_deref(),
         &thread_plan.title,
         &goal,
+        None,
     )
     .ok_or_else(|| LocalTaskExecutionError {
         message: "could not start a visible automation turn".to_string(),
@@ -35681,6 +35637,7 @@ fn resume_thread_after_approval(
             Some("approval"),
             "Approved action continuation",
             &approval_continuation_visible_text(&tool),
+            None,
         ) else {
             return;
         };
@@ -60017,6 +59974,20 @@ data: [DONE]\n";
         let text = super::approval_continuation_visible_text(&long_tool);
         assert!(text.contains(&"x".repeat(80)));
         assert!(!text.contains(&"x".repeat(81)));
+    }
+
+    #[test]
+    fn title_model_inputs_strip_plan_markers_from_answer() {
+        // The final assistant text can carry a ‹‹PLAN›› card; the title model must not
+        // read it as content and latch onto a mid-turn step ("Step 2 in corso – …").
+        let prompt = "LangGraph pro e contro";
+        let answer = "‹‹PLAN››- [-] **Step 2 in corso** (`s2`): confronto‹‹/PLAN››\
+LangGraph conviene per grafi di stato espliciti; per flussi lineari è overhead.";
+        let (clean_prompt, clean_answer) = super::title_model_inputs(prompt, answer);
+        assert_eq!(clean_prompt, prompt);
+        assert!(!clean_answer.contains("Step 2"));
+        assert!(!clean_answer.contains("‹‹PLAN"));
+        assert!(clean_answer.starts_with("LangGraph conviene"));
     }
 
     #[test]

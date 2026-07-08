@@ -175,6 +175,19 @@ pub fn execute_chat_turn_task(
     //    and emits `thread.turn_started`. Fail closed if it cannot be persisted
     //    — never run invisible background model/tool work for an interactive
     //    request the user is waiting on.
+    //
+    //    Reuse the id the atomic enqueue already inserted (`local_user_{request_id}`)
+    //    so we don't mint a SECOND user message for the same prompt. The atomic
+    //    enqueue always writes `request_id` into input_json; fall back to deriving it
+    //    from the turn_id (`turn_{request_id}`) if an older task is missing it.
+    let request_id = task
+        .input_json
+        .get("request_id")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| turn_id.strip_prefix("turn_").map(str::to_string));
+    let preseeded_user_message_id = request_id.map(|r| format!("local_user_{r}"));
     let visible_turn = crate::start_visible_conversation_turn(
         state,
         thread_id,
@@ -183,6 +196,7 @@ pub fn execute_chat_turn_task(
         None,
         prompt,
         prompt,
+        preseeded_user_message_id.as_deref(),
     )
     .ok_or_else(|| crate::LocalTaskExecutionError {
         message: "could not start a visible conversation turn".to_string(),
