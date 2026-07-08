@@ -95,10 +95,15 @@ use local_first_desktop_gateway::{
 // The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
 use local_first_engine::plan::{
-    advance_plan_frontier, build_plan_markdown, collapse_plan_markers,
+    advance_plan_frontier, answer_concludes_plan, build_plan_markdown, collapse_plan_markers,
     enforce_monotonic_plan_progress, parse_plan_marker, plan_done_count, plan_incomplete_reason,
     plan_is_complete, plan_is_settled, plan_next_open, plan_step_id, plan_step_status,
-    plan_step_title, replace_latest_plan_marker,
+    plan_step_title, replace_latest_plan_marker, MIN_DELIVERED_CHARS_TO_CONCLUDE,
+};
+// Vault-reveal markers relocated to the engine crate (ADR 0024 inc 5e.3).
+use local_first_engine::markers::{
+    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker, VAULT_REVEAL_CLOSE,
+    VAULT_REVEAL_OPEN,
 };
 // The trait must be in scope to call `GatewayModelClient::generate` (ADR 0024).
 use local_first_engine::ModelClient;
@@ -6395,20 +6400,8 @@ fn plan_stall_abort_enabled() -> bool {
         .unwrap_or(false)
 }
 
-/// Minimum answer length (chars) we treat as a real delivered deliverable rather than an
-/// aside, for the over-running guard. Tuned conservatively: when in doubt (short answer) we
-/// keep nudging rather than stop early.
-const MIN_DELIVERED_CHARS_TO_CONCLUDE: usize = 600;
-
-/// F5 over-running guard (ADR 0018): once the model has written a SUBSTANTIAL answer and at
-/// most the LAST plan step is still open, it almost certainly FINISHED the work and merely
-/// forgot to mark that step done — so accept the answer instead of nudging it PAST a good
-/// result into a degraded/self-contradictory one (the long-horizon regression). With several
-/// steps still open it genuinely stopped early → keep nudging. Pure so the threshold lives in
-/// one tested place.
-fn answer_concludes_plan(open_steps: usize, delivered_chars: usize) -> bool {
-    open_steps <= 1 && delivered_chars >= MIN_DELIVERED_CHARS_TO_CONCLUDE
-}
+// `MIN_DELIVERED_CHARS_TO_CONCLUDE` + `answer_concludes_plan` moved to `engine::plan`
+// (ADR 0024 inc 5e.3); imported below.
 
 /// F2.2 (ADR 0018, Pavimento): when the over-running guard accepts the answer with the last
 /// step still open, reconcile that step to `done` so the PERSISTED runtime plan reflects the
@@ -13292,27 +13285,8 @@ fn vault_reveal_marker(record: &VaultRecordSummary) -> String {
     format!("{VAULT_REVEAL_OPEN}{payload}{VAULT_REVEAL_CLOSE}")
 }
 
-fn extract_vault_reveal_marker(text: &str) -> Option<String> {
-    let open = text.find(VAULT_REVEAL_OPEN)?;
-    let after_open = open + VAULT_REVEAL_OPEN.len();
-    let close_rel = text[after_open..].find(VAULT_REVEAL_CLOSE)?;
-    let close = after_open + close_rel + VAULT_REVEAL_CLOSE.len();
-    Some(text[open..close].to_string())
-}
-
-fn append_vault_reveal_marker_if_missing(mut text: String, marker: Option<&str>) -> String {
-    let Some(marker) = marker.filter(|marker| !marker.trim().is_empty()) else {
-        return text;
-    };
-    if text.contains(VAULT_REVEAL_OPEN) {
-        return text;
-    }
-    if !text.trim().is_empty() {
-        text.push_str("\n\n");
-    }
-    text.push_str(marker);
-    text
-}
+// `extract_vault_reveal_marker`, `append_vault_reveal_marker_if_missing`, and the
+// `VAULT_REVEAL_OPEN/CLOSE` consts moved to `engine::markers` (ADR 0024 inc 5e.3); imported below.
 
 #[derive(Debug, Deserialize)]
 struct ImprovePromptRequest {
@@ -36559,8 +36533,7 @@ const COMPOSIO_CONFIRM_CLOSE: &str = "‹‹/COMPOSIO_CONFIRM››";
 const PAYMENT_APPROVAL_OPEN: &str = "‹‹PAYMENT_APPROVAL››";
 const PAYMENT_APPROVAL_CLOSE: &str = "‹‹/PAYMENT_APPROVAL››";
 const PAYMENT_APPROVAL_TTL_SECONDS: u64 = 300;
-const VAULT_REVEAL_OPEN: &str = "‹‹VAULT_REVEAL››";
-const VAULT_REVEAL_CLOSE: &str = "‹‹/VAULT_REVEAL››";
+// VAULT_REVEAL_OPEN/CLOSE moved to engine::markers (ADR 0024 inc 5e.3); imported below.
 
 fn payment_approval_marker(snapshot: &PaymentApprovalSnapshot) -> String {
     let marker = serde_json::json!({ "snapshot": snapshot });

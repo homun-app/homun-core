@@ -196,6 +196,35 @@ impl StreamMarkerFilter {
     }
 }
 
+/// The vault-reveal marker (a secret revealed to the user is wrapped so it never enters the model
+/// context / committed transcript). Moved from the gateway (ADR 0024 inc 5e.3).
+pub const VAULT_REVEAL_OPEN: &str = "‹‹VAULT_REVEAL››";
+pub const VAULT_REVEAL_CLOSE: &str = "‹‹/VAULT_REVEAL››";
+
+/// Extract the first ‹‹VAULT_REVEAL››…‹‹/VAULT_REVEAL›› span from text (including the markers).
+pub fn extract_vault_reveal_marker(text: &str) -> Option<String> {
+    let open = text.find(VAULT_REVEAL_OPEN)?;
+    let after_open = open + VAULT_REVEAL_OPEN.len();
+    let close_rel = text[after_open..].find(VAULT_REVEAL_CLOSE)?;
+    let close = after_open + close_rel + VAULT_REVEAL_CLOSE.len();
+    Some(text[open..close].to_string())
+}
+
+/// Append a vault-reveal marker to `text` unless it's empty or the text already carries one.
+pub fn append_vault_reveal_marker_if_missing(mut text: String, marker: Option<&str>) -> String {
+    let Some(marker) = marker.filter(|marker| !marker.trim().is_empty()) else {
+        return text;
+    };
+    if text.contains(VAULT_REVEAL_OPEN) {
+        return text;
+    }
+    if !text.trim().is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str(marker);
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

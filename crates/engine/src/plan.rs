@@ -265,6 +265,17 @@ pub fn replace_latest_plan_marker(text: &str, steps: &[Value]) -> String {
     out
 }
 
+/// Minimum delivered characters for a substantial final answer to count as "concludes the plan"
+/// (guards the genuinely-truncated case). Shared by `answer_concludes_plan` and the gateway's
+/// delivery-reconcile. Moved from the gateway (ADR 0024 inc 5e.3).
+pub const MIN_DELIVERED_CHARS_TO_CONCLUDE: usize = 600;
+
+/// The nudge-decision predicate: a substantial final answer with at most one open step concludes
+/// the plan (conservative — many open steps means "keep pushing"). Pure (ADR 0024 inc 5e.3).
+pub fn answer_concludes_plan(open_steps: usize, delivered_chars: usize) -> bool {
+    open_steps <= 1 && delivered_chars >= MIN_DELIVERED_CHARS_TO_CONCLUDE
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
