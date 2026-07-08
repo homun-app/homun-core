@@ -182,6 +182,29 @@ pub trait PlanProgress {
     ) -> impl Future<Output = (bool, String)> + Send;
 }
 
+/// The loop's turn-level completion judge (ADR 0024, increment 5, Point 2a). When the model ACTS but
+/// stops WITHOUT ever tracking a plan, the loop asks this judge whether the request is actually
+/// finished; a `true` (incomplete) verdict triggers the plan-bootstrap nudge. Like the `PlanProgress`
+/// judge it is an LLM call (role `memory`) that reaches gateway config, so the engine reaches it
+/// through this narrow seam rather than pulling that config into the crate.
+///
+/// STANDALONE, deliberately NOT a fourth `PlanProgress` method: `PlanProgress` is the lifecycle of a
+/// *tracked plan step* (persist/record/verify a step), whereas this is a turn-level "did you finish,
+/// with NO plan" judgment (SRP). Both are mid-turn judges that ADR 0025 (browse-as-recursion) retires
+/// once the manager judges the answers — separate thin seams delete cleanly, one per concern. `Send`
+/// because the loop runs inside `tokio::spawn`. Defined ahead of the loop move that will consume it.
+pub trait TurnCompletionJudge {
+    /// Strict LLM judge: given the user REQUEST and the agent's final WORK (what it did/said right
+    /// before stopping, with no tracked plan), does the request still have clearly-remaining work?
+    /// Returns `true` when the turn appears INCOMPLETE. Fails OPEN (returns `false`) on any error, so
+    /// a judge outage never fakes a nudge.
+    fn task_appears_incomplete(
+        &self,
+        request: &str,
+        work: &str,
+    ) -> impl Future<Output = bool> + Send;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +341,31 @@ mod tests {
         plan.record_step_outcome(Some("t1"), &Value::Null, &["evidence".into()]).await;
         assert_eq!(*plan.persisted.lock().unwrap(), vec![2], "persisted a 2-step plan");
         assert_eq!(*plan.outcomes.lock().unwrap(), 1, "recorded one verified outcome");
+    }
+
+    // A scripted completion judge proves the seam is usable + mockable: the future loop can be driven
+    // with a canned verdict (no LLM) and the call recorded for inspection.
+    #[derive(Default)]
+    struct ScriptedJudge {
+        verdict: bool,                          // canned "incomplete?" answer
+        seen: std::sync::Mutex<Option<String>>, // last (request, work) joined, for inspection
+    }
+    impl TurnCompletionJudge for ScriptedJudge {
+        async fn task_appears_incomplete(&self, request: &str, work: &str) -> bool {
+            *self.seen.lock().unwrap() = Some(format!("{request}|{work}"));
+            self.verdict
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn turn_completion_judge_is_usable_with_a_mock() {
+        let judge = ScriptedJudge { verdict: true, ..Default::default() };
+        let incomplete = judge.task_appears_incomplete("do A and B", "did only A").await;
+        assert!(incomplete, "scripted judge said the turn is incomplete");
+        assert_eq!(
+            judge.seen.lock().unwrap().as_deref(),
+            Some("do A and B|did only A"),
+            "judge saw the request and work"
+        );
     }
 }

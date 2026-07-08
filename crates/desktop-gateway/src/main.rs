@@ -31042,6 +31042,22 @@ impl local_first_engine::PlanProgress for GatewayPlanProgress {
     }
 }
 
+/// The engine's turn-completion judge port (ADR 0024 inc 5, Point 2a): when the loop moves into the
+/// engine it asks "did the model stop with the request unfinished (and no plan)?" through this seam
+/// instead of calling `task_appears_incomplete` directly. Holds an `AppState` only to reach the shared
+/// HTTP client (the judge is a `memory`-role LLM call); delegates verbatim so behavior is unchanged —
+/// the loop still calls the free fn until inc 5e adopts this adapter.
+#[allow(dead_code)] // constructed by the gateway wiring at inc 5e (the loop move); defined now, contract-first.
+pub(crate) struct GatewayTurnCompletionJudge {
+    pub state: AppState,
+}
+
+impl local_first_engine::TurnCompletionJudge for GatewayTurnCompletionJudge {
+    async fn task_appears_incomplete(&self, request: &str, work: &str) -> bool {
+        task_appears_incomplete(&self.state.http, request, work).await
+    }
+}
+
 fn stream_registry()
 -> &'static std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<StreamEntry>>> {
     static CELL: std::sync::OnceLock<

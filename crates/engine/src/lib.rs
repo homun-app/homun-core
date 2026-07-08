@@ -37,4 +37,5 @@ pub mod model_normalize;
 pub use contract::{
     CapabilityExecutor, EventSink, LoadedTool, ModelCall, ModelCallError, ModelClient,
     ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects, ToolOutcome,
+    TurnCompletionJudge,
 };
