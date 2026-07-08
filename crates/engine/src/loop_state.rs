@@ -65,6 +65,9 @@ pub struct LoopState {
     /// The set of dynamically-loaded tool keys already live in the turn's toolset (so a
     /// second load of the same capability is a no-op).
     pub loaded_tools: BTreeSet<String>,
+    /// The tool schemas exposed to the model this turn: seeded gateway-side with the base
+    /// toolset (trimmed by policy), then extended as capabilities load (see `loaded_tools`).
+    pub tool_schemas: Vec<Value>,
 }
 
 impl LoopState {
@@ -98,5 +101,6 @@ mod tests {
         assert!(ls.step_evidence.is_empty());
         assert!(!ls.pending_compaction);
         assert!(ls.loaded_tools.is_empty());
+        assert!(ls.tool_schemas.is_empty());
     }
 }

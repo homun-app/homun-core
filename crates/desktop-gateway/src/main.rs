@@ -23794,10 +23794,10 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let mut browse_sources: Vec<String> = Vec::new();
         // Tools offered to the model this run: the base set, plus any tools the
         // model discovers via `find_connected_tools` (injected on demand).
-        let mut tool_schemas = base_tools;
+        ls.tool_schemas = base_tools;
         // "Chiedi" mode: pure conversation — no tools, no actions.
         if mode == "ask" {
-            tool_schemas.clear();
+            ls.tool_schemas.clear();
         }
         // Contact perimeter tool filter (channel turns): denied wins, then the
         // allowlist (if non-empty) narrows further. Substring match on the function
@@ -23806,7 +23806,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             let denied = &cx.perimeter.tools_denied;
             let allowed = &cx.perimeter.tools_allowed;
             if !denied.is_empty() || !allowed.is_empty() {
-                tool_schemas.retain(|schema| {
+                ls.tool_schemas.retain(|schema| {
                     let name = schema
                         .pointer("/function/name")
                         .and_then(|v| v.as_str())
@@ -23963,7 +23963,7 @@ missing, give what you have and note the gap in one short line.",
                         model: &model,
                         api_key: api_key.as_deref(),
                         messages: &ls.messages,
-                        tools: &tool_schemas,
+                        tools: &ls.tool_schemas,
                         temperature,
                         is_final_round,
                     },
@@ -24004,7 +24004,7 @@ missing, give what you have and note the gap in one short line.",
                     if is_final_round {
                         return None;
                     }
-                    let known: Vec<String> = tool_schemas
+                    let known: Vec<String> = ls.tool_schemas
                         .iter()
                         .filter_map(|t| {
                             t.get("function")
@@ -24088,7 +24088,7 @@ missing, give what you have and note the gap in one short line.",
                         step_evidence: &mut ls.step_evidence,
                         tool_trace: &mut ls.tool_trace,
                         loaded_tools: &mut ls.loaded_tools,
-                        tool_schemas: &mut tool_schemas,
+                        tool_schemas: &mut ls.tool_schemas,
                         last_round_sig: &mut ls.last_round_sig,
                         repeat_count: &mut ls.repeat_count,
                         progress_anchor_round: &mut ls.progress_anchor_round,
