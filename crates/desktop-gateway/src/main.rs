@@ -24040,6 +24040,9 @@ async fn run_agent_rounds(
     // 5.D1c.7: the sync policy gates (workflow-route block + provider vision capability).
     use local_first_engine::TurnPolicy as _;
     let turn_policy = GatewayTurnPolicy { route: capability_route_for_runtime };
+    // Wire the turn-completion judge seam (was a direct free-fn call): the no-plan "did you finish?" judge.
+    use local_first_engine::TurnCompletionJudge as _;
+    let completion_judge = GatewayTurnCompletionJudge { state: state_owned.clone() };
     for round in 0..cfg.hard_round_ceiling {
         let max_rounds = if ls.browser_used {
             cfg.browser_max_rounds
@@ -24587,7 +24590,8 @@ missing, give what you have and note the gap in one short line.",
                 }
             } else if plan_steps.is_empty()
                 && turn_used_tools
-                && task_appears_incomplete(&state_owned.http, &memory_user_message, &content)
+                && completion_judge
+                    .task_appears_incomplete(&memory_user_message, &content)
                     .await
             {
                 // Slice 2.5: the model ACTED but stopped WITHOUT ever creating a plan, and the
@@ -31003,7 +31007,7 @@ impl local_first_engine::TurnPolicy for GatewayTurnPolicy {
 /// instead of calling `task_appears_incomplete` directly. Holds an `AppState` only to reach the shared
 /// HTTP client (the judge is a `memory`-role LLM call); delegates verbatim so behavior is unchanged —
 /// the loop still calls the free fn until inc 5e adopts this adapter.
-#[allow(dead_code)] // constructed by the gateway wiring at inc 5e (the loop move); defined now, contract-first.
+// Constructed live in run_agent_rounds (5.D1c.7-followup): the no-plan completion judge.
 pub(crate) struct GatewayTurnCompletionJudge {
     pub state: AppState,
 }
