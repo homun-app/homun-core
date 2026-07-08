@@ -5,10 +5,23 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-08.**
 
-## ⭐ CHECKPOINT 2026-07-08 — Punto 2+4 tutto implementato headless; resta validazione LIVE + Punto 5
+## ⭐ CHECKPOINT 2026-07-08 — Punto 2+4 CODATO + LIVE-VALIDATO; prossimo = Punto 5 (il move)
 
 Tree pulito, workspace verde (engine 32/32, gateway 493 pass /0 fail — il `soffice` è flaky ambientale, 34-warn
 baseline). Riparti da qui.
+
+**✅ VALIDAZIONE LIVE 2026-07-08 (app pilotata, binario nuovo, chat model `deepseek-v4-pro:cloud`)** — tutti i
+debiti del batch saldati con 2 turni:
+- **Fix branching** (`945194f9`): DB `homun.sqlite` — i 2 thread nuovi hanno **1 root** ciascuno (seed→user
+  `local_user_*` LINKATO→answer, `active_leaf`=answer) e titoli puliti; i thread pre-fix mostravano 2–3 root +
+  "Step 2 in corso". Bug + sub-bug titolo CONFERMATI risolti.
+- **Move P4** (LoopState): turno browsing Rust — guardia `repeat_count`/`last_round_sig` ha rotto il loop
+  ("Same actions repeated"), `accumulated`/`messages`/`tool_schemas`/`step_evidence` corretti, tabella+Fonti ok.
+- **P2b** (sintesi→`ModelClient`): stesso turno è uscito `!final_done` (repeat-guard) → **sintesi forzata via il
+  seam** → deliverable completo (tabella+note+fonti). Happy-path OK; il path retry/fallback non è stato innescato
+  (nessun fallimento) ma è lo stesso ModelClient già provato in inc 4.
+- **Bonus P2a**: nudge "Pianifico il lavoro rimanente" = giudice `task_appears_incomplete` scattato.
+- Nota ambientale (non inc 5): modello *memory* `gemma4:31b-cloud` su Ollama :11434 giù → privacy-guard fail-open.
 
 **FATTO prima (prep 5c→5e.3a):** tutti i 5 seam hanno impl gateway, `ChatToolCtx` è `Sync`,
 `execute_chat_tool` è la fn pura `&ctx → (result, effects)`. **5d.1b LIVE-VALIDATO** (piano 1/3→3/3). Logica
@@ -38,10 +51,8 @@ behavior-preserving** (è il punto) → valida col vivo (turno empty-answer + tu
 dietro `HOMUN_ENGINE_CRATE` (default OFF) — fold di plan+provider, port/stato, **parità LIVE turno-per-turno**.
 **Punto 6:** wire + flip default + ritiro parallela inline (→ 5f/inc6 = ADR 0025).
 
-**DEBITI validazione LIVE (con l'app pilotata, `npm run electron:dev` per prendere il binario nuovo):**
-(a) fix branching (`945194f9`) — turn→cambia chat→torna → prompt+risposta entrambi; (b) 1 turno per confermare i
-move P4 (behavior-preserving, basso rischio); (c) **P2b** (`4223643c`, PENDING-LIVE) — turno empty-answer (reasoning
-model che brucia il budget → deve sintetizzare con retry/fallback) + turno normale.
+**DEBITI validazione LIVE — SALDATI 2026-07-08** (vedi blocco ✅ in cima al checkpoint): (a) branching ✅,
+(b) move P4 ✅, (c) P2b happy-path ✅. Resta solo la parità LIVE del **Punto 5** (quando si sposta il corpo loop).
 
 ## ⭐ Merge 2026-07-06 — due linee riunite su `main`
 
