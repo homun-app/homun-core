@@ -18686,92 +18686,6 @@ fn tool_safety_enabled() -> bool {
     std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
 }
 
-/// Harness-driven plan progress from VERIFIED evidence. Called after each work tool result: if
-/// the plan has a frontier `doing` step and enough new evidence has accrued, ask the F2 judge
-/// whether that step is genuinely complete; if so, mark it done, advance the frontier, and emit
-/// the ‹‹PLAN›› card + persist — the same canonical live+durable update the model's own
-/// `step_advance` produces. This is the ONLY way progress rises during a browsing turn, where the
-/// driver is the weak browser model that never calls `step_advance` (see the browser branch: the
-/// switch lasts the rest of the turn, no return to the manager). Verified-only, so thrashing on a
-/// hard-to-find market never fakes progress. Stride-gated so the (cheap `memory`-role) judge runs
-/// at most once per few tool results.
-///
-/// 5.D1c.5: re-expressed over the seams (`PlanProgress` for verify/record/persist + the steps→Value
-/// bridge, `EventSink` for the card, `TurnConfig` for the flags) so it carries no `&AppState` /
-/// `&StreamSink` / `ExecutionPlan` and moves into the engine with the loop. Behavior unchanged — each
-/// seam call delegates to the exact former free-fn.
-async fn try_advance_frontier_from_evidence(
-    ls: &mut local_first_engine::LoopState,
-    plan_progress: &impl local_first_engine::PlanProgress,
-    event_sink: &impl local_first_engine::EventSink,
-    cfg: &local_first_engine::TurnConfig,
-    thread_id: Option<&str>,
-    round: usize,
-) {
-    if !cfg.autoadvance_from_evidence || !cfg.step_verification {
-        return;
-    }
-    // Evidence stride: only re-check after a few new tool outcomes since the last attempt.
-    const EVIDENCE_STRIDE: usize = 3;
-    if ls.step_evidence.len() < ls.progress_verify_anchor.saturating_add(EVIDENCE_STRIDE) {
-        return;
-    }
-    ls.progress_verify_anchor = ls.step_evidence.len();
-    let batch_evidence = ls.step_evidence.join("\n");
-    if batch_evidence.is_empty() {
-        return;
-    }
-    // Advance as many consecutive frontier steps as this evidence window confirms — bounded so a
-    // single evidence window can never sweep the whole plan to done (that's the delivery reconcile's
-    // job, not a mid-turn judge call).
-    for _ in 0..2u8 {
-        let plan_steps = plan_value_steps(&ls.plan);
-        let Some(idx) = plan_steps
-            .iter()
-            .position(|s| plan_step_status(s) == "doing")
-        else {
-            return; // nothing in progress (plan complete or not started)
-        };
-        let title = plan_step_title(&plan_steps[idx]).to_string();
-        let criterion = plan_steps[idx]
-            .get("done_criterion")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let (ok, _reason) =
-            plan_progress.verify_step_complete(&title, &criterion, &batch_evidence).await;
-        if !ok {
-            return; // frontier step not proven done yet → leave it doing
-        }
-        let mut plan_steps = plan_steps;
-        advance_plan_frontier(&mut plan_steps);
-        let verified_step = plan_steps[idx].clone();
-        // record_step_outcome clones the evidence internally (its impl offloads to spawn_blocking),
-        // so pass the current window by ref — the same evidence the old inline clone captured pre-clear.
-        plan_progress
-            .record_step_outcome(thread_id, &verified_step, &ls.step_evidence)
-            .await;
-        ls.plan = plan_progress.plan_value_from_steps(&plan_steps);
-        ls.progress_anchor_round = round; // F1: real progress → reset the stall guard
-        event_sink
-            .emit(GenerateStreamEvent::Delta {
-                text: format!(
-                    "‹‹ACT››✓ Step verified: {}‹‹/ACT››",
-                    title.chars().take(60).collect::<String>()
-                ),
-            })
-            .await;
-        // The canonical live plan card (→ plan_update event) + durable runtime plan, exactly like
-        // the model's own step_advance path.
-        let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
-        event_sink.emit(GenerateStreamEvent::Delta { text: plan_mark }).await;
-        plan_progress.persist_plan(thread_id, &plan_steps).await;
-        // This evidence window was consumed by the advance — reset it + the stride anchor.
-        ls.step_evidence.clear();
-        ls.progress_verify_anchor = 0;
-    }
-}
-
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
 /// Verbatim unification of the MCP and Composio confirmation blocks — the only
 /// per-family differences are the marker delimiters and the human label. The `card`
@@ -24392,7 +24306,7 @@ missing, give what you have and note the gap in one short line.",
                     }
                     // Harness-derived progress: advance the plan frontier when the gathered
                     // evidence VERIFIES the current step (the weak browser model never does).
-                    try_advance_frontier_from_evidence(&mut ls, &plan_progress, tx, &cfg, thread_id.as_deref(), round).await;
+                    local_first_engine::agent_loop::try_advance_frontier_from_evidence(&mut ls, &plan_progress, tx, &cfg, thread_id.as_deref(), round).await;
                 }
                 // Parity harness: compute the result-derived fingerprint fields
                 // from `&result` BEFORE the push moves `result` into the message.

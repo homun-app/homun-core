@@ -55,6 +55,9 @@ pub mod outcome;
 /// The parity oracle for the loop move (ADR 0024 inc 5, 5.D1c.9): normalized per-tool-call fingerprints.
 pub mod trace;
 
+/// The single guarded ReAct loop — motore #1 (ADR 0021), extracted here (ADR 0024 inc 5, 5.D1c.10).
+pub mod agent_loop;
+
 pub use contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, LoadedTool, ModelCall,
     ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects,
