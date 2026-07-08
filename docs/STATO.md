@@ -20,11 +20,18 @@ smoke-test `a4a7a4ba` = PRIMA esecuzione reale di run_turn (mock, no network) �
 `HOMUN_TRACE_DUMP=1`, gateway headless lanciato da me. **ON = engine::run_turn ha girato un turno REALE end-to-end: 0
 panic/errori, risposta completa 1482 char (piano + codice Python + test), 7 tool-call.** Confronto invarianti strutturali
 per-tipo-tool: `run_in_sandbox` ✅ e `update_plan` ✅ (msgs_pushed=1, ‹‹PLAN›› marker) IDENTICI OFF-vs-ON; `write_file`/
-`find_capability` solo-ON = non-determinismo del modello (path più ricco), NON un problema di parità. Nessuna anomalia
-strutturale. **Branch non ancora coperti da questo turno: browser, approval/pending_confirm, forced-synthesis** → un
-turno LIVE (browser) nell'app rafforzerebbe prima del flip. **NEXT = 5.D2 (con utente): flip default ON + CANCELLA la copia
-inline run_agent_rounds + il flag → stato finale un-solo-loop-no-flag.** Consigliato: un giro LIVE in-app con
-`HOMUN_ENGINE_CRATE=1` (idealmente un turno browser) prima di 5.D2.
+`find_capability` solo-ON = non-determinismo del modello (path più ricco), NON un problema di parità. Nessuna anomalia strutturale.
+
+**⭐ LIVE IN-APP VALIDATION 2026-07-08 (Fabio, app Electron con `HOMUN_ENGINE_CRATE=1` = path ESTRATTO):** turno
+"Pianifica 3 step funzione Python" renderizzato **impeccabile sul path ON** — plan card con "Step verified: Testare con
+alcuni valori" (Activity 5), Step 1/2/3 con codice, esecuzione sandbox, risposta completa. Fabio: **"va tutto bene"**.
+`engine::run_turn` ha gestito LIVE un turno multi-step reale identico a sempre. (Unico appunto di Fabio = la **working
+island**/pannello Activity non persiste lo storico azioni — UX ORTOGONALE al motore, uguale OFF/ON, non regressione;
+rimandato → task `task_58afe482`.) **Branch ancora non esercitati su ON: browser, approval/pending_confirm** (basso
+rischio: copia verbatim + BrowserExecutor già validato in sessioni precedenti).
+
+**NEXT = 5.D2 (con utente): flip default ON + CANCELLA la copia inline run_agent_rounds + il flag `HOMUN_ENGINE_CRATE`
+→ stato finale un-solo-loop-no-flag.** Opzionale-consigliato prima: un turno LIVE **browser** su ON per coprire quel ramo.
 
 **5.D1c COMPLETO fino a .9 + le 2 code (task_appears_incomplete + marker cluster).** Il corpo di `run_agent_rounds`
 (832 righe) è ora **ENGINE-SAFE**: audit fn-gateway×chiamate-nel-corpo = ZERO free-fn/tipi gateway nel control-flow;
