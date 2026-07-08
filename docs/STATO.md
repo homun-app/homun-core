@@ -5,9 +5,23 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-08.**
 
-## ⭐ CHECKPOINT 2026-07-08 — 5.D1c.10 IL MOVE LANDED (flag OFF); prossimo = PARITY VALIDATION poi 5.D2 flip (con utente)
+## ⭐ CHECKPOINT 2026-07-08 — ADR 0024 (estrazione motore #1) COMPLETA: `engine::run_turn` è il loop unico, no flag
 
-Tree pulito, workspace verde (engine 61/61, gateway 474 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
+Tree pulito, workspace verde (engine 64/64, gateway 474 pass / 1 `soffice`-ambientale, 34-warn baseline). Riparti da qui.
+
+**⭐⭐ 5.D2 FATTO (`50ed7ec6`) — LA CONVERGENZA.** Il loop agentico (motore #1, ADR 0021) vive ORA SOLO in
+`engine::agent_loop::run_turn`; `run_agent_rounds` è un thin seam-builder (~108 righe, era ~866) che costruisce gli
+adapter gateway e chiama `run_turn` **incondizionatamente**. Cancellati: copia inline (766 righe), flag
+`HOMUN_ENGINE_CRATE`+`engine_crate_enabled()`, dispatch, MAX_PLAN_NUDGES (→ engine), 8 import trait-seam `as _`, 14
+import loop-only; 7 `mut` inutili rimossi. **Stato finale = UN loop, nessun flag, nessuna copia** (converge, don't
+duplicate). `grep HOMUN_ENGINE_CRATE = 0`. **Chiude il Punto 5 di ADR 0024 e SBLOCCA ADR 0025** (browse-as-recursion:
+`browse(goal)` invoca ricorsivamente QUESTO stesso `run_turn` → il fix-radice del context-pollution del modello-browser
+che Fabio ha visto oggi). Validazione: parità strutturale trace-dump OFF/ON ✅ + smoke-test ✅ + LIVE in-app plan+code ✅
++ marker-flood fix `d066581e` ✅ (turno browser LIVE: flood sparito, committed pulito).
+
+**PROSSIMO ARCO = ADR 0025 (browse-as-recursion)** — la cura vera del garbage browser (reasoning/tool-call leak,
+narrazione-invece-di-risposta): il manager forte resta driver, il modello-browser gira isolato in un sotto-turno
+`run_turn(goal)→answer`. + task aperti: working-island (`task_58afe482`, in corso in altra sessione).
 
 **⭐ 5.D1c.10 FATTO (additivo, `HOMUN_ENGINE_CRATE` default OFF = ZERO rischio prod):** il loop agentico è ESTRATTO in
 `engine::agent_loop::run_turn` (copia generica sui 8 seam, 733 righe, trasformata solo `local_first_engine::→crate::` +
