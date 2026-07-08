@@ -52,7 +52,7 @@ pub mod tools;
 pub use contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, LoadedTool, ModelCall,
     ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects,
-    ToolOutcome, TurnCompletionJudge,
+    ToolOutcome, TurnCompletionJudge, TurnPolicy,
 };
 pub use config::TurnConfig;
 pub use loop_state::LoopState;

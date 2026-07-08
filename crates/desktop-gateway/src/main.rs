@@ -23983,6 +23983,9 @@ async fn run_agent_rounds(
     // 5.D1c.6: the F3 context-compaction seam (wraps the step-summary LLM call).
     use local_first_engine::ContextCompactor as _;
     let compactor = GatewayContextCompactor { http: state_owned.http.clone() };
+    // 5.D1c.7: the sync policy gates (workflow-route block + provider vision capability).
+    use local_first_engine::TurnPolicy as _;
+    let turn_policy = GatewayTurnPolicy { route: capability_route_for_runtime };
     for round in 0..cfg.hard_round_ceiling {
         let max_rounds = if ls.browser_used {
             cfg.browser_max_rounds
@@ -24220,9 +24223,7 @@ missing, give what you have and note the gap in one short line.",
                     None => name,
                 };
 
-                if let Some(blocked) =
-                    workflow_route_blocked_tool_message(&capability_route_for_runtime, name)
-                {
+                if let Some(blocked) = turn_policy.route_blocked(name) {
                     // Parity harness: the blocked arm pushes a tool message then
                     // `continue`s, jumping over the normal record block below. The
                     // upcoming extraction handles this arm specially, so it MUST be
@@ -24412,9 +24413,8 @@ missing, give what you have and note the gap in one short line.",
                 // confidently reports no `vision` capability (undetected/cloud → send, as
                 // today); a non-vision model would otherwise error on the image part — feed
                 // it a text note so it falls back to the page's text snapshot.
-                let vision_capable = ollama_capabilities(&ls.provider.base_url, &ls.provider.model)
-                    .map(|c| c.vision)
-                    .unwrap_or(true);
+                let vision_capable =
+                    turn_policy.supports_vision(&ls.provider.base_url, &ls.provider.model);
                 if vision_capable {
                     ls.messages.push(serde_json::json!({
                         "role": "user",
@@ -30960,6 +30960,24 @@ pub(crate) struct GatewayContextCompactor {
 impl local_first_engine::ContextCompactor for GatewayContextCompactor {
     async fn compact(&self, messages: &mut Vec<serde_json::Value>, start: &mut usize) {
         compact_completed_step(&self.http, messages, start).await;
+    }
+}
+
+/// The gateway's `TurnPolicy` (ADR 0024 inc 5, 5.D1c.7): the two sync gates the loop consults —
+/// workflow-route blocking (holds the turn's `CapabilityRouteDecision`, a gateway type) and provider
+/// vision capability (reads the cached `ollama_capabilities`). Constructed live in run_agent_rounds.
+pub(crate) struct GatewayTurnPolicy {
+    pub route: CapabilityRouteDecision,
+}
+
+impl local_first_engine::TurnPolicy for GatewayTurnPolicy {
+    fn route_blocked(&self, tool: &str) -> Option<String> {
+        workflow_route_blocked_tool_message(&self.route, tool)
+    }
+
+    fn supports_vision(&self, base_url: &str, model: &str) -> bool {
+        // Undetected/cloud providers report no capabilities → default to sending the image (as today).
+        ollama_capabilities(base_url, model).map(|c| c.vision).unwrap_or(true)
     }
 }
 

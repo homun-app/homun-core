@@ -250,6 +250,21 @@ pub trait ContextCompactor {
     ) -> impl Future<Output = ()> + Send;
 }
 
+/// Small SYNC gateway-policy probes the loop consults before an action (ADR 0024 inc 5, 5.D1c.7).
+/// Two "can I do X right now?" questions whose answers need gateway-only state the leaf engine can't
+/// hold: the turn's workflow-route decision (a gateway type) and the provider capability cache. Grouped
+/// on one thin seam because both are trivial per-action gates the engine asks the gateway — not worth a
+/// trait each. All sync (`&self`, no future): pure lookups, no IO.
+pub trait TurnPolicy {
+    /// Is this tool BLOCKED by the turn's workflow route? Returns the model-facing block message to
+    /// surface (and skip the tool), or `None` when the tool is allowed.
+    fn route_blocked(&self, tool: &str) -> Option<String>;
+
+    /// Can the CURRENT provider accept an image part? Gates the browser-screenshot vision injection;
+    /// defaults to `true` for undetected/cloud providers (only a confidently non-vision model is skipped).
+    fn supports_vision(&self, base_url: &str, model: &str) -> bool;
+}
+
 /// The loop's turn-level completion judge (ADR 0024, increment 5, Point 2a). When the model ACTS but
 /// stops WITHOUT ever tracking a plan, the loop asks this judge whether the request is actually
 /// finished; a `true` (incomplete) verdict triggers the plan-bootstrap nudge. Like the `PlanProgress`
@@ -417,6 +432,27 @@ mod tests {
         assert_eq!(msgs.len(), 2, "the step slice collapsed to one summary note");
         assert_eq!(msgs[1]["content"], "[summary]");
         assert_eq!(start, 2, "start advanced past the summary");
+    }
+
+    // A scripted policy proves the TurnPolicy seam is usable + mockable (drive the gates with no
+    // gateway state). The gateway's `GatewayTurnPolicy` is the real impl.
+    struct FixedPolicy;
+    impl TurnPolicy for FixedPolicy {
+        fn route_blocked(&self, tool: &str) -> Option<String> {
+            (tool == "forbidden").then(|| "blocked by route".to_string())
+        }
+        fn supports_vision(&self, _base_url: &str, model: &str) -> bool {
+            model != "text-only"
+        }
+    }
+
+    #[test]
+    fn turn_policy_is_usable_with_a_mock() {
+        let p = FixedPolicy;
+        assert_eq!(p.route_blocked("forbidden").as_deref(), Some("blocked by route"));
+        assert_eq!(p.route_blocked("write_file"), None);
+        assert!(p.supports_vision("http://x", "vision-model"));
+        assert!(!p.supports_vision("http://x", "text-only"));
     }
 
     // An in-memory sink proves the EventSink seam is usable + mockable (drive the future loop's
