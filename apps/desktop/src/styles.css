@@ -2364,6 +2364,33 @@ body.resizing-drawer {
   font-weight: 650;
 }
 
+/* Objective block (Task 4c) — top of the Objective → Plan → Activity hierarchy.
+   A light surface block, matching .pcp-section-title/.pcp-objective conventions. */
+.wi-goal {
+  margin: 0 4px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.wi-goal-label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wi-goal-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .wi-progress {
   margin: 4px 0 10px;
   padding-top: 8px;

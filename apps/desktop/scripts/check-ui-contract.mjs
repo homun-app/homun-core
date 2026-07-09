@@ -430,6 +430,13 @@ assertNotContains(
   "onOpenWorkbench(\"memoria\")",
   "memory row must be removed from the island"
 );
+// Task 4c: the objective sits at the top of the Objective → Plan → Activity hierarchy,
+// rendered as a text block (conditional — hidden when the workspace has no objective).
+assertContains(
+  "src/components/WorkspaceIsland.tsx",
+  "wi-goal",
+  "island must render the project objective as a text block"
+);
 assertContains("src/components/ChatView.tsx", "detailsOpen || workbenchOpen ? \" panel-open\" : \"\"", "right-side panels must reserve layout space instead of covering the chat");
 assertContains("src/styles.css", "top: calc(var(--window-chrome-height, 44px) + 8px);", "workbench island must sit below native chrome with breathing room");
 assertContains("src/styles.css", "right: 12px;", "workbench island must keep a visible margin from the window edge");

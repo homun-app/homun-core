@@ -57,6 +57,7 @@ function loadWorkspaceIslandMode(): WorkspaceIslandMode {
 
 export function WorkspaceIsland({
   threadId,
+  objective,
   activitySteps,
   computerActivity,
   computerLive,
@@ -69,6 +70,9 @@ export function WorkspaceIsland({
   onOpenWorkbench,
 }: {
   threadId: string;
+  /** North-star objective text (top of the Objective → Plan → Activity hierarchy).
+   *  null/undefined when the workspace has none — the block stays hidden. */
+  objective?: string | null;
   activitySteps: string[];
   computerActivity: string | null;
   computerLive: boolean;
@@ -241,6 +245,16 @@ export function WorkspaceIsland({
               </div>
             )}
           </div>
+
+          {/* Objective sits above Plan/Activity in the hierarchy — shown as plain text,
+              never an empty block: the server returns null when there's no confirmed
+              goal memory for this workspace (personal/threads chats included). */}
+          {objective ? (
+            <div className="wi-goal">
+              <span className="wi-goal-label">{t("projectContext.objective")}</span>
+              <p className="wi-goal-text">{objective}</p>
+            </div>
+          ) : null}
 
           {planSteps.length > 0 && (
             <button

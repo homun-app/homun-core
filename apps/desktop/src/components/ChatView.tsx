@@ -351,6 +351,9 @@ export function ChatView({
   // the Obiettivi compose when promoting a chat message to a goal.
   const [threadIsProject, setThreadIsProject] = useState(false);
   const [projectGoalCount, setProjectGoalCount] = useState(0);
+  // Task 4c: north-star objective text, rides along the same /api/memory/goals
+  // fetch that already yields projectGoalCount — no separate network call.
+  const [projectObjective, setProjectObjective] = useState<string | null>(null);
   const [projectMemoryCount, setProjectMemoryCount] = useState(0);
   const [goalSeed, setGoalSeed] = useState<string | null>(null);
   const [computerLiveStatus, setComputerLiveStatus] = useState<{
@@ -1492,6 +1495,7 @@ export function ChatView({
     let cancelled = false;
     setThreadIsProject(false);
     setProjectGoalCount(0);
+    setProjectObjective(null);
     setProjectMemoryCount(0);
     void coreBridge
       .projectGoals(thread.threadId)
@@ -1500,6 +1504,7 @@ export function ChatView({
         const isProject = Boolean(d?.is_project);
         setThreadIsProject(isProject);
         setProjectGoalCount(d?.goals.length ?? 0);
+        setProjectObjective(d?.objective ?? null);
         if (!isProject) {
           setProjectMemoryCount(0);
           return;
@@ -1519,6 +1524,7 @@ export function ChatView({
         if (cancelled) return;
         setThreadIsProject(false);
         setProjectGoalCount(0);
+        setProjectObjective(null);
         setProjectMemoryCount(0);
       });
     return () => {
@@ -1974,6 +1980,7 @@ export function ChatView({
           {thread.workspaceId && <ProjectContextPanel threadId={thread.threadId} />}
           <WorkspaceIsland
             threadId={thread.threadId}
+            objective={projectObjective}
             activitySteps={conversationActivity}
             computerActivity={computerLiveStatus.activity}
             computerLive={computerLiveStatus.active}
