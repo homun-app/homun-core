@@ -100,7 +100,7 @@ use local_first_desktop_gateway::{
 use local_first_engine::plan::{
     build_plan_markdown, enforce_monotonic_plan_progress, parse_plan_marker,
     plan_done_count, plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
-    plan_step_id, plan_step_status, plan_step_title, MIN_DELIVERED_CHARS_TO_CONCLUDE,
+    plan_step_id, plan_step_status, plan_step_title, plan_value_steps, MIN_DELIVERED_CHARS_TO_CONCLUDE,
 };
 use local_first_engine::markers::{VAULT_REVEAL_CLOSE, VAULT_REVEAL_OPEN};
 // Engine helpers exercised ONLY by this crate's tests (their non-test callers moved into
@@ -6376,6 +6376,27 @@ fn plan_reconcile_on_delivery_flag(value: Option<&str>) -> bool {
 
 fn plan_reconcile_on_delivery_enabled() -> bool {
     plan_reconcile_on_delivery_flag(std::env::var("HOMUN_PLAN_RECONCILE").ok().as_deref())
+}
+
+/// Turn trace is ON by default (local-only, bounded). `HOMUN_TURN_TRACE=0`/`off` opts out. See
+/// `engine::turn_trace`.
+fn turn_trace_enabled() -> bool {
+    !matches!(
+        std::env::var("HOMUN_TURN_TRACE")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("0") | Some("off") | Some("OFF") | Some("Off")
+    )
+}
+
+/// Max bytes before `turn-trace.jsonl` rotates. Override with `HOMUN_TURN_TRACE_MAX_BYTES`.
+fn turn_trace_max_bytes() -> u64 {
+    std::env::var("HOMUN_TURN_TRACE_MAX_BYTES")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(5_000_000)
 }
 
 /// Harness-driven plan progress during a browsing turn. When the driver switches to the
@@ -18928,6 +18949,9 @@ struct ChatToolCtx<'a> {
     automation_workspace_id: &'a WorkspaceId,
     turn_scaffold: &'a scaffold::ScaffoldProfile,
     floor_acting: bool,
+    // Readable per-turn observability sink (ported). Used by the `update_plan`/`step_advance` arm to
+    // record the Plan event; no-op when disabled. See `engine::turn_trace`.
+    turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
 }
 
 
@@ -21405,6 +21429,19 @@ an uncertain date.",
                 ctx.thread_id,
                 &plan_steps,
             );
+            // Turn trace: record the plan op with the model's SENT step statuses vs the CANONICAL
+            // (merged/verified) ones — observability only, never influences the merge.
+            ctx.turn_trace.record(local_first_engine::turn_trace::TurnEvent::Plan {
+                op: name.to_string(),
+                sent: sent
+                    .iter()
+                    .map(|s| plan_step_status(s).to_string())
+                    .collect(),
+                canonical: plan_steps
+                    .iter()
+                    .map(|s| plan_step_status(s).to_string())
+                    .collect(),
+            });
             let done = plan_done_count(&plan_steps);
             match rejection {
                 Some(msg) => format!("⚠️ {msg} (done {done}/{})", plan_steps.len()),
@@ -22320,6 +22357,9 @@ struct GatewayCapabilityExecutor<'a> {
     // `GatewayBrowseExecutor` without threading them through the whole ChatToolCtx.
     prompt: &'a str,
     channel_owner: bool,
+    // Readable per-turn observability sink (ported); passed into each per-call ChatToolCtx so the plan
+    // arm can record the Plan event. No-op when disabled. See `engine::turn_trace`.
+    turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
 }
 
 impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
@@ -22378,6 +22418,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             automation_workspace_id: self.automation_workspace_id,
             turn_scaffold: self.turn_scaffold,
             floor_acting: self.floor_acting,
+            turn_trace: self.turn_trace,
         };
         let (result, effects) = execute_chat_tool(&ctx, name, &args_raw, call_id).await;
         Ok(local_first_engine::ToolOutcome { result, effects })
@@ -22659,6 +22700,8 @@ impl GatewayBrowseExecutor<'_> {
             false,
             Vec::new(),
             None, // no trace-dump inside the sub-turn
+            // Sub-turns don't spam the readable per-turn trace (ADR 0025): the manager's turn owns it.
+            &local_first_engine::turn_trace::TurnTrace::disabled(),
         )
         .await;
 
@@ -22761,6 +22804,29 @@ async fn stream_chat_via_openai(
     model: String,
     api_key: Option<String>,
 ) -> Result<Response, GatewayError> {
+    // Turn trace (readable per-turn observability): handle created HERE, at the absolute entry, so a
+    // hang in SETUP (memory recall, prompt-build, browser-session) is visible — see engine::turn_trace.
+    // The `turn_received` event is the FIRST thing recorded; if no `turn_start` follows, the turn
+    // stalled before generation (a setup-hang would otherwise be invisible). Cheap Arc/None handle;
+    // no-op when disabled. It's a pure sink — it records what the turn does, never steers it.
+    let turn_trace = if turn_trace_enabled() {
+        match gateway_logs_dir() {
+            Ok(dir) => local_first_engine::turn_trace::TurnTrace::new(
+                request.request_id.clone(),
+                dir,
+                turn_trace_max_bytes(),
+            ),
+            Err(_) => local_first_engine::turn_trace::TurnTrace::disabled(),
+        }
+    } else {
+        local_first_engine::turn_trace::TurnTrace::disabled()
+    };
+    turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnReceived {
+        prompt_head: request.prompt.chars().take(200).collect(),
+        prompt_len: request.prompt.chars().count(),
+        mode: request.mode.as_deref().unwrap_or("agent").to_string(),
+        model: model.clone(),
+    });
     // Adaptive scaffolding floor (ADR 0018): resolve the turn model's capability
     // tier ONCE, so the in-loop knobs (verify depth now; format/workflow-bias in
     // later phases) can scale with it. Behind HOMUN_ADAPTIVE_FLOOR: `off` (default)
@@ -23555,6 +23621,15 @@ to the user (one table per row + an optional Sources footer)."
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
     // "ask" also drops the toolset below (pure conversation).
     let mode = request.mode.as_deref().unwrap_or("agent").to_string();
+    // Turn trace: setup COMPLETED (memory recall, prompt-build, tier resolution) and generation is about
+    // to begin. A `turn_start` following a `turn_received` implies setup succeeded (no pre-gen hang).
+    turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnStart {
+        prompt_head: request.prompt.chars().take(200).collect(),
+        prompt_len: request.prompt.chars().count(),
+        mode: mode.clone(),
+        model: model.to_string(),
+        tier: turn_tier.as_str().to_string(),
+    });
     let system = match mode.as_str() {
         "plan" => format!(
             "{system}\n\nPLAN MODE (chosen by the user): for ANY non-trivial request \
@@ -24153,7 +24228,30 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, &turn_trace).await;
+        // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
+        // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
+        // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
+        {
+            let final_steps = plan_value_steps(&outcome.final_plan);
+            let plan_final: Vec<String> = final_steps
+                .iter()
+                .map(|s| plan_step_status(s).to_string())
+                .collect();
+            let plan_titles: Vec<String> = final_steps
+                .iter()
+                .map(|s| plan_step_title(s).to_string())
+                .collect();
+            let artifact_count = outcome.memory_answer.matches("‹‹ARTIFACT››").count();
+            let signals = local_first_engine::turn_trace::answer_signals(&outcome.memory_answer, artifact_count);
+            let derived = local_first_engine::turn_trace::derive_flags(&plan_final, &plan_titles, &signals);
+            turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnEnd {
+                final_len: outcome.memory_answer.chars().count(),
+                plan_final,
+                signals,
+                derived,
+            });
+        }
         // M2: mine this exchange for durable personal memory (fire-and-forget, off the response path).
         // Best-effort; never blocks or fails the turn. Skip for channel turns (read_only): the inbound
         // is from a CONTACT, not the user, and the channel handler runs its own speaker-attributed learn
@@ -24249,6 +24347,9 @@ async fn run_agent_rounds(
     // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
     // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
     trace_dir: Option<std::path::PathBuf>,
+    // Readable per-turn observability sink (ported): passed into the capability executor (Plan event)
+    // and into `run_turn` (the in-loop events). No-op when disabled. See `engine::turn_trace`.
+    turn_trace: &local_first_engine::turn_trace::TurnTrace,
 ) -> local_first_engine::TurnOutcome {
     // Build the seams `engine::run_turn` runs against — thin gateway adapters over AppState/transport/
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
@@ -24275,6 +24376,7 @@ async fn run_agent_rounds(
         // calls the `browse` tool; inert otherwise).
         prompt: &prompt,
         channel_owner,
+        turn_trace,
     };
     // The browser tool chokepoint (ADR 0025 seam): OWNS the browser subsystem's private state (session +
     // snapshot/tab/nav bookkeeping); `&mut` because run_turn mutates it per browser call.
@@ -24323,6 +24425,7 @@ async fn run_agent_rounds(
         turn_used_tools,
         browse_sources,
         trace_dir,
+        turn_trace,
     )
     .await
 }

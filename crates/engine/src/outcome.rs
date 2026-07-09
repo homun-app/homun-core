@@ -21,4 +21,10 @@ pub struct TurnOutcome {
     /// exists for ADR 0025's `browse(goal)` recursion, where the sub-turn's `BrowseResult.sources` is
     /// these URLs (the answer itself stays clean, the manager owns source presentation).
     pub browse_sources: Vec<String>,
+    /// The turn's FINAL runtime plan (opaque serialized `ExecutionPlan`, `Null` when the turn had no
+    /// plan). Carried out so the gateway's `turn_trace` `TurnEnd` can report per-step final status +
+    /// the derived "claimed done without artifact" flag — the plan lives in the consumed `LoopState`,
+    /// so it can only reach the caller through the outcome. Observability-only; no path reads it for
+    /// control flow (the `browse` recursion ignores it).
+    pub final_plan: serde_json::Value,
 }

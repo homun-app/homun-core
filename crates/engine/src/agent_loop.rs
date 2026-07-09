@@ -150,6 +150,10 @@ pub async fn run_turn<M, C, B, P, J, K, Pol, E>(
     mut turn_used_tools: bool,
     mut browse_sources: Vec<String>,
     trace_dir: Option<std::path::PathBuf>,
+    // Readable per-turn observability sink (ported). A pure recorder: every `record` only appends a
+    // JSON line (or no-ops when disabled), NEVER gates a decision — behavior-preserving by construction.
+    // Sub-turns (the `browse` recursion) pass `TurnTrace::disabled()` so they don't spam the trace.
+    turn_trace: &crate::turn_trace::TurnTrace,
 ) -> crate::TurnOutcome
 where
     M: ModelClient,
@@ -310,6 +314,28 @@ missing, give what you have and note the gap in one short line.",
                     Some(model_normalize::synthesize_tool_calls(round, parsed))
                 }
             });
+
+        // Turn trace: record this round's outcome (finish_reason + tools chosen) before `tool_calls` is
+        // consumed below. Observability only — reads state, never alters it.
+        turn_trace.record(crate::turn_trace::TurnEvent::Round {
+            round,
+            finish_reason: round_finish_reason.clone().unwrap_or_default(),
+            tool_calls: tool_calls
+                .as_ref()
+                .map(|calls| {
+                    calls
+                        .iter()
+                        .filter_map(|c| {
+                            c.get("function")
+                                .and_then(|f| f.get("name"))
+                                .and_then(|n| n.as_str())
+                                .map(String::from)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            content_delta_len: raw_content.chars().count(),
+        });
 
         if let Some(calls) = tool_calls {
             plan_nudges = 0; // the model is acting again → reset the stop-nudge cap
@@ -657,6 +683,11 @@ missing, give what you have and note the gap in one short line.",
                     .count();
                 if !answer_concludes_plan(open_left, content.trim().chars().count()) {
                     plan_nudges += 1;
+                    // Turn trace: the harness nudged the model to keep going on the still-open plan.
+                    turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
+                        reason: "answer_did_not_conclude_plan".into(),
+                        next_step: step.clone(),
+                    });
                     if !content.trim().is_empty() {
                         ls.messages.push(
                             serde_json::json!({ "role": "assistant", "content": content }),
@@ -696,6 +727,13 @@ missing, give what you have and note the gap in one short line.",
                         .iter()
                         .position(|s| plan_step_status(s) != "done")
                     {
+                        // Turn trace: count open steps at DECISION time (before this reconcile closes
+                        // one) and the delivered size — the inputs the reconcile fired on.
+                        let reconcile_open_before = plan_steps
+                            .iter()
+                            .filter(|s| plan_step_status(s) != "done")
+                            .count();
+                        let reconcile_delivered = content.trim().chars().count();
                         plan_steps[open_index]["status"] = serde_json::json!("done");
                         content = replace_latest_plan_marker(&content, &plan_steps);
                         plan_progress.persist_plan(thread_id.as_deref(), &plan_steps).await;
@@ -704,6 +742,13 @@ missing, give what you have and note the gap in one short line.",
                                 "[plan] reconciled last open step to done on delivery: «{step}»"
                             );
                         }
+                        turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
+                            fired: true,
+                            step: step.clone(),
+                            open_steps: reconcile_open_before,
+                            delivered_chars: reconcile_delivered,
+                            threshold: crate::plan::MIN_DELIVERED_CHARS_TO_CONCLUDE,
+                        });
                     }
                 }
             } else if plan_steps.is_empty()
@@ -718,6 +763,12 @@ missing, give what you have and note the gap in one short line.",
                 // empty plan silently bypasses it (the gap behind a generic multi-step task
                 // stopping early). `make_deck` is exempt: one-call, never enters this loop.
                 plan_nudges += 1;
+                // Turn trace: the model acted but never planned → the harness bootstraps a plan. No
+                // named next step here (the plan is empty by definition on this path).
+                turn_trace.record(crate::turn_trace::TurnEvent::Nudge {
+                    reason: "stopped_without_plan".into(),
+                    next_step: String::new(),
+                });
                 if !content.trim().is_empty() {
                     ls.messages
                         .push(serde_json::json!({ "role": "assistant", "content": content }));
@@ -753,6 +804,9 @@ missing, give what you have and note the gap in one short line.",
                 let fr = round_finish_reason.as_deref().unwrap_or("");
                 eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
             }
+            turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
+                finish_reason: round_finish_reason.clone().unwrap_or_default(),
+            });
             // Keep the reasoning trace in context so the synthesis builds on it.
             if !content.trim().is_empty() {
                 ls.messages.push(serde_json::json!({ "role": "assistant", "content": content }));
@@ -774,9 +828,23 @@ missing, give what you have and note the gap in one short line.",
         // (see plan_steps_reconciled_on_delivery) — and PERSIST it, so the runtime plan is
         // settled → the next turn won't falsely resume a plan this answer already finished.
         let delivered = collapse_plan_markers(&ls.accumulated);
+        // Turn trace: open-step count BEFORE the final reconcile (its input), captured so the trace
+        // shows how many steps the delivery reconcile swept closed.
+        let final_open_before = plan_value_steps(&ls.plan)
+            .iter()
+            .filter(|s| plan_step_status(s) != "done")
+            .count();
+        let final_delivered_chars = delivered.trim().chars().count();
         let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
                 plan_progress.persist_plan(thread_id.as_deref(), &reconciled).await;
+                turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
+                    fired: true,
+                    step: String::new(), // the whole plan is reconciled here, not a single named step
+                    open_steps: final_open_before,
+                    delivered_chars: final_delivered_chars,
+                    threshold: crate::plan::MIN_DELIVERED_CHARS_TO_CONCLUDE,
+                });
                 replace_latest_plan_marker(&delivered, &reconciled)
             }
             None => delivered,
@@ -802,6 +870,12 @@ missing, give what you have and note the gap in one short line.",
     browser_executor.close_session(ls.browser_used).await;
 
     if !final_done {
+        // Turn trace: the loop exited without a committed answer → the guaranteed post-loop synthesis
+        // fires. No per-round finish_reason applies on this exhaustion path (the loop broke on the
+        // round/nav budget or a transport error); a synthetic marker keeps the event greppable.
+        turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
+            finish_reason: "post_loop_exhausted".into(),
+        });
         // Guaranteed synthesis: the model exhausted the tool rounds without a
         // text answer (it kept calling tools). Force one final NO-TOOLS call so it
         // synthesizes from what it did, instead of dead-ending on "limite di passi".
@@ -893,6 +967,8 @@ Tell me if you want me to retry or rephrase."
         memory_answer,
         tool_actions: ls.tool_trace.join("\n"),
         browse_sources,
+        // Carry the final runtime plan out for the gateway's turn_trace TurnEnd (observability only).
+        final_plan: ls.plan,
     }
 }
 
@@ -1037,6 +1113,7 @@ mod tests {
             false,
             Vec::new(),
             None,
+            &crate::turn_trace::TurnTrace::disabled(),
         )
         .await;
 

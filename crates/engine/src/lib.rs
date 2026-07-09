@@ -56,6 +56,11 @@ pub mod outcome;
 /// The parity oracle for the loop move (ADR 0024 inc 5, 5.D1c.9): normalized per-tool-call fingerprints.
 pub mod trace;
 
+/// Readable per-turn observability sink (ported from `feat/piano-ui-completion`): one JSON line per
+/// in-turn event to `turn-trace.jsonl`. A pure sink threaded through `run_turn` — it records what the
+/// turn did and NEVER changes any control-flow decision. Kept separate from `trace` (the hashed oracle).
+pub mod turn_trace;
+
 /// The single guarded ReAct loop — motore #1 (ADR 0021), extracted here (ADR 0024 inc 5, 5.D1c.10).
 pub mod agent_loop;
 

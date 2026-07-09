@@ -182,6 +182,7 @@ mod tests {
             memory_answer: "The price is $63,120.\n\n**Sources**\n- https://kraken.com/btc".to_string(),
             tool_actions: String::new(),
             browse_sources: vec!["https://kraken.com/btc".to_string()],
+            ..Default::default()
         };
         let r = browse_result_from_outcome(&outcome);
         assert!(r.found);
