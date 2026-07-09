@@ -54199,6 +54199,49 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert!(!super::tool_safety_enabled_from(Some("0"))); // escape-hatch → OFF
     }
 
+    // ADR 0023 (C1) live fence check: with the sandbox ON (now the default), the real
+    // build_sandbox_command → sandbox-exec path must ALLOW writes under a writable root
+    // and DENY writes elsewhere ($HOME root). macOS-only (Seatbelt); the Linux fence has
+    // its own integration test (tests/linux_sandbox.rs). Deterministic — no model.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn seatbelt_fence_allows_in_root_denies_out_of_root() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let pid = std::process::id();
+            let root = std::env::temp_dir().join(format!("homun_fence_root_{pid}"));
+            std::fs::create_dir_all(&root).unwrap();
+            let inside = root.join("inside.txt");
+            let _ = std::fs::remove_file(&inside);
+            // $HOME root is NOT a writable root and NOT the temp dir → must be denied.
+            let outside = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+                .join(format!("homun_fence_probe_{pid}.txt"));
+            let _ = std::fs::remove_file(&outside);
+
+            // in-root write → ALLOWED by the workspace-write fence
+            let mut c = super::build_sandbox_command(&[root.clone()], &format!("echo ok > '{}'", inside.display()))
+                .expect("build_sandbox_command (in-root)");
+            let st = c.status().await.expect("run sandbox-exec (in-root)");
+            let in_ok = st.success() && inside.exists();
+
+            // out-of-root write ($HOME) → DENIED by (deny default); the file must NOT appear
+            let mut c2 = super::build_sandbox_command(&[root.clone()], &format!("echo bad > '{}'", outside.display()))
+                .expect("build_sandbox_command (out-of-root)");
+            let _ = c2.status().await; // exit code irrelevant; what matters is the file is absent
+            let leaked = outside.exists();
+
+            let _ = std::fs::remove_file(&inside);
+            let _ = std::fs::remove_file(&outside);
+            let _ = std::fs::remove_dir_all(&root);
+
+            assert!(in_ok, "in-root write should be ALLOWED under the workspace-write fence");
+            assert!(!leaked, "out-of-root write to $HOME LEAKED — the sandbox fence is NOT active");
+        });
+    }
+
     #[test]
     fn ollama_capabilities_parsed_from_show_body() {
         // Shape per Ollama /api/show: capabilities array + model_info["<arch>.context_length"].
