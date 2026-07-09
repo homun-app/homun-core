@@ -153,10 +153,24 @@ uscire dal recinto), con una **policy di approvazione unica** al chokepoint.
   policy *workspace-write* (scritture confinate a root progetto + cache tool; il resto read-only).
 - **Incondizionato:** nessun flag — su macOS/Linux l'enforcement gira **sempre**
   (`sandboxed = cfg!(macos)||cfg!(linux)`); il flag transitorio `HOMUN_TOOL_SAFETY` è stato **rimosso**.
+- **Asse configurabile (riconciliato, 2026-07-09):** l'utente sceglie in *Settings › Runtime* la **modalità
+  sandbox** (`read-only` · `workspace-write` (default) · `danger-full-access`) e la **approval policy**
+  (`never`/`on-request`(default)/…). Risoluzione unica `resolved_sandbox_policy`/`resolved_approval_policy`
+  (precedenza env > persistito > default), consultata da *tutti* i tool effettful (chokepoint unico, caposaldo #5).
+  **Invariante di riconciliazione:** il fence OS resta **incondizionato**; la modalità governa **solo** l'asse
+  approvazione/gating applicativo. `danger` toglie le card di conferma ma **non** disattiva il fence del kernel
+  (più sicuro della modalità danger di Codex). Sotto `read-only` i file-tool (`write_file`/`edit_file`/`apply_patch`)
+  negano **senza scrivere** e ritornano il marker `SANDBOX_READ_ONLY_BLOCKED` → la UI mostra la **escalation card**.
+- **Skill confirmation policies (ADR 0023 Step 5):** una skill che dichiara un dominio sensibile
+  (`sensitive: [delete|financial|medical|sensitive-data]` nel frontmatter) **forza** la conferma sulle azioni
+  effettful mentre è attiva, a prescindere dalla approval policy — l'harness non si fida del modello (`||` fail-safe).
+- **`apply_patch`:** edit multi-file Codex-faithful (context-match, atomico) che **converge sullo stesso chokepoint**
+  — non un secondo percorso di scrittura. Vedi [`architecture/apply-patch.md`](architecture/apply-patch.md).
 
 > **Validazione:** il fence test deterministico `seatbelt_fence` prova il recinto reale (scrittura in-root
-> permessa, `$HOME` negata) attraverso il vero `sandbox-exec`; suite verde (nessun test non-`soffice`
-> regredito). Su Windows/altre piattaforme non c'è ancora fencing.
+> permessa, `$HOME` negata) attraverso il vero `sandbox-exec`; `tests/linux_sandbox.rs` (Landlock) **invariato**;
+> il round-trip persistenza dei settings + il blocco `read-only` provati da test deterministici e (i settings)
+> live sul binario. Su Windows/altre piattaforme non c'è ancora fencing.
 
 ---
 
@@ -191,6 +205,11 @@ il ruolo residuo del crate. I deliverable sono anche **entità di memoria** (rec
 | Memoria: facade/ibrido/grafo/briefing + tool `recall_memory` | **vivo** | on |
 | Registro capability unico + routing BM25 (Caposaldo #7) | **vivo** | on |
 | Sandbox seatbelt/landlock + approval unica (ADR 0023) | **vivo** | **on, incondizionato** (nessun flag) |
+| Modalità sandbox + approval policy configurabili (Settings › Runtime) | **vivo** | default `workspace-write`/`on-request`; fence sempre-on |
+| Skill confirmation policies (`sensitive:` frontmatter, ADR 0023 Step 5) | **vivo** | on (forza confirm se skill sensibile attiva) |
+| `apply_patch` — edit multi-file Codex-faithful | **vivo** | on (stesso chokepoint sandbox) |
+| `turn_trace` — osservabilità leggibile per-turno | **vivo** | on (`HOMUN_TURN_TRACE=0` per opt-out) |
+| Auto-compaction a token-budget come memory checkpoint (Fase 1.1) | **vivo** | on (summarizer condiviso con F3; fail-open) |
 | Deliverable `make_deck`/`make_document` + `brain_materialize` | **vivo** | on |
 | Normalizzatore output (ADR 0019, in `crates/engine`) | **vivo** | on |
 | Vault (chiavi wrapped da syskey OS, PIN reveal-only) | **vivo** | on |

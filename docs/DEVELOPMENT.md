@@ -1438,6 +1438,8 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
 - [architecture/agent-loop.md](architecture/agent-loop.md) — il motore / agent loop (cross-modello).
 - [architecture/memory.md](architecture/memory.md) — la memoria a 3 livelli (SQL + grafo + markdown).
 - [architecture/plugins.md](architecture/plugins.md) — skill, capability e addon (ADR 0011).
+- [architecture/apply-patch.md](architecture/apply-patch.md) — `apply_patch`, edit multi-file Codex-faithful sul chokepoint sandbox.
+- [architecture/turn-trace.md](architecture/turn-trace.md) — `turn_trace`, osservabilità leggibile per-turno (sink sui seam del motore).
 - [architecture/overview.md](architecture/overview.md) — il quadro d'insieme (poster SVG su richiesta).
 - [architecture/system-map.md](architecture/system-map.md) — mappa componenti.
 
