@@ -1,5 +1,11 @@
 # Ledger — Stato reale del sistema Homun (`app/`)
 
+> **AGGIORNAMENTO 2026-07-09 (bis):** dopo questo audit, analisi per-ramo dei branch vecchi → 4 rami superati
+> **cancellati**; da `feat/piano-ui-completion` (linea divergente reale) riportate 4 feature genuinamente-assenti
+> sulla linea presentabile con test (`apply_patch`, `turn_trace`, sandbox configurabile-riconciliato, skill
+> `ConfirmationPolicy`, auto-compaction), ramo poi cancellato. Dettaglio + commit nel checkpoint in testa a
+> [`STATO.md`](../STATO.md). Questo ledger resta l'evidenza point-in-time dell'audit.
+
 > **Audit di riconciliazione e convergenza — FASE 1 (inventario grounded, sola lettura).**
 > Scopo: sciogliere il groviglio "cosa è davvero vivo?" prima della presentazione (fra ~10 giorni).
 > Questo documento è il **registro**; le decisioni LAND/KILL/KEEP sono di Fabio (Fase 2).

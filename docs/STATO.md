@@ -5,6 +5,32 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-09.**
 
+## ⭐ CHECKPOINT 2026-07-09 (bis) — 4 feature Codex-parity portate dal ramo divergente `piano-ui`
+
+Riparti da qui. Linea presentabile = ramo **`fix/workflow-route-plan-precedence`** (= `main` + island + audit +
+router-fix + queste 4). Gate verdi: **engine 81 pass**, **gateway 534 pass** (1 rosso `soffice` ambientale — passa
+in seriale, tocca solo l'import pptx), **ui-contract + electron 12/12 + build** verdi.
+
+**Contesto (analisi per-ramo, "converge non duplicare"):** dei rami vecchi, `fix/win-linux-build`,
+`fix/default-display-name`, `feat/recall-on-demand-tappa-3` erano **superati** (feature già in linea per altra via —
+auto-update, display-name→"", build-config, recall-on-demand come tool M3; il recall del ramo era la vecchia
+euristica a keyword, bocciata) → **cancellati**. `feat/piano-ui-completion` invece era una **linea divergente reale**:
+il grosso superato (engine-extraction 0024, browse-bounds, working-island) ma con feature **genuinamente assenti** →
+riportate pulite con test, ramo poi **cancellato**.
+
+**Le 4 riportate (con commit):**
+- **`apply_patch`** (`51fd92ca`) — edit multi-file Codex-faithful; modulo `apply_patch.rs`, gated sul chokepoint sandbox come `edit_file`; 35 test.
+- **`turn_trace`** (`da802b70`) — osservabilità per-turno leggibile; **sink sui seam** dell'engine (nessun cambio di control-flow, `run_turn` invariato → engine 81 pass). Utile a diagnosticare i "passi indietro".
+- **Sandbox configurabile — RICONCILIATO** (`f1dcad38` backend + `065f3422` UI) — `SandboxMode`+`approval_policy` risolti (env > persisted > default **workspace-write**/on-request), selettori in Settings › Runtime + escalation card read-only. **Invariante:** il fence OS (seatbelt/landlock) resta **incondizionato**; la modalità governa SOLO l'asse approvazione/escalation; **`danger` NON disattiva il fence** (più sicuro di Codex). `tests/linux_sandbox.rs` **invariato**.
+- **Skill `ConfirmationPolicy`** (`1e2ffc79`) — skill che dichiara un dominio sensibile (`sensitive:` frontmatter) forza il confirm sulle azioni effettful, `||` fail-safe. Adattato a `LoopState`/`ToolEffects` post-estrazione.
+- **Auto-compaction come memory checkpoint** (`91045c26`) — **converge**: UN summarizer condiviso da F3 + trigger token-budget (no path parallelo); estende il seam `ContextCompactor`; write del checkpoint via `MemoryFacade` (layer unico); fail-open, mai perdita dati.
+
+**Aperto:** validazione LIVE in-app dei 2 selettori sandbox + escalation card (bloccata in sessione headless da quirk
+ambientali display/token — NON difetti feature; il contratto è coperto da test deterministici + ui-contract + electron).
+Poi **merge linea → `main`** (con Fabio).
+
+---
+
 ## ⭐ CHECKPOINT 2026-07-09 — Audit di riconciliazione e convergenza (FASE 1–3 eseguite)
 
 Tree pulito, gate verdi (gateway **478 pass** / 1 rosso `soffice` ambientale / 5 ignored; **34-warn baseline**;
