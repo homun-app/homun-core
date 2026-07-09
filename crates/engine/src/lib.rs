@@ -7,9 +7,10 @@
 //! its dependencies as TRAITS (model client, capability executor, memory, stores), never the
 //! concrete `AppState`.
 //!
-//! Extraction is incremental and behavior-preserving (ADR 0024 sequence): contract → chokepoint →
-//! move the loop behind `HOMUN_ENGINE_CRATE` → retire the inline parallel. This module currently
-//! holds the boundary contract; the loop body is migrated in later increments.
+//! Extraction followed the ADR 0024 sequence (contract → chokepoint → move the loop → retire the
+//! inline parallel) and is COMPLETE (5.D2): the loop body lives here in `agent_loop::run_turn`, the
+//! `HOMUN_ENGINE_CRATE` flag and the gateway's inline copy are deleted, and the gateway calls this
+//! crate unconditionally.
 
 #![forbid(unsafe_code)]
 

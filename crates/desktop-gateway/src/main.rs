@@ -18883,9 +18883,9 @@ async fn execute_browser_tool(
     args_raw: &str,
     call_id: &str,
 ) -> String {
-        // Granular browser tools (HOMUN_CHAT_BROWSER_GRANULAR):
-        // the main agent drives the browser one micro-action at a
-        // time against a per-turn session.
+        // Granular browser tools: driven one micro-action at a time inside
+        // the isolated browse(goal) sub-agent (ADR 0025) — never by the
+        // manager — against a per-turn session.
         let args: serde_json::Value = serde_json::from_str(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
         // First browser tool this turn: mark used (raises round
@@ -22085,12 +22085,6 @@ Tell the user clearly; do NOT claim it's done."
     (result, effects)
 }
 
-/// The gateway's `CapabilityExecutor` (ADR 0024): wraps the pure `execute_chat_tool` (`&ctx` →
-/// result + effects) as the engine's single NON-browser tool chokepoint. Browser tools stay a
-/// separate loop branch (the temporary `&mut` seam) until ADR 0025 folds them into a recursive
-/// `browse`. Holds `&ctx` (Sync since 5e.1), so the future is `Send` for the loop's `tokio::spawn`.
-/// Constructed per round by the loop-move (5e.3); dead code until then.
-#[allow(dead_code)]
 /// The gateway's `CapabilityExecutor` (ADR 0026): holds ONLY the turn-constant read-only context
 /// execute_chat_tool needs; per call it builds a `ChatToolCtx` from the passed `&mut LoopState`
 /// (plan/step_evidence/tool_trace + provider) + that held context, and delegates. Passing `ls` per
@@ -22188,8 +22182,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
 /// local separate from `&mut ls`, so there is no double borrow. Per call it rebuilds a `BrowserToolCtx`
 /// from its owned state + `&mut LoopState` (the loop-visible browser fields + provider) + held
 /// turn-constants, and delegates to `execute_browser_tool`. Constructed per turn by the loop-move
-/// (5e); `#[allow(dead_code)]` until the crate move wires it in.
-#[allow(dead_code)]
+/// (ADR 0024 5.D2 / ADR 0025) — live since the crate move.
 struct GatewayBrowserExecutor<'a> {
     browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
     last_snapshot: String,
@@ -22271,7 +22264,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
 // context or the user stream. Only the `BrowseResult` returns. The recursion terminates by TYPE: the
 // sub-turn's CapabilityExecutor is `BrowseOnlyCapabilityExecutor` (no nested `browse`), a distinct
 // monomorphization — so `run_turn` at the sub level is a different function instance, not an infinite
-// call. Wired into the manager's toolset by slice 2; `#[allow(dead_code)]` until then.
+// call. Wired into the manager's toolset (ADR 0025 slice 2).
 
 /// Focused system prompt for a `browse(goal)` sub-agent (ADR 0025). Deliberately SMALL and browser-only:
 /// no orchestrator role, no plan/step machinery, no non-browser tools — the manager owns all of that. The
@@ -46796,8 +46789,8 @@ fn browser_sidecar_env_with_headless(headless: String) -> Vec<(String, String)> 
         // Isolated context is OFF by default: measured that a fresh ("cold")
         // context regresses reliability (no cookies -> consent/geo walls ->
         // the worker wanders and burns iterations). The default warm shared
-        // context is far more reliable. Isolation is opt-in per worker (set via
-        // HOMUN_BROWSER_PARALLEL when fanning out) — see parallel path.
+        // context is far more reliable. Isolation is opt-in per worker via
+        // HOMUN_BROWSER_ISOLATED_CONTEXT=1 (checked below) — see parallel path.
         if env::var("HOMUN_BROWSER_ISOLATED_CONTEXT").as_deref() == Ok("1") {
             env.push((
                 "BROWSER_AUTOMATION_ISOLATED_CONTEXT".to_string(),

@@ -1,12 +1,8 @@
 //! The agent loop's turn-carried state (ADR 0024, increment 5, Point 4).
 //!
-//! The single guarded ReAct loop (motore #1) still runs inline in the gateway
-//! (`stream_chat_via_openai`), but its loop-carried locals are bundled here so the
-//! struct is defined at its eventual destination: when the loop body relocates into
-//! this crate (Point 5, behind `HOMUN_ENGINE_CRATE`) it will own a `&mut LoopState`
-//! and mutate these fields directly — no second move. Adopting it in-place first
-//! (gateway constructs it, the inline loop mutates it) keeps every slice
-//! behavior-preserving and lets the compiler prove the field set is complete.
+//! The single guarded ReAct loop (motore #1) owns a `&mut LoopState` and mutates these
+//! fields directly across rounds. The struct bundles every loop-carried local so the
+//! engine's control-flow state is one typed value rather than a fistful of parameters.
 //!
 //! Scope discipline: this holds ONLY state that survives across rounds (turn-carried).
 //! Per-round locals (e.g. the approval `pending_confirm` flag, reset each iteration)

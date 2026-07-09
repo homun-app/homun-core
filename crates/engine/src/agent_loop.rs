@@ -6,11 +6,10 @@
 //! its collaborators (the `contract` seams) so the engine stays decoupled from the gateway's concrete
 //! `AppState`/transport — the gateway builds the impls and injects them.
 //!
-//! Landing note: this fn is a COPY of the gateway's inline `run_agent_rounds`, wired behind
-//! `HOMUN_ENGINE_CRATE` (default OFF). While the flag is OFF the gateway runs its proven inline loop;
-//! ON runs this one. The two are kept in parity via the `trace` oracle until 5.D2 flips the default and
-//! deletes the inline copy — at which point this becomes the ONE loop (no flag, per "converge, don't
-//! duplicate"). ADR 0025 (browse-as-recursion) then invokes this same loop recursively for the browser.
+//! Convergence (ADR 0024, 5.D2, `50ed7ec6`): this IS the one loop. The gateway's inline copy and the
+//! `HOMUN_ENGINE_CRATE` flag are deleted — `run_agent_rounds` builds the seams and calls `run_turn`
+//! unconditionally (per "converge, don't duplicate"). ADR 0025 (browse-as-recursion) invokes this same
+//! loop recursively for the browser sub-agent.
 
 use crate::browser::{is_browser_granular_tool, prune_browser_history, resolve_browser_chat_tool_name};
 use crate::contract::{
@@ -123,8 +122,8 @@ pub async fn try_advance_frontier_from_evidence(
 /// Run ONE agent turn: the bounded guarded ReAct loop + forced synthesis. GENERIC over the seams so
 /// the engine stays decoupled from the gateway's `AppState`/transport — the gateway builds the impls
 /// (constructed per turn) and injects them. Returns the [`crate::TurnOutcome`] the gateway's post-turn
-/// tail (memory learn + code-graph refresh) consumes. Behind `HOMUN_ENGINE_CRATE` (default OFF) until
-/// 5.D2; kept in parity with the gateway's inline copy via the `trace` oracle.
+/// tail (memory learn + code-graph refresh) consumes. Called unconditionally by `run_agent_rounds`
+/// (ADR 0024 5.D2) — no flag, no inline copy.
 #[allow(clippy::too_many_arguments)] // the turn's seams + engine-safe data; grouped further post-5.D2.
 pub async fn run_turn<M, C, B, P, J, K, Pol, E>(
     mut ls: LoopState,
