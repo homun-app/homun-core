@@ -22184,6 +22184,270 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
     }
 }
 
+// ─── ADR 0025 — browse-as-recursion: the browser as a delegated sub-agent ────────────────────────
+// The manager (the strong model, the one guarded loop) calls `browse(goal)`; that runs the SAME
+// `engine::agent_loop::run_turn` RECURSIVELY with a browser-only toolset, the browser model, and an
+// ISOLATED LoopState — so the sub-agent's snapshots/clicks/reasoning never pollute the manager's
+// context or the user stream. Only the `BrowseResult` returns. The recursion terminates by TYPE: the
+// sub-turn's CapabilityExecutor is `BrowseOnlyCapabilityExecutor` (no nested `browse`), a distinct
+// monomorphization — so `run_turn` at the sub level is a different function instance, not an infinite
+// call. Wired into the manager's toolset by slice 2; `#[allow(dead_code)]` until then.
+
+/// Focused system prompt for a `browse(goal)` sub-agent (ADR 0025). Deliberately SMALL and browser-only:
+/// no orchestrator role, no plan/step machinery, no non-browser tools — the manager owns all of that. The
+/// sub-agent's ONE job is to reach the goal in the real browser and OUTPUT the concrete value, then stop.
+/// This tightness is the point: a clean, short context is what keeps the weak browser model from the
+/// reasoning-floods / plan-JSON leaks it produces when handed the full orchestrator prompt.
+fn browse_subagent_system_prompt() -> String {
+    format!(
+        "You drive a REAL web browser to accomplish ONE information goal, then report the result. \
+{now}. You have ONLY these tools: browser_navigate, browser_snapshot, browser_act, \
+browser_screenshot, browser_tabs, browser_dialog. There is no other tool and no plan to track — just \
+browse and answer.\n\
+\n\
+METHOD:\n\
+1. Open a source with browser_navigate, then read the snapshot.\n\
+2. Proceed ONE micro-action at a time (browser_act with a kind + a [ref=...] from the snapshot); \
+re-read the snapshot after each action (browser_act returns the updated one).\n\
+3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
+JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
+do not repeat the same failing search.\n\
+4. EXTRACT AS YOU GO: the moment a page shows the value you need, copy the CONCRETE data (actual \
+numbers, rows, names, dates) into your answer — page content is NOT retained once you navigate away.\n\
+5. STOP as soon as you have the answer: write it plainly with the real values. If the information is \
+genuinely unavailable after trying your sources, say so explicitly (e.g. \"not available on X\") — do \
+NOT invent it. Your browsing budget is limited; settle the goal in 1-2 good sources, not 5+.",
+        now = now_block(),
+    )
+}
+
+/// A `StreamSink` whose events go NOWHERE (ADR 0025 isolation). The sub-agent's raw token/event stream
+/// (its reasoning, tool narration, plan cards) must NOT reach the user — only the `BrowseResult` the
+/// manager relays does. The sub `GatewayModelClient`/browser executor still need a concrete `StreamSink`
+/// to stream into, so we hand them this drain: a detached task empties the mpsc receiver so the sub-loop's
+/// `send`s never block, and the `StreamEntry` is unregistered (no resume, no WS mirror).
+fn drain_stream_sink() -> StreamSink {
+    let (mpsc_tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(32);
+    // Drain forever: keep the receiver alive and discard everything so the sub-loop never back-pressures.
+    tokio::spawn(async move { while rx.recv().await.is_some() {} });
+    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<String>(16);
+    let entry = std::sync::Arc::new(StreamEntry {
+        lines: std::sync::Mutex::new(Vec::new()),
+        tx: broadcast_tx,
+        finished: std::sync::atomic::AtomicBool::new(false),
+        last_event_at: std::sync::atomic::AtomicU64::new(now_epoch_secs()),
+        thread_id: None,
+    });
+    StreamSink { mpsc: mpsc_tx, entry }
+}
+
+/// The recursive `browse(goal)` executor (ADR 0025). Holds the turn-constants the sub-seams need
+/// (`AppState`, HTTP client, thread/prompt/request, perimeter flags); `browse` builds the browser-only
+/// sub-seams + isolated `LoopState` and calls `engine::run_turn`. Constructed by slice 2 alongside the
+/// manager loop; `#[allow(dead_code)]` until the manager's `browse` tool dispatches to it.
+#[allow(dead_code)]
+struct GatewayBrowseExecutor<'a> {
+    state: &'a AppState,
+    http: &'a reqwest::Client,
+    thread_id: Option<&'a str>,
+    prompt: &'a str,
+    request: &'a ChatGenerateStreamRequest,
+    read_only: bool,
+    channel_owner: bool,
+}
+
+#[allow(dead_code)]
+impl GatewayBrowseExecutor<'_> {
+    /// Run one browser sub-turn for `goal` and return its `BrowseResult`. The recursion (this calls
+    /// `run_turn`, which dispatches browser tools back through the sub `GatewayBrowserExecutor`) stays
+    /// finite: the sub CapabilityExecutor type has no `browse`, so there is no self-recursive tool.
+    async fn browse(&self, goal: &str) -> local_first_engine::BrowseResult {
+        // Browser model (falls back to the chat model when the browser role is auto/unresolved), so the
+        // sub-agent runs on the small/cheap browsing model without ever switching the manager's provider.
+        let (base_url, model, api_key) = browser_openai_stream_config()
+            .or_else(chat_openai_stream_config)
+            .unwrap_or_default();
+
+        // Seed the ISOLATED sub-state: a clean 2-message context (browser prompt + goal) and ONLY the 6
+        // granular browser tools. Nothing from the manager's turn crosses in — isolation by construction.
+        let mut ls = local_first_engine::LoopState::new();
+        ls.messages = local_first_engine::browse::seed_browse_messages(
+            &browse_subagent_system_prompt(),
+            goal,
+        );
+        ls.tool_schemas = vec![
+            browser_navigate_tool_schema(),
+            browser_snapshot_tool_schema(),
+            browser_act_tool_schema(),
+            browser_screenshot_tool_schema(),
+            browser_tabs_tool_schema(),
+            browser_dialog_tool_schema(),
+        ];
+        ls.provider = local_first_engine::ProviderBinding {
+            model,
+            base_url,
+            api_key,
+        };
+
+        // The sub-agent's stream is fully encapsulated (see drain_stream_sink) — model tokens and events
+        // are swallowed; only the returned BrowseResult surfaces (the manager narrates to the user).
+        let drain = drain_stream_sink();
+        let model_client = crate::model_client::GatewayModelClient {
+            http: self.http,
+            tx: &drain,
+        };
+        // The tool chokepoint is browser-only: the 6 browser tools route through the fresh browser
+        // executor below; any non-browser call is refused (defense — none are offered in tool_schemas).
+        let capability_executor = BrowseOnlyCapabilityExecutor;
+        let mut browser_executor = GatewayBrowserExecutor {
+            browser_session: None,
+            last_snapshot: String::new(),
+            current_target: "chat_0".to_string(),
+            opened_targets: Vec::new(),
+            nav_failures: std::collections::HashMap::new(),
+            state: self.state,
+            tx: &drain,
+            thread_id: self.thread_id,
+            prompt: self.prompt,
+            request: self.request,
+            read_only: self.read_only,
+            channel_owner: self.channel_owner,
+        };
+        // The sub-turn does NO plan tracking / F3 compaction / route-blocking / completion-nudging — that
+        // is the manager's job. All four ports are inert no-ops, and the cfg disables the plan machinery.
+        let plan_progress = NoPlanProgress;
+        let compactor = NoContextCompactor;
+        let turn_policy = OpenTurnPolicy;
+        let completion_judge = NeverIncompleteJudge;
+        let cfg = local_first_engine::TurnConfig {
+            hard_round_ceiling: hard_round_ceiling(),
+            max_rounds: chat_browser_max_rounds(),
+            browser_max_rounds: chat_browser_max_rounds(),
+            browser_nav_cap: chat_browser_nav_cap(),
+            reconcile_on_delivery: false,
+            autoadvance_from_evidence: false,
+            step_verification: false,
+            verbose: verbose_debug(),
+        };
+
+        let outcome = local_first_engine::agent_loop::run_turn(
+            ls,
+            cfg,
+            &model_client,
+            &capability_executor,
+            &mut browser_executor,
+            &plan_progress,
+            &completion_judge,
+            &compactor,
+            &turn_policy,
+            &drain,
+            0.2, // low temperature: deterministic extraction, not creative writing
+            self.thread_id,
+            &std::collections::BTreeSet::new(),
+            &[],
+            goal.to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None, // no trace-dump inside the sub-turn
+        )
+        .await;
+
+        local_first_engine::browse::browse_result_from_outcome(&outcome)
+    }
+}
+
+/// The sub-turn's tool chokepoint (ADR 0025): browser-only. The 6 granular browser tools route through
+/// the `BrowserExecutor` seam, never here, so this only fires if the sub-model hallucinates a non-browser
+/// call — which it can't legitimately do (none are offered). Refuse it with a corrective message rather
+/// than executing anything, keeping the sub-agent inside its browser sandbox.
+struct BrowseOnlyCapabilityExecutor;
+
+impl local_first_engine::CapabilityExecutor for BrowseOnlyCapabilityExecutor {
+    async fn execute_tool(
+        &self,
+        name: &str,
+        _args_raw: &str,
+        _call_id: &str,
+        _state: &mut local_first_engine::LoopState,
+    ) -> Result<local_first_engine::ToolOutcome, String> {
+        Err(format!(
+            "Tool '{name}' is not available while browsing. Use only the browser tools \
+(browser_navigate / browser_snapshot / browser_act / browser_screenshot / browser_tabs / \
+browser_dialog), then write the final answer."
+        ))
+    }
+}
+
+/// Inert `PlanProgress` for the browse sub-turn (ADR 0025): the sub-agent tracks no plan (the manager
+/// does), and the sub cfg disables every plan path, so all methods are no-ops / negative verdicts.
+struct NoPlanProgress;
+
+impl local_first_engine::PlanProgress for NoPlanProgress {
+    async fn persist_plan(&self, _thread: Option<&str>, _steps: &[serde_json::Value]) {}
+    async fn record_step_outcome(
+        &self,
+        _thread: Option<&str>,
+        _step: &serde_json::Value,
+        _evidence: &[String],
+    ) {
+    }
+    async fn verify_step_complete(
+        &self,
+        _title: &str,
+        _criterion: &str,
+        _evidence: &str,
+    ) -> (bool, String) {
+        (false, String::new())
+    }
+    fn reconcile_on_delivery(
+        &self,
+        _plan: &serde_json::Value,
+        _delivered: &str,
+    ) -> Option<Vec<serde_json::Value>> {
+        None
+    }
+    fn plan_value_from_steps(&self, _steps: &[serde_json::Value]) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+}
+
+/// Inert `ContextCompactor` for the browse sub-turn (ADR 0025): no step compaction (there are no plan
+/// steps to collapse); the browser history hygiene the sub-loop needs is `prune_browser_history`, not this.
+struct NoContextCompactor;
+
+impl local_first_engine::ContextCompactor for NoContextCompactor {
+    async fn compact(&self, _messages: &mut Vec<serde_json::Value>, _start: &mut usize) {}
+}
+
+/// Open `TurnPolicy` for the browse sub-turn (ADR 0025): nothing is route-blocked (the manager already
+/// applied the turn's route to the `browse` call itself), and vision defaults on so a browser screenshot
+/// can be injected for a vision-capable browser model.
+struct OpenTurnPolicy;
+
+impl local_first_engine::TurnPolicy for OpenTurnPolicy {
+    fn route_blocked(&self, _tool: &str) -> Option<String> {
+        None
+    }
+    fn supports_vision(&self, _base_url: &str, _model: &str) -> bool {
+        true
+    }
+}
+
+/// Inert `TurnCompletionJudge` for the browse sub-turn (ADR 0025): the no-plan completion nudge is a
+/// manager concern; a browse sub-turn ends when the sub-model outputs its answer, never nudged to "keep
+/// going". Always reports complete so the sub-loop delivers as soon as the model writes an answer.
+struct NeverIncompleteJudge;
+
+impl local_first_engine::TurnCompletionJudge for NeverIncompleteJudge {
+    async fn task_appears_incomplete(&self, _request: &str, _work: &str) -> bool {
+        false
+    }
+}
+
 async fn stream_chat_via_openai(
     state: &AppState,
     request: ChatGenerateStreamRequest,
