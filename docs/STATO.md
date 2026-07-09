@@ -17,6 +17,20 @@ di produzione**: soffice usava il profilo utente LibreOffice di default → due 
 contendono sul lock → `DeploymentException`. Fix radice: `-env:UserInstallation` con profilo usa-e-getta per invocazione
 (sotto il `temp_root` già unico). Ora i due test pptx passano **in parallelo** e il gate è deterministico.
 
+**Vault — bug-class + hardening (2026-07-09):**
+- **`9eb874af` fix save-bug class** (duplicava le chiavi + errore di salvataggio): il vault usava una stringa
+  generata dal modello (`redacted_preview`) come chiave d'identità → dedup instabile (duplicati) + pending-match
+  esatto (errore). Fix: **dedup stabile su `(category, label)`**, **salvataggio atomico** (`put_record_with_secret`
+  in UNA transazione, both-or-neither), **pending-match tollerante** al drift del preview (idem nel path di reveal).
+  3 test TDD (idempotenza cross-preview, atomicità, tolleranza) red→green; vault 20 · gateway-vault 29 verdi.
+- **`1406035a` hardening Argon2id**: i KDF del PIN (verifier + pin-wrap della master key) erano SHA-256 iterato
+  a mano (non memory-hard) → PIN a 6 cifre forzabile offline. Portati ad **Argon2id** (19 MiB, t=2, p=1), params
+  self-describing sul verifier. Chiude la finestra legacy pin-v1.
+- **⚠️ Reset richiesto (fatto):** la `~/.homun/vault.sqlite` di dev (3 record, PIN `sha256-iterated`, master key
+  `pin-v1` mai migrata) è **incompatibile** col nuovo formato → sarebbe stata illeggibile. Backuppata
+  (`vault.sqlite.pre-argon2-20260709.bak`) e cancellata su decisione di Fabio → al prossimo avvio nasce un vault
+  **Argon2id + syskey** pulito. Nessuna migrazione da vecchio formato (nessun utente reale, YAGNI).
+
 **Contesto (analisi per-ramo, "converge non duplicare"):** dei rami vecchi, `fix/win-linux-build`,
 `fix/default-display-name`, `feat/recall-on-demand-tappa-3` erano **superati** (feature già in linea per altra via —
 auto-update, display-name→"", build-config, recall-on-demand come tool M3; il recall del ramo era la vecchia
