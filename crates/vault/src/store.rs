@@ -353,6 +353,74 @@ impl SQLiteVaultStore {
         Ok(())
     }
 
+    /// Atomically persist a record's metadata AND (optionally) its secret material
+    /// in a SINGLE transaction — both-or-neither. The prior save path took two
+    /// separate `Mutex<Connection>` locks (`put` then `put_secret_material`) with no
+    /// transaction, so a failure between them could leave orphaned secret material
+    /// or partial state ("errore di salvataggio"). Here the conn is locked ONCE,
+    /// both upserts run inside one tx, and any error drops the tx → rollback →
+    /// nothing is written. Encryption happens BEFORE the tx so a crypto failure
+    /// never leaves a half-open transaction. This is the method the gateway save
+    /// path uses; `put`/`put_secret_material` stay for other callers.
+    pub fn put_record_with_secret(
+        &self,
+        record: &VaultRecord,
+        master_key: &[u8; VAULT_MASTER_KEY_LEN],
+        secret: Option<SecretMaterial>,
+    ) -> Result<(), String> {
+        let metadata_json =
+            serde_json::to_string(&record.metadata).map_err(|error| error.to_string())?;
+        // Encrypt with the exact crypto `put_secret_material` uses (reuse, don't
+        // reinvent) before opening the tx — a crypto error must not abort mid-tx.
+        let encrypted_secret = match secret {
+            Some(material) => Some(encrypt_with_master_key(master_key, material.expose_bytes())?),
+            None => None,
+        };
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?;
+        // `unchecked_transaction` takes `&self`, so it works through the MutexGuard
+        // (the &mut-requiring `transaction()` would not). On any early return the tx
+        // is dropped without commit → SQLite rolls it back.
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|error| error.to_string())?;
+        tx.execute(
+            "insert into vault_records (id, category, label, secret_ref, metadata_json)
+             values (?1, ?2, ?3, ?4, ?5)
+             on conflict(id) do update set
+                category=excluded.category,
+                label=excluded.label,
+                secret_ref=excluded.secret_ref,
+                metadata_json=excluded.metadata_json,
+                updated_at=CURRENT_TIMESTAMP",
+            params![
+                record.id.to_string(),
+                category_key(record.category),
+                record.label,
+                record.secret_ref.to_string(),
+                metadata_json
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        if let Some((nonce, ciphertext)) = encrypted_secret {
+            tx.execute(
+                "insert into vault_secret_material (record_id, algorithm, nonce, ciphertext)
+                 values (?1, 'xchacha20poly1305-master-v1', ?2, ?3)
+                 on conflict(record_id) do update set
+                    algorithm=excluded.algorithm,
+                    nonce=excluded.nonce,
+                    ciphertext=excluded.ciphertext,
+                    updated_at=CURRENT_TIMESTAMP",
+                params![record.id.to_string(), nonce, ciphertext],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     pub fn get_secret_material(
         &self,
         record_id: &VaultRecordId,
@@ -1015,6 +1083,103 @@ mod tests {
             store
                 .migrate_pin_wrapped_master_key_to_system(&verifier, "123456", &TEST_WRAP_KEY)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn vault_save_is_atomic_on_metadata_failure() {
+        // Atomicity contract for the gateway save path: the record metadata AND the
+        // secret material must be written both-or-neither. We force the SECOND write
+        // (secret material) to fail via a trigger AFTER the record row is inserted —
+        // a non-transactional put would leave an orphaned record; the transactional
+        // `put_record_with_secret` must roll the record write back too.
+        let store = SQLiteVaultStore::open_in_memory().unwrap();
+        let verifier = LocalPinVerifier::create("123456").unwrap();
+        store.set_local_pin_verifier(verifier.clone()).unwrap();
+        let master_key = store
+            .ensure_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let record_id = VaultRecordId::new("vault_card_1").unwrap();
+        let record = VaultRecord::new(
+            record_id.clone(),
+            VaultCategory::Payments,
+            "Carta personale",
+            SecretRef::new("user_1", "workspace_1", "vault", record_id.as_str()).unwrap(),
+            serde_json::json!({
+                "redacted_preview": "[VAULT:payments:card:last4=1111]"
+            }),
+        )
+        .unwrap();
+
+        // Same-module test: reach the private conn to install a failing trigger on
+        // the secret-material table so the second statement in the tx aborts.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "create trigger vault_fail_secret before insert on vault_secret_material
+                 begin select raise(abort, 'forced secret-material failure'); end;",
+            )
+            .unwrap();
+
+        let result = store.put_record_with_secret(
+            &record,
+            &master_key,
+            Some(local_first_secrets::SecretMaterial::from_string("4111111111111111")),
+        );
+        assert!(result.is_err(), "the forced secret write must fail");
+
+        // Both-or-neither: because the secret write failed, the record write must be
+        // rolled back too — no orphaned metadata, no orphaned secret material.
+        assert!(
+            store.get(&record_id).unwrap().is_none(),
+            "record metadata must roll back with the failed secret write"
+        );
+        assert!(
+            store
+                .get_secret_material(&record_id, &master_key)
+                .unwrap()
+                .is_none(),
+            "no orphaned secret material"
+        );
+    }
+
+    #[test]
+    fn vault_put_record_with_secret_commits_both_on_success() {
+        let store = SQLiteVaultStore::open_in_memory().unwrap();
+        let verifier = LocalPinVerifier::create("123456").unwrap();
+        store.set_local_pin_verifier(verifier.clone()).unwrap();
+        let master_key = store
+            .ensure_local_master_key(&verifier, "123456")
+            .expect("master key");
+        let record_id = VaultRecordId::new("vault_card_1").unwrap();
+        let record = VaultRecord::new(
+            record_id.clone(),
+            VaultCategory::Payments,
+            "Carta personale",
+            SecretRef::new("user_1", "workspace_1", "vault", record_id.as_str()).unwrap(),
+            serde_json::json!({"redacted_preview": "[VAULT:payments:card:last4=1111]"}),
+        )
+        .unwrap();
+
+        store
+            .put_record_with_secret(
+                &record,
+                &master_key,
+                Some(local_first_secrets::SecretMaterial::from_string("4111111111111111")),
+            )
+            .expect("atomic save");
+
+        assert_eq!(store.get(&record_id).unwrap().unwrap().label, "Carta personale");
+        assert_eq!(
+            store
+                .get_secret_material(&record_id, &master_key)
+                .unwrap()
+                .unwrap()
+                .expose_utf8()
+                .unwrap(),
+            "4111111111111111"
         );
     }
 

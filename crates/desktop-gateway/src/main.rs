@@ -37132,15 +37132,11 @@ fn materialize_pending_vault_secret(
         code: "vault_pending_expired",
         message: "Pending Vault secret expired".to_string(),
     })?;
-    let redacted_preview = record
-        .metadata
-        .get("redacted_preview")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    if pending.category != vault_category_key(record.category)
-        || pending.label != record.label
-        || pending.redacted_preview != redacted_preview
-    {
+    // Same class of trap as resolve_incoming_vault_value: match on (category, label)
+    // only. `redacted_preview` is cosmetic + model-generated, so a drift between the
+    // record's stored marker and the pending's must not block materializing the
+    // secret on reveal.
+    if pending.category != vault_category_key(record.category) || pending.label != record.label {
         return Err(invalid_vault_proposal(
             "Pending Vault proposal does not match this record".to_string(),
         ));
@@ -37201,35 +37197,18 @@ fn update_vault_record(
     })
 }
 
-/// The redacted marker stored in a record's metadata (`[VAULT:category:field…]`).
-fn record_redacted_preview(record: &VaultRecord) -> &str {
-    record
-        .metadata
-        .get("redacted_preview")
-        .and_then(|value| value.as_str())
-        .unwrap_or("")
-}
-
-/// The stable logical field of a record, derived from its redacted marker
-/// `[VAULT:category:field…]`. Used together with the category as the dedup key.
-/// Value-bearing segments (`last4=1111`) are dropped so the field is independent
-/// of the secret value.
-fn vault_logical_field(redacted_preview: &str) -> String {
-    let inner = redacted_preview
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-    let mut segments = inner.split(':');
-    if segments.next() != Some("VAULT") {
-        // Not a standard marker; fall back to the whole (normalized) preview.
-        return inner.trim().to_ascii_lowercase();
-    }
-    let _category = segments.next();
-    segments
-        .map(|segment| segment.trim())
-        .filter(|segment| !segment.is_empty() && !segment.contains('='))
+/// Stable dedup identity for a record's label: trim, lowercase, and collapse
+/// internal whitespace runs to a single space. The dedup key is `(category,
+/// normalized_label)` — NEVER the `redacted_preview`. The preview is a
+/// model-generated marker (`[VAULT:category:field…]`), so the SAME logical secret
+/// proposed with a slightly different marker used to hash to a different key and
+/// dodge dedup, creating a duplicate record. The label is the human-facing,
+/// user-editable identity of the secret and is the correct dedup basis.
+fn normalize_vault_label(label: &str) -> String {
+    label
+        .split_whitespace()
         .collect::<Vec<_>>()
-        .join(":")
+        .join(" ")
         .to_ascii_lowercase()
 }
 
@@ -37255,15 +37234,17 @@ fn classify_vault_dedup(
     vault_store: &SQLiteVaultStore,
     master_key: &[u8; 32],
     category_key: &str,
-    field: &str,
+    normalized_label: &str,
     incoming_value: Option<&str>,
 ) -> Result<VaultDedupOutcome, GatewayError> {
     let mut key_only: Option<VaultRecord> = None;
     let mut value_only: Option<VaultRecord> = None;
     for record in vault_store.list().map_err(vault_store_error)? {
         let record_category = vault_category_key(record.category);
-        let record_field = vault_logical_field(record_redacted_preview(&record));
-        let key_match = record_category == category_key && record_field == field;
+        // Dedup identity is (category, normalized label) — stable and independent of
+        // the model-generated preview marker (see `normalize_vault_label`).
+        let record_label = normalize_vault_label(&record.label);
+        let key_match = record_category == category_key && record_label == normalized_label;
         let value_match = match incoming_value {
             // A record we cannot decrypt (e.g. poisoned/foreign ciphertext) must
             // not block saves: treat it as "no value match" rather than erroring.
@@ -37327,10 +37308,10 @@ fn resolve_incoming_vault_value(
     let pending = pending_store.get(pending_id).ok_or_else(|| {
         invalid_vault_proposal("Pending Vault proposal expired or was already used".to_string())
     })?;
-    if pending.category != request.category
-        || pending.label != request.label
-        || pending.redacted_preview != request.redacted_preview
-    {
+    // Match on (category, label) ONLY. `redacted_preview` is a cosmetic,
+    // model-generated marker: a harmless drift between the pending's stored preview
+    // and the request's must NOT block the save (it used to hard-error here).
+    if pending.category != request.category || pending.label != request.label {
         return Err(invalid_vault_proposal(
             "Pending Vault proposal does not match this card".to_string(),
         ));
@@ -37458,12 +37439,12 @@ fn accept_vault_proposal(
             let category =
                 vault_category_from_marker(&request.category).map_err(invalid_vault_proposal)?;
             let category_key = vault_category_key(category);
-            let field = vault_logical_field(&request.redacted_preview);
+            let normalized_label = normalize_vault_label(&request.label);
             match classify_vault_dedup(
                 vault_store,
                 &master_key,
                 category_key,
-                &field,
+                &normalized_label,
                 incoming_value.as_deref(),
             )? {
                 VaultDedupOutcome::Ignore(existing) => {
@@ -37493,15 +37474,6 @@ fn accept_vault_proposal(
     }
 
     let record = vault_record_from_proposal(request).map_err(invalid_vault_proposal)?;
-    if let Some(value) = incoming_value.as_deref() {
-        vault_store
-            .put_secret_material(
-                &record.id,
-                &master_key,
-                SecretMaterial::from_string(value.to_string()),
-            )
-            .map_err(vault_store_error)?;
-    }
     let response = vault_accept_response(
         "created",
         record.id.to_string(),
@@ -37511,7 +37483,16 @@ fn accept_vault_proposal(
         None,
         None,
     );
-    vault_store.put(record).map_err(vault_store_error)?;
+    // Atomic save: metadata + secret material in ONE transaction (both-or-neither),
+    // replacing the prior non-atomic put_secret_material + put sequence that could
+    // orphan secret material on a mid-save failure. Consume the pending only AFTER
+    // the commit succeeds.
+    let secret = incoming_value
+        .as_deref()
+        .map(|value| SecretMaterial::from_string(value.to_string()));
+    vault_store
+        .put_record_with_secret(&record, &master_key, secret)
+        .map_err(vault_store_error)?;
     consume_pending(&pending_to_consume);
     Ok(response)
 }
@@ -50505,6 +50486,78 @@ prs.save(Path({path:?}))
         )
         .expect("reveal");
         assert_eq!(revealed.secret_value, "FM470BN");
+    }
+
+    #[test]
+    fn vault_save_is_idempotent_across_preview_drift() {
+        // Regression: the dedup identity must NOT depend on `redacted_preview`, a
+        // model-generated marker. The same logical secret (same category+label+value)
+        // proposed twice with a DRIFTED preview must resolve to Ignore, not a second
+        // record and not a spurious conflict.
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let first = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "identity",
+                "Codice Fiscale",
+                "[VAULT:identity:fiscal_code]",
+                Some("RSSMRA80A01H501U"),
+            ),
+        )
+        .expect("first save");
+        assert_eq!(first.status, "created");
+
+        // Same (category, label, value), DIFFERENT model-generated preview/marker.
+        let second = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "identity",
+                "Codice Fiscale",
+                "[VAULT:identity:cf:tax_id]",
+                Some("RSSMRA80A01H501U"),
+            ),
+        )
+        .expect("second save");
+        assert_eq!(second.status, "ignored");
+        assert_eq!(second.record_id, first.record_id);
+        assert_eq!(vault.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn vault_pending_match_tolerates_preview_drift() {
+        // A pending proposal whose stored `redacted_preview` differs from the request's
+        // (cosmetic, model-generated) must still save — matched on (category, label).
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        let pending = super::privacy_guard::PendingVaultProposalStore::default();
+        let pending_id = pending.insert(super::privacy_guard::PendingVaultProposal {
+            category: "vehicles".to_string(),
+            label: "Targa auto".to_string(),
+            redacted_preview: "[VAULT:vehicles:plate]".to_string(),
+            secret_value: "FM470BN".to_string(),
+        });
+        let request = super::VaultProposalActionRequest {
+            category: "vehicles".to_string(),
+            label: "Targa auto".to_string(),
+            // Drifted preview vs the pending's stored marker.
+            redacted_preview: "[VAULT:vehicles:license_plate]".to_string(),
+            secret_value: None,
+            pending_id: Some(pending_id.clone()),
+            pin: None,
+            thread_id: None,
+            message_id: None,
+            resolution: None,
+            record_id: None,
+        };
+
+        let response =
+            super::accept_vault_proposal(&vault, Some(&pending), &TEST_VAULT_WRAP_KEY, &request)
+                .expect("save tolerates preview drift");
+        assert_eq!(response.status, "created");
+        assert!(pending.get(&pending_id).is_none());
     }
 
     // ---- Part C: dedup on save, now that vault values are system-readable ----
