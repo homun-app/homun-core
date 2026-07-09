@@ -4694,15 +4694,26 @@ fn status_wiki_body_from_open_loops(
 /// (forward-looking: "where we must arrive / how this must work"), distinct from a decision
 /// (a backward-looking record of a choice). Built from `goal` memories only; None until an
 /// objective is set. This is what keeps the assistant from drifting off-focus.
+///
+/// Thin wrapper over `objective_block_for_workspace` bound to the per-turn memory scope
+/// (`gateway_memory_workspace_id()`), for the system-prompt/briefing injection path.
 fn project_objective_block(state: &AppState) -> Option<String> {
-    let ws = gateway_memory_workspace_id();
+    objective_block_for_workspace(state, &gateway_memory_workspace_id())
+}
+
+/// Parameterized core of the objective block: derives the north-star text for an EXPLICIT
+/// workspace instead of the process-global memory scope. Request handlers (which resolve
+/// the workspace per-request) MUST use this so the objective stays consistent with the rest
+/// of their payload — the global `MEMORY_WORKSPACE` belongs to the run-turn writer and can
+/// describe a different project than a concurrent GET is answering for.
+fn objective_block_for_workspace(state: &AppState, ws: &MemoryWorkspaceId) -> Option<String> {
     if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
         return None;
     }
     let facade = lock_memory_facade(state).ok()?;
     let user = gateway_memory_user_id();
     let goals: Vec<String> = facade
-        .list_memories_for_ui(&user, &ws)
+        .list_memories_for_ui(&user, ws)
         .ok()?
         .into_iter()
         .filter(|m| {
@@ -42308,8 +42319,13 @@ async fn memory_goals_list(
         gateway_memory_workspace_id()
     };
     let is_project = ws.as_str() != PERSONAL_WORKSPACE && ws.as_str() != THREADS_WORKSPACE;
-    let facade = lock_memory_facade(&state)?;
-    let items = facade.list_memories_for_ui(&user, &ws).unwrap_or_default();
+    // Scoped so the facade MutexGuard is dropped before objective_block_for_workspace
+    // below, which locks the same (non-reentrant) memory facade mutex itself — holding
+    // this guard across that call would deadlock the request on its own lock.
+    let items = {
+        let facade = lock_memory_facade(&state)?;
+        facade.list_memories_for_ui(&user, &ws).unwrap_or_default()
+    };
     let pick = |t: &str| -> Vec<serde_json::Value> {
         items
             .iter()
@@ -42320,9 +42336,16 @@ async fn memory_goals_list(
             .map(|m| serde_json::json!({ "reference": m.reference.to_string(), "text": m.text }))
             .collect()
     };
+    // Objective TEXT alongside the goal count: reuse the same derivation the system
+    // prompt uses (converge, don't duplicate), but SCOPED to this request's `ws` — the
+    // same workspace as `goals`/`is_project` above — so the whole payload describes one
+    // project. (project_objective_block would instead read the process-global memory
+    // scope, which a concurrent run-turn could have pointed at a different project.)
+    let objective = objective_block_for_workspace(&state, &ws);
     Ok(Json(serde_json::json!({
         "workspace": ws.as_str(),
         "is_project": is_project,
+        "objective": objective,
         "goals": pick("goal"),
         "decisions": pick("decision"),
     })))
@@ -55368,6 +55391,189 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         );
 
         // Ripristino.
+        match prev_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    /// Task 3 (Working Island Redesign): the `/api/memory/goals` payload — the one
+    /// the UI already reads for `projectGoalCount` — must also carry the objective
+    /// TEXT, so the island can show it without a second round-trip. Reuses
+    /// `project_objective_block` as-is (converge, don't duplicate) rather than
+    /// deriving the text a second way.
+    #[tokio::test]
+    async fn project_context_exposes_objective_from_goal_memory() {
+        let prev_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "objective-user"); }
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let state = test_app_state_for_brief(facade);
+        let user = super::gateway_memory_user_id();
+        let ws = super::MemoryWorkspaceId::new("proj-island");
+
+        let lifecycle = super::MemoryLifecycleRequest {
+            actor_id: "test".to_string(),
+            user_id: user.clone(),
+            workspace_id: ws.clone(),
+            purpose: "add_goal".to_string(),
+        };
+        {
+            let facade_guard = super::lock_memory_facade(&state).expect("memory facade");
+            let record = facade_guard
+                .create_memory_candidate(super::MemoryCreateRequest {
+                    request: lifecycle.clone(),
+                    memory_type: "goal".to_string(),
+                    text: "Ship the island redesign".to_string(),
+                    aliases: Vec::new(),
+                    language_hints: Vec::new(),
+                    confidence: 1.0,
+                    privacy_domain: super::PrivacyDomain::new("work"),
+                    sensitivity: super::MemoryDataSensitivity::Internal,
+                    evidence_refs: Vec::new(),
+                    metadata: serde_json::json!({ "source": "test" }),
+                })
+                .expect("create goal candidate");
+            facade_guard
+                .confirm_memory(&lifecycle, &record.reference, "test setup")
+                .expect("confirm goal");
+        }
+
+        // project_objective_block reads the per-turn MEMORY_WORKSPACE global, not the
+        // handler's query param, so both must point at the same project scope. Set it
+        // only now (after all the SQLite setup above) to keep the window where this
+        // process-global is non-default as short as possible — MEMORY_WORKSPACE is
+        // shared with every other test in this binary running concurrently.
+        super::set_memory_workspace("proj-island");
+
+        // Direct unit assertion on the reused derivation function.
+        let objective = super::project_objective_block(&state);
+        assert_eq!(
+            objective,
+            Some(
+                "🎯 PROJECT OBJECTIVE — this is the NORTH STAR. Every implementation, change, or \
+document must SERVE this objective. Stay focused: if the request seems to \
+drift, expand beyond the objective, or reintroduce something that goes against it, \
+POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
+                    .to_string()
+            ),
+            "project_objective_block must build the objective text from the confirmed goal memory"
+        );
+
+        // Wiring assertion: the same payload that carries the goal count must also
+        // carry the `objective` field, populated from project_objective_block.
+        let response = super::memory_goals_list(
+            axum::extract::State(state.clone()),
+            axum::extract::Query(super::GoalsListQuery {
+                thread: None,
+                workspace: Some("proj-island".to_string()),
+            }),
+        )
+        .await
+        .expect("goals payload")
+        .0;
+        assert_eq!(
+            response["objective"],
+            serde_json::Value::String(objective.expect("objective present")),
+            "the goals payload must expose the objective text alongside the goal count"
+        );
+        assert_eq!(
+            response["goals"].as_array().map(|a| a.len()),
+            Some(1),
+            "sanity: the goal memory is also counted as before (projectGoalCount source)"
+        );
+
+        // Ripristino.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match prev_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    /// Regression guard for the scope-consistency bug: the objective in the
+    /// `/api/memory/goals` payload MUST describe the request's workspace, not whatever
+    /// project the process-global `MEMORY_WORKSPACE` (owned by the run-turn writer)
+    /// happens to point at. Set the global to project A, put a goal in project B, resolve
+    /// the request to B, and assert the payload shows B's objective — never A's.
+    #[tokio::test]
+    async fn project_context_objective_follows_request_workspace_not_global() {
+        let prev_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "objective-scope-user"); }
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let state = test_app_state_for_brief(facade);
+        let user = super::gateway_memory_user_id();
+
+        // Helper: create + confirm a goal memory in a given workspace.
+        let seed_goal = |ws: &super::MemoryWorkspaceId, text: &str| {
+            let lifecycle = super::MemoryLifecycleRequest {
+                actor_id: "test".to_string(),
+                user_id: user.clone(),
+                workspace_id: ws.clone(),
+                purpose: "add_goal".to_string(),
+            };
+            let facade_guard = super::lock_memory_facade(&state).expect("memory facade");
+            let record = facade_guard
+                .create_memory_candidate(super::MemoryCreateRequest {
+                    request: lifecycle.clone(),
+                    memory_type: "goal".to_string(),
+                    text: text.to_string(),
+                    aliases: Vec::new(),
+                    language_hints: Vec::new(),
+                    confidence: 1.0,
+                    privacy_domain: super::PrivacyDomain::new("work"),
+                    sensitivity: super::MemoryDataSensitivity::Internal,
+                    evidence_refs: Vec::new(),
+                    metadata: serde_json::json!({ "source": "test" }),
+                })
+                .expect("create goal candidate");
+            facade_guard
+                .confirm_memory(&lifecycle, &record.reference, "test setup")
+                .expect("confirm goal");
+        };
+
+        let ws_a = super::MemoryWorkspaceId::new("proj-alpha");
+        let ws_b = super::MemoryWorkspaceId::new("proj-beta");
+        seed_goal(&ws_a, "Alpha objective");
+        seed_goal(&ws_b, "Beta objective");
+
+        // The process-global scope points at project A — as a concurrent run-turn on a
+        // DIFFERENT project would leave it. The GET must ignore it.
+        super::set_memory_workspace("proj-alpha");
+
+        let response = super::memory_goals_list(
+            axum::extract::State(state.clone()),
+            axum::extract::Query(super::GoalsListQuery {
+                thread: None,
+                workspace: Some("proj-beta".to_string()),
+            }),
+        )
+        .await
+        .expect("goals payload")
+        .0;
+
+        let objective = response["objective"].as_str().expect("objective present");
+        assert!(
+            objective.contains("Beta objective"),
+            "objective must reflect the request's workspace (B), got: {objective}"
+        );
+        assert!(
+            !objective.contains("Alpha objective"),
+            "objective must NOT leak the process-global workspace's goal (A), got: {objective}"
+        );
+        assert_eq!(
+            response["workspace"].as_str(),
+            Some("proj-beta"),
+            "sanity: the payload's workspace is the request's, matching its objective"
+        );
+
+        // Ripristino.
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match prev_user {
             Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
             None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },

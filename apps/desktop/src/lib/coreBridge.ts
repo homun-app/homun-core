@@ -3378,6 +3378,9 @@ export type ProjectGoalsData = {
   is_project: boolean;
   goals: { reference: string; text: string }[];
   decisions: { reference: string; text: string }[];
+  /** North-star objective text for the workspace (Task 4c); null when none is set
+   *  (personal/threads workspace, or no confirmed goal memory yet). */
+  objective?: string | null;
 };
 
 /** ADR 0022 (Piano UI A5): project briefing — ciò che l'agente SA stabilmente del

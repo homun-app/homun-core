@@ -395,20 +395,55 @@ assertMatches(
 );
 assertContains("src/components/ChatView.tsx", "<WorkspaceIsland", "closed operational plan markers must feed the ambient workspace island");
 assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "workspace island must derive progress from closed operational plan markers");
-assertContains("src/components/ChatView.tsx", "Workspace island options", "workspace island must expose its expand/collapse preference menu");
-assertContains("src/components/ChatView.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
-assertContains("src/components/ChatView.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
+assertContains("src/components/WorkspaceIsland.tsx", "Workspace island options", "workspace island must expose its expand/collapse preference menu");
+assertContains("src/components/WorkspaceIsland.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
+assertContains("src/components/WorkspaceIsland.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
 assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
-assertContains("src/components/ChatView.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
-assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "workspace island must be the single launcher for workbench tabs");
-assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"artifacts\")}", "workspace island artifact count must open the Review workbench");
-assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"plan\")}", "workspace island plan progress must open the Plan workbench");
-assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"activity\")}", "workspace island activity row must open the Activity workbench");
-assertContains("src/components/ChatView.tsx", "goalCount={projectGoalCount}", "workspace island must receive project goal state from the canonical goals read model");
-assertContains("src/components/ChatView.tsx", "memoryCount={projectMemoryCount}", "workspace island must receive project memory state from the canonical memory graph read model");
-assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"goals\")}", "workspace island goals row must open the Goals workbench");
-assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"memoria\")}", "workspace island memory row must open the Memory workbench");
-assertContains("src/components/ChatView.tsx", "onClick={() => onOpenWorkbench(\"files\")}", "workspace island files row must open the Files workbench");
+assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
+assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "chat header (island or kebab menu) must wire onOpenWorkbench(tab) to open the docked Workbench");
+assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"plan\")}", "workspace island plan progress must open the Plan workbench");
+assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"activity\")}", "workspace island activity row must open the Activity workbench");
+// Task 4b: the island is now a lean cockpit — Plan (3-step window) + Activity only.
+// Artifacts/Files/Goals/Memory rows moved out (destined for a header menu, Task 5).
+assertContains(
+  "src/components/WorkspaceIsland.tsx",
+  "threeStepWindow",
+  "island plan must use the 3-step auto-focus window"
+);
+assertNotContains(
+  "src/components/WorkspaceIsland.tsx",
+  "onOpenWorkbench(\"artifacts\")",
+  "artifacts row must be removed from the island (moved to the header menu)"
+);
+assertNotContains(
+  "src/components/WorkspaceIsland.tsx",
+  "onOpenWorkbench(\"files\")",
+  "files row must be removed from the island"
+);
+assertNotContains(
+  "src/components/WorkspaceIsland.tsx",
+  "onOpenWorkbench(\"goals\")",
+  "goals row must be removed from the island"
+);
+assertNotContains(
+  "src/components/WorkspaceIsland.tsx",
+  "onOpenWorkbench(\"memoria\")",
+  "memory row must be removed from the island"
+);
+// Task 4c: the objective sits at the top of the Objective → Plan → Activity hierarchy,
+// rendered as a text block (conditional — hidden when the workspace has no objective).
+assertContains(
+  "src/components/WorkspaceIsland.tsx",
+  "wi-goal",
+  "island must render the project objective as a text block"
+);
+// Task 5: the rows dropped from the island (artifacts/files/activity) resurface behind
+// a header kebab menu that reopens the docked Workbench on the right tab.
+assertContains(
+  "src/components/ChatView.tsx",
+  "<ChatHeaderMenu",
+  "chat header must expose a kebab menu for artifacts/files/screenshots/background activity"
+);
 assertContains("src/components/ChatView.tsx", "detailsOpen || workbenchOpen ? \" panel-open\" : \"\"", "right-side panels must reserve layout space instead of covering the chat");
 assertContains("src/styles.css", "top: calc(var(--window-chrome-height, 44px) + 8px);", "workbench island must sit below native chrome with breathing room");
 assertContains("src/styles.css", "right: 12px;", "workbench island must keep a visible margin from the window edge");
@@ -539,5 +574,17 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "HeaderValue::from_stat
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_threads", "desktop gateway must persist chat threads in SQLite");
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_messages", "desktop gateway must persist chat messages in SQLite");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");
+
+assertContains(
+  "src/components/ChatView.tsx",
+  "<MessageActivity",
+  "per-turn activity must be rendered inline in each assistant message"
+);
+
+assertNotContains(
+  "src/components/ProjectContextPanel.tsx",
+  "pcp-objective",
+  "objective is owned by the working island; the project panel must not duplicate it"
+);
 
 console.log("UI contract checks passed");

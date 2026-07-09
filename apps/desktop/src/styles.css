@@ -1901,6 +1901,65 @@ body.resizing-drawer {
   gap: 8px;
 }
 
+/* Header kebab menu: reopens the docked Workbench on a tab (artifacts/files/
+   activity) plus a screenshot shortcut, replacing the rows the island dropped.
+   Lives in the drag region, so it (and its popover) must opt out of dragging. */
+.chat-header-menu {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+.chat-header-menu-trigger {
+  height: 32px;
+  width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.chat-header-menu-trigger:hover,
+.chat-header-menu-trigger[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.chat-header-menu-popover {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px;
+  display: grid;
+  gap: 2px;
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+  -webkit-app-region: no-drag;
+}
+
+.chat-header-menu-popover button {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  border-radius: 6px;
+  color: var(--text);
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+}
+
+.chat-header-menu-popover button:hover {
+  background: var(--surface-hover);
+}
+
 .status-pill,
 .top-action,
 .tool-chip,
@@ -2190,7 +2249,6 @@ body.resizing-drawer {
   letter-spacing: 0.08em;
 }
 
-.project-context-panel .pcp-objective,
 .project-context-panel .pcp-brief {
   margin: 0;
   color: var(--text);
@@ -2364,6 +2422,33 @@ body.resizing-drawer {
   font-weight: 650;
 }
 
+/* Objective block (Task 4c) — top of the Objective → Plan → Activity hierarchy.
+   A light surface block, matching .pcp-section-title conventions. */
+.wi-goal {
+  margin: 0 4px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.wi-goal-label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.wi-goal-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .wi-progress {
   margin: 4px 0 10px;
   padding-top: 8px;
@@ -2453,22 +2538,23 @@ body.resizing-drawer {
   color: var(--green);
 }
 
-.wi-steps li.doing {
-  color: var(--text);
-  font-weight: 600;
-  background: var(--surface-muted);
-}
-
-/* The step being worked on RIGHT NOW: accent arrow + soft accent fill so you can tell
-   at a glance which one it's on (whether the model marked it "doing" or we inferred it
-   as the first still-open step). */
-.wi-steps li.active {
+/* The step being worked on RIGHT NOW: accent fill + accent icon + trailing arrow
+   so you can tell at a glance which one it's on inside the 3-step window. Driven by
+   `.current` (set for a literal "doing" step OR the inferred current step) so a
+   not-yet-"doing" current step is still visually flagged. */
+.wi-steps li.current {
   color: var(--text);
   font-weight: 600;
   background: var(--brand-soft);
 }
 
-.wi-steps li.active svg {
+.wi-steps li.current svg {
+  color: var(--brand);
+}
+
+.wi-step-active-arrow {
+  margin-left: auto;
+  flex: none;
   color: var(--brand);
 }
 
