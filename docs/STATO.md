@@ -26,14 +26,24 @@ modello-browser gira ISOLATO in un sotto-turno `browse(goal)→BrowseResult` che
 `docs/superpowers/specs/2026-07-08-browse-as-recursion-adr0025-plan.md`.
 - **1.1 FATTO (`b2dfa8fd`) — scaffolding:** `engine::browse::BrowseResult{found,answer,sources,confidence,note}` +
   `Confidence` enum (serde "high"/"low") + flag `HOMUN_CHAT_BROWSE_SUBAGENT` (default OFF, dead-code-gated). +2 test.
-- **⭐ 1.2 (PROSSIMO, il cuore) = `GatewayBrowseExecutor` = `run_turn` ricorsivo:** semina `LoopState` ISOLATA
-  (system-prompt browser + goal) → sub-seam SOLO-browser (ModelClient=modello-browser via `browser_openai_stream_config`,
-  CapabilityExecutor che espone SOLO i 6 tool granulari, BrowserExecutor fresco, EventSink isolato) → `engine::run_turn`
-  ricorsivo (termina per-tipo: sub-CapabilityExecutor diverso) → mappa `TurnOutcome`+sub-`LoopState`→`BrowseResult`. Test:
-  goal→answer, isolamento contesto (LoopState manager intatta), `found=false` su goal impossibile. **Nodo di design:
-  costruire un CapabilityExecutor SOLO-browser** (l'attuale instrada tutti i non-browser via execute_chat_tool → il
-  sub-executor deve rifiutare/no-op i non-browser + il toolset seminato = solo 6 browser tool). Poi 2 (tool manager) → 3
-  (verify+routing) → 4 (flip ON + ritiro model-switch & try_advance_frontier).
+- **1.2 FATTO (2026-07-09) — il cuore, `run_turn` ricorsivo (2 sub-slice):**
+  - **1.2a (`3feccde1`) — helper PURI + `TurnOutcome.browse_sources`:** `engine::browse::seed_browse_messages(system,goal)`
+    (contesto isolato a 2 messaggi) + `browse_result_from_outcome(&TurnOutcome)→BrowseResult` (self-assessment euristico:
+    `found`=answer sostanziale e ≠ fallback canned; `confidence`=High solo se una pagina è stata visitata; strippa il blocco
+    `**Sources**`). NIENTE JSON forzato sul modello debole (anti-pattern rifiutato) — il MANAGER verifica in slice 3.
+    `browse_sources` esposto su `TurnOutcome` (path principale lo ignora, behavior-preserving). +5 test → **engine 71**.
+  - **1.2b (`d0a70ae2`) — `GatewayBrowseExecutor` concreto:** semina `LoopState` ISOLATA (prompt browser-only focalizzato +
+    goal + SOLO i 6 schema browser + provider=modello-browser) → sub-seam: **drain `StreamSink`** (token/eventi del
+    sub-agente inghiottiti = incapsulamento; solo `BrowseResult` emerge), `GatewayBrowserExecutor` fresco,
+    **`BrowseOnlyCapabilityExecutor`** che RIFIUTA i non-browser (i 6 tool passano per `BrowserExecutor`), e
+    `NoPlanProgress`/`NoContextCompactor`/`OpenTurnPolicy`/`NeverIncompleteJudge` inerti (niente plan machinery nel
+    sotto-turno) → `engine::run_turn` ricorsivo (termina per-TIPO) → mappa via 1.2a. `#[allow(dead_code)]` finché slice 2
+    lo cabla. 34-warn baseline tenuto; gateway 474/1-env. **Non unit-testabile (seam concreti = AppState+sidecar) → validato
+    LIVE in slice 4;** la logica testabile è già in 1.2a.
+- **⭐ 2 (PROSSIMO) = tool manager `browse`:** esporre `browse(goal, hints?)` nel toolset del manager + dispatch che instrada
+  a `GatewayBrowseExecutor` (costruito accanto al loop manager in `run_agent_rounds`), nascondendo i 6 tool granulari al
+  manager dietro il flag. Test: il manager riceve un `BrowseResult` pulito. Poi 3 (verify+routing done/retry/blocked) → 4
+  (flip ON + ritiro model-switch browser & `try_advance_frontier_from_evidence`).
 - Task paralleli: working-island (`task_58afe482`, in corso in altra sessione).
 
 **⭐ 5.D1c.10 FATTO (additivo, `HOMUN_ENGINE_CRATE` default OFF = ZERO rischio prod):** il loop agentico è ESTRATTO in
