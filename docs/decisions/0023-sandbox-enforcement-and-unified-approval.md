@@ -4,10 +4,11 @@ Date: 2026-07-02
 
 ## Status
 
-**Accepted — IMPLEMENTATO e ATTIVO DI DEFAULT** (2026-07-09, audit di riconciliazione). Il chokepoint
-di enforcement ora esiste (`run_in_project` + `assess_tool_safety`): sandbox seatbelt (macOS) / landlock
-(Linux) + approval unica girano **di default**; `HOMUN_TOOL_SAFETY=0` è l'escape-hatch **transitorio**
-(fail-secure: solo "0" disabilita) prima della rimozione del flag → enforcement incondizionato.
+**Accepted — IMPLEMENTATO e INCONDIZIONATO** (2026-07-09, audit di riconciliazione). Il chokepoint di
+enforcement esiste (`run_in_project` + `assess_tool_safety`): sandbox seatbelt (macOS) / landlock (Linux)
++ approval unica girano **sempre** su macOS/Linux. Il flag transitorio `HOMUN_TOOL_SAFETY` è stato
+**rimosso** — enforcement ora incondizionato (Windows/altre piattaforme non hanno ancora un fence).
+Validato: fence test deterministico `seatbelt_fence` (in-root permesso, `$HOME` negato).
 
 Definisce il **Pilastro 1 di P1** ([confronto-codex-produzione.md](../confronto-codex-produzione.md) §3):
 portare l'esecuzione dei tool (shell, filesystem, processi) da un modello **cooperativo**

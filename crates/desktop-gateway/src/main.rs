@@ -50,8 +50,8 @@ mod tool_exec;
 mod tool_safety;
 // tool_trace_dump moved to `local_first_engine::trace` (5.D1c.9); the loop calls it there.
 
-// ADR 0023 tool-safety vocabulary + pure decision fn, used by the write-confirm
-// branches in `execute_chat_tool` behind `HOMUN_TOOL_SAFETY`.
+// ADR 0023 tool-safety vocabulary + pure decision fn, used by the (unconditional)
+// write-confirm branches in `execute_chat_tool`.
 use crate::tool_safety::{AskForApproval, SafetyDecision, SandboxPolicy, assess_tool_safety};
 use axum::{
     Json, Router,
@@ -766,7 +766,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ws_registry_arc = std::sync::Arc::new(ws_gateway::WsRegistry::new());
     let _ = ws_registry().set(ws_registry_arc.clone());
     let mut state = AppState {
-        http: reqwest::Client::new(),
+        http: build_gateway_http_client(),
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
         task_store: Arc::new(Mutex::new(TaskStore::open(gateway_task_database_path()?)?)),
         computer_store: Arc::new(Mutex::new(LocalComputerSessionStore::open(
@@ -12064,7 +12064,7 @@ enum RunProjectOutcome {
 /// Command` (cwd/kill_on_drop are set by the caller). `Err` means the fence could NOT
 /// be constructed and the caller must FAIL CLOSED (never run unsandboxed).
 ///
-/// Only ever called on the enforced path (`tool_safety_enabled()` on macOS/Linux), so
+/// Only ever called on the enforced path (macOS/Linux), so
 /// exactly one platform arm is compiled in per target — no `unused` warnings.
 #[cfg(target_os = "macos")]
 fn build_sandbox_command(
@@ -12148,14 +12148,13 @@ fn build_sandbox_command(
 /// with the exit status. This is the host-execution counterpart to the isolated
 /// `run_in_sandbox` (which stays for throwaway/untrusted work).
 ///
-/// ADR 0023 step 3 — OS enforcement. When `HOMUN_TOOL_SAFETY=1` AND we are on a
-/// platform with a fence backend, the `bash` subprocess is fenced under a
+/// ADR 0023 step 3 — OS enforcement (unconditional on macOS/Linux as of 2026-07-09).
+/// On a platform with a fence backend, the `bash` subprocess is fenced under a
 /// workspace-write policy: writes are physically confined to the project root +
 /// standard tool caches (see `workspace_write_roots`), everything else is read-only.
 /// The wrapper is `sandbox-exec` + Seatbelt on macOS, `homun-linux-sandbox` +
-/// Landlock on Linux (see `build_sandbox_command`). The flag is ON by default as of
-/// 2026-07-09 (ADR 0023 landed); `HOMUN_TOOL_SAFETY=0` is the transitional escape-hatch
-/// back to the pre-ADR host exec. Windows/other platforms never sandbox here yet.
+/// Landlock on Linux (see `build_sandbox_command`). Windows/other platforms never
+/// sandbox here yet.
 ///
 /// ADR 0023 on-failure escalation: when a fenced run FAILS with a sandbox-denial
 /// signature, this returns `NeedsEscalation` (instead of the old inline note) so the
@@ -12191,12 +12190,10 @@ Reformulate it without destructive operations.",
             scan.risk_score
         ));
     }
-    // Enforce the OS fence only when the flag is on AND we're on a platform with an
-    // enforcement backend (macOS Seatbelt or Linux Landlock). When either is false we
-    // take the plain `bash -lc` path via `run_bash_unsandboxed` exactly as before —
-    // the sandboxed branch below only runs on the enforced path.
-    let sandboxed =
-        tool_safety_enabled() && (cfg!(target_os = "macos") || cfg!(target_os = "linux"));
+    // Enforce the OS fence on any platform with an enforcement backend (macOS Seatbelt or
+    // Linux Landlock). On Windows/other we take the plain `bash -lc` path via
+    // `run_bash_unsandboxed` — the sandboxed branch below only runs on the enforced path.
+    let sandboxed = cfg!(target_os = "macos") || cfg!(target_os = "linux");
     if !sandboxed {
         return RunProjectOutcome::Completed(run_bash_unsandboxed(&root, command).await);
     }
@@ -14691,6 +14688,43 @@ pub(crate) fn model_request_timeout_secs() -> u64 {
         .and_then(|value| value.trim().parse::<u64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(3600)
+}
+
+/// Time-to-response-headers budget for the model call (seconds). Bounds the PRE-STREAM
+/// phase — TCP connect + request send + arrival of the HTTP response headers — which the
+/// total `model_request_timeout_secs` (a mid-stream backstop) and the stream first-token/
+/// idle governors do NOT cover: those only start once headers arrive. A cold-loading model
+/// (e.g. Ollama loading weights into memory) accepts the socket but withholds headers until
+/// it is ready, so without this bound `.send()` hung the whole turn for 20+ minutes
+/// (2026-07-09). Default 120s: generous enough for a legitimate local cold-load, finite
+/// enough to fail one turn cleanly instead of wedging. Override with
+/// HOMUN_MODEL_HEADERS_TIMEOUT_SECS.
+pub(crate) fn model_headers_timeout_secs() -> u64 {
+    std::env::var("HOMUN_MODEL_HEADERS_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(120)
+}
+
+/// The shared gateway HTTP client. One `connect_timeout` here bounds the TCP-connect phase
+/// for EVERY outbound call (model, embeddings, privacy-guard, channels) so a wedged or
+/// unreachable host fails fast instead of parking a worker; the per-call streaming timeouts
+/// (see `model_client`) layer on top for the model path. Named builder so all sites share
+/// one policy (converge, don't duplicate). Default 10s; override with
+/// HOMUN_HTTP_CONNECT_TIMEOUT_SECS.
+pub(crate) fn build_gateway_http_client() -> reqwest::Client {
+    let connect_secs = std::env::var("HOMUN_HTTP_CONNECT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(10);
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(connect_secs))
+        .build()
+        // A builder failure here is a TLS/backend init problem, not a per-call error;
+        // fall back to the default client so the gateway still boots.
+        .unwrap_or_else(|_| reqwest::Client::new())
 }
 
 /// Idle (inter-token) timeout for streamed completions (seconds). With streaming the
@@ -18763,22 +18797,6 @@ struct ChatToolCtx<'a> {
     floor_acting: bool,
 }
 
-/// ADR 0023 (`docs/decisions/0023-sandbox-enforcement-and-unified-approval.md`)
-/// gate: OS sandbox enforcement (seatbelt/landlock) + the unified `assess_tool_safety`
-/// approval path. DEFAULT ON as of 2026-07-09 (ADR 0023 landed) — `HOMUN_TOOL_SAFETY=0`
-/// is a transitional escape-hatch (one soak iteration) before the flag is removed and
-/// enforcement becomes unconditional. Only "0" disables (fail-secure: a typo'd value
-/// keeps the fence ON). Kept as a fn (not a `LazyLock`) so tests can toggle per case.
-fn tool_safety_enabled() -> bool {
-    tool_safety_enabled_from(std::env::var("HOMUN_TOOL_SAFETY").ok().as_deref())
-}
-
-/// Pure core (testable without touching process env): ON unless explicitly disabled with "0".
-fn tool_safety_enabled_from(value: Option<&str>) -> bool {
-    value != Some("0")
-}
-
-
 
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
 /// Verbatim unification of the MCP and Composio confirmation blocks — the only
@@ -18820,9 +18838,9 @@ confirmation card in the interface. Do NOT say it was executed."
         .to_string()
 }
 
-/// ADR 0023 sandbox axis, SHADOW mode: classify a tool call's filesystem footprint
-/// and log what a `workspace-write` fence WOULD do — WITHOUT enforcing anything.
-/// Observe-only; no dispatch behavior changes. Runs only when `tool_safety_enabled()`.
+/// ADR 0023 sandbox axis: classify a tool call's filesystem footprint and log what the
+/// `workspace-write` fence resolves it to — observability alongside the OS fence.
+/// Observe-only; no dispatch behavior changes.
 fn shadow_log_sandbox(state: &AppState, thread_id: Option<&str>, name: &str, args_raw: &str) {
     use crate::tool_safety::{
         ShadowVerdict, ToolFootprint, sandbox_shadow_verdict, tool_footprint,
@@ -19732,12 +19750,9 @@ async fn execute_chat_tool(
     // `CapabilityExecutor::execute_tool(name, args, call_id)` signature this becomes at 5e.
     _call_id: &str,
 ) -> (String, local_first_engine::ToolEffects) {
-    // ADR 0023 step 2b, SHADOW: observe-only sandbox classification/log. Gated by
-    // `tool_safety_enabled()` (default off → one env read, no-op). NEVER blocks or
-    // alters `result`; it only reads state and logs.
-    if tool_safety_enabled() {
-        shadow_log_sandbox(ctx.state, ctx.thread_id, name, args_raw);
-    }
+    // ADR 0023: observe-only sandbox classification/log alongside the (now unconditional)
+    // OS fence. NEVER blocks or alters `result`; it only reads state and logs.
+    shadow_log_sandbox(ctx.state, ctx.thread_id, name, args_raw);
     // ADR 0024 inc 5d.1b: tools no longer mutate `ctx` inline; the non-browser arms record their
     // loop-state changes here and the caller applies them (`apply_tool_effects`) right after the call
     // — behavior-preserving. (The browser arm still delegates to `execute_browser_tool`, the temporary
@@ -21859,28 +21874,22 @@ require your confirmation in the app. Propose it and stop."
             &args_val,
         );
         let is_write = ctx.composio_writes.contains(name);
-        let needs_confirm = if tool_safety_enabled() {
-            // ADR 0023: route the decision through the pure policy fn. `Never`
-            // (autonomous) → AutoApprove; `OnRequest` + unauthorized write →
-            // AskUser. Sandbox is DangerFullAccess for now (no OS fence wired
-            // yet), so this yields the same verdict as the legacy boolean.
-            let approval = if ctx.autonomous {
-                AskForApproval::Never
-            } else {
-                AskForApproval::OnRequest
-            };
-            matches!(
-                assess_tool_safety(
-                    approval,
-                    &SandboxPolicy::DangerFullAccess,
-                    is_write,
-                    workspace_scoped,
-                ),
-                SafetyDecision::AskUser
-            )
+        // ADR 0023: route the decision through the pure policy fn. `Never` (autonomous)
+        // → AutoApprove; `OnRequest` + unauthorized write → AskUser.
+        let approval = if ctx.autonomous {
+            AskForApproval::Never
         } else {
-            is_write && !ctx.autonomous && !workspace_scoped
+            AskForApproval::OnRequest
         };
+        let needs_confirm = matches!(
+            assess_tool_safety(
+                approval,
+                &SandboxPolicy::DangerFullAccess,
+                is_write,
+                workspace_scoped,
+            ),
+            SafetyDecision::AskUser
+        );
         if needs_confirm {
             emit_approval_card(
                 ctx,
@@ -21974,27 +21983,22 @@ Connectors → MCP; do NOT claim it's done.",
         // run is an autonomous automation (explicit per-automation opt-in).
         let is_write = ctx.composio_writes.contains(name);
         let pre_authorized = composio_tool_allowed(name);
-        let needs_confirm = if tool_safety_enabled() {
-            // ADR 0023: same routing as the MCP branch. `pre_authorized` is the
-            // user's always-allow list; `Never` (autonomous) short-circuits to
-            // AutoApprove. Equals the legacy boolean below under DangerFullAccess.
-            let approval = if ctx.autonomous {
-                AskForApproval::Never
-            } else {
-                AskForApproval::OnRequest
-            };
-            matches!(
-                assess_tool_safety(
-                    approval,
-                    &SandboxPolicy::DangerFullAccess,
-                    is_write,
-                    pre_authorized,
-                ),
-                SafetyDecision::AskUser
-            )
+        // ADR 0023: same routing as the MCP branch. `pre_authorized` = the user's
+        // always-allow list; `Never` (autonomous) short-circuits to AutoApprove.
+        let approval = if ctx.autonomous {
+            AskForApproval::Never
         } else {
-            is_write && !pre_authorized && !ctx.autonomous
+            AskForApproval::OnRequest
         };
+        let needs_confirm = matches!(
+            assess_tool_safety(
+                approval,
+                &SandboxPolicy::DangerFullAccess,
+                is_write,
+                pre_authorized,
+            ),
+            SafetyDecision::AskUser
+        );
         if needs_confirm {
             // Do NOT execute. Emit a confirmation card carrying the exact
             // action; the user runs it (once/always) via the card. The model
@@ -49870,6 +49874,57 @@ prs.save(Path({path:?}))
         );
     }
 
+    // Resilience guard (2026-07-09): a stalled model turn once froze EVERY gateway
+    // endpoint — including the lock-free `/api/health` liveness probe the Electron
+    // watchdog relies on. `health` must never couple to a store lock: this pins that
+    // invariant. A background thread parks holding the chat_store lock (mimicking a
+    // handler/turn that owns a store while blocked); health must still answer within a
+    // tight deadline. If a future change makes `health` take a store lock, one worker
+    // blocks on the held mutex and the 2s timeout trips this test instead of shipping a
+    // watchdog-killing regression.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn health_stays_live_while_a_store_lock_is_held() {
+        use axum::{Router, body::Body, http::Request, http::StatusCode, routing::get};
+        use tower::ServiceExt;
+
+        let state = super::AppState::for_tests();
+        let chat_store = state.chat_store.clone();
+        let (acquired_tx, acquired_rx) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let _guard = chat_store.lock().expect("hold chat_store lock");
+            acquired_tx.send(()).expect("signal lock acquired");
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        });
+        // Only probe once the lock is genuinely held, so the guard is meaningful.
+        acquired_rx.recv().expect("background thread acquired the lock");
+
+        let app = Router::new()
+            .route("/api/health", get(super::health))
+            .with_state(state);
+        // The request MUST run on a separate task: if `health` were to block on the held
+        // mutex, it would park a worker — and if the request ran inline on THIS task it
+        // would park the very thread driving the timeout (a blocking call defeats an async
+        // timeout on its own thread — the same trap as the production bug). Spawning it
+        // keeps the timeout on a free worker so a regression trips instead of hanging.
+        let request = tokio::spawn(async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/api/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+        });
+        let response = tokio::time::timeout(std::time::Duration::from_secs(2), request)
+            .await
+            .expect("/api/health must answer within 2s even while a store lock is held")
+            .expect("health request task panicked")
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        holder.join().ok();
+    }
+
     #[test]
     fn vault_category_from_marker_rejects_unknown_category() {
         let error = super::vault_category_from_marker("banking").expect_err("unknown category");
@@ -54188,15 +54243,6 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert!(plan_at < middle_at, "plan stays before the middle prose");
         assert!(out.contains("[x] **A**"), "but carries the latest content");
         assert!(out.contains("end"));
-    }
-
-    #[test]
-    fn tool_safety_defaults_on_unless_disabled() {
-        // ADR 0023 landed default-ON; only "0" is the escape-hatch (fail-secure).
-        assert!(super::tool_safety_enabled_from(None)); // unset → ON
-        assert!(super::tool_safety_enabled_from(Some("1")));
-        assert!(super::tool_safety_enabled_from(Some("on")));
-        assert!(!super::tool_safety_enabled_from(Some("0"))); // escape-hatch → OFF
     }
 
     // ADR 0023 (C1) live fence check: with the sandbox ON (now the default), the real
