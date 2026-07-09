@@ -145,18 +145,18 @@ offre un browser+shell in container per i lavori isolati.
 
 ## 7. Sicurezza & esecuzione — sandbox + approval
 
-**ADR 0023 (implementato, ATTIVO DI DEFAULT dal 2026-07-09).** L'esecuzione dei tool (shell/filesystem/
+**ADR 0023 (implementato, INCONDIZIONATO dal 2026-07-09).** L'esecuzione dei tool (shell/filesystem/
 processi) passa da un modello *cooperativo* (il modello chiede) a uno **enforced** (il processo non può
 uscire dal recinto), con una **policy di approvazione unica** al chokepoint.
 
 - **Enforcement OS:** `sandbox-exec` + **Seatbelt** su macOS, `homun-linux-sandbox` + **Landlock** su Linux;
   policy *workspace-write* (scritture confinate a root progetto + cache tool; il resto read-only).
-- **Default ON:** `tool_safety_enabled()` è ON salvo `HOMUN_TOOL_SAFETY=0` (escape-hatch **transitorio**,
-  fail-secure: solo "0" disabilita) prima della rimozione del flag → enforcement incondizionato.
+- **Incondizionato:** nessun flag — su macOS/Linux l'enforcement gira **sempre**
+  (`sandboxed = cfg!(macos)||cfg!(linux)`); il flag transitorio `HOMUN_TOOL_SAFETY` è stato **rimosso**.
 
-> ⚠️ **Onestà:** questo **cambia il comportamento di default** (l'exec dei tool è ora sandboxato). La suite
-> di test è verde (nessun test non-`soffice` regredito), ma la **validazione LIVE in-app** è ancora dovuta
-> prima di rimuovere del tutto il flag. Su Windows/altre piattaforme non c'è ancora fencing.
+> **Validazione:** il fence test deterministico `seatbelt_fence` prova il recinto reale (scrittura in-root
+> permessa, `$HOME` negata) attraverso il vero `sandbox-exec`; suite verde (nessun test non-`soffice`
+> regredito). Su Windows/altre piattaforme non c'è ancora fencing.
 
 ---
 
@@ -190,7 +190,7 @@ il ruolo residuo del crate. I deliverable sono anche **entità di memoria** (rec
 | Turn broker + WebSocket unificato | **vivo** | on, no flag |
 | Memoria: facade/ibrido/grafo/briefing + tool `recall_memory` | **vivo** | on |
 | Registro capability unico + routing BM25 (Caposaldo #7) | **vivo** | on |
-| Sandbox seatbelt/landlock + approval unica (ADR 0023) | **vivo** | **on** (`=0` per disattivare) — *validazione live dovuta* |
+| Sandbox seatbelt/landlock + approval unica (ADR 0023) | **vivo** | **on, incondizionato** (nessun flag) |
 | Deliverable `make_deck`/`make_document` + `brain_materialize` | **vivo** | on |
 | Normalizzatore output (ADR 0019, in `crates/engine`) | **vivo** | on |
 | Vault (chiavi wrapped da syskey OS, PIN reveal-only) | **vivo** | on |
@@ -214,7 +214,6 @@ il ruolo residuo del crate. I deliverable sono anche **entità di memoria** (rec
 - **`crates/orchestrator`:** il *secondo motore* (drive plan-execute come chat) è stato **rimosso** (ADR
   0020, superseded da 0021). Il crate **resta** solo per il **tipo `ExecutionPlan`** e il **planner
   deliverable** (`plan_only`, per `make_deck`/`make_document`) + `brain_materialize`. Non è un motore di chat.
-- **C1/sandbox:** attivo di default ma **la validazione live in-app è dovuta** prima di togliere il flag.
 - **File oltre-limite:** `main.rs`/`ChatView.tsx` da splittare (debito di manutenibilità).
 
 ---
