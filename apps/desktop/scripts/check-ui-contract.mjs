@@ -540,4 +540,10 @@ assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if 
 assertRepoContains("crates/desktop-gateway/src/chat_store.rs", "create table if not exists chat_messages", "desktop gateway must persist chat messages in SQLite");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "Body::from_stream", "desktop gateway must proxy runtime stream without buffering the full answer");
 
+assertContains(
+  "src/components/ChatView.tsx",
+  "<MessageActivity",
+  "per-turn activity must be rendered inline in each assistant message"
+);
+
 console.log("UI contract checks passed");

@@ -2081,18 +2081,27 @@ export function ChatView({
                   </div>
                 </div>
               ) : displayMessage.text ? (
-                <AssistantMessageBody
-                  text={displayMessage.text}
-                  eventParts={displayMessage.eventParts}
-                  messageId={displayMessage.id}
-                  threadId={thread.threadId}
-                  onOpenArtifact={(artifact) => {
-                    setArtifactsInitial(artifact.name);
-                    setWorkbenchTab("artifacts");
-                    setArtifactsOpen(true);
-                  }}
-                  onChoose={(answer) => void submitComposerPrompt(answer, [])}
-                />
+                <>
+                  {/* The ‹‹ACT››…‹‹/ACT›› trace markers are already persisted inside
+                      chat_messages.text; mounting it here (not just on the live streaming
+                      path) makes a turn's activity survive reload instead of vanishing
+                      once streaming ends. */}
+                  {assistantMessage && (
+                    <MessageActivity text={displayMessage.text} live={false} />
+                  )}
+                  <AssistantMessageBody
+                    text={displayMessage.text}
+                    eventParts={displayMessage.eventParts}
+                    messageId={displayMessage.id}
+                    threadId={thread.threadId}
+                    onOpenArtifact={(artifact) => {
+                      setArtifactsInitial(artifact.name);
+                      setWorkbenchTab("artifacts");
+                      setArtifactsOpen(true);
+                    }}
+                    onChoose={(answer) => void submitComposerPrompt(answer, [])}
+                  />
+                </>
               ) : (
                 <AssistantThinkingState
                   status={
