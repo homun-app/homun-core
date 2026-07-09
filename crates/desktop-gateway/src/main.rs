@@ -18724,9 +18724,13 @@ fn tool_safety_enabled() -> bool {
 
 /// ADR 0025 (browse-as-recursion): expose the browser to the manager as a single delegated
 /// `browse(goal)` sub-agent (a recursive `run_turn`) instead of the granular tools + mid-turn
-/// model-switch. Default OFF until validated live; the granular-tools path stays the fallback.
+/// model-switch. Slice 4a — now the DEFAULT path (live-validated 2026-07-09: found:true price turn +
+/// found:false Polymarket turn, clean context throughout). The flag is a TRANSITIONAL escape-hatch:
+/// `HOMUN_CHAT_BROWSE_SUBAGENT=0` falls back to the granular-tools + model-switch path for one soak
+/// iteration; slice 4b retires that fallback (model-switch + `try_advance_frontier_from_evidence`) and
+/// deletes the flag → one canonical path (converge, don't duplicate).
 fn browse_subagent_enabled() -> bool {
-    std::env::var("HOMUN_CHAT_BROWSE_SUBAGENT").as_deref() == Ok("1")
+    std::env::var("HOMUN_CHAT_BROWSE_SUBAGENT").as_deref() != Ok("0")
 }
 
 
