@@ -40,6 +40,75 @@ pub enum SandboxPolicy {
     },
 }
 
+/// The resolved sandbox MODE (rootless) — the user/policy CHOICE, before a caller binds
+/// it to concrete writable roots. Roots differ per consumer, so keeping the mode rootless
+/// lets ONE resolver serve every effectful chokepoint (caposaldo #5: one policy, one
+/// resolution) without leaking one consumer's roots into another.
+///
+/// **Reconciliation invariant (this line ≠ Codex/source):** the OS process fence
+/// (seatbelt/landlock) is UNCONDITIONAL here — every subprocess is fenced regardless of
+/// mode (validated by `tests/linux_sandbox.rs`). So `SandboxMode` governs ONLY the
+/// APP-LEVEL policy: what `assess_tool_safety` decides and whether the in-process file
+/// tools may mutate the workspace. **No mode disables the kernel fence.** `Danger` here
+/// means "no app-level approval cards / auto-allow", NOT "unsandboxed subprocess": Homun
+/// never fully unsandboxes subprocesses (local-first deny-by-default caposaldo), unlike
+/// Codex's danger-full-access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxMode {
+    ReadOnly,
+    WorkspaceWrite,
+    Danger,
+}
+
+impl SandboxMode {
+    /// Forgiving parse (settings/env are user-facing strings). Anything unknown or empty
+    /// falls back to `WorkspaceWrite` — the safe, behavior-preserving default ON THIS
+    /// LINE: the file tools already jail every write to the project root and the OS fence
+    /// already wraps subprocesses, so workspace-write is what HEAD effectively enforces.
+    /// (The source defaults unknown → `Danger` because there the fence was flag-gated OFF
+    /// by default; here that would REGRESS the app-level policy, so we diverge.) Only the
+    /// explicit `danger`/`danger-full-access` tokens select `Danger`.
+    pub fn parse(raw: &str) -> SandboxMode {
+        match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "read-only" | "readonly" => SandboxMode::ReadOnly,
+            "danger" | "danger-full-access" | "full-access" => SandboxMode::Danger,
+            // Unknown / empty / "workspace-write" → the safe default (see above).
+            _ => SandboxMode::WorkspaceWrite,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SandboxMode::ReadOnly => "read-only",
+            SandboxMode::WorkspaceWrite => "workspace-write",
+            SandboxMode::Danger => "danger",
+        }
+    }
+
+    /// Bind the rootless mode to a concrete [`SandboxPolicy`] for the APP-LEVEL machine
+    /// (`assess_tool_safety`, shadow log). `project_root` is the consumer's writable root
+    /// (the thread's project dir); `WorkspaceWrite` with no root degrades to `ReadOnly`
+    /// (nothing is writable without a project). `network_access:false` — the app-level
+    /// policy never authorizes network on its own.
+    ///
+    /// NOTE: this is the app-level policy ONLY. The OS kernel fence around subprocesses is
+    /// resolved separately and is UNCONDITIONAL; `Danger` here yields `DangerFullAccess`
+    /// for the app-level verdict but does NOT unsandbox any subprocess.
+    pub fn resolve(self, project_root: Option<&std::path::Path>) -> SandboxPolicy {
+        match self {
+            SandboxMode::ReadOnly => SandboxPolicy::ReadOnly,
+            SandboxMode::WorkspaceWrite => match project_root {
+                Some(root) => SandboxPolicy::WorkspaceWrite {
+                    writable_roots: vec![root.to_path_buf()],
+                    network_access: false,
+                },
+                None => SandboxPolicy::ReadOnly,
+            },
+            SandboxMode::Danger => SandboxPolicy::DangerFullAccess,
+        }
+    }
+}
+
 /// Codex `AskForApproval` — WHEN to stop and ask (the UX axis), independent of the fence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AskForApproval {
@@ -51,6 +120,30 @@ pub enum AskForApproval {
     OnRequest,
     /// Never ask (autonomous runs; presumes a tight sandbox).
     Never,
+}
+
+impl AskForApproval {
+    /// Forgiving parse (settings/env are user-facing strings). Anything unknown or
+    /// empty falls back to `OnRequest` — the safe-but-usable default: the model asks
+    /// when it judges a write needs confirmation, which is today's shipped behavior.
+    pub fn parse(raw: &str) -> AskForApproval {
+        match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "untrusted" | "unless-trusted" => AskForApproval::UnlessTrusted,
+            "on-failure" => AskForApproval::OnFailure,
+            "on-request" => AskForApproval::OnRequest,
+            "never" => AskForApproval::Never,
+            _ => AskForApproval::OnRequest,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AskForApproval::UnlessTrusted => "untrusted",
+            AskForApproval::OnFailure => "on-failure",
+            AskForApproval::OnRequest => "on-request",
+            AskForApproval::Never => "never",
+        }
+    }
 }
 
 /// Which OS fence an auto-approved tool runs under.
@@ -179,6 +272,15 @@ pub fn tool_footprint(name: &str, args: &serde_json::Value) -> ToolFootprint {
                 .unwrap_or("")
                 .to_string(),
         },
+        // apply_patch writes too, but touches N paths internally (parsed from the
+        // patch body, not a single `path` arg). We classify it as a Write with a
+        // synthetic placeholder path so shadow-log / read-only detection treat it
+        // like any other write; the concrete per-file jailing happens at the wiring
+        // site (apply_patch_in_project), which routes every touched path through
+        // jail_in_root.
+        "apply_patch" => ToolFootprint::Write {
+            path: "<apply_patch>".to_string(),
+        },
         "run_in_project" => ToolFootprint::Exec,
         "run_in_sandbox" => ToolFootprint::Contained,
         _ => ToolFootprint::NonFilesystem,
@@ -264,6 +366,79 @@ mod tests {
             SandboxKind::LinuxSeccomp
         } else {
             SandboxKind::None
+        }
+    }
+
+    // ---- SandboxMode: parse / as_str / resolve --------------------------------
+
+    #[test]
+    fn sandbox_mode_parses_forgivingly_and_defaults_to_workspace_write() {
+        assert_eq!(SandboxMode::parse("read-only"), SandboxMode::ReadOnly);
+        assert_eq!(SandboxMode::parse("readonly"), SandboxMode::ReadOnly);
+        assert_eq!(SandboxMode::parse("workspace-write"), SandboxMode::WorkspaceWrite);
+        assert_eq!(SandboxMode::parse("workspace_write"), SandboxMode::WorkspaceWrite);
+        // Explicit danger tokens are the ONLY way to reach Danger.
+        assert_eq!(SandboxMode::parse("danger"), SandboxMode::Danger);
+        assert_eq!(SandboxMode::parse("danger-full-access"), SandboxMode::Danger);
+        assert_eq!(SandboxMode::parse("DANGER"), SandboxMode::Danger);
+        // Reconciliation divergence from source: unknown/empty → WorkspaceWrite (safe
+        // default on this line), NOT Danger.
+        assert_eq!(SandboxMode::parse("garbage"), SandboxMode::WorkspaceWrite);
+        assert_eq!(SandboxMode::parse(""), SandboxMode::WorkspaceWrite);
+        assert_eq!(SandboxMode::ReadOnly.as_str(), "read-only");
+        assert_eq!(SandboxMode::WorkspaceWrite.as_str(), "workspace-write");
+        assert_eq!(SandboxMode::Danger.as_str(), "danger");
+    }
+
+    #[test]
+    fn sandbox_mode_resolves_to_policy_per_mode_and_root() {
+        let root = PathBuf::from("/proj");
+        // read-only → ReadOnly, ignoring any root.
+        assert_eq!(
+            SandboxMode::ReadOnly.resolve(Some(&root)),
+            SandboxPolicy::ReadOnly
+        );
+        // workspace-write + root → WorkspaceWrite jailed to that root, no network.
+        assert_eq!(
+            SandboxMode::WorkspaceWrite.resolve(Some(&root)),
+            SandboxPolicy::WorkspaceWrite {
+                writable_roots: vec![root.clone()],
+                network_access: false,
+            }
+        );
+        // workspace-write with NO root degrades to ReadOnly (nothing writable).
+        assert_eq!(
+            SandboxMode::WorkspaceWrite.resolve(None),
+            SandboxPolicy::ReadOnly
+        );
+        // danger → DangerFullAccess (APP-LEVEL only; the OS fence is separate + always on).
+        assert_eq!(
+            SandboxMode::Danger.resolve(Some(&root)),
+            SandboxPolicy::DangerFullAccess
+        );
+        assert_eq!(SandboxMode::Danger.resolve(None), SandboxPolicy::DangerFullAccess);
+    }
+
+    #[test]
+    fn ask_for_approval_parses_forgivingly_and_defaults_to_on_request() {
+        assert_eq!(AskForApproval::parse("untrusted"), AskForApproval::UnlessTrusted);
+        assert_eq!(AskForApproval::parse("unless-trusted"), AskForApproval::UnlessTrusted);
+        assert_eq!(AskForApproval::parse("unless_trusted"), AskForApproval::UnlessTrusted);
+        assert_eq!(AskForApproval::parse("on-failure"), AskForApproval::OnFailure);
+        assert_eq!(AskForApproval::parse("on_failure"), AskForApproval::OnFailure);
+        assert_eq!(AskForApproval::parse("on-request"), AskForApproval::OnRequest);
+        assert_eq!(AskForApproval::parse("never"), AskForApproval::Never);
+        // Unknown / empty → the safe-but-usable default.
+        assert_eq!(AskForApproval::parse("garbage"), AskForApproval::OnRequest);
+        assert_eq!(AskForApproval::parse(""), AskForApproval::OnRequest);
+        // as_str round-trips back to the canonical token parse accepts.
+        for a in [
+            AskForApproval::UnlessTrusted,
+            AskForApproval::OnFailure,
+            AskForApproval::OnRequest,
+            AskForApproval::Never,
+        ] {
+            assert_eq!(AskForApproval::parse(a.as_str()), a);
         }
     }
 
@@ -465,6 +640,19 @@ mod tests {
                 "{name} should capture path"
             );
         }
+    }
+
+    #[test]
+    fn apply_patch_is_a_write_with_synthetic_path() {
+        // apply_patch has no single `path` arg (paths live in the patch body), so it
+        // is classified as a Write with a synthetic placeholder so read-only detection
+        // and shadow logging treat it as a write. Per-path jailing is done at wiring.
+        assert_eq!(
+            tool_footprint("apply_patch", &serde_json::json!({})),
+            ToolFootprint::Write {
+                path: "<apply_patch>".to_string()
+            }
+        );
     }
 
     #[test]
