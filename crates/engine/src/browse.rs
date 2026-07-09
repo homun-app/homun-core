@@ -111,6 +111,32 @@ pub fn browse_result_from_outcome(outcome: &TurnOutcome) -> BrowseResult {
     }
 }
 
+/// Render a [`BrowseResult`] as the tool-result text the MANAGER reads (ADR 0025 slice 2). A compact
+/// LABELED block (not raw JSON) so the strong manager model can verify the answer against the step
+/// criterion and route deterministically — `found: false` → mark blocked / answer "unavailable" without
+/// thrashing; `found: true` → verify `answer`, cite `sources`, advance. Readable beats JSON here: the
+/// manager reasons over it, it never gets machine-parsed.
+pub fn browse_result_for_manager(result: &BrowseResult) -> String {
+    if !result.found {
+        return match &result.note {
+            Some(note) => format!("found: false\nnote: {note}"),
+            None => "found: false".to_string(),
+        };
+    }
+    let confidence = match result.confidence {
+        Confidence::High => "high",
+        Confidence::Low => "low",
+    };
+    let mut out = format!("found: true\nconfidence: {confidence}\nanswer: {}", result.answer);
+    if !result.sources.is_empty() {
+        out.push_str("\nsources:");
+        for url in &result.sources {
+            out.push_str(&format!("\n- {url}"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +222,28 @@ Tell me if you want me to retry or rephrase."
     fn empty_answer_maps_to_not_found_with_no_note() {
         let r = browse_result_from_outcome(&TurnOutcome::default());
         assert!(!r.found && r.answer.is_empty() && r.note.is_none());
+    }
+
+    #[test]
+    fn manager_view_labels_a_found_result_with_sources() {
+        let r = BrowseResult {
+            found: true,
+            answer: "$63,120".to_string(),
+            sources: vec!["https://kraken.com/btc".to_string()],
+            confidence: Confidence::High,
+            note: None,
+        };
+        let text = browse_result_for_manager(&r);
+        assert_eq!(
+            text,
+            "found: true\nconfidence: high\nanswer: $63,120\nsources:\n- https://kraken.com/btc"
+        );
+    }
+
+    #[test]
+    fn manager_view_of_not_found_carries_note_and_no_answer() {
+        let text = browse_result_for_manager(&BrowseResult::not_found("not available on Polymarket"));
+        assert_eq!(text, "found: false\nnote: not available on Polymarket");
+        assert!(!text.contains("answer:"), "a not-found result exposes no answer to the manager");
     }
 }

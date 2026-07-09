@@ -15626,6 +15626,44 @@ fn mcp_call_timeout() -> std::time::Duration {
 }
 
 /// Granular browser tool: navigate to a URL (and auto-snapshot the result).
+/// ADR 0025 (browse-as-recursion): the SINGLE browser tool the manager sees when the sub-agent is on. The
+/// manager states an information GOAL (one need, usually one plan step); an isolated sub-agent drives the
+/// real browser to satisfy it and returns a compact result. The manager never sees snapshots/clicks — it
+/// delegates the whole browse and reads back `found`/`answer`/`sources`, so its context stays clean.
+fn browse_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browse",
+            "description": "Delegate a web-browsing GOAL to an isolated browser sub-agent and get back the result. Use it whenever you need real-time or web data (prices, standings, schedules, facts, availability): state ONE concrete information goal in `goal` (e.g. 'current BTC price on Kraken', 'Serie A standings after matchday 30'). The sub-agent navigates the real browser for you and returns `found` (was the info obtained?), `answer` (the concrete value), `sources` (URLs visited) and `confidence`. You do NOT drive the browser yourself and never see individual pages — issue ONE browse per need, then verify the answer and continue. If `found: false`, the info was unavailable: refine the goal and browse again (at most twice), else tell the user it's unavailable — do not invent it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "The single, concrete information goal to satisfy on the web, in plain language."
+                    },
+                    "hints": {
+                        "type": "object",
+                        "description": "Optional starting hints.",
+                        "properties": {
+                            "url": {
+                                "type": "string",
+                                "description": "A preferred starting URL, if you already know a good source."
+                            },
+                            "container": {
+                                "type": "string",
+                                "description": "A site/section to prefer (e.g. 'wikipedia', 'official schedule')."
+                            }
+                        }
+                    }
+                },
+                "required": ["goal"]
+            }
+        }
+    })
+}
+
 fn browser_navigate_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -18687,7 +18725,6 @@ fn tool_safety_enabled() -> bool {
 /// ADR 0025 (browse-as-recursion): expose the browser to the manager as a single delegated
 /// `browse(goal)` sub-agent (a recursive `run_turn`) instead of the granular tools + mid-turn
 /// model-switch. Default OFF until validated live; the granular-tools path stays the fallback.
-#[allow(dead_code)] // wired in ADR 0025 step 2 (manager tool); defined now for step 1.
 fn browse_subagent_enabled() -> bool {
     std::env::var("HOMUN_CHAT_BROWSE_SUBAGENT").as_deref() == Ok("1")
 }
@@ -22057,6 +22094,12 @@ struct GatewayCapabilityExecutor<'a> {
     automation_workspace_id: &'a WorkspaceId,
     turn_scaffold: &'a scaffold::ScaffoldProfile,
     floor_acting: bool,
+    // ADR 0025: the extra turn-constants a recursive `browse(goal)` sub-turn needs (the granular browser
+    // executor's ctx wants them). Held here so the manager's `browse` interception can build a
+    // `GatewayBrowseExecutor` without threading them through the whole ChatToolCtx.
+    prompt: &'a str,
+    request: &'a ChatGenerateStreamRequest,
+    channel_owner: bool,
 }
 
 impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
@@ -22067,6 +22110,33 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
     ) -> Result<local_first_engine::ToolOutcome, String> {
+        // ADR 0025 slice 2: `browse` is delegated, not a normal capability. Intercept it BEFORE the
+        // ChatToolCtx path and route it to the isolated recursive sub-turn (GatewayBrowseExecutor). The
+        // engine dispatch sees `browse` as a plain non-browser tool → it arrives here; the recursion runs
+        // entirely gateway-side and returns a compact BrowseResult the manager reads.
+        if name == "browse" {
+            let goal = build_browse_goal(args_raw);
+            if goal.is_empty() {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: "browse needs a non-empty `goal`.".to_string(),
+                    effects: Default::default(),
+                });
+            }
+            let browse_executor = GatewayBrowseExecutor {
+                state: self.state,
+                http: &self.state.http,
+                thread_id: self.thread_id,
+                prompt: self.prompt,
+                request: self.request,
+                read_only: self.read_only,
+                channel_owner: self.channel_owner,
+            };
+            let outcome = browse_executor.browse(&goal).await;
+            return Ok(local_first_engine::ToolOutcome {
+                result: local_first_engine::browse::browse_result_for_manager(&outcome),
+                effects: Default::default(),
+            });
+        }
         let ctx = ChatToolCtx {
             plan: &mut ls.plan,
             step_evidence: &mut ls.step_evidence,
@@ -22241,11 +22311,37 @@ fn drain_stream_sink() -> StreamSink {
     StreamSink { mpsc: mpsc_tx, entry }
 }
 
+/// Build the effective sub-turn goal from the manager's `browse` tool args (ADR 0025 slice 2). Parses
+/// `{ goal, hints?: { url?, container? } }` and folds any hints INTO the goal text (the sub-agent's prompt
+/// is browser-only and has no separate hint slot), so a preferred start URL / source steers it. Returns
+/// "" when `goal` is missing/blank (the caller then refuses the call). Pure — unit-tested below.
+fn build_browse_goal(args_raw: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
+    let goal = v.get("goal").and_then(|g| g.as_str()).unwrap_or("").trim();
+    if goal.is_empty() {
+        return String::new();
+    }
+    let mut out = goal.to_string();
+    let hints = v.get("hints");
+    if let Some(url) = hints.and_then(|h| h.get("url")).and_then(|u| u.as_str()) {
+        let url = url.trim();
+        if !url.is_empty() {
+            out.push_str(&format!(" (start at {url})"));
+        }
+    }
+    if let Some(container) = hints.and_then(|h| h.get("container")).and_then(|c| c.as_str()) {
+        let container = container.trim();
+        if !container.is_empty() {
+            out.push_str(&format!(" (prefer {container})"));
+        }
+    }
+    out
+}
+
 /// The recursive `browse(goal)` executor (ADR 0025). Holds the turn-constants the sub-seams need
 /// (`AppState`, HTTP client, thread/prompt/request, perimeter flags); `browse` builds the browser-only
-/// sub-seams + isolated `LoopState` and calls `engine::run_turn`. Constructed by slice 2 alongside the
-/// manager loop; `#[allow(dead_code)]` until the manager's `browse` tool dispatches to it.
-#[allow(dead_code)]
+/// sub-seams + isolated `LoopState` and calls `engine::run_turn`. Constructed by the manager's `browse`
+/// interception (slice 2) in `GatewayCapabilityExecutor::execute_tool`.
 struct GatewayBrowseExecutor<'a> {
     state: &'a AppState,
     http: &'a reqwest::Client,
@@ -22256,7 +22352,6 @@ struct GatewayBrowseExecutor<'a> {
     channel_owner: bool,
 }
 
-#[allow(dead_code)]
 impl GatewayBrowseExecutor<'_> {
     /// Run one browser sub-turn for `goal` and return its `BrowseResult`. The recursion (this calls
     /// `run_turn`, which dispatches browser tools back through the sub `GatewayBrowserExecutor`) stays
@@ -23278,13 +23373,23 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // granular micro-tools. The legacy coarse `browse_web` handoff is gone.
     // read_only (channels) still gets browser_act, but the dispatch blocks any
     // committing action — channels can fill/scroll/read, never click-submit.
-    let mut base_tools = vec![
-        browser_navigate_tool_schema(),
-        browser_snapshot_tool_schema(),
-        browser_act_tool_schema(),
-        browser_screenshot_tool_schema(),
-        browser_tabs_tool_schema(),
-        browser_dialog_tool_schema(),
+    // ADR 0025: with the browse sub-agent ON, the MANAGER sees a single `browse(goal)` tool; the 6
+    // granular browser tools are hidden (driven only inside the isolated sub-loop). OFF = today's path:
+    // the manager drives the granular tools directly (with the mid-turn model-switch). Behavior-preserving
+    // when OFF — the `vec!` head is byte-identical to the previous unconditional list.
+    let mut base_tools = if browse_subagent_enabled() {
+        vec![browse_tool_schema()]
+    } else {
+        vec![
+            browser_navigate_tool_schema(),
+            browser_snapshot_tool_schema(),
+            browser_act_tool_schema(),
+            browser_screenshot_tool_schema(),
+            browser_tabs_tool_schema(),
+            browser_dialog_tool_schema(),
+        ]
+    };
+    base_tools.extend([
         recall_memory_tool_schema(),
         query_code_graph_tool_schema(),
         query_git_history_tool_schema(),
@@ -23295,7 +23400,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // Deterministic date/time resolution (Layer C). Read-only and needed most
         // on channels (e.g. WhatsApp "treni per domani"), so offered to everyone.
         resolve_datetime_tool_schema(),
-    ];
+    ]);
     if !read_only {
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(generate_image_tool_schema());
@@ -24177,6 +24282,11 @@ async fn run_agent_rounds(
         automation_workspace_id: &automation_workspace_id,
         turn_scaffold: &turn_scaffold,
         floor_acting,
+        // ADR 0025: turn-constants for a recursive `browse(goal)` sub-turn (used only when the manager
+        // calls the `browse` tool; inert otherwise).
+        prompt: &prompt,
+        request: &request,
+        channel_owner,
     };
     // The browser tool chokepoint (ADR 0025 seam): OWNS the browser subsystem's private state (session +
     // snapshot/tab/nav bookkeeping); `&mut` because run_turn mutates it per browser call.
@@ -48596,7 +48706,8 @@ mod tests {
         aggregate_session_state_from_counts,
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
-        browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_plan_markdown,
+        browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
+        build_plan_markdown,
         capability_call_completed_outcome, classify_connector_error, collapse_plan_markers,
         collect_member_counts, composio_tool_is_read, connector_error_hint,
         default_browser_headless_value, evaluate_simple_arithmetic, extract_source_urls,
@@ -48708,6 +48819,21 @@ mod tests {
         // With no HOME, only the project root is writable.
         let no_home = workspace_write_roots(project, None);
         assert_eq!(no_home, vec![project.to_path_buf()]);
+    }
+
+    #[test]
+    fn build_browse_goal_parses_goal_and_folds_hints() {
+        // ADR 0025: the manager's browse args → the sub-turn goal string. Bare goal passes through;
+        // hints (url/container) fold into the text since the browser sub-prompt has no separate hint slot.
+        assert_eq!(build_browse_goal(r#"{"goal":"BTC price"}"#), "BTC price");
+        assert_eq!(
+            build_browse_goal(r#"{"goal":"Serie A standings","hints":{"url":"https://x.com","container":"wikipedia"}}"#),
+            "Serie A standings (start at https://x.com) (prefer wikipedia)"
+        );
+        // Missing/blank goal → empty (the caller refuses the call); malformed JSON is safe.
+        assert_eq!(build_browse_goal(r#"{"hints":{"url":"https://x"}}"#), "");
+        assert_eq!(build_browse_goal(r#"{"goal":"   "}"#), "");
+        assert_eq!(build_browse_goal("not json"), "");
     }
 
     #[test]
