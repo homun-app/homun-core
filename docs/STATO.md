@@ -62,7 +62,19 @@ modello-browser gira ISOLATO in un sotto-turno `browse(goal)→BrowseResult` che
   ETH-prezzo→calcolo→scrivi → il manager ha scelto **curl in sandbox** per l'API strutturata (non browse), piano PULITO con
   "Step verified" (routing intelligente: browse convive con curl/skill, il manager sceglie il tool giusto perché il contesto è
   pulito). **I 3 turni coprono l'intero contratto BrowseResult (found:true / found:false / non-usato-perché-c'è-di-meglio).**
-- **3 verify+routing (PROSSIMO, richiede RUN LIVE con app ricostruita + sidecar browser):** il manager verifica il
+- **⭐ 4a FATTO + LIVE-VALIDATO 2026-07-09 (`4bcd9b5d`) — flip del default a ON:** `browse_subagent_enabled()` ora ritorna true
+  a meno di `HOMUN_CHAT_BROWSE_SUBAGENT=0` (escape-hatch transitorio). browse-as-recursion è il **path browser di default**;
+  i 6 tool granulari + il model-switch sono nascosti al manager di default; `=0` è il fallback per una iterazione di soak prima
+  che 4b ritiri model-switch & `try_advance_frontier_from_evidence` e cancelli il flag. **Validato via API (io-guidato) SENZA la
+  env var:** gateway senza flag (env count=0) → manager ha chiamato `browse` → sotto-turno ha navigato reale
+  (`browser-step[done]: navigate coingecko.com/coins/ethereum`) → risposta reale ($1.742,56 + tabella) + fonte, contesto pulito
+  (un ACT + una riga REASONING). Baseline 34-warn tenuto.
+- **⭐ 4b (PROSSIMO, il ritiro finale "converge, don't duplicate" — con Fabio dopo soak):** cancellare il **model-switch**
+  mid-turn (`main.rs:~18855`, `‹‹ACT››🧠 Passo al modello browser` — nel sotto-loop è già no-op perché il provider è già il
+  modello browser); ritirare **`try_advance_frontier_from_evidence`** (`agent_loop.rs:522`, band-aid per il modello-browser che
+  congelava il piano — ⚠️ avanza il frontier da QUALSIASI evidenza, non solo browser: verificare che il manager forte avanzi il
+  piano da solo su multi-step non-browser prima di rimuoverlo); eliminare il flag → un solo path.
+- **3 verify+routing: GIÀ validato sopra** (BTC found:true + Polymarket found:false, il routing emerge dal loop guardato). Storico:
   `BrowseResult` e instrada il piano done/retry/blocked; **meccanismo già in place** via la description del tool + il loop
   guardato esistente → è soprattutto VALIDAZIONE live: risposta giusta→avanza, sbagliata→retry, impossibile→blocked/"unavailable").
   4 = **flip `HOMUN_CHAT_BROWSE_SUBAGENT=1` ON + regressione** su query tipo Polymarket/prezzo-live (piano che sale live,
