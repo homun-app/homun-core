@@ -137,6 +137,7 @@ import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { WorkspaceIsland } from "./WorkspaceIsland";
+import { ChatHeaderMenu } from "./ChatHeaderMenu";
 import type {
   ChatMessage,
   ChatMessageMetrics,
@@ -1970,7 +1971,14 @@ export function ChatView({
             <span id="chat-title">{thread.title}</span>
           </div>
         </div>
-
+        <ChatHeaderMenu
+          onOpenWorkbench={(tab) => {
+            setArtifactsInitial(null);
+            setWorkbenchTab(tab);
+            setArtifactsOpen(true);
+          }}
+          onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
+        />
       </header>
 
       <div className="chat-status-stack" aria-label="Live workspace status">

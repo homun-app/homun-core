@@ -400,7 +400,7 @@ assertContains("src/components/WorkspaceIsland.tsx", "wi-progress", "workspace i
 assertContains("src/components/WorkspaceIsland.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
 assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
 assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
-assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "workspace island must be the single launcher for workbench tabs");
+assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "chat header (island or kebab menu) must wire onOpenWorkbench(tab) to open the docked Workbench");
 assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"plan\")}", "workspace island plan progress must open the Plan workbench");
 assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"activity\")}", "workspace island activity row must open the Activity workbench");
 // Task 4b: the island is now a lean cockpit — Plan (3-step window) + Activity only.
@@ -436,6 +436,13 @@ assertContains(
   "src/components/WorkspaceIsland.tsx",
   "wi-goal",
   "island must render the project objective as a text block"
+);
+// Task 5: the rows dropped from the island (artifacts/files/activity) resurface behind
+// a header kebab menu that reopens the docked Workbench on the right tab.
+assertContains(
+  "src/components/ChatView.tsx",
+  "<ChatHeaderMenu",
+  "chat header must expose a kebab menu for artifacts/files/screenshots/background activity"
 );
 assertContains("src/components/ChatView.tsx", "detailsOpen || workbenchOpen ? \" panel-open\" : \"\"", "right-side panels must reserve layout space instead of covering the chat");
 assertContains("src/styles.css", "top: calc(var(--window-chrome-height, 44px) + 8px);", "workbench island must sit below native chrome with breathing room");

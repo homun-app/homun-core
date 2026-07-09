@@ -1901,6 +1901,65 @@ body.resizing-drawer {
   gap: 8px;
 }
 
+/* Header kebab menu: reopens the docked Workbench on a tab (artifacts/files/
+   activity) plus a screenshot shortcut, replacing the rows the island dropped.
+   Lives in the drag region, so it (and its popover) must opt out of dragging. */
+.chat-header-menu {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+.chat-header-menu-trigger {
+  height: 32px;
+  width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.chat-header-menu-trigger:hover,
+.chat-header-menu-trigger[aria-expanded="true"] {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.chat-header-menu-popover {
+  position: absolute;
+  z-index: 90;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px;
+  display: grid;
+  gap: 2px;
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+  -webkit-app-region: no-drag;
+}
+
+.chat-header-menu-popover button {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  border-radius: 6px;
+  color: var(--text);
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+}
+
+.chat-header-menu-popover button:hover {
+  background: var(--surface-hover);
+}
+
 .status-pill,
 .top-action,
 .tool-chip,
