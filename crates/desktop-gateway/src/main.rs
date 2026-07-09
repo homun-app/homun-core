@@ -19104,6 +19104,24 @@ workspace-write in Settings to allow project writes."
     )
 }
 
+/// ADR 0023: surface a read-only-blocked write to the desktop UI as a `tool_result`
+/// stream event so it can render the escalation card. The write tools return the block as
+/// a plain-prefix string (`READ_ONLY_BLOCKED_MARKER`) fed back to the model; nothing else
+/// puts that string on the UI stream, so without this the user only sees the model's
+/// (unreliable) narration. Deliberately NOT a `‹‹…››` card marker — the UI matches the
+/// plain prefix on the tool_result payload. No-op for any non-blocked result.
+async fn emit_read_only_block_if_needed(tx: &StreamSink, name: &str, result: &str) {
+    if result.starts_with(READ_ONLY_BLOCKED_MARKER) {
+        let _ = emit_stream_event(
+            tx,
+            GenerateStreamEvent::ToolResult {
+                payload: serde_json::json!({ "name": name, "output": result }),
+            },
+        )
+        .await;
+    }
+}
+
 /// ADR 0023 sandbox axis: classify a tool call's filesystem footprint and log what the
 /// resolved fence would decide — observability alongside the (unconditional) OS fence.
 /// Observe-only; no dispatch behavior changes.
@@ -21818,6 +21836,7 @@ loaded with use_skill):\n{}",
             )
             .await;
         }
+        emit_read_only_block_if_needed(ctx.tx, "write_file", &result).await;
         result
     } else if name == "edit_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
@@ -21846,11 +21865,13 @@ loaded with use_skill):\n{}",
         .await;
         let st = ctx.state.clone();
         let tid = ctx.thread_id.map(|s| s.to_string());
-        tokio::task::spawn_blocking(move || {
+        let result = tokio::task::spawn_blocking(move || {
             edit_project_file(&st, tid.as_deref(), &path, &old, &new)
         })
         .await
-        .unwrap_or_else(|e| format!("Error: {e}"))
+        .unwrap_or_else(|e| format!("Error: {e}"));
+        emit_read_only_block_if_needed(ctx.tx, "edit_file", &result).await;
+        result
     } else if name == "apply_patch" {
         let args_val: serde_json::Value =
             serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
@@ -21877,7 +21898,7 @@ loaded with use_skill):\n{}",
         })
         .await
         .unwrap_or_else(|e| Err(format!("Error: {e}")));
-        match apply_result {
+        let patch_result = match apply_result {
             Ok(files) => {
                 // Emit a structured diff card per touched file (‹‹DIFF›› marker), and
                 // register artifact memory for each written path (skip deletions).
@@ -21918,7 +21939,9 @@ loaded with use_skill):\n{}",
                 }
             }
             Err(msg) => msg,
-        }
+        };
+        emit_read_only_block_if_needed(ctx.tx, "apply_patch", &patch_result).await;
+        patch_result
     } else if name == "list_files" {
         let _ = emit_stream_event(
             ctx.tx,
@@ -27174,26 +27197,47 @@ fn normalize_adaptive_floor(raw: &str) -> String {
     .to_string()
 }
 
+/// Overlay a PARTIAL settings patch (top-level keys only) onto `current`, then normalize
+/// every axis. Pure so the merge is unit-testable. Any key ABSENT from `patch` is
+/// preserved from `current`: each Settings control (adaptive-floor / sandbox / approval)
+/// posts only its own field, so a naive whole-struct deserialize would let one control
+/// silently reset the others to their serde defaults (a real clobber once >1 control
+/// exists). Extra/unknown keys in the patch are dropped by the RuntimeSettings decode.
+fn merge_runtime_settings(current: &RuntimeSettings, patch: &serde_json::Value) -> RuntimeSettings {
+    let mut base = serde_json::to_value(current).unwrap_or_else(|_| serde_json::json!({}));
+    if let (Some(base_obj), Some(patch_obj)) = (base.as_object_mut(), patch.as_object()) {
+        for (key, value) in patch_obj {
+            base_obj.insert(key.clone(), value.clone());
+        }
+    }
+    let mut merged: RuntimeSettings =
+        serde_json::from_value(base).unwrap_or_else(|_| current.clone());
+    // Normalize each axis to a token the resolvers accept (unknown → safe default).
+    merged.adaptive_floor = normalize_adaptive_floor(&merged.adaptive_floor);
+    merged.sandbox_mode =
+        crate::tool_safety::SandboxMode::parse(&merged.sandbox_mode).as_str().to_string();
+    merged.approval_policy =
+        crate::tool_safety::AskForApproval::parse(&merged.approval_policy).as_str().to_string();
+    merged
+}
+
 async fn get_runtime_settings() -> Json<RuntimeSettings> {
     Json(load_runtime_settings())
 }
 
 async fn set_runtime_settings(
-    Json(mut settings): Json<RuntimeSettings>,
+    Json(patch): Json<serde_json::Value>,
 ) -> Result<Json<RuntimeSettings>, GatewayError> {
-    // Normalize so the chat path never sees an unknown mode. `parse(..).as_str()`
-    // canonicalizes each axis to a token the resolvers accept (unknown → safe default).
-    settings.adaptive_floor = normalize_adaptive_floor(&settings.adaptive_floor);
-    settings.sandbox_mode =
-        crate::tool_safety::SandboxMode::parse(&settings.sandbox_mode).as_str().to_string();
-    settings.approval_policy =
-        crate::tool_safety::AskForApproval::parse(&settings.approval_policy).as_str().to_string();
-    save_runtime_settings(&settings).map_err(|message| GatewayError {
+    // PATCH semantics: merge the caller's partial patch onto the persisted settings so one
+    // Settings control never clobbers another (see `merge_runtime_settings`). The full,
+    // normalized object is persisted and returned.
+    let merged = merge_runtime_settings(&load_runtime_settings(), &patch);
+    save_runtime_settings(&merged).map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "runtime_settings_save",
         message,
     })?;
-    Ok(Json(settings))
+    Ok(Json(merged))
 }
 
 // --- WhatsApp sidecar lifecycle + status (C1.5: connection managed from the app) ---
@@ -48590,6 +48634,44 @@ mod tests {
 
         unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ADR 0023 UI: each Settings control (adaptive-floor / sandbox / approval) POSTs only
+    // its own field. `set_runtime_settings` must MERGE the partial patch so saving one
+    // control does not reset the others to their serde defaults — otherwise the three
+    // selectors silently clobber each other. Pure test over the merge helper.
+    #[test]
+    fn set_runtime_settings_merges_partial_updates() {
+        let current = super::RuntimeSettings {
+            adaptive_floor: "on".to_string(),
+            sandbox_mode: "danger".to_string(),
+            approval_policy: "never".to_string(),
+        };
+        // Patch only sandbox_mode → the other two axes are preserved.
+        let merged = super::merge_runtime_settings(
+            &current,
+            &serde_json::json!({ "sandbox_mode": "read-only" }),
+        );
+        assert_eq!(merged.adaptive_floor, "on", "adaptive_floor preserved");
+        assert_eq!(merged.sandbox_mode, "read-only", "sandbox_mode updated");
+        assert_eq!(merged.approval_policy, "never", "approval_policy preserved");
+
+        // Reverse direction: patching adaptive_floor must NOT reset sandbox_mode/approval.
+        let merged2 = super::merge_runtime_settings(
+            &merged,
+            &serde_json::json!({ "adaptive_floor": "off" }),
+        );
+        assert_eq!(merged2.adaptive_floor, "off", "adaptive_floor updated");
+        assert_eq!(merged2.sandbox_mode, "read-only", "sandbox_mode preserved");
+        assert_eq!(merged2.approval_policy, "never", "approval_policy preserved");
+
+        // Unknown tokens normalize to the safe default; extra keys are ignored.
+        let merged3 = super::merge_runtime_settings(
+            &current,
+            &serde_json::json!({ "sandbox_mode": "bogus", "unrelated": 1 }),
+        );
+        assert_eq!(merged3.sandbox_mode, "workspace-write", "unknown → safe default");
+        assert_eq!(merged3.adaptive_floor, "on", "adaptive_floor preserved");
     }
 
     #[test]

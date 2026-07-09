@@ -115,6 +115,8 @@ import {
   MCP_CONFIRM_RE,
   FS_AUTHORIZE_RE,
   SANDBOX_ESCALATE_RE,
+  SANDBOX_READ_ONLY_BLOCKED_PREFIX,
+  SANDBOX_READ_ONLY_TARGET_RE,
   CONNECT_SUGGEST_RE,
   COMPOSIO_DONE_RE,
   COMPOSIO_RECONNECT_RE,
@@ -5652,6 +5654,7 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
   reconnectSlug: string | null;
   fsAuthorize: { path: string; op: string } | null;
   sandboxEscalate: { command: string; cwd: string } | null;
+  readOnlyBlocked: { target: string } | null;
   connectSuggest: ConnectSuggest | null;
   vaultPropose: VaultProposal | null;
   vaultReveal: VaultRevealProposal | null;
@@ -5714,6 +5717,17 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
       }
     } catch {
       /* malformed → just hide it */
+    }
+  }
+  // ADR 0023: a file write blocked by read-only sandbox mode. It arrives as a `tool_result`
+  // event whose output carries the PLAIN `SANDBOX_READ_ONLY_BLOCKED` prefix (deliberately
+  // not a `‹‹…››` card marker), so match it on the event part, not the text.
+  let readOnlyBlocked: { target: string } | null = null;
+  for (const part of eventParts ?? []) {
+    if (part.type !== "tool_result") continue;
+    const output = (part.payload as { output?: unknown } | undefined)?.output;
+    if (typeof output === "string" && output.startsWith(SANDBOX_READ_ONLY_BLOCKED_PREFIX)) {
+      readOnlyBlocked = { target: output.match(SANDBOX_READ_ONLY_TARGET_RE)?.[1] ?? "" };
     }
   }
   // Clickable connect-cards from suggest_capabilities (install skill / connect MCP
@@ -5854,6 +5868,7 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
     reconnectSlug,
     fsAuthorize,
     sandboxEscalate,
+    readOnlyBlocked,
     connectSuggest,
     vaultPropose,
     vaultReveal,
@@ -5905,6 +5920,7 @@ const AssistantMessageBody = memo(
     reconnectSlug,
     fsAuthorize,
     sandboxEscalate,
+    readOnlyBlocked,
     connectSuggest,
     vaultPropose,
     vaultReveal,
@@ -5943,6 +5959,9 @@ const AssistantMessageBody = memo(
           messageId={messageId}
           threadId={threadId}
         />
+      )}
+      {readOnlyBlocked && !streaming && (
+        <SandboxReadOnlyCard target={readOnlyBlocked.target} />
       )}
       {connectSuggest && !streaming && (
         <ConnectSuggestCard
@@ -7123,6 +7142,83 @@ function SandboxEscalateCard({
           <span style={{ marginLeft: 6 }}>
             {status === "running" ? "Running…" : "Run without sandbox"}
           </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** ADR 0023 — read-only escalation card. A file write was blocked because the sandbox is
+ *  in read-only mode. Unlike the bash on-failure card (which re-runs the exact command
+ *  unsandboxed via a provenance-checked endpoint), the read-only write result carries no
+ *  content to re-dispatch, so the action here flips the persisted `sandbox_mode` to
+ *  workspace-write and asks the user to re-send — the honest, no-bypass option on this
+ *  branch's plain-marker design. */
+function SandboxReadOnlyCard({ target }: { target: string }) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<"idle" | "switching" | "switched" | "error">("idle");
+  const [note, setNote] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+
+  const switchToWorkspace = async () => {
+    setStatus("switching");
+    setNote(null);
+    try {
+      await coreBridge.setRuntimeSettings({ sandbox_mode: "workspace-write" });
+      setStatus("switched");
+    } catch (error) {
+      setStatus("error");
+      setNote((error as Error).message);
+    }
+  };
+
+  if (status === "switched") {
+    return (
+      <div className="cmp-confirm">
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ShieldCheck size={15} />
+          <strong>{t("chat.sandboxReadOnlySwitchedTitle")}</strong>
+        </div>
+        <p className="set-hint" style={{ fontSize: 12 }}>
+          {t("chat.sandboxReadOnlySwitchedHint")}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cmp-confirm">
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <AlertTriangle size={15} />
+        <strong>{t("chat.sandboxReadOnlyTitle")}</strong>
+      </div>
+      <p className="set-hint" style={{ fontSize: 12 }}>
+        {target
+          ? t("chat.sandboxReadOnlyDesc", { target })
+          : t("chat.sandboxReadOnlyDescNoTarget")}
+      </p>
+      {status === "error" && <p className="cmp-confirm-err">{t("chat.failed")}: {note}</p>}
+      <div className="cmp-confirm-actions">
+        <button
+          className="set-btn primary"
+          type="button"
+          disabled={status === "switching"}
+          onClick={() => void switchToWorkspace()}
+        >
+          <span>
+            {status === "switching"
+              ? t("chat.sandboxReadOnlySwitching")
+              : t("chat.sandboxReadOnlySwitch")}
+          </span>
+        </button>
+        <button
+          className="set-btn"
+          type="button"
+          disabled={status === "switching"}
+          onClick={() => setDismissed(true)}
+        >
+          <span>{t("chat.sandboxReadOnlyKeep")}</span>
         </button>
       </div>
     </div>

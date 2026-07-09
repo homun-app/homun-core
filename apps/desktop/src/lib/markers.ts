@@ -68,6 +68,13 @@ export const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUT
 // re-runs it UNSANDBOXED on approval. Payload mirrors a tool call:
 // {"approval_id"?, "tool":"run_in_project", "arguments":{"command":"…","cwd":"…"}}.
 export const SANDBOX_ESCALATE_RE = /‹‹SANDBOX_ESCALATE››([\s\S]*?)‹‹\/SANDBOX_ESCALATE››/;
+// ADR 0023: a file write blocked by read-only sandbox mode. Unlike the guillemet cards
+// above, this is a PLAIN string prefix the write tools return as their result (surfaced
+// to the UI via a `tool_result` stream event, never as a `‹‹…››` card). The desktop
+// matches this prefix on the tool_result payload to render the read-only escalation card.
+export const SANDBOX_READ_ONLY_BLOCKED_PREFIX = "SANDBOX_READ_ONLY_BLOCKED";
+// Pulls the target path out of the block message ("…the write to '<target>' was blocked…").
+export const SANDBOX_READ_ONLY_TARGET_RE = /the write to '([^']+)'/;
 export const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT_SUGGEST››/;
 export const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 export const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;

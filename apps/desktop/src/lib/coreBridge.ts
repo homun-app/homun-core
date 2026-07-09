@@ -704,17 +704,26 @@ async function electronSetRuntimeModel(model: string): Promise<{ active: string 
   return gatewayPostJson<{ active: string }>("/api/runtime/model", { model });
 }
 
-/** Adaptive scaffolding floor (ADR 0018): "off" | "shadow" | "on". */
+/** Persisted runtime/behaviour axes (GET returns all three). Maps 1:1 to the gateway
+ *  `RuntimeSettings` struct the chat path resolves live:
+ *  - `adaptive_floor` (ADR 0018): "off" | "shadow" | "on"
+ *  - `sandbox_mode` (ADR 0023): "read-only" | "workspace-write" | "danger"
+ *  - `approval_policy` (ADR 0023): "untrusted" | "on-failure" | "on-request" | "never" */
 export interface RuntimeSettings {
   adaptive_floor: string;
+  sandbox_mode: string;
+  approval_policy: string;
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {
   return gatewayGetJson<RuntimeSettings>("/api/runtime/settings");
 }
 
+// PATCH semantics: each Settings control posts ONLY its own field. The gateway merges the
+// partial onto the persisted object (see `merge_runtime_settings`), so a partial never
+// clobbers the sibling axes.
 async function electronSetRuntimeSettings(
-  settings: RuntimeSettings,
+  settings: Partial<RuntimeSettings>,
 ): Promise<RuntimeSettings> {
   return gatewayPostJson<RuntimeSettings>("/api/runtime/settings", settings);
 }
@@ -2642,7 +2651,7 @@ export const coreBridge = {
   runtimeModels: (threadId?: string) => electronRuntimeModels(threadId),
   setRuntimeModel: (model: string) => electronSetRuntimeModel(model),
   runtimeSettings: () => electronRuntimeSettings(),
-  setRuntimeSettings: (settings: RuntimeSettings) =>
+  setRuntimeSettings: (settings: Partial<RuntimeSettings>) =>
     electronSetRuntimeSettings(settings),
   timezone: () => electronTimezone(),
   setTimezone: (timezone: string | null) => electronSetTimezone(timezone),
