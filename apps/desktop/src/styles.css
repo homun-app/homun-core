@@ -2453,22 +2453,23 @@ body.resizing-drawer {
   color: var(--green);
 }
 
-.wi-steps li.doing {
-  color: var(--text);
-  font-weight: 600;
-  background: var(--surface-muted);
-}
-
-/* The step being worked on RIGHT NOW: accent arrow + soft accent fill so you can tell
-   at a glance which one it's on (whether the model marked it "doing" or we inferred it
-   as the first still-open step). */
-.wi-steps li.active {
+/* The step being worked on RIGHT NOW: accent fill + accent icon + trailing arrow
+   so you can tell at a glance which one it's on inside the 3-step window. Driven by
+   `.current` (set for a literal "doing" step OR the inferred current step) so a
+   not-yet-"doing" current step is still visually flagged. */
+.wi-steps li.current {
   color: var(--text);
   font-weight: 600;
   background: var(--brand-soft);
 }
 
-.wi-steps li.active svg {
+.wi-steps li.current svg {
+  color: var(--brand);
+}
+
+.wi-step-active-arrow {
+  margin-left: auto;
+  flex: none;
   color: var(--brand);
 }
 

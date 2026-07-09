@@ -7,18 +7,43 @@ import {
   ChevronUp,
   Download,
   FileImage,
-  FileText,
-  FolderOpen,
   ListTodo,
   Loader2,
   MoreHorizontal,
-  Share2,
   SquareTerminal,
-  Target,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ChatStreamStatus, ParsedArtifact, PlanStep, WorkbenchTab } from "./ChatView";
+import { currentStepIndex, threeStepWindow } from "../lib/islandPlan";
+import type { ChatStreamStatus, PlanStep, WorkbenchTab } from "./ChatView";
+
+// Single-row renderer shared by the before/window/after segments of the 3-step
+// plan window: status drives the icon (done = Check, doing = spinner, blocked =
+// AlertTriangle, bare todo = hollow circle) so the three segments stay visually
+// consistent even though only `window` is always-visible and before/after collapse.
+// `isCurrent` flags the row the plan is on RIGHT NOW — which may be a step the model
+// never marked "doing" (currentStepIndex falls back to the first still-open step) —
+// so it gets the accent highlight + trailing arrow even while showing its todo icon.
+function renderPlanStepRow(step: PlanStep, key: string, isCurrent: boolean) {
+  const active = isCurrent || step.status === "doing";
+  return (
+    <li key={key} className={`${step.status}${active ? " current" : ""}`}>
+      <span>
+        {step.status === "done" ? (
+          <Check size={12} />
+        ) : step.status === "doing" ? (
+          <Loader2 size={12} className="composer-spin" />
+        ) : step.status === "blocked" ? (
+          <AlertTriangle size={12} />
+        ) : (
+          <span />
+        )}
+      </span>
+      <em>{step.title}</em>
+      {active && <ArrowRight size={12} className="wi-step-active-arrow" />}
+    </li>
+  );
+}
 
 type WorkspaceIslandMode = "auto" | "expanded" | "collapsed";
 
@@ -33,12 +58,8 @@ function loadWorkspaceIslandMode(): WorkspaceIslandMode {
 export function WorkspaceIsland({
   threadId,
   activitySteps,
-  artifacts,
   computerActivity,
   computerLive,
-  fileCount,
-  goalCount,
-  memoryCount,
   planSteps,
   streaming,
   status,
@@ -49,12 +70,8 @@ export function WorkspaceIsland({
 }: {
   threadId: string;
   activitySteps: string[];
-  artifacts: ParsedArtifact[];
   computerActivity: string | null;
   computerLive: boolean;
-  fileCount: number;
-  goalCount: number;
-  memoryCount: number;
   planSteps: PlanStep[];
   streaming: boolean;
   status: ChatStreamStatus | null;
@@ -67,32 +84,27 @@ export function WorkspaceIsland({
   const [mode, setModeState] = useState<WorkspaceIslandMode>(() => loadWorkspaceIslandMode());
   const [expanded, setExpanded] = useState(() => loadWorkspaceIslandMode() === "expanded");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [completedExpanded, setCompletedExpanded] = useState(false);
+  // Collapse toggles for the two collapsed segments flanking the always-visible
+  // 3-step window (threeStepWindow): completed steps before it, waiting steps after.
+  const [beforeExpanded, setBeforeExpanded] = useState(false);
+  const [afterExpanded, setAfterExpanded] = useState(false);
   // Latch: once the island has shown work this thread, keep it AROUND (collapsed) after
   // the run instead of unmounting the moment the live state empties — so the user can
   // review what the agent did ("it disappears and doesn't stay"). Reset per thread.
   const [hadWorkspaceState, setHadWorkspaceState] = useState(false);
   const doneCount = planSteps.filter((step) => step.status === "done").length;
-  const completedSteps = planSteps.filter((step) => step.status === "done");
-  const openSteps = planSteps.filter((step) => step.status !== "done");
   const runningPlan = planSteps.find((step) => step.status === "doing");
   const blockedPlan = planSteps.find((step) => step.status === "blocked");
-  // The step being worked on RIGHT NOW. Models (esp. weak ones) often forget to mark a
-  // step "doing" — they just flip steps to "done" as they go — so fall back to the first
-  // still-open step. Guarantees the island always highlights "which one is it on".
-  const activeStep = runningPlan ?? openSteps.find((step) => step.status === "todo") ?? null;
+  // Auto-focus window: always show the 3 steps around "now", collapse the rest.
+  // currentIdx is the absolute index of the step being worked on (falls back to the
+  // first still-open step when the model never marked one "doing"), used to highlight
+  // the current row inside the window even when its status is still "todo".
+  const planWin = threeStepWindow(planSteps);
+  const currentIdx = currentStepIndex(planSteps);
   const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
-  const artifactsCount = artifacts.length;
   const hasWorkspaceState =
     (threadHasMessages || streaming || computerLive) &&
-    (streaming ||
-      computerLive ||
-      planSteps.length > 0 ||
-      activitySteps.length > 0 ||
-      artifactsCount > 0 ||
-      fileCount > 0 ||
-      goalCount > 0 ||
-      memoryCount > 0);
+    (streaming || computerLive || planSteps.length > 0 || activitySteps.length > 0);
   useEffect(() => setHadWorkspaceState(false), [threadId]);
   useEffect(() => {
     if (hasWorkspaceState) setHadWorkspaceState(true);
@@ -110,15 +122,7 @@ export function WorkspaceIsland({
     computerActivity ??
     status?.title ??
     (computerLive ? "Computer" : null) ??
-    (artifactsCount > 0
-      ? `${artifactsCount} artifact`
-      : fileCount > 0
-        ? `${fileCount} file`
-        : goalCount > 0
-          ? `${goalCount} goal`
-          : memoryCount > 0
-            ? "Memory"
-            : t("chat.panel"));
+    t("chat.panel");
   const progressLabel =
     planSteps.length > 0
       ? `${doneCount}/${planSteps.length}`
@@ -126,13 +130,7 @@ export function WorkspaceIsland({
         ? status?.phase ?? "live"
         : computerLive
           ? "live"
-        : artifactsCount > 0
-          ? `${artifactsCount}`
-          : goalCount > 0
-            ? `${goalCount}`
-            : memoryCount > 0
-              ? `${memoryCount}`
-              : "";
+          : "";
 
   const setMode = (next: WorkspaceIslandMode) => {
     setModeState(next);
@@ -162,12 +160,8 @@ export function WorkspaceIsland({
     return () => window.clearTimeout(timer);
   }, [
     activitySteps.length,
-    artifactsCount,
     blockedPlan,
     doneCount,
-    fileCount,
-    goalCount,
-    memoryCount,
     mode,
     planSteps.length,
     streaming,
@@ -265,49 +259,53 @@ export function WorkspaceIsland({
                 <span>Progress</span>
                 <strong>{doneCount}/{planSteps.length}</strong>
               </div>
-              {completedSteps.length > 0 && (
+              {planWin.before.length > 0 && (
                 <button
                   className="wi-completed-toggle"
                   type="button"
-                  aria-expanded={completedExpanded}
-                  onClick={() => setCompletedExpanded((value) => !value)}
+                  aria-expanded={beforeExpanded}
+                  onClick={() => setBeforeExpanded((value) => !value)}
                 >
-                  {completedExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  <span>{completedExpanded ? "Hide" : "Show"} {completedSteps.length} completed</span>
+                  {beforeExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>{planWin.before.length} completati</span>
                 </button>
               )}
-              {openSteps.length > 0 && (
-                <ol className="wi-steps">
-                  {openSteps.slice(0, 5).map((step, index) => {
-                    const isActive = step === activeStep;
-                    return (
-                      <li
-                        key={`open-${index}-${step.title}`}
-                        className={`${step.status}${isActive ? " active" : ""}`}
-                      >
-                        <span>
-                          {step.status === "blocked" ? (
-                            <AlertTriangle size={12} />
-                          ) : isActive ? (
-                            <ArrowRight size={12} />
-                          ) : (
-                            <span />
-                          )}
-                        </span>
-                        <em>{step.title}</em>
-                      </li>
-                    );
-                  })}
+              {beforeExpanded && planWin.before.length > 0 && (
+                <ol className="wi-steps wi-steps-completed">
+                  {planWin.before.map((step: PlanStep, index: number) =>
+                    renderPlanStepRow(step, `before-${index}-${step.title}`, false)
+                  )}
                 </ol>
               )}
-              {completedExpanded && completedSteps.length > 0 && (
-                <ol className="wi-steps wi-steps-completed">
-                  {completedSteps.slice(0, 8).map((step, index) => (
-                    <li key={`done-${index}-${step.title}`} className="done">
-                      <span><Check size={12} /></span>
-                      <em>{step.title}</em>
-                    </li>
-                  ))}
+              {/* The 3-step window: always visible regardless of collapse state, so the
+                  current step (and its immediate neighbors) never disappears from view.
+                  A window step's absolute index is before.length + j, so it's the current
+                  one when that equals currentIdx. */}
+              <ol className="wi-steps">
+                {planWin.window.map((step: PlanStep, index: number) =>
+                  renderPlanStepRow(
+                    step,
+                    `win-${index}-${step.title}`,
+                    planWin.before.length + index === currentIdx
+                  )
+                )}
+              </ol>
+              {planWin.after.length > 0 && (
+                <button
+                  className="wi-completed-toggle"
+                  type="button"
+                  aria-expanded={afterExpanded}
+                  onClick={() => setAfterExpanded((value) => !value)}
+                >
+                  {afterExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  <span>{planWin.after.length} in attesa</span>
+                </button>
+              )}
+              {afterExpanded && planWin.after.length > 0 && (
+                <ol className="wi-steps">
+                  {planWin.after.map((step: PlanStep, index: number) =>
+                    renderPlanStepRow(step, `after-${index}-${step.title}`, false)
+                  )}
                 </ol>
               )}
             </div>
@@ -326,54 +324,6 @@ export function WorkspaceIsland({
               </button>
               {latestActivity && <p className="wi-latest">{latestActivity}</p>}
             </>
-          )}
-
-          {artifactsCount > 0 && (
-            <button
-              className="wi-row wi-row-button"
-              type="button"
-              onClick={() => onOpenWorkbench("artifacts")}
-            >
-              <FileText size={14} />
-              <span>Artifacts</span>
-              <strong>{artifactsCount}</strong>
-            </button>
-          )}
-
-          {fileCount > 0 && (
-            <button
-              className="wi-row wi-row-button"
-              type="button"
-              onClick={() => onOpenWorkbench("files")}
-            >
-              <FolderOpen size={14} />
-              <span>Files</span>
-              <strong>{fileCount}</strong>
-            </button>
-          )}
-
-          {goalCount > 0 && (
-            <button
-              className="wi-row wi-row-button"
-              type="button"
-              onClick={() => onOpenWorkbench("goals")}
-            >
-              <Target size={14} />
-              <span>Goals</span>
-              <strong>{goalCount}</strong>
-            </button>
-          )}
-
-          {memoryCount > 0 && (
-            <button
-              className="wi-row wi-row-button"
-              type="button"
-              onClick={() => onOpenWorkbench("memoria")}
-            >
-              <Share2 size={14} />
-              <span>Memory</span>
-              <strong>{memoryCount}</strong>
-            </button>
           )}
 
           <div className="wi-actions">

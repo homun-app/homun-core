@@ -1975,12 +1975,8 @@ export function ChatView({
           <WorkspaceIsland
             threadId={thread.threadId}
             activitySteps={conversationActivity}
-            artifacts={workbenchArtifacts}
             computerActivity={computerLiveStatus.activity}
             computerLive={computerLiveStatus.active}
-            fileCount={uploadedFiles.length}
-            goalCount={projectGoalCount}
-            memoryCount={projectMemoryCount}
             planSteps={workspacePlanSteps}
             streaming={promptSubmitting || Boolean(streamingAssistantId)}
             status={streamStatus}

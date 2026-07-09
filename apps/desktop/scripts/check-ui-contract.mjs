@@ -401,14 +401,35 @@ assertContains("src/components/WorkspaceIsland.tsx", "if (!hasWorkspaceState && 
 assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
 assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
 assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "workspace island must be the single launcher for workbench tabs");
-assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"artifacts\")}", "workspace island artifact count must open the Review workbench");
 assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"plan\")}", "workspace island plan progress must open the Plan workbench");
 assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"activity\")}", "workspace island activity row must open the Activity workbench");
-assertContains("src/components/ChatView.tsx", "goalCount={projectGoalCount}", "workspace island must receive project goal state from the canonical goals read model");
-assertContains("src/components/ChatView.tsx", "memoryCount={projectMemoryCount}", "workspace island must receive project memory state from the canonical memory graph read model");
-assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"goals\")}", "workspace island goals row must open the Goals workbench");
-assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"memoria\")}", "workspace island memory row must open the Memory workbench");
-assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"files\")}", "workspace island files row must open the Files workbench");
+// Task 4b: the island is now a lean cockpit — Plan (3-step window) + Activity only.
+// Artifacts/Files/Goals/Memory rows moved out (destined for a header menu, Task 5).
+assertContains(
+  "src/components/WorkspaceIsland.tsx",
+  "threeStepWindow",
+  "island plan must use the 3-step auto-focus window"
+);
+assertNotContains(
+  "src/components/WorkspaceIsland.tsx",
+  "onOpenWorkbench(\"artifacts\")",
+  "artifacts row must be removed from the island (moved to the header menu)"
+);
+assertNotContains(
+  "src/components/WorkspaceIsland.tsx",
+  "onOpenWorkbench(\"files\")",
+  "files row must be removed from the island"
+);
+assertNotContains(
+  "src/components/WorkspaceIsland.tsx",
+  "onOpenWorkbench(\"goals\")",
+  "goals row must be removed from the island"
+);
+assertNotContains(
+  "src/components/WorkspaceIsland.tsx",
+  "onOpenWorkbench(\"memoria\")",
+  "memory row must be removed from the island"
+);
 assertContains("src/components/ChatView.tsx", "detailsOpen || workbenchOpen ? \" panel-open\" : \"\"", "right-side panels must reserve layout space instead of covering the chat");
 assertContains("src/styles.css", "top: calc(var(--window-chrome-height, 44px) + 8px);", "workbench island must sit below native chrome with breathing room");
 assertContains("src/styles.css", "right: 12px;", "workbench island must keep a visible margin from the window edge");
