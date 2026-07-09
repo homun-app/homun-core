@@ -5,7 +5,6 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use local_first_secrets::{SecretMaterial, SecretRef};
 use rand::RngCore;
 use rusqlite::{Connection, params};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::str::FromStr;
@@ -496,22 +495,28 @@ fn decrypt_master_key(
         .map_err(|_| "vault master key decryption failed".to_string())
 }
 
+/// Domain tag folded into the Argon2 salt so the pin-wrap key is cryptographically
+/// distinct from the PIN verifier digest even though both derive from the same
+/// (salt, PIN): different salt input → independent key, so the stored verifier
+/// digest can never be replayed as the master-key wrap key.
+const PIN_WRAP_DOMAIN: &[u8] = b"homun-vault-master-key-wrap-v1";
+
+/// Derive the 32-byte master-key wrap key with Argon2id (memory-hard, resists
+/// GPU brute force of the short PIN). Uses the SAME cost params the verifier was
+/// created with, read from `verifier`, so it stays consistent within a run.
 fn pin_wrap_key(verifier: &LocalPinVerifier, pin: &str) -> Result<[u8; 32], String> {
-    let salt = hex_decode(&verifier.salt_hex)?;
-    let mut digest = Sha256::new();
-    digest.update(b"homun-vault-master-key-wrap-v1");
-    digest.update(&salt);
-    digest.update(pin.as_bytes());
-    let mut key: [u8; 32] = digest.finalize().into();
-    for _ in 1..verifier.iterations {
-        let mut next = Sha256::new();
-        next.update(b"homun-vault-master-key-wrap-v1");
-        next.update(key);
-        next.update(&salt);
-        next.update(pin.as_bytes());
-        key = next.finalize().into();
-    }
-    Ok(key)
+    let raw_salt = hex_decode(&verifier.salt_hex)?;
+    // Domain-separate by prepending the tag to the salt input.
+    let mut salt = Vec::with_capacity(PIN_WRAP_DOMAIN.len() + raw_salt.len());
+    salt.extend_from_slice(PIN_WRAP_DOMAIN);
+    salt.extend_from_slice(&raw_salt);
+    crate::pin::derive_pin_digest(
+        pin.as_bytes(),
+        &salt,
+        verifier.mem_kib,
+        verifier.time_cost,
+        verifier.parallelism,
+    )
 }
 
 fn encrypt_with_master_key(
