@@ -4,7 +4,9 @@ Date: 2026-06-27
 
 ## Status
 
-Proposed. Estende il caposaldo della [0016](0016-harness-owned-task-engine-cross-model.md)
+**Accepted — IMPLEMENTATO** (2026-07-09, audit di riconciliazione). Il normalizzatore vive in
+`crates/engine/src/model_normalize.rs` (+ `markers.rs`, moduli puri) ed è cablato nel loop unico
+(`engine::agent_loop::run_turn`). Estende il caposaldo della [0016](0016-harness-owned-task-engine-cross-model.md)
 ("l'harness possiede control-flow, stato e **formato**") portandolo dove oggi NON è
 applicato: il **confine di ingresso** della risposta del modello. È il fix
 **sistemico** della classe di bug che oggi inseguiamo a uno a uno (lingua,

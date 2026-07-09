@@ -4,7 +4,11 @@ Date: 2026-07-02
 
 ## Status
 
-**Proposed.** Definisce la **separazione motore/gateway**: estrarre il loop agentico (`stream_chat_via_openai`)
+**Accepted — COMPLETO** (2026-07-08, `50ed7ec6`; confermato dall'audit di riconciliazione 2026-07-09).
+Il loop agentico vive **solo** in `crates/engine::agent_loop::run_turn`, chiamato **incondizionatamente** da
+`run_agent_rounds`; la copia inline e il flag `HOMUN_ENGINE_CRATE` sono **cancellati** ("un loop, nessun flag").
+
+Definisce la **separazione motore/gateway**: estrarre il loop agentico (`stream_chat_via_openai`)
 e l'esecuzione dei tool dal monolite `crates/desktop-gateway/src/main.rs` in un **crate motore**
 dedicato, con un **unico chokepoint** per l'esecuzione dei tool. Il gateway HTTP resta il *postino*
 (routing, auth, streaming), non il proprietario della logica d'agente.

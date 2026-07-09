@@ -1,6 +1,8 @@
 # ADR 0025 — Il browser come sotto-agente delegato (goal → risposta), il manager resta il driver
 
-- **Stato:** Proposed (non iniziato)
+- **Stato:** **Accepted — COMPLETO** (2026-07-09, `a183a736`) — un solo path browser (`browse(goal)`
+  ricorsivo su `engine::agent_loop::run_turn`), nessun flag; il model-switch mid-turn e il flag
+  `HOMUN_CHAT_BROWSE_SUBAGENT` sono rimossi. *(Testo sotto = decisione originale, immutata.)*
 - **Data:** 2026-07-07
 - **Relazioni:** estende ADR 0021 (loop unico guardato, planning-as-a-tool); **richiede ADR 0024**
   (engine-extraction dal monolite: il loop dev'essere un motore richiamabile per poterlo invocare

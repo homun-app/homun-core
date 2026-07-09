@@ -4,7 +4,14 @@ Date: 2026-05-29
 
 ## Status
 
-Accepted. Target end-state for milestone M1/A1; reached incrementally.
+Accepted, poi **EMENDATA dalla [0021](0021-single-guarded-loop-planning-as-tool.md)** (2026-07-09,
+audit di riconciliazione). La direzione "instradare il turno di **chat** attraverso il Brain" è
+**ritirata**: il motore di chat è il loop unico guardato (0021); il wiring drive-as-chat + i flag
+`HOMUN_ORCHESTRATED_CHAT`/`HOMUN_DRIVE_CHAT` sono stati **rimossi** (commit B1). L'`OrchestratorBrain`
+**sopravvive come PLANNER** dei deliverable (`make_deck`/`make_document` via `plan_only`) e per
+`brain_materialize` — **non** come motore d'esecuzione della chat.
+
+Target end-state originale per milestone M1/A1; reached incrementally.
 
 ## Context
 
