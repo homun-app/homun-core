@@ -111,6 +111,10 @@ pub struct ToolEffects {
     pub request_confirm: bool,
     /// The tool asks the loop to compact context before continuing (F3).
     pub request_compaction: bool,
+    /// Sensitive domains a `use_skill` load declares (ADR 0023 Step 5): kebab-case tokens the
+    /// loop dedups into `LoopState::active_sensitive`, arming the turn's force-confirm. `String`
+    /// (not the gateway's `SensitiveCategory`) so the leaf engine stays gateway-type-free.
+    pub arm_sensitive: Vec<String>,
     /// Real progress happened → reset the stall guards (F1): anchor the round, zero the repeat
     /// counter, clear the last-round signature.
     pub reset_stall_guards: bool,

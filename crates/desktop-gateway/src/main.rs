@@ -16200,13 +16200,22 @@ fn homuncoder_skill_ids() -> std::collections::HashSet<String> {
 
 /// Loads an installed skill's SKILL.md body (instructions) by id.
 fn load_skill_body(id: &str) -> Option<String> {
+    load_skill_body_and_sensitive(id).map(|(body, _)| body)
+}
+
+/// Loads a skill's adapted body PLUS its declared sensitive categories in one pass
+/// (ADR 0023 Step 5 / Fase 0.3). `use_skill` uses the body to show instructions and
+/// the categories to arm the turn's force-confirm (`ctx.active_sensitive`).
+fn load_skill_body_and_sensitive(
+    id: &str,
+) -> Option<(String, Vec<skills::SensitiveCategory>)> {
     let dir = skills_dir().ok()?;
     let disabled = load_skills_disabled();
     let origins = load_skills_origins();
     skills::load_detail(&dir, id, &disabled, &origins)
         .ok()
         .flatten()
-        .map(|detail| adapt_skill_body(&detail.body, id))
+        .map(|detail| (adapt_skill_body(&detail.body, id), detail.summary.sensitive))
 }
 
 /// Extracts a skill id from a sandbox command that references the container skill
@@ -18971,6 +18980,12 @@ struct ChatToolCtx<'a> {
     // Readable per-turn observability sink (ported). Used by the `update_plan`/`step_advance` arm to
     // record the Plan event; no-op when disabled. See `engine::turn_trace`.
     turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
+    /// ADR 0023 Step 5 (Fase 0.3): sensitive domains armed by a `use_skill` earlier this turn,
+    /// re-hydrated per call from the engine's `LoopState::active_sensitive` tokens. Non-empty →
+    /// effectful actions force a confirm regardless of approval policy (`skill_policy_forces_confirm`).
+    /// Owned (not `&mut`) because arming now flows through `ToolEffects::arm_sensitive`, and the ctx is
+    /// built shared per call; this side only READS it at the effectful approval gates.
+    active_sensitive: Vec<crate::skills::SensitiveCategory>,
 }
 
 
@@ -19082,6 +19097,19 @@ fn effective_approval(
     } else {
         resolved
     }
+}
+
+/// ADR 0023 Step 5 (Fase 0.3): a skill that declares a sensitive domain
+/// (`sensitive:` frontmatter) forces a confirmation on its EFFECTFUL actions —
+/// even under a permissive approval policy (`never`/`on-request`) — without
+/// trusting the model. Pure and policy-independent so it OR-composes with the
+/// existing `assess_tool_safety` verdict at each effectful gate: reads are never
+/// gated, and nothing fires unless a sensitive skill is active this turn.
+fn skill_policy_forces_confirm(
+    active_sensitive: &[crate::skills::SensitiveCategory],
+    is_effectful: bool,
+) -> bool {
+    is_effectful && !active_sensitive.is_empty()
 }
 
 /// Machine-keyable prefix a file-write tool returns (INSTEAD of writing any bytes) when
@@ -20112,14 +20140,22 @@ require your confirmation in the app. Propose it and stop."
         )
         .await;
         let id_for_load = id.clone();
-        match tokio::task::spawn_blocking(move || load_skill_body(&id_for_load))
+        match tokio::task::spawn_blocking(move || load_skill_body_and_sensitive(&id_for_load))
             .await
         {
-            Ok(Some(body)) => format!(
-                "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
+            Ok(Some((body, sensitive))) => {
+                // ADR 0023 Step 5: arm the turn's force-confirm for a skill that declares a
+                // sensitive domain. The loop dedups these tokens into `LoopState::active_sensitive`
+                // so they persist across the turn's later rounds.
+                for cat in sensitive {
+                    effects.arm_sensitive.push(cat.as_token().to_string());
+                }
+                format!(
+                    "Instructions for the skill «{id}» (SKILL.md) — FOLLOW THEM with the \
 available tools (for data from the web use the browser: browser_navigate on the indicated URL):\n\n{}",
-                body.chars().take(8000).collect::<String>()
-            ),
+                    body.chars().take(8000).collect::<String>()
+                )
+            }
             _ => format!("Skill «{id}» not found or not readable."),
         }
     } else if name == "run_in_sandbox" {
@@ -22257,6 +22293,10 @@ require your confirmation in the app. Propose it and stop."
             ),
             SafetyDecision::AskUser
         );
+        // ADR 0023 Step 5: an active sensitive skill forces a confirm on effectful
+        // actions even when the policy alone wouldn't (e.g. under `never`).
+        let needs_confirm = needs_confirm
+            || skill_policy_forces_confirm(ctx.active_sensitive.as_slice(), is_write);
         if needs_confirm {
             emit_approval_card(
                 ctx,
@@ -22363,6 +22403,10 @@ Connectors → MCP; do NOT claim it's done.",
             ),
             SafetyDecision::AskUser
         );
+        // ADR 0023 Step 5: an active sensitive skill forces a confirm on effectful
+        // actions even when the policy alone wouldn't (e.g. under `never`).
+        let needs_confirm = needs_confirm
+            || skill_policy_forces_confirm(ctx.active_sensitive.as_slice(), is_write);
         if needs_confirm {
             // Do NOT execute. Emit a confirmation card carrying the exact
             // action; the user runs it (once/always) via the card. The model
@@ -22521,6 +22565,14 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 effects: Default::default(),
             });
         }
+        // ADR 0023 Step 5: re-hydrate the turn's armed sensitive domains (carried as tokens in the
+        // engine-safe LoopState) into the gateway enum for the approval gates. Read before the `&mut`
+        // field borrows below (disjoint fields, but this keeps it a clean owned snapshot).
+        let active_sensitive: Vec<crate::skills::SensitiveCategory> = ls
+            .active_sensitive
+            .iter()
+            .filter_map(|t| crate::skills::SensitiveCategory::parse(t))
+            .collect();
         let ctx = ChatToolCtx {
             plan: &mut ls.plan,
             step_evidence: &mut ls.step_evidence,
@@ -22544,6 +22596,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             turn_scaffold: self.turn_scaffold,
             floor_acting: self.floor_acting,
             turn_trace: self.turn_trace,
+            active_sensitive,
         };
         let (result, effects) = execute_chat_tool(&ctx, name, &args_raw, call_id).await;
         Ok(local_first_engine::ToolOutcome { result, effects })
@@ -48695,6 +48748,20 @@ mod tests {
             super::effective_approval(false, AskForApproval::Never),
             AskForApproval::Never
         );
+    }
+
+    #[test]
+    fn sensitive_skill_forces_confirm_only_on_effectful() {
+        use super::skill_policy_forces_confirm;
+        use crate::skills::SensitiveCategory;
+        // ADR 0023 Step 5 (Fase 0.3): an active sensitive-declared skill forces a
+        // confirmation on EFFECTFUL actions, even under a permissive approval
+        // policy — but never gates reads, and never fires when nothing is active.
+        let active = [SensitiveCategory::Financial];
+        assert!(skill_policy_forces_confirm(&active, true)); // effectful + active → confirm
+        assert!(!skill_policy_forces_confirm(&active, false)); // read + active → no
+        assert!(!skill_policy_forces_confirm(&[], true)); // effectful + none active → no
+        assert!(!skill_policy_forces_confirm(&[], false)); // read + none active → no
     }
 
     #[test]

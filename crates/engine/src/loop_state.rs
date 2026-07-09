@@ -65,6 +65,13 @@ pub struct LoopState {
     /// The tool schemas exposed to the model this turn: seeded gateway-side with the base
     /// toolset (trimmed by policy), then extended as capabilities load (see `loaded_tools`).
     pub tool_schemas: Vec<Value>,
+    /// Sensitive domains armed by a `use_skill` this turn (ADR 0023 Step 5): kebab-case
+    /// tokens (`financial`/`medical`/…) carried across rounds so a skill loaded in an early
+    /// round keeps forcing confirms on effectful actions in later rounds. `String` (not the
+    /// gateway's `SensitiveCategory` enum) because the leaf engine can't reference that type;
+    /// the gateway re-hydrates the enum per call. Non-empty → the harness force-confirms
+    /// effectful actions regardless of approval policy (`skill_policy_forces_confirm`).
+    pub active_sensitive: Vec<String>,
     /// The canonical runtime plan, carried as an opaque `Value` (the serialized `ExecutionPlan`)
     /// because that type lives in a downstream crate the leaf `engine` can't reference. The gateway
     /// seeds it (resume) and round-trips it faithfully via serde at the plan-helper boundaries; the
@@ -132,6 +139,13 @@ impl LoopState {
         if effects.request_confirm {
             *pending_confirm = true;
         }
+        for cat in effects.arm_sensitive {
+            // ADR 0023 Step 5: dedup so repeated `use_skill` of the same (or overlapping)
+            // sensitive skills doesn't grow the armed set across rounds.
+            if !self.active_sensitive.contains(&cat) {
+                self.active_sensitive.push(cat);
+            }
+        }
         if effects.request_compaction {
             self.pending_compaction = true;
         }
@@ -167,6 +181,7 @@ mod tests {
         assert!(!ls.pending_compaction);
         assert!(ls.loaded_tools.is_empty());
         assert!(ls.tool_schemas.is_empty());
+        assert!(ls.active_sensitive.is_empty());
         assert!(ls.plan.is_null(), "plan starts as Null until the gateway seeds it");
         assert!(ls.provider.model.is_empty() && ls.provider.base_url.is_empty());
         assert!(!ls.browser_used);
