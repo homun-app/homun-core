@@ -3,7 +3,41 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-08.**
+> **Ultimo aggiornamento: 2026-07-09.**
+
+## ⭐ CHECKPOINT 2026-07-09 — Audit di riconciliazione e convergenza (FASE 1–3 eseguite)
+
+Tree pulito, gate verdi (gateway **478 pass** / 1 rosso `soffice` ambientale / 5 ignored; **34-warn baseline**;
+`cargo check` clean). Riparti da qui. Ledger completo: [`docs/audit/2026-07-09-system-state-ledger.md`](audit/2026-07-09-system-state-ledger.md).
+
+**Cosa ha fatto l'audit "cosa è VIVO":** mappato ogni flag `HOMUN_*`, ogni arco mezzo-atterrato, il codice
+morto e il drift doc↔codice; poi eseguito (decisioni di Fabio: *tutto A + B1 + C1 LAND, resto KEEP*):
+- **A1/A2** (`06d8db2d`) — rimossi i commenti-scaffold stantii di `HOMUN_ENGINE_CRATE`, i `#[allow(dead_code)]`
+  sugli executor ormai vivi, e i commenti-ghost `HOMUN_CHAT_BROWSER_GRANULAR`/`HOMUN_BROWSER_PARALLEL`.
+- **B1 KILL** (`51eb69f8`) — **ritirato il motore drive-as-chat** (ADR 0020, superseded): cancellati i flag
+  `HOMUN_ORCHESTRATED_CHAT`/`HOMUN_DRIVE_CHAT` + ~759 righe (`orchestrator_*_for_chat`, `ChatDriveStepExecutor`,
+  ecc.). **TENUTI** `ExecutionPlan` + `OrchestratorBrain::plan_only` (planner deliverable `make_deck`) +
+  `brain_materialize`; `crates/orchestrator` resta solo per quelli.
+- **C1 LAND** (`98580eb2`) — **sandbox + approval unica ATTIVI DI DEFAULT** (ADR 0023): `tool_safety_enabled()`
+  ora ON salvo `HOMUN_TOOL_SAFETY=0` (escape-hatch transitorio, fail-secure). ⚠️ **cambia il comportamento di
+  default** (l'exec dei tool è ora sandboxato) → **validazione LIVE in-app ancora dovuta** prima di togliere il flag.
+- **A3/A4** (`6b8774bf`/`7b6fa46c`) — status ADR allineati al codice (0024/0025→Complete, 0019/0023→Implemented,
+  0008→emendata-da-0021) e `docs/architecture/*` riconciliati (crates/engine ESISTE, `browse(goal)`, broker incondizionato).
+
+**Stato canonico oggi (verificato):** UN loop (`engine::agent_loop::run_turn`, no flag) · UN path browser
+(`browse(goal)` ricorsivo, no flag) · sandbox default-on · broker incondizionato · memoria service/pool ancora
+dietro flag **default-OFF** (KEEP, WIP dichiarato) · adaptive-floor **default-OFF** (KEEP) · `crates/orchestrator`
+dormiente-per-chat (solo planner deliverable). Flag `HOMUN_ENGINE_CRATE`/`HOMUN_CHAT_BROWSE_SUBAGENT`/
+`HOMUN_TURN_BROKER` = **0 riferimenti**.
+
+> ⚠️ **I checkpoint più in basso sono STORICI.** La narrativa incrementale dell'estrazione motore (5.D1c…5.D2,
+> `HOMUN_ENGINE_CRATE` come flag transitorio "default OFF", drive-as-chat, ecc.) è **superata**: quel lavoro è
+> atterrato e i flag sono stati cancellati — vale QUESTO checkpoint. (Archiviazione della storia in `archive/`, differita.)
+
+**NEXT:** FASE 4 = `docs/system-overview.md` (as-built onesto per la presentazione). Poi **validazione LIVE in-app di C1**
+(sandbox default-on) prima di rimuovere il flag `HOMUN_TOOL_SAFETY`.
+
+---
 
 ## ⭐ CHECKPOINT 2026-07-08 — ADR 0024 (estrazione motore #1) COMPLETA: `engine::run_turn` è il loop unico, no flag
 
