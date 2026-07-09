@@ -8434,6 +8434,59 @@ fn is_plan_continuation_message(prompt: &str) -> bool {
     )
 }
 
+/// True when the prompt explicitly asks to PLAN (multi-step) and/or RESEARCH on the web
+/// (browse / verify sources) — i.e. a task whose control flow belongs to the agent loop,
+/// not a one-shot deliverable. Deliberately CONSERVATIVE: it fires only on explicit
+/// agentic verbs, so a plain "scrivimi un memo su X" still routes to the pruned
+/// make_document workflow (the weak-model file-discipline that route exists for).
+/// Bilingual (IT/EN): the user-facing prompt language varies (reply-language contract).
+fn prompt_requests_planning_or_research(prompt: &str) -> bool {
+    // TOKEN signals must match WHOLE tokens, not substrings: a bare `contains("pianifica")`
+    // false-fires on "pianificazione" (financial/strategic planning — a common one-shot
+    // document TOPIC) and `contains("naviga")` on "navigazione", which would wrongly
+    // downgrade a legit make_document/make_deck request to the agent loop and defeat the
+    // very tool-pruning this route exists for. cap_tokenize lowercases + splits on
+    // non-alphanumeric, so "pianificazione"/"navigazione" tokenize to themselves, not the
+    // agentic verb. (Multi-word PHRASE signals below stay substring — they can't collide.)
+    const TOKEN_SIGNALS: &[&str] = &["pianifica", "pianificare", "naviga", "navigare"];
+    let tokens: std::collections::BTreeSet<String> = cap_tokenize(prompt).into_iter().collect();
+    if TOKEN_SIGNALS.iter().any(|s| tokens.contains(*s)) {
+        return true;
+    }
+    let t = prompt.to_lowercase();
+    const PHRASE_SIGNALS: &[&str] = &[
+        // planning / explicit multi-step execution
+        "passo-passo",
+        "passo passo",
+        "step-by-step",
+        "step by step",
+        "scomponi il lavoro",
+        "esegui gli step",
+        "esegui i passi",
+        "step verificabil",
+        // research / browse / source verification
+        "cerca sul web",
+        "cerca online",
+        "fonti ufficiali",
+        "verifica sul web",
+        "verifica le fonti",
+        "navigate the web",
+        "browse the web",
+    ];
+    PHRASE_SIGNALS.iter().any(|s| t.contains(s))
+}
+
+/// The two CHEAP, prompt-only doors into plan-precedence (ADR 0018): a bare
+/// continuation/approval resuming a plan, OR an explicit first-turn plan/research
+/// request. The third door — a thread that already has an active runtime plan — is a
+/// memory lookup checked separately at the call site to keep it short-circuited.
+/// Closing the whole CLASS here (not just the continuation door) is what stops the
+/// "make_document lock" from re-appearing via a new prompt phrasing (regression test:
+/// `plan_research_first_turn_is_not_collapsed_into_make_document`).
+fn prompt_forces_plan_precedence(prompt: &str) -> bool {
+    is_plan_continuation_message(prompt) || prompt_requests_planning_or_research(prompt)
+}
+
 fn runtime_plan_step_outcome_matches(
     memory: &MemoryRecord,
     thread_key: &str,
@@ -23231,9 +23284,14 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
     // plan — or a bare continuation/approval ("1", "procedi") — owns the control flow.
     // Honouring a workflow route here would prune the plan's tools (update_plan,
     // browser_navigate) and dead-end it (the APPROVAL-RESUME / "1 → make_deck" bug).
-    // The continuation check is cheap and short-circuits the memory lookup.
+    // Three doors, closed uniformly: (a) a bare continuation/approval, (b) a thread with
+    // an active runtime plan, (c) a FIRST-turn prompt that is itself a plan/research
+    // request (prompt_forces_plan_precedence) — the door the continuation-only guard
+    // left open (a plan/research prompt that also matches a workflow's keywords, e.g.
+    // "documento", could never get off the ground: chicken-and-egg). The prompt-only
+    // checks are cheap and short-circuit the memory lookup.
     if matches!(capability_route, CapabilityRouteDecision::Workflow { .. })
-        && (is_plan_continuation_message(&request.prompt)
+        && (prompt_forces_plan_precedence(&request.prompt)
             || thread_has_active_runtime_plan(state, request.thread_id.as_deref()))
     {
         eprintln!(
@@ -54509,6 +54567,68 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 .is_none(),
             "generic agent-loop turns keep normal tools"
         );
+    }
+
+    #[test]
+    fn plan_research_first_turn_is_not_collapsed_into_make_document() {
+        // Regression: the exact first-turn prompt that dead-ended (~16 min) because the
+        // BM25 router picked the make_document workflow (matches "documento") and pruned
+        // update_plan/browser, so the plan/research could never start (chicken-and-egg).
+        let prompt = "Pianifica ed esegui passo-passo una mini-ricerca comparativa su tre \
+framework per agenti LLM — LangGraph, CrewAI e AutoGen. Scomponi il lavoro in almeno 7 \
+step verificabili. Naviga le fonti ufficiali dove serve e alla fine produci un breve \
+documento di sintesi con pro/contro e una raccomandazione finale.";
+        // The router STILL classifies it as a workflow — that's fine; precedence overrides it.
+        assert!(
+            matches!(super::route_capability(prompt), super::CapabilityRouteDecision::Workflow { .. }),
+            "router classifies the multi-intent prompt as a workflow (make_document)"
+        );
+        // Plan/research intent must take precedence so the workflow route is downgraded to the
+        // agent loop (where make_document is still available: plan -> browse -> document).
+        assert!(
+            super::prompt_forces_plan_precedence(prompt),
+            "a first-turn plan+research request must take plan precedence, not be pruned to make_document"
+        );
+    }
+
+    #[test]
+    fn plan_precedence_covers_the_whole_class_not_just_continuations() {
+        // (a) bare continuation / approval — the door the ORIGINAL fix already covered
+        assert!(super::prompt_forces_plan_precedence("1"));
+        assert!(super::prompt_forces_plan_precedence("procedi"));
+        // (c) first-turn planning intent
+        assert!(super::prompt_forces_plan_precedence("pianifica ed esegui il lavoro passo-passo"));
+        // (c) first-turn research / browse intent
+        assert!(super::prompt_forces_plan_precedence("naviga le fonti ufficiali e verifica sul web"));
+        // NEGATIVE — a plain one-shot document request must NOT trigger plan precedence
+        // (do not over-broaden: preserve the weak-model file-discipline the workflow route exists for).
+        let memo = "scrivimi un breve memo di una pagina sul progetto Homun";
+        assert!(
+            !super::prompt_forces_plan_precedence(memo),
+            "a plain document request must not trigger plan precedence"
+        );
+        // ...and it still routes to the make_document workflow, unchanged.
+        assert!(
+            matches!(super::route_capability(memo), super::CapabilityRouteDecision::Workflow { .. }),
+            "a plain document request still routes to the make_document workflow"
+        );
+    }
+
+    #[test]
+    fn plan_precedence_does_not_false_positive_on_document_topics() {
+        // "pianificazione"/"navigazione" are document/deck TOPICS, not plan/research intent —
+        // they must NOT trigger plan precedence, else the make_document route loses its pruning.
+        for p in [
+            "scrivimi un documento sulla pianificazione fiscale per la mia azienda",
+            "crea una presentazione sulla navigazione costiera in Liguria",
+            "prepara un documento con la pianificazione delle ferie del team",
+        ] {
+            assert!(!super::prompt_forces_plan_precedence(p), "false positive on: {p}");
+            assert!(
+                matches!(super::route_capability(p), super::CapabilityRouteDecision::Workflow { .. }),
+                "document/deck topic must still route to a pruned workflow: {p}"
+            );
+        }
     }
 
     #[test]
