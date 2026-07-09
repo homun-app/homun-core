@@ -56,7 +56,12 @@ modello-browser gira ISOLATO in un sotto-turno `browse(goal)→BrowseResult` che
   range, mcap, volume) + **Fonte: CoinGecko** (la sorgente da `BrowseResult.sources`, presentata DAL manager). Fabio: **"il
   manager ha chiamato browse, contesto pulito"**. Il rumore browser è rimasto incapsulato nel drain-sink del sotto-loop —
   esattamente la cura-radice di ADR 0025, per costruzione. **Verify+routing (slice 3) emerso dal loop guardato esistente**
-  (found:true+sorgente→confidence high→risposta relayata), zero codice nuovo.
+  (found:true+sorgente→confidence high→risposta relayata), zero codice nuovo. **+ edge-case 2026-07-09 (Fabio, "entrambi
+  puliti"):** (A) Polymarket-neve-Napoli → il manager ha chiamato `browse` che ha tornato **`found:false`** e ha risposto
+  "non disponibile, nessun mercato" **SENZA inventare** un numero (il path di routing di slice 4, validato); (B) piano
+  ETH-prezzo→calcolo→scrivi → il manager ha scelto **curl in sandbox** per l'API strutturata (non browse), piano PULITO con
+  "Step verified" (routing intelligente: browse convive con curl/skill, il manager sceglie il tool giusto perché il contesto è
+  pulito). **I 3 turni coprono l'intero contratto BrowseResult (found:true / found:false / non-usato-perché-c'è-di-meglio).**
 - **3 verify+routing (PROSSIMO, richiede RUN LIVE con app ricostruita + sidecar browser):** il manager verifica il
   `BrowseResult` e instrada il piano done/retry/blocked; **meccanismo già in place** via la description del tool + il loop
   guardato esistente → è soprattutto VALIDAZIONE live: risposta giusta→avanza, sbagliata→retry, impossibile→blocked/"unavailable").
