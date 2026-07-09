@@ -889,6 +889,7 @@ Tell me if you want me to retry or rephrase."
     crate::TurnOutcome {
         memory_answer,
         tool_actions: ls.tool_trace.join("\n"),
+        browse_sources,
     }
 }
 

@@ -16,4 +16,9 @@ pub struct TurnOutcome {
     /// The turn's consequential tool actions, newline-joined — the "why" the learn extractor records
     /// alongside the answer.
     pub tool_actions: String,
+    /// The source URLs actually visited this turn (the browser_navigate targets), in first-seen order.
+    /// The MAIN path already folds these into the answer's "Fonti" section and ignores this field; it
+    /// exists for ADR 0025's `browse(goal)` recursion, where the sub-turn's `BrowseResult.sources` is
+    /// these URLs (the answer itself stays clean, the manager owns source presentation).
+    pub browse_sources: Vec<String>,
 }
