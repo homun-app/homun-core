@@ -37,10 +37,14 @@ const MAX_PLAN_NUDGES: u32 = 8;
 /// Harness-driven plan progress from VERIFIED evidence. Called after each work tool result: if the
 /// plan has a frontier `doing` step and enough new evidence has accrued, ask the F2 judge whether that
 /// step is genuinely complete; if so, mark it done, advance the frontier, and emit the ‹‹PLAN›› card +
-/// persist — the same canonical live+durable update the model's own `step_advance` produces. This is
-/// the ONLY way progress rises during a browsing turn, where the driver is the weak browser model that
-/// never calls `step_advance`. Verified-only, so thrashing on a hard-to-find market never fakes
-/// progress. Stride-gated so the (cheap `memory`-role) judge runs at most once per few tool results.
+/// persist — the same canonical live+durable update the model's own `step_advance` produces.
+///
+/// KEPT past ADR 0025 (which retired the browser model-switch) because it is NOT a browser band-aid: it
+/// is the general weak-model safety net. A capable manager calls `step_advance` itself, but Homun also
+/// runs on weak LOCAL models as the driver (ADR 0016/0018), which don't reliably self-advance — this is
+/// how their multi-step plans progress. Verified-only, so a stuck step never fakes progress; stride-gated
+/// so the (cheap `memory`-role) judge runs at most once per few tool results. Gated off entirely for the
+/// browse sub-loop (its `TurnConfig` disables autoadvance) — the manager owns plan control-flow now.
 ///
 /// Expressed over the seams (`PlanProgress` for verify/record/persist + the steps→Value bridge,
 /// `EventSink` for the card, `TurnConfig` for the flags) — no `AppState`/transport/`ExecutionPlan`.

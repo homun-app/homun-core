@@ -18669,14 +18669,13 @@ struct BrowserToolCtx<'a> {
     current_target: &'a mut String,
     opened_targets: &'a mut Vec<String>,
     nav_failures: &'a mut std::collections::HashMap<String, u32>,
-    base_url: &'a mut String,
-    model: &'a mut String,
-    api_key: &'a mut Option<String>,
+    // ADR 0025 4b: the provider fields (base_url/model/api_key) were removed with the mid-turn
+    // model-switch — the browser branch no longer touches the driver provider (the sub-loop is seeded
+    // on the browser model at construction).
     state: &'a AppState,
     tx: &'a StreamSink,
     thread_id: Option<&'a str>,
     prompt: &'a str,
-    request: &'a ChatGenerateStreamRequest,
     read_only: bool,
     channel_owner: bool,
 }
@@ -18722,16 +18721,6 @@ fn tool_safety_enabled() -> bool {
     std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
 }
 
-/// ADR 0025 (browse-as-recursion): expose the browser to the manager as a single delegated
-/// `browse(goal)` sub-agent (a recursive `run_turn`) instead of the granular tools + mid-turn
-/// model-switch. Slice 4a — now the DEFAULT path (live-validated 2026-07-09: found:true price turn +
-/// found:false Polymarket turn, clean context throughout). The flag is a TRANSITIONAL escape-hatch:
-/// `HOMUN_CHAT_BROWSE_SUBAGENT=0` falls back to the granular-tools + model-switch path for one soak
-/// iteration; slice 4b retires that fallback (model-switch + `try_advance_frontier_from_evidence`) and
-/// deletes the flag → one canonical path (converge, don't duplicate).
-fn browse_subagent_enabled() -> bool {
-    std::env::var("HOMUN_CHAT_BROWSE_SUBAGENT").as_deref() != Ok("0")
-}
 
 
 /// Emit an approval confirmation card and return the model-facing "AWAITING" string.
@@ -18855,41 +18844,12 @@ async fn execute_browser_tool(
                 ctx.prompt.to_string(),
                 ctx.thread_id.map(|s| s.to_string()),
             );
-            // Honor an EXPLICIT "browser" role: switch the driver
-            // model for the rest of this (browsing) turn. Skipped
-            // when the user forced a per-message model override.
-            let has_msg_override = ctx
-                .request
-                .model
-                .as_deref()
-                .map(|m| !m.trim().is_empty())
-                .unwrap_or(false);
-            if !has_msg_override {
-                if let Some((b_url, b_model, b_key)) =
-                    browser_openai_stream_config()
-                {
-                    if b_model != *ctx.model || b_url != *ctx.base_url {
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🧠 Passo al modello browser: {b_model}‹‹/ACT››"
-                                ),
-                            },
-                        )
-                        .await;
-                        *ctx.base_url = b_url;
-                        *ctx.model = b_model;
-                        *ctx.api_key = b_key;
-                        // Provider-aware endpoint: an Ollama-based
-                        // browser role needs native /api/chat — the
-                        // old hardcoded "/chat/completions" sent
-                        // NATIVE-shaped payloads (object arguments)
-                        // to the strict /v1 endpoint → 400 on every
-                        // mid-turn model switch (task #105).
-                    }
-                }
-            }
+            // ADR 0025 slice 4b — the mid-turn driver model-switch was RETIRED here. It swapped the
+            // whole turn to the weak browser model on the first browser tool (the root cause of the
+            // context pollution ADR 0025 cures). `execute_browser_tool` is now called ONLY from the
+            // isolated browse sub-loop, which is ALREADY seeded on the browser model/provider — so the
+            // switch is redundant. The manager stays on its own model for the whole turn and delegates
+            // browsing via `browse(goal)`. (The browser role is applied by the sub-loop's seam, not here.)
         }
         if browser_session.is_none() {
             let reused = match ctx.thread_id {
@@ -22102,7 +22062,6 @@ struct GatewayCapabilityExecutor<'a> {
     // executor's ctx wants them). Held here so the manager's `browse` interception can build a
     // `GatewayBrowseExecutor` without threading them through the whole ChatToolCtx.
     prompt: &'a str,
-    request: &'a ChatGenerateStreamRequest,
     channel_owner: bool,
 }
 
@@ -22131,7 +22090,6 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 http: &self.state.http,
                 thread_id: self.thread_id,
                 prompt: self.prompt,
-                request: self.request,
                 read_only: self.read_only,
                 channel_owner: self.channel_owner,
             };
@@ -22189,7 +22147,6 @@ struct GatewayBrowserExecutor<'a> {
     tx: &'a StreamSink,
     thread_id: Option<&'a str>,
     prompt: &'a str,
-    request: &'a ChatGenerateStreamRequest,
     read_only: bool,
     channel_owner: bool,
 }
@@ -22214,14 +22171,10 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             current_target: &mut self.current_target,
             opened_targets: &mut self.opened_targets,
             nav_failures: &mut self.nav_failures,
-            base_url: &mut ls.provider.base_url,
-            model: &mut ls.provider.model,
-            api_key: &mut ls.provider.api_key,
             state: self.state,
             tx: self.tx,
             thread_id: self.thread_id,
             prompt: self.prompt,
-            request: self.request,
             read_only: self.read_only,
             channel_owner: self.channel_owner,
         };
@@ -22351,7 +22304,6 @@ struct GatewayBrowseExecutor<'a> {
     http: &'a reqwest::Client,
     thread_id: Option<&'a str>,
     prompt: &'a str,
-    request: &'a ChatGenerateStreamRequest,
     read_only: bool,
     channel_owner: bool,
 }
@@ -22408,7 +22360,6 @@ impl GatewayBrowseExecutor<'_> {
             tx: &drain,
             thread_id: self.thread_id,
             prompt: self.prompt,
-            request: self.request,
             read_only: self.read_only,
             channel_owner: self.channel_owner,
         };
@@ -23377,22 +23328,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // granular micro-tools. The legacy coarse `browse_web` handoff is gone.
     // read_only (channels) still gets browser_act, but the dispatch blocks any
     // committing action — channels can fill/scroll/read, never click-submit.
-    // ADR 0025: with the browse sub-agent ON, the MANAGER sees a single `browse(goal)` tool; the 6
-    // granular browser tools are hidden (driven only inside the isolated sub-loop). OFF = today's path:
-    // the manager drives the granular tools directly (with the mid-turn model-switch). Behavior-preserving
-    // when OFF — the `vec!` head is byte-identical to the previous unconditional list.
-    let mut base_tools = if browse_subagent_enabled() {
-        vec![browse_tool_schema()]
-    } else {
-        vec![
-            browser_navigate_tool_schema(),
-            browser_snapshot_tool_schema(),
-            browser_act_tool_schema(),
-            browser_screenshot_tool_schema(),
-            browser_tabs_tool_schema(),
-            browser_dialog_tool_schema(),
-        ]
-    };
+    // ADR 0025 (slice 4b — converged): the MANAGER sees a single `browse(goal)` tool; the 6 granular
+    // browser tools are driven ONLY inside the isolated browse sub-loop (they're seeded there directly),
+    // never offered to the manager. The mid-turn model-switch + the granular-tools-on-the-manager path
+    // are retired — one canonical browser path.
+    let mut base_tools = vec![browse_tool_schema()];
     base_tools.extend([
         recall_memory_tool_schema(),
         query_code_graph_tool_schema(),
@@ -24167,7 +24107,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, request, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir).await;
         // M2: mine this exchange for durable personal memory (fire-and-forget, off the response path).
         // Best-effort; never blocks or fails the turn. Skip for channel turns (read_only): the inbound
         // is from a CONTACT, not the user, and the channel handler runs its own speaker-attributed learn
@@ -24235,7 +24175,6 @@ async fn run_agent_rounds(
     tx: &StreamSink,
     http: reqwest::Client,
     state_owned: AppState,
-    request: ChatGenerateStreamRequest,
     temperature: f64,
     prompt: String,
     thread_id: Option<String>,
@@ -24289,7 +24228,6 @@ async fn run_agent_rounds(
         // ADR 0025: turn-constants for a recursive `browse(goal)` sub-turn (used only when the manager
         // calls the `browse` tool; inert otherwise).
         prompt: &prompt,
-        request: &request,
         channel_owner,
     };
     // The browser tool chokepoint (ADR 0025 seam): OWNS the browser subsystem's private state (session +
@@ -24304,7 +24242,6 @@ async fn run_agent_rounds(
         tx: &tx,
         thread_id: thread_id.as_deref(),
         prompt: &prompt,
-        request: &request,
         read_only,
         channel_owner,
     };
