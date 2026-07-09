@@ -7634,7 +7634,16 @@ fn render_imported_template_thumbnails(
         let _ = fs::remove_dir_all(path);
     };
 
+    // Give each soffice invocation its OWN throwaway user profile. Without this, concurrent
+    // conversions (two doc/pptx renders overlapping, or the parallel test suite) contend on the
+    // single default LibreOffice profile, whose lock makes the second instance abort with a
+    // `com.sun.star.registry ... DeploymentException`. `-env:UserInstallation` wants a file:// URI;
+    // the profile lives under the already-unique `temp_root` (pid+uuid) and is cleaned up with it.
+    let profile_dir = temp_root.join("lo-profile");
+    let profile_arg = format!("-env:UserInstallation=file://{}", profile_dir.display());
+
     let soffice_output = Command::new(&soffice)
+        .arg(&profile_arg)
         .args(["--headless", "--convert-to", "pdf", "--outdir"])
         .arg(&temp_root)
         .arg(source_path)
