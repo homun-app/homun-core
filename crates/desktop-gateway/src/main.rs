@@ -12153,9 +12153,9 @@ fn build_sandbox_command(
 /// workspace-write policy: writes are physically confined to the project root +
 /// standard tool caches (see `workspace_write_roots`), everything else is read-only.
 /// The wrapper is `sandbox-exec` + Seatbelt on macOS, `homun-linux-sandbox` +
-/// Landlock on Linux (see `build_sandbox_command`). The flag is OFF by default, so
-/// the default path is byte-identical to the pre-ADR host exec (`Completed` wraps the
-/// same rendered string). Windows/other platforms never sandbox here yet.
+/// Landlock on Linux (see `build_sandbox_command`). The flag is ON by default as of
+/// 2026-07-09 (ADR 0023 landed); `HOMUN_TOOL_SAFETY=0` is the transitional escape-hatch
+/// back to the pre-ADR host exec. Windows/other platforms never sandbox here yet.
 ///
 /// ADR 0023 on-failure escalation: when a fenced run FAILS with a sandbox-denial
 /// signature, this returns `NeedsEscalation` (instead of the old inline note) so the
@@ -18764,13 +18764,18 @@ struct ChatToolCtx<'a> {
 }
 
 /// ADR 0023 (`docs/decisions/0023-sandbox-enforcement-and-unified-approval.md`)
-/// gate: when `HOMUN_TOOL_SAFETY=1`, the two write-confirm branches route their
-/// decision through `tool_safety::assess_tool_safety` instead of the ad-hoc
-/// boolean. Default OFF (unset / any other value) → the exact legacy boolean, so
-/// this is behavior-preserving until the flag is flipped. Kept as a fn (not a
-/// `LazyLock`) so tests can toggle the env var per case.
+/// gate: OS sandbox enforcement (seatbelt/landlock) + the unified `assess_tool_safety`
+/// approval path. DEFAULT ON as of 2026-07-09 (ADR 0023 landed) — `HOMUN_TOOL_SAFETY=0`
+/// is a transitional escape-hatch (one soak iteration) before the flag is removed and
+/// enforcement becomes unconditional. Only "0" disables (fail-secure: a typo'd value
+/// keeps the fence ON). Kept as a fn (not a `LazyLock`) so tests can toggle per case.
 fn tool_safety_enabled() -> bool {
-    std::env::var("HOMUN_TOOL_SAFETY").as_deref() == Ok("1")
+    tool_safety_enabled_from(std::env::var("HOMUN_TOOL_SAFETY").ok().as_deref())
+}
+
+/// Pure core (testable without touching process env): ON unless explicitly disabled with "0".
+fn tool_safety_enabled_from(value: Option<&str>) -> bool {
+    value != Some("0")
 }
 
 
@@ -54183,6 +54188,15 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert!(plan_at < middle_at, "plan stays before the middle prose");
         assert!(out.contains("[x] **A**"), "but carries the latest content");
         assert!(out.contains("end"));
+    }
+
+    #[test]
+    fn tool_safety_defaults_on_unless_disabled() {
+        // ADR 0023 landed default-ON; only "0" is the escape-hatch (fail-secure).
+        assert!(super::tool_safety_enabled_from(None)); // unset → ON
+        assert!(super::tool_safety_enabled_from(Some("1")));
+        assert!(super::tool_safety_enabled_from(Some("on")));
+        assert!(!super::tool_safety_enabled_from(Some("0"))); // escape-hatch → OFF
     }
 
     #[test]
