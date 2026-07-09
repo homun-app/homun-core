@@ -215,6 +215,12 @@ gathered‹‹/ACT››"
             ls.pending_compaction = false;
             compactor.compact(&mut ls.messages, &mut ls.step_messages_start).await;
         }
+        // Fase 1.1: token-budget auto-compaction (the memory-checkpoint path) — independent of
+        // plan steps. Fires when the conversation approaches the model's context window, flushing
+        // the older span to the memory engine and collapsing it in-context. Same safe round
+        // boundary as the step compaction; fail-open (unknown window → no-op) so a turn without a
+        // known window keeps exactly today's round-based hygiene.
+        compactor.compact_for_budget(&mut ls.messages, cfg.context_window).await;
         // On the LAST allowed round, forbid tools so the model MUST synthesize
         // a final answer from what it already gathered — otherwise it can burn
         // every round on tool calls and end with no answer ("limite di passi").
@@ -1067,6 +1073,7 @@ mod tests {
             max_rounds: 2,
             browser_max_rounds: 8,
             browser_nav_cap: 6,
+            context_window: None,
             reconcile_on_delivery: true,
             autoadvance_from_evidence: true,
             step_verification: true,

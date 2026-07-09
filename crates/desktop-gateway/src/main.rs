@@ -14661,6 +14661,140 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
     }
 }
 
+/// Fraction of a model's context window at which token-budget auto-compaction fires
+/// (Fase 1.1). Conservative: leaves headroom for the model's output (~6k) + tool schemas.
+const CONTEXT_COMPACTION_THRESHOLD: f64 = 0.75;
+/// Minimum number of messages a compaction span must cover to be worth a summarizer
+/// round-trip (mirrors the `< 6` guard in `compact_completed_step`).
+const CONTEXT_COMPACTION_MIN_SPAN: usize = 4;
+/// Number of head messages (`system` + first `user`, the task anchor) and recent tail
+/// messages token-budget compaction preserves (Fase 1.1).
+const CONTEXT_COMPACTION_KEEP_HEAD: usize = 2;
+const CONTEXT_COMPACTION_KEEP_TAIL: usize = 8;
+
+/// Estimate the token footprint of the messages we're about to send (Fase 1.1). No
+/// tokenizer exists (and `tiktoken` would be wrong for non-OpenAI local models), so we
+/// use the universal char/4 heuristic over each message's serialized JSON — a SAFETY
+/// VALVE for the budget check, not a billing meter. Pure + testable.
+fn estimate_tokens(messages: &[serde_json::Value]) -> usize {
+    messages.iter().map(|m| m.to_string().len()).sum::<usize>() / 4
+}
+
+/// Should we compact before sending? True iff the model's context window is KNOWN and the
+/// estimate exceeds `threshold` of it. Unknown window (`None`) or degenerate (`0`) → false
+/// (fail-open to the existing round-based hygiene; the catalog auto-fills the window for
+/// Ollama/cloud so unknown is rare). Pure + testable.
+fn needs_context_compaction(
+    estimated_tokens: usize,
+    context_window: Option<usize>,
+    threshold: f64,
+) -> bool {
+    match context_window {
+        Some(w) if w > 0 => estimated_tokens as f64 > threshold * w as f64,
+        _ => false,
+    }
+}
+
+/// Pick the `[from, to)` span to collapse, preserving the head (`system` + first `user`,
+/// the task anchor) and at least `keep_tail_min` recent messages. The tail boundary is
+/// moved EARLIER past any `tool` result so a kept tool-result is never orphaned from its
+/// `assistant` tool_calls (OpenAI-compat valid). Returns `None` if the resulting span is
+/// too small to be worth a summarizer round-trip. Pure + testable.
+fn context_compaction_span(
+    roles: &[&str],
+    keep_head: usize,
+    keep_tail_min: usize,
+) -> Option<(usize, usize)> {
+    let len = roles.len();
+    if len <= keep_head + keep_tail_min {
+        return None;
+    }
+    let from = keep_head;
+    let mut to = len - keep_tail_min;
+    // Keep more in the tail until it starts at a non-`tool` message (a clean group
+    // boundary), so collapsing [from, to) can't strand a tool result.
+    while to > from && roles[to] == "tool" {
+        to -= 1;
+    }
+    if to <= from || to - from < CONTEXT_COMPACTION_MIN_SPAN {
+        return None;
+    }
+    Some((from, to))
+}
+
+/// Flatten a slice of conversation messages to `role: content` text. Keeps up to 8000
+/// chars per message so a browser snapshot's actual DATA (a full standings table, a
+/// schedule, a price list) survives — 1500 truncated mid-table once, so the data the
+/// deliverable needed was lost. Shared by the summarizer and the memory write-back.
+fn render_slice_text(slice: &[serde_json::Value]) -> String {
+    let mut buf = String::new();
+    for m in slice {
+        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        if let Some(content) = m.get("content").and_then(|c| c.as_str()) {
+            buf.push_str(role);
+            buf.push_str(": ");
+            buf.push_str(&content.chars().take(8000).collect::<String>());
+            buf.push('\n');
+        }
+    }
+    buf
+}
+
+/// Summarize a slice of conversation messages into ONE salience-preserving note via the
+/// "memory" role model. Shared by `compact_completed_step` (plan-step, F3) and
+/// `compact_for_context_budget` (token-budget, Fase 1.1). Preserves the task's raw data
+/// AND its salient state; compresses only narration. BEST-EFFORT: returns `None` on any
+/// failure so the caller leaves `messages` untouched (less compaction, never data loss).
+async fn summarize_message_slice(
+    http: &reqwest::Client,
+    slice: &[serde_json::Value],
+) -> Option<String> {
+    let buf = render_slice_text(slice);
+    if buf.trim().is_empty() {
+        return None;
+    }
+    let (base_url, model, api_key) = role_openai_config("memory")?;
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    // Compaction must NOT destroy the task's raw material OR its state. A 150-word gist
+    // drops the concrete rows (standings, schedules, flight options) a LATER step reports
+    // and the decisions/open-questions the turn still depends on — so preserve DATA
+    // verbatim + task STATE, summarize only the narration.
+    let system = "You compress an agent's earlier work to free context WITHOUT losing anything the \
+task still needs. PRESERVE VERBATIM: every concrete data point a later step will report (full tables — \
+standings, schedules, results; lists of options — flights/trains/hotels with times/prices/stops; names, \
+numbers, dates, URLs, artifact filenames) AND the task's salient STATE (the current goal/plan, decisions \
+already made, open questions still to resolve, artifacts produced). Copy data as a compact markdown list or \
+table — do NOT abbreviate, sample, or say \"etc.\". Summarize only the NARRATION (what the agent did/tried). \
+No preamble, no headings.";
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 1600,
+        "messages": [
+            { "role": "system", "content": system },
+            { "role": "user", "content": buf.chars().take(24000).collect::<String>() },
+        ],
+    });
+    let mut builder = http
+        .post(&endpoint)
+        .timeout(std::time::Duration::from_secs(45));
+    if let Some(key) = api_key.as_ref() {
+        builder = builder.bearer_auth(key);
+    }
+    let resp = builder.json(&payload).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.json::<serde_json::Value>().await.ok()?;
+    let summary = body
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if summary.is_empty() { None } else { Some(summary) }
+}
+
 /// F3 context compaction: collapse the messages a just-completed plan step produced into
 /// a single summary note, so a long multi-step turn stays within the context window.
 /// Replaces `messages[*start..]` with one assistant summary message and advances `*start`.
@@ -14680,69 +14814,9 @@ async fn compact_completed_step(
     if slice.len() < 6 {
         return;
     }
-    let mut buf = String::new();
-    for m in slice {
-        let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("");
-        if let Some(content) = m.get("content").and_then(|c| c.as_str()) {
-            buf.push_str(role);
-            buf.push_str(": ");
-            // Keep enough of each message that a browser snapshot's actual DATA (a full
-            // standings table, a schedule, a price list) reaches the summarizer — 1500
-            // chars truncated mid-table, so the data the deliverable needs was lost and
-            // the final answer evaporated ("verifica interrotta"). 8000 keeps the data.
-            buf.push_str(&content.chars().take(8000).collect::<String>());
-            buf.push('\n');
-        }
-    }
-    if buf.trim().is_empty() {
-        return;
-    }
-    let Some((base_url, model, api_key)) = role_openai_config("memory") else {
+    let Some(summary) = summarize_message_slice(http, slice).await else {
         return;
     };
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    // Compaction must NOT destroy the task's raw material. A 150-word gist drops the
-    // concrete rows (group standings, match schedule, flight options) the LATER synthesis
-    // step has to report — so preserve DATA verbatim, summarize only the narration.
-    let system = "You compress an agent's completed steps to free context WITHOUT losing the \
-task's raw material. PRESERVE VERBATIM every concrete data point a later step will report: full \
-tables (standings, schedules, results), lists of options (flights/trains/hotels with their \
-times/prices/stops), names, numbers, dates, URLs, artifact filenames. Copy them as a compact \
-markdown list or table — do NOT abbreviate, sample, or say \"etc.\". You may summarize only the \
-NARRATION (what the agent did/tried). No preamble, no headings.";
-    let payload = serde_json::json!({
-        "model": model,
-        "temperature": 0,
-        "max_tokens": 1600,
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": buf.chars().take(24000).collect::<String>() },
-        ],
-    });
-    let mut builder = http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(45));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let Ok(resp) = builder.json(&payload).send().await else {
-        return;
-    };
-    if !resp.status().is_success() {
-        return;
-    }
-    let Ok(body) = resp.json::<serde_json::Value>().await else {
-        return;
-    };
-    let summary = body
-        .pointer("/choices/0/message/content")
-        .and_then(|c| c.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if summary.is_empty() {
-        return;
-    }
     // Replace the slice with one compact assistant note (valid OpenAI-compat: an
     // assistant message with content and no tool_calls). The user-facing answer
     // (`accumulated`, with its ‹‹PLAN››/‹‹ARTIFACT›› markers) is untouched — this only
@@ -14753,6 +14827,66 @@ NARRATION (what the agent did/tried). No preamble, no headings.";
         "content": format!("[Earlier plan steps — context compacted]\n{summary}"),
     }));
     *start = messages.len();
+}
+
+/// Token-budget auto-compaction (Fase 1.1) — the MEMORY-CHECKPOINT path. When the messages
+/// approach the model's context window, WRITE the older span to the one memory engine
+/// (durable + recallable — nothing lost even if the summary drops something; ADR 0022),
+/// then replace it in-context with one salience-preserving note. Harness-driven — no model
+/// tool (ADR 0021). BEST-EFFORT: any failure leaves `messages` intact. Safe only at a round
+/// boundary (complete tool-call/result groups), like `compact_completed_step`.
+async fn compact_for_context_budget(
+    state: &AppState,
+    messages: &mut Vec<serde_json::Value>,
+    context_window: Option<usize>,
+    thread_id: Option<&str>,
+) {
+    if !needs_context_compaction(
+        estimate_tokens(messages),
+        context_window,
+        CONTEXT_COMPACTION_THRESHOLD,
+    ) {
+        return;
+    }
+    let roles: Vec<&str> = messages
+        .iter()
+        .map(|m| m.get("role").and_then(|r| r.as_str()).unwrap_or(""))
+        .collect();
+    let Some((from, to)) = context_compaction_span(
+        &roles,
+        CONTEXT_COMPACTION_KEEP_HEAD,
+        CONTEXT_COMPACTION_KEEP_TAIL,
+    ) else {
+        return;
+    };
+    let slice: Vec<serde_json::Value> = messages[from..to].to_vec();
+    // Memory checkpoint (the core): flush the span to the ONE memory engine BEFORE
+    // collapsing it — durable, recallable, off-path, fire-and-forget. The safety net that
+    // makes even an aggressive summary lossless.
+    let span_text = render_slice_text(&slice);
+    if !span_text.trim().is_empty() {
+        tokio::spawn(learn_via_service_or_inline(
+            state,
+            &span_text,
+            "",
+            "context-compaction",
+            thread_id,
+            None,
+            None,
+        ));
+    }
+    // Salience-preserving summary replaces the span in-context. Best-effort: on failure
+    // leave messages intact (the write-back above already captured the content durably).
+    let Some(summary) = summarize_message_slice(&state.http, &slice).await else {
+        return;
+    };
+    let note = serde_json::json!({
+        "role": "assistant",
+        "content": format!(
+            "[Earlier conversation — context compacted to fit the window; full detail saved to memory]\n{summary}"
+        ),
+    });
+    messages.splice(from..to, std::iter::once(note));
 }
 
 /// Whether the active orchestrator provider runs locally (loopback base_url).
@@ -22849,6 +22983,9 @@ impl GatewayBrowseExecutor<'_> {
             max_rounds: chat_browser_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
+            // Browse sub-turn does NO token-budget compaction (NoContextCompactor); the browser
+            // history hygiene it needs is `prune_browser_history`. Unknown window → fail-open anyway.
+            context_window: None,
             reconcile_on_delivery: false,
             autoadvance_from_evidence: false,
             step_verification: false,
@@ -24390,6 +24527,9 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             max_rounds: chat_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
+            // Fase 1.1: the model's real context window (catalog `context_window`, resolved above)
+            // drives token-budget auto-compaction. `None` → fail-open (no budget compaction).
+            context_window: model_context_window,
             reconcile_on_delivery: plan_reconcile_on_delivery_enabled(),
             autoadvance_from_evidence: plan_autoadvance_from_evidence_enabled(),
             step_verification: step_verification_enabled(),
@@ -24572,7 +24712,10 @@ async fn run_agent_rounds(
         channel_owner,
     };
     let plan_progress = GatewayPlanProgress { state: state_owned.clone() };
-    let compactor = GatewayContextCompactor { http: state_owned.http.clone() };
+    let compactor = GatewayContextCompactor {
+        state: state_owned.clone(),
+        thread_id: thread_id.clone(),
+    };
     let turn_policy = GatewayTurnPolicy { route: capability_route_for_runtime };
     let completion_judge = GatewayTurnCompletionJudge { state: state_owned.clone() };
 
@@ -30854,16 +30997,33 @@ impl local_first_engine::PlanProgress for GatewayPlanProgress {
     }
 }
 
-/// The gateway's `ContextCompactor` (ADR 0024 inc 5, 5.D1c.6): wraps `compact_completed_step` (the F3
-/// step-summary LLM call). Holds only the shared HTTP client (a cheap Arc clone) — the summarizer needs
-/// nothing else from `AppState`. Constructed live in run_agent_rounds.
+/// The gateway's `ContextCompactor` (ADR 0024 inc 5, 5.D1c.6): wraps the two harness-driven
+/// compaction paths — `compact_completed_step` (F3 per-step summary) and `compact_for_context_budget`
+/// (Fase 1.1 token-budget checkpoint). Holds the `AppState` (a cheap Arc clone) because the budget path
+/// writes the dropped span to the memory engine, and the turn's `thread_id` so that write is scoped.
+/// Constructed live in run_agent_rounds.
 pub(crate) struct GatewayContextCompactor {
-    pub http: reqwest::Client,
+    pub state: AppState,
+    pub thread_id: Option<String>,
 }
 
 impl local_first_engine::ContextCompactor for GatewayContextCompactor {
     async fn compact(&self, messages: &mut Vec<serde_json::Value>, start: &mut usize) {
-        compact_completed_step(&self.http, messages, start).await;
+        compact_completed_step(&self.state.http, messages, start).await;
+    }
+
+    async fn compact_for_budget(
+        &self,
+        messages: &mut Vec<serde_json::Value>,
+        context_window: Option<usize>,
+    ) {
+        compact_for_context_budget(
+            &self.state,
+            messages,
+            context_window,
+            self.thread_id.as_deref(),
+        )
+        .await;
     }
 }
 
@@ -48762,6 +48922,44 @@ mod tests {
         assert!(!skill_policy_forces_confirm(&active, false)); // read + active → no
         assert!(!skill_policy_forces_confirm(&[], true)); // effectful + none active → no
         assert!(!skill_policy_forces_confirm(&[], false)); // read + none active → no
+    }
+
+    #[test]
+    fn estimate_tokens_counts_serialized_chars_over_four() {
+        use super::estimate_tokens;
+        let messages = vec![
+            serde_json::json!({"role": "system", "content": "You are helpful."}),
+            serde_json::json!({"role": "user", "content": "Summarize this."}),
+        ];
+        let expected: usize = messages.iter().map(|m| m.to_string().len()).sum::<usize>() / 4;
+        assert_eq!(estimate_tokens(&messages), expected);
+        assert!(estimate_tokens(&messages) > 0);
+    }
+
+    #[test]
+    fn needs_context_compaction_respects_threshold_and_unknown_window() {
+        use super::needs_context_compaction;
+        assert!(needs_context_compaction(800, Some(1000), 0.75)); // > 750
+        assert!(!needs_context_compaction(700, Some(1000), 0.75)); // < 750
+        assert!(!needs_context_compaction(999_999, None, 0.75)); // unknown window → never
+        assert!(!needs_context_compaction(800, Some(0), 0.75)); // degenerate window → never
+    }
+
+    #[test]
+    fn context_compaction_span_preserves_head_tail_and_avoids_orphan_tool() {
+        use super::context_compaction_span;
+        // Too short (len <= keep_head + keep_tail_min) → None.
+        assert_eq!(
+            context_compaction_span(&["system", "user", "assistant", "user"], 2, 2),
+            None
+        );
+        // Normal: collapse the middle, keep head(2) + tail(>=2).
+        let roles = ["system", "user", "a", "tool", "a", "tool", "a", "user"];
+        assert_eq!(context_compaction_span(&roles, 2, 2), Some((2, 6)));
+        // Tail boundary lands on a `tool` result → move earlier so a kept tool
+        // result is never orphaned from its assistant tool_calls.
+        let roles2 = ["system", "user", "a", "tool", "a", "tool", "a", "tool", "a", "user"];
+        assert_eq!(context_compaction_span(&roles2, 2, 3), Some((2, 6)));
     }
 
     #[test]

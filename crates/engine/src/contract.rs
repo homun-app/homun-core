@@ -252,6 +252,23 @@ pub trait ContextCompactor {
         messages: &mut Vec<Value>,
         start: &mut usize,
     ) -> impl Future<Output = ()> + Send;
+
+    /// Token-budget auto-compaction (Fase 1.1) — the MEMORY-CHECKPOINT path, distinct from the
+    /// per-step `compact` above. Called once per round BEFORE the model send: when `messages`
+    /// approach the model's `context_window`, the impl WRITES the older span to the one memory
+    /// engine (durable + recallable — nothing lost even if the summary drops something; ADR 0022)
+    /// and replaces it in-context with one salience-preserving note. Unlike `compact` it is not
+    /// tied to a plan step and takes no `start` cursor — it re-derives the span from the whole
+    /// `messages` each round. FAIL-OPEN: unknown window (`None`) → no-op; summarizer failure →
+    /// `messages` untouched. Default no-op so the browse sub-turn / test stubs opt out for free;
+    /// only the gateway's real compactor overrides it.
+    fn compact_for_budget(
+        &self,
+        _messages: &mut Vec<Value>,
+        _context_window: Option<usize>,
+    ) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 }
 
 /// Small SYNC gateway-policy probes the loop consults before an action (ADR 0024 inc 5, 5.D1c.7).

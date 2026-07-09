@@ -20,6 +20,10 @@ pub struct TurnConfig {
     pub browser_max_rounds: usize,
     /// Wander-cap: max `browser_navigate` calls for the CURRENT step before forcing synthesis.
     pub browser_nav_cap: usize,
+    /// The active model's context window in tokens, if known (catalog `context_window`, Fase 1.1).
+    /// Feeds token-budget auto-compaction (`ContextCompactor::compact_for_budget`): `None` → the
+    /// window is unknown → fail-open (no budget compaction, only the existing round-based hygiene).
+    pub context_window: Option<usize>,
     /// Whether the delivery reconcile pass runs (`plan_reconcile_on_delivery_enabled`).
     pub reconcile_on_delivery: bool,
     /// Whether the mid-turn evidence-driven frontier auto-advance runs (`plan_autoadvance_from_evidence_enabled`).
