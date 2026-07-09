@@ -12,14 +12,41 @@ use local_first_subagents::GenerateStreamEvent;
 use crate::{
     auth_fallback_config, build_chat_payload, chat_endpoint, collect_ollama_native_stream,
     collect_openai_stream, emit_stream_event, is_ollama_base, model_first_token_timeout_secs,
-    model_idle_timeout_secs, model_request_timeout_secs, should_try_tool_compatibility_fallback,
-    tool_compatibility_fallback_config, StreamSink,
+    model_headers_timeout_secs, model_idle_timeout_secs, model_request_timeout_secs,
+    should_try_tool_compatibility_fallback, tool_compatibility_fallback_config, StreamSink,
 };
 
 /// Borrows the turn's reqwest client and stream sink; built once before the ReAct loop.
 pub(crate) struct GatewayModelClient<'a> {
     pub http: &'a reqwest::Client,
     pub tx: &'a StreamSink,
+}
+
+/// Outcome of the bounded pre-stream send. `HeadersTimeout` is distinguished from a
+/// `Transport` error so the caller can treat "upstream withheld headers past the budget"
+/// exactly like a reqwest timeout (retry → provider fallback → clean message).
+pub(crate) enum SendOutcome {
+    Ready(reqwest::Response),
+    Transport(reqwest::Error),
+    HeadersTimeout,
+}
+
+/// Bound the pre-stream phase (connect + request send + **response headers**) with an
+/// explicit deadline. A cold-loading / wedged model (e.g. Ollama loading a model into
+/// memory) ACCEPTS the TCP connection but withholds the HTTP response until it is ready,
+/// so `.send().await` blocks there. reqwest's per-request `.timeout()` is a multi-minute
+/// backstop and the stream idle/first-token governors only start AFTER headers arrive —
+/// leaving this phase effectively unbounded and, in production (2026-07-09), hanging the
+/// turn for 20+ minutes. This wrapper caps it; `Elapsed` → `HeadersTimeout`.
+pub(crate) async fn send_with_headers_timeout(
+    request: reqwest::RequestBuilder,
+    headers_timeout: std::time::Duration,
+) -> SendOutcome {
+    match tokio::time::timeout(headers_timeout, request.send()).await {
+        Ok(Ok(response)) => SendOutcome::Ready(response),
+        Ok(Err(error)) => SendOutcome::Transport(error),
+        Err(_elapsed) => SendOutcome::HeadersTimeout,
+    }
 }
 
 impl ModelClient for GatewayModelClient<'_> {
@@ -54,11 +81,16 @@ impl ModelClient for GatewayModelClient<'_> {
             temperature,
             is_final_round,
         );
-        // Model proxies (e.g. ollama.com) occasionally return 502/timeout. Retry
-        // transient failures a couple of times with backoff + a configurable
-        // timeout (default 600s — slow reasoning models need far more than the old
-        // 180s), and surface a CLEAN message (not raw upstream JSON) if it persists.
+        // Two-layer timeout (2026-07-09 resilience fix): `request_timeout` is the total
+        // per-request backstop (covers the whole streamed body; fires mid-stream per
+        // reqwest#2839, so it stays high). `headers_timeout` separately bounds the
+        // PRE-STREAM phase (connect + response headers), which a cold-loading model
+        // withholds — that phase is invisible to the stream idle/first-token governors
+        // and used to hang the turn for 20+ minutes. Model proxies (e.g. ollama.com)
+        // also occasionally return 502/timeout; retry transient failures a couple of
+        // times with backoff and surface a CLEAN message if it persists.
         let request_timeout = std::time::Duration::from_secs(model_request_timeout_secs());
+        let headers_timeout = std::time::Duration::from_secs(model_headers_timeout_secs());
         let resp = {
             let mut attempt: u32 = 0;
             loop {
@@ -66,9 +98,9 @@ impl ModelClient for GatewayModelClient<'_> {
                 if let Some(key) = api_key.as_ref() {
                     builder = builder.bearer_auth(key);
                 }
-                match builder.json(&payload).send().await {
-                    Ok(value) if value.status().is_success() => break value,
-                    Ok(value) => {
+                match send_with_headers_timeout(builder.json(&payload), headers_timeout).await {
+                    SendOutcome::Ready(value) if value.status().is_success() => break value,
+                    SendOutcome::Ready(value) => {
                         let code = value.status();
                         // DIAGNOSTIC (task #105): log the upstream error body —
                         // swallowing it turned a payload bug (400 on the mid-turn
@@ -263,8 +295,17 @@ check/update the key in Settings → Model & Runtime."
                         .await;
                         return Err(ModelCallError::Upstream(message));
                     }
-                    Err(error) => {
-                        let transient = error.is_timeout() || error.is_connect();
+                    // A transport error and a pre-stream headers-timeout are both
+                    // transient-capable (retry → provider fallback → clean message). A
+                    // HeadersTimeout — a cold-loading upstream withholding headers — is
+                    // treated exactly like a reqwest timeout so the same self-heal applies.
+                    failure @ (SendOutcome::Transport(_) | SendOutcome::HeadersTimeout) => {
+                        let transient = match &failure {
+                            SendOutcome::Transport(error) => {
+                                error.is_timeout() || error.is_connect()
+                            }
+                            _ => true,
+                        };
                         if transient && attempt < 2 {
                             attempt += 1;
                             let _ = emit_stream_event(self.tx, GenerateStreamEvent::Delta {
@@ -376,5 +417,47 @@ check/update the key in Settings → Model & Runtime."
             },
             finish_reason,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Resilience regression (2026-07-09): a cold-loading / wedged model endpoint
+    // ACCEPTS the TCP connection but withholds the HTTP response headers until the
+    // model is in memory. reqwest's per-request `.timeout()` is a 3600s backstop and
+    // the stream idle/first-token timeouts only start AFTER headers arrive, so this
+    // pre-headers phase used to hang the turn for up to ~3h. `send_with_headers_timeout`
+    // must give up promptly instead.
+    #[tokio::test]
+    async fn send_with_headers_timeout_gives_up_when_upstream_withholds_headers() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Accept the connection and hold it open forever without ever replying —
+        // exactly the cold-load shape (headers never sent).
+        tokio::spawn(async move {
+            let _held = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+
+        let client = reqwest::Client::new();
+        let request = client
+            .post(format!("http://{addr}/v1/chat/completions"))
+            .json(&serde_json::json!({ "model": "x", "messages": [] }));
+
+        let started = std::time::Instant::now();
+        let outcome =
+            send_with_headers_timeout(request, std::time::Duration::from_millis(150)).await;
+
+        assert!(
+            matches!(outcome, SendOutcome::HeadersTimeout),
+            "a header-withholding upstream must surface HeadersTimeout, got a different outcome"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "must give up in ~the headers budget, not hang (elapsed {:?})",
+            started.elapsed()
+        );
     }
 }
