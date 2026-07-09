@@ -40,10 +40,20 @@ modello-browser gira ISOLATO in un sotto-turno `browse(goal)→BrowseResult` che
     sotto-turno) → `engine::run_turn` ricorsivo (termina per-TIPO) → mappa via 1.2a. `#[allow(dead_code)]` finché slice 2
     lo cabla. 34-warn baseline tenuto; gateway 474/1-env. **Non unit-testabile (seam concreti = AppState+sidecar) → validato
     LIVE in slice 4;** la logica testabile è già in 1.2a.
-- **⭐ 2 (PROSSIMO) = tool manager `browse`:** esporre `browse(goal, hints?)` nel toolset del manager + dispatch che instrada
-  a `GatewayBrowseExecutor` (costruito accanto al loop manager in `run_agent_rounds`), nascondendo i 6 tool granulari al
-  manager dietro il flag. Test: il manager riceve un `BrowseResult` pulito. Poi 3 (verify+routing done/retry/blocked) → 4
-  (flip ON + ritiro model-switch browser & `try_advance_frontier_from_evidence`).
+- **2 FATTO (2026-07-09, `3b646e28`) — tool manager `browse` + dispatch:** con `HOMUN_CHAT_BROWSE_SUBAGENT=1` il toolset del
+  manager offre UN solo `browse(goal, hints?)` (`browse_tool_schema`) invece dei 6 granulari (nascosti — guidati solo nel
+  sub-loop). Il dispatch dell'engine vede `browse` come tool non-browser → arriva a `GatewayCapabilityExecutor::execute_tool`,
+  che intercetta `name=="browse"` PRIMA del path ChatToolCtx, costruisce `GatewayBrowseExecutor` e gira il sotto-turno
+  ricorsivo, restituendo un `BrowseResult` compatto etichettato (`engine::browse::browse_result_for_manager`) che il manager
+  verifica. `build_browse_goal` folda gli hint url/container nel goal. Flag OFF = toolset+path byte-identici (behavior-preserving).
+  Rimossi gli `#[allow(dead_code)]` ora vivi. +3 test (engine 73, gateway 475/1-env). **La guida retry-max-2/blocked è già nella
+  DESCRIPTION del tool `browse`** ("se found:false, raffina e ribrowsa al più 2 volte, poi dì unavailable — non inventare").
+- **⭐ 3+4 (PROSSIMO, richiedono RUN LIVE con app ricostruita + sidecar browser):** 3 = verify+routing (il manager verifica il
+  `BrowseResult` e instrada il piano done/retry/blocked; **meccanismo già in place** via la description del tool + il loop
+  guardato esistente → è soprattutto VALIDAZIONE live: risposta giusta→avanza, sbagliata→retry, impossibile→blocked/"unavailable").
+  4 = **flip `HOMUN_CHAT_BROWSE_SUBAGENT=1` ON + regressione** su query tipo Polymarket/prezzo-live (piano che sale live,
+  contesto pulito, niente flood ‹‹REASONING››, "unavailable" gestito) **+ ritiro** del model-switch browser e di
+  `try_advance_frontier_from_evidence`. Da fare con Fabio (in-app) o io via API se il sidecar contained-computer è su.
 - Task paralleli: working-island (`task_58afe482`, in corso in altra sessione).
 
 **⭐ 5.D1c.10 FATTO (additivo, `HOMUN_ENGINE_CRATE` default OFF = ZERO rischio prod):** il loop agentico è ESTRATTO in
