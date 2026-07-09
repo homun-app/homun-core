@@ -2190,7 +2190,6 @@ body.resizing-drawer {
   letter-spacing: 0.08em;
 }
 
-.project-context-panel .pcp-objective,
 .project-context-panel .pcp-brief {
   margin: 0;
   color: var(--text);
@@ -2365,7 +2364,7 @@ body.resizing-drawer {
 }
 
 /* Objective block (Task 4c) — top of the Objective → Plan → Activity hierarchy.
-   A light surface block, matching .pcp-section-title/.pcp-objective conventions. */
+   A light surface block, matching .pcp-section-title conventions. */
 .wi-goal {
   margin: 0 4px 10px;
   padding: 8px 10px;

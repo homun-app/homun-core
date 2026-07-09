@@ -96,13 +96,10 @@ export function ProjectContextPanel({ threadId }: { threadId: string }) {
 
       {!collapsed && (
         <div className="pcp-body">
-          {objectiveLine && (
-            <section className="pcp-section">
-              <h4 className="pcp-section-title">{t("projectContext.objective")}</h4>
-              <p className="pcp-objective">{objectiveLine}</p>
-            </section>
-          )}
-
+          {/* The plain objective text is owned by the working island (.wi-goal),
+              fused into the same card directly below this panel — rendering it
+              here too would duplicate it. This panel only falls back to a goals
+              list when no objective is set. */}
           {!objectiveLine && hasGoals && (
             <section className="pcp-section">
               <h4 className="pcp-section-title">{t("projectContext.objective")}</h4>
