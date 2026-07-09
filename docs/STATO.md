@@ -19,9 +19,22 @@ duplicate). `grep HOMUN_ENGINE_CRATE = 0`. **Chiude il Punto 5 di ADR 0024 e SBL
 che Fabio ha visto oggi). Validazione: parità strutturale trace-dump OFF/ON ✅ + smoke-test ✅ + LIVE in-app plan+code ✅
 + marker-flood fix `d066581e` ✅ (turno browser LIVE: flood sparito, committed pulito).
 
-**PROSSIMO ARCO = ADR 0025 (browse-as-recursion)** — la cura vera del garbage browser (reasoning/tool-call leak,
-narrazione-invece-di-risposta): il manager forte resta driver, il modello-browser gira isolato in un sotto-turno
-`run_turn(goal)→answer`. + task aperti: working-island (`task_58afe482`, in corso in altra sessione).
+**⭐ ARCO CORRENTE = ADR 0025 (browse-as-recursion) — LANCIATO 2026-07-08.** La cura-radice del garbage browser
+(reasoning/tool-call leak, narrazione-invece-di-risposta): il manager forte resta driver per tutto il turno, il
+modello-browser gira ISOLATO in un sotto-turno `browse(goal)→BrowseResult` che invoca ricorsivamente lo STESSO
+`engine::run_turn`. Piano completo + decisioni SOTA sulle 4 domande aperte in
+`docs/superpowers/specs/2026-07-08-browse-as-recursion-adr0025-plan.md`.
+- **1.1 FATTO (`b2dfa8fd`) — scaffolding:** `engine::browse::BrowseResult{found,answer,sources,confidence,note}` +
+  `Confidence` enum (serde "high"/"low") + flag `HOMUN_CHAT_BROWSE_SUBAGENT` (default OFF, dead-code-gated). +2 test.
+- **⭐ 1.2 (PROSSIMO, il cuore) = `GatewayBrowseExecutor` = `run_turn` ricorsivo:** semina `LoopState` ISOLATA
+  (system-prompt browser + goal) → sub-seam SOLO-browser (ModelClient=modello-browser via `browser_openai_stream_config`,
+  CapabilityExecutor che espone SOLO i 6 tool granulari, BrowserExecutor fresco, EventSink isolato) → `engine::run_turn`
+  ricorsivo (termina per-tipo: sub-CapabilityExecutor diverso) → mappa `TurnOutcome`+sub-`LoopState`→`BrowseResult`. Test:
+  goal→answer, isolamento contesto (LoopState manager intatta), `found=false` su goal impossibile. **Nodo di design:
+  costruire un CapabilityExecutor SOLO-browser** (l'attuale instrada tutti i non-browser via execute_chat_tool → il
+  sub-executor deve rifiutare/no-op i non-browser + il toolset seminato = solo 6 browser tool). Poi 2 (tool manager) → 3
+  (verify+routing) → 4 (flip ON + ritiro model-switch & try_advance_frontier).
+- Task paralleli: working-island (`task_58afe482`, in corso in altra sessione).
 
 **⭐ 5.D1c.10 FATTO (additivo, `HOMUN_ENGINE_CRATE` default OFF = ZERO rischio prod):** il loop agentico è ESTRATTO in
 `engine::agent_loop::run_turn` (copia generica sui 8 seam, 733 righe, trasformata solo `local_first_engine::→crate::` +
