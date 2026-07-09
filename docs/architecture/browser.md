@@ -1,6 +1,6 @@
 # Sottosistema Browser
 
-> Verificato vs codice 2026-07-06.
+> Verificato vs codice 2026-07-09 (post ADR 0025 completo; audit di riconciliazione). Metà sidecar invariata.
 >
 > Stato: **reverse-engineered dal codice, punto fermo.** Documenta il comportamento reale
 > OGGI, non il design desiderato. I riferimenti sono per **simbolo** (funzione/costante/file):
@@ -8,10 +8,12 @@
 > il simbolo, non fidarti del numero. Quando il codice e questa nota divergono, vince il codice
 > (e questa nota va corretta).
 >
-> **Chi pilota il browser.** Il loop browser è guidato dal **singolo loop guardato** in
-> `crates/desktop-gateway/src/main.rs` (ADR 0021), NON da `crates/orchestrator` (quel path di
-> drive è ritirato/dormiente). Il loop è un port fedele di **OpenClaw** (aria-snapshot + ref
-> indicizzati, done-tool).
+> **Chi pilota il browser.** Dopo ADR 0025 (browse-as-recursion, **completo**) il manager
+> (main chat loop) NON pilota più il browser: espone un solo tool `browse(goal)` e delega a un
+> **sub-turno browser ricorsivo e isolato**. Quel sub-turno gira sul **singolo loop guardato**
+> `engine::agent_loop::run_turn` (`crates/engine/src/agent_loop.rs`, ADR 0021/0024), NON in
+> `main.rs` e NON in `crates/orchestrator` (quel path di drive è ritirato/dormiente). Il loop è
+> un port fedele di **OpenClaw** (aria-snapshot + ref indicizzati, done-tool).
 
 ---
 
@@ -29,10 +31,13 @@ Due metà:
   JSON-line su stdio e pilota Chromium via Playwright. Espone metodi atomici
   (`browser.open`, `browser.navigate`, `browser.snapshot`, `browser.act`, …). È il solo
   che tocca il browser.
-- **Gateway Rust** (`crates/desktop-gateway/src/main.rs`): espone al modello i tool
-  granulari `browser_navigate` / `browser_snapshot` / `browser_act` / `browser_tabs` /
-  `browser_screenshot` / `browser_dialog`, gestisce il loop a round, l'igiene di
-  contesto, il **gate di sicurezza** e il **lock globale** sul singolo browser.
+- **Gateway Rust** (`crates/desktop-gateway/src/main.rs`): espone al **manager** un solo tool
+  `browse(goal)` (`browse_tool_schema`); i tool granulari `browser_navigate` /
+  `browser_snapshot` / `browser_act` / `browser_tabs` / `browser_screenshot` /
+  `browser_dialog` vivono SOLO dentro il **sub-turno browser ricorsivo e isolato**
+  (`GatewayBrowseExecutor`) e non sono più visibili al manager. Gestisce il loop a round (via
+  `engine::agent_loop::run_turn`), l'igiene di contesto, il **gate di sicurezza** e il **lock
+  globale** sul singolo browser.
 - **Renderer live panel** (`apps/desktop/src/components/ChatComputerPanel.tsx` +
   `apps/desktop/src/styles.css`): mostra la sessione noVNC del thread mentre il browser
   lavora. Il compact card usa icona di espansione (`Maximize2`) e la modalità full è
@@ -43,25 +48,35 @@ Due metà:
 
 ## Come funziona OGGI
 
-Flusso di un turno con browsing (lato gateway, `main.rs`):
+Flusso di un turno con browsing (lato gateway). Dopo ADR 0025 il browsing è a **DUE livelli**:
+il manager chiama `browse(goal)` (un solo tool); il gateway intercetta la call in
+`GatewayCapabilityExecutor::execute_tool` e la instrada a `GatewayBrowseExecutor`, che avvia un
+**sub-turno browser ricorsivo** — un secondo `engine::agent_loop::run_turn` con toolset
+browser-only (i 6 tool granulari, seminati in `ls.tool_schemas`) + il **modello browser**,
+isolato da un **drain-sink** (`drain_stream_sink`) così che snapshot/click/ragionamento del
+browser non inquinino il contesto del manager. Solo un `BrowseResult` compatto torna al manager
+(`browse_result_for_manager`). Dentro il sub-turno:
 
-1. Quando il modello chiama un tool browser, il gateway, se non c'è ancora una sessione,
-   avvia il sidecar con `spawn_browser_sidecar_for_chat` / `spawn_browser_sidecar_for_task`
-   (entrambe in `main.rs`). Il loop condiviso (`for round in 0..hard_round_ceiling()`, `main.rs`)
-   gira fino a `chat_browser_max_rounds()` → `MAX_TOOL_ROUNDS_BROWSER = 32` round quando
-   `browser_used` (`main.rs`, costante a `MAX_TOOL_ROUNDS_BROWSER`). NB: è **lo stesso** loop
-   guardato ADR 0021 (motore #1), non un loop separato per il browser.
+1. Quando il **modello browser** (nel sub-turno) chiama un tool granulare, il gateway, se non
+   c'è ancora una sessione, avvia il sidecar con `spawn_browser_sidecar_for_chat` /
+   `spawn_browser_sidecar_for_task` (entrambe in `main.rs`). Il loop
+   (`for round in 0..hard_round_ceiling()` in `engine::agent_loop::run_turn`,
+   `crates/engine/src/agent_loop.rs`) gira fino a `chat_browser_max_rounds()` →
+   `MAX_TOOL_ROUNDS_BROWSER = 32` round quando `browser_used` (`main.rs`, costante a
+   `MAX_TOOL_ROUNDS_BROWSER`). NB: è **lo stesso** loop guardato ADR 0021 (motore #1), invocato
+   **ricorsivamente** per il sub-turno browser — non un loop separato.
 2. Ogni round inizia con **igiene di contesto** `prune_browser_history` (`main.rs`): tiene solo
    l'ULTIMO risultato-snapshot del browser e l'ULTIMA immagine, stubba i precedenti
    (`PRUNED_SNAPSHOT_STUB`, `main.rs`), per non far esplodere la context window a 32 round.
 3. Ogni chiamata al sidecar passa per `chat_browser_call` (`main.rs`), sempre sotto il
    **`browse_web_lock`** globale (`fn browse_web_lock`, `main.rs`): un solo turno pilota il
    browser per volta.
-4. **`browser_navigate`** (handler `"browser_navigate" => {` nel loop, `main.rs`): la prima volta
+4. **`browser_navigate`** (handler `"browser_navigate" => {` in `execute_browser_tool`, `main.rs`,
+   invocato dal loop via il seam `GatewayBrowserExecutor`): la prima volta
    su un tab fa `browser.open`, poi `browser.navigate`; subito dopo fa una `browser.snapshot` con
    i parametri canonici `browser_chat_snapshot_params` (`main.rs`) e restituisce al modello il
    testo via `browser_snapshot_text` (`main.rs`).
-5. **`browser_act`** (handler `"browser_act" => {` nel loop, `main.rs`): costruisce l'azione
+5. **`browser_act`** (handler `"browser_act" => {` in `execute_browser_tool`, `main.rs`): costruisce l'azione
    coercendo l'errore comune del modello (un ref tipo `e83` passato come `target`, che è un id di
    TAB → re-routing in `ref`, stesso handler), passa per il **gate**
    `browser_safety::high_risk_reason` / `is_committing_action` (`browser_safety.rs`, `fn` a
@@ -81,7 +96,8 @@ esegue l'azione e (per le azioni mutanti) ri-snapshotta.
 
 ```mermaid
 flowchart TD
-    M[Modello chiama tool browser] --> GW[Gateway main.rs loop max 32 round]
+    M[Manager chiama browse goal] --> SUB[GatewayBrowseExecutor sub-turno ricorsivo isolato]
+    SUB --> GW[engine run_turn loop max 32 round modello browser]
     GW --> PR[prune_browser_history igiene contesto]
     PR --> LK[browse_web_lock mutex globale]
     LK --> CB[chat_browser_call su sidecar]
@@ -101,8 +117,9 @@ flowchart TD
     DIS --> IDLE[waitForLoadState networkidle bounded]
     IDLE --> SNAP[createSnapshot aria con ref]
     SNAP --> REFS[mappa refs aria-ref locator]
-    REFS --> OUT[snapshot testo piu refs torna al modello]
+    REFS --> OUT[snapshot testo piu refs torna al modello browser]
     OUT --> GW
+    GW --> BR[BrowseResult compatto al manager drain-sink isola il resto]
 ```
 
 ---
@@ -145,9 +162,20 @@ flowchart TD
 
 ## Contratto
 
-### Tool esposti al modello (gateway)
+### Tool esposto al manager (gateway)
 
-Schemi in `main.rs`, funzioni `browser_*_tool_schema()`.
+Dopo ADR 0025 il **manager** vede UN solo tool browser (`browse_tool_schema()` in `main.rs`,
+cablato in `base_tools`):
+
+| Tool | Input | Output | Note |
+|------|-------|--------|------|
+| `browse` (`browse_tool_schema`) | `goal` (req), `hints.url`, `hints.container` | `BrowseResult` compatto: `found`, `answer`, `sources[]`, `confidence` | delega a un sub-turno browser isolato; il manager non pilota mai le singole pagine |
+
+### Tool del sub-turno browser (browser-only, NON visibili al manager)
+
+Schemi in `main.rs`, funzioni `browser_*_tool_schema()`. Seminati SOLO nel sub-turno
+(`GatewayBrowseExecutor::browse` → `ls.tool_schemas`), mai nel `base_tools` del manager: sono
+la superficie che il **modello browser** chiama dentro il sub-loop ricorsivo.
 
 | Tool | Input | Output | Note |
 |------|-------|--------|------|
@@ -262,8 +290,10 @@ Problemi reali individuati nel codice attuale:
    di estrazione dati via JS: tutto deve passare dal testo dello snapshot o da click/scroll.
    Limita pagine in cui il dato è raggiungibile solo via script.
 6. **Due sorgenti per "i tool browser" (convergenti, F1.d).** Restano: (a)
-   gli **schemi di chat** (`browser_*_tool_schema()` in `main.rs`, la superficie reale che il
-   modello chiama nel singolo loop, cablati in `base_tools`); (b) il **seed del registry**
+   gli **schemi granulari** (`browser_*_tool_schema()` in `main.rs`); dopo ADR 0025 NON sono più
+   nel `base_tools` del manager (che offre solo `browse_tool_schema()`) — sono seminati SOLO nel
+   sub-turno browser (`GatewayBrowseExecutor::browse` → `ls.tool_schemas`), la superficie reale
+   che il **modello browser** chiama nel sub-loop ricorsivo; (b) il **seed del registry**
    (`browser_registry_cached_tools`, `main.rs`) che deriva gli stessi sei tool dagli schemi (a) —
    è ciò che il **plan-as-a-tool** indicizza (via registry), così il browser è visibile al piano
    coi nomi giusti. F1.d ha reso (a)≡(b); resta da far sorgentare (a) dal registry (lavoro di
@@ -277,7 +307,8 @@ Problemi reali individuati nel codice attuale:
    tipato per il worker path. NB: l'**enum** `CapabilityProviderKind::Browser` resta (lo usano
    registry e resource-bridge per la classe risorsa `BrowserSession`); è solo la **struct**
    provider a essere stata rimossa. (Il vecchio drive di `crates/orchestrator` NON pilota questo
-   path: il browser è guidato dal singolo loop guardato in `main.rs`, ADR 0021.)
+   path: il browser è guidato dal singolo loop guardato `engine::agent_loop::run_turn`
+   (ADR 0021/0024), invocato come sub-turno ricorsivo `browse(goal)` per ADR 0025.)
 7. **CDP-wedge invisibile a `browser_cdp_ok` (2026-06-29).** Un container `homun-cc` long-lived può
    andare in *wedge*: `/json/version` (HTTP) risponde ancora, ma `connectOverCDP` (ws handshake) si
    impianta su targets stantii → ogni sidecar nuovo va in `Timeout 30000ms exceeded`. `browser_cdp_ok`
@@ -330,15 +361,22 @@ Sidecar TypeScript (`runtimes/browser-automation/src/`):
 - `browser/navigation_guard.ts` — `assertNavigationAllowed`, blocco rete privata.
 
 Gateway Rust (`crates/desktop-gateway/src/`) — riferimenti per simbolo, ri-greppa in `main.rs`:
-- `main.rs` — tool schema (`browser_*_tool_schema`), loop condiviso
-  (`for round in 0..hard_round_ceiling()`) e handler (`"browser_navigate"`/`"browser_snapshot"`/
-  `"browser_act"` match arms), `browse_web_lock`, `prune_browser_history` /
-  `PRUNED_SNAPSHOT_STUB`, `chat_browser_call`, `browser_chat_snapshot_params`,
-  `browser_snapshot_text`, `browser_act_error_hint`, spawn sidecar
-  (`spawn_browser_sidecar_for_chat` / `_for_task`), env builder
+- `main.rs` — tool schema del manager (`browse_tool_schema`) + schemi granulari
+  (`browser_*_tool_schema`, ora seminati nel sub-turno), `GatewayBrowseExecutor` /
+  `BrowseOnlyCapabilityExecutor` (il sub-turno browser ricorsivo isolato, con `drain_stream_sink`)
+  e handler (`"browser_navigate"`/`"browser_snapshot"`/`"browser_act"` match arms),
+  `browse_web_lock`, `prune_browser_history` / `PRUNED_SNAPSHOT_STUB`, `chat_browser_call`,
+  `browser_chat_snapshot_params`, `browser_snapshot_text`, `browser_act_error_hint`, spawn
+  sidecar (`spawn_browser_sidecar_for_chat` / `_for_task`), env builder
   (`browser_sidecar_env_with_headless`), CDP health (`browser_cdp_ok` /
   `ensure_browser_cdp_healthy`), worker path (`execute_capability_browser_task` /
   `execute_persistent_browser_capability` / `browser_method_for_capability_tool`),
-  registry seed (`browser_registry_cached_tools`). Tutto guidato dal singolo loop ADR 0021.
+  registry seed (`browser_registry_cached_tools`). Il loop a round NON è più in `main.rs`.
+
+Engine crate (`crates/engine/src/`):
+- `agent_loop.rs` — `run_turn`, il singolo loop guardato (motore #1, ADR 0021/0024) che gira sia
+  per il turno manager sia, **ricorsivamente**, per il sub-turno `browse`.
+- `browse.rs` — contratto `browse(goal) → BrowseResult` (`seed_browse_messages`,
+  `browse_result_from_outcome`, `browse_result_for_manager`), ADR 0025.
 - `browser_safety.rs` — `high_risk_reason` / `high_risk_reason_with_payment_approval`,
   `is_committing_action`, `snapshot_label_for_ref`, `HIGH_RISK_LABEL_PATTERNS`.

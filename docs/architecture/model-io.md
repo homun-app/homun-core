@@ -1,9 +1,9 @@
 # I/O e normalizzazione dei modelli (L0)
 
-> Verificato vs codice 2026-07-06.
+> Verificato vs codice 2026-07-09.
 >
 > **Stato** — Data: 2026-06-27. Pagina **reverse-engineered** dal codice reale
-> (`crates/desktop-gateway/src/main.rs`, `crates/inference/`). È il **punto fermo**
+> (`crates/desktop-gateway/src/main.rs`, `crates/engine/`, `crates/inference/`). È il **punto fermo**
 > dello strato fondamentale L0: come ogni modello risponde e come lo riportiamo a una
 > forma unica. **Ogni modifica al sottosistema aggiorna questa pagina.**
 >
@@ -188,9 +188,10 @@ Invarianti:
   tool-as-text). Restano fuori dal modulo gli stadi di **assemblaggio stream** e **richiesta**
   (`reassemble_openai_stream`, `process_ollama_line`, `to_ollama_messages`, l'hack
   `thinking:disabled`) più le regex nel frontend `ChatView.tsx` — bersagli successivi di ADR 0019.
-- **`model_normalize.rs` — cablaggio IN CORSO (F0, [piano](../plans/2026-06-27-foundations-up-convergence.md)):**
+- **`model_normalize.rs` — cablaggio CONVERGIUTO E COMPLETO (F0, [piano](../plans/2026-06-27-foundations-up-convergence.md);
+  modulo ora in `crates/engine/src/model_normalize.rs`):**
   il modulo implementa il pattern canonico SOTA (`Raw* serde-permissivo → Canonical* via
-  TryFrom`, "parse don't validate"). Cablato finora:
+  TryFrom`, "parse don't validate"). Cablato:
   - `parse_plan_propose` (`‹‹PLAN_PROPOSE››`, step stringa-o-oggetto, fix gemma) — step 1 ADR 0019.
   - **`assistant_response`** (F0 increment 1): il **builder canonico** della risposta
     `{choices:[{message,finish_reason}]}` + la regola **reasoning-fallback** ora vivono QUI, e
@@ -299,9 +300,10 @@ Invarianti:
   - `orchestration_judge_response_format`, `extract_deck_object`, `generate_deck_content`
   - il loop a round unico guardato: `for round in 0..hard_round_ceiling()` (ADR 0021)
   - `build_browser_inference_router`
-- `crates/desktop-gateway/src/model_normalize.rs` — **normalizzatore canonico CABLATO** (ADR 0019):
+- `crates/engine/src/model_normalize.rs` — **normalizzatore canonico CABLATO** (ADR 0019;
+  modulo **rilocato** nel crate engine con ADR 0024 inc. 5e.3, non più in `desktop-gateway`):
   `assistant_response`, `split_reasoning_from_content`, `ollama_tool_call`, `sanitize_model_text`,
-  `parse_text_tool_calls` + `synthesize_tool_calls`, `parse_plan_propose`
+  `parse_text_tool_calls` + `synthesize_tool_calls`, `parse_plan_propose` (+ `crates/engine/src/markers.rs`)
 - `crates/desktop-gateway/src/model_registry.rs` — `infer_context_window`, `ModelEntry`
   (`vision/tools/reasoning/context_window`), shape provider/role
 - `crates/inference/src/openai_compat.rs` — `structured_response_format` (la **singola**

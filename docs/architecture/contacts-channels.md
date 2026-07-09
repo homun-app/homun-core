@@ -1,6 +1,6 @@
 # Contatti & Canali
 
-> Verificato vs codice 2026-07-06.
+> Verificato vs codice 2026-07-09.
 
 Data: 2026-06-27 · reverse-engineered dal codice reale · **punto fermo** (descrive
 ciò che il gateway fa OGGI, non ciò che dovrà fare). Sorgente primaria:
@@ -114,9 +114,9 @@ Route registrate in `main.rs` (`/api/channels/whatsapp/inbound` → `whatsapp_in
 
 ### Turno di canale = turn broker (default-on)
 
-Il **turn broker** è ormai l'UNICO path dei turni: `turn_broker_enabled()` legge
-`HOMUN_TURN_BROKER` ma **default `true`** ("Broker is now the ONLY path", il commento
-`Phase 0 = no behavior change` sopra la funzione è stale). Il broker conosce
+Il **turn broker** è il path INCONDIZIONATO dei turni: non c'è più alcun flag —
+la funzione `turn_broker_enabled()` e la env `HOMUN_TURN_BROKER` sono state **rimosse**
+("Broker is now the ONLY path"). Il broker conosce
 esplicitamente le sorgenti in `local_first_task_runtime::broker::ChatTurnSource`
 (`crates/task-runtime/src/broker.rs`): `Interactive`, `Automation`, **`Channel`**,
 `Connector`. Le sorgenti non interattive (canale incluso) entrano con
@@ -366,8 +366,7 @@ access fa bypass. La sua identità è unificata in `person:self` nel grafo
     `activate_remote_approvals_from_message`, `send_message_tool_schema`,
     `execute_send_message`, `create_pending_approval`, `execute_pending_approval`,
     `dispatch_remote_approval`.
-  - Turn broker: `turn_broker_enabled()` (default ON), `enqueue_turn`,
-    `broker_enabled` (probe).
+  - Turn broker (path incondizionato, nessun flag): `enqueue_turn`.
 - `crates/task-runtime/src/broker.rs` — `ChatTurnSource` (incl. `Channel`),
   `chat_turn_retry_policy`, `enqueue_chat_turn`/`enqueue_chat_turn_atomic`.
 - `crates/desktop-gateway/src/turn_executor.rs` — worker del broker che apre il turno

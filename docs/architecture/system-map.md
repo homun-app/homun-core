@@ -1,6 +1,6 @@
 # System Map
 
-> Verificato vs codice 2026-07-06 (broker+WS; niente crates/engine).
+> Verificato vs codice 2026-07-09 (broker+WS; crates/engine ESISTE).
 
 Questo documento e' la mappa operativa del progetto. Va tenuto aggiornato insieme a
 `docs/architecture/final-roadmap.md` e `docs/work-memory.md` quando cambiano
@@ -17,12 +17,14 @@ scopo, componenti, responsabilita' o ordine di implementazione.
 > ancora vivo per i task durevoli.
 >
 > **Motore chat e trasporto (verificato vs codice).** Il motore canonico e' il
-> **singolo loop ReAct guidato** (ADR 0021), che vive **dentro
-> `crates/desktop-gateway/src/main.rs`** (`run_agent_turn_into_message` /
-> `run_agent_turn_into_message_with_fanout`) — **non esiste un `crates/engine`**.
-> `main.rs` e' il monolite (~59k righe) in estrazione incrementale. `crates/orchestrator`
-> resta il **cervello plan-execute alternativo dormiente** (non cablato come motore
-> chat; ADR 0021 ha scelto il loop unico). Il percorso richiesta chat e' passato al
+> **singolo loop ReAct guidato** (ADR 0021), che ora vive in **`crates/engine`**
+> (`engine::agent_loop::run_turn`), chiamato **incondizionatamente** da
+> `run_agent_rounds` in `main.rs` (ADR 0024 completa: flag `HOMUN_ENGINE_CRATE` e copia
+> inline eliminati). `run_agent_turn_into_message[_with_fanout]` in `main.rs` e' solo il
+> **wrapper d'ingresso** che costruisce le seam e delega a `run_turn`. `main.rs` e' il
+> monolite (~59k righe) in estrazione incrementale. `crates/orchestrator` e' **dormiente
+> per la chat** (il drive-as-chat e' stato rimosso 2026-07-09): sopravvive solo come
+> planner dei deliverable (`plan_only` + `brain_materialize`). Il percorso richiesta chat e' passato al
 > **turn broker + WebSocket unificato**: `POST /api/chat/turns` → coda → executor
 > (`turn_executor.rs`, `execute_chat_turn_task`) → eventi su `/api/ws`
 > (`ws_gateway.rs`, `ws_handler`; client `apps/desktop/src/lib/wsSubscription.ts`),
@@ -57,7 +59,7 @@ flowchart TD
   UI -->|"POST /api/chat/turns"| Broker["Turn Broker + Coda (turn_executor)"]
   UI -->|"WS /api/ws (wsSubscription)"| WS["WebSocket Gateway (ws_gateway)"]
   Broker --> Executor["execute_chat_turn_task"]
-  Executor --> Engine["Loop ReAct guidato (main.rs: run_agent_turn_into_message)"]
+  Executor --> Engine["Loop ReAct guidato (crates/engine: engine::agent_loop::run_turn)"]
   Executor -->|"eventi turno"| WS
   WS --> UI
   Engine --> Thread["Chat Thread"]
@@ -224,12 +226,14 @@ Stato attuale:
 
 ### Motore chat (loop ReAct guidato)
 
-> Il "Brain" canonico e' il **singolo loop ReAct guidato** (ADR 0021) dentro
-> `crates/desktop-gateway/src/main.rs` (`run_agent_turn_into_message[_with_fanout]`).
-> **Non esiste `crates/engine`.** `crates/orchestrator` e' il cervello plan-execute
-> alternativo **dormiente** (non cablato come motore chat); i riferimenti a
-> "orchestrator" in `main.rs` sono il **ruolo di registry** del modello, non quel
-> crate. Il "plan" e' un **tool**, non un secondo motore.
+> Il "Brain" canonico e' il **singolo loop ReAct guidato** (ADR 0021) e ora vive in
+> **`crates/engine`** (`engine::agent_loop::run_turn`), chiamato incondizionatamente da
+> `run_agent_rounds` in `crates/desktop-gateway/src/main.rs` (ADR 0024 completa: nessun
+> flag). `run_agent_turn_into_message[_with_fanout]` in `main.rs` e' solo il wrapper
+> d'ingresso. `crates/orchestrator` e' **dormiente per la chat** (drive-as-chat rimosso);
+> sopravvive come planner dei deliverable (`plan_only` + `brain_materialize`). I
+> riferimenti a "orchestrator" in `main.rs` sono il **ruolo di registry** del modello,
+> non quel crate. Il "plan" e' un **tool**, non un secondo motore.
 
 Responsabilita':
 

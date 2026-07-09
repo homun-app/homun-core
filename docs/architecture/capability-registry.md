@@ -1,14 +1,15 @@
 # Registry unico delle capability e routing
 
-> Verificato vs codice 2026-07-06.
+> Verificato vs codice 2026-07-09.
 
 **Stato:** 2026-06-28 — reverse-engineered dal codice reale, **punto fermo**. Aggiornato con
 **F1.a** (un solo ranker BM25 condiviso, ritirato l'FTS5 dell'orchestratore) e **F1.d**
 (browser reale nel registry → visibile al planner). ⚠️ I `file:line` numerici di `main.rs`
 (~59k righe, editato di continuo) sono volutamente **omessi**: si citano solo i **nomi di
 funzione**, che restano la chiave da ri-greppare. Il motore che esegue le capability è il
-**loop ReAct guardato unico** in `crates/desktop-gateway/src/main.rs` (ADR 0021), **non** un
-crate a sé (`crates/engine` non esiste).
+**loop ReAct guardato unico** (ADR 0021), che ora vive nel crate `crates/engine`
+(`engine::agent_loop::run_turn`), chiamato incondizionatamente da `run_agent_rounds` in
+`crates/desktop-gateway/src/main.rs` (ADR 0024 completa: nessun flag).
 
 Serve i **capisaldi #7** (capability activation da registry unico, non keyword sparse)
 e **#11** (comprensione senza keyword/regex; verità verificabile). Vedi

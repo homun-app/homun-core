@@ -1,6 +1,6 @@
 # Architettura — Skill, Capability & Addon
 
-> Verificato vs codice 2026-07-06.
+> Verificato vs codice 2026-07-09.
 
 > Diagramma vivo. Decisioni: [ADR 0011 (core agnostico + ecosistema addon)](../decisions/0011-agnostic-core-addon-ecosystem.md),
 > [ADR 0009 (capability execution containment)](../decisions/0009-capability-execution-containment.md),
@@ -13,8 +13,9 @@
 > tool `use_skill`; il routing capability è `find_capability` /
 > registry nativo (`make_deck`, `make_document`, `pdf_atomic` → `run_in_sandbox`), tutti
 > nel gateway `crates/desktop-gateway/src/main.rs`. Il "Core agnostico"/`ENG` del
-> diagramma è il **single guarded ReAct loop** (ADR 0021) che vive in `main.rs`: NON
-> esiste un `crates/engine`, e `crates/orchestrator` è dormiente.
+> diagramma è il **single guarded ReAct loop** (ADR 0021) che ora vive nel crate
+> `crates/engine` (`engine::agent_loop::run_turn`), chiamato incondizionatamente da
+> `run_agent_rounds` in `main.rs` (ADR 0024 completa); `crates/orchestrator` è dormiente.
 
 ## Principio
 

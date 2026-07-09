@@ -1,8 +1,12 @@
 # Architettura — quadro d'insieme
 
-> ⚠️ **Freschezza (2026-07-06):** queste mappe sono reverse-engineered a giugno 2026 e **precedono**
+> ⚠️ **Freschezza (2026-07-09):** queste mappe sono reverse-engineered a giugno 2026 e **precedono**
 > la fase *turn-broker + unified WebSocket* (ora su `main`): il **path di richiesta** reale oggi è
-> coda-turni + executor + `/api/ws`, che qui NON è ancora disegnato. Inoltre molti riferimenti a
+> coda-turni + executor + `/api/ws`, che qui NON è ancora disegnato. Nel frattempo sono atterrate
+> **ADR 0024 (estrazione del motore, 2026-07-08)** — il singolo loop guardato vive ora in
+> `crates/engine` (`engine::agent_loop::run_turn`), non più inline in `main.rs`, senza flag — e
+> **ADR 0025 (browse-as-recursion, 2026-07-09)**: un solo `browse(goal)` che ricorre in un sub-turno
+> del motore. Inoltre molti riferimenti a
 > riga (`main.rs:NNNN`) sono **stantii** (main.rs ≈58.9k righe, riscritto spesso): **ri-grep il
 > simbolo, non fidarti del numero**. Le mappe restano utili per la *forma* dei sottosistemi; la
 > ri-verifica contro il codice post-broker/WS è lavoro aperto (vedi [STATO.md](../STATO.md)).
@@ -26,7 +30,7 @@ flowchart TD
   SURF --> GW
   MOD --> GW
   GW[Desktop Gateway · Rust · 127.0.0.1<br/>token 0600 + CORS + read-model redatti + lifecycle sidecar]
-  GW --> ENG[Agent engine cross-modello · ADR 0016<br/>recall → plan → act → verify → advance · output IMPOSTO]
+  GW --> ENG[Agent engine · loop ReAct guardato unico · ADR 0021 crates/engine<br/>recall → act → verify → advance · tool-calling nativo · plan come tool]
   ENG --> CAP[Tool / Capability<br/>browser · sandbox · skills · MCP/Composio · artifacts · make_deck]
   ENG --> MEM[Memoria 3 livelli<br/>SQL + grafo + markdown · local-first]
   ENG --> TASK[Durable Task Runtime<br/>queue · checkpoint · scheduler/proattività]
