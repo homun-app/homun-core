@@ -48,7 +48,16 @@ modello-browser gira ISOLATO in un sotto-turno `browse(goal)→BrowseResult` che
   verifica. `build_browse_goal` folda gli hint url/container nel goal. Flag OFF = toolset+path byte-identici (behavior-preserving).
   Rimossi gli `#[allow(dead_code)]` ora vivi. +3 test (engine 73, gateway 475/1-env). **La guida retry-max-2/blocked è già nella
   DESCRIPTION del tool `browse`** ("se found:false, raffina e ribrowsa al più 2 volte, poi dì unavailable — non inventare").
-- **⭐ 3+4 (PROSSIMO, richiedono RUN LIVE con app ricostruita + sidecar browser):** 3 = verify+routing (il manager verifica il
+- **⭐⭐ LIVE VALIDATION 2026-07-09 (Fabio, app con `HOMUN_CHAT_BROWSE_SUBAGENT=1`): SLICES 1–3 PROMOSSE.** Prompt "prezzo BTC
+  in USD, cercalo sul web + fonte" → il **manager ha chiamato `browse` UNA volta** (`‹‹ACT››🧭 navigate the web to check the
+  current Bitcoin price‹‹/ACT››`), il sotto-turno ha navigato REALE (`browser-step[done]: navigate coingecko.com/.../bitcoin`),
+  e il manager ha ricevuto un `BrowseResult` pulito → **UNA riga di reasoning canonica** (`‹‹REASONING››The browse tool returned
+  the current Bitcoin price. Let me present…‹‹/REASONING››`, NIENTE flood) + risposta con dati reali ($62.358,07, -0,6% 24h,
+  range, mcap, volume) + **Fonte: CoinGecko** (la sorgente da `BrowseResult.sources`, presentata DAL manager). Fabio: **"il
+  manager ha chiamato browse, contesto pulito"**. Il rumore browser è rimasto incapsulato nel drain-sink del sotto-loop —
+  esattamente la cura-radice di ADR 0025, per costruzione. **Verify+routing (slice 3) emerso dal loop guardato esistente**
+  (found:true+sorgente→confidence high→risposta relayata), zero codice nuovo.
+- **3 verify+routing (PROSSIMO, richiede RUN LIVE con app ricostruita + sidecar browser):** il manager verifica il
   `BrowseResult` e instrada il piano done/retry/blocked; **meccanismo già in place** via la description del tool + il loop
   guardato esistente → è soprattutto VALIDAZIONE live: risposta giusta→avanza, sbagliata→retry, impossibile→blocked/"unavailable").
   4 = **flip `HOMUN_CHAT_BROWSE_SUBAGENT=1` ON + regressione** su query tipo Polymarket/prezzo-live (piano che sale live,
