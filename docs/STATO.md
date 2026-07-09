@@ -19,11 +19,12 @@ duplicate). `grep HOMUN_ENGINE_CRATE = 0`. **Chiude il Punto 5 di ADR 0024 e SBL
 che Fabio ha visto oggi). Validazione: parità strutturale trace-dump OFF/ON ✅ + smoke-test ✅ + LIVE in-app plan+code ✅
 + marker-flood fix `d066581e` ✅ (turno browser LIVE: flood sparito, committed pulito).
 
-**⭐ ARCO CORRENTE = ADR 0025 (browse-as-recursion) — LANCIATO 2026-07-08.** La cura-radice del garbage browser
-(reasoning/tool-call leak, narrazione-invece-di-risposta): il manager forte resta driver per tutto il turno, il
+**⭐⭐ ARCO ADR 0025 (browse-as-recursion) — COMPLETO 2026-07-09 (`a183a736`).** La cura-radice del garbage browser
+(reasoning/tool-call leak, narrazione-invece-di-risposta) è SHIPPED: il manager forte resta driver per tutto il turno, il
 modello-browser gira ISOLATO in un sotto-turno `browse(goal)→BrowseResult` che invoca ricorsivamente lo STESSO
-`engine::run_turn`. Piano completo + decisioni SOTA sulle 4 domande aperte in
-`docs/superpowers/specs/2026-07-08-browse-as-recursion-adr0025-plan.md`.
+`engine::run_turn`. Come 0024 finì con "un loop, nessun flag", 0025 finisce con **"un path browser, nessun flag"**: model-switch
+ritirato, flag cancellato, `browse` è l'unico tool browser del manager. Live-validato 4× (BTC found:true, Polymarket found:false,
+ETH default-ON, BTC su 4b). Piano completo + decisioni SOTA in `docs/superpowers/specs/2026-07-08-browse-as-recursion-adr0025-plan.md`.
 - **1.1 FATTO (`b2dfa8fd`) — scaffolding:** `engine::browse::BrowseResult{found,answer,sources,confidence,note}` +
   `Confidence` enum (serde "high"/"low") + flag `HOMUN_CHAT_BROWSE_SUBAGENT` (default OFF, dead-code-gated). +2 test.
 - **1.2 FATTO (2026-07-09) — il cuore, `run_turn` ricorsivo (2 sub-slice):**
@@ -69,11 +70,15 @@ modello-browser gira ISOLATO in un sotto-turno `browse(goal)→BrowseResult` che
   env var:** gateway senza flag (env count=0) → manager ha chiamato `browse` → sotto-turno ha navigato reale
   (`browser-step[done]: navigate coingecko.com/coins/ethereum`) → risposta reale ($1.742,56 + tabella) + fonte, contesto pulito
   (un ACT + una riga REASONING). Baseline 34-warn tenuto.
-- **⭐ 4b (PROSSIMO, il ritiro finale "converge, don't duplicate" — con Fabio dopo soak):** cancellare il **model-switch**
-  mid-turn (`main.rs:~18855`, `‹‹ACT››🧠 Passo al modello browser` — nel sotto-loop è già no-op perché il provider è già il
-  modello browser); ritirare **`try_advance_frontier_from_evidence`** (`agent_loop.rs:522`, band-aid per il modello-browser che
-  congelava il piano — ⚠️ avanza il frontier da QUALSIASI evidenza, non solo browser: verificare che il manager forte avanzi il
-  piano da solo su multi-step non-browser prima di rimuoverlo); eliminare il flag → un solo path.
+- **⭐⭐ 4b FATTO + LIVE-VALIDATO 2026-07-09 (`a183a736`) — RITIRO FINALE, ADR 0025 COMPLETO:** cancellato il **model-switch**
+  mid-turn in `execute_browser_tool` (era la causa-radice: scambiava tutto il turno al modello-browser debole; nel sotto-loop era
+  già no-op) + cascata di plumbing morto (base_url/model/api_key/request da `BrowserToolCtx`, `request` da
+  GatewayBrowser/Browse/CapabilityExecutor + param di `run_agent_rounds`); **cancellato il flag `HOMUN_CHAT_BROWSE_SUBAGENT` +
+  `browse_subagent_enabled()`** → il manager offre SEMPRE un solo `browse(goal)`, i 6 granulari vivono SOLO nel sotto-loop = un
+  path canonico. **`try_advance_frontier_from_evidence` TENUTO (rifrasato):** NON è un band-aid browser ma la rete harness
+  general per modelli DEBOLI (ADR 0016/0018 — Homun gira anche su manager locali deboli che non chiamano step_advance;
+  verified-only; gated off nel sotto-loop). Live: binario 4b senza flag → `browse` di default, BTC $62.315 + fonte, navigazione
+  reale coingecko, **zero card "Passo al modello browser"**, contesto pulito. Engine 73 · gateway 475/1-flaky-soffice · 34-warn.
 - **3 verify+routing: GIÀ validato sopra** (BTC found:true + Polymarket found:false, il routing emerge dal loop guardato). Storico:
   `BrowseResult` e instrada il piano done/retry/blocked; **meccanismo già in place** via la description del tool + il loop
   guardato esistente → è soprattutto VALIDAZIONE live: risposta giusta→avanza, sbagliata→retry, impossibile→blocked/"unavailable").
