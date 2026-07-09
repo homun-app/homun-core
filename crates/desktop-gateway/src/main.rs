@@ -48022,6 +48022,11 @@ mod tests {
 
     static GATEWAY_DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    // Serializes tests that mutate PROCESS-GLOBAL state (`MEMORY_WORKSPACE`, `HOMUN_USER_ID`).
+    // Without this they race under the parallel test runner and flake. Poison-tolerant:
+    // if a holder panics we still hand out the guard (the global is restored per-test anyway).
+    static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     struct TestGatewayDataDir {
         _lock: MutexGuard<'static, ()>,
         restore: Option<String>,
@@ -55122,6 +55127,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     /// `briefing_pack_personal_shape_is_well_formed_with_profile_only`.
     #[test]
     fn scope_from_active_workspace_projects_personal_and_project() {
+        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         // Salvaguarda e ripristina lo scope memory globale (test condiviso).
         let prev = std::env::var("HOMUN_USER_ID").ok();
         // SAFETY: test isolato; ripristinato sotto.
@@ -55274,6 +55280,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     /// si aggiusta il service, si investiga (kickoff, stop-and-ask).
     #[test]
     fn brief_via_service_matches_inline_assembly_personal_and_project() {
+        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         // Il metodo brief() viene dal trait MemoryRecallService: portiamolo in scope.
         use super::MemoryRecallService;
         // User id stabile per entrambi gli scope (le funzioni leggono la globale).
@@ -55339,6 +55346,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     /// serve la cache stale (cache miss → rebuild che riflette la nuova memoria).
     #[test]
     fn briefing_cache_invalidates_after_memory_write() {
+        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         use super::MemoryRecallService;
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
         unsafe { std::env::set_var("HOMUN_USER_ID", "invalidate-user"); }
@@ -55404,6 +55412,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     /// deriving the text a second way.
     #[tokio::test]
     async fn project_context_exposes_objective_from_goal_memory() {
+        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
         unsafe { std::env::set_var("HOMUN_USER_ID", "objective-user"); }
 
@@ -55500,6 +55509,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
     /// the request to B, and assert the payload shows B's objective — never A's.
     #[tokio::test]
     async fn project_context_objective_follows_request_workspace_not_global() {
+        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
         unsafe { std::env::set_var("HOMUN_USER_ID", "objective-scope-user"); }
 
