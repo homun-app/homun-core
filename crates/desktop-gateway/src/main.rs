@@ -1,5 +1,6 @@
 // Shared browser high-risk safety gate (used by the main-agent-driven
 // browser_* tools).
+mod apply_patch;
 mod attachments;
 mod browser_safety;
 mod chat_store;
@@ -11146,6 +11147,23 @@ fn edit_file_tool_schema() -> serde_json::Value {
     })
 }
 
+fn apply_patch_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "apply_patch",
+            "description": "Apply a patch to files in the project. `input` is a patch in the format: `*** Begin Patch` … `*** End Patch`, containing `*** Add File: <path>` (body lines start with `+`), `*** Update File: <path>` (optional `*** Move to: <path>`, then `@@` context hunks with `+`/`-`/space line prefixes — NO line numbers; locate edits by context), and `*** Delete File: <path>`. Prefer apply_patch over write_file/edit_file for multi-file or precise edits.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input": { "type": "string", "description": "The full patch text, from '*** Begin Patch' to '*** End Patch'." }
+                },
+                "required": ["input"]
+            }
+        }
+    })
+}
+
 fn list_files_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -11925,6 +11943,109 @@ fn edit_project_file(
             "'old_string' appears {n} times in '{rel}': it's ambiguous. Add surrounding context to make it unique."
         ),
     }
+}
+
+/// One file touched by an applied patch, carrying enough to render a diff card and to
+/// register artifact memory. `old` is the pre-image (None for a newly-created file); a
+/// deletion is `deleted = true` with `new` empty.
+struct AppliedPatchFile {
+    path: String,
+    old: Option<String>,
+    new: String,
+    deleted: bool,
+}
+
+/// Apply a Codex-format patch to the thread's project folder, ON THE REAL FILESYSTEM.
+///
+/// This is the sync bridge the `apply_patch` tool dispatch runs inside `spawn_blocking`:
+/// it owns `root` + `input`, routes EVERY touched path through `jail_in_root` (via the
+/// `resolve` closure handed to [`crate::apply_patch::apply_patch_under_root`]), and
+/// creates parent dirs on write (mirroring `write_project_file`). Confinement lives
+/// entirely in `jail_in_root`; this function does not re-implement it. Returns the list
+/// of applied files (for diff + memory) or a model-facing error (nothing written).
+fn apply_patch_in_project(
+    state: &AppState,
+    thread_id: Option<&str>,
+    input: &str,
+) -> Result<Vec<AppliedPatchFile>, String> {
+    let Some(root) = project_root_for_thread(state, thread_id) else {
+        return Err(no_project_folder_msg());
+    };
+
+    // Capture per-file pre-images so the caller can emit before/after diffs. The applier
+    // reads a file before it (or a later hunk) rewrites it, so snapshotting inside the
+    // read closure records the ORIGINAL content. `RefCell` keeps the closure a plain
+    // `Fn` (the applier wants `&dyn Fn` for reads) while still mutating the map.
+    let pre_images: std::cell::RefCell<std::collections::HashMap<String, Option<String>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+
+    let resolve = |rel: &str| jail_in_root(&root, rel);
+    // Snapshot the old content of each path the moment the applier reads it, keyed by
+    // its resolved-relative form, so we can pair it with the change (diff pre-image).
+    let read_snapshot = |p: &std::path::Path| -> Option<String> {
+        let content = std::fs::read_to_string(p).ok();
+        if let Ok(rel) = p.strip_prefix(&root) {
+            pre_images
+                .borrow_mut()
+                .entry(rel.to_string_lossy().replace('\\', "/"))
+                .or_insert_with(|| content.clone());
+        }
+        content
+    };
+
+    // `write` and `remove` both record into `applied`; a `RefCell` lets both `FnMut`
+    // closures borrow it without conflicting (they run sequentially inside the applier).
+    let applied: std::cell::RefCell<Vec<(String, String, bool)>> =
+        std::cell::RefCell::new(Vec::new());
+    let mut write = |p: &std::path::Path, c: &str| -> Result<(), String> {
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("could not create folders for the patch target: {e}"))?;
+        }
+        std::fs::write(p, c).map_err(|e| format!("could not write a patched file: {e}"))?;
+        if let Ok(rel) = p.strip_prefix(&root) {
+            applied
+                .borrow_mut()
+                .push((rel.to_string_lossy().replace('\\', "/"), c.to_string(), false));
+        }
+        Ok(())
+    };
+    let mut remove = |p: &std::path::Path| -> Result<(), String> {
+        std::fs::remove_file(p).map_err(|e| format!("could not delete a patched file: {e}"))?;
+        if let Ok(rel) = p.strip_prefix(&root) {
+            applied
+                .borrow_mut()
+                .push((rel.to_string_lossy().replace('\\', "/"), String::new(), true));
+        }
+        Ok(())
+    };
+
+    crate::apply_patch::apply_patch_under_root(
+        input,
+        &resolve,
+        &read_snapshot,
+        &mut write,
+        &mut remove,
+    )?;
+
+    // Pair each write/remove with its captured pre-image. A Rename shows up as a write
+    // to `to` (pre-image None, it's new) + a remove of `from`; we surface both, and the
+    // remove of `from` is treated like a deletion for the diff.
+    let pre_images = pre_images.into_inner();
+    let files = applied
+        .into_inner()
+        .into_iter()
+        .map(|(path, new, deleted)| {
+            let old = pre_images.get(&path).cloned().flatten();
+            AppliedPatchFile {
+                path,
+                old,
+                new,
+                deleted,
+            }
+        })
+        .collect();
+    Ok(files)
 }
 
 fn list_project_files(state: &AppState, thread_id: Option<&str>) -> String {
@@ -18415,6 +18536,7 @@ const CORE_TOOL_NAMES: &[&str] = &[
     "read_file",
     "write_file",
     "edit_file",
+    "apply_patch",
     "list_files",
     "run_in_project",
 ];
@@ -19779,6 +19901,7 @@ async fn execute_chat_tool(
                 | "read_file"
                 | "write_file"
                 | "edit_file"
+                | "apply_patch"
                 | "list_files"
                 | "run_in_project"
                 | "schedule_task"
@@ -21585,6 +21708,74 @@ loaded with use_skill):\n{}",
         })
         .await
         .unwrap_or_else(|e| format!("Error: {e}"))
+    } else if name == "apply_patch" {
+        let args_val: serde_json::Value =
+            serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({}));
+        let input = args_val
+            .get("input")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = emit_stream_event(
+            ctx.tx,
+            GenerateStreamEvent::Delta {
+                text: "‹‹ACT››🩹 Applying patch‹‹/ACT››".to_string(),
+            },
+        )
+        .await;
+        // Gating mirrors edit_file/write_file: the OS fence is unconditional, `ctx.read_only`
+        // channel turns already refused this above (allowlist), and confinement to the project
+        // root happens inside `apply_patch_in_project` via `jail_in_root` — no path escapes.
+        // A missing project folder surfaces as the `Err(msg)` arm (no_project_folder_msg).
+        let st = ctx.state.clone();
+        let tid = ctx.thread_id.map(|s| s.to_string());
+        let apply_result = tokio::task::spawn_blocking(move || {
+            apply_patch_in_project(&st, tid.as_deref(), &input)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("Error: {e}")));
+        match apply_result {
+            Ok(files) => {
+                // Emit a structured diff card per touched file (‹‹DIFF›› marker), and
+                // register artifact memory for each written path (skip deletions).
+                let mut names: Vec<String> = Vec::with_capacity(files.len());
+                for file in &files {
+                    names.push(file.path.clone());
+                    if !file.deleted {
+                        let payload = local_first_subagents::DiffStreamPayload {
+                            path: file.path.clone(),
+                            label: Some(format!("apply_patch: {}", file.path)),
+                            old: file.old.clone(),
+                            new: file.new.clone(),
+                            language: None,
+                        };
+                        if let Ok(json) = serde_json::to_string(&payload) {
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!("‹‹DIFF››{json}‹‹/DIFF››"),
+                                },
+                            )
+                            .await;
+                        }
+                        register_project_file_artifact_memory(
+                            ctx.state,
+                            ctx.thread_id,
+                            &file.path,
+                            file.new.len() as u64,
+                            "apply_patch",
+                        )
+                        .await;
+                    }
+                }
+                if names.is_empty() {
+                    "Applied patch (no files changed).".to_string()
+                } else {
+                    format!("Applied patch. Updated: {}", names.join(", "))
+                }
+            }
+            Err(msg) => msg,
+        }
     } else if name == "list_files" {
         let _ = emit_stream_event(
             ctx.tx,
@@ -23443,6 +23634,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         base_tools.push(read_file_tool_schema());
         base_tools.push(write_file_tool_schema());
         base_tools.push(edit_file_tool_schema());
+        // Codex-format multi-file patch: preferred for precise / multi-file edits.
+        // Jailed via jail_in_root, gated exactly like write_file/edit_file.
+        base_tools.push(apply_patch_tool_schema());
         base_tools.push(list_files_tool_schema());
         // Native filesystem (browse/read the user's authorized folders), so this
         // fundamental capability isn't outsourced to a third-party MCP.
