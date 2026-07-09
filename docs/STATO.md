@@ -8,8 +8,14 @@
 ## ⭐ CHECKPOINT 2026-07-09 (bis) — 4 feature Codex-parity portate dal ramo divergente `piano-ui`
 
 Riparti da qui. Linea presentabile = ramo **`fix/workflow-route-plan-precedence`** (= `main` + island + audit +
-router-fix + queste 4). Gate verdi: **engine 81 pass**, **gateway 534 pass** (1 rosso `soffice` ambientale — passa
-in seriale, tocca solo l'import pptx), **ui-contract + electron 12/12 + build** verdi.
+router-fix + queste 4 + fix soffice). **`pre_release_gate.py` = ALL GREEN** (cargo + ui-contract + build + py):
+**engine 81 pass**, **gateway 535 pass** (0 rossi — il flaky `soffice` è **risolto alla radice**, vedi sotto),
+**electron 12/12**. Merge → `main` = **fast-forward pulito, zero conflitti** (35 commit avanti), pronto all'ok di Fabio.
+
+**Fix bonus (`2c9abb59`):** il flaky `soffice`/pptx ("1 rosso ambientale" presente da tutto l'audit) era un **bug
+di produzione**: soffice usava il profilo utente LibreOffice di default → due render concorrenti (o la suite parallela)
+contendono sul lock → `DeploymentException`. Fix radice: `-env:UserInstallation` con profilo usa-e-getta per invocazione
+(sotto il `temp_root` già unico). Ora i due test pptx passano **in parallelo** e il gate è deterministico.
 
 **Contesto (analisi per-ramo, "converge non duplicare"):** dei rami vecchi, `fix/win-linux-build`,
 `fix/default-display-name`, `feat/recall-on-demand-tappa-3` erano **superati** (feature già in linea per altra via —
