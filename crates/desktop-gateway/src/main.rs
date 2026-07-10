@@ -19275,6 +19275,46 @@ fn resolved_writable_roots(state: &AppState, thread_id: Option<&str>) -> Vec<std
     roots
 }
 
+/// Pure precedence core for Phase-3 per-project skill confirmations: a per-workspace override
+/// REPLACES the global default (`None` inherits it), then each token is parsed to a
+/// [`crate::skills::SensitiveCategory`] via the forgiving `parse` (unknown tokens dropped so a
+/// typo never widens/breaks the gate), de-duplicated. IO-free + unit-testable.
+fn resolve_skill_confirmations_core(
+    ws: Option<&[String]>,
+    global: &[String],
+) -> Vec<crate::skills::SensitiveCategory> {
+    let tokens: &[String] = match ws {
+        Some(list) => list,
+        None => global,
+    };
+    let mut out: Vec<crate::skills::SensitiveCategory> = Vec::new();
+    for token in tokens {
+        if let Some(cat) = crate::skills::SensitiveCategory::parse(token) {
+            if !out.contains(&cat) {
+                out.push(cat);
+            }
+        }
+    }
+    out
+}
+
+/// The resolved set of sensitive categories that must ALWAYS force a confirmation in this
+/// thread's workspace, regardless of the active skill (Phase 3). Precedence: per-workspace
+/// override if `Some`, else the global `RuntimeSettings.skill_confirmations`, else empty (no
+/// env axis for this policy). Seeds the turn's `active_sensitive` set so
+/// `skill_policy_forces_confirm` fires on effectful actions even with NO sensitive skill loaded.
+/// Fail-safe: it only ever ADDS confirmations.
+fn resolved_skill_confirmations(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Vec<crate::skills::SensitiveCategory> {
+    let ws = workspace_record_for_thread(state, thread_id).and_then(|w| w.skill_confirmations);
+    resolve_skill_confirmations_core(
+        ws.as_deref(),
+        &load_runtime_settings().skill_confirmations,
+    )
+}
+
 /// The approval axis: env `HOMUN_APPROVAL_POLICY` > per-workspace override > persisted
 /// global `RuntimeSettings.approval_policy` > default `on-request`. Behavior-preserving
 /// when no workspace override is set: the non-autonomous case keeps asking on effectful
@@ -27448,6 +27488,13 @@ struct RuntimeSettings {
     /// REPLACES this list for that project. `#[serde(default)]` = legacy files upgrade clean.
     #[serde(default)]
     writable_roots: Vec<String>,
+
+    /// Phase 3 (per-project skill confirmations): the GLOBAL default set of sensitive
+    /// categories (`delete|financial|medical|sensitive-data`) that must ALWAYS force a
+    /// confirmation, whatever skill is active. Empty (default) = none forced globally. A
+    /// per-workspace `WorkspaceRecord.skill_confirmations` override REPLACES this list.
+    #[serde(default)]
+    skill_confirmations: Vec<String>,
 }
 
 fn default_adaptive_floor() -> String {
@@ -27472,6 +27519,7 @@ impl Default for RuntimeSettings {
             sandbox_mode: default_sandbox_mode(),
             approval_policy: default_approval_policy(),
             writable_roots: Vec::new(),
+            skill_confirmations: Vec::new(),
         }
     }
 }
@@ -47941,6 +47989,11 @@ struct WorkspaceRecord {
     /// list). The project root is ALWAYS writable regardless; this only ADDS folders.
     #[serde(default)]
     writable_roots: Option<Vec<String>>,
+    /// Phase 3 — per-project sensitive categories that must ALWAYS force a confirmation.
+    /// `None` = inherit the global `RuntimeSettings.skill_confirmations`; `Some(list)` REPLACES
+    /// it. Tokens: `delete|financial|medical|sensitive-data` (unknown dropped at resolve time).
+    #[serde(default)]
+    skill_confirmations: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48181,6 +48234,7 @@ fn load_workspaces_file() -> WorkspacesFile {
                 sandbox_mode: None,
                 approval_policy: None,
                 writable_roots: None,
+                skill_confirmations: None,
             }],
         })
 }
@@ -48531,6 +48585,7 @@ async fn create_workspace(
         sandbox_mode: None,
         approval_policy: None,
         writable_roots: None,
+        skill_confirmations: None,
     };
     {
         let facade = memory_facade(&state);
@@ -49228,6 +49283,7 @@ mod tests {
             sandbox_mode: Some("read-only".into()),
             approval_policy: Some("never".into()),
             writable_roots: None,
+            skill_confirmations: None,
         };
         // Partial: only approval changes; sandbox override is preserved.
         let merged =
@@ -49247,6 +49303,45 @@ mod tests {
         let noop = super::merge_workspace_policy(&cur, &serde_json::json!({}));
         assert_eq!(noop.sandbox_mode.as_deref(), Some("read-only"));
         assert_eq!(noop.approval_policy.as_deref(), Some("never"));
+    }
+
+    // Phase 3 (per-project skill confirmations): the global default lives on `RuntimeSettings`
+    // (`Vec<String>`) and the per-workspace override on `WorkspaceRecord`
+    // (`Option<Vec<String>>`, None = inherit). Both `#[serde(default)]`. The pure precedence
+    // core parses tokens to `SensitiveCategory` (forgiving, unknown dropped); a per-workspace
+    // override REPLACES the global default.
+    #[test]
+    fn skill_confirmations_fields_and_resolution() {
+        use crate::skills::SensitiveCategory;
+        // Legacy files (no field) → empty / None.
+        let rs0: super::RuntimeSettings = serde_json::from_str("{}").unwrap();
+        assert!(rs0.skill_confirmations.is_empty());
+        let wr0: super::WorkspaceRecord =
+            serde_json::from_str(r#"{"id":"w","name":"W"}"#).unwrap();
+        assert_eq!(wr0.skill_confirmations, None);
+        // Present fields round-trip.
+        let rs: super::RuntimeSettings =
+            serde_json::from_str(r#"{"skill_confirmations":["delete","financial"]}"#).unwrap();
+        assert_eq!(rs.skill_confirmations, vec!["delete".to_string(), "financial".to_string()]);
+        let wr: super::WorkspaceRecord =
+            serde_json::from_str(r#"{"id":"w","name":"W","skill_confirmations":["medical"]}"#).unwrap();
+        assert_eq!(wr.skill_confirmations.as_deref(), Some(&["medical".to_string()][..]));
+        // Pure precedence core: ws override REPLACES global; None inherits; unknown dropped; deduped.
+        assert_eq!(
+            super::resolve_skill_confirmations_core(Some(&["medical".to_string()]), &["delete".to_string()]),
+            vec![SensitiveCategory::Medical]
+        );
+        assert_eq!(
+            super::resolve_skill_confirmations_core(None, &["financial".to_string()]),
+            vec![SensitiveCategory::Financial]
+        );
+        assert_eq!(
+            super::resolve_skill_confirmations_core(
+                Some(&["bogus".to_string(), "delete".to_string(), "delete".to_string()]),
+                &[]
+            ),
+            vec![SensitiveCategory::Delete]
+        );
     }
 
     // Phase 2 (per-project writable_roots): the global default lives on `RuntimeSettings`
@@ -49291,6 +49386,7 @@ mod tests {
             sandbox_mode: Some("read-only".into()),
             approval_policy: Some("never".into()),
             writable_roots: None,
+            skill_confirmations: None,
         };
         // Array sets the override; mode/approval are untouched.
         let m = super::merge_workspace_policy(
@@ -49329,6 +49425,7 @@ mod tests {
             sandbox_mode: "danger".to_string(),
             approval_policy: "never".to_string(),
             writable_roots: Vec::new(),
+            skill_confirmations: Vec::new(),
         };
         // Patch only sandbox_mode → the other two axes are preserved.
         let merged = super::merge_runtime_settings(
@@ -57958,6 +58055,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
             sandbox_mode: None,
             approval_policy: None,
             writable_roots: None,
+            skill_confirmations: None,
         };
 
         super::upsert_workspace_root_memory_entity(&facade, &workspace).unwrap();
@@ -57970,6 +58068,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
                 sandbox_mode: None,
                 approval_policy: None,
                 writable_roots: None,
+                skill_confirmations: None,
             },
         )
         .unwrap();
