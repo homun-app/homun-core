@@ -5,6 +5,28 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-10.**
 
+## ⭐ CHECKPOINT 2026-07-10 (ter) — Sandbox policy PER-PROGETTO (Fase 1 completa)
+
+Nuova feature (spec+piano+impl): la policy sandbox non è più solo globale — ogni progetto (e Personale)
+può avere il suo `sandbox_mode`/`approval_policy`, ereditando un **default globale** se non sovrascrive.
+Spec: `docs/superpowers/specs/2026-07-10-per-project-sandbox-policy-design.md`; piano Fase 1:
+`docs/superpowers/plans/2026-07-10-per-project-sandbox-policy-phase1.md`.
+- **Modello:** override `Option` su `WorkspaceRecord` (workspaces.json); None = eredita.
+- **Resolver:** `resolved_sandbox_mode(state, thread_id)` / `resolved_approval_policy(state, thread_id)` —
+  precedenza **env > override-workspace > default-globale (`runtime-settings`) > built-in**. Tutti i
+  chokepoint già passano `thread_id` → ereditano il per-progetto automaticamente.
+- **Endpoint:** `POST /api/workspaces/{id}/policy` (partial-merge, `null` = azzera→eredita).
+- **UI:** pagina **Settings › Sandbox** — sezione Default + lista workspace con badge eredita/override
+  (i controlli globali *spostati* qui, non duplicati).
+- **Commit:** `4a025dd8` (campi) · `aa0366bb` (resolver) · `3501047b` (chokepoint) · `325fecec` (endpoint) ·
+  `6ecd2ebe` (UI). Gate: **gateway 542 pass**, ui-contract+build+electron 12/12. **Validato live via API**
+  (Homun→read-only isolato sul solo workspace, poi azzerato). Render UI da vedere a schermo (rinviato).
+- **Invariante preservato:** il fence OS resta incondizionato; nessun mode per-progetto lo disattiva.
+- **Fasi 2/3 (piani da scrivere, "fai tutto"):** F2 = `writable_roots`+`network` per-progetto → nel fence OS
+  (seatbelt/landlock, delicata); F3 = conferme skill per-progetto.
+
+---
+
 ## ⭐⭐ CHECKPOINT 2026-07-10 — Gateway-freeze RISOLTO ALLA RADICE (ADR 0027)
 
 **Il freeze che tormentava da giorni è chiuso.** Durante i test live il gateway si è congelato (`/health` 000
