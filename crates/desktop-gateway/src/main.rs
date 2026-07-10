@@ -925,6 +925,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
+        .route("/api/chat/threads/{thread_id}/activity", get(thread_activity_projection))
         .route("/api/chat/threads/{thread_id}/branches", get(chat_branches))
         .route(
             "/api/chat/threads/{thread_id}/active_leaf",
@@ -31742,6 +31743,29 @@ async fn get_turn_events(
         })
         .collect();
     Ok(Json(out))
+}
+
+/// GET /api/chat/threads/{thread_id}/activity — durable cockpit projection for the working
+/// island: the latest plan across the thread + activity accumulated cross-turn + the latest
+/// turn's status. Reads the canonical turn_events log (via the indexed tasks(thread_id) join),
+/// NOT the lossy message-text markers — so the island survives turn-end/reload/thread-switch.
+async fn thread_activity_projection(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<local_first_task_runtime::ThreadActivityProjection>, GatewayError> {
+    let store = state.task_store.lock().map_err(|e| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "broker_store_lock",
+        message: format!("lock: {e}"),
+    })?;
+    let projection = store
+        .project_thread_activity(&thread_id, 200)
+        .map_err(|e| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "thread_activity",
+            message: format!("{e}"),
+        })?;
+    Ok(Json(projection))
 }
 
 /// GET /api/chat/turns/{turn_id}/stream — replay buffered events (seq > since) then
