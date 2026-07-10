@@ -101,6 +101,7 @@ import {
   type VaultProposalAcceptResult,
 } from "../lib/coreBridge";
 import { wsSubscription } from "../lib/wsSubscription";
+import { fetchThreadActivity } from "../lib/chatApi";
 import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
@@ -320,6 +321,11 @@ export function ChatView({
   // Cleared on submit; superseded by the persisted values when streaming ends.
   const [liveActivitySteps, setLiveActivitySteps] = useState<string[]>([]);
   const [livePlanMarkdown, setLivePlanMarkdown] = useState<string | null>(null);
+  // Durable cross-turn projection over turn_events (the canonical log), fetched at rest so
+  // the island reflects the thread's real plan/activity after turn-end/reload/thread-switch —
+  // NOT the lossy message-text markers (absent for workflow deliverables; plan emitted once).
+  const [projectedActivity, setProjectedActivity] = useState<string[]>([]);
+  const [projectedPlan, setProjectedPlan] = useState<string | null>(null);
   // Track the active turn_id for WS event filtering. Set when a turn starts,
   // cleared when it ends. Used by the wsSubscription subscriber to route events.
   const activeTurnIdRef = useRef<string | null>(null);
@@ -487,12 +493,48 @@ export function ChatView({
   const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
   const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
   const isStreaming = promptSubmitting || Boolean(streamingAssistantId);
-  const conversationPlan = isStreaming && livePlanMarkdown ? livePlanMarkdown : persistedPlan;
-  const conversationActivity = isStreaming && liveActivitySteps.length > 0 ? liveActivitySteps : persistedActivity;
+  // Island source, converged on the durable projection:
+  //  - live: live WS events (current turn) layered over the projection (prior turns);
+  //  - at rest: the projection alone, falling back to the lossy text markers only if the
+  //    projection is empty (older turns whose events predate turn_events, or edge cases).
+  const conversationPlan = isStreaming
+    ? livePlanMarkdown ?? projectedPlan ?? persistedPlan
+    : projectedPlan ?? persistedPlan;
+  const conversationActivity = isStreaming
+    ? [...projectedActivity, ...liveActivitySteps]
+    : projectedActivity.length > 0
+      ? projectedActivity
+      : persistedActivity;
   const workspacePlanSteps = useMemo(
     () => (conversationPlan ? parsePlanSteps(conversationPlan) : []),
     [conversationPlan],
   );
+  // Clear the projection the instant the thread switches so a new (possibly still-streaming)
+  // thread never briefly shows the previous thread's plan/activity before its own fetch lands.
+  useEffect(() => {
+    setProjectedActivity([]);
+    setProjectedPlan(null);
+  }, [thread.threadId]);
+  // Load the durable island projection on thread change and when a turn ENDS (isStreaming →
+  // false, so the just-finished turn folds in). Deliberately NOT during streaming: the live
+  // WS events carry the active turn; fetching mid-stream would double-count it against the
+  // projection. Best-effort — live + the text-marker fallback cover a failed fetch.
+  useEffect(() => {
+    if (isStreaming) return;
+    let cancelled = false;
+    fetchThreadActivity(thread.threadId)
+      .then((projection) => {
+        if (cancelled) return;
+        setProjectedActivity(projection.activity);
+        setProjectedPlan(projection.plan_markdown);
+      })
+      .catch(() => {
+        /* projection unavailable → island falls back to live + persisted markers */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [thread.threadId, isStreaming]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {

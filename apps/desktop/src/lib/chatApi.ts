@@ -763,6 +763,26 @@ export async function openTurnStream(turnId: string, since: number = 0): Promise
   return res;
 }
 
+/** Durable cockpit projection for the working island (mirrors the Rust
+ *  `ThreadActivityProjection`): the latest plan across the thread, activity
+ *  accumulated cross-turn, and the latest turn's status. Read at rest so the
+ *  island survives turn-end/reload/thread-switch instead of parsing lossy
+ *  message-text markers. */
+export interface ThreadActivityProjection {
+  plan_markdown: string | null;
+  activity: string[];
+  latest_turn_status: string | null;
+  turn_count: number;
+}
+
+export async function fetchThreadActivity(
+  threadId: string,
+): Promise<ThreadActivityProjection> {
+  return gatewayJson<ThreadActivityProjection>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/activity`,
+  );
+}
+
 /**
  * Cancel a running turn: DELETE /api/chat/turns/{id}. The broker marks the turn
  * cancelled and notifies the executor. 202 = accepted, 404 = no active turn
