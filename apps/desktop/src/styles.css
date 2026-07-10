@@ -1874,7 +1874,12 @@ body.resizing-drawer {
      zone, so the titlebar remains a pure drag/header area. */
   width: auto;
   margin-inline: calc(-1 * clamp(18px, 5vw, 72px));
-  padding-inline: calc(clamp(18px, 5vw, 72px) + max(0px, (100% - 760px) / 2));
+  /* Title aligns with the centered 760 message column (left), but the right-side actions
+     (the ⋯ menu) are an INDEPENDENT element pinned to the window's right edge — matching
+     the floating workspace island (`.chat-status-stack { right: 24px }`) so the two top-
+     right controls line up cleanly instead of the menu sitting inside the chat column. */
+  padding-left: calc(clamp(18px, 5vw, 72px) + max(0px, (100% - 760px) / 2));
+  padding-right: 24px;
   -webkit-app-region: drag;
 }
 
@@ -2667,6 +2672,12 @@ body.resizing-drawer {
 }
 .wi-head .wi-status svg {
   flex: none;
+}
+/* Both header children are <span>s, so they inherit `.wi-head > span { flex-direction:
+   column }` (a leftover from the old stacked title). Force the actions back to a row so
+   the ⋯ menu and the collapse chevron sit side by side, not stacked. */
+.wi-head .wi-head-actions {
+  flex-direction: row;
 }
 
 .wi-menu .wi-menu-label {
