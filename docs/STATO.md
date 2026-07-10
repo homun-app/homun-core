@@ -22,8 +22,20 @@ Spec: `docs/superpowers/specs/2026-07-10-per-project-sandbox-policy-design.md`; 
   `6ecd2ebe` (UI). Gate: **gateway 542 pass**, ui-contract+build+electron 12/12. **Validato live via API**
   (Homun→read-only isolato sul solo workspace, poi azzerato). Render UI da vedere a schermo (rinviato).
 - **Invariante preservato:** il fence OS resta incondizionato; nessun mode per-progetto lo disattiva.
-- **Fasi 2/3 (piani da scrivere, "fai tutto"):** F2 = `writable_roots`+`network` per-progetto → nel fence OS
-  (seatbelt/landlock, delicata); F3 = conferme skill per-progetto.
+- **Fase 2 COMPLETA** (`9a6820c3`→`0fa48cf9` + UI `4945e54e`): **cartelle scrivibili extra per-progetto**
+  → `resolved_writable_roots(state, thread_id)` (project root + home-cache base + extra risolti) confluisce in
+  `run_in_project`/`build_sandbox_command`; **fence guardrail INVARIATO** (`seatbelt_fence` + `linux_sandbox.rs`
+  = 0 righe cambiate) + nuovo test multi-root. UI: editor multi-cartella (Default + per-workspace).
+- **`network_access` per-progetto DEFERITO (honest):** rete enforced solo su macOS (seatbelt), TODO su Linux
+  (landlock v1 = solo filesystem, serve seccomp) + il fence bash hardcoda `network:true` → non spedisco un
+  toggle di sicurezza che su Linux non fa nulla. Campi dati riservati, niente UI. Vedi spec.
+- **Fase 3 COMPLETA** (`3e61c282`→`837f4699` + UI `2d117e7d`): **conferme skill per-progetto** →
+  `resolved_skill_confirmations(state, thread_id)` seminato in `active_sensitive` a inizio turno (fail-safe,
+  solo AGGIUNGE) → un progetto può forzare conferma su `delete`/`financial`/`medical`/`sensitive-data` anche
+  senza skill sensibile attiva. UI: 4 checkbox (Default + per-workspace).
+- **Endpoint** `POST /api/workspaces/{id}/policy` ora copre tutti e 4 gli assi (mode/approval/writable_roots/
+  skill_confirmations), partial-merge, `null`=azzera→eredita. **Validato live via API** (round-trip + clear su
+  Homun, isolato). Gate: **gateway 549 pass**, ui-contract+build+electron verdi. Render UI da vedere a schermo.
 
 ---
 
