@@ -1838,7 +1838,7 @@ body.resizing-drawer {
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr) auto;
   overflow: hidden;
-  padding: 0 clamp(18px, 5vw, 72px);
+  padding: 0 clamp(16px, 3vw, 44px);
 }
 
 /* "Fake-docked" panel: the panel itself is a flush-right full-height column (see
@@ -1877,12 +1877,12 @@ body.resizing-drawer {
      region reliably (same subtree). Sidebar open/close controls live in the footer
      zone, so the titlebar remains a pure drag/header area. */
   width: auto;
-  margin-inline: calc(-1 * clamp(18px, 5vw, 72px));
+  margin-inline: calc(-1 * clamp(16px, 3vw, 44px));
   /* Title aligns with the centered 760 message column (left), but the right-side actions
      (the ⋯ menu) are an INDEPENDENT element pinned to the window's right edge — matching
      the floating workspace island (`.chat-status-stack { right: 24px }`) so the two top-
      right controls line up cleanly instead of the menu sitting inside the chat column. */
-  padding-left: calc(clamp(18px, 5vw, 72px) + max(0px, (100% - 760px) / 2));
+  padding-left: calc(clamp(16px, 3vw, 44px) + max(0px, (100% - 760px) / 2));
   padding-right: 24px;
   -webkit-app-region: drag;
 }
