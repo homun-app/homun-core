@@ -27393,6 +27393,14 @@ struct RuntimeSettings {
     /// `sandbox_mode`. Exposed in Settings by a later UI task.
     #[serde(default = "default_approval_policy")]
     approval_policy: String,
+
+    /// Phase 2 (per-project sandbox policy): the GLOBAL default set of extra writable
+    /// folders granted to the exec fence, beyond the always-writable project root. Empty
+    /// (default) = just the project root. Absolute paths; non-existent/relative entries are
+    /// dropped at resolve time. A per-workspace `WorkspaceRecord.writable_roots` override
+    /// REPLACES this list for that project. `#[serde(default)]` = legacy files upgrade clean.
+    #[serde(default)]
+    writable_roots: Vec<String>,
 }
 
 fn default_adaptive_floor() -> String {
@@ -27416,6 +27424,7 @@ impl Default for RuntimeSettings {
             adaptive_floor: default_adaptive_floor(),
             sandbox_mode: default_sandbox_mode(),
             approval_policy: default_approval_policy(),
+            writable_roots: Vec::new(),
         }
     }
 }
@@ -47880,6 +47889,11 @@ struct WorkspaceRecord {
     sandbox_mode: Option<String>,
     #[serde(default)]
     approval_policy: Option<String>,
+    /// Phase 2 — per-project extra writable folders for the exec fence. `None` = inherit the
+    /// global `RuntimeSettings.writable_roots`; `Some(list)` REPLACES it (the project owns its
+    /// list). The project root is ALWAYS writable regardless; this only ADDS folders.
+    #[serde(default)]
+    writable_roots: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48119,6 +48133,7 @@ fn load_workspaces_file() -> WorkspacesFile {
                 folder: None,
                 sandbox_mode: None,
                 approval_policy: None,
+                writable_roots: None,
             }],
         })
 }
@@ -48445,6 +48460,7 @@ async fn create_workspace(
         folder: Some(folder.to_string()),
         sandbox_mode: None,
         approval_policy: None,
+        writable_roots: None,
     };
     {
         let facade = memory_facade(&state);
@@ -49141,6 +49157,7 @@ mod tests {
             folder: None,
             sandbox_mode: Some("read-only".into()),
             approval_policy: Some("never".into()),
+            writable_roots: None,
         };
         // Partial: only approval changes; sandbox override is preserved.
         let merged =
@@ -49162,6 +49179,19 @@ mod tests {
         assert_eq!(noop.approval_policy.as_deref(), Some("never"));
     }
 
+    // Phase 2 (per-project writable_roots): the global default lives on `RuntimeSettings`
+    // (`Vec<String>`, empty = just the project root) and the per-workspace override on
+    // `WorkspaceRecord` (`Option<Vec<String>>`, None = inherit). Both `#[serde(default)]` so
+    // legacy files without the field deserialize cleanly; a present field round-trips.
+    #[test]
+    fn writable_roots_fields_default_and_round_trip() {
+        let rs: super::RuntimeSettings = serde_json::from_str("{}").unwrap();
+        assert!(rs.writable_roots.is_empty());
+        let wr: super::WorkspaceRecord =
+            serde_json::from_str(r#"{"id":"w","name":"W","writable_roots":["/tmp/extra"]}"#).unwrap();
+        assert_eq!(wr.writable_roots.as_deref(), Some(&["/tmp/extra".to_string()][..]));
+    }
+
     // ADR 0023 UI: each Settings control (adaptive-floor / sandbox / approval) POSTs only
     // its own field. `set_runtime_settings` must MERGE the partial patch so saving one
     // control does not reset the others to their serde defaults — otherwise the three
@@ -49172,6 +49202,7 @@ mod tests {
             adaptive_floor: "on".to_string(),
             sandbox_mode: "danger".to_string(),
             approval_policy: "never".to_string(),
+            writable_roots: Vec::new(),
         };
         // Patch only sandbox_mode → the other two axes are preserved.
         let merged = super::merge_runtime_settings(
@@ -57734,6 +57765,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
             folder: Some("/Users/fabio/Projects/Homun/app".to_string()),
             sandbox_mode: None,
             approval_policy: None,
+            writable_roots: None,
         };
 
         super::upsert_workspace_root_memory_entity(&facade, &workspace).unwrap();
@@ -57745,6 +57777,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
                 folder: Some("/Users/fabio/Projects/Homun".to_string()),
                 sandbox_mode: None,
                 approval_policy: None,
+                writable_roots: None,
             },
         )
         .unwrap();
