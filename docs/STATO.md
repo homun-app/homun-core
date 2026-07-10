@@ -5,6 +5,40 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-10.**
 
+## ⭐ CHECKPOINT 2026-07-10 (quater) — UI Codex-parity + proactivity-answer fix; direzione = rifinitura→early-access
+
+Sessione di rifinitura UX + un fix di comportamento. Tutto su `main`, pushato. Gate: gateway compila +
+nuovo test verde, ui-contract + build verdi.
+
+- **Working-island = "fake column" stile Codex** (`baee4d92`): l'isola è un overlay (absolute) che
+  restringe *virtualmente* la chat via padding, NON una colonna-grid reale (che troncava il testo). Fix del
+  troncamento alla radice: `grid-template-columns: minmax(0,1fr)` sul layout (la colonna implicita aveva
+  `min-width:auto` → un `<code>` lungo allargava tutto e `overflow:hidden` tagliava) + wrap su
+  `.rich-inline-code` + `min-width:0` sulla catena messaggi. Header ⋯ e scrollbar "escono" a piena larghezza
+  (sempre a destra); isola a filo destro, piatta (ombra rimossa). Composer più compatto.
+- **Sidebar più grande + uniforme** (`87b69a4f`, `ac9c4497`): nav/thread/titoli-sezione 13→14px, label/orari
+  12→13px (la chat è 16.5px → divario ridotto); titoli thread **a filo** (slot-icona vuoto collassa) e meno
+  tronchi (`padding-right` 44→12); i 4 header di sezione (Work/Create/Personal/Projects) uniformati a 13px;
+  rimossa la linea-guida verticale dell'albero. Passata font: collassato il cluster di mezzi-pixel
+  (12.5→13, 13.5→14, …) → da ~30 dimensioni a ~18.
+- **Fix proactivity-answer** (`0b647224`): rispondere a una domanda di proactivity (es. onboarding "che ruolo
+  hai?") **non** apre più un turno agentico. Causa (provata dal DB): la scelta era inviata come prompt di chat
+  non vincolato → modello debole in over-agency (da "Sviluppatore" ha creato+eseguito un task sandbox+file).
+  Fix: choice proactivity taggata `purpose=kind`; la risposta va a un nuovo endpoint
+  `POST /api/chat/threads/{id}/proactive_answer` che **cattura la scelta come `preference` Personale** (alimenta
+  le future card) + posta un ack, **zero loop/tool**. Le choice in-task (senza `purpose`) invariate. Test
+  `proactive_answer_capture_is_a_recallable_preference`.
+
+**DIREZIONE SCELTA (Fabio): rifinitura → macOS early-access.** Backlog immediato:
+1. **Composer polish** (Codex-like: toolbar/affordance send/allegati).
+2. **Var-izzazione font strutturale**: aggiungere `--text-2xs: 11px`, instradare i px hardcoded (11/12/13/14)
+   alle var `--text-*` sulle superfici principali (coerenza strutturale, non solo numerica).
+3. Onde di fluidity Codex rimaste (vedi [[homun-codex-fluidity-map]]).
+Poi il ponte al lancio (sito/docs deploy, un-draft release) è breve (vedi [[homun-production-launch-state]]).
+
+⚠️ Preferenza attiva: **niente verifica via computer-use** — Fabio controlla l'app a schermo di persona
+(vedi [[homun-no-computer-verify-unless-asked]]); io faccio build+gate+commit.
+
 ## ⭐ CHECKPOINT 2026-07-10 (ter) — Sandbox policy PER-PROGETTO (Fase 1 completa)
 
 Nuova feature (spec+piano+impl): la policy sandbox non è più solo globale — ogni progetto (e Personale)
