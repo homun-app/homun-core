@@ -140,6 +140,123 @@ function ApprovalPolicyBlock() {
   );
 }
 
+/** A tiny list editor of absolute-path text rows (Phase 2 extra writable folders). Keeps a
+ *  local draft so typing never POSTs per keystroke; commits the cleaned array (trimmed,
+ *  blanks dropped) on blur, add, or remove. The parent decides what an empty array means
+ *  (an explicit `[]` override on a workspace vs the global default). */
+function PathListEditor({
+  paths,
+  disabled,
+  onCommit,
+}: {
+  paths: string[];
+  disabled: boolean;
+  onCommit: (paths: string[]) => void;
+}) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<string[]>(paths);
+  // Re-seed the draft whenever the committed value changes underneath us (reload / override
+  // cleared back to inherit). Comparing the joined form keeps focus while the user types.
+  useEffect(() => {
+    setDraft(paths);
+  }, [paths.join("\n")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const clean = (rows: string[]) => rows.map((p) => p.trim()).filter((p) => p.length > 0);
+
+  return (
+    <div style={{ display: "grid", gap: "var(--s2)" }}>
+      {draft.map((path, index) => (
+        <div key={index} style={{ display: "flex", gap: "var(--s2)", alignItems: "center" }}>
+          <input
+            className="set-input"
+            style={{ flex: 1, fontFamily: "ui-monospace, monospace" }}
+            value={path}
+            disabled={disabled}
+            spellCheck={false}
+            placeholder={t("settings.sandboxWritableRootsPlaceholder")}
+            onChange={(event) =>
+              setDraft((rows) => rows.map((p, i) => (i === index ? event.target.value : p)))
+            }
+            onBlur={() => onCommit(clean(draft))}
+          />
+          <button
+            type="button"
+            className="set-btn"
+            disabled={disabled}
+            aria-label={t("settings.sandboxWritableRootsRemove")}
+            onClick={() => {
+              const next = draft.filter((_, i) => i !== index);
+              setDraft(next);
+              onCommit(clean(next));
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      <div>
+        <button
+          type="button"
+          className="set-btn"
+          disabled={disabled}
+          onClick={() => setDraft((rows) => [...rows, ""])}
+        >
+          + {t("settings.sandboxWritableRootsAdd")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** ADR 0023 / Phase 2 — the global default extra writable folders. Persists to
+ *  `RuntimeSettings.writable_roots` (empty = only the project root stays writable). */
+function DefaultWritableRootsBlock() {
+  const { t } = useTranslation();
+  const [roots, setRoots] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await coreBridge.runtimeSettings();
+        if (!cancelled) setRoots(settings.writable_roots ?? []);
+      } catch {
+        /* leave default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const commit = async (paths: string[]) => {
+    setBusy(true);
+    try {
+      const saved = await coreBridge.setRuntimeSettings({ writable_roots: paths });
+      setRoots(saved.writable_roots ?? []);
+    } catch {
+      /* a later read corrects the optimistic state */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="set-trow"
+      aria-busy={busy}
+      style={{ flexDirection: "column", alignItems: "stretch", gap: "var(--s3)" }}
+    >
+      <div>
+        <div className="tt">{t("settings.sandboxWritableRootsTitle")}</div>
+        <div className="td">{t("settings.sandboxWritableRootsDesc")}</div>
+      </div>
+      <PathListEditor paths={roots} disabled={busy} onCommit={(paths) => void commit(paths)} />
+    </div>
+  );
+}
+
 /** One workspace row: name + effective badge (override vs inherits), expandable into the
  *  two override selects. The empty option (`""`) clears the axis back to the Default by
  *  POSTing JSON `null` — see `merge_workspace_policy` on the gateway. */
@@ -157,7 +274,11 @@ function WorkspacePolicyRow({
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
 
-  const hasOverride = Boolean(record.sandbox_mode) || Boolean(record.approval_policy);
+  // Any axis set (including an explicit empty `writable_roots: []`) counts as an override.
+  const hasOverride =
+    Boolean(record.sandbox_mode) ||
+    Boolean(record.approval_policy) ||
+    Array.isArray(record.writable_roots);
 
   const patch = async (
     field: "sandbox_mode" | "approval_policy",
@@ -169,6 +290,20 @@ function WorkspacePolicyRow({
       const updated = await coreBridge.setWorkspacePolicy(record.id, {
         [field]: value === "" ? null : value,
       });
+      onChanged(updated);
+    } catch {
+      /* a later reload corrects the row */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Phase 2 — post the full writable_roots array (an explicit override, `[]` included) or
+  // `null` to clear back to inheriting the global default.
+  const patchRoots = async (paths: string[] | null) => {
+    setBusy(true);
+    try {
+      const updated = await coreBridge.setWorkspacePolicy(record.id, { writable_roots: paths });
       onChanged(updated);
     } catch {
       /* a later reload corrects the row */
@@ -240,6 +375,39 @@ function WorkspacePolicyRow({
                 </option>
               ))}
             </select>
+          </div>
+          <div
+            className="set-trow"
+            style={{ flexDirection: "column", alignItems: "stretch", gap: "var(--s2)" }}
+          >
+            <div
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--s2)" }}
+            >
+              <div className="tt">{t("settings.sandboxWritableRootsTitle")}</div>
+              <div style={{ display: "flex", gap: "var(--s2)", alignItems: "center" }}>
+                <span className={`set-badge ${Array.isArray(record.writable_roots) ? "green" : "muted"}`}>
+                  {Array.isArray(record.writable_roots)
+                    ? t("settings.sandboxBadgeOverride")
+                    : t("settings.sandboxBadgeInherit")}
+                </span>
+                {Array.isArray(record.writable_roots) && (
+                  <button
+                    type="button"
+                    className="set-btn"
+                    disabled={busy}
+                    onClick={() => void patchRoots(null)}
+                  >
+                    {t("settings.sandboxInheritOption")}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="td">{t("settings.sandboxWritableRootsDesc")}</div>
+            <PathListEditor
+              paths={record.writable_roots ?? []}
+              disabled={busy}
+              onCommit={(paths) => void patchRoots(paths)}
+            />
           </div>
         </div>
       )}
@@ -326,6 +494,7 @@ export function SandboxSettingsView() {
       </p>
       <SandboxModeBlock />
       <ApprovalPolicyBlock />
+      <DefaultWritableRootsBlock />
       <WorkspacePolicyList />
     </div>
   );

@@ -445,6 +445,9 @@ export interface WorkspaceRecord {
   // `RuntimeSettings` default. Set → overrides that axis for every thread in the project.
   sandbox_mode?: string | null;
   approval_policy?: string | null;
+  // Phase 2 — extra writable folders (beyond the always-writable project root). An array
+  // (even empty) is an explicit override; absent/null inherits the global default.
+  writable_roots?: string[] | null;
 }
 
 export interface WorkspacesSnapshot {
@@ -717,6 +720,8 @@ export interface RuntimeSettings {
   adaptive_floor: string;
   sandbox_mode: string;
   approval_policy: string;
+  /** Phase 2 — global default extra writable folders (empty = only the project root). */
+  writable_roots: string[];
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {
@@ -1724,7 +1729,11 @@ async function electronDeleteWorkspace(id: string): Promise<WorkspacesSnapshot> 
 // updated record.
 async function electronSetWorkspacePolicy(
   id: string,
-  patch: { sandbox_mode?: string | null; approval_policy?: string | null },
+  patch: {
+    sandbox_mode?: string | null;
+    approval_policy?: string | null;
+    writable_roots?: string[] | null;
+  },
 ): Promise<WorkspaceRecord> {
   return gatewayPostJson<WorkspaceRecord>(
     `/api/workspaces/${encodeURIComponent(id)}/policy`,
@@ -2719,7 +2728,11 @@ export const coreBridge = {
   deleteWorkspace: (id: string) => electronDeleteWorkspace(id),
   setWorkspacePolicy: (
     id: string,
-    patch: { sandbox_mode?: string | null; approval_policy?: string | null },
+    patch: {
+      sandbox_mode?: string | null;
+      approval_policy?: string | null;
+      writable_roots?: string[] | null;
+    },
   ) => electronSetWorkspacePolicy(id, patch),
   projectAccess: (workspaceId: string) => electronProjectAccess(workspaceId),
   upsertProjectAccess: (workspaceId: string, input: ProjectAccessInput) =>
