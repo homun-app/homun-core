@@ -2,14 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
-  Check,
   ChevronDown,
   ChevronUp,
   Loader2,
   Maximize2,
   Minimize2,
   Monitor,
-  RotateCcw,
   SquareTerminal,
 } from "lucide-react";
 import { coreBridge, type ContainedComputerLive, type TerminalEntry } from "../lib/coreBridge";
@@ -39,7 +37,8 @@ export function ChatComputerPanel({
   const { t } = useTranslation();
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
-  const [view, setView] = useState<"bar" | "expanded" | "full">("bar");
+  // Default to the big browser (Fabio's ask): the live view takes the space, not a thumbnail.
+  const [view, setView] = useState<"bar" | "expanded" | "full">("expanded");
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   void pollRef; // kept for compatibility; no longer used after WS migration
   // Liveness: track WHEN the activity last changed so the panel can show "Xs ago" and a
@@ -157,6 +156,12 @@ export function ChatComputerPanel({
   // threshold is generous to avoid false alarms).
   const idleSec = Math.max(0, Math.floor((now - lastActivityAtRef.current) / 1000));
   const stalled = idleSec >= 45;
+  // Single, alternating status line (Fabio's ask): the browser takes the space, and ONE
+  // line below shows the CURRENT action, cycling as the backend pushes new activity — not a
+  // growing scrollable list. Strip the leading status emoji so it reads as a clean line.
+  const rawAction = live.activity || (steps.length > 0 ? steps[steps.length - 1]?.label : "") || "";
+  const currentAction =
+    rawAction.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "").trim() || t("chat.starting");
 
   return (
     <>
@@ -199,70 +204,7 @@ export function ChatComputerPanel({
           </button>
         </header>
 
-        {!fullscreen && (
-          <div className="cc-body">
-            {view === "bar" && (
-              // Manus-style PiP: an always-visible small LIVE preview while the
-              // browser works. One iframe is mounted at a time (bar OR stage),
-              // so this never doubles the noVNC connection. Click to expand.
-              <button
-                className="cc-thumb"
-                type="button"
-                onClick={() => setView("expanded")}
-                title={t("chat.expandComputer")}
-                aria-label={t("chat.expandComputer")}
-              >
-                <iframe
-                  className="cc-thumb-frame"
-                  title="Preview computer (live)"
-                  src={src}
-                  tabIndex={-1}
-                />
-                <span className="cc-thumb-expand">
-                  <Maximize2 size={13} />
-                </span>
-              </button>
-            )}
-            <div className="cc-plan">
-              <div className="cc-plan-head">
-                Activity progress
-                {steps.length > 0 && <span className="cc-plan-count">{steps.length}</span>}
-              </div>
-              <ul className="cc-plan-steps">
-                {steps.map((step, index) => (
-                  <li className={`cc-step ${step.status}`} key={index}>
-                    {step.status === "retry" ? (
-                      <RotateCcw size={13} />
-                    ) : (
-                      <Check size={13} />
-                    )}
-                    <span>{step.label}</span>
-                  </li>
-                ))}
-                <li className={`cc-step ${stalled ? "stalled" : "running"}`}>
-                  {stalled ? (
-                    <AlertTriangle size={13} />
-                  ) : (
-                    <Loader2 size={13} className="spin" />
-                  )}
-                  <span>
-                    {steps.length === 0 ? t("chat.starting") : t("chat.inProgress")}
-                    {idleSec >= 3 && (
-                      <span className="cc-step-elapsed"> · {idleSec}s</span>
-                    )}
-                    {stalled && (
-                      <span className="cc-step-stalled">
-                        {" "}
-                        — {t("chat.maybeStuck", { defaultValue: "no progress, may be stuck" })}
-                      </span>
-                    )}
-                  </span>
-                </li>
-              </ul>
-            </div>
-          </div>
-        )}
-
+        {/* The browser takes the space; one status line below it alternates the actions. */}
         {showStage && (
           <div className="cc-stage">
             <iframe
@@ -272,6 +214,18 @@ export function ChatComputerPanel({
               allow="clipboard-read; clipboard-write"
               tabIndex={-1}
             />
+          </div>
+        )}
+
+        {!fullscreen && (
+          <div className={`cc-statusline${stalled ? " stalled" : ""}`}>
+            {stalled ? (
+              <AlertTriangle size={13} />
+            ) : (
+              <Loader2 size={13} className="spin" />
+            )}
+            <span className="cc-statusline-text">{currentAction}</span>
+            {idleSec >= 3 && <span className="cc-step-elapsed">· {idleSec}s</span>}
           </div>
         )}
       </div>

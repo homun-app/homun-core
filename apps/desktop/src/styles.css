@@ -8006,6 +8006,35 @@ body.resizing-drawer {
   display: block;
 }
 
+/* Single alternating status line under the big browser: shows the CURRENT action, cycling
+   as the backend pushes new activity (replaces the growing scrollable step list). */
+.cc-statusline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 0;
+}
+.cc-statusline svg {
+  flex: none;
+  color: var(--muted);
+}
+.cc-statusline-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.cc-statusline .cc-step-elapsed {
+  flex: none;
+  color: var(--muted);
+}
+
 /* Terminal view (CLI skill execution) — a dark scrollable console. */
 .cc-term {
   max-height: 260px;
