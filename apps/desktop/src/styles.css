@@ -269,8 +269,8 @@ small {
      This strip paints ABOVE the header, so covering that corner made its `drag` swallow the
      menu's clicks (app-region resolves by paint order). The topbar's own drag still covers
      the freed band, minus the menu's `no-drag` hole. */
-  right: 72px;
-  width: 60px;
+  right: 110px;
+  width: 24px;
 }
 
 .drawer-bottom-trigger {
@@ -1832,13 +1832,32 @@ body.resizing-drawer {
   /* Shared by the detail panel (its width) and the conversation inset below, so the
      two never drift. Desktop-first; the responsive breakpoints handle narrow widths. */
   --detail-panel-w: min(520px, calc(100% - 48px));
+  --island-col-w: 336px;
   height: 100%;
   min-height: 0;
   position: relative;
   display: grid;
+  /* Two columns: the conversation (reflows) and the island as a real COLUMN on the right
+     (Codex-style) — it no longer floats over the chat. Collapsing zeroes the column so the
+     conversation takes the full width. The header spans both; the composer auto-places under
+     the conversation (side panels are position:absolute, so they stay out of the flow). */
+  grid-template-columns: minmax(0, 1fr) var(--island-col-w);
   grid-template-rows: 58px minmax(0, 1fr) auto;
   overflow: hidden;
   padding: 0 clamp(16px, 3vw, 44px);
+}
+.active-task-layout > .task-topbar {
+  grid-column: 1 / -1;
+}
+.active-task-layout > .thread-scroll {
+  grid-column: 1;
+  grid-row: 2;
+}
+.active-task-layout.island-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+.active-task-layout.island-collapsed > .chat-status-stack {
+  display: none;
 }
 
 /* "Fake-docked" panel: the panel itself is a flush-right full-height column (see
@@ -1913,6 +1932,13 @@ body.resizing-drawer {
 /* Header kebab menu: reopens the docked Workbench on a tab (artifacts/files/
    activity) plus a screenshot shortcut, replacing the rows the island dropped.
    Lives in the drag region, so it (and its popover) must opt out of dragging. */
+.task-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
 .chat-header-menu {
   position: relative;
   -webkit-app-region: no-drag;
@@ -2054,19 +2080,25 @@ body.resizing-drawer {
 }
 
 .chat-status-stack {
-  position: absolute;
-  /* Sit clearly BELOW the 58px header row now that both are pinned to the right edge:
-     header controls on top, island below — a clean vertical stack (Claude-style) with no
-     overlap. (The header ⋯ menu's click bug was a separate drag-strip issue, not this.) */
-  top: 64px;
-  right: 24px;
-  z-index: 32;
+  /* The island is now a real right COLUMN (grid cell 2, spanning the scroll + composer rows),
+     not a floating overlay — so it pushes the conversation instead of covering it. */
+  grid-column: 2;
+  grid-row: 2 / 4;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 10px;
-  max-width: min(360px, calc(100vw - 390px));
-  pointer-events: none;
+  padding: 12px 0 16px 14px;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+}
+.chat-status-stack .unified-status-panel,
+.chat-status-stack .workspace-island,
+.chat-status-stack .workspace-island-panel,
+.chat-status-stack .cc-dock {
+  width: 100%;
+  max-width: 100%;
 }
 .chat-status-stack:has(.cc-dock.expanded) {
   max-width: min(360px, calc(100vw - 390px));
@@ -2910,7 +2942,11 @@ body.resizing-drawer {
 
 .thread-scroll {
   min-height: 0;
-  overflow: auto;
+  /* Vertical only: the island is a real column now, so the conversation lives in a narrower
+     grid cell — a stray wide child must not push a horizontal scrollbar on the whole thread
+     (code blocks scroll inside themselves). */
+  overflow-y: auto;
+  overflow-x: hidden;
   scroll-behavior: smooth;
   scrollbar-gutter: stable;
 }

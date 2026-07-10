@@ -91,6 +91,8 @@ export function WorkspaceIsland({
   streaming,
   status,
   threadHasMessages,
+  columnMode,
+  onCollapseColumn,
   onCaptureScreenshot,
   onExportChat,
   onOpenWorkbench,
@@ -112,6 +114,10 @@ export function WorkspaceIsland({
   streaming: boolean;
   status: ChatStreamStatus | null;
   threadHasMessages: boolean;
+  /** In column mode the island is a real layout column (never a floating pill): always show
+   *  the panel, and the header's collapse control hides the whole column via onCollapseColumn. */
+  columnMode?: boolean;
+  onCollapseColumn?: () => void;
   onCaptureScreenshot?: () => void;
   onExportChat: () => void;
   onOpenWorkbench: (tab: WorkbenchTab) => void;
@@ -203,9 +209,13 @@ export function WorkspaceIsland({
 
   if (!hasWorkspaceState && !hadWorkspaceState) return null;
 
+  // In column mode the island is a real layout column, so it always shows the panel — the
+  // pill/auto-collapse dance only made sense for the old floating overlay.
+  const showPanel = columnMode || expanded;
+
   return (
-    <div className={`workspace-island${expanded ? " expanded" : ""}${streaming ? " live" : ""}`}>
-      {!expanded ? (
+    <div className={`workspace-island${showPanel ? " expanded" : ""}${streaming ? " live" : ""}${columnMode ? " column" : ""}`}>
+      {!showPanel ? (
         <button
           className="workspace-island-pill"
           type="button"
@@ -248,6 +258,10 @@ export function WorkspaceIsland({
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
+                  if (columnMode) {
+                    onCollapseColumn?.();
+                    return;
+                  }
                   if (mode === "expanded") setMode("auto");
                   setExpanded(false);
                 }}

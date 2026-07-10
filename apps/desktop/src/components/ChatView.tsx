@@ -57,6 +57,7 @@ import {
   Sparkles,
   Square,
   SquareTerminal,
+  PanelRight,
   ThumbsDown,
   ThumbsUp,
   WandSparkles,
@@ -355,6 +356,9 @@ export function ChatView({
   // Workbench (right-side panel, Claude-Code style): `artifactsOpen` is the
   // open/closed flag; `workbenchTab` is the active tab. Phase 1 ships the
   // "Artefatti" tab; File / Computer / Activity / Piano land in later phases.
+  // The island is a real right COLUMN now: open = it reflows the chat; collapsed = hidden,
+  // chat takes the full width (a header button reopens it). Default open.
+  const [islandOpen, setIslandOpen] = useState(true);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
   const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
@@ -2050,11 +2054,24 @@ export function ChatView({
     : t("chat.active");
   const headerToolPolicy = thread.source ? t("chat.readOnlyChannel") : t("chat.fullLocalTools");
 
+  // The island column reserves space only when it has something to show (else the chat takes
+  // the full width). Content = the thread has messages AND there's a plan/activity/sources/
+  // subagents/live-computer/streaming signal — mirrors the island's own visibility.
+  const islandHasContent =
+    threadMessages.length > 0 &&
+    (workspacePlanSteps.length > 0 ||
+      conversationActivity.length > 0 ||
+      islandSources.length > 0 ||
+      projectedSubagents.length > 0 ||
+      computerLiveStatus.active ||
+      promptSubmitting ||
+      Boolean(streamingAssistantId));
+  const islandColumnVisible = islandOpen && islandHasContent;
   return (
     <section
       className={`chat-view active-task-layout${detailsOpen || workbenchOpen ? " panel-open" : ""}${
         threadMessages.length === 0 ? " is-empty" : ""
-      }`}
+      }${islandColumnVisible ? "" : " island-collapsed"}`}
       aria-labelledby="chat-title"
     >
       <header className="task-topbar">
@@ -2063,14 +2080,27 @@ export function ChatView({
             <span id="chat-title">{thread.title}</span>
           </div>
         </div>
-        <ChatHeaderMenu
-          onOpenWorkbench={(tab) => {
-            setArtifactsInitial(null);
-            setWorkbenchTab(tab);
-            setArtifactsOpen(true);
-          }}
-          onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
-        />
+        <span className="task-header-actions">
+          {!islandOpen && islandHasContent && (
+            <button
+              type="button"
+              className="chat-header-menu-trigger"
+              title={t("chat.panel")}
+              aria-label={t("chat.panel")}
+              onClick={() => setIslandOpen(true)}
+            >
+              <PanelRight size={17} />
+            </button>
+          )}
+          <ChatHeaderMenu
+            onOpenWorkbench={(tab) => {
+              setArtifactsInitial(null);
+              setWorkbenchTab(tab);
+              setArtifactsOpen(true);
+            }}
+            onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
+          />
+        </span>
       </header>
 
       <div className="chat-status-stack" aria-label="Live workspace status">
@@ -2090,6 +2120,8 @@ export function ChatView({
             streaming={promptSubmitting || Boolean(streamingAssistantId)}
             status={streamStatus}
             threadHasMessages={threadMessages.length > 0}
+            columnMode
+            onCollapseColumn={() => setIslandOpen(false)}
             onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
             onExportChat={() => void exportChatMarkdown()}
             onOpenWorkbench={(tab) => {
