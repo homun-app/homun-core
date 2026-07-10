@@ -893,7 +893,8 @@ body.resizing-drawer {
   padding: 0 6px;
   color: var(--muted);
   background: transparent;
-  font-size: var(--text-base);
+  /* Match the other section headers (Work/Create/Personal/Projects) at --text-sm. */
+  font-size: var(--text-sm);
   text-align: left;
 }
 /* Trailing chevron (e.g. "Archiviati") pushed right; the channels count uses its own
@@ -1055,7 +1056,8 @@ body.resizing-drawer {
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--faint);
-  font-size: 12px;
+  /* Same size as the Work/Create nav-group labels so all top-level section headers match. */
+  font-size: var(--text-sm);
   font-weight: 520;
   text-align: left;
   cursor: pointer;
@@ -1203,9 +1205,10 @@ body.resizing-drawer {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Nesting is conveyed by the indent alone — no vertical tree-guide line (applies to both
+     the Personal and Projects trees, which share this container). */
   margin: 2px 0 2px 11px;
   padding-left: 9px;
-  border-left: 1.5px solid var(--line);
 }
 
 .drawer-project-edit {
