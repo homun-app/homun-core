@@ -448,6 +448,9 @@ export interface WorkspaceRecord {
   // Phase 2 — extra writable folders (beyond the always-writable project root). An array
   // (even empty) is an explicit override; absent/null inherits the global default.
   writable_roots?: string[] | null;
+  // Phase 3 — skill-confirmation categories that must ALWAYS confirm in this project
+  // (`delete|financial|medical|sensitive-data`). Array = override; absent/null inherits.
+  skill_confirmations?: string[] | null;
 }
 
 export interface WorkspacesSnapshot {
@@ -722,6 +725,8 @@ export interface RuntimeSettings {
   approval_policy: string;
   /** Phase 2 — global default extra writable folders (empty = only the project root). */
   writable_roots: string[];
+  /** Phase 3 — global default skill-confirmation categories (empty = none forced). */
+  skill_confirmations: string[];
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {
@@ -1733,6 +1738,7 @@ async function electronSetWorkspacePolicy(
     sandbox_mode?: string | null;
     approval_policy?: string | null;
     writable_roots?: string[] | null;
+    skill_confirmations?: string[] | null;
   },
 ): Promise<WorkspaceRecord> {
   return gatewayPostJson<WorkspaceRecord>(
@@ -2732,6 +2738,7 @@ export const coreBridge = {
       sandbox_mode?: string | null;
       approval_policy?: string | null;
       writable_roots?: string[] | null;
+      skill_confirmations?: string[] | null;
     },
   ) => electronSetWorkspacePolicy(id, patch),
   projectAccess: (workspaceId: string) => electronProjectAccess(workspaceId),

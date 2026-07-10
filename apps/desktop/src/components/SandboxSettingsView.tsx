@@ -257,6 +257,109 @@ function DefaultWritableRootsBlock() {
   );
 }
 
+// Phase 3 — the skill-confirmation category tokens. Must match `SensitiveCategory::parse`
+// on the gateway exactly (`delete|financial|medical|sensitive-data`).
+const SKILL_CONFIRM_CATEGORIES = ["delete", "financial", "medical", "sensitive-data"] as const;
+const SKILL_CONFIRM_LABELS: Record<(typeof SKILL_CONFIRM_CATEGORIES)[number], string> = {
+  delete: "settings.sandboxSkillConfirmDelete",
+  financial: "settings.sandboxSkillConfirmFinancial",
+  medical: "settings.sandboxSkillConfirmMedical",
+  "sensitive-data": "settings.sandboxSkillConfirmSensitive",
+};
+
+/** The 4 always-confirm category checkboxes. Emits the checked array in canonical order so
+ *  the posted value is stable regardless of click order. */
+function SkillConfirmCheckboxes({
+  selected,
+  disabled,
+  onToggle,
+}: {
+  selected: string[];
+  disabled: boolean;
+  onToggle: (next: string[]) => void;
+}) {
+  const { t } = useTranslation();
+  const toggle = (category: string, checked: boolean) => {
+    const set = new Set(selected);
+    if (checked) set.add(category);
+    else set.delete(category);
+    onToggle(SKILL_CONFIRM_CATEGORIES.filter((c) => set.has(c)));
+  };
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--s3)" }}>
+      {SKILL_CONFIRM_CATEGORIES.map((category) => (
+        <label
+          key={category}
+          style={{ display: "flex", gap: "var(--s2)", alignItems: "center", cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={selected.includes(category)}
+            onChange={(event) => toggle(category, event.target.checked)}
+          />
+          <span>{t(SKILL_CONFIRM_LABELS[category])}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+/** ADR 0023 / Phase 3 — the global default skill-confirmation categories. Persists to
+ *  `RuntimeSettings.skill_confirmations` (empty = no category is force-confirmed by default). */
+function DefaultSkillConfirmationsBlock() {
+  const { t } = useTranslation();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await coreBridge.runtimeSettings();
+        if (!cancelled) setSelected(settings.skill_confirmations ?? []);
+      } catch {
+        /* leave default */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const commit = async (next: string[]) => {
+    setSelected(next);
+    setBusy(true);
+    try {
+      const saved = await coreBridge.setRuntimeSettings({ skill_confirmations: next });
+      setSelected(saved.skill_confirmations ?? []);
+    } catch {
+      /* a later read corrects the optimistic state */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="set-trow"
+      aria-busy={busy}
+      style={{ flexDirection: "column", alignItems: "stretch", gap: "var(--s3)" }}
+    >
+      <div>
+        <div className="tt">{t("settings.sandboxSkillConfirmTitle")}</div>
+        <div className="td">{t("settings.sandboxSkillConfirmDescDefault")}</div>
+      </div>
+      <SkillConfirmCheckboxes
+        selected={selected}
+        disabled={busy}
+        onToggle={(next) => void commit(next)}
+      />
+    </div>
+  );
+}
+
 /** One workspace row: name + effective badge (override vs inherits), expandable into the
  *  two override selects. The empty option (`""`) clears the axis back to the Default by
  *  POSTing JSON `null` — see `merge_workspace_policy` on the gateway. */
@@ -278,7 +381,8 @@ function WorkspacePolicyRow({
   const hasOverride =
     Boolean(record.sandbox_mode) ||
     Boolean(record.approval_policy) ||
-    Array.isArray(record.writable_roots);
+    Array.isArray(record.writable_roots) ||
+    Array.isArray(record.skill_confirmations);
 
   const patch = async (
     field: "sandbox_mode" | "approval_policy",
@@ -304,6 +408,22 @@ function WorkspacePolicyRow({
     setBusy(true);
     try {
       const updated = await coreBridge.setWorkspacePolicy(record.id, { writable_roots: paths });
+      onChanged(updated);
+    } catch {
+      /* a later reload corrects the row */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Phase 3 — post the full skill-confirmation array (override, `[]` included) or `null` to
+  // clear back to inheriting the global default.
+  const patchConfirms = async (categories: string[] | null) => {
+    setBusy(true);
+    try {
+      const updated = await coreBridge.setWorkspacePolicy(record.id, {
+        skill_confirmations: categories,
+      });
       onChanged(updated);
     } catch {
       /* a later reload corrects the row */
@@ -409,6 +529,39 @@ function WorkspacePolicyRow({
               onCommit={(paths) => void patchRoots(paths)}
             />
           </div>
+          <div
+            className="set-trow"
+            style={{ flexDirection: "column", alignItems: "stretch", gap: "var(--s2)" }}
+          >
+            <div
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "var(--s2)" }}
+            >
+              <div className="tt">{t("settings.sandboxSkillConfirmTitle")}</div>
+              <div style={{ display: "flex", gap: "var(--s2)", alignItems: "center" }}>
+                <span className={`set-badge ${Array.isArray(record.skill_confirmations) ? "green" : "muted"}`}>
+                  {Array.isArray(record.skill_confirmations)
+                    ? t("settings.sandboxBadgeOverride")
+                    : t("settings.sandboxBadgeInherit")}
+                </span>
+                {Array.isArray(record.skill_confirmations) && (
+                  <button
+                    type="button"
+                    className="set-btn"
+                    disabled={busy}
+                    onClick={() => void patchConfirms(null)}
+                  >
+                    {t("settings.sandboxInheritOption")}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="td">{t("settings.sandboxSkillConfirmDesc")}</div>
+            <SkillConfirmCheckboxes
+              selected={record.skill_confirmations ?? []}
+              disabled={busy}
+              onToggle={(next) => void patchConfirms(next)}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -495,6 +648,7 @@ export function SandboxSettingsView() {
       <SandboxModeBlock />
       <ApprovalPolicyBlock />
       <DefaultWritableRootsBlock />
+      <DefaultSkillConfirmationsBlock />
       <WorkspacePolicyList />
     </div>
   );
