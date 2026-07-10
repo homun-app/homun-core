@@ -1,7 +1,7 @@
 # ADR 0027 — Memory facade lock-free (out-of-path): rimuovere il `Mutex<MemoryFacade>` globale, pool WAL come unico path
 
-- **Stato:** Proposed
-- **Data:** 2026-07-09
+- **Stato:** **Implemented** (2026-07-10) — vedi «Nota di implementazione» in fondo.
+- **Data:** 2026-07-09 (proposta) · 2026-07-10 (implementazione)
 - **Relazioni:** **completa/realizza [ADR 0022](0022-memory-as-out-of-path-service.md)** ("memory as an
   out-of-path service"); **motivato dal gateway-freeze del 2026-07-09** (backtrace del processo congelato,
   memoria `homun-gateway-freeze-resilience`); tocca il **Caposaldo #1** (un solo `MemoryFacade`, il layer
@@ -87,3 +87,27 @@ Layer di supporto (backstop, non la cura):
 > Implementazione: coordinare con la sessione/fix di resilienza (`homun-gateway-freeze-resilience`). Il timeout
 > è già landato come backstop; questo ADR è la cura di radice. Gate: i test del pool WAL esistono (Tappa 2) +
 > un `health_stays_live` che tenga specificamente il lock del **memory-facade**.
+
+---
+
+## Nota di implementazione (2026-07-10)
+
+Implementato in due move sul ramo `fix/workflow-route-plan-precedence`, dopo aver **riprodotto il freeze live**
+sul build corrente (che aveva già il fix headers-timeout → conferma: backstop, non cura) e averne isolato dal
+`sample` il possessore del lock: la **rigenerazione del knowledge-graph** (`sweep_graph_orphans`/`regenerate_graph_links`,
+avvio + post-turno) tiene a lungo la contesa mentre gli endpoint memoria della working-island (`memory_goals_list`,
+`objective_block`, `memory_project_briefing`, `memory_artifacts`) si accodano.
+
+- **Move 1 (`01850b8d`)** — rimosso il `Mutex` esterno: `AppState.memory_facade: Arc<Mutex<MemoryFacade>>` →
+  `Arc<MemoryFacade>`; `lock_memory_facade` (+`memory_store_lock_error`) cancellati, ~82 call-site convertiti ad
+  accesso diretto (compiler-verificato). Nessuna sequenza read-modify-write richiedeva atomicità cross-write (lo
+  sweep clear→relink era **già** non-atomico sotto il vecchio mutex, che veniva preso/rilasciato per-chiamata).
+  Esito: il freeze permanente sparisce (nessun handler tiene più un lock del facade attraverso una op lenta).
+- **Move 2 (`4e…`/store.rs)** — `pool_enabled()` default → **ON**: il pool WAL (writer dedicata + N reader) è il
+  path di default; `HOMUN_MEMORY_POOL=off` resta escape-hatch verso `Single`. `Single` NON è stato ancora
+  cancellato (rete di sicurezza pre-demo; ritiro completo = follow-up dopo che WAL è provato nell'uso reale).
+
+**Validazione live (data-dir reale dell'utente, grafo grande):** `memory.sqlite` passa a `journal_mode=wal`;
+sondando gli endpoint memoria **durante lo sweep graph-regen d'avvio**, le letture rispondono **200×40, 000×0**
+(prima, in `Single`, ~15s di 000). Test verdi: memory-crate, engine 81, gateway (WAL-default). Il freeze è chiuso
+alla radice, non solo mitigato.
