@@ -19228,6 +19228,45 @@ fn resolved_sandbox_policy(state: &AppState, thread_id: Option<&str>) -> Sandbox
     resolved_sandbox_mode(state, thread_id).resolve(root.as_deref())
 }
 
+/// Pure precedence core for Phase-2 extra writable roots: a per-workspace override REPLACES
+/// the global default (a project that declares its own list OWNS it — we do NOT merge, so a
+/// project can deliberately shrink the global set), and `None` inherits the global default.
+/// Returns the raw string list; existence/absoluteness filtering happens in
+/// [`resolved_writable_roots`] so this stays IO-free + unit-testable.
+fn resolve_extra_roots(ws: Option<&[String]>, global: &[String]) -> Vec<String> {
+    match ws {
+        Some(list) => list.to_vec(),
+        None => global.to_vec(),
+    }
+}
+
+/// The resolved writable roots for the exec fence on this thread: the project root FIRST
+/// (ALWAYS writable — the fence never removes it) plus the resolved extra roots (per-workspace
+/// override if `Some`, else the global `RuntimeSettings.writable_roots`). Extra entries are
+/// jailed to EXISTING ABSOLUTE directories (relative / non-existent entries are dropped so a
+/// typo never breaks or silently widens the fence) and de-duplicated. Feeds
+/// `build_sandbox_command` in `run_in_project`.
+///
+/// Reconciliation invariant: this only ADDS folders on top of the always-present project root
+/// — it can never disable the OS fence (Phase 2 goal).
+fn resolved_writable_roots(state: &AppState, thread_id: Option<&str>) -> Vec<std::path::PathBuf> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(root) = project_root_for_thread(state, thread_id) {
+        roots.push(root);
+    }
+    let ws = workspace_record_for_thread(state, thread_id).and_then(|w| w.writable_roots);
+    let extra = resolve_extra_roots(ws.as_deref(), &load_runtime_settings().writable_roots);
+    for entry in extra {
+        let path = std::path::PathBuf::from(entry.trim());
+        // Only absolute, currently-existing directories may widen the fence — anything else
+        // is dropped (a typo neither fails the run nor silently opens an unintended path).
+        if path.is_absolute() && path.is_dir() && !roots.contains(&path) {
+            roots.push(path);
+        }
+    }
+    roots
+}
+
 /// The approval axis: env `HOMUN_APPROVAL_POLICY` > per-workspace override > persisted
 /// global `RuntimeSettings.approval_policy` > default `on-request`. Behavior-preserving
 /// when no workspace override is set: the non-autonomous case keeps asking on effectful
@@ -49190,6 +49229,23 @@ mod tests {
         let wr: super::WorkspaceRecord =
             serde_json::from_str(r#"{"id":"w","name":"W","writable_roots":["/tmp/extra"]}"#).unwrap();
         assert_eq!(wr.writable_roots.as_deref(), Some(&["/tmp/extra".to_string()][..]));
+    }
+
+    // Phase 2 precedence core: a per-workspace override REPLACES the global default (a
+    // project that declares its own extra-roots list OWNS it — no merge), and `None`
+    // inherits the global default. IO-free so the precedence is unit-testable.
+    #[test]
+    fn resolve_extra_roots_override_replaces_global() {
+        assert_eq!(
+            super::resolve_extra_roots(Some(&["/a".to_string()]), &["/g".to_string()]),
+            vec!["/a".to_string()]
+        );
+        assert_eq!(
+            super::resolve_extra_roots(None, &["/g".to_string()]),
+            vec!["/g".to_string()]
+        );
+        // An explicit EMPTY override still replaces (shrinks to just the project root).
+        assert!(super::resolve_extra_roots(Some(&[]), &["/g".to_string()]).is_empty());
     }
 
     // ADR 0023 UI: each Settings control (adaptive-floor / sandbox / approval) POSTs only
