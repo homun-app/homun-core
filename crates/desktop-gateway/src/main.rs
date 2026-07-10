@@ -47803,6 +47803,12 @@ struct WorkspaceRecord {
     /// every conversation in this project. None for the legacy default project.
     #[serde(default)]
     folder: Option<String>,
+    /// ADR 0023 — per-workspace policy overrides. `None` = inherit the global default
+    /// (`runtime-settings.json`). Absent in legacy workspaces.json → None → behavior-preserving.
+    #[serde(default)]
+    sandbox_mode: Option<String>,
+    #[serde(default)]
+    approval_policy: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48040,6 +48046,8 @@ fn load_workspaces_file() -> WorkspacesFile {
                 id: default_id,
                 name: "Predefinito".to_string(),
                 folder: None,
+                sandbox_mode: None,
+                approval_policy: None,
             }],
         })
 }
@@ -48284,6 +48292,8 @@ async fn create_workspace(
         id,
         name,
         folder: Some(folder.to_string()),
+        sandbox_mode: None,
+        approval_policy: None,
     };
     {
         let facade = memory_facade(&state);
@@ -48741,6 +48751,26 @@ mod tests {
         // With no HOME, only the project root is writable.
         let no_home = workspace_write_roots(project, None);
         assert_eq!(no_home, vec![project.to_path_buf()]);
+    }
+
+    // Per-workspace policy (Fase 1): the new override fields on `WorkspaceRecord` default
+    // to `None` (absent in legacy workspaces.json → inherit the global default) and
+    // round-trip when present. Behavior-preserving on upgrade.
+    #[test]
+    fn workspace_record_policy_overrides_default_to_none_and_round_trip() {
+        let legacy: super::WorkspaceRecord =
+            serde_json::from_str(r#"{"id":"w1","name":"P","folder":"/tmp/p"}"#).unwrap();
+        assert_eq!(legacy.sandbox_mode, None);
+        assert_eq!(legacy.approval_policy, None);
+        let with: super::WorkspaceRecord = serde_json::from_str(
+            r#"{"id":"w1","name":"P","sandbox_mode":"read-only","approval_policy":"never"}"#,
+        )
+        .unwrap();
+        assert_eq!(with.sandbox_mode.as_deref(), Some("read-only"));
+        assert_eq!(with.approval_policy.as_deref(), Some("never"));
+        let back = serde_json::to_string(&with).unwrap();
+        assert!(back.contains("read-only"));
+        assert!(back.contains("never"));
     }
 
     // ADR 0023 (reconciled): the sandbox/approval resolvers — env-override > persisted
@@ -57382,6 +57412,8 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
             id: "workspace_test".to_string(),
             name: "Homun".to_string(),
             folder: Some("/Users/fabio/Projects/Homun/app".to_string()),
+            sandbox_mode: None,
+            approval_policy: None,
         };
 
         super::upsert_workspace_root_memory_entity(&facade, &workspace).unwrap();
@@ -57391,6 +57423,8 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
                 id: workspace.id.clone(),
                 name: "Homun App".to_string(),
                 folder: Some("/Users/fabio/Projects/Homun".to_string()),
+                sandbox_mode: None,
+                approval_policy: None,
             },
         )
         .unwrap();
