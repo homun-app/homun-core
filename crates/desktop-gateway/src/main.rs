@@ -48976,6 +48976,75 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    // Per-workspace chokepoint (Fase 1): the `write_project_file` read-only gate now honors
+    // the thread's WORKSPACE override, not just the global default. A thread in a workspace
+    // whose `sandbox_mode = read-only` is blocked; a thread in a workspace with no override
+    // inherits the global `workspace-write` and writes. Proves the resolver rewiring reaches
+    // the real file chokepoint.
+    #[test]
+    fn write_project_file_honors_per_workspace_read_only() {
+        let _env = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let dir = isolated_gateway_test_dir("per-workspace-write");
+        std::fs::create_dir_all(&dir).expect("create temp data dir");
+        let _data = TestGatewayDataDir::new(&dir);
+        // SAFETY: env-mutation under TEST_ENV_LOCK; env must not shadow the workspace axis.
+        unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); }
+
+        // A real project folder both workspaces point at, so the inheriting workspace's
+        // write actually lands on disk (the read-only one is blocked before the folder).
+        let project = dir.join("project");
+        std::fs::create_dir_all(&project).expect("create project folder");
+        let project_str = project.to_string_lossy().replace('\\', "\\\\");
+
+        // Global default = workspace-write; "ro" overrides to read-only, "rw" inherits.
+        std::fs::write(
+            dir.join("runtime-settings.json"),
+            r#"{"adaptive_floor":"off","sandbox_mode":"workspace-write","approval_policy":"on-request"}"#,
+        )
+        .expect("write runtime settings");
+        std::fs::write(
+            dir.join("workspaces.json"),
+            format!(
+                r#"{{"active":"rw","workspaces":[
+                    {{"id":"ro","name":"RO","folder":"{project_str}","sandbox_mode":"read-only"}},
+                    {{"id":"rw","name":"RW","folder":"{project_str}"}}
+                ]}}"#
+            ),
+        )
+        .expect("write workspaces file");
+
+        let state = super::AppState::for_tests();
+        let (t_ro, t_rw) = {
+            let store = state.chat_store.lock().expect("lock chat store");
+            (
+                store.create_thread("ro").expect("create ro thread").thread_id,
+                store.create_thread("rw").expect("create rw thread").thread_id,
+            )
+        };
+
+        // Read-only workspace → blocked, nothing written.
+        let blocked = super::write_project_file(&state, Some(&t_ro), "note.txt", "x");
+        assert!(
+            blocked.starts_with(super::READ_ONLY_BLOCKED_MARKER),
+            "expected a read-only block, got: {blocked}"
+        );
+
+        // Inheriting workspace → global workspace-write applies → the write lands.
+        let ok = super::write_project_file(&state, Some(&t_rw), "note.txt", "x");
+        assert!(
+            !ok.starts_with(super::READ_ONLY_BLOCKED_MARKER),
+            "expected a successful write, got: {ok}"
+        );
+        assert!(
+            project.join("note.txt").is_file(),
+            "the inheriting workspace should have written the file"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     // ADR 0023 UI: each Settings control (adaptive-floor / sandbox / approval) POSTs only
     // its own field. `set_runtime_settings` must MERGE the partial patch so saving one
     // control does not reset the others to their serde defaults — otherwise the three
