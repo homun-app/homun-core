@@ -2650,6 +2650,153 @@ body.resizing-drawer {
   font-size: 12px;
 }
 
+/* ── Cockpit redesign (Codex/ZCode): one fused card, monochrome. The ONLY accent is the
+   done check — every other glyph is text/muted grayscale. Sections stack, hairline-split. ── */
+.wi-head {
+  justify-content: space-between;
+  margin-bottom: 0;
+  padding: 2px 4px 8px;
+}
+.wi-head .wi-status {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.wi-head .wi-status svg {
+  flex: none;
+}
+
+.wi-menu .wi-menu-label {
+  padding: 6px 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.wi-menu .wi-menu-item {
+  justify-content: flex-start;
+  gap: 9px;
+}
+.wi-menu .wi-menu-item svg {
+  flex: none;
+  color: var(--muted);
+}
+.wi-menu .wi-menu-item > span {
+  flex: 1;
+  min-width: 0;
+}
+.wi-menu .wi-menu-count {
+  flex: none;
+  color: var(--muted);
+  font-style: normal;
+}
+.wi-menu .wi-menu-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--line);
+}
+
+.wi-section {
+  padding: 10px 6px;
+  border-top: 1px solid var(--line);
+}
+.wi-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.wi-section-head > span:first-child {
+  flex: 1;
+  text-align: left;
+}
+.wi-section-head em {
+  flex: none;
+  color: var(--muted);
+  font-style: normal;
+}
+.wi-section-toggle {
+  cursor: pointer;
+}
+.wi-section-toggle:hover {
+  color: var(--text);
+}
+.wi-section .wi-steps {
+  margin: 0;
+}
+
+/* Monochrome plan: neutralize the old brand-tinted current row + red blocked row.
+   Done stays green — the single accent that marks completion. */
+.wi-steps li.current {
+  background: transparent;
+  color: var(--text);
+  font-weight: 400;
+}
+.wi-steps li.current svg {
+  color: var(--text);
+}
+.wi-steps li.blocked {
+  color: var(--text);
+}
+.wi-step-icon-done {
+  color: var(--green);
+}
+.wi-step-icon-current {
+  color: var(--text);
+}
+.wi-step-icon-todo {
+  color: var(--line-strong);
+}
+.wi-step-icon-blocked {
+  color: var(--muted);
+}
+
+/* Activity + Sources */
+.wi-activity .wi-latest {
+  margin: 6px 0 0;
+}
+.wi-activity .wi-activity-caret {
+  margin-left: 0;
+}
+.wi-source {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+.wi-source .wi-source-icon {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+}
+.wi-source .wi-source-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wi-source em {
+  flex: none;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 11px;
+}
+
 .floating-menu {
   position: absolute;
   top: calc(100% + 8px);

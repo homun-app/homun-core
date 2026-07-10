@@ -398,34 +398,27 @@ assertMatches(
 );
 assertContains("src/components/ChatView.tsx", "<WorkspaceIsland", "closed operational plan markers must feed the ambient workspace island");
 assertContains("src/components/ChatView.tsx", "workspacePlanSteps", "workspace island must derive progress from closed operational plan markers");
-assertContains("src/components/WorkspaceIsland.tsx", "Workspace island options", "workspace island must expose its expand/collapse preference menu");
+assertContains("src/components/WorkspaceIsland.tsx", "Panel mode", "workspace island must expose its expand/collapse preference menu");
 assertContains("src/components/WorkspaceIsland.tsx", "wi-progress", "workspace island must render collapsible progress inside the island");
 assertContains("src/components/WorkspaceIsland.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
 assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
 assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
 assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "chat header (island or kebab menu) must wire onOpenWorkbench(tab) to open the docked Workbench");
-assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"plan\")}", "workspace island plan progress must open the Plan workbench");
+// The redundant "Plan N/M" row was removed — Progress IS the plan (one section, not two).
+// Sources (artifacts + uploaded files) are fused into the island; each opens the Workbench.
+assertContains("src/components/WorkspaceIsland.tsx", "wi-sources", "workspace island must render the fused Sources section");
 // The activity row reveals its accumulated conversation steps INLINE. It used to open the
 // Workbench "activity" tab, but that tab renders background TASKS (activeTasks), not these
 // conversation activity steps — so clicking showed nothing. The island now owns the reveal.
 assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => setActivityOpen((value) => !value)}", "workspace island activity row must reveal its accumulated steps inline");
 assertContains("src/components/WorkspaceIsland.tsx", "wi-activity-list", "workspace island must render the inline activity list");
-// Task 4b: the island is now a lean cockpit — Plan (3-step window) + Activity only.
-// Artifacts/Files/Goals/Memory rows moved out (destined for a header menu, Task 5).
+// Cockpit redesign: one fused card — Objective → Progress (3-step window) → Activity →
+// Sources. Sources (artifacts + uploaded files) are fused back IN and open the Workbench;
+// Goals/Memory stay out. The separate ProjectContextPanel is retired (island owns the goal).
 assertContains(
   "src/components/WorkspaceIsland.tsx",
   "threeStepWindow",
   "island plan must use the 3-step auto-focus window"
-);
-assertNotContains(
-  "src/components/WorkspaceIsland.tsx",
-  "onOpenWorkbench(\"artifacts\")",
-  "artifacts row must be removed from the island (moved to the header menu)"
-);
-assertNotContains(
-  "src/components/WorkspaceIsland.tsx",
-  "onOpenWorkbench(\"files\")",
-  "files row must be removed from the island"
 );
 assertNotContains(
   "src/components/WorkspaceIsland.tsx",

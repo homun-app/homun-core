@@ -137,7 +137,6 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
-import { ProjectContextPanel } from "./ProjectContextPanel";
 import { WorkspaceIsland } from "./WorkspaceIsland";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
 import type {
@@ -564,6 +563,28 @@ export function ChatView({
     }
     return out;
   }, [messages]);
+  // "Sources" projection for the island: generated artifacts + uploaded files, monochrome.
+  // `kind` only picks the glyph (image vs document); `meta` is a one-word provenance hint.
+  const islandSources = useMemo<IslandSource[]>(() => {
+    const out: IslandSource[] = [];
+    for (const artifact of workbenchArtifacts) {
+      const name = artifact.projectRelativePath || artifact.name;
+      const isImage = ARTIFACT_IMAGE_EXT.includes(artifactExt(name));
+      out.push({
+        name,
+        kind: isImage ? "image" : "artifact",
+        meta: artifact.updated ? "updated" : artifact.source === "project" ? "project" : "artifact",
+      });
+    }
+    for (const file of uploadedFiles) {
+      out.push({
+        name: file.title,
+        kind: file.kind === "image" ? "image" : "file",
+        meta: "uploaded",
+      });
+    }
+    return out;
+  }, [workbenchArtifacts, uploadedFiles]);
   const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
@@ -2038,10 +2059,10 @@ export function ChatView({
       </header>
 
       <div className="chat-status-stack" aria-label="Live workspace status">
-        {/* ADR 0022: un unico pannello unificato — ProjectContextPanel (solo progetti)
-            + WorkspaceIsland fusi visivamente in una sola card contigua, senza gap. */}
-        <div className={`unified-status-panel${thread.workspaceId ? " has-project-context" : ""}`}>
-          {thread.workspaceId && <ProjectContextPanel threadId={thread.threadId} />}
+        {/* One fused cockpit. The separate ProjectContextPanel (objective + a verbose
+            "open loops" list) was retired: the island owns the objective, and the loop
+            list read as clutter. Everything the agent shows lives in this single card. */}
+        <div className="unified-status-panel">
           <WorkspaceIsland
             threadId={thread.threadId}
             objective={projectObjective}
@@ -2049,6 +2070,7 @@ export function ChatView({
             computerActivity={computerLiveStatus.activity}
             computerLive={computerLiveStatus.active}
             planSteps={workspacePlanSteps}
+            sources={islandSources}
             streaming={promptSubmitting || Boolean(streamingAssistantId)}
             status={streamStatus}
             threadHasMessages={threadMessages.length > 0}
@@ -3814,6 +3836,14 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
  *  background/scheduled tasks; "plan" = the orchestrator's operational plan.
  *  (Computer stays docked above the composer by design.) */
 export type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan";
+
+/** A generated artifact or uploaded file, projected into the island's "Sources" section.
+ *  `kind` only selects the (monochrome) glyph; `meta` is a one-word provenance hint. */
+export interface IslandSource {
+  name: string;
+  kind: "artifact" | "file" | "image";
+  meta?: string;
+}
 
 // Shared view metadata for the panel: the header dropdown (chat top-right) and the
 // in-panel title both read from here, so labels/icons never drift. Mock interaction:

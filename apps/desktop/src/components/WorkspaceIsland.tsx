@@ -1,52 +1,53 @@
 import {
   AlertTriangle,
   ArrowRight,
+  Camera,
   Check,
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  Download,
-  FileImage,
-  ListTodo,
+  Circle,
+  Copy,
+  FileText,
+  Image as ImageIcon,
+  Layers,
   Loader2,
   MoreHorizontal,
-  SquareTerminal,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { currentStepIndex, threeStepWindow } from "../lib/islandPlan";
-import type { ChatStreamStatus, PlanStep, WorkbenchTab } from "./ChatView";
+import type { ChatStreamStatus, IslandSource, PlanStep, WorkbenchTab } from "./ChatView";
 
-// Single-row renderer shared by the before/window/after segments of the 3-step
-// plan window: status drives the icon (done = Check, doing = spinner, blocked =
-// AlertTriangle, bare todo = hollow circle) so the three segments stay visually
-// consistent even though only `window` is always-visible and before/after collapse.
-// `isCurrent` flags the row the plan is on RIGHT NOW — which may be a step the model
-// never marked "doing" (currentStepIndex falls back to the first still-open step) —
-// so it gets the accent highlight + trailing arrow even while showing its todo icon.
-// `live` gates the "in progress" affordances (spinner + active highlight + arrow): only
-// a STREAMING turn has a step actively running. On a concluded turn nothing is in
-// progress, so those affordances are suppressed — otherwise a step the model left marked
-// "doing" would spin forever and read as "still working" after the turn already ended.
+// Single checklist row (Progress). Monochrome: the ONLY color is the done check.
+// `live` gates the "in progress" affordances — a concluded turn has no active step, so
+// the spinner and the current-step arrow are suppressed (otherwise a step the model left
+// marked "doing" would spin forever and read as still-working after the turn ended).
 function renderPlanStepRow(step: PlanStep, key: string, isCurrent: boolean, live: boolean) {
   const active = live && (isCurrent || step.status === "doing");
+  const icon =
+    step.status === "done" ? (
+      <Check size={14} className="wi-step-icon-done" />
+    ) : step.status === "blocked" ? (
+      <AlertTriangle size={13} className="wi-step-icon-blocked" />
+    ) : step.status === "doing" && live ? (
+      <Loader2 size={13} className="composer-spin" />
+    ) : active ? (
+      <ArrowRight size={14} className="wi-step-icon-current" />
+    ) : (
+      <Circle size={12} className="wi-step-icon-todo" />
+    );
   return (
     <li key={key} className={`${step.status}${active ? " current" : ""}`}>
-      <span>
-        {step.status === "done" ? (
-          <Check size={12} />
-        ) : step.status === "doing" && live ? (
-          <Loader2 size={12} className="composer-spin" />
-        ) : step.status === "blocked" ? (
-          <AlertTriangle size={12} />
-        ) : (
-          <span />
-        )}
-      </span>
+      <span className="wi-step-icon">{icon}</span>
       <em>{step.title}</em>
-      {active && <ArrowRight size={12} className="wi-step-active-arrow" />}
     </li>
   );
+}
+
+function sourceIcon(kind: IslandSource["kind"]) {
+  if (kind === "image") return <ImageIcon size={15} />;
+  return <FileText size={15} />;
 }
 
 type WorkspaceIslandMode = "auto" | "expanded" | "collapsed";
@@ -66,6 +67,8 @@ export function WorkspaceIsland({
   computerActivity,
   computerLive,
   planSteps,
+  sources,
+  backgroundCount,
   streaming,
   status,
   threadHasMessages,
@@ -74,13 +77,17 @@ export function WorkspaceIsland({
   onOpenWorkbench,
 }: {
   threadId: string;
-  /** North-star objective text (top of the Objective → Plan → Activity hierarchy).
-   *  null/undefined when the workspace has none — the block stays hidden. */
+  /** North-star objective text (top of the Objective → Progress hierarchy). null when
+   *  the workspace has none — the block stays hidden. */
   objective?: string | null;
   activitySteps: string[];
   computerActivity: string | null;
   computerLive: boolean;
   planSteps: PlanStep[];
+  /** Generated artifacts + uploaded files for the "Sources" section (already deduped). */
+  sources?: IslandSource[];
+  /** Background tasks running elsewhere (other threads/automations) — surfaced in the menu. */
+  backgroundCount?: number;
   streaming: boolean;
   status: ChatStreamStatus | null;
   threadHasMessages: boolean;
@@ -92,41 +99,34 @@ export function WorkspaceIsland({
   const [mode, setModeState] = useState<WorkspaceIslandMode>(() => loadWorkspaceIslandMode());
   const [expanded, setExpanded] = useState(() => loadWorkspaceIslandMode() === "expanded");
   const [menuOpen, setMenuOpen] = useState(false);
-  // Collapse toggles for the two collapsed segments flanking the always-visible
-  // 3-step window (threeStepWindow): completed steps before it, waiting steps after.
+  // Collapse toggles for the two segments flanking the always-visible 3-step window.
   const [beforeExpanded, setBeforeExpanded] = useState(false);
   const [afterExpanded, setAfterExpanded] = useState(false);
-  // Activity reveals its accumulated steps INLINE (like the transcript's MessageActivity):
-  // the old row opened the Workbench "activity" tab, which is bound to background TASKS
-  // (activeTasks), not these conversation activity steps — so clicking showed nothing.
+  // Activity reveals its accumulated steps INLINE (the old row opened the Workbench
+  // "activity" tab, which is bound to background TASKS — not these conversation steps).
   const [activityOpen, setActivityOpen] = useState(false);
-  // Latch: once the island has shown work this thread, keep it AROUND (collapsed) after
-  // the run instead of unmounting the moment the live state empties — so the user can
-  // review what the agent did ("it disappears and doesn't stay"). Reset per thread.
+  // Latch: keep the island around (collapsed) after a run so the user can review the work.
   const [hadWorkspaceState, setHadWorkspaceState] = useState(false);
+  const sourceList = sources ?? [];
   const doneCount = planSteps.filter((step) => step.status === "done").length;
   const runningPlan = planSteps.find((step) => step.status === "doing");
   const blockedPlan = planSteps.find((step) => step.status === "blocked");
   // Auto-focus window: always show the 3 steps around "now", collapse the rest.
-  // currentIdx is the absolute index of the step being worked on (falls back to the
-  // first still-open step when the model never marked one "doing"), used to highlight
-  // the current row inside the window even when its status is still "todo".
   const planWin = threeStepWindow(planSteps);
   const currentIdx = currentStepIndex(planSteps);
   const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
   const hasWorkspaceState =
     (threadHasMessages || streaming || computerLive) &&
-    (streaming || computerLive || planSteps.length > 0 || activitySteps.length > 0);
+    (streaming ||
+      computerLive ||
+      planSteps.length > 0 ||
+      activitySteps.length > 0 ||
+      sourceList.length > 0);
   useEffect(() => setHadWorkspaceState(false), [threadId]);
   useEffect(() => {
     if (hasWorkspaceState) setHadWorkspaceState(true);
   }, [hasWorkspaceState]);
-  // Headline precedence: REAL work signals first (the running/blocked plan step,
-  // the live ‹‹ACT›› activity, the computer activity) so the task's title shows up
-  // IMMEDIATELY as the agent works — the generic phase label ("thinking"/"writing")
-  // is only a fallback for the brief moment before any concrete activity exists.
-  // Previously `status?.title` sat above the activity signals, so the island showed
-  // "thinking"/"writing" for the whole turn and the real title appeared only at the end.
+  // Headline (collapsed pill): real work signals first so the task title shows immediately.
   const headline =
     blockedPlan?.title ??
     runningPlan?.title ??
@@ -167,20 +167,11 @@ export function WorkspaceIsland({
       setExpanded(true);
       return undefined;
     }
-
     const timer = window.setTimeout(() => setExpanded(false), 3200);
     return () => window.clearTimeout(timer);
-  }, [
-    activitySteps.length,
-    blockedPlan,
-    doneCount,
-    mode,
-    planSteps.length,
-    streaming,
-    computerLive,
-  ]);
+  }, [activitySteps.length, blockedPlan, doneCount, mode, planSteps.length, streaming, computerLive]);
 
-  const menuOptions: Array<{ value: WorkspaceIslandMode; label: string }> = [
+  const modeOptions: Array<{ value: WorkspaceIslandMode; label: string }> = [
     { value: "auto", label: "Auto expand" },
     { value: "expanded", label: "Always expanded" },
     { value: "collapsed", label: "Always collapsed" },
@@ -200,63 +191,107 @@ export function WorkspaceIsland({
           onClick={() => setExpanded(true)}
         >
           <span className="workspace-island-icon">
-            {streaming ? <Loader2 size={14} className="composer-spin" /> : <ListTodo size={14} />}
+            {streaming ? <Loader2 size={13} className="composer-spin" /> : <Circle size={7} />}
           </span>
           <span className="workspace-island-label">{headline}</span>
           {progressLabel && <span className="workspace-island-count">{progressLabel}</span>}
         </button>
       ) : (
-        <div className="workspace-island-panel" role="group" aria-label="Workspace status">
+        <div className="workspace-island-panel" role="group" aria-label={t("chat.panel")}>
+          {/* Header: state + menu only (no "Workspace" title — there is one workspace). */}
           <div className="wi-head">
-            <span>
-              <strong>Workspace</strong>
-              <small>{streaming ? "live" : "thread"}</small>
+            <span className="wi-status">
+              {streaming ? (
+                <>
+                  <Loader2 size={13} className="composer-spin" />
+                  <span>Working</span>
+                </>
+              ) : (
+                <span className="wi-status-idle">Idle</span>
+              )}
             </span>
             <span className="wi-head-actions">
               <button
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
-                aria-label="Workspace island options"
+                aria-label="Options"
                 onClick={() => setMenuOpen((value) => !value)}
               >
-                <MoreHorizontal size={14} />
+                <MoreHorizontal size={15} />
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  if (mode === "expanded") {
-                    setMode("auto");
-                  }
+                  if (mode === "expanded") setMode("auto");
                   setExpanded(false);
                 }}
                 aria-label="Collapse status"
               >
-                <ChevronUp size={14} />
+                <ChevronUp size={15} />
               </button>
             </span>
             {menuOpen && (
               <div className="wi-menu" role="menu">
-                {menuOptions.map((option) => (
+                <div className="wi-menu-label">Panel mode</div>
+                {modeOptions.map((option) => (
                   <button
                     key={option.value}
                     type="button"
                     role="menuitemradio"
                     aria-checked={mode === option.value}
+                    className="wi-menu-item"
                     onClick={() => setMode(option.value)}
                   >
                     <span>{option.label}</span>
-                    {mode === option.value && <Check size={14} />}
+                    {mode === option.value && <Check size={15} />}
                   </button>
                 ))}
+                <div className="wi-menu-sep" />
+                {onCaptureScreenshot && (
+                  <button
+                    type="button"
+                    className="wi-menu-item"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onCaptureScreenshot();
+                    }}
+                  >
+                    <Camera size={15} />
+                    <span>{t("chat.captureScreenshot")}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="wi-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onExportChat();
+                  }}
+                >
+                  <Copy size={15} />
+                  <span>{t("chat.exportChat")}</span>
+                </button>
+                {backgroundCount && backgroundCount > 0 ? (
+                  <button
+                    type="button"
+                    className="wi-menu-item"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenWorkbench("activity");
+                    }}
+                  >
+                    <Layers size={15} />
+                    <span>Background activity</span>
+                    <em className="wi-menu-count">{backgroundCount}</em>
+                  </button>
+                ) : null}
               </div>
             )}
           </div>
 
-          {/* Objective sits above Plan/Activity in the hierarchy — shown as plain text,
-              never an empty block: the server returns null when there's no confirmed
-              goal memory for this workspace (personal/threads chats included). */}
+          {/* Objective → Progress → Activity → Sources. Each section renders only when full. */}
           {objective ? (
             <div className="wi-goal">
               <span className="wi-goal-label">{t("projectContext.objective")}</span>
@@ -265,21 +300,10 @@ export function WorkspaceIsland({
           ) : null}
 
           {planSteps.length > 0 && (
-            <button
-              className="wi-row wi-row-button"
-              type="button"
-              onClick={() => onOpenWorkbench("plan")}
-            >
-              <ListTodo size={14} />
-              <span>Plan</span>
-              <strong>{doneCount}/{planSteps.length}</strong>
-            </button>
-          )}
-          {planSteps.length > 0 && (
-            <div className="wi-progress">
-              <div className="wi-progress-head">
+            <div className="wi-section wi-progress">
+              <div className="wi-section-head">
                 <span>Progress</span>
-                <strong>{doneCount}/{planSteps.length}</strong>
+                <em>{doneCount}/{planSteps.length}</em>
               </div>
               {planWin.before.length > 0 && (
                 <button
@@ -289,28 +313,24 @@ export function WorkspaceIsland({
                   onClick={() => setBeforeExpanded((value) => !value)}
                 >
                   {beforeExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  <span>{planWin.before.length} completati</span>
+                  <span>{planWin.before.length} completed</span>
                 </button>
               )}
               {beforeExpanded && planWin.before.length > 0 && (
                 <ol className="wi-steps wi-steps-completed">
                   {planWin.before.map((step: PlanStep, index: number) =>
-                    renderPlanStepRow(step, `before-${index}-${step.title}`, false, streaming)
+                    renderPlanStepRow(step, `before-${index}-${step.title}`, false, streaming),
                   )}
                 </ol>
               )}
-              {/* The 3-step window: always visible regardless of collapse state, so the
-                  current step (and its immediate neighbors) never disappears from view.
-                  A window step's absolute index is before.length + j, so it's the current
-                  one when that equals currentIdx. */}
               <ol className="wi-steps">
                 {planWin.window.map((step: PlanStep, index: number) =>
                   renderPlanStepRow(
                     step,
                     `win-${index}-${step.title}`,
                     planWin.before.length + index === currentIdx,
-                    streaming
-                  )
+                    streaming,
+                  ),
                 )}
               </ol>
               {planWin.after.length > 0 && (
@@ -321,13 +341,13 @@ export function WorkspaceIsland({
                   onClick={() => setAfterExpanded((value) => !value)}
                 >
                   {afterExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                  <span>{planWin.after.length} in attesa</span>
+                  <span>{planWin.after.length} waiting</span>
                 </button>
               )}
               {afterExpanded && planWin.after.length > 0 && (
                 <ol className="wi-steps">
                   {planWin.after.map((step: PlanStep, index: number) =>
-                    renderPlanStepRow(step, `after-${index}-${step.title}`, false, streaming)
+                    renderPlanStepRow(step, `after-${index}-${step.title}`, false, streaming),
                   )}
                 </ol>
               )}
@@ -335,18 +355,17 @@ export function WorkspaceIsland({
           )}
 
           {activitySteps.length > 0 && (
-            <div className="wi-activity">
+            <div className="wi-section wi-activity">
               <button
-                className="wi-row wi-row-button"
+                className="wi-section-head wi-section-toggle"
                 type="button"
                 aria-expanded={activityOpen}
                 onClick={() => setActivityOpen((value) => !value)}
               >
-                <SquareTerminal size={14} />
                 <span>Activity</span>
-                <strong>{activitySteps.length}</strong>
+                <em>{activitySteps.length}</em>
                 <ChevronDown
-                  size={13}
+                  size={14}
                   className={`wi-activity-caret${activityOpen ? " open" : ""}`}
                 />
               </button>
@@ -364,18 +383,26 @@ export function WorkspaceIsland({
             </div>
           )}
 
-          <div className="wi-actions">
-            {onCaptureScreenshot && (
-              <button type="button" onClick={onCaptureScreenshot}>
-                <FileImage size={13} />
-                <span>{t("chat.captureScreenshot")}</span>
-              </button>
-            )}
-            <button type="button" onClick={onExportChat}>
-              <Download size={13} />
-              <span>{t("chat.exportChat")}</span>
-            </button>
-          </div>
+          {sourceList.length > 0 && (
+            <div className="wi-section wi-sources">
+              <div className="wi-section-head">
+                <span>Sources</span>
+                <em>{sourceList.length}</em>
+              </div>
+              {sourceList.slice(0, 6).map((source, index) => (
+                <button
+                  key={`${index}-${source.name}`}
+                  type="button"
+                  className="wi-source"
+                  onClick={() => onOpenWorkbench(source.kind === "file" ? "files" : "artifacts")}
+                >
+                  <span className="wi-source-icon">{sourceIcon(source.kind)}</span>
+                  <span className="wi-source-name">{source.name}</span>
+                  {source.meta && <em>{source.meta}</em>}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
