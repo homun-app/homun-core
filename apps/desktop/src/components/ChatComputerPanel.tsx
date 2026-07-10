@@ -157,9 +157,11 @@ export function ChatComputerPanel({
   const idleSec = Math.max(0, Math.floor((now - lastActivityAtRef.current) / 1000));
   const stalled = idleSec >= 45;
   // Single, alternating status line (Fabio's ask): the browser takes the space, and ONE
-  // line below shows the CURRENT action, cycling as the backend pushes new activity — not a
-  // growing scrollable list. Strip the leading status emoji so it reads as a clean line.
-  const rawAction = live.activity || (steps.length > 0 ? steps[steps.length - 1]?.label : "") || "";
+  // line below shows the CURRENT action, cycling as the backend pushes new steps — not a
+  // growing scrollable list. Prefer the latest browser STEP (the real action, e.g. "navigate
+  // to …"); NEVER `live.activity`, which carries the raw browse goal (the whole prompt) and
+  // would leak the system prompt into the status line. Strip the leading emoji for clean text.
+  const rawAction = steps.length > 0 ? steps[steps.length - 1]?.label ?? "" : "";
   const currentAction =
     rawAction.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "").trim() || t("chat.starting");
 
