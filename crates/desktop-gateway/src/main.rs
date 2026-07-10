@@ -1260,6 +1260,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(rename_workspace),
         )
         .route(
+            "/api/workspaces/{workspace_id}/policy",
+            post(set_workspace_policy),
+        )
+        .route(
             "/api/workspaces/{workspace_id}/delete",
             post(delete_workspace),
         )
@@ -48136,6 +48140,86 @@ fn save_workspaces_file(file: &WorkspacesFile) -> Result<(), std::io::Error> {
     fs::write(path, body)
 }
 
+/// Canonicalize a per-workspace `sandbox_mode` override token: `Some(canonical)` only for a
+/// RECOGNIZED alias, else `None`. `SandboxMode::parse` is forgiving (unknown → the
+/// workspace-write default), so it cannot itself distinguish a garbage token from a real
+/// one — hence the explicit alias gate. `None` (unknown/blank) means "no override" =
+/// inherit the global default, never a spurious explicit override.
+fn normalize_sandbox_override(raw: &str) -> Option<String> {
+    let token = raw.trim().to_ascii_lowercase();
+    matches!(
+        token.as_str(),
+        "read-only" | "readonly" | "workspace-write" | "danger" | "danger-full-access" | "full-access"
+    )
+    .then(|| crate::tool_safety::SandboxMode::parse(&token).as_str().to_string())
+}
+
+/// Canonicalize a per-workspace `approval_policy` override token (mirrors
+/// [`normalize_sandbox_override`]): `Some(canonical)` for a recognized alias, else `None`.
+fn normalize_approval_override(raw: &str) -> Option<String> {
+    let token = raw.trim().to_ascii_lowercase();
+    matches!(
+        token.as_str(),
+        "untrusted" | "unless-trusted" | "on-failure" | "on-request" | "never"
+    )
+    .then(|| crate::tool_safety::AskForApproval::parse(&token).as_str().to_string())
+}
+
+/// Read one policy axis out of a JSON patch: `null` → clear to `None`; a recognized string
+/// token → `Some(canonical)`; an unknown token or non-string → `None`. Used only when the
+/// key is PRESENT in the patch (an absent key leaves the field untouched — partial merge).
+fn policy_override_from_json(
+    value: &serde_json::Value,
+    normalize: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    value.as_str().and_then(normalize)
+}
+
+/// Overlay a PARTIAL policy patch onto a `WorkspaceRecord` (mirrors `merge_runtime_settings`
+/// for the two per-workspace axes). Only keys PRESENT in `patch` are touched, so a control
+/// posting one axis never resets the sibling; `null` clears an override back to inherit;
+/// unknown tokens are dropped to `None`. Pure so the merge is unit-testable.
+fn merge_workspace_policy(current: &WorkspaceRecord, patch: &serde_json::Value) -> WorkspaceRecord {
+    let mut merged = current.clone();
+    if let Some(obj) = patch.as_object() {
+        if let Some(value) = obj.get("sandbox_mode") {
+            merged.sandbox_mode = policy_override_from_json(value, normalize_sandbox_override);
+        }
+        if let Some(value) = obj.get("approval_policy") {
+            merged.approval_policy = policy_override_from_json(value, normalize_approval_override);
+        }
+    }
+    merged
+}
+
+/// `POST /api/workspaces/{id}/policy` — persist the per-workspace sandbox/approval override
+/// (Fase 1). Body `{ sandbox_mode?, approval_policy? }`, each optional; a `null` value clears
+/// that axis back to inheriting the global default (partial-merge, see
+/// [`merge_workspace_policy`]). 404 if the workspace id is unknown. Returns the updated
+/// record. Reconciliation invariant untouched: this only changes WHERE the mode/approval
+/// come from, never disables the OS kernel fence.
+async fn set_workspace_policy(
+    Path(workspace_id): Path<String>,
+    Json(patch): Json<serde_json::Value>,
+) -> Result<Json<WorkspaceRecord>, GatewayError> {
+    let mut file = load_workspaces_file();
+    let Some(workspace) = file.workspaces.iter_mut().find(|w| w.id == workspace_id) else {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "workspace_not_found",
+            message: format!("workspace not found: {workspace_id}"),
+        });
+    };
+    let merged = merge_workspace_policy(workspace, &patch);
+    *workspace = merged.clone();
+    save_workspaces_file(&file).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "workspaces_write_failed",
+        message: error.to_string(),
+    })?;
+    Ok(Json(merged))
+}
+
 fn workspace_memory_error(error: String) -> GatewayError {
     GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -49043,6 +49127,39 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // Per-workspace policy endpoint (Fase 1): `merge_workspace_policy` overlays a PARTIAL
+    // patch onto a record — a control posting one axis must not clobber the sibling.
+    // `null` clears an override back to inherit; an unknown token is dropped to None (never
+    // stored as a spurious explicit override).
+    #[test]
+    fn merge_workspace_policy_is_partial_and_normalizes() {
+        let cur = super::WorkspaceRecord {
+            id: "w".into(),
+            name: "W".into(),
+            folder: None,
+            sandbox_mode: Some("read-only".into()),
+            approval_policy: Some("never".into()),
+        };
+        // Partial: only approval changes; sandbox override is preserved.
+        let merged =
+            super::merge_workspace_policy(&cur, &serde_json::json!({"approval_policy":"on-request"}));
+        assert_eq!(merged.sandbox_mode.as_deref(), Some("read-only"));
+        assert_eq!(merged.approval_policy.as_deref(), Some("on-request"));
+        // `null` clears back to inherit (None).
+        let cleared =
+            super::merge_workspace_policy(&cur, &serde_json::json!({"sandbox_mode": null}));
+        assert_eq!(cleared.sandbox_mode, None);
+        assert_eq!(cleared.approval_policy.as_deref(), Some("never")); // untouched
+        // Unknown token → dropped to None (not stored as an override).
+        let garbage =
+            super::merge_workspace_policy(&cur, &serde_json::json!({"sandbox_mode":"bogus"}));
+        assert_eq!(garbage.sandbox_mode, None);
+        // An absent key leaves both axes untouched.
+        let noop = super::merge_workspace_policy(&cur, &serde_json::json!({}));
+        assert_eq!(noop.sandbox_mode.as_deref(), Some("read-only"));
+        assert_eq!(noop.approval_policy.as_deref(), Some("never"));
     }
 
     // ADR 0023 UI: each Settings control (adaptive-floor / sandbox / approval) POSTs only
