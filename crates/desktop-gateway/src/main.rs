@@ -12355,8 +12355,10 @@ Reformulate it without destructive operations.",
     }
     // Sandboxed path: build the OS fence command, run inline (we need the raw status +
     // combined output to decide whether to escalate). The writable roots are computed
-    // the same way on every platform; only the command wrapper differs.
-    let writable_roots = workspace_write_roots(&root, std::env::var("HOME").ok().as_deref());
+    // the same way on every platform; only the command wrapper differs. Phase 2: the roots
+    // are the behavior-preserving base (project root + home build caches) PLUS any per-project
+    // extra folders (`resolved_writable_roots` — never removes the base; the OS fence stays on).
+    let writable_roots = resolved_writable_roots(state, thread_id);
     // v1: fence filesystem writes, allow network (npm/git need it). Stricter
     // network-off is a follow-up on both platforms.
     let mut cmd = match build_sandbox_command(&writable_roots, command) {
@@ -19241,18 +19243,24 @@ fn resolve_extra_roots(ws: Option<&[String]>, global: &[String]) -> Vec<String> 
 }
 
 /// The resolved writable roots for the exec fence on this thread: the project root FIRST
-/// (ALWAYS writable — the fence never removes it) plus the resolved extra roots (per-workspace
-/// override if `Some`, else the global `RuntimeSettings.writable_roots`). Extra entries are
-/// jailed to EXISTING ABSOLUTE directories (relative / non-existent entries are dropped so a
-/// typo never breaks or silently widens the fence) and de-duplicated. Feeds
-/// `build_sandbox_command` in `run_in_project`.
+/// (ALWAYS writable — the fence never removes it) plus the home build-cache dirs
+/// (`~/.npm`, `~/.cargo`, `~/.cache`, …) that npm/git/cargo need — i.e. exactly what
+/// `run_in_project` fenced before Phase 2, via `workspace_write_roots` — and THEN the
+/// per-project extra roots (per-workspace override if `Some`, else the global
+/// `RuntimeSettings.writable_roots`). Extra entries are jailed to EXISTING ABSOLUTE
+/// directories (relative / non-existent entries are dropped so a typo never breaks or
+/// silently widens the fence) and de-duplicated. Feeds `build_sandbox_command`.
 ///
-/// Reconciliation invariant: this only ADDS folders on top of the always-present project root
-/// — it can never disable the OS fence (Phase 2 goal).
+/// Reconciliation invariant: Phase 2 only ADDS the extra folders on top of the
+/// behavior-preserving base — it can never remove the project root or disable the OS fence.
 fn resolved_writable_roots(state: &AppState, thread_id: Option<&str>) -> Vec<std::path::PathBuf> {
     let mut roots: Vec<std::path::PathBuf> = Vec::new();
     if let Some(root) = project_root_for_thread(state, thread_id) {
-        roots.push(root);
+        // Behavior-preserving base = project root + home build caches (the pre-Phase-2 fence).
+        roots.extend(workspace_write_roots(
+            &root,
+            std::env::var("HOME").ok().as_deref(),
+        ));
     }
     let ws = workspace_record_for_thread(state, thread_id).and_then(|w| w.writable_roots);
     let extra = resolve_extra_roots(ws.as_deref(), &load_runtime_settings().writable_roots);
@@ -55679,6 +55687,72 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert!(plan_at < middle_at, "plan stays before the middle prose");
         assert!(out.contains("[x] **A**"), "but carries the latest content");
         assert!(out.contains("end"));
+    }
+
+    // Phase 2 (per-project extra writable folders): the exec fence must honor MULTIPLE
+    // writable roots — a per-project EXTRA folder outside the project root is writable, while
+    // a folder in NEITHER root stays denied. Mirrors `seatbelt_fence_...` (macOS-only Seatbelt,
+    // deterministic) but proves the multi-root case that `resolved_writable_roots` produces
+    // (project + extra). Does NOT touch the guardrail test. The Linux multi-root case is
+    // covered by `tests/linux_sandbox.rs` (which already passes multiple --allow-write).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn seatbelt_fence_allows_per_project_extra_writable_folder() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let pid = std::process::id();
+            let project = std::env::temp_dir().join(format!("homun_extra_project_{pid}"));
+            let extra = std::env::temp_dir().join(format!("homun_extra_folder_{pid}"));
+            std::fs::create_dir_all(&project).unwrap();
+            std::fs::create_dir_all(&extra).unwrap();
+            let in_project = project.join("p.txt");
+            let in_extra = extra.join("e.txt");
+            let _ = std::fs::remove_file(&in_project);
+            let _ = std::fs::remove_file(&in_extra);
+            // A dir in NEITHER writable root → must stay denied.
+            let outside = std::path::PathBuf::from(std::env::var("HOME").unwrap())
+                .join(format!("homun_extra_probe_{pid}.txt"));
+            let _ = std::fs::remove_file(&outside);
+
+            // Both roots (project + the per-project extra folder) are passed to the fence,
+            // exactly as `resolved_writable_roots` would yield them.
+            let roots = vec![project.clone(), extra.clone()];
+
+            let mut c = super::build_sandbox_command(
+                &roots,
+                &format!("echo ok > '{}'", in_project.display()),
+            )
+            .expect("build_sandbox_command (project root)");
+            let project_ok = c.status().await.expect("run (project)").success() && in_project.exists();
+
+            let mut c2 = super::build_sandbox_command(
+                &roots,
+                &format!("echo ok > '{}'", in_extra.display()),
+            )
+            .expect("build_sandbox_command (extra root)");
+            let extra_ok = c2.status().await.expect("run (extra)").success() && in_extra.exists();
+
+            let mut c3 = super::build_sandbox_command(
+                &roots,
+                &format!("echo bad > '{}'", outside.display()),
+            )
+            .expect("build_sandbox_command (outside)");
+            let _ = c3.status().await;
+            let leaked = outside.exists();
+
+            let _ = std::fs::remove_file(&in_project);
+            let _ = std::fs::remove_file(&in_extra);
+            let _ = std::fs::remove_file(&outside);
+            let _ = std::fs::remove_dir_all(&project);
+            let _ = std::fs::remove_dir_all(&extra);
+
+            assert!(project_ok, "write under the project root should be ALLOWED");
+            assert!(extra_ok, "write under the per-project EXTRA root should be ALLOWED");
+            assert!(!leaked, "write outside BOTH roots LEAKED — the fence is not confining");
+        });
     }
 
     // ADR 0023 (C1) live fence check: with the sandbox ON (now the default), the real
