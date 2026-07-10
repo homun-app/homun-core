@@ -265,8 +265,12 @@ small {
 }
 
 .window-drag-strip--right {
-  right: 0;
-  width: 132px;
+  /* Leave the rightmost ~72px free: the chat header's ⋯ menu now lives there (right: 24px).
+     This strip paints ABOVE the header, so covering that corner made its `drag` swallow the
+     menu's clicks (app-region resolves by paint order). The topbar's own drag still covers
+     the freed band, minus the menu's `no-drag` hole. */
+  right: 72px;
+  width: 60px;
 }
 
 .drawer-bottom-trigger {
@@ -2051,7 +2055,10 @@ body.resizing-drawer {
 
 .chat-status-stack {
   position: absolute;
-  top: 52px;
+  /* Sit clearly BELOW the 58px header row now that both are pinned to the right edge:
+     header controls on top, island below — a clean vertical stack (Claude-style) with no
+     overlap. (The header ⋯ menu's click bug was a separate drag-strip issue, not this.) */
+  top: 64px;
   right: 24px;
   z-index: 32;
   display: flex;
