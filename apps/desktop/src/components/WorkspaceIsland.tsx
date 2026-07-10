@@ -24,14 +24,18 @@ import type { ChatStreamStatus, PlanStep, WorkbenchTab } from "./ChatView";
 // `isCurrent` flags the row the plan is on RIGHT NOW — which may be a step the model
 // never marked "doing" (currentStepIndex falls back to the first still-open step) —
 // so it gets the accent highlight + trailing arrow even while showing its todo icon.
-function renderPlanStepRow(step: PlanStep, key: string, isCurrent: boolean) {
-  const active = isCurrent || step.status === "doing";
+// `live` gates the "in progress" affordances (spinner + active highlight + arrow): only
+// a STREAMING turn has a step actively running. On a concluded turn nothing is in
+// progress, so those affordances are suppressed — otherwise a step the model left marked
+// "doing" would spin forever and read as "still working" after the turn already ended.
+function renderPlanStepRow(step: PlanStep, key: string, isCurrent: boolean, live: boolean) {
+  const active = live && (isCurrent || step.status === "doing");
   return (
     <li key={key} className={`${step.status}${active ? " current" : ""}`}>
       <span>
         {step.status === "done" ? (
           <Check size={12} />
-        ) : step.status === "doing" ? (
+        ) : step.status === "doing" && live ? (
           <Loader2 size={12} className="composer-spin" />
         ) : step.status === "blocked" ? (
           <AlertTriangle size={12} />
@@ -92,6 +96,10 @@ export function WorkspaceIsland({
   // 3-step window (threeStepWindow): completed steps before it, waiting steps after.
   const [beforeExpanded, setBeforeExpanded] = useState(false);
   const [afterExpanded, setAfterExpanded] = useState(false);
+  // Activity reveals its accumulated steps INLINE (like the transcript's MessageActivity):
+  // the old row opened the Workbench "activity" tab, which is bound to background TASKS
+  // (activeTasks), not these conversation activity steps — so clicking showed nothing.
+  const [activityOpen, setActivityOpen] = useState(false);
   // Latch: once the island has shown work this thread, keep it AROUND (collapsed) after
   // the run instead of unmounting the moment the live state empties — so the user can
   // review what the agent did ("it disappears and doesn't stay"). Reset per thread.
@@ -287,7 +295,7 @@ export function WorkspaceIsland({
               {beforeExpanded && planWin.before.length > 0 && (
                 <ol className="wi-steps wi-steps-completed">
                   {planWin.before.map((step: PlanStep, index: number) =>
-                    renderPlanStepRow(step, `before-${index}-${step.title}`, false)
+                    renderPlanStepRow(step, `before-${index}-${step.title}`, false, streaming)
                   )}
                 </ol>
               )}
@@ -300,7 +308,8 @@ export function WorkspaceIsland({
                   renderPlanStepRow(
                     step,
                     `win-${index}-${step.title}`,
-                    planWin.before.length + index === currentIdx
+                    planWin.before.length + index === currentIdx,
+                    streaming
                   )
                 )}
               </ol>
@@ -318,7 +327,7 @@ export function WorkspaceIsland({
               {afterExpanded && planWin.after.length > 0 && (
                 <ol className="wi-steps">
                   {planWin.after.map((step: PlanStep, index: number) =>
-                    renderPlanStepRow(step, `after-${index}-${step.title}`, false)
+                    renderPlanStepRow(step, `after-${index}-${step.title}`, false, streaming)
                   )}
                 </ol>
               )}
@@ -326,18 +335,33 @@ export function WorkspaceIsland({
           )}
 
           {activitySteps.length > 0 && (
-            <>
+            <div className="wi-activity">
               <button
                 className="wi-row wi-row-button"
                 type="button"
-                onClick={() => onOpenWorkbench("activity")}
+                aria-expanded={activityOpen}
+                onClick={() => setActivityOpen((value) => !value)}
               >
                 <SquareTerminal size={14} />
                 <span>Activity</span>
                 <strong>{activitySteps.length}</strong>
+                <ChevronDown
+                  size={13}
+                  className={`wi-activity-caret${activityOpen ? " open" : ""}`}
+                />
               </button>
-              {latestActivity && <p className="wi-latest">{latestActivity}</p>}
-            </>
+              {activityOpen ? (
+                <ol className="wi-activity-list">
+                  {activitySteps.slice(-40).map((step, index) => (
+                    <li key={`${index}-${step.slice(0, 24)}`}>
+                      {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                latestActivity && <p className="wi-latest">{latestActivity}</p>
+              )}
+            </div>
           )}
 
           <div className="wi-actions">

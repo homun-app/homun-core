@@ -405,7 +405,11 @@ assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages
 assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
 assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "chat header (island or kebab menu) must wire onOpenWorkbench(tab) to open the docked Workbench");
 assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"plan\")}", "workspace island plan progress must open the Plan workbench");
-assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => onOpenWorkbench(\"activity\")}", "workspace island activity row must open the Activity workbench");
+// The activity row reveals its accumulated conversation steps INLINE. It used to open the
+// Workbench "activity" tab, but that tab renders background TASKS (activeTasks), not these
+// conversation activity steps — so clicking showed nothing. The island now owns the reveal.
+assertContains("src/components/WorkspaceIsland.tsx", "onClick={() => setActivityOpen((value) => !value)}", "workspace island activity row must reveal its accumulated steps inline");
+assertContains("src/components/WorkspaceIsland.tsx", "wi-activity-list", "workspace island must render the inline activity list");
 // Task 4b: the island is now a lean cockpit — Plan (3-step window) + Activity only.
 // Artifacts/Files/Goals/Memory rows moved out (destined for a header menu, Task 5).
 assertContains(

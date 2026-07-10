@@ -2220,6 +2220,60 @@ body.resizing-drawer {
   white-space: nowrap;
 }
 
+/* Fusion (ADR 0022): inside the unified panel the collapsed project-context pill is a
+   detached rounded chip by default (inline-flex + full border-radius), which reads as a
+   floating, disconnected element above the island. Make it a full-width header that shares
+   the card: top-only radius, no bottom border/shadow, so it sits flush on the island. */
+.unified-status-panel.has-project-context .project-context-panel .pcp-pill {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 14px 14px 0 0;
+  border-bottom: none;
+  box-shadow: none;
+}
+
+/* Activity, revealed inline (self-contained — no Workbench dependency). */
+.workspace-island-panel .wi-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.workspace-island-panel .wi-activity-caret {
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.workspace-island-panel .wi-activity-caret.open {
+  transform: rotate(180deg);
+}
+.workspace-island-panel .wi-activity-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 2px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.workspace-island-panel .wi-activity-list li {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+  position: relative;
+}
+.workspace-island-panel .wi-activity-list li::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 7px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
 .project-context-panel.expanded .pcp-body {
   width: 320px;
   max-width: 100%;
