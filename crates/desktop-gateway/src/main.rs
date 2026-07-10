@@ -11896,7 +11896,7 @@ fn write_project_file(
     // depth — the true single chokepoint is the write executor itself). Keyed on the MODE
     // (not the degraded policy) so default `workspace-write` with no project root still
     // reports "no project folder", never a spurious read-only block.
-    if resolved_sandbox_mode() == crate::tool_safety::SandboxMode::ReadOnly {
+    if resolved_sandbox_mode(state, thread_id) == crate::tool_safety::SandboxMode::ReadOnly {
         return read_only_write_blocked_msg(rel);
     }
     let Some(root) = project_root_for_thread(state, thread_id) else {
@@ -11926,7 +11926,7 @@ fn edit_project_file(
 ) -> String {
     // ADR 0023 chokepoint: refuse workspace mutation under the resolved `read-only` mode,
     // before reading/writing bytes (see `write_project_file`).
-    if resolved_sandbox_mode() == crate::tool_safety::SandboxMode::ReadOnly {
+    if resolved_sandbox_mode(state, thread_id) == crate::tool_safety::SandboxMode::ReadOnly {
         return read_only_write_blocked_msg(rel);
     }
     if old.is_empty() {
@@ -11985,7 +11985,7 @@ fn apply_patch_in_project(
     // ADR 0023 chokepoint: refuse the whole patch under the resolved `read-only` mode,
     // before any file is touched (the applier writes N paths; blocking here keeps it
     // atomic — nothing is written). Keyed on the MODE (see `write_project_file`).
-    if resolved_sandbox_mode() == crate::tool_safety::SandboxMode::ReadOnly {
+    if resolved_sandbox_mode(state, thread_id) == crate::tool_safety::SandboxMode::ReadOnly {
         return Err(read_only_write_blocked_msg("apply_patch"));
     }
     let Some(root) = project_root_for_thread(state, thread_id) else {
@@ -19156,20 +19156,63 @@ confirmation card in the interface. Do NOT say it was executed."
 // deny-by-default caposaldo), unlike Codex's danger-full-access.
 // ============================================================================
 
-/// The resolved sandbox MODE (rootless): env `HOMUN_SANDBOX_MODE` > persisted
-/// `RuntimeSettings.sandbox_mode` > default. **Default = workspace-write**
+/// The resolved sandbox MODE (rootless) for a thread: env `HOMUN_SANDBOX_MODE` >
+/// per-workspace override (the thread's `WorkspaceRecord.sandbox_mode`, Fase 1) >
+/// persisted global `RuntimeSettings.sandbox_mode` > default. **Default = workspace-write**
 /// (behavior-preserving: HEAD already jails every file write to the project root and
 /// fences subprocesses, so workspace-write is what it effectively enforces — defaulting
 /// to `danger` would REGRESS the app-level policy). Kept a fn (not LazyLock) so tests
-/// toggle env per case.
-fn resolved_sandbox_mode() -> crate::tool_safety::SandboxMode {
+/// toggle env per case. No per-workspace mode disables the OS kernel fence (unconditional).
+fn resolved_sandbox_mode(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> crate::tool_safety::SandboxMode {
+    let env = std::env::var("HOMUN_SANDBOX_MODE").ok();
+    let ws = workspace_record_for_thread(state, thread_id).and_then(|w| w.sandbox_mode);
+    resolve_sandbox_mode_core(
+        env.as_deref(),
+        ws.as_deref(),
+        &load_runtime_settings().sandbox_mode,
+    )
+}
+
+/// The `WorkspaceRecord` for a thread's workspace — mirrors `project_root_for_thread`'s
+/// lookup (`store.workspace_for_thread` → the record in workspaces.json). `None` when the
+/// thread maps to no known workspace → the caller inherits the global default. Fase 1.
+fn workspace_record_for_thread(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Option<WorkspaceRecord> {
+    let workspace_id = thread_id
+        .and_then(|tid| {
+            lock_store(state)
+                .ok()
+                .and_then(|s| s.workspace_for_thread(tid).ok())
+        })
+        .unwrap_or_else(active_workspace_id);
+    load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|w| w.id == workspace_id)
+}
+
+/// Pure precedence core (unit-testable, no AppState/IO): env > per-workspace override >
+/// global default > built-in. Each input is a raw user-facing token; blank/absent falls
+/// through to the next tier. Extracted so the precedence is DRY and testable without
+/// wiring an `AppState` + on-disk files.
+fn resolve_sandbox_mode_core(
+    env: Option<&str>,
+    ws: Option<&str>,
+    global: &str,
+) -> crate::tool_safety::SandboxMode {
     use crate::tool_safety::SandboxMode;
-    if let Ok(m) = std::env::var("HOMUN_SANDBOX_MODE") {
-        if !m.trim().is_empty() {
-            return SandboxMode::parse(&m);
-        }
+    if let Some(m) = env.map(str::trim).filter(|s| !s.is_empty()) {
+        return SandboxMode::parse(m);
     }
-    SandboxMode::parse(&load_runtime_settings().sandbox_mode)
+    if let Some(m) = ws.map(str::trim).filter(|s| !s.is_empty()) {
+        return SandboxMode::parse(m);
+    }
+    SandboxMode::parse(global)
 }
 
 /// The resolved APP-LEVEL [`SandboxPolicy`] for this thread: the resolved mode bound to
@@ -19178,21 +19221,42 @@ fn resolved_sandbox_mode() -> crate::tool_safety::SandboxMode {
 /// separately and is unconditional (see the invariant above).
 fn resolved_sandbox_policy(state: &AppState, thread_id: Option<&str>) -> SandboxPolicy {
     let root = project_root_for_thread(state, thread_id);
-    resolved_sandbox_mode().resolve(root.as_deref())
+    resolved_sandbox_mode(state, thread_id).resolve(root.as_deref())
 }
 
-/// The approval axis: env `HOMUN_APPROVAL_POLICY` > persisted `RuntimeSettings.
-/// approval_policy` > default `on-request`. Behavior-preserving: the non-autonomous case
-/// keeps asking on effectful writes exactly as today (the wiring still forces `Never` for
-/// autonomous runs via `effective_approval`).
-fn resolved_approval_policy() -> crate::tool_safety::AskForApproval {
+/// The approval axis: env `HOMUN_APPROVAL_POLICY` > per-workspace override > persisted
+/// global `RuntimeSettings.approval_policy` > default `on-request`. Behavior-preserving
+/// when no workspace override is set: the non-autonomous case keeps asking on effectful
+/// writes exactly as today (the wiring still forces `Never` for autonomous runs via
+/// `effective_approval`).
+fn resolved_approval_policy(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> crate::tool_safety::AskForApproval {
+    let env = std::env::var("HOMUN_APPROVAL_POLICY").ok();
+    let ws = workspace_record_for_thread(state, thread_id).and_then(|w| w.approval_policy);
+    resolve_approval_policy_core(
+        env.as_deref(),
+        ws.as_deref(),
+        &load_runtime_settings().approval_policy,
+    )
+}
+
+/// Pure precedence core for the approval axis (mirrors [`resolve_sandbox_mode_core`]):
+/// env > per-workspace override > global default > built-in.
+fn resolve_approval_policy_core(
+    env: Option<&str>,
+    ws: Option<&str>,
+    global: &str,
+) -> crate::tool_safety::AskForApproval {
     use crate::tool_safety::AskForApproval;
-    if let Ok(p) = std::env::var("HOMUN_APPROVAL_POLICY") {
-        if !p.trim().is_empty() {
-            return AskForApproval::parse(&p);
-        }
+    if let Some(p) = env.map(str::trim).filter(|s| !s.is_empty()) {
+        return AskForApproval::parse(p);
     }
-    AskForApproval::parse(&load_runtime_settings().approval_policy)
+    if let Some(p) = ws.map(str::trim).filter(|s| !s.is_empty()) {
+        return AskForApproval::parse(p);
+    }
+    AskForApproval::parse(global)
 }
 
 /// Pure: the effective approval for a single turn. Autonomous runs NEVER prompt
@@ -22396,7 +22460,8 @@ require your confirmation in the app. Propose it and stop."
         // through MCP (the native `write_file`/`edit_file`/`apply_patch` already refuse).
         // Emits the same `SANDBOX_READ_ONLY_BLOCKED` marker → the escalation card fires.
         if workspace_scoped
-            && resolved_sandbox_mode() == crate::tool_safety::SandboxMode::ReadOnly
+            && resolved_sandbox_mode(ctx.state, ctx.thread_id)
+                == crate::tool_safety::SandboxMode::ReadOnly
         {
             let blocked = read_only_write_blocked_msg(&mcp_tool);
             emit_read_only_block_if_needed(ctx.tx, name, &blocked).await;
@@ -22407,7 +22472,8 @@ require your confirmation in the app. Propose it and stop."
         // forces `Never`, so at the default this yields the same verdict as before. The
         // sandbox arg is the resolved app-level policy (naming-only in `assess_tool_safety`
         // — it does not change the Ask/Auto verdict, but keeps the label honest).
-        let approval = effective_approval(ctx.autonomous, resolved_approval_policy());
+        let approval =
+            effective_approval(ctx.autonomous, resolved_approval_policy(ctx.state, ctx.thread_id));
         let needs_confirm = matches!(
             assess_tool_safety(
                 approval,
@@ -22518,7 +22584,8 @@ Connectors → MCP; do NOT claim it's done.",
         // ADR 0023: same routing as the MCP branch. `pre_authorized` = the user's
         // always-allow list; the approval axis is RESOLVED, autonomous forced to `Never`.
         // At the default `on-request` this equals the legacy verdict.
-        let approval = effective_approval(ctx.autonomous, resolved_approval_policy());
+        let approval =
+            effective_approval(ctx.autonomous, resolved_approval_policy(ctx.state, ctx.thread_id));
         let needs_confirm = matches!(
             assess_tool_safety(
                 approval,
@@ -48773,9 +48840,70 @@ mod tests {
         assert!(back.contains("never"));
     }
 
+    // Per-workspace resolution core (Fase 1): the pure precedence
+    // env > per-workspace override > global default > built-in, unit-tested without
+    // AppState wiring. The thin `resolved_*` wrappers only gather these three inputs.
+    #[test]
+    fn resolve_sandbox_mode_core_precedence_env_beats_workspace_beats_global() {
+        use crate::tool_safety::SandboxMode;
+        // No env, no workspace override → the global default wins.
+        assert_eq!(
+            super::resolve_sandbox_mode_core(None, None, "workspace-write"),
+            SandboxMode::WorkspaceWrite
+        );
+        // Workspace override beats the global default.
+        assert_eq!(
+            super::resolve_sandbox_mode_core(None, Some("read-only"), "workspace-write"),
+            SandboxMode::ReadOnly
+        );
+        // A blank workspace override is ignored (inherits the global default).
+        assert_eq!(
+            super::resolve_sandbox_mode_core(None, Some("  "), "workspace-write"),
+            SandboxMode::WorkspaceWrite
+        );
+        // Env beats both the workspace override and the global default.
+        assert_eq!(
+            super::resolve_sandbox_mode_core(Some("danger"), Some("read-only"), "workspace-write"),
+            SandboxMode::Danger
+        );
+        // A blank env is ignored (falls through to the workspace override).
+        assert_eq!(
+            super::resolve_sandbox_mode_core(Some("  "), Some("read-only"), "workspace-write"),
+            SandboxMode::ReadOnly
+        );
+    }
+
+    #[test]
+    fn resolve_approval_policy_core_precedence_env_beats_workspace_beats_global() {
+        use crate::tool_safety::AskForApproval;
+        assert_eq!(
+            super::resolve_approval_policy_core(None, None, "on-request"),
+            AskForApproval::OnRequest
+        );
+        assert_eq!(
+            super::resolve_approval_policy_core(None, Some("never"), "on-request"),
+            AskForApproval::Never
+        );
+        assert_eq!(
+            super::resolve_approval_policy_core(None, Some("  "), "on-request"),
+            AskForApproval::OnRequest
+        );
+        assert_eq!(
+            super::resolve_approval_policy_core(Some("on-failure"), Some("never"), "on-request"),
+            AskForApproval::OnFailure
+        );
+        assert_eq!(
+            super::resolve_approval_policy_core(Some("  "), Some("never"), "on-request"),
+            AskForApproval::Never
+        );
+    }
+
     // ADR 0023 (reconciled): the sandbox/approval resolvers — env-override > persisted
     // RuntimeSettings > default. `TEST_ENV_LOCK` serializes the process-global env
     // mutation; `TestGatewayDataDir` points the persisted file at an isolated temp dir.
+    // The persisted-vs-default+env axis is now covered by the pure core (`resolve_*_core`);
+    // the full `resolved_*` wrapper (with `None` thread → active workspace, no override)
+    // still exercises the env + on-disk `runtime-settings.json` path end-to-end.
 
     #[test]
     fn resolved_sandbox_mode_precedence_env_beats_persisted_beats_default() {
@@ -48786,11 +48914,14 @@ mod tests {
         let dir = isolated_gateway_test_dir("sandbox-mode-precedence");
         std::fs::create_dir_all(&dir).expect("create temp data dir");
         let _data = TestGatewayDataDir::new(&dir);
+        // No thread → the active (default) workspace, which carries no override → inherit
+        // the global default. This keeps the env + on-disk `runtime-settings.json` coverage.
+        let state = super::AppState::for_tests();
         // SAFETY: env-mutation under TEST_ENV_LOCK, restored at the end.
         unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); }
 
         // No env + no persisted file → the DEFAULT is workspace-write (NOT danger).
-        assert_eq!(super::resolved_sandbox_mode(), SandboxMode::WorkspaceWrite);
+        assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::WorkspaceWrite);
 
         // Persist read-only → persisted beats default.
         std::fs::write(
@@ -48798,14 +48929,14 @@ mod tests {
             r#"{"adaptive_floor":"off","sandbox_mode":"read-only","approval_policy":"on-request"}"#,
         )
         .expect("write runtime settings");
-        assert_eq!(super::resolved_sandbox_mode(), SandboxMode::ReadOnly);
+        assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::ReadOnly);
 
         // Env override beats the persisted value.
         unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "danger"); }
-        assert_eq!(super::resolved_sandbox_mode(), SandboxMode::Danger);
+        assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::Danger);
         // A blank env var is ignored (falls through to persisted), not parsed as unknown.
         unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "  "); }
-        assert_eq!(super::resolved_sandbox_mode(), SandboxMode::ReadOnly);
+        assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::ReadOnly);
 
         unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); }
         std::fs::remove_dir_all(&dir).ok();
@@ -48820,11 +48951,14 @@ mod tests {
         let dir = isolated_gateway_test_dir("approval-policy-precedence");
         std::fs::create_dir_all(&dir).expect("create temp data dir");
         let _data = TestGatewayDataDir::new(&dir);
+        // No thread → the active (default) workspace, which carries no override → inherit
+        // the global default. Keeps the env + on-disk `runtime-settings.json` coverage.
+        let state = super::AppState::for_tests();
         // SAFETY: env-mutation under TEST_ENV_LOCK, restored at the end.
         unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); }
 
         // No env + no persisted file → the DEFAULT is on-request.
-        assert_eq!(super::resolved_approval_policy(), AskForApproval::OnRequest);
+        assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::OnRequest);
 
         // Persist `never` → persisted beats default.
         std::fs::write(
@@ -48832,11 +48966,11 @@ mod tests {
             r#"{"adaptive_floor":"off","sandbox_mode":"workspace-write","approval_policy":"never"}"#,
         )
         .expect("write runtime settings");
-        assert_eq!(super::resolved_approval_policy(), AskForApproval::Never);
+        assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::Never);
 
         // Env override beats the persisted value.
         unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "on-failure"); }
-        assert_eq!(super::resolved_approval_policy(), AskForApproval::OnFailure);
+        assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::OnFailure);
 
         unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); }
         std::fs::remove_dir_all(&dir).ok();
