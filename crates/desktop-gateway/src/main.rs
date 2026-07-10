@@ -19416,21 +19416,46 @@ workspace-write in Settings to allow project writes."
     )
 }
 
-/// ADR 0023: surface a read-only-blocked write to the desktop UI as a `tool_result`
-/// stream event so it can render the escalation card. The write tools return the block as
-/// a plain-prefix string (`READ_ONLY_BLOCKED_MARKER`) fed back to the model; nothing else
-/// puts that string on the UI stream, so without this the user only sees the model's
-/// (unreliable) narration. Deliberately NOT a `‹‹…››` card marker — the UI matches the
-/// plain prefix on the tool_result payload. No-op for any non-blocked result.
-async fn emit_read_only_block_if_needed(tx: &StreamSink, name: &str, result: &str) {
-    if result.starts_with(READ_ONLY_BLOCKED_MARKER) {
-        let _ = emit_stream_event(
-            tx,
-            GenerateStreamEvent::ToolResult {
-                payload: serde_json::json!({ "name": name, "output": result }),
-            },
-        )
-        .await;
+/// Pure card-builder for the read-only informational card (ADR 0023). Given a tool result,
+/// returns the text-marker card
+/// (`\n\n‹‹SANDBOX_READONLY››{"target":"…"}‹‹/SANDBOX_READONLY››\n`) when the result is a
+/// read-only block, else `None`. Extracted from [`emit_read_only_block_if_needed`] so the
+/// persistence-critical shaping (marker + target) is unit-testable without a full
+/// `ChatToolCtx`. The target is parsed from the block message (`the write to '…'`); empty
+/// when absent. WHY a text marker in the assistant output (not a `tool_result` event): the
+/// event channel is NOT persisted into `event_parts_json`, so on commit/reload the card had
+/// no data source and never rendered — converged onto the same proven channel as the bash
+/// escalation card.
+fn read_only_card_marker(result: &str) -> Option<String> {
+    if !result.starts_with(READ_ONLY_BLOCKED_MARKER) {
+        return None;
+    }
+    // Plain string parse (no regex dep in this crate) of `the write to '<target>'`.
+    let target = result
+        .split_once("the write to '")
+        .and_then(|(_, rest)| rest.split_once('\''))
+        .map(|(t, _)| t)
+        .unwrap_or("");
+    Some(format!(
+        "\n\n{SANDBOX_READONLY_OPEN}{}{SANDBOX_READONLY_CLOSE}\n",
+        serde_json::json!({ "target": target })
+    ))
+}
+
+/// ADR 0023: surface a read-only-blocked write to the desktop UI as an informational card
+/// appended to the assistant's PERSISTED output. The write tools return the block as a
+/// plain-prefix string (`READ_ONLY_BLOCKED_MARKER`) fed back to the model; this appends the
+/// `‹‹SANDBOX_READONLY››` text-marker card to `effects.append_output` (so it survives
+/// commit/reload) and streams it as a `Delta`. No `request_confirm` / pending approval —
+/// this is informational, not a confirm gate. No-op for any non-blocked result.
+async fn emit_read_only_block_if_needed(
+    ctx: &ChatToolCtx<'_>,
+    effects: &mut local_first_engine::ToolEffects,
+    result: &str,
+) {
+    if let Some(card) = read_only_card_marker(result) {
+        effects.append_output.push(card.clone());
+        let _ = emit_stream_event(ctx.tx, GenerateStreamEvent::Delta { text: card }).await;
     }
 }
 
@@ -22156,7 +22181,7 @@ loaded with use_skill):\n{}",
             )
             .await;
         }
-        emit_read_only_block_if_needed(ctx.tx, "write_file", &result).await;
+        emit_read_only_block_if_needed(ctx, &mut effects, &result).await;
         result
     } else if name == "edit_file" {
         let args_val: serde_json::Value = serde_json::from_str(args_raw)
@@ -22190,7 +22215,7 @@ loaded with use_skill):\n{}",
         })
         .await
         .unwrap_or_else(|e| format!("Error: {e}"));
-        emit_read_only_block_if_needed(ctx.tx, "edit_file", &result).await;
+        emit_read_only_block_if_needed(ctx, &mut effects, &result).await;
         result
     } else if name == "apply_patch" {
         let args_val: serde_json::Value =
@@ -22260,7 +22285,7 @@ loaded with use_skill):\n{}",
             }
             Err(msg) => msg,
         };
-        emit_read_only_block_if_needed(ctx.tx, "apply_patch", &patch_result).await;
+        emit_read_only_block_if_needed(ctx, &mut effects, &patch_result).await;
         patch_result
     } else if name == "list_files" {
         let _ = emit_stream_event(
@@ -22572,7 +22597,7 @@ require your confirmation in the app. Propose it and stop."
                 == crate::tool_safety::SandboxMode::ReadOnly
         {
             let blocked = read_only_write_blocked_msg(&mcp_tool);
-            emit_read_only_block_if_needed(ctx.tx, name, &blocked).await;
+            emit_read_only_block_if_needed(ctx, &mut effects, &blocked).await;
             blocked
         } else {
         // ADR 0023: route the decision through the pure policy fn. The approval axis is
@@ -38237,6 +38262,12 @@ const FS_AUTHORIZE_CLOSE: &str = "‹‹/FS_AUTHORIZE››";
 const SANDBOX_ESCALATE_OPEN: &str = "‹‹SANDBOX_ESCALATE››";
 const SANDBOX_ESCALATE_CLOSE: &str = "‹‹/SANDBOX_ESCALATE››";
 
+// ADR 0023 read-only informational card markers. Same guillemet framing as the escalation
+// card so the frontend can parse the card out of the PERSISTED assistant text (not a
+// transient tool_result event) — reloading the thread must still render the card.
+const SANDBOX_READONLY_OPEN: &str = "‹‹SANDBOX_READONLY››";
+const SANDBOX_READONLY_CLOSE: &str = "‹‹/SANDBOX_READONLY››";
+
 /// Rewrites the authorize-card marker into a plain "granted" note so reopening
 /// the chat doesn't re-show the actionable card (mirrors the Composio/MCP path).
 fn rewrite_fs_authorize_to_done(text: &str, path: &str) -> String {
@@ -49306,6 +49337,33 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ADR 0023: the read-only card must ride the PERSISTED text-marker channel (the bug was
+    // a non-persisted `tool_result` event → `event_parts_json` NULL → card never rendered on
+    // reload). `read_only_card_marker` is the pure shaper the emit fn appends to
+    // `effects.append_output`; assert the marker + parsed target are present for a block, and
+    // that a non-block result yields None (no spurious card).
+    #[test]
+    fn read_only_card_marker_wraps_target_for_a_block() {
+        let blocked = super::read_only_write_blocked_msg("appunti.txt");
+        let card = super::read_only_card_marker(&blocked)
+            .expect("a read-only block must produce a card");
+        assert!(
+            card.contains(super::SANDBOX_READONLY_OPEN)
+                && card.contains(super::SANDBOX_READONLY_CLOSE),
+            "card must be wrapped in the SANDBOX_READONLY marker, got: {card}"
+        );
+        assert!(
+            card.contains("\"target\":\"appunti.txt\""),
+            "card must carry the parsed target as JSON, got: {card}"
+        );
+
+        // A normal (non-blocked) tool result must NOT produce a card.
+        assert!(
+            super::read_only_card_marker("✅ Wrote appunti.txt").is_none(),
+            "a successful write must not emit a read-only card"
+        );
     }
 
     // Per-workspace policy endpoint (Fase 1): `merge_workspace_policy` overlays a PARTIAL

@@ -115,8 +115,7 @@ import {
   MCP_CONFIRM_RE,
   FS_AUTHORIZE_RE,
   SANDBOX_ESCALATE_RE,
-  SANDBOX_READ_ONLY_BLOCKED_PREFIX,
-  SANDBOX_READ_ONLY_TARGET_RE,
+  SANDBOX_READONLY_RE,
   CONNECT_SUGGEST_RE,
   COMPOSIO_DONE_RE,
   COMPOSIO_RECONNECT_RE,
@@ -5719,15 +5718,19 @@ function parseComposioConfirm(text: string, eventParts?: ChatEventPart[]): {
       /* malformed → just hide it */
     }
   }
-  // ADR 0023: a file write blocked by read-only sandbox mode. It arrives as a `tool_result`
-  // event whose output carries the PLAIN `SANDBOX_READ_ONLY_BLOCKED` prefix (deliberately
-  // not a `‹‹…››` card marker), so match it on the event part, not the text.
+  // ADR 0023: a file write blocked by read-only sandbox mode → informational read-only card.
+  // Parsed from the PERSISTED assistant text (mirrors sandboxEscalate above). It used to ride
+  // a `tool_result` event that was never persisted into `event_parts_json`, so the card
+  // vanished on commit/reload; the gateway now appends a `‹‹SANDBOX_READONLY››{"target":…}`
+  // marker to the message text (stripped from visible prose by COMPOSIO_MARKERS_RE).
   let readOnlyBlocked: { target: string } | null = null;
-  for (const part of eventParts ?? []) {
-    if (part.type !== "tool_result") continue;
-    const output = (part.payload as { output?: unknown } | undefined)?.output;
-    if (typeof output === "string" && output.startsWith(SANDBOX_READ_ONLY_BLOCKED_PREFIX)) {
-      readOnlyBlocked = { target: output.match(SANDBOX_READ_ONLY_TARGET_RE)?.[1] ?? "" };
+  const roMatch = text.match(SANDBOX_READONLY_RE);
+  if (roMatch) {
+    try {
+      const p = JSON.parse(roMatch[1]) as { target?: string };
+      readOnlyBlocked = { target: typeof p.target === "string" ? p.target : "" };
+    } catch {
+      /* malformed → hide */
     }
   }
   // Clickable connect-cards from suggest_capabilities (install skill / connect MCP

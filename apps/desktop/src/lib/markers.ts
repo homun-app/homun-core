@@ -68,13 +68,11 @@ export const FS_AUTHORIZE_RE = /‹‹FS_AUTHORIZE››([\s\S]*?)‹‹\/FS_AUT
 // re-runs it UNSANDBOXED on approval. Payload mirrors a tool call:
 // {"approval_id"?, "tool":"run_in_project", "arguments":{"command":"…","cwd":"…"}}.
 export const SANDBOX_ESCALATE_RE = /‹‹SANDBOX_ESCALATE››([\s\S]*?)‹‹\/SANDBOX_ESCALATE››/;
-// ADR 0023: a file write blocked by read-only sandbox mode. Unlike the guillemet cards
-// above, this is a PLAIN string prefix the write tools return as their result (surfaced
-// to the UI via a `tool_result` stream event, never as a `‹‹…››` card). The desktop
-// matches this prefix on the tool_result payload to render the read-only escalation card.
-export const SANDBOX_READ_ONLY_BLOCKED_PREFIX = "SANDBOX_READ_ONLY_BLOCKED";
-// Pulls the target path out of the block message ("…the write to '<target>' was blocked…").
-export const SANDBOX_READ_ONLY_TARGET_RE = /the write to '([^']+)'/;
+// ADR 0023: a file write blocked by read-only sandbox mode. Like the escalation card above
+// (and unlike the earlier non-persisted `tool_result` event that never rendered on reload),
+// this is a guillemet card the gateway appends to the PERSISTED assistant text. Payload is a
+// JSON object {"target":"<path>"}; the desktop renders an informational read-only card.
+export const SANDBOX_READONLY_RE = /‹‹SANDBOX_READONLY››([\s\S]*?)‹‹\/SANDBOX_READONLY››/;
 export const CONNECT_SUGGEST_RE = /‹‹CONNECT_SUGGEST››([\s\S]*?)‹‹\/CONNECT_SUGGEST››/;
 export const COMPOSIO_DONE_RE = /‹‹COMPOSIO_DONE››([\s\S]*?)‹‹\/COMPOSIO_DONE››/;
 export const COMPOSIO_RECONNECT_RE = /‹‹COMPOSIO_RECONNECT››([\s\S]*?)‹‹\/COMPOSIO_RECONNECT››/;
@@ -94,7 +92,7 @@ export const GOAL_PROPOSE_RE = /‹‹GOAL_PROPOSE››([\s\S]*?)‹‹\/GOAL_P
 // Strips an UNCLOSED plan/goal marker (open present, no close) from the visible prose.
 export const UNCLOSED_PROPOSE_RE = /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*$/;
 export const COMPOSIO_MARKERS_RE =
-  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
+  /‹‹(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››[\s\S]*?‹‹\/(?:COMPOSIO_(?:CONFIRM|DONE|RECONNECT)|MCP_CONFIRM|FS_AUTHORIZE|SANDBOX_ESCALATE|SANDBOX_READONLY|CONNECT_SUGGEST|VAULT_PROPOSE|VAULT_REVEAL|PAYMENT_APPROVAL|CHOICES|PLAN_PROPOSE|GOAL_PROPOSE|PLAN)››/g;
 export const PROPOSE_MARKERS_VISIBLE_RE =
   /‹‹(?:PLAN_PROPOSE|GOAL_PROPOSE)››[\s\S]*?‹‹\/(?:PLAN_PROPOSE|GOAL_PROPOSE)››/g;
 
