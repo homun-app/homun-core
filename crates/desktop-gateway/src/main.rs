@@ -194,7 +194,7 @@ pub(crate) struct AppState {
     task_store: Arc<Mutex<TaskStore>>,
     computer_store: Arc<Mutex<LocalComputerSessionStore>>,
     browser_url_policies: Arc<Mutex<BrowserUrlPolicyStore>>,
-    memory_facade: Arc<Mutex<MemoryFacade>>,
+    memory_facade: Arc<MemoryFacade>,
     /// ADR 0022 (Tappa 1): service memoria che incapsula brief/recall/learn.
     /// `Some` solo quando `HOMUN_MEMORY_SERVICE=on`; `None` → orchestrazione inline attuale.
     memory_service: Option<Arc<dyn MemoryRecallService>>,
@@ -262,9 +262,9 @@ impl AppState {
             browser_url_policies: Arc::new(Mutex::new(
                 BrowserUrlPolicyStore::open_in_memory().expect("in-memory url policy store"),
             )),
-            memory_facade: Arc::new(Mutex::new(MemoryFacade::new(
+            memory_facade: Arc::new(MemoryFacade::new(
                 SQLiteMemoryStore::open_in_memory().expect("in-memory memory store"),
-            ))),
+            )),
             memory_service: None,
             vault_store: Arc::new(Mutex::new(
                 SQLiteVaultStore::open_in_memory().expect("in-memory vault store"),
@@ -776,10 +776,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         browser_url_policies: Arc::new(Mutex::new(BrowserUrlPolicyStore::open(
             gateway_browser_policy_database_path()?,
         )?)),
-        memory_facade: Arc::new(Mutex::new(MemoryFacade::new(
+        memory_facade: Arc::new(MemoryFacade::new(
             SQLiteMemoryStore::open(gateway_memory_database_path()?)
                 .map_err(std::io::Error::other)?,
-        ))),
+        )),
         // ADR 0022 (Tappa 1): costruisci il service solo se il flag è ON.
         // L'impl delega interamente alla memoria_facade sopra (condivisa via Arc),
         // quindi niente nuovi store, niente big-bang.
@@ -1476,9 +1476,7 @@ fn scope_display_name(scope: &str) -> String {
 /// keep the prompt bounded. `scope` is a workspace id or PERSONAL_WORKSPACE —
 /// which is exactly the suggestion card's `scope`, so no translation is needed.
 fn gather_scope_memory(state: &AppState, scope: &str, cap: usize) -> Vec<String> {
-    let Ok(facade) = lock_memory_facade(state) else {
-        return Vec::new();
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = MemoryWorkspaceId::new(scope);
     let mut items: Vec<String> = facade
@@ -1508,9 +1506,7 @@ fn gather_scope_memory(state: &AppState, scope: &str, cap: usize) -> Vec<String>
 /// Zeigarnik guarantee). Most-recent first, small cap. Separate from the general profile
 /// so they get a guaranteed, high-priority slot instead of competing in the relevance mix.
 fn gather_open_loops(state: &AppState, cap: usize) -> Vec<String> {
-    let Ok(facade) = lock_memory_facade(state) else {
-        return Vec::new();
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
     let mut items: Vec<String> = facade
@@ -2017,9 +2013,9 @@ fn spawn_embedding_catchup(state: AppState) {
         }
         const BATCH: usize = 64;
         let pending = |ws: &MemoryWorkspaceId| -> usize {
-            lock_memory_facade(&state)
+            memory_facade(&state)
+                .refs_without_embeddings(&user, ws, BATCH)
                 .ok()
-                .and_then(|f| f.refs_without_embeddings(&user, ws, BATCH).ok())
                 .map(|r| r.len())
                 .unwrap_or(0)
         };
@@ -2066,9 +2062,7 @@ fn spawn_memory_hygiene_sweep(state: AppState) {
         let mut total_gaps = 0usize;
         let mut total_promoted = 0usize;
         for scope in scopes {
-            let Some(facade) = lock_memory_facade(&state).ok() else {
-                continue;
-            };
+            let facade = memory_facade(&state);
             let ws = MemoryWorkspaceId::new(&scope);
             total_gaps += local_first_memory::sweep_gap_facts(&facade, &user, &ws);
             total_promoted +=
@@ -2533,7 +2527,7 @@ fn persist_explicit_memory(
     };
     let redacted = redact_sensitive_text(text);
 
-    let facade = lock_memory_facade(state)?;
+    let facade = memory_facade(state);
     let record = facade
         .create_memory_candidate(MemoryCreateRequest {
             request: lifecycle.clone(),
@@ -2626,9 +2620,7 @@ fn gather_profile_memory_with_options(
     state: &AppState,
     personal_preferences_only_override: bool,
 ) -> (Vec<String>, Vec<String>) {
-    let Ok(facade) = lock_memory_facade(state) else {
-        return (Vec::new(), Vec::new());
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
     let read = |workspace: MemoryWorkspaceId, preferences_only: bool| -> Vec<String> {
@@ -3286,7 +3278,7 @@ async fn backfill_embeddings(
     let model = embed_model();
     // Fase 1 (lock): collect pending + seen.
     let collected = {
-        let Ok(facade) = lock_memory_facade(state) else { return };
+        let facade = memory_facade(state);
         local_first_memory::backfill_collect_pending(&facade, user, workspace, limit)
     };
     let Some((pending, mut seen)) = collected else { return };
@@ -3296,7 +3288,8 @@ async fn backfill_embeddings(
         if vector.is_empty() {
             continue;
         }
-        if let Ok(facade) = lock_memory_facade(state) {
+        {
+            let facade = memory_facade(state);
             local_first_memory::backfill_persist_one(
                 &facade,
                 user,
@@ -4138,7 +4131,7 @@ fn remember_artifact_memory(
         workspace_id: workspace.clone(),
         purpose: "artifact_created".to_string(),
     };
-    let facade = lock_memory_facade(state).map_err(|error| error.message)?;
+    let facade = memory_facade(state);
     let reference = upsert_artifact_memory_record(
         &facade,
         &user,
@@ -4299,7 +4292,7 @@ fn remember_project_file_artifact_memory(
         workspace_id: workspace.clone(),
         purpose: "project_file_written".to_string(),
     };
-    let facade = lock_memory_facade(state).map_err(|error| error.message)?;
+    let facade = memory_facade(state);
     let reference = upsert_artifact_memory_record(
         &facade,
         &user,
@@ -4711,7 +4704,7 @@ fn objective_block_for_workspace(state: &AppState, ws: &MemoryWorkspaceId) -> Op
     if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
         return None;
     }
-    let facade = lock_memory_facade(state).ok()?;
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let goals: Vec<String> = facade
         .list_memories_for_ui(&user, ws)
@@ -4747,7 +4740,7 @@ fn project_brief_block(state: &AppState) -> Option<String> {
     if ws.as_str() == PERSONAL_WORKSPACE || ws.as_str() == THREADS_WORKSPACE {
         return None;
     }
-    let facade = lock_memory_facade(state).ok()?;
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let page = facade
         .list_wiki_pages_for_ui(&user, &ws)
@@ -4824,7 +4817,7 @@ fn scope_from_active_workspace() -> MemoryScope {
 ///
 /// L'estrazione vera (migrazione delle funzioni nel crate `memory`) è la Tappa
 /// 4: qui si incapsula *delegando*. Mantiene `AppState` (clone a basso costo,
-/// tutti i campi sono `Arc`) e condivide la stessa `Arc<Mutex<MemoryFacade>>`.
+/// tutti i campi sono `Arc`) e condivide lo stesso `Arc<MemoryFacade>` (ADR 0027: lock-free).
 ///
 /// Parità: `brief` riproduce esattamente la sequenza di assemblaggio del
 /// system prompt (`main.rs:19476-19509`); `recall`/`learn` avvolgono
@@ -4944,12 +4937,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         // Hit solo se generation AND prompt_fingerprint combaciano.
         let user = gateway_memory_user_id();
         let workspace = gateway_memory_workspace_id();
-        let generation = {
-            let facade = lock_memory_facade(&self.state).ok();
-            facade
-                .map(|facade| facade.briefing_generation(&user, &workspace))
-                .unwrap_or(0)
-        };
+        let generation = memory_facade(&self.state).briefing_generation(&user, &workspace);
         let fingerprint = prompt_fingerprint(user_message);
         let scope_key = format!("{}|{}", user.as_str(), workspace.as_str());
 
@@ -5028,9 +5016,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
             let query_vec = local_first_memory::embed_query(embedding.as_ref(), query).await;
             // Fase 2: lock + search sync. Il guard vive solo in questo scope sync.
             let block = {
-                let Ok(facade) = lock_memory_facade(&state) else {
-                    return RecallPack::from_block(query, scope_owned, None);
-                };
+                let facade = memory_facade(&state);
                 // Graph-context callback: inietta workflow_status / artifact_provenance.
                 // Le fn libere del gateway sono Sync; il closure è + Sync.
                 let graph_context: Option<
@@ -5088,7 +5074,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
             };
             // Fase 1 (sync, lock): prepara il prompt (gating + known loops).
             let prompt = {
-                let Ok(facade) = lock_memory_facade(&state) else { return };
+                let facade = memory_facade(&state);
                 local_first_memory::prepare_learn_prompt(
                     &facade,
                     &user,
@@ -5105,7 +5091,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
             // Fase 2 (off-lock): LLM estrattore via capability trait (no guard attiva).
             let Some(content) = llm.chat(&system, &user_content).await else { return };
             // Fase 3 (sync, lock re-acquisito): parse + routing + persist + hooks.
-            let Ok(facade) = lock_memory_facade(&state) else { return };
+            let facade = memory_facade(&state);
             let hooks = local_first_memory::LearnHooks {
                 persist_graph: Some(&|facade, user, workspace, entities, relations, project_ws| {
                     persist_graph(facade, user, workspace, entities, relations, project_ws);
@@ -5178,7 +5164,7 @@ fn learn_via_service_or_inline(
                 std::sync::Arc::new(GatewayLlmClient { http: state.http.clone() });
             // Fase 1 (lock): prompt.
             let prompt = {
-                let Ok(facade) = lock_memory_facade(&state) else { return };
+                let facade = memory_facade(&state);
                 local_first_memory::prepare_learn_prompt(
                     &facade,
                     &user,
@@ -5195,7 +5181,7 @@ fn learn_via_service_or_inline(
             // Fase 2 (off-lock): LLM.
             let Some(content) = llm.chat(&system, &user_content).await else { return };
             // Fase 3 (lock): persist + hooks.
-            let Ok(facade) = lock_memory_facade(&state) else { return };
+            let facade = memory_facade(&state);
             let hooks = local_first_memory::LearnHooks {
                 persist_graph: Some(&|facade, user, workspace, entities, relations, project_ws| {
                     persist_graph(facade, user, workspace, entities, relations, project_ws);
@@ -5270,9 +5256,7 @@ async fn consolidate_scope(
     let is_edited = |ws: &MemoryWorkspaceId, path: &str| wiki_is_edited(ws, path);
     // Fase 1 (lock): dedup open-loop + pre-pass deterministico + listing.
     let (merged, prepared) = {
-        let Ok(facade) = lock_memory_facade(state) else {
-            return (0, 0);
-        };
+        let facade = memory_facade(state);
         local_first_memory::consolidate_prepare(&facade, user, workspace, &is_edited)
     };
     let Some(input) = prepared else {
@@ -5295,15 +5279,14 @@ async fn consolidate_scope(
     let Some(root) = root else {
         // LLM curator unavailable: keep the deterministic merges already applied,
         // rebuild the wiki pages.
-        if let Ok(facade) = lock_memory_facade(state) {
+        {
+            let facade = memory_facade(state);
             local_first_memory::rebuild_all_wiki(&facade, user, workspace, &is_edited);
         }
         return (merged, 0);
     };
     // Fase 3 (lock re-acquisito): applica merge/drop + ricostruisce wiki.
-    let Ok(facade) = lock_memory_facade(state) else {
-        return (merged, 0);
-    };
+    let facade = memory_facade(state);
     local_first_memory::consolidate_apply(
         &facade,
         user,
@@ -5601,9 +5584,7 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
         .map(|contacts| contacts.into_iter().filter_map(|c| c.entity_ref).collect())
         .unwrap_or_default();
     let user = gateway_memory_user_id();
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
+    let facade = memory_facade(state);
     let items: Vec<(MemoryRef, String)> = facade
         .list_memories_for_ui(&user, workspace)
         .unwrap_or_default()
@@ -5675,9 +5656,15 @@ fn sweep_graph_orphans(state: &AppState, workspace: &MemoryWorkspaceId) {
 /// delete/forget so the structural layer is always complete and consistent
 /// (no forward-only gaps, no orphans, no stale edges). Cheap at personal scale.
 fn regenerate_graph_links(state: &AppState, workspace: &MemoryWorkspaceId) {
-    if let Ok(facade) = lock_memory_facade(state) {
+    {
+        let facade = memory_facade(state);
         let _ = facade.clear_mention_links(&gateway_memory_user_id(), workspace);
     }
+    // ADR 0027: this sweep is EVENTUALLY-CONSISTENT under lock-free access. clear+re-link
+    // are separate store ops (never one atomic guard — they weren't under the old outer
+    // Mutex either, which was dropped between the two calls), so a concurrent reader may
+    // observe a transient half-swept graph. That is acceptable: it runs on startup and
+    // after writes, and settles to a complete/consistent projection within the same tick.
     // sweep_graph_orphans re-links ALL live facts + tombstones zero-edge entities.
     sweep_graph_orphans(state, workspace);
 }
@@ -5685,7 +5672,8 @@ fn regenerate_graph_links(state: &AppState, workspace: &MemoryWorkspaceId) {
 fn reconcile_memory_scope(state: &AppState, workspace: &MemoryWorkspaceId) {
     regenerate_graph_links(state, workspace);
     let user = gateway_memory_user_id();
-    if let Ok(facade) = lock_memory_facade(state) {
+    {
+        let facade = memory_facade(state);
         rebuild_decisions_wiki(&facade, &user, workspace);
         rebuild_project_brief(&facade, &user, workspace);
         rebuild_status_wiki(&facade, &user, workspace);
@@ -5912,9 +5900,7 @@ fn record_decision(state: &AppState, args: &serde_json::Value) -> String {
     // The "why" lives in the text too, so the existing recall (which surfaces the
     // record text) shows it without needing to render the structured fields.
     let text = redact_sensitive_text(&format!("{summary} — why: {rationale}"));
-    let Ok(facade) = lock_memory_facade(state) else {
-        return "Memory unavailable.".to_string();
-    };
+    let facade = memory_facade(state);
     let record = facade.create_memory_candidate(MemoryCreateRequest {
         request: lifecycle.clone(),
         memory_type: "decision".to_string(),
@@ -6108,9 +6094,7 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
         .and_then(|store| store.list_contacts().ok())
         .map(|cs| cs.into_iter().filter_map(|c| c.entity_ref).collect())
         .unwrap_or_default();
-    let Ok(facade) = lock_memory_facade(state) else {
-        return "Memory unavailable.".to_string();
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
     let mut deleted = forget_in_scope(&facade, &user, &active, &query, reason);
@@ -6128,9 +6112,8 @@ fn forget_memory(state: &AppState, args: &serde_json::Value) -> String {
     deleted.dedup();
     // Cascade: the graph already hides Deleted; refresh the wiki projection too.
     rebuild_decisions_wiki(&facade, &user, &active);
-    // G5: deletions can orphan entities — re-optimize the touched scopes (the
-    // facade lock must be released first; sweep re-locks).
-    drop(facade);
+    // G5: deletions can orphan entities — re-optimize the touched scopes.
+    // ADR 0027: no facade lock to release; the store serializes each op internally.
     if !deleted.is_empty() {
         reconcile_memory_scope(state, &active);
         if active.as_str() != PERSONAL_WORKSPACE {
@@ -8337,9 +8320,7 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
 /// Tier- and flag-independent: it holds even with the adaptive floor off.
 fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> bool {
     let thread_key = runtime_plan_thread_key(thread_id);
-    let Ok(facade) = lock_memory_facade(state) else {
-        return false;
-    };
+    let facade = memory_facade(state);
     facade
         .list_memories_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
         .unwrap_or_default()
@@ -8358,9 +8339,7 @@ fn load_runtime_plan_from_state(
     thread_id: Option<&str>,
 ) -> Vec<serde_json::Value> {
     let thread_key = runtime_plan_thread_key(thread_id);
-    let Ok(facade) = lock_memory_facade(state) else {
-        return Vec::new();
-    };
+    let facade = memory_facade(state);
     facade
         .list_memories_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
         .unwrap_or_default()
@@ -8388,9 +8367,7 @@ fn plan_stall_check_and_bump(
     resume_plan: &[serde_json::Value],
 ) -> bool {
     let thread_key = runtime_plan_thread_key(thread_id);
-    let Ok(facade) = lock_memory_facade(state) else {
-        return false;
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
     let Some(memory) = facade
@@ -8631,9 +8608,7 @@ fn record_runtime_plan_step_outcome_from_state(
     step: &serde_json::Value,
     evidence: &[String],
 ) {
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
     let lifecycle = MemoryLifecycleRequest {
@@ -8713,9 +8688,7 @@ fn record_subagent_task_step_outcome(
                 .flatten()
         })
         .map(|thread| thread.thread_id);
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
     let lifecycle = MemoryLifecycleRequest {
@@ -9015,9 +8988,7 @@ fn upsert_runtime_plan_memory_from_state(
     thread_id: Option<&str>,
     plan: &[serde_json::Value],
 ) {
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
     let lifecycle = MemoryLifecycleRequest {
@@ -9307,9 +9278,7 @@ fn query_code_graph(state: &AppState, symbol: &str) -> String {
     if needle.is_empty() {
         return "Specify a symbol (function/file) to explore.".to_string();
     }
-    let Ok(facade) = lock_memory_facade(state) else {
-        return "Memory unavailable.".to_string();
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let ws = gateway_memory_workspace_id();
     let entities = facade.list_entities_for_ui(&user, &ws).unwrap_or_default();
@@ -10914,7 +10883,8 @@ async fn automation_update(
     drop(store);
     let memory_user = gateway_memory_user_id();
     let memory_workspace = MemoryWorkspaceId::new(automation.workspace_id.as_str());
-    if let Ok(facade) = lock_memory_facade(&state) {
+    {
+        let facade = memory_facade(&state);
         let _ = tombstone_automation_memory_records(&facade, &memory_user, &memory_workspace, &id);
     }
     reconcile_memory_scope(&state, &memory_workspace);
@@ -10999,7 +10969,8 @@ async fn automation_delete(
     drop(store);
     let memory_user = gateway_memory_user_id();
     let memory_workspace = MemoryWorkspaceId::new(workspace.as_str());
-    if let Ok(facade) = lock_memory_facade(&state) {
+    {
+        let facade = memory_facade(&state);
         let _ = tombstone_automation_memory_records(&facade, &memory_user, &memory_workspace, &id);
     }
     reconcile_memory_scope(&state, &memory_workspace);
@@ -12915,7 +12886,7 @@ fn decisions_for_path(state: &AppState, path: &str) -> Option<String> {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .filter(|name| !name.is_empty())?;
-    let facade = lock_memory_facade(state).ok()?;
+    let facade = memory_facade(state);
     let access = MemoryAccessRequest {
         actor_id: "recall_file".to_string(),
         user_id: gateway_memory_user_id(),
@@ -12976,7 +12947,7 @@ fn relevant_code_components_for_prompt(state: &AppState, prompt: &str) -> Option
     if terms.is_empty() {
         return None;
     }
-    let facade = lock_memory_facade(state).ok()?;
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let ws = gateway_memory_workspace_id();
     let hits = facade.search_code_entities(&user, &ws, &terms, 15).ok()?;
@@ -13255,9 +13226,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     if query.is_empty() {
         return empty("No query provided.");
     }
-    let Ok(facade) = lock_memory_facade(state) else {
-        return empty("Memory unavailable.");
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
     let search = |workspace: MemoryWorkspaceId| -> Vec<(String, String)> {
@@ -23358,15 +23327,12 @@ when the answer is long. {language_instruction} Clear and well-structured.",
     let has_code_map = {
         let st = state.clone();
         tokio::task::spawn_blocking(move || {
-            lock_memory_facade(&st)
+            memory_facade(&st)
+                .list_entities_for_ui(
+                    &gateway_memory_user_id(),
+                    &gateway_memory_workspace_id(),
+                )
                 .ok()
-                .and_then(|f| {
-                    f.list_entities_for_ui(
-                        &gateway_memory_user_id(),
-                        &gateway_memory_workspace_id(),
-                    )
-                    .ok()
-                })
                 .map(|ents| ents.iter().any(|e| e.entity_type.starts_with("code_")))
                 .unwrap_or(false)
         })
@@ -23635,7 +23601,7 @@ save/export a file to a folder, call save_artifact(file, destination)."
             .as_ref()
             .expect("contact_only implies contact_ctx");
         let episodes = {
-            let facade = lock_memory_facade(state)?;
+            let facade = memory_facade(state);
             let user = gateway_memory_user_id();
             episode_texts_by_handles(&facade, &user, &cx.handles)
         };
@@ -23751,28 +23717,26 @@ normal answers."
                     std::sync::Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
                 let query_vec =
                     local_first_memory::embed_query(embedding.as_ref(), &request.prompt).await;
-                let block = match lock_memory_facade(state) {
-                    Ok(facade) => {
-                        let graph_context: Option<
-                            &(dyn Fn(&local_first_memory::MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
-                        > = Some(&|facade, user, workspace, q| {
-                            if let Some(workflow) =
-                                workflow_status_context_for_query(facade, user, workspace, q)
-                            {
-                                return Some(workflow);
-                            }
-                            artifact_provenance_context_for_query(facade, user, workspace, q)
-                        });
-                        local_first_memory::recall_search_on_facade(
-                            &facade,
-                            &user,
-                            &workspace,
-                            &request.prompt,
-                            &query_vec,
-                            graph_context,
-                        )
-                    }
-                    Err(_) => None,
+                let block = {
+                    let facade = memory_facade(state);
+                    let graph_context: Option<
+                        &(dyn Fn(&local_first_memory::MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
+                    > = Some(&|facade, user, workspace, q| {
+                        if let Some(workflow) =
+                            workflow_status_context_for_query(facade, user, workspace, q)
+                        {
+                            return Some(workflow);
+                        }
+                        artifact_provenance_context_for_query(facade, user, workspace, q)
+                    });
+                    local_first_memory::recall_search_on_facade(
+                        facade,
+                        &user,
+                        &workspace,
+                        &request.prompt,
+                        &query_vec,
+                        graph_context,
+                    )
                 };
                 match block {
                     Some(block) => format!("{system}\n\n{block}"),
@@ -25613,9 +25577,7 @@ fn write_proactive_action_memory(
     else {
         return;
     };
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
+    let facade = memory_facade(state);
     if let Ok(record) = facade.create_memory_candidate(request.clone()) {
         let _ = facade.confirm_memory(
             &request.request,
@@ -28682,9 +28644,7 @@ fn backfill_mentions(state: &AppState) {
             .map(|w| w.id)
             .filter(|id| id != PERSONAL_WORKSPACE),
     );
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
+    let facade = memory_facade(state);
     let mut linked_scopes = 0usize;
     for id in workspaces {
         let workspace = MemoryWorkspaceId::new(id);
@@ -28753,9 +28713,7 @@ fn unify_owner_identity(state: &AppState) {
         }
     }
     let contact_refs = other_contact_refs; // self-contact entities are mergeable
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
+    let facade = memory_facade(state);
     let all = facade
         .list_entities_including_tombstoned(&user, &workspace)
         .unwrap_or_default();
@@ -28899,9 +28857,7 @@ fn backfill_contacts(state: &AppState) {
     let user = gateway_memory_user_id();
     let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     let entities = {
-        let Ok(facade) = lock_memory_facade(state) else {
-            return;
-        };
+        let facade = memory_facade(state);
         facade
             .list_entities_for_ui(&user, &workspace)
             .unwrap_or_default()
@@ -29020,9 +28976,7 @@ fn record_channel_message(
     } else {
         message.sender_name.clone()
     };
-    let Ok(facade) = lock_memory_facade(state) else {
-        return;
-    };
+    let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     let handle = contact_handle(channel, &message.sender);
@@ -30174,7 +30128,7 @@ fn read_memory_artifact_for_export(
             code: "artifact_bad_ref",
             message: error,
         })?;
-    let facade = lock_memory_facade(state)?;
+    let facade = memory_facade(state);
     let memory = facade
         .list_memories_for_ui(&reference.user_id, &reference.workspace_id)
         .unwrap_or_default()
@@ -30357,7 +30311,8 @@ async fn artifacts_usage(State(state): State<AppState>) -> Json<ArtifactsUsage> 
     }
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
-    if let Ok(facade) = lock_memory_facade(&state) {
+    {
+        let facade = memory_facade(&state);
         let mut files: Vec<ArtifactFileView> = facade
             .list_memories_for_ui(&user, &workspace)
             .unwrap_or_default()
@@ -30473,7 +30428,7 @@ async fn memory_artifacts(
     } else {
         gateway_memory_workspace_id()
     };
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let mut artifacts: Vec<MemoryArtifactView> = facade
         .list_memories_for_ui(&user, &workspace)
         .unwrap_or_default()
@@ -30584,7 +30539,7 @@ async fn delete_memory_artifact(
         })?;
     let user = reference.user_id.clone();
     let workspace = reference.workspace_id.clone();
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let memory = facade
         .list_memories_for_ui(&user, &workspace)
         .unwrap_or_default()
@@ -41995,7 +41950,7 @@ async fn memory_dashboard(
     State(state): State<AppState>,
 ) -> Result<Json<MemoryDashboard>, GatewayError> {
     let request = gateway_memory_access_request();
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let dashboard = MemoryUiReadModel::new(&facade)
         .dashboard(&request)
         .map_err(GatewayError::memory)?;
@@ -42007,7 +41962,7 @@ async fn memory_dashboard(
 async fn memory_export(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let request = gateway_memory_access_request();
     let dashboard = MemoryUiReadModel::new(&facade)
         .dashboard(&request)
@@ -42048,7 +42003,7 @@ async fn export_user_data(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // ── Memories (reuse the existing memory_export logic) ──
     let memories = {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         let user = gateway_memory_user_id();
         let workspace = gateway_memory_workspace_id();
         let items: Vec<serde_json::Value> = facade
@@ -42184,7 +42139,7 @@ struct MemoryItemView {
 async fn memory_items(
     State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, GatewayError> {
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let user = gateway_memory_user_id();
     let mut out: Vec<MemoryItemView> = Vec::new();
     let mut push_scope = |workspace: &MemoryWorkspaceId, scope: &str, label: &str| {
@@ -42511,7 +42466,7 @@ async fn memory_graphify_import(
     })?;
     let user = gateway_memory_user_id();
     let ws = MemoryWorkspaceId::new(&req.workspace_id);
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let (entities, rels) = import_graphify_value(&facade, &user, &ws, &graph);
     Ok(Json(
         serde_json::json!({ "entities": entities, "relations": rels }),
@@ -42865,7 +42820,8 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
     };
     let user = gateway_memory_user_id();
     let ws = MemoryWorkspaceId::new(workspace_id);
-    if let Ok(facade) = lock_memory_facade(state) {
+    {
+        let facade = memory_facade(state);
         let (n, e) = import_graphify_value(&facade, &user, &ws, &graph);
         eprintln!("project-graph: {workspace_id} → {n} nodi, {e} archi");
     }
@@ -42913,7 +42869,8 @@ async fn project_graph_ensure(
         build_project_graph(&st, &ws, &folder, subpath.as_deref());
         // Refresh the project BRIEF (goals + recent state) from current memory, so the
         // always-on injected briefing is fresh whenever the project is opened.
-        if let Ok(facade) = lock_memory_facade(&st) {
+        {
+            let facade = memory_facade(&st);
             rebuild_project_brief(
                 &facade,
                 &gateway_memory_user_id(),
@@ -43000,7 +42957,7 @@ async fn memory_goals_list(
     // below, which locks the same (non-reentrant) memory facade mutex itself — holding
     // this guard across that call would deadlock the request on its own lock.
     let items = {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         facade.list_memories_for_ui(&user, &ws).unwrap_or_default()
     };
     let pick = |t: &str| -> Vec<serde_json::Value> {
@@ -43069,7 +43026,7 @@ async fn memory_project_briefing(
             "decisions": [],
         })));
     }
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let items = facade.list_memories_for_ui(&user, &ws).unwrap_or_default();
     // Objective (goals) + decisions + open-loops, con provenance thread_id.
     // Dedup by normalized text and cap: accepting the SAME repeated proactive card
@@ -43139,7 +43096,7 @@ async fn memory_goals_promote(
         .filter(|w| !w.trim().is_empty())
         .map(MemoryWorkspaceId::new)
         .unwrap_or_else(gateway_memory_workspace_id);
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let mut promoted = 0usize;
     for raw in &req.refs {
         if let Ok(reference) = raw.parse::<MemoryRef>() {
@@ -43181,7 +43138,7 @@ async fn memory_goals_add(
         .filter(|w| !w.trim().is_empty())
         .map(MemoryWorkspaceId::new)
         .unwrap_or_else(gateway_memory_workspace_id);
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let lifecycle = MemoryLifecycleRequest {
         actor_id: "desktop-chat".to_string(),
         user_id: user.clone(),
@@ -43244,7 +43201,7 @@ async fn memory_goals_suggest(
     // Collect context as OWNED strings, then DROP the facade before the await (the lock
     // guard isn't Send across an await point).
     let (decisions, existing): (Vec<String>, Vec<String>) = {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         let items = facade.list_memories_for_ui(&user, &ws).unwrap_or_default();
         let dec = items
             .iter()
@@ -43305,7 +43262,7 @@ async fn memory_graph(
     State(state): State<AppState>,
     Query(query): Query<MemoryGraphQuery>,
 ) -> Result<Json<MemoryGraphResponse>, GatewayError> {
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let user = gateway_memory_user_id();
     // Prefer the thread's project (so the Memoria tab shows the CONVERSATION's graph),
     // then an explicit workspace, then the active workspace.
@@ -43696,7 +43653,7 @@ async fn memory_graph_merge(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("merged from memory graph");
     {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         facade
             .merge_entities(
                 &survivor_ref,
@@ -43717,7 +43674,7 @@ async fn memory_hygiene_suggestions(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     let user = gateway_memory_user_id();
     let ws = resolve_memory_query_scope(&state, &query);
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let suggestions =
         memory_hygiene_suggestions_for_scope(&facade, &user, &ws).map_err(GatewayError::memory)?;
     Ok(Json(serde_json::json!({
@@ -43739,7 +43696,7 @@ async fn memory_wiki(
     State(state): State<AppState>,
     Query(query): Query<MemoryGraphQuery>,
 ) -> Result<Json<Vec<WikiPageView>>, GatewayError> {
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let user = gateway_memory_user_id();
     let ws = if let Some(tid) = query.thread.as_deref().filter(|t| !t.trim().is_empty()) {
         lock_store(&state)
@@ -43802,7 +43759,7 @@ async fn memory_wiki_save(
         gateway_memory_workspace_id()
     };
     {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         let existing = facade
             .list_wiki_pages_for_ui(&user, &ws)
             .ok()
@@ -44108,7 +44065,7 @@ async fn contacts_list(
     // Episode count per thread handle, computed once (avoids O(contacts × episodes)).
     let user = gateway_memory_user_id();
     let counts: std::collections::HashMap<String, usize> = {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
         let mut map: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for mem in facade
@@ -44166,7 +44123,7 @@ async fn contact_memories(
     Json(request): Json<ContactRefRequest>,
 ) -> Result<Json<Vec<String>>, GatewayError> {
     let handles = contact_handles_by_ref(&state, &request.reference)?;
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let user = gateway_memory_user_id();
     Ok(Json(episode_texts_by_handles(&facade, &user, &handles)))
 }
@@ -44316,7 +44273,8 @@ async fn contacts_merge(
     // both contacts have entity refs, merge graph entities so aliases and relations
     // move to the survivor; otherwise keep the previous conservative tombstone.
     if let Some(eref) = absorbed_entity_ref {
-        if let Ok(facade) = lock_memory_facade(&state) {
+        {
+            let facade = memory_facade(&state);
             let user = gateway_memory_user_id();
             let workspace = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
             let survivor_ref = survivor
@@ -44830,7 +44788,8 @@ async fn contact_relationship_add(
     let to_contact = store.contact_by_id(to).ok().flatten();
     drop(store);
     if let (Some(from_contact), Some(to_contact)) = (from_contact, to_contact) {
-        if let Ok(facade) = lock_memory_facade(&state) {
+        {
+            let facade = memory_facade(&state);
             let _ = mirror_contact_relationship_to_memory_graph(
                 &facade,
                 &from_contact,
@@ -44868,7 +44827,8 @@ async fn contact_relationship_remove(
         })?;
     drop(store);
     if let Some(existing) = existing {
-        if let Ok(facade) = lock_memory_facade(&state) {
+        {
+            let facade = memory_facade(&state);
             let _ = tombstone_contact_relationship_memory_graph_edge(
                 &facade,
                 existing.from_contact_id,
@@ -45313,7 +45273,7 @@ async fn contact_profile(
         )
     };
     let user = gateway_memory_user_id();
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let episode_count = episode_texts_by_handles(&facade, &user, &handles).len();
     let entity_refs = contact_entity_refs(&facade, &user, &handles, contact.as_ref());
     let facts = facts_from_graph(&facade, &user, &entity_refs);
@@ -45356,7 +45316,7 @@ async fn contact_profile_refresh(
 
     // Distillation input + provenance map + forget/dedup context (one lock).
     let (episodes, ep_refs, forgotten, mut seen) = {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         let episodes = episodes_dated_by_handles(&facade, &user, &handles);
         let ep_refs = episode_refs_by_date(&facade, &user, &handles);
         let forgotten = forgotten_token_sets(&facade, &user);
@@ -45381,7 +45341,7 @@ async fn contact_profile_refresh(
 
     // Persist new facts as graph records (forget + dedup applied), with provenance.
     {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         let lifecycle = MemoryLifecycleRequest {
             actor_id: "contact-distill".to_string(),
             user_id: user.clone(),
@@ -45434,7 +45394,7 @@ async fn contact_profile_refresh(
     }
 
     // Return the LIVE graph view (pre-existing + newly added).
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let entity_refs = contact_entity_refs(&facade, &user, &handles, Some(&contact));
     let facts = facts_from_graph(&facade, &user, &entity_refs);
     Ok(Json(ContactProfile {
@@ -45467,7 +45427,7 @@ async fn memory_decide(
             code: "memory_bad_ref",
             message: error,
         })?;
-    let facade = lock_memory_facade(&state)?;
+    let facade = memory_facade(&state);
     let lifecycle = MemoryLifecycleRequest {
         actor_id: "desktop-ui".to_string(),
         user_id: reference.user_id.clone(),
@@ -45527,8 +45487,8 @@ async fn memory_decide(
         }
     }
     // G5: a deletion can orphan entities and leave dangling edges — re-optimize
-    // the graph of the touched scope. Facade lock released first (non-reentrant).
-    drop(facade);
+    // the graph of the touched scope. ADR 0027: no facade lock; the store is
+    // internally serialized, so the re-optimize sweep needs no explicit release.
     reconcile_memory_scope(&state, &reference.workspace_id);
     Ok(Json(serde_json::json!({ "ok": true })))
 }
@@ -47319,12 +47279,10 @@ fn lock_browser_url_policies(
         })
 }
 
-fn lock_memory_facade(state: &AppState) -> Result<MutexGuard<'_, MemoryFacade>, GatewayError> {
-    state.memory_facade.lock().map_err(|error| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "memory_store_lock_error",
-        message: error.to_string(),
-    })
+/// ADR 0027: the facade is lock-free — the store owns concurrency per-op. Direct &-access;
+/// never held across a model/embed call (that was the HTTP-hot-path freeze this move removes).
+fn memory_facade(state: &AppState) -> &MemoryFacade {
+    &state.memory_facade
 }
 
 fn lock_vault_store(state: &AppState) -> Result<MutexGuard<'_, SQLiteVaultStore>, GatewayError> {
@@ -48315,7 +48273,7 @@ async fn create_workspace(
         folder: Some(folder.to_string()),
     };
     {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         upsert_workspace_root_memory_entity(&facade, &workspace).map_err(workspace_memory_error)?;
     }
     reconcile_memory_scope(&state, &MemoryWorkspaceId::new(workspace.id.clone()));
@@ -48365,7 +48323,7 @@ async fn set_workspace_folder(
     };
     let updated_workspace = workspace.clone();
     {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         upsert_workspace_root_memory_entity(&facade, &updated_workspace)
             .map_err(workspace_memory_error)?;
     }
@@ -48414,7 +48372,7 @@ async fn rename_workspace(
     workspace.name = name;
     let updated_workspace = workspace.clone();
     {
-        let facade = lock_memory_facade(&state)?;
+        let facade = memory_facade(&state);
         upsert_workspace_root_memory_entity(&facade, &updated_workspace)
             .map_err(workspace_memory_error)?;
     }
@@ -48513,7 +48471,8 @@ fn purge_workspace_data(state: &AppState, workspace_id: &str) {
     {
         let mem_user = MemoryUserId::new("local".to_string());
         let mem_workspace = MemoryWorkspaceId::new(workspace_id.to_string());
-        if let Ok(facade) = lock_memory_facade(state) {
+        {
+            let facade = memory_facade(state);
             match facade.purge_workspace(&mem_user, &mem_workspace) {
                 Ok(count) => {
                     eprintln!("purge_workspace: removed {count} memories from {workspace_id}")
@@ -48540,7 +48499,8 @@ fn vacuum_all_stores(state: &AppState) {
             eprintln!("VACUUM task store: {error:?}");
         }
     }
-    if let Ok(facade) = lock_memory_facade(state) {
+    {
+        let facade = memory_facade(state);
         if let Err(error) = facade.vacuum() {
             eprintln!("VACUUM memory store: {error}");
         }
@@ -56206,7 +56166,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             browser_url_policies: std::sync::Arc::new(std::sync::Mutex::new(
                 super::BrowserUrlPolicyStore::open_in_memory().expect("browser url policy store"),
             )),
-            memory_facade: std::sync::Arc::new(std::sync::Mutex::new(memory_facade)),
+            memory_facade: std::sync::Arc::new(memory_facade),
             memory_service: None,
             vault_store: std::sync::Arc::new(std::sync::Mutex::new(
                 local_first_vault::SQLiteVaultStore::open_in_memory().expect("vault store"),
@@ -56428,7 +56388,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             purpose: "add_goal".to_string(),
         };
         {
-            let facade_guard = super::lock_memory_facade(&state).expect("memory facade");
+            let facade_guard = super::memory_facade(&state);
             let record = facade_guard
                 .create_memory_candidate(super::MemoryCreateRequest {
                     request: lifecycle.clone(),
@@ -56525,7 +56485,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
                 workspace_id: ws.clone(),
                 purpose: "add_goal".to_string(),
             };
-            let facade_guard = super::lock_memory_facade(&state).expect("memory facade");
+            let facade_guard = super::memory_facade(&state);
             let record = facade_guard
                 .create_memory_candidate(super::MemoryCreateRequest {
                     request: lifecycle.clone(),
