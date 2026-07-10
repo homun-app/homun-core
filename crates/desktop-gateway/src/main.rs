@@ -22952,6 +22952,17 @@ struct GatewayBrowserExecutor<'a> {
     channel_owner: bool,
 }
 
+impl Drop for GatewayBrowserExecutor<'_> {
+    // Guarantee the "● LIVE" browser indicator clears on EVERY exit. `close_session` is the
+    // normal cleanup (parks the session + clears the indicator), but it runs only on graceful
+    // exit paths — a turn CANCEL/abort drops this executor's future before it, leaving the
+    // frozen browser frame stuck LIVE forever. Clearing here on drop is idempotent (→ None)
+    // and covers cancel, abort, and panic. (Session parking still happens in close_session.)
+    fn drop(&mut self) {
+        end_browser_activity();
+    }
+}
+
 impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
     async fn execute_browser(
         &mut self,
