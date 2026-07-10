@@ -326,6 +326,10 @@ export function ChatView({
   const [projectedActivity, setProjectedActivity] = useState<string[]>([]);
   const [projectedPlan, setProjectedPlan] = useState<string | null>(null);
   const [projectedTurnStatus, setProjectedTurnStatus] = useState<string | null>(null);
+  // Once the projection has loaded for a thread we TRUST it — including a null plan (a new
+  // plan-less task must clear the previous task's plan). Before it loads we fall back to the
+  // text markers to avoid a blank flash. Reset per thread.
+  const [projectionLoaded, setProjectionLoaded] = useState(false);
   // Track the active turn_id for WS event filtering. Set when a turn starts,
   // cleared when it ends. Used by the wsSubscription subscriber to route events.
   const activeTurnIdRef = useRef<string | null>(null);
@@ -497,12 +501,18 @@ export function ChatView({
   //  - live: live WS events (current turn) layered over the projection (prior turns);
   //  - at rest: the projection alone, falling back to the lossy text markers only if the
   //    projection is empty (older turns whose events predate turn_events, or edge cases).
+  // Plan: while streaming, ONLY the live plan of the CURRENT turn (never fall back to the
+  // projection — a new plan-less task must not keep showing the previous task's plan). At
+  // rest, trust the loaded projection (which is scoped to the latest turn), else the marker.
   const conversationPlan = isStreaming
-    ? livePlanMarkdown ?? projectedPlan ?? persistedPlan
-    : projectedPlan ?? persistedPlan;
+    ? livePlanMarkdown
+    : projectionLoaded
+      ? projectedPlan
+      : persistedPlan;
+  // Activity accumulates across the thread: projection (prior turns) + live (current turn).
   const conversationActivity = isStreaming
     ? [...projectedActivity, ...liveActivitySteps]
-    : projectedActivity.length > 0
+    : projectionLoaded
       ? projectedActivity
       : persistedActivity;
   const workspacePlanSteps = useMemo(() => {
@@ -525,6 +535,7 @@ export function ChatView({
     setProjectedActivity([]);
     setProjectedPlan(null);
     setProjectedTurnStatus(null);
+    setProjectionLoaded(false);
   }, [thread.threadId]);
   // Load the durable island projection on thread change and when a turn ENDS (isStreaming →
   // false, so the just-finished turn folds in). Deliberately NOT during streaming: the live
@@ -539,6 +550,7 @@ export function ChatView({
         setProjectedActivity(projection.activity);
         setProjectedPlan(projection.plan_markdown);
         setProjectedTurnStatus(projection.latest_turn_status);
+        setProjectionLoaded(true);
       })
       .catch(() => {
         /* projection unavailable → island falls back to live + persisted markers */

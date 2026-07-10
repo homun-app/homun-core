@@ -19,6 +19,13 @@ import { useTranslation } from "react-i18next";
 import { currentStepIndex, threeStepWindow } from "../lib/islandPlan";
 import type { ChatStreamStatus, IslandSource, PlanStep, WorkbenchTab } from "./ChatView";
 
+// Gateway activity lines carry a leading status emoji (🛠️ 💻 🔎 ↩ ✓ …). The cockpit shows
+// uniform TEXT lines — no icons — so strip that leading emoji everywhere the line is shown
+// (the collapsed latest line, the pill headline, and the expanded list all go through this).
+function cleanActivityLine(step: string): string {
+  return step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "").trim();
+}
+
 // Single checklist row (Progress). Monochrome: the ONLY color is the done check.
 // `live` gates the "in progress" affordances — a concluded turn has no active step, so
 // the spinner and the current-step arrow are suppressed (otherwise a step the model left
@@ -114,7 +121,8 @@ export function WorkspaceIsland({
   // Auto-focus window: always show the 3 steps around "now", collapse the rest.
   const planWin = threeStepWindow(planSteps);
   const currentIdx = currentStepIndex(planSteps);
-  const latestActivity = activitySteps[activitySteps.length - 1] ?? null;
+  const rawLatestActivity = activitySteps[activitySteps.length - 1] ?? null;
+  const latestActivity = rawLatestActivity ? cleanActivityLine(rawLatestActivity) : null;
   const hasWorkspaceState =
     (threadHasMessages || streaming || computerLive) &&
     (streaming ||
@@ -372,9 +380,7 @@ export function WorkspaceIsland({
               {activityOpen ? (
                 <ol className="wi-activity-list">
                   {activitySteps.slice(-40).map((step, index) => (
-                    <li key={`${index}-${step.slice(0, 24)}`}>
-                      {step.replace(/^(?:\p{Extended_Pictographic}|️|‍|\s)+/u, "")}
-                    </li>
+                    <li key={`${index}-${step.slice(0, 24)}`}>{cleanActivityLine(step)}</li>
                   ))}
                 </ol>
               ) : (

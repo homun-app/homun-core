@@ -899,31 +899,47 @@ impl TaskStore {
     /// Projects the durable per-turn log into a thread-level cockpit view for the working
     /// island (see `ThreadActivityProjection`). ONE JOIN turn_events⋈tasks(thread_id) — both
     /// tables live in the same sqlite — yields every activity+plan_update across the thread's
-    /// turns in chronological order; we fold them (append activity, keep the last plan) and
-    /// read the latest turn's status separately. This is why the island can survive
-    /// turn-end/reload/thread-switch and accumulate cross-turn: it no longer parses the lossy
-    /// message-text markers. `activity_cap` bounds the payload by keeping the most recent steps.
+    /// turns in chronological order. Activity ACCUMULATES across the thread; the PLAN is scoped
+    /// to the LATEST turn only (a new task that emits no plan must not leave the previous task's
+    /// plan on screen — the island has to reflect the current request, not the first one). We
+    /// read the latest turn's id+status once, then keep only plan_updates from that turn. This
+    /// is why the island survives turn-end/reload/thread-switch without parsing lossy message
+    /// markers. `activity_cap` bounds the payload by keeping the most recent steps.
     pub fn project_thread_activity(
         &self,
         thread_id: &str,
         activity_cap: usize,
     ) -> TaskRuntimeResult<ThreadActivityProjection> {
+        // Latest turn (id + status) first: the plan is scoped to it.
+        let latest_turn: Option<(String, String)> = self
+            .connection
+            .query_row(
+                "SELECT task_id, status FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'
+                 ORDER BY created_at DESC LIMIT 1",
+                params![thread_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        let latest_turn_id = latest_turn.as_ref().map(|(id, _)| id.clone());
+        let latest_turn_status = latest_turn.map(|(_, status)| status);
+
         let mut stmt = self.connection.prepare(
-            "SELECT te.kind, te.payload_json
+            "SELECT te.turn_id, te.kind, te.payload_json
              FROM turn_events te JOIN tasks t ON t.task_id = te.turn_id
              WHERE t.thread_id = ?1 AND t.kind = 'chat_turn'
                AND te.kind IN ('activity', 'plan_update')
              ORDER BY t.created_at ASC, te.seq ASC",
         )?;
         let rows = stmt.query_map(params![thread_id], |row| {
-            let kind: String = row.get(0)?;
-            let payload: String = row.get(1)?;
-            Ok((kind, payload))
+            let turn_id: String = row.get(0)?;
+            let kind: String = row.get(1)?;
+            let payload: String = row.get(2)?;
+            Ok((turn_id, kind, payload))
         })?;
         let mut activity: Vec<String> = Vec::new();
         let mut plan_markdown: Option<String> = None;
         for row in rows {
-            let (kind, payload_json) = row?;
+            let (turn_id, kind, payload_json) = row?;
             let payload: Value = serde_json::from_str(&payload_json)?;
             match kind.as_str() {
                 "activity" => {
@@ -934,7 +950,8 @@ impl TaskStore {
                         }
                     }
                 }
-                "plan_update" => {
+                // Plan is scoped to the LATEST turn: a newer, plan-less task clears the old plan.
+                "plan_update" if Some(&turn_id) == latest_turn_id.as_ref() => {
                     if let Some(md) = payload.get("markdown").and_then(|v| v.as_str()) {
                         if !md.trim().is_empty() {
                             plan_markdown = Some(md.to_string());
@@ -949,16 +966,7 @@ impl TaskStore {
         if activity_cap > 0 && activity.len() > activity_cap {
             activity.drain(0..activity.len() - activity_cap);
         }
-        // Latest turn status + count — both served by idx_tasks_chat_turn_thread.
-        let latest_turn_status: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT status FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'
-                 ORDER BY created_at DESC LIMIT 1",
-                params![thread_id],
-                |row| row.get(0),
-            )
-            .optional()?;
+        // Turn count — served by idx_tasks_chat_turn_thread.
         let turn_count: i64 = self.connection.query_row(
             "SELECT COUNT(*) FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'",
             params![thread_id],
@@ -1383,6 +1391,26 @@ mod chat_turn_query_tests {
         assert_eq!(p.plan_markdown.as_deref(), Some("- [x] due"), "latest plan wins");
         assert_eq!(p.turn_count, 2);
         assert_eq!(p.latest_turn_status.as_deref(), Some("running"), "status of the most recent turn");
+    }
+
+    #[test]
+    fn project_thread_activity_plan_is_scoped_to_latest_turn() {
+        let s = store();
+        // Turn 1 (older): a planned task that completes with a plan.
+        let mut t1 = make_chat_turn("turn_a", "threadZ", TaskStatus::Completed);
+        t1.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
+        s.insert_chat_turn(&t1, "threadZ", "reqa", "interactive", "full").unwrap();
+        s.insert_turn_event("turn_a", TurnEventKind::Activity, json!({"text": "A1"})).unwrap();
+        s.insert_turn_event("turn_a", TurnEventKind::PlanUpdate, json!({"markdown": "- [x] mini-ricerca"})).unwrap();
+        // Turn 2 (newer): a DIFFERENT task with no plan (e.g. a one-shot web search).
+        let mut t2 = make_chat_turn("turn_b", "threadZ", TaskStatus::Completed);
+        t2.created_at = OffsetDateTime::from_unix_timestamp(200).unwrap();
+        s.insert_chat_turn(&t2, "threadZ", "reqb", "interactive", "full").unwrap();
+        s.insert_turn_event("turn_b", TurnEventKind::Activity, json!({"text": "B1 search"})).unwrap();
+
+        let p = s.project_thread_activity("threadZ", 200).unwrap();
+        assert_eq!(p.plan_markdown, None, "the plan-less latest turn must clear the previous task's plan");
+        assert_eq!(p.activity, vec!["A1".to_string(), "B1 search".to_string()], "activity still accumulates");
     }
 
     #[test]
