@@ -511,8 +511,9 @@ assertContains("src/App.tsx", "onAutoSubmitConsumed", "template auto-submit trig
 assertContains("src/components/ChatView.tsx", "autoSubmit?: ChatAutoSubmit | null", "ChatView must accept external chat-start triggers without bypassing streaming UI");
 assertContains("src/components/ChatView.tsx", "submitPrompt(\n      autoSubmit.prompt", "external chat-start triggers must reuse the normal visible submit pipeline");
 assertNotContains("src/App.tsx", "template_workflow_", "template workflows must not start a parallel invisible stream from App");
-assertContains("src/components/ChatComputerPanel.tsx", "view === \"bar\" ? \"full\" : \"bar\"", "Computer dock chevron must open the live browser to a useful expanded view from the compact card");
-assertContains("src/components/ChatComputerPanel.tsx", "view === \"bar\" ? <Maximize2 size={15} /> : <ChevronDown size={15} />", "Computer dock compact expand control must use a fullscreen/expand icon, not an upward chevron");
+// The dock now has ONE enlarge/contract control (right-aligned): fullscreen ⇄ back.
+assertContains("src/components/ChatComputerPanel.tsx", "setView(fullscreen ? \"expanded\" : \"full\")", "Computer dock must expose a single enlarge/contract control (fullscreen ⇄ expanded)");
+assertContains("src/components/ChatComputerPanel.tsx", "fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />", "Computer dock enlarge/contract control must use fullscreen/minimize icons");
 assertContains("src/styles.css", ".cc-dock,\n.cc-scrim {\n  pointer-events: auto;", "Computer dock controls must be clickable inside the non-interactive status stack");
 assertContains("src/styles.css", ".cc-dock.full {\n  position: fixed;", "Computer fullscreen dock must escape the status stack and anchor inside the chat viewport");
 assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + 24px);", "Computer fullscreen dock must start to the right of the sidebar island");
