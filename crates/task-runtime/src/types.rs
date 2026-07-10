@@ -196,6 +196,20 @@ pub struct TurnEvent {
     pub created_at: i64,
 }
 
+/// Thread-level cockpit projection over the durable per-turn log (`turn_events`) for the
+/// working island. Plans supersede (latest `plan_update` wins); activity accumulates across
+/// ALL turns of the thread in chronological order (capped to bound the payload). This is the
+/// single durable source the island reads at rest — the message-text `‹‹ACT/PLAN››` markers
+/// are a lossy mirror (absent for workflow deliverables, plan emitted at most once) we no
+/// longer depend on. `latest_turn_status` distinguishes a live turn from a concluded one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThreadActivityProjection {
+    pub plan_markdown: Option<String>,
+    pub activity: Vec<String>,
+    pub latest_turn_status: Option<String>,
+    pub turn_count: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TurnEventKind {

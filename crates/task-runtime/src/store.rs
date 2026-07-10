@@ -1,7 +1,7 @@
 use crate::{
     ApprovalRequest, Automation, AutomationRun, ResourceClass, TaskCheckpoint,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    TurnEvent, TurnEventKind, UserId, WorkspaceId,
+    ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -896,6 +896,82 @@ impl TaskStore {
         Ok(out)
     }
 
+    /// Projects the durable per-turn log into a thread-level cockpit view for the working
+    /// island (see `ThreadActivityProjection`). ONE JOIN turn_events⋈tasks(thread_id) — both
+    /// tables live in the same sqlite — yields every activity+plan_update across the thread's
+    /// turns in chronological order; we fold them (append activity, keep the last plan) and
+    /// read the latest turn's status separately. This is why the island can survive
+    /// turn-end/reload/thread-switch and accumulate cross-turn: it no longer parses the lossy
+    /// message-text markers. `activity_cap` bounds the payload by keeping the most recent steps.
+    pub fn project_thread_activity(
+        &self,
+        thread_id: &str,
+        activity_cap: usize,
+    ) -> TaskRuntimeResult<ThreadActivityProjection> {
+        let mut stmt = self.connection.prepare(
+            "SELECT te.kind, te.payload_json
+             FROM turn_events te JOIN tasks t ON t.task_id = te.turn_id
+             WHERE t.thread_id = ?1 AND t.kind = 'chat_turn'
+               AND te.kind IN ('activity', 'plan_update')
+             ORDER BY t.created_at ASC, te.seq ASC",
+        )?;
+        let rows = stmt.query_map(params![thread_id], |row| {
+            let kind: String = row.get(0)?;
+            let payload: String = row.get(1)?;
+            Ok((kind, payload))
+        })?;
+        let mut activity: Vec<String> = Vec::new();
+        let mut plan_markdown: Option<String> = None;
+        for row in rows {
+            let (kind, payload_json) = row?;
+            let payload: Value = serde_json::from_str(&payload_json)?;
+            match kind.as_str() {
+                "activity" => {
+                    if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
+                        let text = text.trim();
+                        if !text.is_empty() {
+                            activity.push(text.to_string());
+                        }
+                    }
+                }
+                "plan_update" => {
+                    if let Some(md) = payload.get("markdown").and_then(|v| v.as_str()) {
+                        if !md.trim().is_empty() {
+                            plan_markdown = Some(md.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Bound the payload: keep the most recent `activity_cap` steps (the tail is what the
+        // cockpit shows). A cap of 0 would be nonsensical here, so treat it as "no cap".
+        if activity_cap > 0 && activity.len() > activity_cap {
+            activity.drain(0..activity.len() - activity_cap);
+        }
+        // Latest turn status + count — both served by idx_tasks_chat_turn_thread.
+        let latest_turn_status: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT status FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'
+                 ORDER BY created_at DESC LIMIT 1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let turn_count: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'",
+            params![thread_id],
+            |row| row.get(0),
+        )?;
+        Ok(ThreadActivityProjection {
+            plan_markdown,
+            activity,
+            latest_turn_status,
+            turn_count: turn_count as usize,
+        })
+    }
+
     /// Increments and persists the process_generation. Call ONCE at process startup,
     /// before any acquire. Uniquely identifies this incarnation of the process: leases
     /// written by previous generations are stale at boot recovery.
@@ -1283,6 +1359,52 @@ mod chat_turn_query_tests {
             .execute("UPDATE tasks SET thread_id = 'thread_x' WHERE task_id = 'bg1'", [])
             .unwrap();
         assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap(), None);
+    }
+
+    #[test]
+    fn project_thread_activity_accumulates_cross_turn_and_takes_latest_plan() {
+        let s = store();
+        // Turn 1 (older): one activity + one plan. created_at set explicitly so the JOIN's
+        // `t.created_at ASC` ordering is deterministic across turns.
+        let mut t1 = make_chat_turn("turn_a", "threadX", TaskStatus::Completed);
+        t1.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
+        s.insert_chat_turn(&t1, "threadX", "reqa", "interactive", "full").unwrap();
+        s.insert_turn_event("turn_a", TurnEventKind::Activity, json!({"text": "A1"})).unwrap();
+        s.insert_turn_event("turn_a", TurnEventKind::PlanUpdate, json!({"markdown": "- [ ] uno"})).unwrap();
+        // Turn 2 (newer, still running): one activity + a superseding plan.
+        let mut t2 = make_chat_turn("turn_b", "threadX", TaskStatus::Running);
+        t2.created_at = OffsetDateTime::from_unix_timestamp(200).unwrap();
+        s.insert_chat_turn(&t2, "threadX", "reqb", "interactive", "full").unwrap();
+        s.insert_turn_event("turn_b", TurnEventKind::Activity, json!({"text": "B1"})).unwrap();
+        s.insert_turn_event("turn_b", TurnEventKind::PlanUpdate, json!({"markdown": "- [x] due"})).unwrap();
+
+        let p = s.project_thread_activity("threadX", 200).unwrap();
+        assert_eq!(p.activity, vec!["A1".to_string(), "B1".to_string()], "activity accumulates across turns in order");
+        assert_eq!(p.plan_markdown.as_deref(), Some("- [x] due"), "latest plan wins");
+        assert_eq!(p.turn_count, 2);
+        assert_eq!(p.latest_turn_status.as_deref(), Some("running"), "status of the most recent turn");
+    }
+
+    #[test]
+    fn project_thread_activity_caps_to_most_recent() {
+        let s = store();
+        let t = make_chat_turn("turn_c", "threadY", TaskStatus::Completed);
+        s.insert_chat_turn(&t, "threadY", "reqc", "interactive", "full").unwrap();
+        for i in 0..5 {
+            s.insert_turn_event("turn_c", TurnEventKind::Activity, json!({"text": format!("step{i}")})).unwrap();
+        }
+        let p = s.project_thread_activity("threadY", 2).unwrap();
+        assert_eq!(p.activity, vec!["step3".to_string(), "step4".to_string()], "cap keeps the most recent tail");
+    }
+
+    #[test]
+    fn project_thread_activity_empty_thread_is_default() {
+        let s = store();
+        let p = s.project_thread_activity("nope", 200).unwrap();
+        assert!(p.activity.is_empty());
+        assert_eq!(p.plan_markdown, None);
+        assert_eq!(p.latest_turn_status, None);
+        assert_eq!(p.turn_count, 0);
     }
 }
 
