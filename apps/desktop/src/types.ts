@@ -20,6 +20,7 @@ export type SettingsSectionId =
   | "appearance"
   | "runtime"
   | "privacy"
+  | "sandbox"
   | "vault"
   | "memory"
   | "artifacts"

@@ -441,6 +441,10 @@ export interface WorkspaceRecord {
   id: string;
   name: string;
   folder?: string | null;
+  // ADR 0023 per-workspace policy overrides. Absent/null → this project inherits the global
+  // `RuntimeSettings` default. Set → overrides that axis for every thread in the project.
+  sandbox_mode?: string | null;
+  approval_policy?: string | null;
 }
 
 export interface WorkspacesSnapshot {
@@ -1714,6 +1718,20 @@ async function electronDeleteWorkspace(id: string): Promise<WorkspacesSnapshot> 
   );
 }
 
+// ADR 0023 — per-workspace sandbox/approval override. Mirrors `setRuntimeSettings`: each axis
+// is optional and PATCH-merged server-side; sending JSON `null` clears that axis back to
+// inheriting the global default (see `merge_workspace_policy` on the gateway). Returns the
+// updated record.
+async function electronSetWorkspacePolicy(
+  id: string,
+  patch: { sandbox_mode?: string | null; approval_policy?: string | null },
+): Promise<WorkspaceRecord> {
+  return gatewayPostJson<WorkspaceRecord>(
+    `/api/workspaces/${encodeURIComponent(id)}/policy`,
+    patch,
+  );
+}
+
 async function electronProjectAccess(workspaceId: string): Promise<ProjectAccessGrant[]> {
   return gatewayGetJson<ProjectAccessGrant[]>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/access`,
@@ -2699,6 +2717,10 @@ export const coreBridge = {
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
   renameWorkspace: (id: string, name: string) => electronRenameWorkspace(id, name),
   deleteWorkspace: (id: string) => electronDeleteWorkspace(id),
+  setWorkspacePolicy: (
+    id: string,
+    patch: { sandbox_mode?: string | null; approval_policy?: string | null },
+  ) => electronSetWorkspacePolicy(id, patch),
   projectAccess: (workspaceId: string) => electronProjectAccess(workspaceId),
   upsertProjectAccess: (workspaceId: string, input: ProjectAccessInput) =>
     electronUpsertProjectAccess(workspaceId, input),

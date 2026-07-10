@@ -350,6 +350,9 @@ assertContains("src/components/ChatView.tsx", "coreBridge.vaultPaymentApprovalAp
 assertContains("src/components/ChatView.tsx", "messageId={messageId}", "Payment Approval Card must receive the source message id for transcript rewrite");
 assertContains("src/lib/coreBridge.ts", "message_id: ctx.messageId", "Payment approvals must include source message id when available");
 assertContains("src/data/mockData.ts", "id: \"vault\"", "Vault must be a separate Settings section");
+assertContains("src/data/mockData.ts", "id: \"sandbox\"", "Sandbox must be a separate Settings section");
+assertContains("src/components/SettingsView.tsx", "<SandboxSettingsView />", "Settings must render the dedicated Sandbox pane");
+assertContains("src/lib/coreBridge.ts", "/policy`", "coreBridge must POST per-workspace sandbox/approval overrides");
 assertContains("src/components/SettingsView.tsx", "coreBridge.vaultPinSetup", "Vault Settings must configure the local PIN through the bridge");
 assertContains("src/components/ChatView.tsx", "coreBridge.vaultProposalAccept", "Vault proposal card must expose an accept action");
 assertContains("src/components/ChatView.tsx", "Save to Vault", "Vault proposal card must offer an explicit save action");
