@@ -48237,6 +48237,25 @@ fn policy_override_from_json(
     value.as_str().and_then(normalize)
 }
 
+/// Read a string-LIST override axis (Phase 2 `writable_roots` / Phase 3 `skill_confirmations`)
+/// out of a JSON patch, mirroring [`policy_override_from_json`] for lists: an ARRAY →
+/// `Some(list)` of trimmed non-empty strings (an empty array is a valid explicit "replace with
+/// nothing" override); `null` or any non-array → `None` (clear back to inherit the global
+/// default). Only called when the key is PRESENT in the patch (absent key → field untouched).
+fn string_list_override_from_json(value: &serde_json::Value) -> Option<Vec<String>> {
+    match value {
+        serde_json::Value::Array(items) => Some(
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
 /// Overlay a PARTIAL policy patch onto a `WorkspaceRecord` (mirrors `merge_runtime_settings`
 /// for the two per-workspace axes). Only keys PRESENT in `patch` are touched, so a control
 /// posting one axis never resets the sibling; `null` clears an override back to inherit;
@@ -48249,6 +48268,10 @@ fn merge_workspace_policy(current: &WorkspaceRecord, patch: &serde_json::Value) 
         }
         if let Some(value) = obj.get("approval_policy") {
             merged.approval_policy = policy_override_from_json(value, normalize_approval_override);
+        }
+        // Phase 2: per-project extra writable folders (array sets, null clears to inherit).
+        if let Some(value) = obj.get("writable_roots") {
+            merged.writable_roots = string_list_override_from_json(value);
         }
     }
     merged
@@ -49254,6 +49277,45 @@ mod tests {
         );
         // An explicit EMPTY override still replaces (shrinks to just the project root).
         assert!(super::resolve_extra_roots(Some(&[]), &["/g".to_string()]).is_empty());
+    }
+
+    // Phase 2 endpoint: `merge_workspace_policy` also carries the per-project `writable_roots`
+    // list. An ARRAY sets the override, `null` clears it back to inherit (None), and a partial
+    // patch must never clobber the mode/approval axes (nor vice versa).
+    #[test]
+    fn merge_workspace_policy_handles_writable_roots() {
+        let cur = super::WorkspaceRecord {
+            id: "w".into(),
+            name: "W".into(),
+            folder: None,
+            sandbox_mode: Some("read-only".into()),
+            approval_policy: Some("never".into()),
+            writable_roots: None,
+        };
+        // Array sets the override; mode/approval are untouched.
+        let m = super::merge_workspace_policy(
+            &cur,
+            &serde_json::json!({"writable_roots": ["/tmp/a", " /tmp/b "]}),
+        );
+        assert_eq!(
+            m.writable_roots.as_deref(),
+            Some(&["/tmp/a".to_string(), "/tmp/b".to_string()][..])
+        );
+        assert_eq!(m.sandbox_mode.as_deref(), Some("read-only"));
+        assert_eq!(m.approval_policy.as_deref(), Some("never"));
+        // `null` clears back to inherit (None), leaving the other axes untouched.
+        let cur2 = super::WorkspaceRecord {
+            writable_roots: Some(vec!["/x".to_string()]),
+            ..cur.clone()
+        };
+        let cleared =
+            super::merge_workspace_policy(&cur2, &serde_json::json!({"writable_roots": null}));
+        assert_eq!(cleared.writable_roots, None);
+        assert_eq!(cleared.sandbox_mode.as_deref(), Some("read-only"));
+        // An absent writable_roots key leaves the existing override untouched.
+        let noop =
+            super::merge_workspace_policy(&cur2, &serde_json::json!({"sandbox_mode": "danger"}));
+        assert_eq!(noop.writable_roots.as_deref(), Some(&["/x".to_string()][..]));
     }
 
     // ADR 0023 UI: each Settings control (adaptive-floor / sandbox / approval) POSTs only
