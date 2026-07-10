@@ -48361,6 +48361,10 @@ fn merge_workspace_policy(current: &WorkspaceRecord, patch: &serde_json::Value) 
         if let Some(value) = obj.get("writable_roots") {
             merged.writable_roots = string_list_override_from_json(value);
         }
+        // Phase 3: per-project skill-confirmation categories (array sets, null clears).
+        if let Some(value) = obj.get("skill_confirmations") {
+            merged.skill_confirmations = string_list_override_from_json(value);
+        }
     }
     merged
 }
@@ -49446,6 +49450,45 @@ mod tests {
         let noop =
             super::merge_workspace_policy(&cur2, &serde_json::json!({"sandbox_mode": "danger"}));
         assert_eq!(noop.writable_roots.as_deref(), Some(&["/x".to_string()][..]));
+    }
+
+    // Phase 3 endpoint: `merge_workspace_policy` also carries the per-project
+    // `skill_confirmations` list. Array sets, `null` clears, and a partial patch must not
+    // clobber the sibling axes (mode / approval / writable_roots).
+    #[test]
+    fn merge_workspace_policy_handles_skill_confirmations() {
+        let cur = super::WorkspaceRecord {
+            id: "w".into(),
+            name: "W".into(),
+            folder: None,
+            sandbox_mode: Some("read-only".into()),
+            approval_policy: Some("never".into()),
+            writable_roots: Some(vec!["/x".to_string()]),
+            skill_confirmations: None,
+        };
+        // Array sets the override; the other axes are untouched.
+        let m = super::merge_workspace_policy(
+            &cur,
+            &serde_json::json!({"skill_confirmations": ["delete", "financial"]}),
+        );
+        assert_eq!(
+            m.skill_confirmations.as_deref(),
+            Some(&["delete".to_string(), "financial".to_string()][..])
+        );
+        assert_eq!(m.sandbox_mode.as_deref(), Some("read-only"));
+        assert_eq!(m.writable_roots.as_deref(), Some(&["/x".to_string()][..]));
+        // `null` clears back to inherit (None); siblings untouched.
+        let cur2 = super::WorkspaceRecord {
+            skill_confirmations: Some(vec!["medical".to_string()]),
+            ..cur.clone()
+        };
+        let cleared =
+            super::merge_workspace_policy(&cur2, &serde_json::json!({"skill_confirmations": null}));
+        assert_eq!(cleared.skill_confirmations, None);
+        assert_eq!(cleared.approval_policy.as_deref(), Some("never"));
+        // An absent key leaves the existing override untouched.
+        let noop = super::merge_workspace_policy(&cur2, &serde_json::json!({"sandbox_mode": "danger"}));
+        assert_eq!(noop.skill_confirmations.as_deref(), Some(&["medical".to_string()][..]));
     }
 
     // ADR 0023 UI: each Settings control (adaptive-floor / sandbox / approval) POSTs only
