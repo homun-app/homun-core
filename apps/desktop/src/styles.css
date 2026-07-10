@@ -1832,29 +1832,44 @@ body.resizing-drawer {
   /* Shared by the detail panel (its width) and the conversation inset below, so the
      two never drift. Desktop-first; the responsive breakpoints handle narrow widths. */
   --detail-panel-w: min(520px, calc(100% - 48px));
-  --island-col-w: 336px;
+  /* Fake-column geometry, one source of truth (padding, island position, jump-button centre
+     all derive from these):
+       --island-gap  = the inset that ALSO applies to the left content edge (so the island's
+                       right margin from the window equals the chat's left margin — symmetric).
+       --island-w    = island panel width.
+       --island-reserve = right padding that virtually narrows the chat: gap + island width
+                       when open, 0 when collapsed (then the chat reclaims the full width). */
+  /* Fake-column geometry (single source of truth):
+       --island-edge = island margin from the window's right edge (small: the island hugs the
+                       right, per "la working island deve essere più a destra").
+       --island-w    = island panel width.
+       --island-gap  = left content inset + the breathing gap between the chat and the island.
+       --island-reserve = the RIGHT inset applied to the chat CONTENT only (text + composer) so
+                       it never slides under the island; 0 when the island is collapsed.
+     The header bar and the scroll container deliberately break OUT of this reserve to the full
+     window width, so the ⋯ menu and the scrollbar stay pinned far-right regardless of the chat
+     narrowing (only their content is inset). */
+  --island-edge: 14px;
+  --island-gap: clamp(16px, 3vw, 44px);
+  --island-w: 340px;
+  --island-reserve: calc(var(--island-edge) + var(--island-w) + var(--island-gap));
   height: 100%;
   min-height: 0;
   position: relative;
   display: grid;
-  /* Two columns: the conversation (reflows) and the island as a real COLUMN on the right
-     (Codex-style) — it no longer floats over the chat. Collapsing zeroes the column so the
-     conversation takes the full width. The header spans both; the composer auto-places under
-     the conversation (side panels are position:absolute, so they stay out of the flow). */
-  grid-template-columns: minmax(0, 1fr) var(--island-col-w);
+  /* minmax(0, 1fr): a single column that may shrink to 0. Without this the implicit column
+     defaults to min-width:auto and a wide unbreakable child (long inline code) expands the
+     whole layout past its box, which overflow:hidden then CLIPS — the message-text bug. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 58px minmax(0, 1fr) auto;
   overflow: hidden;
-  padding: 0 clamp(16px, 3vw, 44px);
-}
-.active-task-layout > .task-topbar {
-  grid-column: 1 / -1;
-}
-.active-task-layout > .thread-scroll {
-  grid-column: 1;
-  grid-row: 2;
+  /* "Fake column" (Codex-style): the island FLOATS on the right (absolute); the conversation
+     content is virtually narrowed by RIGHT padding (--island-reserve). On narrow widths the
+     island simply overlaps — no real grid column (which clipped long content). */
+  padding: 0 var(--island-reserve) 0 var(--island-gap);
 }
 .active-task-layout.island-collapsed {
-  grid-template-columns: minmax(0, 1fr) 0;
+  --island-reserve: 0px;
 }
 .active-task-layout.island-collapsed > .chat-status-stack {
   display: none;
@@ -1896,13 +1911,14 @@ body.resizing-drawer {
      region reliably (same subtree). Sidebar open/close controls live in the footer
      zone, so the titlebar remains a pure drag/header area. */
   width: auto;
-  margin-inline: calc(-1 * clamp(16px, 3vw, 44px));
-  /* Title aligns with the centered 760 message column (left), but the right-side actions
-     (the ⋯ menu) are an INDEPENDENT element pinned to the window's right edge — matching
-     the floating workspace island (`.chat-status-stack { right: 24px }`) so the two top-
-     right controls line up cleanly instead of the menu sitting inside the chat column. */
-  padding-left: calc(clamp(16px, 3vw, 44px) + max(0px, (100% - 760px) / 2));
-  padding-right: 24px;
+  /* Break OUT of the layout's asymmetric side padding to span the full window width: cancel
+     the left inset (--island-gap) and the right content reserve (--island-reserve). Then the
+     ⋯ menu is pinned at --island-edge from the window's right — the SAME margin as the island —
+     so it never shifts left with the chat when the column narrows or collapses (#1). */
+  margin-left: calc(-1 * var(--island-gap));
+  margin-right: calc(-1 * var(--island-reserve));
+  padding-left: var(--island-gap);
+  padding-right: var(--island-edge);
   -webkit-app-region: drag;
 }
 
@@ -2080,18 +2096,23 @@ body.resizing-drawer {
 }
 
 .chat-status-stack {
-  /* The island is now a real right COLUMN (grid cell 2, spanning the scroll + composer rows),
-     not a floating overlay — so it pushes the conversation instead of covering it. */
-  grid-column: 2;
-  grid-row: 2 / 4;
+  /* Fake column: a full-height panel FLOATING on the right (absolute). The conversation
+     reserves --island-reserve on its right so it sits alongside; on narrow widths the panel
+     simply overlaps (as in Codex). No separator line. right = --island-gap gives it the same
+     margin from the window edge that the chat has on the left. */
+  position: absolute;
+  top: 64px;
+  right: var(--island-edge);
+  bottom: 12px;
+  width: var(--island-w);
+  z-index: 32;
   min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 10px;
-  padding: 12px 0 16px 14px;
+  padding: 0 4px 4px 16px;
   overflow-y: auto;
-  border-left: 1px solid var(--line);
 }
 .chat-status-stack .unified-status-panel,
 .chat-status-stack .workspace-island,
@@ -2206,7 +2227,9 @@ body.resizing-drawer {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: color-mix(in srgb, var(--surface) 96%, transparent);
-  box-shadow: var(--shadow-menu);
+  /* Flat card, border only — the floating drop-shadow read as a "strange halo" around the
+     whole island (#4). Keep the light blur for the frosted look without the shadow. */
+  box-shadow: none;
   backdrop-filter: blur(14px);
 }
 
@@ -2328,7 +2351,9 @@ body.resizing-drawer {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: color-mix(in srgb, var(--surface) 96%, transparent);
-  box-shadow: var(--shadow-menu);
+  /* Flat card, border only — the floating drop-shadow read as a "strange halo" around the
+     whole island (#4). Keep the light blur for the frosted look without the shadow. */
+  box-shadow: none;
   backdrop-filter: blur(14px);
 }
 
@@ -2942,9 +2967,13 @@ body.resizing-drawer {
 
 .thread-scroll {
   min-height: 0;
-  /* Vertical only: the island is a real column now, so the conversation lives in a narrower
-     grid cell — a stray wide child must not push a horizontal scrollbar on the whole thread
-     (code blocks scroll inside themselves). */
+  /* Break out to the FULL window width (cancel the layout's right content reserve) so the
+     scrollbar sits at the far right edge, THEN re-inset the messages by the same reserve so
+     they stay left of the island (#2 — "lo scroll deve essere tutto a destra"). */
+  margin-right: calc(-1 * var(--island-reserve));
+  padding-right: var(--island-reserve);
+  /* Vertical only: a stray wide child must not push a horizontal scrollbar on the whole
+     thread (code blocks scroll inside themselves). */
   overflow-y: auto;
   overflow-x: hidden;
   scroll-behavior: smooth;
@@ -2970,7 +2999,9 @@ body.resizing-drawer {
 .thread-content {
   width: min(100%, 760px);
   margin: 0 auto;
-  padding: 32px 0 22px;
+  /* Horizontal breathing room so the text sits off the column edges (matching the left
+     inset) and never grazes the overflow-clip boundary. */
+  padding: 32px 16px 22px;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -2989,6 +3020,7 @@ body.resizing-drawer {
 
 .message {
   width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   animation: message-in 180ms ease both;
@@ -3090,6 +3122,20 @@ body.resizing-drawer {
 
 .rich-message {
   overflow-wrap: anywhere;
+  min-width: 0;
+}
+/* Long inline code (filenames like confronto-framework-agenti-llm.md, tool names) must WRAP,
+   not force the message wider than its column — otherwise the whole block overflows and the
+   text is clipped once the conversation is virtually narrowed for the island. */
+.rich-message :not(pre) > code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+.thread-content,
+.thread-message-list,
+.thread-message-row {
+  min-width: 0;
 }
 
 .message.user > .rich-message {
@@ -3318,6 +3364,11 @@ body.resizing-drawer {
   background: var(--surface-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.92em;
+  /* A long filename in inline code (confronto-framework-agenti-llm.md) must be allowed to
+     break — overflow-wrap:anywhere ALSO lowers the min-content width, so the message no
+     longer forces the column wider than its box. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .rich-code-block,
@@ -4550,13 +4601,14 @@ body.resizing-drawer {
 
 .composer-surface textarea {
   width: 100%;
-  height: 76px;
-  min-height: 76px;
+  /* Compact single-line default (Codex-like); grows to max-height as the user types. */
+  height: 40px;
+  min-height: 40px;
   max-height: 180px;
   resize: none;
   border: 0;
   outline: 0;
-  padding: 16px 18px 8px;
+  padding: 10px 18px 4px;
   color: var(--text);
   background: transparent;
 }
@@ -4729,7 +4781,7 @@ body.resizing-drawer {
 .composer-toolbar {
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 12px 12px;
+  padding: 4px 12px 8px;
 }
 
 .composer-actions {
@@ -7006,8 +7058,10 @@ body.resizing-drawer {
 /* Floating "jump to latest" button, shown when scrolled away from the bottom. */
 .chat-jump-bottom {
   position: absolute;
-  left: 50%;
-  bottom: 132px;
+  /* Centre on the composer, which lives in the inset content area [--island-gap … 100% −
+     --island-reserve]; its centre is (gap + 100% − reserve)/2. Collapses correctly (reserve→0). */
+  left: calc((100% + var(--island-gap) - var(--island-reserve, 0px)) / 2);
+  bottom: 100px;
   transform: translateX(-50%);
   z-index: 20;
   width: 34px;

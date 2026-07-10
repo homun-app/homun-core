@@ -2081,13 +2081,14 @@ export function ChatView({
           </div>
         </div>
         <span className="task-header-actions">
-          {!islandOpen && islandHasContent && (
+          {islandHasContent && (
             <button
               type="button"
-              className="chat-header-menu-trigger"
+              className={`chat-header-menu-trigger${islandOpen ? " active" : ""}`}
               title={t("chat.panel")}
               aria-label={t("chat.panel")}
-              onClick={() => setIslandOpen(true)}
+              aria-pressed={islandOpen}
+              onClick={() => setIslandOpen((value) => !value)}
             >
               <PanelRight size={17} />
             </button>
