@@ -7813,6 +7813,10 @@ body.resizing-drawer {
   gap: 10px;
   padding: 7px 8px 7px 12px;
 }
+/* Single enlarge/contract control, pinned to the right. */
+.cc-dock-toggle {
+  margin-left: auto;
+}
 
 .cc-dock-title {
   display: inline-flex;

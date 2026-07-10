@@ -184,25 +184,15 @@ export function ChatComputerPanel({
               <i className="cc-live-dot" /> live
             </span>
           </span>
-          {showStage && (
-            <button
-              className="cc-icon-btn"
-              type="button"
-              onClick={() => setView(fullscreen ? "expanded" : "full")}
-              title={fullscreen ? t("chat.collapse") : t("chat.fullscreen")}
-              aria-label={fullscreen ? t("chat.collapse") : t("chat.fullscreen")}
-            >
-              {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-            </button>
-          )}
+          {/* One control, right-aligned: enlarge to fullscreen ⇄ contract back. */}
           <button
-            className="cc-icon-btn"
+            className="cc-icon-btn cc-dock-toggle"
             type="button"
-            onClick={() => setView(view === "bar" ? "full" : "bar")}
-            title={view === "bar" ? t("chat.fullscreen") : t("chat.collapse")}
-            aria-label={view === "bar" ? t("chat.fullscreen") : t("chat.collapse")}
+            onClick={() => setView(fullscreen ? "expanded" : "full")}
+            title={fullscreen ? t("chat.collapse") : t("chat.fullscreen")}
+            aria-label={fullscreen ? t("chat.collapse") : t("chat.fullscreen")}
           >
-            {view === "bar" ? <Maximize2 size={15} /> : <ChevronDown size={15} />}
+            {fullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
           </button>
         </header>
 
