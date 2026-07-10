@@ -2069,7 +2069,7 @@ body.resizing-drawer {
   pointer-events: none;
 }
 .chat-status-stack:has(.cc-dock.expanded) {
-  max-width: min(620px, calc(100vw - 390px));
+  max-width: min(360px, calc(100vw - 390px));
 }
 .chat-status-stack:has(.cc-dock.full) {
   max-width: min(360px, calc(100vw - 390px));
@@ -7770,7 +7770,9 @@ body.resizing-drawer {
 }
 
 .cc-dock.expanded {
-  width: min(620px, calc(100% - 32px));
+  /* Match the working island's width (320px) — the dock stacks under it in the same column,
+     so a wider dock looked oversized. The live browser (16:10) scales to this width. */
+  width: 320px;
 }
 
 .cc-dock.full {
