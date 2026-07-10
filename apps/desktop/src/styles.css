@@ -5029,17 +5029,30 @@ body.resizing-drawer {
   overflow: hidden;
   background: linear-gradient(180deg, var(--surface-muted), var(--surface));
 }
+/* ChatView's Workbench placeholders (memory/artifacts/activity/plan/files). A cohesive
+   family under one class; aligned to the shared .state-view look (below) so they match the
+   EmptyState/LoadingState components without churning ~12 compound JSX blocks. */
 .workbench-empty {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: var(--muted);
-  padding: 24px;
+  padding: 40px 24px;
   text-align: center;
-  font-size: 13px;
+  color: var(--muted);
+}
+.workbench-empty > svg {
+  color: var(--faint);
+}
+.workbench-empty p {
+  margin: 0;
+  max-width: 340px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--muted);
 }
 
 /* ===== Shared state blocks (EmptyState / LoadingState / ErrorState) ================
@@ -5100,6 +5113,17 @@ body.resizing-drawer {
 }
 .state-retry:hover {
   background: var(--surface-hover);
+}
+/* Dashed placeholder-card variant (empty template gallery, empty approvals list, …). */
+.state-view.state-card {
+  min-height: 180px;
+  border: 1px dashed var(--line);
+  border-radius: 13px;
+  background: var(--bg);
+}
+.state-view.state-compact.state-card {
+  min-height: 56px;
+  padding: 12px 16px;
 }
 
 /* Goals manager (Workbench): define the project's objective. Mirrors the operational
@@ -6398,7 +6422,7 @@ body.resizing-drawer {
   padding: 32px;
 }
 .memview-graph-hint svg { color: var(--faint); }
-.memview-empty { color: var(--faint); font-size: 13px; padding: 16px; }
+.memview-empty { color: var(--muted); font-size: var(--text-sm); padding: 16px; }
 /* ===== /Memoria redesign ========================================================= */
 
 /* Memoria tab: Grafo/Wiki toggle + wiki markdown view. */
@@ -8450,11 +8474,6 @@ body.resizing-drawer {
 .approval-header,
 .approval-meta,
 .approval-surface,
-.approval-empty {
-  display: flex;
-  align-items: center;
-}
-
 .approval-header {
   justify-content: space-between;
   gap: 10px;
@@ -8496,16 +8515,6 @@ body.resizing-drawer {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.approval-empty {
-  min-height: 58px;
-  border: 1px dashed var(--line);
-  border-radius: var(--radius);
-  justify-content: center;
-  gap: 8px;
-  color: var(--muted);
-  background: var(--surface);
 }
 
 .resource-usage-panel {
@@ -11571,9 +11580,9 @@ body.resizing-drawer {
   gap: 10px;
 }
 .auto-empty {
-  font-size: 14px;
+  font-size: var(--text-sm);
   color: var(--muted);
-  line-height: 1.6;
+  line-height: 1.5;
   padding: 8px 2px;
 }
 .auto-card {
@@ -12751,26 +12760,6 @@ body.resizing-drawer {
   border-radius: 10px;
   font-size: 12px;
   font-weight: 740;
-}
-.template-empty {
-  display: grid;
-  place-items: center;
-  gap: 6px;
-  min-height: 220px;
-  border: 1px dashed var(--line);
-  border-radius: 13px;
-  background: var(--bg);
-  color: var(--muted);
-  text-align: center;
-  padding: 28px;
-}
-.template-empty strong {
-  color: var(--text);
-}
-.template-empty span {
-  max-width: 360px;
-  font-size: 13px;
-  line-height: 1.45;
 }
 .template-detail-modal {
   width: min(920px, 92vw);

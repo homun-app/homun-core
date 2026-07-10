@@ -14,15 +14,21 @@ export function EmptyState({
   description,
   action,
   compact,
+  card,
 }: {
   icon?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
   compact?: boolean;
+  /** Dashed placeholder card (bordered box) instead of a plain centered block — for panels
+   *  like an empty template gallery or approvals list. */
+  card?: boolean;
 }) {
   return (
-    <div className={`state-view state-empty${compact ? " state-compact" : ""}`}>
+    <div
+      className={`state-view state-empty${compact ? " state-compact" : ""}${card ? " state-card" : ""}`}
+    >
       {icon && <div className="state-icon">{icon}</div>}
       <p className="state-title">{title}</p>
       {description && <p className="state-desc">{description}</p>}

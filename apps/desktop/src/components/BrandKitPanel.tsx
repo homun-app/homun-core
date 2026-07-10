@@ -12,6 +12,7 @@ import {
   Upload,
 } from "lucide-react";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
+import { EmptyState } from "./StateViews";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
 import type { PluginHost } from "../plugins/registry";
 
@@ -428,11 +429,12 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
       {importError && <p className="template-import-error">{importError}</p>}
 
       {visible.length === 0 && !importingName ? (
-        <div className="template-empty">
-          <Presentation size={22} aria-hidden />
-          <strong>{t("presentations:noTemplatesTitle")}</strong>
-          <span>{t("presentations:noTemplatesBody")}</span>
-        </div>
+        <EmptyState
+          icon={<Presentation size={22} aria-hidden />}
+          title={t("presentations:noTemplatesTitle")}
+          description={t("presentations:noTemplatesBody")}
+          card
+        />
       ) : (
         <div className="template-gallery-grid">
           {importingName && <TemplateImportingCard name={importingName} />}

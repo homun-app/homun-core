@@ -8,6 +8,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { EmptyState } from "./StateViews";
 import type {
   ApprovelItem,
   TaskDetailItem,
@@ -132,10 +133,7 @@ export function TasksView({
             </article>
           ))}
           {!approvals.length && (
-            <div className="approval-empty">
-              <Check size={17} />
-              <span>{t("tasksView.noApprovals")}</span>
-            </div>
+            <EmptyState icon={<Check size={22} />} title={t("tasksView.noApprovals")} compact card />
           )}
 
           <div className="resource-usage-panel" aria-label={t("tasksView.resourceUsageAria")}>
