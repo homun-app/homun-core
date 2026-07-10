@@ -132,6 +132,20 @@ export const chatApi = {
     );
   },
 
+  /** Answer a PROACTIVITY question (onboarding, follow-up, …): captures the pick as memory
+   *  and posts a canned acknowledgment WITHOUT running the agent loop. */
+  async captureProactiveAnswer(
+    threadId: string,
+    body: { answer: string; question: string; ack: string },
+  ) {
+    return hydrateMessagesSnapshot(
+      await gatewayJson<CoreChatMessagesSnapshot>(
+        `/api/chat/threads/${encodeURIComponent(threadId)}/proactive_answer`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    );
+  },
+
   recentChatContext(threadId: string, limit = 8) {
     return recentChatContext(threadId, limit);
   },

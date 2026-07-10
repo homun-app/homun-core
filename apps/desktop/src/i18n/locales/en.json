@@ -437,6 +437,7 @@
     "changeModelHint": "Change the model for this chat from the selector in the composer ↓",
     "panel": "Panel",
     "openPanel": "Open panel",
+    "proactiveAnswerThanks": "Got it — noted. Thanks!",
     "headerMenuLabel": "More actions",
     "headerMenuArtifacts": "Artifacts",
     "headerMenuFiles": "Files",

@@ -329,6 +329,9 @@ export interface ChoicePromptPayload {
   question: string;
   multi: boolean;
   options: string[];
+  /** Set for PROACTIVITY-origin questions (onboarding, follow-up, …): answering captures
+   *  the pick as memory instead of running an agent turn. Absent for in-task model choices. */
+  purpose?: string;
 }
 
 /** Proposta di salvataggio di un segreto nel vault. */
@@ -2878,6 +2881,10 @@ export const coreBridge = {
   createChatThread: (workspace?: string) => chatApi.createChatThread(workspace),
   seedAssistantMessage: (threadId: string, text: string, eventParts?: unknown[]) =>
     chatApi.seedAssistantMessage(threadId, text, eventParts),
+  captureProactiveAnswer: (
+    threadId: string,
+    body: { answer: string; question: string; ack: string },
+  ) => chatApi.captureProactiveAnswer(threadId, body),
   automations: (workspaceId?: string | null) => electronAutomations(workspaceId),
   activeStreams: () => electronActiveStreams(),
   automationEventSources: () => electronAutomationEventSources(),

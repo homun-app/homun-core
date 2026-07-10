@@ -907,6 +907,10 @@ export default function App() {
               question: "",
               multi: false,
               options,
+              // Marks this as a PROACTIVITY question (onboarding, follow-up, …). Answering
+              // it captures the pick as memory instead of running an agent turn — see the
+              // `purpose` branch in ChatView's onChoose. Carries the card kind for context.
+              purpose: suggestion.kind,
             },
           }]
         : [];

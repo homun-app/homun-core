@@ -981,6 +981,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(seed_assistant_message),
         )
         .route(
+            "/api/chat/threads/{thread_id}/proactive_answer",
+            post(proactive_answer),
+        )
+        .route(
             "/api/chat/threads/{thread_id}/folder",
             get(get_thread_folder).post(set_thread_folder),
         )
@@ -13902,6 +13906,122 @@ async fn seed_assistant_message(
         "thread_id": thread_id,
     }));
     Ok(Json(snapshot))
+}
+
+#[derive(Debug, Deserialize)]
+struct ProactiveAnswerRequest {
+    /// The option the user picked (e.g. "Sviluppatore").
+    answer: String,
+    /// The question that was asked (the card's message text), kept for the captured fact.
+    #[serde(default)]
+    question: String,
+    /// A short, ALREADY-LOCALIZED acknowledgment to post back. The frontend supplies it so
+    /// the reply respects the UI language WITHOUT the gateway ever calling the model.
+    #[serde(default)]
+    ack: String,
+}
+
+/// Answer to a proactivity question (e.g. day-1 onboarding "what's your role?") WITHOUT
+/// running the agent loop. A supervisor question is info-gathering, not a task request:
+/// the old path submitted the pick as a normal chat turn, and a weak model treated a
+/// one-word answer ("Sviluppatore") as licence to plan and execute unrelated work. Here we
+/// only: (1) echo the pick as a user message, (2) capture it as a durable Personal-scope
+/// memory so future reviews are grounded on it, (3) post a canned acknowledgment. No tools.
+async fn proactive_answer(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<ProactiveAnswerRequest>,
+) -> Result<Json<ChatMessagesSnapshot>, GatewayError> {
+    let answer = request.answer.trim();
+    if answer.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "empty_answer",
+            message: "Empty answer.".to_string(),
+        });
+    }
+    // 1) Echo the pick as a user message (thread reads: question → answer → ack).
+    //    append_assistant_message inserts the message with ITS role, so it serves a
+    //    "user" message too.
+    {
+        let user_message = channel_chat_message("user", answer);
+        lock_store(&state)?
+            .append_assistant_message(&thread_id, &user_message)
+            .map_err(GatewayError::store)?;
+    }
+    // 2) Durable capture — out of the store lock (the MemoryFacade is a separate service).
+    capture_proactive_answer_memory(&state, &thread_id, request.question.trim(), answer);
+    // 3) Canned acknowledgment — NO agent loop, NO tools.
+    let ack = {
+        let trimmed = request.ack.trim();
+        if trimmed.is_empty() {
+            "Perfect — noted. Thanks!".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
+    let ack_message = channel_chat_message("assistant", &ack);
+    let snapshot = lock_store(&state)?
+        .append_assistant_message(&thread_id, &ack_message)
+        .map_err(GatewayError::store)?;
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+    }));
+    Ok(Json(snapshot))
+}
+
+/// Build the memory-write request for a captured proactivity answer. Pure (no I/O) so it
+/// is unit-testable. memory_type is `preference` on purpose: `gather_scope_memory` only
+/// recalls fact|preference|decision|goal, so this guarantees the answer feeds future reviews.
+fn proactive_answer_memory_request(
+    question: &str,
+    answer: &str,
+    thread_id: &str,
+    lifecycle: MemoryLifecycleRequest,
+) -> MemoryCreateRequest {
+    let text = if question.is_empty() {
+        format!("Onboarding answer: {answer}")
+    } else {
+        format!("{question}\n\u{2192} {answer}")
+    };
+    MemoryCreateRequest {
+        request: lifecycle,
+        memory_type: "preference".to_string(),
+        text: redact_sensitive_text(&text),
+        aliases: Vec::new(),
+        language_hints: Vec::new(),
+        confidence: 1.0,
+        privacy_domain: PrivacyDomain::new("personal"),
+        sensitivity: MemoryDataSensitivity::Internal,
+        evidence_refs: Vec::new(),
+        metadata: serde_json::json!({
+            "source": "proactive_answer",
+            "thread_id": thread_id,
+        }),
+    }
+}
+
+/// Persist a proactivity answer as a Personal-scope preference. Out-of-path: a failure is
+/// swallowed (the echo + acknowledgment already landed; a lost fact just means the next
+/// review is a little less grounded, never a broken chat).
+fn capture_proactive_answer_memory(
+    state: &AppState,
+    thread_id: &str,
+    question: &str,
+    answer: &str,
+) {
+    let lifecycle = MemoryLifecycleRequest {
+        actor_id: "proactivity".to_string(),
+        user_id: gateway_memory_user_id(),
+        workspace_id: MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
+        purpose: "proactive_answer_capture".to_string(),
+    };
+    let request = proactive_answer_memory_request(question, answer, thread_id, lifecycle.clone());
+    let facade = memory_facade(state);
+    if let Ok(record) = facade.create_memory_candidate(request) {
+        let _ = facade.confirm_memory(&lifecycle, &record.reference, "proactive answer capture");
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -49044,7 +49164,8 @@ mod tests {
         next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
-        proactive_memory_request_for_suggestion_action, project_filesystem_mcp_instruction,
+        proactive_answer_memory_request, proactive_memory_request_for_suggestion_action,
+        project_filesystem_mcp_instruction,
         prune_browser_history, redact_sensitive_text, requeue_waiting_resource_tasks,
         resolve_active_model, resolve_contained_computer_cdp, resolve_contained_computer_novnc,
         response_language_instruction, rewrite_confirm_to_done, sanitize_dedup_key,
@@ -50482,6 +50603,45 @@ prs.save(Path({path:?}))
             proactive_memory_request_for_suggestion_action(&row, "unknown", None, None, lifecycle,)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn proactive_answer_capture_is_a_recallable_preference() {
+        // The onboarding-answer fix: a picked answer must be captured as a `preference`
+        // (the only types gather_scope_memory recalls are fact|preference|decision|goal),
+        // so future proactive reviews are grounded on it. It must NOT run the agent loop —
+        // this pure request builder is the whole capture payload.
+        let lifecycle = local_first_memory::MemoryLifecycleRequest {
+            actor_id: "proactivity".to_string(),
+            user_id: local_first_memory::UserId::new("user"),
+            workspace_id: local_first_memory::WorkspaceId::new("__personal__"),
+            purpose: "proactive_answer_capture".to_string(),
+        };
+        let req = proactive_answer_memory_request(
+            "Che ruolo ricopri nel progetto Homun?",
+            "Sviluppatore",
+            "thread_42",
+            lifecycle,
+        );
+        assert_eq!(req.memory_type, "preference");
+        assert!(req.text.contains("Sviluppatore"));
+        assert!(req.text.contains("Che ruolo"));
+        assert_eq!(req.metadata["source"], "proactive_answer");
+        assert_eq!(req.metadata["thread_id"], "thread_42");
+
+        // Empty question → still a self-describing fact, never an empty capture.
+        let bare = proactive_answer_memory_request(
+            "",
+            "Founder",
+            "t1",
+            local_first_memory::MemoryLifecycleRequest {
+                actor_id: "proactivity".to_string(),
+                user_id: local_first_memory::UserId::new("user"),
+                workspace_id: local_first_memory::WorkspaceId::new("__personal__"),
+                purpose: "proactive_answer_capture".to_string(),
+            },
+        );
+        assert!(bare.text.contains("Founder"));
     }
 
     #[test]

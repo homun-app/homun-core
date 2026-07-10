@@ -1205,6 +1205,23 @@ export function ChatView({
     }
   }
 
+  // A PROACTIVITY question (onboarding, follow-up, …) was answered from its choice card.
+  // Capture the pick as memory + post a canned acknowledgment via the gateway — do NOT run
+  // an agent turn. This is the fix for a weak model treating a one-word answer as licence to
+  // invent and execute unrelated work (e.g. answering "Sviluppatore" spawning sandbox tasks).
+  async function handleProactiveAnswer(question: string, answer: string) {
+    try {
+      await coreBridge.captureProactiveAnswer(thread.threadId, {
+        answer,
+        question,
+        ack: t("chat.proactiveAnswerThanks"),
+      });
+      await refreshAfterChatSubmit();
+    } catch (error) {
+      setPromptError(describeBridgeError(error));
+    }
+  }
+
   async function persistAutoTitleForCompletedTurn(
     promptMessages: ChatMessage[],
     assistantText: string,
@@ -2184,7 +2201,11 @@ export function ChatView({
                         setWorkbenchTab("artifacts");
                         setArtifactsOpen(true);
                       }}
-                      onChoose={(answer) => void submitComposerPrompt(answer, [])}
+                      onChoose={(answer, purpose) =>
+                        purpose
+                          ? void handleProactiveAnswer(displayMessage.text, answer)
+                          : void submitComposerPrompt(answer, [])
+                      }
                     />
                   )}
                 </>
@@ -3321,6 +3342,10 @@ interface ChoicePrompt {
   question: string;
   multi: boolean;
   options: string[];
+  /** Set for PROACTIVITY-origin questions (onboarding, follow-up, …): answering captures
+   *  the pick as memory instead of running an agent turn. Absent for model-emitted,
+   *  in-task choices (those still continue the turn normally). */
+  purpose?: string;
 }
 
 /** A plan the model proposes BEFORE executing (plan-mode): the card gates execution
@@ -3413,6 +3438,7 @@ function parseChoicePromptPayload(payload: unknown): ChoicePrompt | null {
     question: typeof parsed.question === "string" ? parsed.question : "",
     multi: parsed.multi === true,
     options: parsed.options.filter((option) => typeof option === "string" && option.trim()),
+    purpose: typeof parsed.purpose === "string" ? parsed.purpose : undefined,
   };
 }
 
@@ -6048,7 +6074,7 @@ const AssistantMessageBody = memo(
     messageId?: string;
     threadId?: string;
     onOpenArtifact?: (artifact: ParsedArtifact) => void;
-    onChoose?: (answer: string) => void;
+    onChoose?: (answer: string, purpose?: string) => void;
   }) {
   const {
     visible,
@@ -6749,7 +6775,7 @@ function ChoicesCard({
   onChoose,
 }: {
   prompt: ChoicePrompt;
-  onChoose: (answer: string) => void;
+  onChoose: (answer: string, purpose?: string) => void;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [sent, setSent] = useState(false);
@@ -6769,7 +6795,7 @@ function ChoicesCard({
     if (answer.length === 0) return;
     setPicked(answer);
     setSent(true);
-    onChoose(answer.join(", "));
+    onChoose(answer.join(", "), prompt.purpose);
   };
   return (
     <div className="choices-card">
