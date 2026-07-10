@@ -19379,6 +19379,23 @@ fn skill_policy_forces_confirm(
     is_effectful && !active_sensitive.is_empty()
 }
 
+/// Phase 3 compose: the dedup UNION of the skill-armed sensitive categories and the
+/// per-project ones. The project's categories force a confirm even with NO sensitive skill
+/// active (they seed the turn's `active_sensitive`); a category present in both is not
+/// duplicated. Pure so the compose is unit-testable and order-stable (skill first).
+fn merged_sensitive(
+    skill: &[crate::skills::SensitiveCategory],
+    project: &[crate::skills::SensitiveCategory],
+) -> Vec<crate::skills::SensitiveCategory> {
+    let mut out = skill.to_vec();
+    for cat in project {
+        if !out.contains(cat) {
+            out.push(*cat);
+        }
+    }
+    out
+}
+
 /// Machine-keyable prefix a file-write tool returns (INSTEAD of writing any bytes) when
 /// the resolved sandbox mode is `read-only`. A later UI task keys on this token to render
 /// an escalation card ("approve → re-run the write"); for now it is the structured error
@@ -24535,6 +24552,23 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     tokio::spawn(async move {
         let mut ls = local_first_engine::LoopState::new();
         ls.messages = messages;
+        // Phase 3 (per-project skill confirmations): seed the turn's force-confirm set with the
+        // workspace's configured categories so an effectful action is gated even with NO
+        // sensitive skill loaded. Fail-safe — this only ADDS to `active_sensitive`; the loop
+        // later unions per-skill categories via `ToolEffects::arm_sensitive`. `merged_sensitive`
+        // dedups the (empty-at-init) skill set with the project set.
+        {
+            let existing: Vec<crate::skills::SensitiveCategory> = ls
+                .active_sensitive
+                .iter()
+                .filter_map(|t| crate::skills::SensitiveCategory::parse(t))
+                .collect();
+            let project_sensitive = resolved_skill_confirmations(&state_owned, thread_id.as_deref());
+            ls.active_sensitive = merged_sensitive(&existing, &project_sensitive)
+                .iter()
+                .map(|cat| cat.as_token().to_string())
+                .collect();
+        }
         // Last upstream model error this turn (e.g. a 410 "model retired"), already
         // human-readable. Surfaced as the final answer if the turn produces no text,
         // so a dead/blocked model is obvious instead of a generic "no answer".
@@ -49489,6 +49523,27 @@ mod tests {
         assert!(!skill_policy_forces_confirm(&active, false)); // read + active → no
         assert!(!skill_policy_forces_confirm(&[], true)); // effectful + none active → no
         assert!(!skill_policy_forces_confirm(&[], false)); // read + none active → no
+    }
+
+    // Phase 3 compose: a per-project category must force a confirm on an effectful action
+    // even with NO sensitive skill active — i.e. `merged_sensitive([], project)` seeds the
+    // gate. `merged_sensitive` also dedups the union and never drops the skill categories.
+    #[test]
+    fn project_skill_confirmations_force_confirm_with_no_skill_active() {
+        use super::{merged_sensitive, skill_policy_forces_confirm};
+        use crate::skills::SensitiveCategory;
+        // No skill active, project requires `delete` → effectful action is gated.
+        let merged = merged_sensitive(&[], &[SensitiveCategory::Delete]);
+        assert!(skill_policy_forces_confirm(&merged, true), "project category forces confirm");
+        assert!(!skill_policy_forces_confirm(&merged, false), "still never gates reads");
+        // Neither skill nor project → nothing is forced.
+        assert!(!skill_policy_forces_confirm(&merged_sensitive(&[], &[]), true));
+        // Union dedups; skill category is preserved and not duplicated.
+        let both = merged_sensitive(
+            &[SensitiveCategory::Financial],
+            &[SensitiveCategory::Financial, SensitiveCategory::Delete],
+        );
+        assert_eq!(both, vec![SensitiveCategory::Financial, SensitiveCategory::Delete]);
     }
 
     #[test]
