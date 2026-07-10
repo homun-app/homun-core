@@ -9301,7 +9301,12 @@ function Composer({
               <X size={17} />
             </button>
           ) : value.trim() ? (
-            <button className="send-button" disabled={disabled} type="submit" aria-label={t("chat.send")}>
+            <button
+              className="send-button"
+              disabled={disabled || (!value.trim() && composerImages.length === 0)}
+              type="submit"
+              aria-label={t("chat.send")}
+            >
               <ArrowUp size={18} />
             </button>
           ) : null}

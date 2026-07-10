@@ -7553,6 +7553,14 @@ body.resizing-drawer {
 .send-button {
   color: white;
   background: var(--blue);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+/* Codex-like affordance: muted while the composer is empty (nothing to send), accent as
+   soon as there's text or an image. Mirrors submitCurrentValue's real send condition. */
+.send-button:disabled {
+  background: var(--surface-muted);
+  color: var(--faint);
+  cursor: default;
 }
 
 .composer-stop-button {
