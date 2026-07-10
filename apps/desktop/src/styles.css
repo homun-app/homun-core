@@ -5042,6 +5042,66 @@ body.resizing-drawer {
   font-size: 13px;
 }
 
+/* ===== Shared state blocks (EmptyState / LoadingState / ErrorState) ================
+   One coherent look for the empty/loading/error placeholders every view used to hand-roll.
+   See components/StateViews.tsx. Views supply icon + copy; layout/type/spacing live here. */
+.state-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.state-view.state-compact {
+  padding: 20px 16px;
+  gap: 6px;
+}
+.state-icon {
+  display: inline-flex;
+  color: var(--faint);
+}
+.state-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 560;
+  color: var(--text);
+}
+.state-desc {
+  margin: 0;
+  max-width: 340px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--muted);
+}
+.state-action {
+  margin-top: 4px;
+}
+.state-error .state-icon {
+  color: var(--danger);
+}
+.state-spin {
+  color: var(--muted);
+  animation: spin 0.8s linear infinite;
+}
+.state-retry {
+  margin-top: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.state-retry:hover {
+  background: var(--surface-hover);
+}
+
 /* Goals manager (Workbench): define the project's objective. Mirrors the operational
    plan panel's visual language for consistency (same card, header, step rhythm). */
 .goals-manager {
@@ -13008,16 +13068,6 @@ body.resizing-drawer {
   flex-shrink: 0;
 }
 .proattiva-refresh:hover { background: var(--surface-hover); color: var(--text); }
-.proattiva-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  text-align: center;
-  font-size: 14px;
-  color: var(--muted);
-  padding: 40px 20px;
-}
 .proattiva-group { margin-bottom: 18px; }
 .proattiva-group-head {
   display: flex;
@@ -13965,14 +14015,6 @@ body.resizing-drawer {
 .notif-sub {
   margin: 4px 0 0;
   font-size: 13px;
-  color: var(--muted);
-}
-.notif-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 56px 0;
   color: var(--muted);
 }
 .notif-list {

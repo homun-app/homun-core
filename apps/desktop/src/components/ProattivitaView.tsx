@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { coreBridge } from "../lib/coreBridge";
+import { EmptyState, LoadingState } from "./StateViews";
 import type { ProactivitySuggestion, WorkspaceRecord } from "../lib/coreBridge";
 
 const PERSONAL_SCOPE = "__personal__";
@@ -152,12 +153,12 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
       </div>
 
       {loading ? (
-        <p className="proattiva-empty">{t("proattivita:loading")}</p>
+        <LoadingState label={t("proattivita:loading")} />
       ) : groups.length === 0 ? (
-        <div className="proattiva-empty">
-          <Lightbulb size={20} aria-hidden="true" />
-          <p>{t("proattivita:emptyHint")}</p>
-        </div>
+        <EmptyState
+          icon={<Lightbulb size={22} aria-hidden="true" />}
+          title={t("proattivita:emptyHint")}
+        />
       ) : (
         groups.map(([scope, cards]) => {
           const isPersonal = scope === PERSONAL_SCOPE;

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Monitor, Bell, Download } from "lucide-react";
 import { coreBridge, type SystemStatus, type UpdateInfo } from "../lib/coreBridge";
+import { EmptyState } from "./StateViews";
 import {
   IS_DESKTOP,
   checkDesktopUpdate,
@@ -200,10 +201,7 @@ export function NotificationsView() {
         <p className="notif-sub">{t("notifications.subtitle")}</p>
       </header>
       {items.length === 0 ? (
-        <div className="notif-empty">
-          <Bell size={20} />
-          <span>{t("notifications.empty")}</span>
-        </div>
+        <EmptyState icon={<Bell size={22} />} title={t("notifications.empty")} />
       ) : (
         <ul className="notif-list">{items}</ul>
       )}
