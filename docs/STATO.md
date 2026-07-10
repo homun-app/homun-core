@@ -3,7 +3,27 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-09.**
+> **Ultimo aggiornamento: 2026-07-10.**
+
+## ⭐⭐ CHECKPOINT 2026-07-10 — Gateway-freeze RISOLTO ALLA RADICE (ADR 0027)
+
+**Il freeze che tormentava da giorni è chiuso.** Durante i test live il gateway si è congelato (`/health` 000
+permanente); ho catturato un `sample` del processo bloccato → **causa pinnata** (quello che la memoria diceva
+"STILL unpinned"): contesa sul global `std::sync::Mutex<MemoryFacade>` (`lock_memory_facade`, 85 call-site sugli
+handler HTTP). Possessore isolato: la **rigenerazione del knowledge-graph** (`sweep_graph_orphans`, avvio+post-turno)
+tiene la contesa mentre la working-island martella gli endpoint memoria. **ADR 0027 implementato** (era Proposed):
+- **Move 1 (`01850b8d`)**: rimosso il `Mutex` esterno → `Arc<MemoryFacade>` (82 call-site, compiler-verificato;
+  `lock_memory_facade` cancellato). Il freeze permanente sparisce.
+- **Move 2 (`store.rs`)**: pool WAL **default-ON** (`HOMUN_MEMORY_POOL=off` = escape-hatch verso Single, non ancora
+  ritirato). Letture concorrenti.
+- **Validato LIVE sul data-dir reale (grafo grande):** `memory.sqlite`→`journal_mode=wal`; letture memoria durante
+  lo sweep graph-regen d'avvio = **200×40, 000×0** (prima in Single: ~15s di 000). Freeze chiuso alla radice.
+- Test: memory-crate verde su WAL, engine 81, gateway (WAL-default) in verifica. Fix headers-timeout resta backstop.
+
+> ⚠️ Follow-up: ritiro completo di `Single` dopo che WAL è provato nell'uso reale; opzionale un watchdog `/health`.
+> Dettaglio in [ADR 0027](decisions/0027-memory-facade-lock-free-out-of-path.md) + [[homun-gateway-freeze-resilience]].
+
+---
 
 ## ⭐ CHECKPOINT 2026-07-09 (bis) — 4 feature Codex-parity portate dal ramo divergente `piano-ui`
 
