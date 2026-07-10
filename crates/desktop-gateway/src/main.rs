@@ -22390,6 +22390,18 @@ require your confirmation in the app. Propose it and stop."
             &args_val,
         );
         let is_write = ctx.composio_writes.contains(name);
+        // ADR 0023 read-only chokepoint — parity with the native file tools: a workspace
+        // filesystem write via an MCP provider (e.g. `mcp__filesystem__create`) is REFUSED
+        // under read-only mode BEFORE executing, so a model cannot route around read-only
+        // through MCP (the native `write_file`/`edit_file`/`apply_patch` already refuse).
+        // Emits the same `SANDBOX_READ_ONLY_BLOCKED` marker → the escalation card fires.
+        if workspace_scoped
+            && resolved_sandbox_mode() == crate::tool_safety::SandboxMode::ReadOnly
+        {
+            let blocked = read_only_write_blocked_msg(&mcp_tool);
+            emit_read_only_block_if_needed(ctx.tx, name, &blocked).await;
+            blocked
+        } else {
         // ADR 0023: route the decision through the pure policy fn. The approval axis is
         // now RESOLVED (env > persisted Settings > default `on-request`); autonomous still
         // forces `Never`, so at the default this yields the same verdict as before. The
@@ -22495,6 +22507,7 @@ Connectors → MCP; do NOT claim it's done.",
                 .await;
             }
             mcp_result
+        }
         }
     } else if !name.is_empty() {
         // A connected-service (Composio) tool. Writes need explicit
