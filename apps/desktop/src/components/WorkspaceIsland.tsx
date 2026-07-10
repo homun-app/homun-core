@@ -17,7 +17,18 @@ import {
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { currentStepIndex, threeStepWindow } from "../lib/islandPlan";
+import type { SubagentInfo } from "../lib/chatApi";
 import type { ChatStreamStatus, IslandSource, PlanStep, WorkbenchTab } from "./ChatView";
+
+// Subagent status → monochrome glyph (running = spinner, done = the single green check,
+// failed/cancelled = alert, otherwise a hollow todo circle).
+function subagentIcon(status: string) {
+  if (status === "running") return <Loader2 size={13} className="composer-spin" />;
+  if (status === "completed") return <Check size={14} className="wi-step-icon-done" />;
+  if (status === "failed" || status === "cancelled" || status === "expired")
+    return <AlertTriangle size={13} className="wi-step-icon-blocked" />;
+  return <Circle size={12} className="wi-step-icon-todo" />;
+}
 
 // Gateway activity lines carry a leading status emoji (🛠️ 💻 🔎 ↩ ✓ …). The cockpit shows
 // uniform TEXT lines — no icons — so strip that leading emoji everywhere the line is shown
@@ -75,6 +86,7 @@ export function WorkspaceIsland({
   computerLive,
   planSteps,
   sources,
+  subagents,
   backgroundCount,
   streaming,
   status,
@@ -93,6 +105,8 @@ export function WorkspaceIsland({
   planSteps: PlanStep[];
   /** Generated artifacts + uploaded files for the "Sources" section (already deduped). */
   sources?: IslandSource[];
+  /** Subagents spawned on the thread — empty until spawn_subagent actually fires. */
+  subagents?: SubagentInfo[];
   /** Background tasks running elsewhere (other threads/automations) — surfaced in the menu. */
   backgroundCount?: number;
   streaming: boolean;
@@ -115,6 +129,7 @@ export function WorkspaceIsland({
   // Latch: keep the island around (collapsed) after a run so the user can review the work.
   const [hadWorkspaceState, setHadWorkspaceState] = useState(false);
   const sourceList = sources ?? [];
+  const subagentList = subagents ?? [];
   const doneCount = planSteps.filter((step) => step.status === "done").length;
   const runningPlan = planSteps.find((step) => step.status === "doing");
   const blockedPlan = planSteps.find((step) => step.status === "blocked");
@@ -129,6 +144,7 @@ export function WorkspaceIsland({
       computerLive ||
       planSteps.length > 0 ||
       activitySteps.length > 0 ||
+      subagentList.length > 0 ||
       sourceList.length > 0);
   useEffect(() => setHadWorkspaceState(false), [threadId]);
   useEffect(() => {
@@ -359,6 +375,24 @@ export function WorkspaceIsland({
                   )}
                 </ol>
               )}
+            </div>
+          )}
+
+          {subagentList.length > 0 && (
+            <div className="wi-section wi-subagents">
+              <div className="wi-section-head">
+                <span>Subagents</span>
+                <em>{subagentList.length}</em>
+              </div>
+              <ul className="wi-steps">
+                {subagentList.map((subagent, index) => (
+                  <li key={`${index}-${subagent.name}`} className={subagent.status}>
+                    <span className="wi-step-icon">{subagentIcon(subagent.status)}</span>
+                    <em>{subagent.name}</em>
+                    <span className="wi-subagent-status">{subagent.status}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

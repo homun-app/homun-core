@@ -768,11 +768,16 @@ export async function openTurnStream(turnId: string, since: number = 0): Promise
  *  accumulated cross-turn, and the latest turn's status. Read at rest so the
  *  island survives turn-end/reload/thread-switch instead of parsing lossy
  *  message-text markers. */
+export interface SubagentInfo {
+  name: string;
+  status: string;
+}
 export interface ThreadActivityProjection {
   plan_markdown: string | null;
   activity: string[];
   latest_turn_status: string | null;
   turn_count: number;
+  subagents: SubagentInfo[];
 }
 
 export async function fetchThreadActivity(

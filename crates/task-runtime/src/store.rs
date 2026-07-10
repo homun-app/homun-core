@@ -1,12 +1,25 @@
 use crate::{
     ApprovalRequest, Automation, AutomationRun, ResourceClass, TaskCheckpoint,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkspaceId,
+    SubagentInfo, ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 use std::path::Path;
 use time::OffsetDateTime;
+
+/// "subagent.review" → "Review"; "subagent.code_reviewer" → "Code reviewer".
+fn subagent_name_from_kind(kind: &str) -> String {
+    let raw = kind
+        .strip_prefix("subagent.")
+        .unwrap_or(kind)
+        .replace(['_', '-'], " ");
+    let mut chars = raw.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => raw,
+    }
+}
 
 pub struct TaskStore {
     connection: Connection,
@@ -972,11 +985,29 @@ impl TaskStore {
             params![thread_id],
             |row| row.get(0),
         )?;
+        // Subagents spawned on this thread (kind `subagent.<role>`). Forward-looking: empty
+        // until spawn_subagent actually fires. `subagent.review` → "Review".
+        let mut sub_stmt = self.connection.prepare(
+            "SELECT kind, status FROM tasks
+             WHERE thread_id = ?1 AND kind LIKE 'subagent.%'
+             ORDER BY created_at ASC",
+        )?;
+        let subagents = sub_stmt
+            .query_map(params![thread_id], |row| {
+                let kind: String = row.get(0)?;
+                let status: String = row.get(1)?;
+                Ok(SubagentInfo {
+                    name: subagent_name_from_kind(&kind),
+                    status,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(ThreadActivityProjection {
             plan_markdown,
             activity,
             latest_turn_status,
             turn_count: turn_count as usize,
+            subagents,
         })
     }
 

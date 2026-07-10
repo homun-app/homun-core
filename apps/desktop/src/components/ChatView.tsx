@@ -101,7 +101,7 @@ import {
   type VaultProposalAcceptResult,
 } from "../lib/coreBridge";
 import { wsSubscription } from "../lib/wsSubscription";
-import { fetchThreadActivity } from "../lib/chatApi";
+import { fetchThreadActivity, type SubagentInfo } from "../lib/chatApi";
 import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
@@ -326,6 +326,7 @@ export function ChatView({
   const [projectedActivity, setProjectedActivity] = useState<string[]>([]);
   const [projectedPlan, setProjectedPlan] = useState<string | null>(null);
   const [projectedTurnStatus, setProjectedTurnStatus] = useState<string | null>(null);
+  const [projectedSubagents, setProjectedSubagents] = useState<SubagentInfo[]>([]);
   // Once the projection has loaded for a thread we TRUST it — including a null plan (a new
   // plan-less task must clear the previous task's plan). Before it loads we fall back to the
   // text markers to avoid a blank flash. Reset per thread.
@@ -535,6 +536,7 @@ export function ChatView({
     setProjectedActivity([]);
     setProjectedPlan(null);
     setProjectedTurnStatus(null);
+    setProjectedSubagents([]);
     setProjectionLoaded(false);
   }, [thread.threadId]);
   // Load the durable island projection on thread change and when a turn ENDS (isStreaming →
@@ -550,6 +552,7 @@ export function ChatView({
         setProjectedActivity(projection.activity);
         setProjectedPlan(projection.plan_markdown);
         setProjectedTurnStatus(projection.latest_turn_status);
+        setProjectedSubagents(projection.subagents ?? []);
         setProjectionLoaded(true);
       })
       .catch(() => {
@@ -2083,6 +2086,7 @@ export function ChatView({
             computerLive={computerLiveStatus.active}
             planSteps={workspacePlanSteps}
             sources={islandSources}
+            subagents={projectedSubagents}
             streaming={promptSubmitting || Boolean(streamingAssistantId)}
             status={streamStatus}
             threadHasMessages={threadMessages.length > 0}

@@ -208,6 +208,17 @@ pub struct ThreadActivityProjection {
     pub activity: Vec<String>,
     pub latest_turn_status: Option<String>,
     pub turn_count: usize,
+    /// Subagents spawned on this thread (name + status). Empty until `spawn_subagent`
+    /// actually fires — today weak local managers route decomposition to the PLAN, so this
+    /// is forward-looking plumbing: the section renders as soon as a subagent task appears.
+    pub subagents: Vec<SubagentInfo>,
+}
+
+/// One spawned subagent, projected into the island's "Subagenti" section.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SubagentInfo {
+    pub name: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

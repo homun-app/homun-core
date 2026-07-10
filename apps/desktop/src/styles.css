@@ -2815,6 +2815,20 @@ body.resizing-drawer {
   font-size: 11px;
 }
 
+/* Subagents: name (left) + status (right), monochrome. */
+.wi-subagents .wi-steps li em {
+  flex: 1;
+  color: var(--text);
+}
+.wi-subagents .wi-steps li.completed em {
+  color: var(--muted);
+}
+.wi-subagent-status {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .floating-menu {
   position: absolute;
   top: calc(100% + 8px);
