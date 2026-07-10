@@ -95,10 +95,15 @@ disabilita mai del tutto la sandbox"). Per `danger`/`network` copy esplicita sul
   (Default + righe workspace con eredita/override per questi 2 assi). Resolver workspace-aware.
   Riusa tutto il gating esistente. Endpoint `POST /api/workspaces/{id}/policy`. Test resolver +
   chokepoint per-progetto + UI-contract.
-- **Fase 2:** `writable_roots` + `network_access` per-workspace → confluiscono nella
-  `SandboxPolicy::WorkspaceWrite { writable_roots, network_access }` passata al fence OS
-  (seatbelt/landlock) e ad `assess_tool_safety`. UI: multi-cartella + toggle rete per riga. Test:
-  fence onora writable_roots/network del progetto (integrazione landlock/seatbelt).
+- **Fase 2:** `writable_roots` per-workspace → confluiscono nel fence dell'esecuzione sandboxata
+  (`build_sandbox_command`/`run_in_project`, seatbelt + landlock, entrambi già enforced con test).
+  UI: multi-cartella per riga. Test: il fence onora le cartelle extra del progetto.
+  **⚠️ `network_access` per-progetto è DEFERITO (decisione 2026-07-10, honest-not-fake):** la rete è
+  enforced solo su **macOS** (seatbelt) ma è un **TODO su Linux** (`landlock_fence.rs`: v1 = solo
+  filesystem; serve un filtro seccomp) e il fence bash hardcoda `network:true`. Un toggle rete
+  per-progetto oggi sarebbe un controllo di sicurezza che su Linux non fa nulla → non si spedisce finché
+  non atterra il seccomp network-off su landlock (rung successivo dell'ADR 0023). I campi dati
+  `network_access` restano riservati ma senza UI.
 - **Fase 3:** `skill_confirmations` per-workspace → si compongono con la skill `ConfirmationPolicy`
   esistente (un progetto può forzare conferma su categorie anche senza skill sensibile attiva). UI:
   checkbox categorie per riga. Test: forza-conferma per-progetto.
