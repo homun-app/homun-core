@@ -58,12 +58,16 @@ pub struct SQLiteMemoryStore {
 }
 
 impl SQLiteMemoryStore {
-    /// ADR 0022 (Tappa 2) — `true` quando `HOMUN_MEMORY_POOL=on`: lo store usa il
-    /// pool WAL (writer + reader). Default OFF → `Single` (path legacy invariato).
+    /// ADR 0022 (Tappa 2) + ADR 0027 (move 2) — il pool WAL (writer dedicata + N
+    /// reader) è ora il path di DEFAULT: le letture girano concorrenti su reader
+    /// separati, solo le scritture serializzano brevemente. Questo, con la rimozione
+    /// del `Mutex<MemoryFacade>` esterno (ADR 0027 move 1), impedisce a uno sweep o
+    /// briefing di SCRITTURA di bloccare gli handler HTTP di LETTURA (il freeze del
+    /// 2026-07-09). `HOMUN_MEMORY_POOL=off` resta come escape-hatch verso `Single`.
     fn pool_enabled() -> bool {
         std::env::var("HOMUN_MEMORY_POOL")
-            .map(|value| value == "1" || value.eq_ignore_ascii_case("on"))
-            .unwrap_or(false)
+            .map(|value| !(value == "0" || value.eq_ignore_ascii_case("off")))
+            .unwrap_or(true)
     }
 
     /// Numero di reader nel pool (default 3). Letto una volta al costruttore.
