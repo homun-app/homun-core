@@ -730,6 +730,9 @@ export interface RuntimeSettings {
   writable_roots: string[];
   /** Phase 3 — global default skill-confirmation categories (empty = none forced). */
   skill_confirmations: string[];
+  /** Auto-start the local computer (contained Docker sandbox) at app launch, opening Docker
+   *  if closed. Default true. */
+  local_computer_autostart?: boolean;
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {

@@ -640,6 +640,52 @@ function LocalComputerToggle({
   );
 }
 
+/** Persists `RuntimeSettings.local_computer_autostart`. Read by the gateway at boot to warm
+ *  up the contained computer — OPENING Docker if it's closed. Default ON. */
+function LocalComputerAutostartToggle() {
+  const { t } = useTranslation();
+  const [on, setOn] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await coreBridge.runtimeSettings();
+        if (!cancelled) setOn(settings.local_computer_autostart !== false);
+      } catch {
+        /* leave default ON */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const change = async (next: boolean) => {
+    setOn(next);
+    setBusy(true);
+    try {
+      const saved = await coreBridge.setRuntimeSettings({ local_computer_autostart: next });
+      setOn(saved.local_computer_autostart !== false);
+    } catch {
+      /* a later read corrects the optimistic state */
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="set-trow" aria-busy={busy}>
+      <div>
+        <div className="tt">{t("settings.localComputerAutostartTitle")}</div>
+        <div className="td">{t("settings.localComputerAutostartDesc")}</div>
+      </div>
+      <Toggle on={on} onChange={(next) => void change(next)} />
+    </div>
+  );
+}
+
 function AccountPane({
   computer,
 }: {
@@ -5190,6 +5236,8 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
         </div>
         <LocalComputerToggle enabled={enabled} />
       </div>
+
+      <LocalComputerAutostartToggle />
 
       {/* Live view container — real noVNC iframe, striped placeholder otherwise (design 531). */}
       <div className="set-computer-live">

@@ -1119,7 +1119,9 @@
     "start": "Start",
     "stop": "Stop",
     "starting": "Starting…",
-    "localComputerDockerOff": "The contained computer needs Docker, which isn't available on this deployment."
+    "localComputerDockerOff": "The contained computer needs Docker, which isn't available on this deployment.",
+    "localComputerAutostartTitle": "Start on launch",
+    "localComputerAutostartDesc": "Warm up the local computer when the app starts, opening Docker if it's closed. Turn off if you don't want Docker started every launch."
   },
   "error": {
     "model": {

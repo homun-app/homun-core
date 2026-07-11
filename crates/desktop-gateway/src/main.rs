@@ -1362,12 +1362,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let app = app.layer(cors_layer());
-    // Warm up the contained computer so the live view + browser are ready without
-    // waiting for the first skill. Best-effort and non-intrusive: only when Docker
-    // is already running (we never force-open Docker Desktop at boot), and off the
-    // async runtime so startup is not blocked by the container build/boot.
+    // Warm up the contained computer so the live view + browser are ready without waiting for
+    // the first skill. Off the async runtime so startup is not blocked by the container boot.
+    // Behavior depends on the user's `local_computer_autostart` setting (default ON):
+    //   ON  → start it eagerly, OPENING Docker if it's closed (ensure_contained_computer).
+    //   OFF → stay non-intrusive: only warm up when Docker is already running.
     std::thread::spawn(|| {
-        if sandbox::docker_running() && !sandbox::container_up() {
+        if sandbox::container_up() {
+            return;
+        }
+        let autostart = load_runtime_settings().local_computer_autostart;
+        if autostart || sandbox::docker_running() {
             let _ = sandbox::ensure_contained_computer();
         }
     });
@@ -27686,6 +27691,14 @@ struct RuntimeSettings {
     /// per-workspace `WorkspaceRecord.skill_confirmations` override REPLACES this list.
     #[serde(default)]
     skill_confirmations: Vec<String>,
+
+    /// Auto-start the local computer (the contained Docker sandbox) at app launch, OPENING
+    /// Docker if it's closed. Default ON: the sandbox powers skills + the browser, so warming
+    /// it at boot avoids a cold start (Docker Desktop takes 1-2 min) on first use. Users who
+    /// don't want Docker spun up every launch can turn it off — then boot stays non-intrusive
+    /// (warm up only if Docker is already running). `#[serde(default = …)]` = legacy files → ON.
+    #[serde(default = "default_local_computer_autostart")]
+    local_computer_autostart: bool,
 }
 
 fn default_adaptive_floor() -> String {
@@ -27703,6 +27716,11 @@ fn default_approval_policy() -> String {
     crate::tool_safety::AskForApproval::OnRequest.as_str().to_string()
 }
 
+/// Default = ON: warm up the local computer at boot (opening Docker if needed).
+fn default_local_computer_autostart() -> bool {
+    true
+}
+
 impl Default for RuntimeSettings {
     fn default() -> Self {
         Self {
@@ -27711,6 +27729,7 @@ impl Default for RuntimeSettings {
             approval_policy: default_approval_policy(),
             writable_roots: Vec::new(),
             skill_confirmations: Vec::new(),
+            local_computer_autostart: default_local_computer_autostart(),
         }
     }
 }
@@ -49717,6 +49736,7 @@ mod tests {
             approval_policy: "never".to_string(),
             writable_roots: Vec::new(),
             skill_confirmations: Vec::new(),
+            local_computer_autostart: true,
         };
         // Patch only sandbox_mode → the other two axes are preserved.
         let merged = super::merge_runtime_settings(
@@ -49726,6 +49746,22 @@ mod tests {
         assert_eq!(merged.adaptive_floor, "on", "adaptive_floor preserved");
         assert_eq!(merged.sandbox_mode, "read-only", "sandbox_mode updated");
         assert_eq!(merged.approval_policy, "never", "approval_policy preserved");
+        assert!(merged.local_computer_autostart, "autostart preserved");
+
+        // local_computer_autostart: defaults ON for legacy files, toggles via a partial patch,
+        // and a patch to another field must NOT reset it.
+        let legacy: super::RuntimeSettings = serde_json::from_str("{}").unwrap();
+        assert!(legacy.local_computer_autostart, "default ON on legacy files");
+        let toggled = super::merge_runtime_settings(
+            &current,
+            &serde_json::json!({ "local_computer_autostart": false }),
+        );
+        assert!(!toggled.local_computer_autostart, "autostart toggled off");
+        let after = super::merge_runtime_settings(
+            &toggled,
+            &serde_json::json!({ "adaptive_floor": "off" }),
+        );
+        assert!(!after.local_computer_autostart, "autostart preserved through other patch");
 
         // Reverse direction: patching adaptive_floor must NOT reset sandbox_mode/approval.
         let merged2 = super::merge_runtime_settings(

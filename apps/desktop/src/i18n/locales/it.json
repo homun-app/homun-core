@@ -1119,7 +1119,9 @@
     "start": "Avvia",
     "stop": "Ferma",
     "starting": "Avvio…",
-    "localComputerDockerOff": "Il computer contenuto richiede Docker, non disponibile su questo deploy."
+    "localComputerDockerOff": "Il computer contenuto richiede Docker, non disponibile su questo deploy.",
+    "localComputerAutostartTitle": "Avvia all'avvio",
+    "localComputerAutostartDesc": "Avvia il local computer quando parte l'app, aprendo Docker se è chiuso. Disattivalo se non vuoi che Docker parta a ogni avvio."
   },
   "error": {
     "model": {
