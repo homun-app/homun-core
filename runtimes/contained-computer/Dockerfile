@@ -3,7 +3,10 @@
 # "computer" the agent uses, isolated from the host desktop.
 #
 # arm64 (Apple silicon) and amd64 both work: every package below is multi-arch.
-FROM debian:bookworm-slim
+# Debian 13 (trixie): newer Chromium baseline + libs than bookworm, for better browser
+# perf/compat. Freshness: up.sh pulls this base before building, so a Debian security/point
+# update cascades to a rebuilt apt layer (a newer `chromium`) instead of a frozen cache.
+FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
     DISPLAY=:99 \
@@ -29,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       fonts-liberation \
       procps \
-      # Timezone database (Layer D, defensive): bookworm-slim happens to ship
+      # Timezone database (Layer D, defensive): trixie-slim happens to ship
       # zoneinfo today, but pin tzdata so a future base-image slimming can't
       # silently revert the container to UTC. The ESSENTIAL part is `-e TZ=...`
       # in up.sh — without it the container is UTC (host-2h here), so `date`,

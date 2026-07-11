@@ -48,6 +48,19 @@ fi
 # layer), so rebuilds stay fast. Set HOMUN_CC_NO_CACHE=1 to force a clean rebuild.
 NO_CACHE=""
 [ -n "${HOMUN_CC_NO_CACHE:-}" ] && NO_CACHE="--no-cache"
+# Freshness: opportunistically refresh the base image so a Debian security/point update
+# cascades into a rebuilt apt layer (a newer `chromium`) instead of Docker's frozen cache.
+# Deliberately NON-fatal and skippable (HOMUN_CC_NO_PULL=1): an offline boot falls back to
+# the already-cached base + layers (so autostart-at-boot never breaks without a network).
+# The tag MUST match the Dockerfile `FROM`.
+BASE_IMAGE="debian:trixie-slim"
+if [ -z "${HOMUN_CC_NO_PULL:-}" ] && [ -z "${NO_CACHE}" ]; then
+  if docker pull "${BASE_IMAGE}" >/dev/null 2>&1; then
+    echo "==> base image ${BASE_IMAGE} refreshed"
+  else
+    echo "==> base pull skipped (offline or unchanged) — using cached image"
+  fi
+fi
 echo "==> building ${IMAGE} (def hash ${HOMUN_CC_HASH})${NO_CACHE:+ [no-cache]}"
 docker build ${NO_CACHE} --label "homun.cc_hash=${HOMUN_CC_HASH}" -t "${IMAGE}" "${HERE}"
 
