@@ -28345,6 +28345,41 @@ async fn telegram_send_with_rebind(
     channel_send(state, TELEGRAM_HTTP_PORT, recipient, text).await
 }
 
+/// Turn-completion hook: if `thread_id` is a channel conversation (has a stored recipient),
+/// mirror the CLEAN assistant answer out to that channel. This is the OUTPUT half of the
+/// channel-as-adapter convergence — the canonical turn runs through the broker/engine (island /
+/// turn_events / persistence for free) and its reply is ADDITIONALLY sent to the contact.
+/// No-op for non-channel threads and empty answers. Called from `execute_chat_turn_task`.
+pub(crate) async fn mirror_reply_to_channel_if_any(state: &AppState, thread_id: &str, answer: &str) {
+    let answer = answer.trim();
+    if answer.is_empty() {
+        return;
+    }
+    let Some(thread) = lock_store(state).ok().and_then(|s| s.thread(thread_id).ok().flatten())
+    else {
+        return;
+    };
+    let recipient = match thread.channel_recipient.as_deref().map(str::trim) {
+        Some(r) if !r.is_empty() => r.to_string(),
+        _ => return,
+    };
+    match thread.source.as_deref() {
+        Some("telegram") => match telegram_send_with_rebind(state, &recipient, answer).await {
+            Ok(()) => eprintln!("channel/telegram: reply mirrored to {recipient}"),
+            Err(error) => {
+                eprintln!("channel/telegram: reply mirror FAILED to {recipient}: {error}")
+            }
+        },
+        Some("whatsapp") => match channel_send(state, WHATSAPP_HTTP_PORT, &recipient, answer).await {
+            Ok(()) => eprintln!("channel/whatsapp: reply mirrored to {recipient}"),
+            Err(error) => {
+                eprintln!("channel/whatsapp: reply mirror FAILED to {recipient}: {error}")
+            }
+        },
+        _ => {} // not a sendable channel thread
+    }
+}
+
 async fn telegram_send_buttons_with_rebind(
     state: &AppState,
     recipient: &str,
@@ -28785,6 +28820,70 @@ async fn handle_channel_inbound(
                     Err(_) => None,
                 };
 
+                // AutoReply: converge onto the ONE turn flow — enqueue a channel-sourced,
+                // READ-ONLY turn through the broker (same engine → turn_events → working
+                // island → persistence). The executor mirrors the final reply back to the
+                // channel (see mirror_reply_to_channel_if_any in execute_chat_turn_task). No
+                // inline agent run and no concurrent spawn (the old parallel path that skipped
+                // turn_events). ApproveReply keeps the inline draft→approval path below.
+                if !approve_mode {
+                    if let Some(tid) = thread_id.as_deref() {
+                        let request_id = format!(
+                            "channel_{}_{}",
+                            now_epoch_secs(),
+                            uuid::Uuid::new_v4().simple()
+                        );
+                        let input = local_first_task_runtime::broker::ChatTurnInput {
+                            thread_id: tid.to_string(),
+                            request_id,
+                            prompt: content.clone(),
+                            visible_prompt: None,
+                            attachments: None,
+                            mode: None,
+                            model: None,
+                            source: local_first_task_runtime::broker::ChatTurnSource::Channel,
+                            approval: local_first_task_runtime::broker::TurnApproval::ReadOnly,
+                        };
+                        // A contact can fire several messages quickly; the broker runs ONE turn
+                        // per thread, so retry a few times if the previous turn is still active
+                        // (light queueing) rather than dropping the message or spawning a
+                        // concurrent inline turn.
+                        let mut enqueued = false;
+                        for _ in 0..6u32 {
+                            match enqueue_chat_turn_core(&st, &input) {
+                                Ok(_) => {
+                                    enqueued = true;
+                                    break;
+                                }
+                                Err(
+                                    local_first_task_runtime::broker::EnqueueError::ThreadBusy {
+                                        ..
+                                    },
+                                ) => {
+                                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                                }
+                                Err(error) => {
+                                    eprintln!(
+                                        "channel/{channel}: enqueue failed for {reply_to}: {error}"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                        if enqueued {
+                            eprintln!("channel/{channel}: turn enqueued (broker) for {reply_to}");
+                        } else {
+                            eprintln!(
+                                "channel/{channel}: could not enqueue turn for {reply_to} (thread stayed busy)"
+                            );
+                        }
+                    } else {
+                        eprintln!("channel/{channel}: no thread — dropping inbound from {reply_to}");
+                    }
+                    return;
+                }
+
+                // ---- ApproveReply (inline draft → user approval) ----
                 let title = format!("{label} · {name}");
                 let visible_turn = thread_id.as_deref().and_then(|tid| {
                     start_visible_conversation_turn(
@@ -31647,6 +31746,50 @@ async fn resume_stream(Path(request_id): Path<String>) -> Result<Response, Gatew
 // GET    /api/chat/turns/{turn_id}/stream   — replay + live NDJSON (?since=seq)
 
 /// POST /api/chat/turns — enqueue a chat turn via the broker.
+/// The ONE chat-turn enqueue: atomically persist the linked user message AND the `chat_turn`
+/// task in a single tx; the worker pool + `execute_chat_turn_task` then run the canonical engine
+/// (which emits `turn_events` → the working island). Shared by the HTTP `enqueue_turn` and the
+/// channel inbound path so a channel message is just another turn SOURCE — same broker, same
+/// engine, same island/persistence — instead of a parallel inline executor.
+fn enqueue_chat_turn_core(
+    state: &AppState,
+    input: &local_first_task_runtime::broker::ChatTurnInput,
+) -> Result<
+    local_first_task_runtime::broker::EnqueuedTurn,
+    local_first_task_runtime::broker::EnqueueError,
+> {
+    let user_id = gateway_user_id();
+    let workspace_id = gateway_workspace_id();
+    let store = state.task_store.lock().map_err(|e| {
+        local_first_task_runtime::broker::EnqueueError::Store(
+            local_first_task_runtime::TaskRuntimeError::Store(format!("task store lock: {e}")),
+        )
+    })?;
+    // The turn executor reuses this exact id, so the later commit_prompt_result INSERT OR
+    // IGNORE no-ops → one user message per turn (the atomic-enqueue invariant).
+    let user_message_id = format!("local_user_{}", input.request_id);
+    let user_message_thread = input.thread_id.clone();
+    let user_message_prompt = input.prompt.clone();
+    let user_message_ts = now_epoch_secs().to_string();
+    local_first_task_runtime::broker::enqueue_chat_turn_atomic(
+        &store,
+        &user_id,
+        &workspace_id,
+        input,
+        |tx| {
+            ChatStore::insert_linked_user_message(
+                tx,
+                &user_message_thread,
+                &user_message_id,
+                &user_message_prompt,
+                &user_message_ts,
+            )
+            .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))?;
+            Ok(())
+        },
+    )
+}
+
 async fn enqueue_turn(
     State(state): State<AppState>,
     Json(req): Json<EnqueueTurnRequest>,
@@ -31685,6 +31828,11 @@ async fn enqueue_turn(
         local_first_task_runtime::broker::ChatTurnSource::Interactive => {
             local_first_task_runtime::broker::TurnApproval::Full
         }
+        // Channels stay READ-ONLY (no committing tool/browser actions on the user's behalf
+        // from an inbound message) — the same policy the inline path enforced.
+        local_first_task_runtime::broker::ChatTurnSource::Channel => {
+            local_first_task_runtime::broker::TurnApproval::ReadOnly
+        }
         _ => local_first_task_runtime::broker::TurnApproval::Confirm,
     };
     let input = local_first_task_runtime::broker::ChatTurnInput {
@@ -31698,47 +31846,7 @@ async fn enqueue_turn(
         source,
         approval,
     };
-    let user_id = gateway_user_id();
-    let workspace_id = gateway_workspace_id();
-    let store = state.task_store.lock().map_err(|e| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "broker_store_lock",
-        message: format!("task store lock: {e}"),
-    })?;
-    // Atomic enqueue: persist the user message in chat_messages AND insert the
-    // chat_turn task in the SAME SQLite transaction. Restores the prompt+turn
-    // atomicity invariant (a crash between the two writes can no longer lose
-    // the prompt or leave an orphan task).
-    let user_message_id = format!("local_user_{request_id}");
-    let user_message_prompt = input.prompt.clone();
-    let user_message_thread = input.thread_id.clone();
-    let user_message_ts = now_epoch_secs().to_string();
-    let user_message_request_id = request_id.clone();
-    match local_first_task_runtime::broker::enqueue_chat_turn_atomic(
-        &store,
-        &user_id,
-        &workspace_id,
-        &input,
-        |tx| {
-            // Link the enqueued prompt into the thread tree via the canonical helper
-            // (parent = active_leaf, advance the leaf) so it is a proper node, NOT a
-            // dangling 2nd root. The turn executor reuses this exact id, so the later
-            // commit_prompt_result INSERT OR IGNORE no-ops → one user message per turn.
-            ChatStore::insert_linked_user_message(
-                tx,
-                &user_message_thread,
-                &user_message_id,
-                &user_message_prompt,
-                &user_message_ts,
-            )
-            .map_err(|e| {
-                local_first_task_runtime::TaskRuntimeError::Store(e.to_string())
-            })?;
-            // The request_id is logged separately; the id already embeds it for idempotency.
-            let _ = user_message_request_id;
-            Ok(())
-        },
-    ) {
+    match enqueue_chat_turn_core(&state, &input) {
         Ok(enqueued) => {
             let turn_id = enqueued.task_id.as_str().to_string();
             tracing::info!(

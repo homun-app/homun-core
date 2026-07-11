@@ -265,6 +265,13 @@ pub fn execute_chat_turn_task(
             &full_text,
         );
 
+        // Channel convergence: mirror the CLEAN answer out to Telegram/WhatsApp when this
+        // thread is a channel conversation (no-op otherwise). The OUTPUT adapter — a channel
+        // message runs the SAME broker/engine turn (island/turn_events) and still gets a reply.
+        // This executor is sync (block_on, like the engine call above), so block on the send.
+        tokio::runtime::Handle::current()
+            .block_on(crate::mirror_reply_to_channel_if_any(state, thread_id, &answer));
+
         // 7. Emit the terminal `done` turn event (durable + best-effort live).
         tracing::info!(target: "broker::executor", turn_id = %turn_id, "emitting done event");
         if let Ok(store) = state.task_store.lock() {
