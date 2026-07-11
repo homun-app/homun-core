@@ -3192,11 +3192,7 @@ fn attachments_from_row(
     index: usize,
 ) -> rusqlite::Result<Vec<serde_json::Value>> {
     let attachments_json: Option<String> = row.get(index)?;
-    attachments_json
-        .filter(|json| !json.trim().is_empty())
-        .map(|json| serde_json::from_str(&json).map_err(json_error))
-        .transpose()
-        .map(|attachments| attachments.unwrap_or_default())
+    Ok(parse_optional_json_array(attachments_json.as_deref(), "attachments_json"))
 }
 
 fn event_parts_from_row(
@@ -3204,11 +3200,29 @@ fn event_parts_from_row(
     index: usize,
 ) -> rusqlite::Result<Vec<serde_json::Value>> {
     let event_parts_json: Option<String> = row.get(index)?;
-    event_parts_json
-        .filter(|json| !json.trim().is_empty())
-        .map(|json| serde_json::from_str(&json).map_err(json_error))
-        .transpose()
-        .map(|event_parts| event_parts.unwrap_or_default())
+    Ok(parse_optional_json_array(event_parts_json.as_deref(), "event_parts_json"))
+}
+
+/// Parse a nullable JSON-array metadata column, FAIL-OPEN. These columns (attachments,
+/// event parts) are optional display metadata: a single malformed/legacy-corrupt row (e.g. a
+/// historical bug that stored a bare `msg_…` parent-id here) must NEVER abort the whole read
+/// — which used to fail a chat/channel turn ("could not persist the turn", no reply). On a
+/// parse error we log and degrade to empty instead of propagating.
+fn parse_optional_json_array(raw: Option<&str>, column: &str) -> Vec<serde_json::Value> {
+    let Some(json) = raw.map(str::trim).filter(|j| !j.is_empty()) else {
+        return Vec::new();
+    };
+    match serde_json::from_str(json) {
+        Ok(values) => values,
+        Err(error) => {
+            tracing::warn!(
+                target: "gateway::chat_store",
+                %error, column,
+                "ignoring unparseable metadata column (legacy corruption) — treating as empty"
+            );
+            Vec::new()
+        }
+    }
 }
 
 fn json_error(error: serde_json::Error) -> rusqlite::Error {
@@ -3233,6 +3247,22 @@ fn monotonic_suffix() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_optional_json_array_fails_open_on_corruption() {
+        // The channel-reply bug: a legacy row stored a bare `msg_…` parent-id in
+        // attachments_json. Reading it MUST NOT error (that aborted the whole turn via
+        // messages() → "could not persist the turn" → no reply) — it degrades to empty.
+        assert!(parse_optional_json_array(Some("msg_1782421837_abc"), "attachments_json").is_empty());
+        assert!(parse_optional_json_array(Some("browser_user_123"), "attachments_json").is_empty());
+        assert!(parse_optional_json_array(None, "attachments_json").is_empty());
+        assert!(parse_optional_json_array(Some(""), "attachments_json").is_empty());
+        assert!(parse_optional_json_array(Some("   "), "event_parts_json").is_empty());
+        // Valid JSON still parses through unchanged.
+        let ok = parse_optional_json_array(Some("[{\"type\":\"x\"}]"), "event_parts_json");
+        assert_eq!(ok.len(), 1);
+        assert_eq!(ok[0]["type"], "x");
+    }
 
     #[test]
     fn suggestions_dedup_list_and_act() {
