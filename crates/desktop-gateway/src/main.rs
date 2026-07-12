@@ -19693,22 +19693,13 @@ async fn execute_browser_tool(
             match reused {
                 Some(existing) => *browser_session = Some(existing),
                 None => {
-                    // Self-heal: a wedged contained-computer CDP makes the
-                    // sidecar's connectOverCDP time out. Health-check BEFORE
-                    // connecting; and if the spawn/connect fails anyway (a
-                    // race, or a container that wedged after the check),
-                    // recycle + recreate and retry once — resolve the block
-                    // automatically instead of reporting "non disponibile".
-                    if !browser_cdp_ok(ctx.state).await {
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: "‹‹ACT››🔧 Browser stuck: restarting the contained computer…‹‹/ACT››".to_string(),
-                            },
-                        )
-                        .await;
-                        ensure_browser_cdp_healthy(ctx.state).await;
-                    }
+                    // Isolation policy: PREFER the sandbox browser. If its CDP isn't up, try to
+                    // START the contained computer and wait; only fall back to the on-host browser
+                    // after a real attempt + timeout (surfaced, never silent). This closes the
+                    // sandbox escape where a mis-detected "container down" launched a host Chromium
+                    // immediately. On success `contained_computer_cdp_endpoint()` now resolves, so
+                    // the sidecar spawned below attaches via connectOverCDP instead of launching.
+                    ensure_contained_browser_or_host_fallback(ctx.state, ctx.tx).await;
                     for attempt in 0u8..2 {
                         let st = ctx.state.clone();
                         let spawned = tokio::task::spawn_blocking(move || {
@@ -28393,6 +28384,59 @@ pub(crate) async fn mirror_reply_to_channel_if_any(state: &AppState, thread_id: 
         "workspace": base_workspace_id(),
         "channel": channel,
     }));
+}
+
+/// Resolve a thread's outbound channel endpoint (sidecar port + recipient), or `None` when the
+/// thread isn't a sendable channel conversation. Shared by the typing-indicator helpers.
+fn channel_endpoint(state: &AppState, thread_id: &str) -> Option<(u16, String)> {
+    let thread = lock_store(state).ok().and_then(|s| s.thread(thread_id).ok().flatten())?;
+    let recipient = thread
+        .channel_recipient
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty())?
+        .to_string();
+    let port = match thread.source.as_deref() {
+        Some("telegram") => TELEGRAM_HTTP_PORT,
+        Some("whatsapp") => WHATSAPP_HTTP_PORT,
+        _ => return None,
+    };
+    Some((port, recipient))
+}
+
+/// Show a "typing…" indicator on a channel thread's origin channel for as long as the returned
+/// handle is alive. Returns `None` for non-channel threads. The broker runs a channel turn in a
+/// worker AFTER the inbound handler returns, so — unlike the inline ApproveReply path — the
+/// typing keepalive must be tied to the TURN lifecycle: the caller (turn_executor) starts it at
+/// turn start and stops it when the model finishes. Refresh every 8s because the sidecar presence
+/// expires on its own (so a crash never leaves the contact "typing" forever).
+pub(crate) fn start_channel_typing_keepalive(
+    state: &AppState,
+    thread_id: &str,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let (port, recipient) = channel_endpoint(state, thread_id)?;
+    let state = state.clone();
+    Some(tokio::runtime::Handle::current().spawn(async move {
+        loop {
+            if channel_set_presence(&state, port, &recipient, "composing")
+                .await
+                .is_err()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+        }
+    }))
+}
+
+/// Clear the typing indicator on a channel thread (best-effort). Aborting the keepalive stops the
+/// refresh, but WhatsApp keeps "composing" until a message OR an explicit "paused" arrives — so a
+/// CANCELLED channel turn (no reply sent) would otherwise leave the contact stuck typing. Mirrors
+/// the inline path, which also sends "paused". No-op for non-channel threads.
+pub(crate) async fn clear_channel_typing(state: &AppState, thread_id: &str) {
+    if let Some((port, recipient)) = channel_endpoint(state, thread_id) {
+        let _ = channel_set_presence(state, port, &recipient, "paused").await;
+    }
 }
 
 async fn telegram_send_buttons_with_rebind(
@@ -46667,11 +46711,43 @@ fn contained_container_detected() -> bool {
         .value
 }
 
+/// Cached TCP probe of the contained browser's CDP port. `docker ps`
+/// (`contained_container_detected`) is NOT a reliable "is the sandbox browser usable" signal: it
+/// can be blocked by the gateway's own seatbelt sandbox (the `docker` CLI isn't on the allowlist)
+/// or lag behind its 8s cache — and a false "down" then silently routes browsing to the ON-HOST
+/// browser (a sandbox escape). The port `connectOverCDP` actually needs is the source of truth,
+/// and probing localhost is permitted (the gateway already HTTP-probes it). So OR this in.
+fn contained_cdp_port_open() -> bool {
+    use std::net::{SocketAddr, TcpStream};
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    struct Probe {
+        open: bool,
+        at: Option<Instant>,
+    }
+    static CACHE: OnceLock<Mutex<Probe>> = OnceLock::new();
+    const TTL: Duration = Duration::from_secs(5);
+    // Well-known host-mapped CDP port of the contained computer (matches the resolver default).
+    const CDP_ADDR: SocketAddr = SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 9222);
+
+    let cache = CACHE.get_or_init(|| Mutex::new(Probe { open: false, at: None }));
+    let mut guard = cache.lock().unwrap_or_else(|p| p.into_inner());
+    if guard.at.map(|t| t.elapsed() < TTL).unwrap_or(false) {
+        return guard.open;
+    }
+    let open = TcpStream::connect_timeout(&CDP_ADDR, Duration::from_millis(300)).is_ok();
+    guard.open = open;
+    guard.at = Some(Instant::now());
+    open
+}
+
 /// Resolves the contained computer's CDP endpoint. An explicit env endpoint wins;
-/// then the `HOMUN_CONTAINED_COMPUTER` enable flag; otherwise we auto-detect
-/// a running container — the app auto-starts it for skills, so the browser and the
-/// live view should use it whenever it is up. `None` means "use the on-host
-/// browser", the graceful fallback when Docker is unavailable.
+/// then the `HOMUN_CONTAINED_COMPUTER` enable flag; otherwise we auto-detect a running
+/// container — via `docker ps` OR a direct probe of its CDP port (the latter survives a
+/// sandboxed/stale `docker ps` that would otherwise mis-route browsing to the host). `None`
+/// means "the sandbox browser is genuinely unavailable"; the browse gate then tries to START it
+/// and only falls back to the on-host browser after a real attempt + timeout.
 fn contained_computer_cdp_endpoint() -> Option<String> {
     if let Some(endpoint) = resolve_contained_computer_cdp(
         env::var("HOMUN_CONTAINED_COMPUTER_CDP").ok().as_deref(),
@@ -46679,7 +46755,7 @@ fn contained_computer_cdp_endpoint() -> Option<String> {
     ) {
         return Some(endpoint);
     }
-    if contained_container_detected() {
+    if contained_container_detected() || contained_cdp_port_open() {
         // Reuse the resolver's well-known default endpoint (DRY).
         return resolve_contained_computer_cdp(None, Some("true"));
     }
@@ -47045,6 +47121,63 @@ async fn ensure_browser_cdp_healthy(state: &AppState) -> bool {
             return true;
         }
     }
+    false
+}
+
+/// Direct reachability probe of the contained browser's CDP. Unlike `browser_cdp_ok` (which
+/// short-circuits to `true` when no endpoint resolves — its "we're in host mode" answer), this
+/// always hits the wire, so the browse gate can tell "sandbox genuinely down" from "host mode".
+async fn contained_cdp_reachable(state: &AppState) -> bool {
+    let endpoint =
+        contained_computer_cdp_endpoint().unwrap_or_else(|| "http://127.0.0.1:9222".to_string());
+    state
+        .http
+        .get(format!("{}/json/version", endpoint.trim_end_matches('/')))
+        .timeout(std::time::Duration::from_millis(1500))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+/// How long the browse gate waits for the contained computer to come up (1s polls) before it
+/// falls back to the host browser. Sized for a COLD Docker Desktop + container start.
+const CONTAINED_BROWSER_START_POLLS: u32 = 45;
+
+/// Browse-gate policy (user's rule): PREFER the sandbox. If the contained browser's CDP isn't up,
+/// actively try to START the contained computer (opens Docker if closed) and wait; only after a
+/// real attempt + timeout fall through to the on-host browser — a visible, last-resort degradation,
+/// never the silent immediate escape the old code did. Returns true when the sandbox CDP is ready
+/// (so `contained_computer_cdp_endpoint()` now resolves and the sidecar attaches via connectOverCDP);
+/// false means the caller proceeds and the sidecar launches the host browser as the fallback.
+async fn ensure_contained_browser_or_host_fallback(state: &AppState, tx: &StreamSink) -> bool {
+    if contained_cdp_reachable(state).await {
+        return true;
+    }
+    let _ = emit_stream_event(
+        tx,
+        GenerateStreamEvent::Delta {
+            text: "‹‹ACT››🖥️ Avvio il computer isolato (browser nel sandbox)…‹‹/ACT››".to_string(),
+        },
+    )
+    .await;
+    let _ = tokio::task::spawn_blocking(crate::sandbox::ensure_contained_computer).await;
+    // Cold Docker + container start can take a while; poll up to the timeout the user asked for.
+    for _ in 0..CONTAINED_BROWSER_START_POLLS {
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        if contained_cdp_reachable(state).await {
+            return true;
+        }
+    }
+    // Genuine timeout: fall back to the host browser, but SURFACE it (the user was alarmed by the
+    // silent escape) instead of quietly leaving the sandbox.
+    let _ = emit_stream_event(
+        tx,
+        GenerateStreamEvent::Delta {
+            text: "‹‹ACT››⚠️ Il computer isolato non è partito: uso il browser locale come fallback.‹‹/ACT››".to_string(),
+        },
+    )
+    .await;
     false
 }
 

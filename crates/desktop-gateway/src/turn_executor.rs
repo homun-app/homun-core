@@ -206,6 +206,12 @@ pub fn execute_chat_turn_task(
         message: "could not start a visible conversation turn".to_string(),
     })?;
 
+    // 4b. Channel turns: show a "typing…" indicator on the origin channel for the WHOLE turn.
+    // The broker runs the turn in a worker (the inbound handler already returned), so unlike the
+    // inline ApproveReply path the keepalive is tied to the turn lifecycle here. No-op for
+    // non-channel threads; aborted right after the agent-loop finishes below.
+    let typing_keepalive = crate::start_channel_typing_keepalive(state, thread_id);
+
     // 5. Drive the agent-loop to completion. The real fan-out (Task 1a.4) will
     //    mirror each stream event into turn_events + the broadcast; the stub
     //    just delegates to the existing drainer.
@@ -233,6 +239,14 @@ pub fn execute_chat_turn_task(
             ) => Some(answer),
         }
     });
+    // Stop the typing indicator now the model is done — covers both the completed and the
+    // cancelled path. Abort halts the refresh; the explicit "paused" clears WhatsApp, which
+    // (unlike Telegram's self-expiring action) would otherwise stay "typing" on a cancelled turn.
+    if let Some(handle) = typing_keepalive {
+        handle.abort();
+        tokio::runtime::Handle::current()
+            .block_on(crate::clear_channel_typing(state, thread_id));
+    }
     let cancelled = run.is_none();
     let answer = run
         .flatten()
