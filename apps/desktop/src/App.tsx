@@ -603,6 +603,18 @@ export default function App() {
   // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
   // before the 2.5s taskQueue polling catches up.
   const [streamingThreadId, setStreamingThreadId] = useState<string | null>(null);
+  // Bumped on a `thread.updated` for the open thread → ChatView re-fetches its island
+  // projection, so a BACKGROUND channel turn's finished activity folds in (it isn't streamed).
+  const [islandRefreshNonce, setIslandRefreshNonce] = useState(0);
+  // Set on a `thread.turn_started` for the open thread → ChatView attaches to that turn's live
+  // stream (island + transcript update in real time), for turns THIS client didn't launch —
+  // e.g. a Telegram/WhatsApp/scheduled reply, or a turn started from another window.
+  const [incomingBackgroundTurn, setIncomingBackgroundTurn] = useState<{
+    turnId: string;
+    threadId: string;
+    userMessageId: string;
+    assistantMessageId: string;
+  } | null>(null);
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
   const pendingEventThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
@@ -787,6 +799,17 @@ export default function App() {
       }
       if (isVisibleTurn) {
         pendingEventThreadIdsRef.current.add(eventThreadId);
+        // Hand the started turn to ChatView so it can attach to the live stream (island +
+        // transcript). ChatView ignores it for turns it launched itself (already streaming)
+        // and for other threads; navigateToThread below makes eventThreadId the open one.
+        if (event.turn_id && event.user_message_id && event.assistant_message_id) {
+          setIncomingBackgroundTurn({
+            turnId: event.turn_id,
+            threadId: eventThreadId,
+            userMessageId: event.user_message_id,
+            assistantMessageId: event.assistant_message_id,
+          });
+        }
       }
       void navigateToThread(eventThreadId, { forceMessages: isVisibleTurn }).finally(() => {
         if (isVisibleTurn) {
@@ -801,6 +824,9 @@ export default function App() {
         pendingEventThreadIdsRef.current.has(eventThreadId))
     ) {
       void refreshChatReadModels(eventThreadId);
+      if (eventThreadId === activeThreadId) {
+        setIslandRefreshNonce((n) => n + 1);
+      }
     }
   };
   useEffect(() => {
@@ -1473,6 +1499,8 @@ export default function App() {
             onMessagesChange={(messages) =>
               handleMessagesChange(activeThread.threadId, messages)
             }
+            islandRefreshNonce={islandRefreshNonce}
+            incomingBackgroundTurn={incomingBackgroundTurn}
             autoSubmit={
               pendingTemplateAutoSubmit?.threadId === activeThread.threadId
                 ? pendingTemplateAutoSubmit

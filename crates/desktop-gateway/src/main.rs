@@ -28363,21 +28363,36 @@ pub(crate) async fn mirror_reply_to_channel_if_any(state: &AppState, thread_id: 
         Some(r) if !r.is_empty() => r.to_string(),
         _ => return,
     };
-    match thread.source.as_deref() {
-        Some("telegram") => match telegram_send_with_rebind(state, &recipient, answer).await {
-            Ok(()) => eprintln!("channel/telegram: reply mirrored to {recipient}"),
-            Err(error) => {
-                eprintln!("channel/telegram: reply mirror FAILED to {recipient}: {error}")
+    let channel = match thread.source.as_deref() {
+        Some("telegram") => {
+            match telegram_send_with_rebind(state, &recipient, answer).await {
+                Ok(()) => eprintln!("channel/telegram: reply mirrored to {recipient}"),
+                Err(error) => {
+                    eprintln!("channel/telegram: reply mirror FAILED to {recipient}: {error}")
+                }
             }
-        },
-        Some("whatsapp") => match channel_send(state, WHATSAPP_HTTP_PORT, &recipient, answer).await {
-            Ok(()) => eprintln!("channel/whatsapp: reply mirrored to {recipient}"),
-            Err(error) => {
-                eprintln!("channel/whatsapp: reply mirror FAILED to {recipient}: {error}")
+            "telegram"
+        }
+        Some("whatsapp") => {
+            match channel_send(state, WHATSAPP_HTTP_PORT, &recipient, answer).await {
+                Ok(()) => eprintln!("channel/whatsapp: reply mirrored to {recipient}"),
+                Err(error) => {
+                    eprintln!("channel/whatsapp: reply mirror FAILED to {recipient}: {error}")
+                }
             }
-        },
-        _ => {} // not a sendable channel thread
-    }
+            "whatsapp"
+        }
+        _ => return, // not a sendable channel thread
+    };
+    // Nudge the app: a BACKGROUND channel turn isn't streamed to this client, so without this
+    // event the open thread's messages + working-island projection never refresh (they only
+    // re-fetch on thread-switch / a streamed turn end). This is what re-populates the island.
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+        "channel": channel,
+    }));
 }
 
 async fn telegram_send_buttons_with_rebind(
@@ -28894,6 +28909,8 @@ async fn handle_channel_inbound(
                         Some(channel),
                         &title,
                         &content,
+                        None,
+                        // Legacy inline ApproveReply path (no broker task) → throwaway turn id.
                         None,
                     )
                 });
@@ -29643,6 +29660,13 @@ fn start_visible_conversation_turn(
     // `None` for the inline paths (channel / automation / approval) that have no
     // pre-seeded message and must mint a fresh id.
     preseeded_user_message_id: Option<&str>,
+    // The broker turn id (`turn_{request_id}` = the task id) to advertise in the
+    // `thread.turn_started` event. This is the SAME id the live WS `turn.event` fan-out and
+    // the resumable turn stream key on, so a client that receives the event can attach to the
+    // running turn (live island + transcript) — including a channel turn it never launched.
+    // `None` for legacy inline paths with no broker task: they mint a throwaway id (nothing
+    // downstream joins on the visible turn_id, so it stays cosmetic for those).
+    turn_id_override: Option<&str>,
 ) -> Option<VisibleConversationTurn> {
     let user_message = match preseeded_user_message_id {
         Some(id) => channel_chat_message_with_id("user", user_text, id),
@@ -29650,11 +29674,10 @@ fn start_visible_conversation_turn(
     };
     let assistant_message = channel_chat_message("assistant", "…");
     let turn = VisibleConversationTurn {
-        turn_id: format!(
-            "turn_{}_{}",
-            now_epoch_secs(),
-            uuid::Uuid::new_v4().simple()
-        ),
+        turn_id: match turn_id_override {
+            Some(id) => id.to_string(),
+            None => format!("turn_{}_{}", now_epoch_secs(), uuid::Uuid::new_v4().simple()),
+        },
         user_message_id: user_message.id.clone(),
         assistant_message_id: assistant_message.id.clone(),
     };
@@ -33973,6 +33996,8 @@ fn execute_proactive_prompt_task(
         &thread_plan.title,
         &goal,
         None,
+        // Inline automation path (no broker task) → throwaway turn id.
+        None,
     )
     .ok_or_else(|| LocalTaskExecutionError {
         message: "could not start a visible automation turn".to_string(),
@@ -36124,6 +36149,8 @@ fn resume_thread_after_approval(
             Some("approval"),
             "Approved action continuation",
             &approval_continuation_visible_text(&tool),
+            None,
+            // Inline approval-continuation path (no broker task) → throwaway turn id.
             None,
         ) else {
             return;

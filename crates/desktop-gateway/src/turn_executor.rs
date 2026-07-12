@@ -197,6 +197,10 @@ pub fn execute_chat_turn_task(
         prompt,
         prompt,
         preseeded_user_message_id.as_deref(),
+        // Advertise the broker turn id so any client with this thread open can attach to the
+        // live stream (island + transcript) — the whole point of routing channel turns through
+        // the broker instead of an invisible inline run.
+        Some(turn_id),
     )
     .ok_or_else(|| crate::LocalTaskExecutionError {
         message: "could not start a visible conversation turn".to_string(),

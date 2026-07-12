@@ -185,6 +185,19 @@ interface ChatViewProps {
   // Fires when this thread starts/stops generating, so the parent can mark the
   // thread busy in the sidebar in real time (before the 2.5s taskQueue poll).
   onStreamingChange?: (busy: boolean) => void;
+  /** Bumped by App on a `thread.updated` for this open thread → the working-island re-fetches
+   *  its durable projection (so a BACKGROUND channel turn's finished activity folds in). */
+  islandRefreshNonce?: number;
+  /** Set by App on a `thread.turn_started` for this open thread that this client did NOT
+   *  launch (a channel/scheduled reply, or a turn from another window). ChatView attaches to
+   *  its live stream so the island + transcript update in real time, identical to an in-app
+   *  turn — not just at turn end. The persisted ids let us seed without duplicating bubbles. */
+  incomingBackgroundTurn?: {
+    turnId: string;
+    threadId: string;
+    userMessageId: string;
+    assistantMessageId: string;
+  } | null;
   // Pre-fill the composer (e.g. engaging a proactivity card opens a chat seeded
   // with the card's context). The nonce re-applies the same text.
   seed?: { text: string; nonce: number } | null;
@@ -287,6 +300,8 @@ export function ChatView({
   task,
   thread,
   onMessagesChange,
+  islandRefreshNonce,
+  incomingBackgroundTurn,
   onOpenTasks,
   onApproveApprovel,
   onRejectApprovel,
@@ -335,6 +350,9 @@ export function ChatView({
   // Track the active turn_id for WS event filtering. Set when a turn starts,
   // cleared when it ends. Used by the wsSubscription subscriber to route events.
   const activeTurnIdRef = useRef<string | null>(null);
+  // Turn ids of background turns we've already attached to (via incomingBackgroundTurn), so a
+  // re-fired `thread.turn_started` or a messages re-render never double-attaches the same turn.
+  const handledBackgroundTurnsRef = useRef<Set<string>>(new Set());
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [chatExported, setChatExported] = useState(false);
   const [replyContext, setReplyContext] = useState<ReplyContext | null>(null);
@@ -565,7 +583,12 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [thread.threadId, isStreaming]);
+    // `islandRefreshNonce` (bumped by App on a `thread.updated` for THIS open thread) so a
+    // BACKGROUND turn — e.g. a channel/Telegram reply this client never streamed — re-fetches
+    // the durable island projection when it finishes, instead of leaving the island frozen on
+    // the previous turn's activity. (The message COUNT is stable: the assistant placeholder is
+    // updated in place, so it can't be the trigger.)
+  }, [thread.threadId, isStreaming, islandRefreshNonce]);
   // Files the user uploaded in THIS conversation (e.g. the patente PDF), derived
   // from message attachments — the chat-context "File" tab of the Workbench.
   const uploadedFiles = useMemo(() => {
@@ -1082,10 +1105,18 @@ export function ChatView({
 
   // Reattach to an answer that was streaming when the app was reloaded: replays
   // the buffered events from the gateway and continues live, then persists.
-  async function resumeActiveStream(marker: ResumeMarker, options?: { commitResult?: boolean }) {
+  async function resumeActiveStream(
+    marker: ResumeMarker,
+    options?: { commitResult?: boolean; replaceIds?: string[] },
+  ) {
     if (promptSubmitting || streamingAssistantId) return;
     const shouldAutoTitleAfterResume = isPlaceholderThreadTitle(thread.title);
     const requestId = marker.requestId;
+    // Point the island's live WS channel (the `turn.event` subscription) at THIS turn. The
+    // broker fan-out keys on `turn_{request_id}`, which now also equals the id carried by
+    // `thread.turn_started` (the visible turn adopts the broker id — see start_visible_
+    // conversation_turn). Set BEFORE any await so the first replayed event is already accepted.
+    activeTurnIdRef.current = `turn_${requestId}`;
     const userMessage: ChatMessage = {
       id: `resume_user_${Date.now()}`,
       role: "user",
@@ -1099,7 +1130,14 @@ export function ChatView({
       timestamp: currentTimestampSeconds(),
       metadata: "Local model",
     };
-    const promptMessages = [...messages, userMessage];
+    // When re-attaching to a turn whose user bubble + assistant placeholder are ALREADY
+    // persisted (a background channel/scheduled turn re-fetched into `messages`), drop those
+    // rows from the optimistic seed so the fresh user/streaming bubbles don't duplicate them.
+    const replaceIds = options?.replaceIds;
+    const seedMessages = replaceIds?.length
+      ? messages.filter((message) => !replaceIds.includes(message.id))
+      : messages;
+    const promptMessages = [...seedMessages, userMessage];
     let streamedText = "";
     let streamEventParts: ChatEventPart[] = [];
     let unlistenStream: (() => void) | undefined;
@@ -1190,6 +1228,11 @@ export function ChatView({
       setStreamStatus((current) => (current?.requestId === requestId ? null : current));
       setPromptSubmitting(false);
       notifyStreaming(false);
+      // Release the island's live WS channel — but only if it still points at OUR turn, so a
+      // newer turn that started meanwhile keeps its attachment.
+      if (activeTurnIdRef.current === `turn_${requestId}`) {
+        activeTurnIdRef.current = null;
+      }
       if (options?.commitResult !== false) {
         clearResumeMarker(thread.threadId);
       }
@@ -2024,6 +2067,33 @@ export function ChatView({
     void resumeActiveStream(marker, { commitResult });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.threadId]);
+
+  // A background turn (a channel/scheduled reply, or a turn started from another window) began
+  // on THIS open thread. We never launched it, so nothing here is streaming it → without this
+  // the island would sit on the previous turn until the new one ended. Attach to its live
+  // stream exactly like an in-app turn: `resumeActiveStream` flips isStreaming, points the
+  // island's WS channel at the turn (activeTurnIdRef), and streams deltas into the transcript.
+  // Guards: never re-attach a turn we started ourselves (promptSubmitting/streamingAssistantId
+  // are set for those), never handle the same turn twice, and wait until the forceMessages
+  // re-fetch has landed the persisted user bubble + assistant placeholder so we can seed the
+  // transcript without duplicating them.
+  useEffect(() => {
+    const incoming = incomingBackgroundTurn;
+    if (!incoming || incoming.threadId !== thread.threadId) return;
+    if (handledBackgroundTurnsRef.current.has(incoming.turnId)) return;
+    if (promptSubmitting || streamingAssistantId) return;
+    const placeholder = messages.find((message) => message.id === incoming.assistantMessageId);
+    if (!placeholder) return; // persisted rows not loaded yet → retry when `messages` updates
+    const userText =
+      messages.find((message) => message.id === incoming.userMessageId)?.text ?? "";
+    const requestId = incoming.turnId.replace(/^turn_/, "");
+    handledBackgroundTurnsRef.current.add(incoming.turnId);
+    void resumeActiveStream(
+      { requestId, userText, assistantMessageId: incoming.assistantMessageId },
+      { commitResult: true, replaceIds: [incoming.userMessageId, incoming.assistantMessageId] },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingBackgroundTurn, messages, promptSubmitting, streamingAssistantId, thread.threadId]);
 
   useEffect(() => {
     const handleResize = () => scrollConversationToBottomIfPinned("auto");
