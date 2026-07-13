@@ -1734,6 +1734,80 @@ async function electronDeleteWorkspace(id: string): Promise<WorkspacesSnapshot> 
   );
 }
 
+// ── Tags (cross-project colored labels) ──────────────────────────────────────────────────
+export type TagEntityType = "project" | "thread";
+export interface Tag {
+  id: string;
+  name: string;
+  color: string;
+  created_at: number;
+}
+export interface TagEntityRef {
+  entity_type: TagEntityType;
+  entity_id: string;
+}
+
+async function electronListTags(): Promise<Tag[]> {
+  return gatewayGetJson<Tag[]>("/api/tags");
+}
+async function electronCreateTag(name: string, color: string): Promise<Tag> {
+  return gatewayPostJson<Tag>("/api/tags", { name, color });
+}
+async function electronRenameTag(id: string, name: string): Promise<void> {
+  await gatewayPostJson(`/api/tags/${encodeURIComponent(id)}/rename`, { name });
+}
+async function electronSetTagColor(id: string, color: string): Promise<void> {
+  await gatewayPostJson(`/api/tags/${encodeURIComponent(id)}/color`, { color });
+}
+async function electronDeleteTag(id: string): Promise<void> {
+  await gatewayPostJson(`/api/tags/${encodeURIComponent(id)}/delete`, {});
+}
+async function electronAssignTag(
+  tagId: string,
+  entityType: TagEntityType,
+  entityId: string,
+): Promise<void> {
+  await gatewayPostJson(`/api/tags/${encodeURIComponent(tagId)}/assign`, {
+    entity_type: entityType,
+    entity_id: entityId,
+  });
+}
+async function electronUnassignTag(
+  tagId: string,
+  entityType: TagEntityType,
+  entityId: string,
+): Promise<void> {
+  await gatewayPostJson(`/api/tags/${encodeURIComponent(tagId)}/unassign`, {
+    entity_type: entityType,
+    entity_id: entityId,
+  });
+}
+async function electronTagsForEntity(
+  entityType: TagEntityType,
+  entityId: string,
+): Promise<Tag[]> {
+  return gatewayGetJson<Tag[]>(
+    `/api/tags/entity/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}`,
+  );
+}
+async function electronEntitiesForTag(tagId: string): Promise<TagEntityRef[]> {
+  const result = await gatewayGetJson<{ entities: TagEntityRef[] }>(
+    `/api/tags/${encodeURIComponent(tagId)}/entities`,
+  );
+  return result.entities;
+}
+export interface TagAssignment {
+  entity_type: TagEntityType;
+  entity_id: string;
+  tag: Tag;
+}
+async function electronAllTagAssignments(): Promise<TagAssignment[]> {
+  const result = await gatewayGetJson<{ assignments: TagAssignment[] }>(
+    "/api/tags/assignments",
+  );
+  return result.assignments;
+}
+
 // ADR 0023 — per-workspace sandbox/approval override. Mirrors `setRuntimeSettings`: each axis
 // is optional and PATCH-merged server-side; sending JSON `null` clears that axis back to
 // inheriting the global default (see `merge_workspace_policy` on the gateway). Returns the
@@ -2738,6 +2812,19 @@ export const coreBridge = {
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
   renameWorkspace: (id: string, name: string) => electronRenameWorkspace(id, name),
   deleteWorkspace: (id: string) => electronDeleteWorkspace(id),
+  listTags: () => electronListTags(),
+  createTag: (name: string, color: string) => electronCreateTag(name, color),
+  renameTag: (id: string, name: string) => electronRenameTag(id, name),
+  setTagColor: (id: string, color: string) => electronSetTagColor(id, color),
+  deleteTag: (id: string) => electronDeleteTag(id),
+  assignTag: (tagId: string, entityType: TagEntityType, entityId: string) =>
+    electronAssignTag(tagId, entityType, entityId),
+  unassignTag: (tagId: string, entityType: TagEntityType, entityId: string) =>
+    electronUnassignTag(tagId, entityType, entityId),
+  tagsForEntity: (entityType: TagEntityType, entityId: string) =>
+    electronTagsForEntity(entityType, entityId),
+  entitiesForTag: (tagId: string) => electronEntitiesForTag(tagId),
+  allTagAssignments: () => electronAllTagAssignments(),
   setWorkspacePolicy: (
     id: string,
     patch: {

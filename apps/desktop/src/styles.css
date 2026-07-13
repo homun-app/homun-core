@@ -1381,6 +1381,141 @@ body.resizing-drawer {
   box-shadow: var(--shadow-menu);
 }
 
+/* Tag popover (assign/create tags for one thread or project) + the color chips on list rows. */
+.tag-menu {
+  position: fixed;
+  z-index: 65;
+  width: 220px;
+  max-width: min(240px, calc(100vw - 24px));
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+}
+.tag-menu-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.tag-menu-empty {
+  padding: 8px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.tag-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.tag-menu-item:hover {
+  background: var(--surface-hover);
+}
+.tag-menu-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tag-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.tag-menu-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  margin-top: 4px;
+  padding: 0 8px;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-control) var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.tag-menu-add:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.tag-menu-create {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 6px 4px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+.tag-menu-input {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.tag-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tag-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+.tag-swatch.selected {
+  border-color: var(--text);
+}
+.tag-menu-create-confirm {
+  min-height: 30px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: var(--brand);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 560;
+  cursor: pointer;
+}
+.tag-menu-create-confirm:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Color chips beside a thread/project title — discreet dots, not bulky labels. */
+.tag-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+.tag-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
 .drawer-new-chat-menu {
   width: 280px;
   max-width: min(280px, calc(100vw - 24px));

@@ -16,6 +16,7 @@ import {
   Search,
   Settings,
   Shield,
+  Tag as TagIcon,
   Trash2,
   X,
 } from "lucide-react";
@@ -25,8 +26,15 @@ import { useTranslation } from "react-i18next";
 import { settingsGroupLabels, settingsSections } from "../data/mockData";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
-import { coreBridge, type CoreChatThread, type WorkspaceRecord } from "../lib/coreBridge";
+import {
+  coreBridge,
+  type CoreChatThread,
+  type Tag,
+  type WorkspaceRecord,
+} from "../lib/coreBridge";
 import { UpdatePill } from "./UpdatePill";
+import { TagMenu } from "./TagMenu";
+import { useTags, tagsForEntity } from "../lib/useTags";
 import { ProjectAccessDialog } from "./ProjectAccessDialog";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
@@ -188,6 +196,7 @@ function ProjectsNav({
   onThreadContextMenu,
 }: ProjectsNavProps) {
   const { t } = useTranslation();
+  const { assignments: tagAssignments } = useTags();
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
   const [personalThreads, setPersonalThreads] = useState<ChatThread[]>([]);
@@ -199,6 +208,11 @@ function ProjectsNav({
   const [accessProject, setAccessProject] = useState<WorkspaceRecord | null>(null);
   const [projectMenu, setProjectMenu] = useState<{
     project: WorkspaceRecord;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [projectTagMenu, setProjectTagMenu] = useState<{
+    entityId: string;
     x: number;
     y: number;
   } | null>(null);
@@ -459,6 +473,7 @@ function ProjectsNav({
         onMore={(e) => onThreadContextMenu(thread, e)}
         onPinToggle={() => onSetChatThreadPinned(thread.threadId, !thread.pinned)}
         onSelect={() => onSelect(thread)}
+        tags={tagsForEntity(tagAssignments, "thread", thread.threadId)}
       />
     ));
   }
@@ -531,6 +546,21 @@ function ProjectsNav({
                       {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       <FolderOpen size={14} />
                       <span className="drawer-link-title">{project.name}</span>
+                      {(() => {
+                        const projectTags = tagsForEntity(tagAssignments, "project", project.id);
+                        return projectTags.length > 0 ? (
+                          <span className="tag-chips" aria-hidden="true">
+                            {projectTags.map((tag) => (
+                              <span
+                                key={tag.id}
+                                className="tag-chip-dot"
+                                style={{ background: tag.color }}
+                                title={tag.name}
+                              />
+                            ))}
+                          </span>
+                        ) : null;
+                      })()}
                     </button>
                     <button
                       className="drawer-row-action"
@@ -613,6 +643,21 @@ function ProjectsNav({
             </button>
           )}
           <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setProjectTagMenu({
+                entityId: projectMenu.project.id,
+                x: projectMenu.x,
+                y: projectMenu.y,
+              });
+              setProjectMenu(null);
+            }}
+          >
+            <TagIcon size={15} />
+            <span>{t("tags.menuLabel")}</span>
+          </button>
+          <button
             className="danger"
             type="button"
             role="menuitem"
@@ -622,6 +667,16 @@ function ProjectsNav({
             <span>{t("common.delete")}</span>
           </button>
         </div>
+      )}
+
+      {projectTagMenu && (
+        <TagMenu
+          entityType="project"
+          entityId={projectTagMenu.entityId}
+          x={projectTagMenu.x}
+          y={projectTagMenu.y}
+          onClose={() => setProjectTagMenu(null)}
+        />
       )}
 
       <ProjectAccessDialog workspace={accessProject} onClose={() => setAccessProject(null)} />
@@ -762,6 +817,12 @@ export function NavDrawer({
     useState<NewChatProjectModalState | null>(null);
   const [threadMenu, setThreadMenu] = useState<{
     thread: ChatThread;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [tagMenu, setTagMenu] = useState<{
+    entityType: "thread" | "project";
+    entityId: string;
     x: number;
     y: number;
   } | null>(null);
@@ -1225,6 +1286,22 @@ export function NavDrawer({
             </button>
           )}
           <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setTagMenu({
+                entityType: "thread",
+                entityId: threadMenu.thread.threadId,
+                x: threadMenu.x,
+                y: threadMenu.y,
+              });
+              setThreadMenu(null);
+            }}
+          >
+            <TagIcon size={15} />
+            <span>{t("tags.menuLabel")}</span>
+          </button>
+          <button
             className="danger"
             type="button"
             role="menuitem"
@@ -1234,6 +1311,16 @@ export function NavDrawer({
             <span>{t("common.delete")}</span>
           </button>
         </div>
+      )}
+
+      {tagMenu && (
+        <TagMenu
+          entityType={tagMenu.entityType}
+          entityId={tagMenu.entityId}
+          x={tagMenu.x}
+          y={tagMenu.y}
+          onClose={() => setTagMenu(null)}
+        />
       )}
 
       <footer className="drawer-footer">
@@ -1498,6 +1585,7 @@ function ThreadLink({
   onPinToggle,
   onSelect,
   thread,
+  tags,
 }: {
   active: boolean;
   busy?: boolean;
@@ -1507,6 +1595,7 @@ function ThreadLink({
   onPinToggle?: () => void;
   onSelect: () => void;
   thread: ChatThread;
+  tags?: Tag[];
 }) {
   const { t } = useTranslation();
   const icon = threadTypeIcon(thread.source, t);
@@ -1528,6 +1617,18 @@ function ThreadLink({
           {busy && <span className="thread-busy-dot" aria-hidden="true" />}
           {thread.title}
         </span>
+        {tags && tags.length > 0 && (
+          <span className="tag-chips" aria-hidden="true">
+            {tags.map((tag) => (
+              <span
+                key={tag.id}
+                className="tag-chip-dot"
+                style={{ background: tag.color }}
+                title={tag.name}
+              />
+            ))}
+          </span>
+        )}
         <span className="drawer-thread-time">{formatThreadRelativeTime(thread.updatedAt)}</span>
       </button>
       {(onPinToggle || onArchive || onMore) && (

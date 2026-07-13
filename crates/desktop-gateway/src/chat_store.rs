@@ -717,6 +717,29 @@ impl ChatStore {
         rows.collect()
     }
 
+    /// Every (entity, tag) pair in one shot — the sidebar loads this once to render tag chips
+    /// on each item without an N+1 of `tags_for_entity` per visible thread/project.
+    pub fn all_tag_assignments(&self) -> rusqlite::Result<Vec<(String, String, Tag)>> {
+        let mut stmt = self.conn.prepare(
+            "select a.entity_type, a.entity_id, t.id, t.name, t.color, t.created_at
+             from tag_assignments a join tags t on t.id = a.tag_id
+             order by a.created_at desc",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                Tag {
+                    id: row.get(2)?,
+                    name: row.get(3)?,
+                    color: row.get(4)?,
+                    created_at: row.get(5)?,
+                },
+            ))
+        })?;
+        rows.collect()
+    }
+
     /// Drop every tag assignment for an entity — called when a thread or project is deleted,
     /// so no assignment dangles pointing at a gone entity (the entity side has no FK).
     pub fn remove_entity_assignments(

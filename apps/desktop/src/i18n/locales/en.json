@@ -1,4 +1,12 @@
 {
+  "tags": {
+    "empty": "No tags yet",
+    "new": "New tag",
+    "newNamePlaceholder": "Tag name",
+    "color": "Color",
+    "create": "Create",
+    "menuLabel": "Tags"
+  },
   "shell": {
     "resizeSidebarAria": "Resize the sidebar"
   },

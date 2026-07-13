@@ -1274,6 +1274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         // Tags (cross-project colored labels on projects + conversations).
         .route("/api/tags", get(tags_list).post(tags_create))
+        .route("/api/tags/assignments", get(tags_all_assignments))
         .route("/api/tags/{tag_id}/rename", post(tags_rename))
         .route("/api/tags/{tag_id}/color", post(tags_set_color))
         .route("/api/tags/{tag_id}/delete", post(tags_delete))
@@ -49412,6 +49413,21 @@ async fn tags_for_entity_handler(
         .tags_for_entity(entity, &entity_id)
         .map_err(GatewayError::store)?;
     Ok(Json(tags))
+}
+
+async fn tags_all_assignments(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let rows = lock_store(&state)?
+        .all_tag_assignments()
+        .map_err(GatewayError::store)?;
+    let list: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(entity_type, entity_id, tag)| {
+            serde_json::json!({ "entity_type": entity_type, "entity_id": entity_id, "tag": tag })
+        })
+        .collect();
+    Ok(Json(serde_json::json!({ "assignments": list })))
 }
 
 /// Cascading purge of all data for a workspace across every store. Best-effort:
