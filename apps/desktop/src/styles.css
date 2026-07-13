@@ -2348,6 +2348,14 @@ body.resizing-drawer {
    then follow, and the title after them. */
 .app-shell.drawer-closed .task-topbar {
   padding-left: 78px;
+  /* Vertically center the collapsed header on the macOS traffic-light line at EVERY width the
+     header can be collapsed (the sidebar auto-closes at ≤1024px, so this must not depend on the
+     ≤860px breakpoint). The lights sit at trafficLightPosition {x:16,y:15} → centre ≈ y21 from
+     the window top. Pinning a 42px box to the top of the header row (align-self:start) centres
+     the 38px content at y21 — matching the open drawer's titlebar — instead of inheriting the
+     58px desktop row (which centred it at y29, ~8px low). */
+  height: 42px;
+  align-self: start;
 }
 .task-collapsed-controls {
   display: inline-flex;
