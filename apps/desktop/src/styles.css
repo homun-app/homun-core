@@ -315,17 +315,20 @@ small {
 .drawer-nav-item,
 .rail-nav,
 .task-title-area {
-  /* Flex row so the collapsed reopen/search controls sit on the SAME baseline as the
-     title (aligned with the traffic lights). Without this the inline-flex controls span
-     and the block title-button stack vertically → icons float above the title. */
+  -webkit-app-region: no-drag;
+}
+
+/* The chat-header title zone: a flex row so the collapsed reopen/search controls sit on the
+   SAME baseline as the title. flex-grow:0 keeps it at content width, leaving the topbar's empty
+   middle as a window-drag handle; min-width:0 + flex-shrink lets the title truncate when space
+   is tight instead of pushing .task-header-actions off the clipped right edge. NOTE: kept as its
+   OWN rule — folding it into the grouped no-drag selector above would leak these flex props onto
+   .drawer-scroll (centering the sidebar) and every nav row. */
+.task-title-area {
   display: flex;
   align-items: center;
-  /* Grow to fill, but min-width:0 lets it SHRINK below the title's intrinsic width so the
-     title truncates instead of pushing .task-header-actions off the right edge (where the
-     layout's overflow:hidden clipped them → "top-right buttons vanish when narrow"). */
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  -webkit-app-region: no-drag;
 }
 
 
