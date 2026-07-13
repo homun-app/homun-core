@@ -315,6 +315,16 @@ small {
 .drawer-nav-item,
 .rail-nav,
 .task-title-area {
+  /* Flex row so the collapsed reopen/search controls sit on the SAME baseline as the
+     title (aligned with the traffic lights). Without this the inline-flex controls span
+     and the block title-button stack vertically → icons float above the title. */
+  display: flex;
+  align-items: center;
+  /* Grow to fill, but min-width:0 lets it SHRINK below the title's intrinsic width so the
+     title truncates instead of pushing .task-header-actions off the right edge (where the
+     layout's overflow:hidden clipped them → "top-right buttons vanish when narrow"). */
+  flex: 1 1 auto;
+  min-width: 0;
   -webkit-app-region: no-drag;
 }
 
@@ -2344,6 +2354,10 @@ body.resizing-drawer {
   align-items: center;
   gap: 2px;
   margin-right: 8px;
+  /* The window drag-strip (z-index 200) spans the top-left band and would SWALLOW these
+     clicks (the ⋯ menu escapes only because it sits right of the strip). Lift above it. */
+  position: relative;
+  z-index: 205;
   -webkit-app-region: no-drag;
 }
 .task-collapsed-action {
@@ -2384,6 +2398,15 @@ body.resizing-drawer {
   background: transparent;
   font-size: 16px;
   font-weight: 600;
+  /* Allow the button to shrink and its title to truncate (see .task-title-area). */
+  min-width: 0;
+  overflow: hidden;
+}
+
+.task-title-button > #chat-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .task-top-actions {
@@ -9589,6 +9612,17 @@ body.resizing-drawer {
   .active-task-layout {
     padding-inline: 18px;
   }
+
+  /* The topbar breaks out of the layout's side padding with negative margins so the ⋯ menu
+     pins to the window's right edge. Those margins must MATCH the layout's actual padding —
+     and here it drops to 18px. Without re-coupling, the base margin-right stayed at the full
+     -(--island-reserve) (~388px), overshooting the window and carrying .task-header-actions
+     off-screen right, where overflow:hidden CLIPPED them → the "top-right buttons vanish when
+     the window narrows" bug. padding-left is left to the base/drawer-closed rules (78px for
+     the traffic-light inset when collapsed). */
+  .task-topbar {
+    margin-inline: -18px;
+  }
 }
 
 @media (max-width: 860px) {
@@ -9616,10 +9650,13 @@ body.resizing-drawer {
   }
 
   .task-topbar {
-    align-items: flex-start;
-    flex-direction: column;
-    justify-content: center;
-    padding-block: 8px;
+    /* Keep the header a SINGLE ROW even when narrow (title left, ⋯ + panel-toggle pinned
+       right). A column layout here stacked the two into a ~70px block inside the fixed 58px
+       grid row, whose parent's overflow:hidden then CLIPPED the second row → the top-right
+       actions vanished. The island floats below the header (top:64px) so it never collides. */
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
   }
 
   .active-task-layout {
