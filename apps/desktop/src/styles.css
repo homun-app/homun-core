@@ -9526,6 +9526,11 @@ body.resizing-drawer {
   margin-bottom: var(--s6);
 }
 .set-profile-avatar {
+  /* MUST be block: as the empty-state placeholder it's a <span>, and an inline span
+     ignores width/height → it collapsed to 0×0 (invisible picker + no avatar). The nav
+     copy survives only because it's a flex ITEM there (blockified); this one sits inside a
+     plain <button>, so it needs the explicit block itself. */
+  display: block;
   width: 36px;
   height: 36px;
   border-radius: 9px;

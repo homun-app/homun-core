@@ -771,6 +771,14 @@ function AccountPane({
                     alt=""
                     className="set-profile-avatar"
                     style={{ objectFit: "cover" }}
+                    // A stored value that no longer loads (a legacy blob:/object URL from an
+                    // older build, or a truncated data URL) must NOT leave an invisible broken
+                    // image where the picker button used to be — self-heal to the visible
+                    // placeholder so the avatar stays a clickable "upload" affordance.
+                    onError={() => {
+                      setProfileImage("");
+                      setProfileImageError(null);
+                    }}
                   />
                 ) : (
                   <span className="set-profile-avatar" />
