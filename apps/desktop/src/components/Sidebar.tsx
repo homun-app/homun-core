@@ -319,20 +319,12 @@ function ProjectsNav({
       setBusy(false);
     }
   }
-  async function openProjectThread(projectId: string, threadId: string) {
-    if (projectId === activeWorkspaceId) {
-      onSelectThread(threadId);
-      return;
-    }
-    setBusy(true);
-    try {
-      await coreBridge.selectChatThread(threadId);
-      await coreBridge.selectWorkspace(projectId);
-      window.location.reload();
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-    }
+  function openProjectThread(projectId: string, threadId: string) {
+    // Soft context switch: point the sidebar at the project locally and let the workspace-aware
+    // onSelectThread switch the server context + load the chat in the center. No full reload
+    // (which reset the scroll and lost the just-clicked chat).
+    if (projectId !== activeWorkspaceId) setActiveWorkspaceId(projectId);
+    onSelectThread(threadId);
   }
 
   async function loadProjectThreads(projectId: string) {
@@ -369,20 +361,11 @@ function ProjectsNav({
       return next;
     });
   }
-  async function openPersonalThread(threadId: string) {
-    if (!inProject) {
-      onSelectThread(threadId);
-      return;
-    }
-    setBusy(true);
-    try {
-      await coreBridge.selectChatThread(threadId);
-      await coreBridge.selectWorkspace(PERSONAL_WORKSPACE_ID);
-      window.location.reload();
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-    }
+  function openPersonalThread(threadId: string) {
+    // Soft context switch (see openProjectThread): re-scope the sidebar to Personal locally and
+    // let the workspace-aware onSelectThread do the rest — no full page reload.
+    if (inProject) setActiveWorkspaceId(PERSONAL_WORKSPACE_ID);
+    onSelectThread(threadId);
   }
 
   function openCreateProjectModal() {

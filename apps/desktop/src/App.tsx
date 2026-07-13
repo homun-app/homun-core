@@ -712,13 +712,19 @@ export default function App() {
   }
 
   async function handleSelectThread(threadId: string) {
-    const thread = chatThreads.find((item) => item.threadId === threadId);
-    if (!thread) return;
+    // `select_chat_thread` is workspace-aware: it returns the target thread's workspace snapshot,
+    // so a thread in ANOTHER workspace switches context here WITHOUT a full page reload (the
+    // sidebar used to `window.location.reload()` for the cross-workspace case). No early return
+    // on a thread missing from the current list — that's exactly the cross-workspace case.
+    const fallback = chatThreads.find((item) => item.threadId === threadId);
     try {
       const snapshot = await coreBridge.selectChatThread(threadId);
       const mappedThreads = snapshot.threads.map(mapCoreChatThread);
       const selectedThread =
-        mappedThreads.find((item) => item.threadId === threadId) ?? thread;
+        mappedThreads.find((item) => item.threadId === threadId) ??
+        fallback ??
+        mappedThreads[0] ??
+        defaultChatThread;
       const messages = await coreBridge.chatMessages(threadId);
       setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
       setThreadMessagesFromBackend(threadId, messages.messages.map(mapCoreChatMessage));
@@ -727,7 +733,7 @@ export default function App() {
       setActiveView("chat");
     } catch (error) {
       setActiveThreadId(threadId);
-      setSelectedTaskId(thread.taskId);
+      if (fallback) setSelectedTaskId(fallback.taskId);
       setActiveView("chat");
       console.warn("select_chat_thread unavailable", error);
     }
