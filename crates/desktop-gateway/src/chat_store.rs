@@ -334,6 +334,40 @@ fn map_suggestion(row: &rusqlite::Row) -> rusqlite::Result<SuggestionRow> {
     })
 }
 
+/// A user-defined colored tag. Cross-cutting over projects and conversations (see the
+/// `tags` / `tag_assignments` schema): a label, not a container.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Tag {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub created_at: i64,
+}
+
+/// Which kind of entity a tag is assigned to. Kept as a small enum so the API/handlers
+/// validate the type once instead of passing raw strings around.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagEntity {
+    Project,
+    Thread,
+}
+
+impl TagEntity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TagEntity::Project => "project",
+            TagEntity::Thread => "thread",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "project" => Some(TagEntity::Project),
+            "thread" => Some(TagEntity::Thread),
+            _ => None,
+        }
+    }
+}
+
 impl ChatStore {
     pub fn open(path: impl AsRef<Path>) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
@@ -538,6 +572,8 @@ impl ChatStore {
             "delete from task_thread_links where thread_id = ?1",
             params![thread_id],
         )?;
+        // Drop any tag assignments on this thread (the entity side has no FK).
+        self.remove_entity_assignments(TagEntity::Thread, thread_id)?;
         self.conn.execute(
             "delete from chat_threads where thread_id = ?1",
             params![thread_id],
@@ -553,6 +589,146 @@ impl ChatStore {
             }
         }
         self.threads(&workspace_id)
+    }
+
+    // ── Tags (cross-project colored labels) ─────────────────────────────────────────────
+    // A tag is a lightweight {name, color}; assignment is many-to-many over threads and
+    // projects, so the sidebar can filter by tag across workspaces without a container.
+
+    /// All tags, newest first (stable secondary sort by name so equal timestamps are
+    /// deterministic — matters for tests and for a tidy tag list).
+    pub fn list_tags(&self) -> rusqlite::Result<Vec<Tag>> {
+        let mut stmt = self.conn.prepare(
+            "select id, name, color, created_at from tags order by created_at desc, name asc",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Create a tag with a caller-supplied id (the gateway mints it, so ids stay predictable
+    /// client-side). Idempotent on the id: re-creating updates name+color.
+    pub fn create_tag(&self, id: &str, name: &str, color: &str) -> rusqlite::Result<Tag> {
+        let now = Self::now_secs();
+        self.conn.execute(
+            "insert into tags (id, name, color, created_at) values (?1, ?2, ?3, ?4)
+             on conflict(id) do update set name = excluded.name, color = excluded.color",
+            params![id, name, color, now],
+        )?;
+        Ok(Tag {
+            id: id.to_string(),
+            name: name.to_string(),
+            color: color.to_string(),
+            created_at: now,
+        })
+    }
+
+    pub fn rename_tag(&self, id: &str, name: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute("update tags set name = ?1 where id = ?2", params![name, id])?;
+        Ok(())
+    }
+
+    pub fn set_tag_color(&self, id: &str, color: &str) -> rusqlite::Result<()> {
+        self.conn
+            .execute("update tags set color = ?1 where id = ?2", params![color, id])?;
+        Ok(())
+    }
+
+    /// Delete a tag AND all its assignments. The FK cascades only when `PRAGMA foreign_keys`
+    /// is on (it isn't relied on elsewhere here), so purge assignments explicitly — same
+    /// belt-and-suspenders pattern as `delete_thread`.
+    pub fn delete_tag(&self, id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "delete from tag_assignments where tag_id = ?1",
+            params![id],
+        )?;
+        self.conn
+            .execute("delete from tags where id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Assign a tag to an entity. Idempotent: a repeat assignment is a no-op (the composite
+    /// primary key + `on conflict do nothing`), so the caller never has to check first.
+    pub fn assign_tag(
+        &self,
+        tag_id: &str,
+        entity: TagEntity,
+        entity_id: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert into tag_assignments (tag_id, entity_type, entity_id, created_at)
+             values (?1, ?2, ?3, ?4) on conflict do nothing",
+            params![tag_id, entity.as_str(), entity_id, Self::now_secs()],
+        )?;
+        Ok(())
+    }
+
+    pub fn unassign_tag(
+        &self,
+        tag_id: &str,
+        entity: TagEntity,
+        entity_id: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "delete from tag_assignments where tag_id = ?1 and entity_type = ?2 and entity_id = ?3",
+            params![tag_id, entity.as_str(), entity_id],
+        )?;
+        Ok(())
+    }
+
+    /// The tags currently on one entity (thread or project), newest-assigned first.
+    pub fn tags_for_entity(
+        &self,
+        entity: TagEntity,
+        entity_id: &str,
+    ) -> rusqlite::Result<Vec<Tag>> {
+        let mut stmt = self.conn.prepare(
+            "select t.id, t.name, t.color, t.created_at
+             from tags t join tag_assignments a on a.tag_id = t.id
+             where a.entity_type = ?1 and a.entity_id = ?2
+             order by a.created_at desc, t.name asc",
+        )?;
+        let rows = stmt.query_map(params![entity.as_str(), entity_id], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                created_at: row.get(3)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// The entities a tag is on, as `(entity_type, entity_id)` pairs — the filter query
+    /// ("show everything tagged X").
+    pub fn entities_for_tag(&self, tag_id: &str) -> rusqlite::Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "select entity_type, entity_id from tag_assignments where tag_id = ?1
+             order by created_at desc",
+        )?;
+        let rows = stmt.query_map(params![tag_id], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
+    /// Drop every tag assignment for an entity — called when a thread or project is deleted,
+    /// so no assignment dangles pointing at a gone entity (the entity side has no FK).
+    pub fn remove_entity_assignments(
+        &self,
+        entity: TagEntity,
+        entity_id: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "delete from tag_assignments where entity_type = ?1 and entity_id = ?2",
+            params![entity.as_str(), entity_id],
+        )?;
+        Ok(())
     }
 
     /// Cascading purge of ALL chat data for a workspace: threads, messages,
@@ -578,6 +754,8 @@ impl ChatStore {
                 "delete from task_thread_links where thread_id = ?1",
                 params![thread_id],
             )?;
+            // These threads bypass `delete_thread`, so purge their tag assignments here too.
+            self.remove_entity_assignments(TagEntity::Thread, thread_id)?;
         }
         self.conn.execute(
             "delete from chat_threads where workspace_id = ?1",
@@ -587,6 +765,8 @@ impl ChatStore {
             "delete from chat_settings where key = ?1",
             params![active_thread_setting_key(workspace_id)],
         )?;
+        // And the project's own tag assignments (a project is a taggable entity too).
+        self.remove_entity_assignments(TagEntity::Project, workspace_id)?;
         Ok(count)
     }
 
@@ -2143,6 +2323,35 @@ impl ChatStore {
                 unique(from_contact_id, to_contact_id, relationship_type)
             );
 
+            -- User-defined colored TAGS: lightweight labels {name, color} that cut ACROSS
+            -- projects and conversations. Assignment is many-to-many, so one tag can span
+            -- threads (and projects) that live in different workspaces — the 'same group across
+            -- projects' need, without a single-membership container.
+            create table if not exists tags (
+                id text primary key,
+                name text not null,
+                color text not null,
+                created_at integer not null
+            );
+
+            -- Tag ↔ entity assignment. entity_type is 'project' or 'thread'; entity_id is the
+            -- workspace_id or thread_id. NO FK on the entity: workspaces persist as a JSON file
+            -- (not a table) and thread rows can lag, so assignments are pruned in app logic on
+            -- delete. The FK on tag_id cascades, so deleting a tag drops all its assignments.
+            create table if not exists tag_assignments (
+                tag_id text not null,
+                entity_type text not null check (entity_type in ('project', 'thread')),
+                entity_id text not null,
+                created_at integer not null,
+                primary key (tag_id, entity_type, entity_id),
+                foreign key (tag_id) references tags(id) on delete cascade
+            );
+
+            create index if not exists idx_tag_assignments_entity
+                on tag_assignments(entity_type, entity_id);
+            create index if not exists idx_tag_assignments_tag
+                on tag_assignments(tag_id);
+
             ",
         )?;
 
@@ -3262,6 +3471,77 @@ mod tests {
         let ok = parse_optional_json_array(Some("[{\"type\":\"x\"}]"), "event_parts_json");
         assert_eq!(ok.len(), 1);
         assert_eq!(ok[0]["type"], "x");
+    }
+
+    #[test]
+    fn tags_crud_assign_and_cross_project_filter() {
+        let store = ChatStore::in_memory().unwrap();
+
+        // Create tags; list is newest-first.
+        store.create_tag("t_red", "Urgent", "#e5484d").unwrap();
+        store.create_tag("t_blue", "Idea", "#3b82f6").unwrap();
+        let tags = store.list_tags().unwrap();
+        assert_eq!(tags.len(), 2);
+        assert_eq!(tags[0].id, "t_blue"); // most recently created first
+        assert_eq!(tags[1].name, "Urgent");
+
+        // Same tag on a THREAD and a PROJECT in different workspaces — the cross-project point.
+        store
+            .assign_tag("t_red", TagEntity::Thread, "thread_a")
+            .unwrap();
+        store
+            .assign_tag("t_red", TagEntity::Project, "workspace_x")
+            .unwrap();
+        // Idempotent: a repeat assign doesn't duplicate.
+        store
+            .assign_tag("t_red", TagEntity::Thread, "thread_a")
+            .unwrap();
+
+        let entities = store.entities_for_tag("t_red").unwrap();
+        assert_eq!(entities.len(), 2);
+        assert!(entities.contains(&("thread".to_string(), "thread_a".to_string())));
+        assert!(entities.contains(&("project".to_string(), "workspace_x".to_string())));
+
+        // tags_for_entity is scoped to the (type, id).
+        let on_thread = store.tags_for_entity(TagEntity::Thread, "thread_a").unwrap();
+        assert_eq!(on_thread.len(), 1);
+        assert_eq!(on_thread[0].id, "t_red");
+        assert!(store
+            .tags_for_entity(TagEntity::Thread, "workspace_x")
+            .unwrap()
+            .is_empty()); // wrong type → no match
+
+        // rename + recolor.
+        store.rename_tag("t_red", "Critical").unwrap();
+        store.set_tag_color("t_red", "#000000").unwrap();
+        let red = store
+            .list_tags()
+            .unwrap()
+            .into_iter()
+            .find(|t| t.id == "t_red")
+            .unwrap();
+        assert_eq!(red.name, "Critical");
+        assert_eq!(red.color, "#000000");
+
+        // unassign one, keep the other.
+        store
+            .unassign_tag("t_red", TagEntity::Thread, "thread_a")
+            .unwrap();
+        assert_eq!(store.entities_for_tag("t_red").unwrap().len(), 1);
+
+        // remove_entity_assignments (delete-entity path) drops what's left for that entity.
+        store
+            .remove_entity_assignments(TagEntity::Project, "workspace_x")
+            .unwrap();
+        assert!(store.entities_for_tag("t_red").unwrap().is_empty());
+
+        // delete_tag purges the tag AND any assignments.
+        store
+            .assign_tag("t_blue", TagEntity::Thread, "thread_b")
+            .unwrap();
+        store.delete_tag("t_blue").unwrap();
+        assert_eq!(store.list_tags().unwrap().len(), 1);
+        assert!(store.entities_for_tag("t_blue").unwrap().is_empty());
     }
 
     #[test]
