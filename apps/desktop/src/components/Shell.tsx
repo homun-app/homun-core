@@ -1,4 +1,4 @@
-import { PanelLeftOpen } from "lucide-react";
+import { PanelLeftOpen, Search } from "lucide-react";
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -125,15 +125,26 @@ export function Shell({
         </div>
       )}
       {!drawerOpen && !isSettings && (
-        <button
-          className="drawer-bottom-trigger"
-          type="button"
-          aria-label={t("sidebar.expandSidebar")}
-          title={t("sidebar.expandSidebar")}
-          onClick={onToggleDrawer}
-        >
-          <PanelLeftOpen size={18} />
-        </button>
+        <div className="drawer-top-trigger">
+          <button
+            className="drawer-top-trigger-action"
+            type="button"
+            aria-label={t("sidebar.expandSidebar")}
+            title={t("sidebar.expandSidebar")}
+            onClick={onToggleDrawer}
+          >
+            <PanelLeftOpen size={18} />
+          </button>
+          <button
+            className="drawer-top-trigger-action"
+            type="button"
+            aria-label={t("sidebar.search")}
+            title={t("sidebar.search")}
+            onClick={() => setSearchOpen(true)}
+          >
+            <Search size={18} />
+          </button>
+        </div>
       )}
       {drawerOpen && !isSettings && (
         <NavDrawer

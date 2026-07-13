@@ -149,7 +149,7 @@ assertContains("src/components/Shell.tsx", "window-chrome", "desktop shell must 
 assertNotContains("src/components/Shell.tsx", "window-light close", "custom chrome must not render fake traffic lights");
 assertNotContains("src/components/Shell.tsx", "window-sidebar-toggle", "sidebar toggle must not live inside the native window-control row");
 assertNotContains("src/components/Shell.tsx", "drawer-edge-hotspot", "collapsed sidebar must not open from a left-edge hover hotspot");
-assertContains("src/components/Shell.tsx", "drawer-bottom-trigger", "collapsed sidebar must expose a visible opener in the sidebar footer zone");
+assertContains("src/components/Shell.tsx", "drawer-top-trigger", "collapsed sidebar must expose a top opener (reopen + search) by the traffic lights");
 assertContains("src/components/Shell.tsx", "onClick={onToggleDrawer}", "visible collapsed sidebar opener must open the persistent drawer directly");
 assertNotContains("src/components/Shell.tsx", "transientDrawerOpen", "collapsed sidebar must not maintain hover-open transient drawer state");
 assertContains("src/styles.css", "--drawer-island-gap", "sidebar must be laid out as a floating island with stable margins");
@@ -157,9 +157,8 @@ assertContains("src/styles.css", ".window-chrome", "custom window chrome must ow
 assertNotContains("src/styles.css", ".window-light", "custom window chrome must not draw fake traffic lights");
 assertContains("src/styles.css", "pointer-events: none", "custom window chrome wrapper must not sit as a click-blocking overlay");
 assertContains("src/styles.css", ".window-drag-strip", "custom window chrome must use explicit drag strips instead of dragging over controls");
-assertContains("src/styles.css", ".drawer-bottom-trigger", "collapsed sidebar opener must live outside the native titlebar/drag strip");
-assertContains("src/styles.css", "bottom: calc(var(--drawer-island-bottom) + 3px)", "collapsed sidebar opener must align with the sidebar footer zone");
-assertContains("src/styles.css", ".drawer-bottom-trigger svg", "sidebar toggle icon must not intercept pointer events from the button");
+assertContains("src/styles.css", ".drawer-top-trigger", "collapsed sidebar opener must live at the top, by the traffic lights");
+assertContains("src/styles.css", ".drawer-top-trigger-action svg", "sidebar toggle icon must not intercept pointer events from the button");
 assertContains("src/styles.css", ".app-shell.drawer-open > .nav-drawer", "open sidebar and Settings nav must use the same island styling");
 assertContains("src/components/Sidebar.tsx", "drawer-titlebar-action", "expanded sidebar toggle + search must live in the top titlebar row");
 assertNotContains("src/components/Sidebar.tsx", "drawer-new-action", "sidebar search row must not include a global new-chat plus button");

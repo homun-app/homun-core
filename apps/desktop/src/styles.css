@@ -273,16 +273,23 @@ small {
   width: 24px;
 }
 
-.drawer-bottom-trigger {
+/* Collapsed-sidebar controls: reopen + search stay at the TOP, just right of the macOS traffic
+   lights, so they read as always-on window chrome (not tucked into a corner at the bottom). */
+.drawer-top-trigger {
   position: fixed;
-  left: calc(var(--drawer-island-gap) + 4px);
-  bottom: calc(var(--drawer-island-bottom) + 3px);
+  top: 6px;
+  left: 82px;
   z-index: 160;
+  display: flex;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+.drawer-top-trigger-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border: none;
   border-radius: var(--radius);
   background: transparent;
@@ -291,14 +298,14 @@ small {
   pointer-events: auto;
   -webkit-app-region: no-drag;
 }
-
-.drawer-bottom-trigger:hover,
-.drawer-bottom-trigger:focus-visible {
+.drawer-top-trigger-action:hover,
+.drawer-top-trigger-action:focus-visible {
   background: var(--surface-hover);
   color: var(--text);
 }
 
-.drawer-bottom-trigger svg,
+.drawer-top-trigger-action svg,
+.drawer-titlebar-action svg,
 .drawer-footer-action svg,
 .drawer-search-action svg {
   pointer-events: none;
@@ -473,7 +480,9 @@ body.resizing-drawer {
   /* Top padding clears the macOS traffic lights with a comfortable gap (lights end
      ~y30) so the first row isn't tucked against them; the empty strip above the nav is
      the window-drag handle (buttons/links/inputs are no-drag via the global rule). */
-  padding: 52px 14px 10px;
+  /* Small top padding: the titlebar row below IS the traffic-light strip now (right-aligned
+     buttons sit clear of the lights, its empty area is the window-drag handle). */
+  padding: 6px 14px 10px;
   overflow: hidden;
   position: relative;
   -webkit-app-region: drag;
@@ -914,7 +923,11 @@ body.resizing-drawer {
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
-  margin-bottom: 2px;
+  min-height: 28px;
+  margin-bottom: 4px;
+  /* The empty (left) part of this row is the window-drag handle, level with the traffic lights;
+     the buttons opt out of dragging below. */
+  -webkit-app-region: drag;
 }
 .drawer-titlebar-action {
   display: inline-flex;
@@ -927,6 +940,7 @@ body.resizing-drawer {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 .drawer-titlebar-action:hover {
   background: var(--surface-hover);
