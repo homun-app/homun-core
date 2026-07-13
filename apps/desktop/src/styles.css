@@ -569,7 +569,7 @@ body.resizing-drawer {
 }
 
 .drawer-nav {
-  margin-bottom: 14px;
+  margin-bottom: 6px;
 }
 
 .settings-drawer {
@@ -1244,10 +1244,14 @@ body.resizing-drawer {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* Nesting is conveyed by the indent alone — no vertical tree-guide line (applies to both
-     the Personal and Projects trees, which share this container). */
-  margin: 2px 0 2px 11px;
-  padding-left: 9px;
+  margin: 2px 0;
+  /* Base = flush. Personal chats are independent (no nesting → no indent). Project chats get an
+     indent (below) that aligns them with the project TITLE, not the folder icon. */
+  padding-left: 0;
+}
+/* Align a project's tasks with the project title text: folder icon (14) + its gap (8). */
+.drawer-projects-tree .drawer-project-chats {
+  padding-left: 22px;
 }
 
 .drawer-project-edit {
@@ -1546,7 +1550,10 @@ body.resizing-drawer {
 .drawer-filter-bar {
   display: flex;
   justify-content: flex-end;
-  padding: 0 2px 4px;
+  padding: 0 2px;
+  /* Pull the first section up close to the funnel: the scroll's 18px inter-area gap is right
+     for area↔area, but too much around this thin control. */
+  margin-bottom: -12px;
 }
 .sidebar-filters {
   position: relative;

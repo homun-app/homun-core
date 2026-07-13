@@ -579,7 +579,6 @@ function ProjectsNav({
                       disabled={busy}
                       onClick={() => toggleProject(project.id)}
                     >
-                      {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       <FolderOpen size={14} />
                       <span className="drawer-link-title">{project.name}</span>
                       {(() => {
