@@ -569,7 +569,7 @@ body.resizing-drawer {
 }
 
 .drawer-nav {
-  margin-bottom: 2px;
+  margin-bottom: 14px;
 }
 
 .settings-drawer {
@@ -781,7 +781,7 @@ body.resizing-drawer {
 }
 
 .linear-sidebar-nav {
-  gap: 10px;
+  gap: 16px;
 }
 
 .drawer-nav-group-label {
@@ -794,7 +794,9 @@ body.resizing-drawer {
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--faint);
-  font-size: var(--text-sm);
+  /* Same size as the nav items (chevrons removed): area titles read as part of the list, not
+     tiny eyebrows — hierarchy comes from the faint color, not a smaller size. */
+  font-size: var(--text-base);
   font-weight: 520;
   text-align: left;
   cursor: pointer;
@@ -855,7 +857,8 @@ body.resizing-drawer {
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* More breathing room between areas (Personal / Projects). */
+  gap: 18px;
   padding-right: 2px;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -1092,8 +1095,8 @@ body.resizing-drawer {
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--faint);
-  /* Same size as the Work/Create nav-group labels so all top-level section headers match. */
-  font-size: var(--text-sm);
+  /* Same size as the Work/Create nav-group labels AND the nav items (chevrons removed). */
+  font-size: var(--text-base);
   font-weight: 520;
   text-align: left;
   cursor: pointer;

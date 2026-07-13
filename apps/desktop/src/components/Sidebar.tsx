@@ -521,7 +521,6 @@ function ProjectsNav({
       <section className="drawer-section drawer-personal-tree" data-project-tree="personal">
         <div className="drawer-chats-head">
           <button className="drawer-section-toggle" type="button" onClick={togglePersonal}>
-            {expandedGroups.personal ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             <span>{t("sidebar.personal")}</span>
           </button>
           <button
@@ -547,7 +546,6 @@ function ProjectsNav({
       <section className="drawer-section drawer-projects-tree" data-project-tree="projects">
         <div className="drawer-chats-head">
           <button className="drawer-section-toggle" type="button" onClick={toggleProjects}>
-            {expandedGroups.projects ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             <span>{t("sidebar.projects")}</span>
           </button>
           <button
@@ -1029,7 +1027,6 @@ export function NavDrawer({
               type="button"
               onClick={() => toggleNavGroup(section)}
             >
-              {collapsedNavGroups[section] ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
               <span>{NAV_SECTION_LABELS[section]}</span>
             </button>
             {!collapsedNavGroups[section] &&
