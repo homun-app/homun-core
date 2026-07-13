@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import {
   DndContext,
@@ -285,12 +285,21 @@ function ProjectsNav({
   // scope and are mixed straight into the list — ordered by recency like every other
   // thread (their leading type icon is what tells them apart). The "homun" thread is
   // excluded (retired). Backend order is already `pinned desc, updated_at desc`.
-  const personalChats = (inProject ? personalThreads : activeThreads).filter(
+  // Render the Personal list from LOCAL state (not the prop) so it can be reordered / mutated
+  // optimistically. Kept fresh from `activeThreads` while at the personal scope (below); the
+  // backend already sorts by display_order, so a persisted manual order survives the resync.
+  const personalChats = personalThreads.filter(
     (t) => t.status === "active" && t.threadId !== "homun",
   );
   const projectChats = inProject
     ? activeThreads.filter((t) => t.status === "active" && t.threadId !== "homun")
     : [];
+
+  // Mirror the active context into the local Personal list while at the personal scope, so the
+  // list a user sees is one we own and can mutate optimistically (reorder/rename/delete).
+  useEffect(() => {
+    if (!inProject) setPersonalThreads(activeThreads);
+  }, [inProject, activeThreads]);
 
   useEffect(() => {
     if (!inProject) return;
@@ -495,6 +504,22 @@ function ProjectsNav({
       .catch(() => void reloadWorkspaces());
   }
 
+  function handlePersonalThreadsDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = personalThreads.findIndex((thread) => thread.threadId === active.id);
+    const newIndex = personalThreads.findIndex((thread) => thread.threadId === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(personalThreads, oldIndex, newIndex);
+    setPersonalThreads(next); // optimistic
+    void coreBridge
+      .reorderChatThreads(
+        PERSONAL_WORKSPACE_ID,
+        next.map((thread) => thread.threadId),
+      )
+      .catch(() => {});
+  }
+
   function handleProjectThreadsDragEnd(projectId: string, event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -512,8 +537,8 @@ function ProjectsNav({
       .catch(() => {});
   }
 
-  /** Render a thread list. When `reorder` is given, the list is drag-sortable (project tasks);
-   *  Personal stays static for now (its data is a parent prop → no local optimistic update). */
+  /** Render a thread list. When `reorder` is given, the list is drag-sortable (Personal + a
+   *  non-active project's tasks — both backed by local state we can update optimistically). */
   function renderThreadList(
     threads: ChatThread[],
     emptyLabel: string,
@@ -606,9 +631,14 @@ function ProjectsNav({
         </div>
         {expandedGroups.personal && (
           <div className="drawer-project-chats">
-            {renderThreadList(personalChats, t("sidebar.noChatsYet"), (thread) => {
-              void openPersonalThread(thread.threadId);
-            })}
+            {renderThreadList(
+              personalChats,
+              t("sidebar.noChatsYet"),
+              (thread) => {
+                void openPersonalThread(thread.threadId);
+              },
+              handlePersonalThreadsDragEnd,
+            )}
           </div>
         )}
       </section>
@@ -1081,7 +1111,12 @@ export function NavDrawer({
     }));
   }
 
-  const activeThreads = chatThreads.filter((thread) => thread.status === "active");
+  // Memoized so the reference is stable across renders (ProjectsNav's personal-sync effect
+  // depends on it — a fresh array every render would loop it).
+  const activeThreads = useMemo(
+    () => chatThreads.filter((thread) => thread.status === "active"),
+    [chatThreads],
+  );
   const archivedThreads = chatThreads.filter((thread) => thread.status === "archived");
   const newChatProjects = newChatWorkspaces
     .filter((project) => project.id !== PERSONAL_WORKSPACE_ID)

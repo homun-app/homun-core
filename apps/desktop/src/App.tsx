@@ -1078,8 +1078,13 @@ export default function App() {
   }
 
   async function handleRenameChatThread(threadId: string, title: string) {
+    // Optimistic: rename in place immediately (no snapshot round-trip / no active-thread reset),
+    // then persist in the background — the next load reconciles if it ever fails.
+    setChatThreads((current) =>
+      current.map((thread) => (thread.threadId === threadId ? { ...thread, title } : thread)),
+    );
     try {
-      await applyThreadSnapshot(await coreBridge.renameChatThread(threadId, title));
+      await coreBridge.renameChatThread(threadId, title);
     } catch (error) {
       console.warn("chat_thread_rename unavailable", error);
     }
@@ -1127,27 +1132,24 @@ export default function App() {
   }
 
   async function handleDeleteChatThread(threadId: string) {
-    try {
-      await applyThreadSnapshot(await coreBridge.deleteChatThread(threadId));
-      setThreadMessages((current) => {
-        const next = { ...current };
-        delete next[threadId];
-        return next;
-      });
-    } catch (error) {
-      setChatThreads((current) => current.filter((thread) => thread.threadId !== threadId));
-      setThreadMessages((current) => {
-        const next = { ...current };
-        delete next[threadId];
-        return next;
-      });
-      if (activeThreadId === threadId) {
-        const nextThread = chatThreads.find((thread) => thread.threadId !== threadId);
-        if (nextThread) {
-          setActiveThreadId(nextThread.threadId);
-          setSelectedTaskId(nextThread.taskId);
-        }
+    // Optimistic: drop it from the list + messages immediately (and reselect if it was active),
+    // then persist in the background.
+    setChatThreads((current) => current.filter((thread) => thread.threadId !== threadId));
+    setThreadMessages((current) => {
+      const next = { ...current };
+      delete next[threadId];
+      return next;
+    });
+    if (activeThreadId === threadId) {
+      const nextThread = chatThreads.find((thread) => thread.threadId !== threadId);
+      if (nextThread) {
+        setActiveThreadId(nextThread.threadId);
+        setSelectedTaskId(nextThread.taskId);
       }
+    }
+    try {
+      await coreBridge.deleteChatThread(threadId);
+    } catch (error) {
       console.warn("chat_thread_delete unavailable", error);
     }
   }
