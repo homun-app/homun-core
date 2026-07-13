@@ -1653,11 +1653,13 @@ body.resizing-drawer {
 .filter-segment {
   flex: 1;
   height: 26px;
+  padding: 0 6px;
   border: none;
   border-radius: calc(var(--radius-control) - 2px);
   background: transparent;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 .filter-segment:hover {
