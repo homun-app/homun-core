@@ -421,7 +421,7 @@ impl ChatStore {
                     updated_at, message_count, source, channel_recipient, workspace_id
                from chat_threads
               where workspace_id = ?1 and thread_id <> 'homun'
-              order by pinned desc, cast(updated_at as integer) desc, rowid desc",
+              order by pinned desc, display_order asc, cast(updated_at as integer) desc, rowid desc",
         )?;
         let threads = stmt
             .query_map(params![workspace_id], thread_from_row)?
@@ -589,6 +589,25 @@ impl ChatStore {
             }
         }
         self.threads(&workspace_id)
+    }
+
+    /// Persist a manual drag-and-drop order for a workspace's threads: the listed ids get
+    /// display_order 1..N in sequence, so the sidebar's sort (pinned, then display_order, then
+    /// recency) honors the user's arrangement. The caller sends the full visible list. Returns
+    /// the fresh snapshot.
+    pub fn set_threads_order(
+        &self,
+        workspace_id: &str,
+        ordered_ids: &[String],
+    ) -> rusqlite::Result<ChatThreadSnapshot> {
+        for (index, thread_id) in ordered_ids.iter().enumerate() {
+            self.conn.execute(
+                "update chat_threads set display_order = ?1
+                 where thread_id = ?2 and workspace_id = ?3",
+                params![(index as i64) + 1, thread_id, workspace_id],
+            )?;
+        }
+        self.threads(workspace_id)
     }
 
     // ── Tags (cross-project colored labels) ─────────────────────────────────────────────
@@ -2408,6 +2427,15 @@ impl ChatStore {
                 [],
             )?;
         }
+        // Manual sidebar ordering (drag-and-drop). Default 0 = "unordered": a list nobody has
+        // reordered keeps its recency sort (all rows tie on 0 → the updated_at tiebreak wins).
+        // A reorder assigns 1..N, so manual order then wins; new threads (0) surface on top.
+        if !self.column_exists("chat_threads", "display_order")? {
+            self.conn.execute(
+                "alter table chat_threads add column display_order integer not null default 0",
+                [],
+            )?;
+        }
         // Contacts P2: per-contact persona/tone + response mode. response_mode '' =
         // inherit the channel/global default (backward compatible: existing contacts
         // keep today's allowlist behavior until the user customizes them).
@@ -3565,6 +3593,35 @@ mod tests {
         store.delete_tag("t_blue").unwrap();
         assert_eq!(store.list_tags().unwrap().len(), 1);
         assert!(store.entities_for_tag("t_blue").unwrap().is_empty());
+    }
+
+    #[test]
+    fn set_threads_order_persists_manual_order() {
+        let store = ChatStore::in_memory().unwrap();
+        let ws = "ws_reorder";
+        let a = store.create_thread(ws).unwrap().thread_id;
+        let b = store.create_thread(ws).unwrap().thread_id;
+        let c = store.create_thread(ws).unwrap().thread_id;
+
+        // Reorder to c, a, b and confirm the snapshot reflects it.
+        let snap = store
+            .set_threads_order(ws, &[c.clone(), a.clone(), b.clone()])
+            .unwrap();
+        let order: Vec<String> = snap.threads.iter().map(|t| t.thread_id.clone()).collect();
+        let pos = |id: &str| order.iter().position(|x| x == id).expect("thread present");
+        assert!(pos(&c) < pos(&a), "c before a");
+        assert!(pos(&a) < pos(&b), "a before b");
+
+        // A fresh query proves it persisted (not just the returned snapshot).
+        let order2: Vec<String> = store
+            .threads(ws)
+            .unwrap()
+            .threads
+            .iter()
+            .map(|t| t.thread_id.clone())
+            .collect();
+        let pos2 = |id: &str| order2.iter().position(|x| x == id).expect("thread present");
+        assert!(pos2(&c) < pos2(&a) && pos2(&a) < pos2(&b));
     }
 
     #[test]

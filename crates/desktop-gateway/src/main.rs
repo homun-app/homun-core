@@ -919,6 +919,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/chat/threads/{thread_id}/rename",
             post(rename_chat_thread),
         )
+        .route("/api/chat/threads/reorder", post(reorder_chat_threads))
         .route(
             "/api/chat/threads/{thread_id}/archive",
             post(archive_chat_thread),
@@ -1276,6 +1277,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/workspaces/{workspace_id}/delete",
             post(delete_workspace),
         )
+        .route("/api/workspaces/reorder", post(reorder_workspaces))
         // Tags (cross-project colored labels on projects + conversations).
         .route("/api/tags", get(tags_list).post(tags_create))
         .route("/api/tags/assignments", get(tags_all_assignments))
@@ -2325,6 +2327,23 @@ async fn rename_chat_thread(
     Ok(Json(
         lock_store(&state)?
             .rename_thread(&thread_id, title)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct ReorderThreadsRequest {
+    workspace_id: String,
+    ordered_ids: Vec<String>,
+}
+
+async fn reorder_chat_threads(
+    State(state): State<AppState>,
+    Json(request): Json<ReorderThreadsRequest>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    Ok(Json(
+        lock_store(&state)?
+            .set_threads_order(&request.workspace_id, &request.ordered_ids)
             .map_err(GatewayError::store)?,
     ))
 }
@@ -49295,6 +49314,40 @@ async fn delete_workspace(
     // This prevents orphaned rows (chat, tasks, memory) that would otherwise
     // accumulate forever in the SQLite files.
     purge_workspace_data(&state, &workspace_id);
+    Ok(Json(WorkspacesResponse {
+        active_workspace_id: file.active.clone(),
+        workspaces: file.workspaces,
+    }))
+}
+
+#[derive(Deserialize)]
+struct ReorderWorkspacesRequest {
+    ordered_ids: Vec<String>,
+}
+
+/// Persist a manual drag-and-drop order for projects: rewrite the workspaces list to the given
+/// id order. Any workspace not named in the request (defensive — the client sends the full list)
+/// keeps its original relative position at the end.
+async fn reorder_workspaces(
+    Json(request): Json<ReorderWorkspacesRequest>,
+) -> Result<Json<WorkspacesResponse>, GatewayError> {
+    let mut file = load_workspaces_file();
+    let original = std::mem::take(&mut file.workspaces);
+    for id in &request.ordered_ids {
+        if let Some(workspace) = original.iter().find(|w| &w.id == id) {
+            file.workspaces.push(workspace.clone());
+        }
+    }
+    for workspace in &original {
+        if !request.ordered_ids.contains(&workspace.id) {
+            file.workspaces.push(workspace.clone());
+        }
+    }
+    save_workspaces_file(&file).map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "workspaces_write_failed",
+        message: error.to_string(),
+    })?;
     Ok(Json(WorkspacesResponse {
         active_workspace_id: file.active.clone(),
         workspaces: file.workspaces,
