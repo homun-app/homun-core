@@ -221,6 +221,7 @@
     "chat": "Chat",
     "newChat": "New chat",
     "rename": "Rename",
+    "defaultWorkspace": "Workspace",
     "noChatsYet": "No chats yet.",
     "close": "Close",
     "projectNamePlaceholder": "Project name",

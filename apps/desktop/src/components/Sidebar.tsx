@@ -599,7 +599,7 @@ function ProjectsNav({
       <section className="drawer-section drawer-personal-tree" data-project-tree="personal">
         <div className="drawer-chats-head">
           <button className="drawer-section-toggle" type="button" onClick={togglePersonal}>
-            <span>{t("sidebar.personal")}</span>
+            <span>{t("sidebar.defaultWorkspace")}</span>
           </button>
           <button
             className="drawer-eyebrow-add"
