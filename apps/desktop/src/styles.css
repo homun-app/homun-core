@@ -279,7 +279,8 @@ small {
   position: fixed;
   top: 6px;
   left: 82px;
-  z-index: 160;
+  /* Above the window drag-strip (200) so the collapsed reopen/search buttons are clickable. */
+  z-index: 210;
   display: flex;
   gap: 2px;
   -webkit-app-region: no-drag;
@@ -493,7 +494,10 @@ body.resizing-drawer {
   top: calc(var(--window-drag-height) + var(--drawer-island-top));
   bottom: var(--drawer-island-bottom);
   left: var(--drawer-island-gap);
-  z-index: 120;
+  /* Above the window drag-strip (200) so the titlebar's toggle/search actually receive clicks
+     (the strip would otherwise sit on top of them); the drawer's own titlebar row is the drag
+     region up here. Still below modals (420+). */
+  z-index: 210;
   width: min(var(--drawer-width, 292px), calc(100vw - (var(--drawer-island-gap) * 2)));
   height: auto;
   border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);

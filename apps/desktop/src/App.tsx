@@ -622,7 +622,7 @@ export default function App() {
   // up on every working chat, not only the active one.
   const [backgroundStreamIds, setBackgroundStreamIds] = useState<Set<string>>(new Set());
   const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
-  const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 920);
+  const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 1024);
   const activeThread = useMemo(
     () =>
       chatThreads.find((thread) => thread.threadId === activeThreadId) ??
@@ -1350,7 +1350,7 @@ export default function App() {
 
   useEffect(() => {
     function syncDrawerWithViewport() {
-      setDrawerOpen(window.innerWidth > 920);
+      setDrawerOpen(window.innerWidth > 1024);
     }
 
     syncDrawerWithViewport();
