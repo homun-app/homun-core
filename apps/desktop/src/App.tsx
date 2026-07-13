@@ -8,7 +8,6 @@ import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
 import { Shell } from "./components/Shell";
 import { LoginGate } from "./components/LoginGate";
-import { NotificationsView } from "./components/NotificationsView";
 import { ShallowView } from "./components/ShallowView";
 import { SettingsView } from "./components/SettingsView";
 import { TasksView } from "./components/TasksView";
@@ -1565,7 +1564,6 @@ export default function App() {
             activeView === plugin.id && <plugin.Panel key={plugin.id} host={pluginHost} />,
         )}
         {activeView === "browser" && <ContainedComputerView />}
-        {activeView === "notifications" && <NotificationsView />}
         {activeView === "brain" && (
           <ShallowView
             title="Brain Audit"

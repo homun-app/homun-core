@@ -2,7 +2,6 @@ import {
   ArrowLeft,
   Archive,
   ArchiveRestore,
-  Bell,
   ChevronDown,
   ChevronRight,
   FolderOpen,
@@ -27,7 +26,7 @@ import { settingsGroupLabels, settingsSections } from "../data/mockData";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 import { useSetting } from "../lib/settingsStore";
 import { coreBridge, type CoreChatThread, type WorkspaceRecord } from "../lib/coreBridge";
-import { useNotificationCount } from "../lib/useNotificationCount";
+import { UpdatePill } from "./UpdatePill";
 import { ProjectAccessDialog } from "./ProjectAccessDialog";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
@@ -88,7 +87,6 @@ export function NavigationRail({
   onToggleDrawer,
 }: NavigationRailProps) {
   const { t } = useTranslation();
-  const notifCount = useNotificationCount();
   return (
     <aside className="navigation-rail" aria-label={t("sidebar.railAriaLabel")}>
       <nav className="rail-nav">
@@ -129,15 +127,6 @@ export function NavigationRail({
       </nav>
 
       <div className="rail-bottom">
-        <button
-          className={`rail-button has-badge ${activeView === "notifications" ? "active" : ""}`}
-          type="button"
-          aria-label={t("sidebar.notifications")}
-          onClick={() => onNavigate("notifications")}
-        >
-          <Bell size={18} />
-          {notifCount > 0 && <span className="nav-badge">{notifCount}</span>}
-        </button>
         <button
           className={`rail-button ${activeView === "settings" ? "active" : ""}`}
           type="button"
@@ -749,7 +738,6 @@ export function NavDrawer({
   onUnarchiveChatThread,
 }: NavDrawerProps) {
   const { t } = useTranslation();
-  const notifCount = useNotificationCount();
   const [collapsedSections, setCollapsedSections] = useState({
     archived: false,
   });
@@ -929,6 +917,10 @@ export function NavDrawer({
           <span>{t("sidebar.search")}</span>
         </button>
       </div>
+
+      {/* Discreet "update available" pill — replaces the retired notification bell/page.
+          Renders nothing unless an update is actually pending. */}
+      <UpdatePill />
 
       <nav className="drawer-nav linear-sidebar-nav" aria-label="Workspace navigation">
         {groupedNavItems.map(({ section, items }) => (
@@ -1246,16 +1238,6 @@ export function NavDrawer({
 
       <footer className="drawer-footer">
         <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
-          <button
-            className="drawer-footer-action has-badge"
-            type="button"
-            aria-label={t("sidebar.notifications")}
-            title={t("sidebar.notifications")}
-            onClick={() => onNavigate("notifications")}
-          >
-            <Bell size={16} />
-            {notifCount > 0 && <span className="nav-badge">{notifCount}</span>}
-          </button>
           <button
             className="drawer-footer-action drawer-settings-action"
             type="button"

@@ -532,6 +532,42 @@ body.resizing-drawer {
   color: var(--text);
 }
 
+/* Discreet "update available" pill at the top of the sidebar (replaces the retired
+   notification bell/page). Green = actionable-but-calm; the component renders nothing until an
+   update is actually pending, so it never adds noise to the minimal sidebar. */
+.update-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  margin: 2px 0 4px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
+  border-radius: var(--radius-control);
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: var(--text-sm);
+  font-weight: 560;
+  text-align: left;
+  cursor: pointer;
+}
+.update-pill:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--green) 18%, var(--green-soft));
+}
+.update-pill:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+.update-pill svg {
+  flex-shrink: 0;
+}
+.update-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .drawer-nav {
   margin-bottom: 2px;
 }
