@@ -7,6 +7,20 @@
     "create": "Crea",
     "menuLabel": "Tag"
   },
+  "filters": {
+    "label": "Filtra",
+    "type": "Tipo",
+    "date": "Aggiornato",
+    "dateOption": {
+      "all": "Tutto",
+      "today": "Oggi",
+      "7d": "7 giorni",
+      "30d": "30 giorni"
+    },
+    "tags": "Tag",
+    "clear": "Azzera filtri",
+    "noMatches": "Nessun risultato"
+  },
   "shell": {
     "resizeSidebarAria": "Ridimensiona la barra laterale"
   },

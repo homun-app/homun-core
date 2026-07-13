@@ -7,6 +7,20 @@
     "create": "Create",
     "menuLabel": "Tags"
   },
+  "filters": {
+    "label": "Filter",
+    "type": "Type",
+    "date": "Updated",
+    "dateOption": {
+      "all": "Any",
+      "today": "Today",
+      "7d": "7 days",
+      "30d": "30 days"
+    },
+    "tags": "Tags",
+    "clear": "Clear filters",
+    "noMatches": "No matches"
+  },
   "shell": {
     "resizeSidebarAria": "Resize the sidebar"
   },

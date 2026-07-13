@@ -34,7 +34,15 @@ import {
 } from "../lib/coreBridge";
 import { UpdatePill } from "./UpdatePill";
 import { TagMenu } from "./TagMenu";
+import { SidebarFilters } from "./SidebarFilters";
 import { useTags, tagsForEntity } from "../lib/useTags";
+import {
+  type ThreadFilter,
+  EMPTY_THREAD_FILTER,
+  threadMatchesFilter,
+  threadFilterIsActive,
+  threadSourceKey,
+} from "../lib/threadFilter";
 import { ProjectAccessDialog } from "./ProjectAccessDialog";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
@@ -197,6 +205,7 @@ function ProjectsNav({
 }: ProjectsNavProps) {
   const { t } = useTranslation();
   const { assignments: tagAssignments } = useTags();
+  const [threadFilter, setThreadFilter] = useState<ThreadFilter>(EMPTY_THREAD_FILTER);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
   const [personalThreads, setPersonalThreads] = useState<ChatThread[]>([]);
@@ -461,8 +470,22 @@ function ProjectsNav({
     emptyLabel: string,
     onSelect: (thread: ChatThread) => void,
   ) {
-    if (threads.length === 0) return <p className="drawer-empty">{emptyLabel}</p>;
-    return threads.map((thread) => (
+    const filtered = threads.filter((thread) =>
+      threadMatchesFilter(
+        thread,
+        threadFilter,
+        tagsForEntity(tagAssignments, "thread", thread.threadId).map((tag) => tag.id),
+      ),
+    );
+    if (filtered.length === 0) {
+      // Distinguish "genuinely empty" from "hidden by the active filter".
+      return (
+        <p className="drawer-empty">
+          {threadFilterIsActive(threadFilter) ? t("filters.noMatches") : emptyLabel}
+        </p>
+      );
+    }
+    return filtered.map((thread) => (
       <ThreadLink
         key={thread.threadId}
         active={thread.threadId === activeThreadId && activeView === "chat"}
@@ -478,8 +501,23 @@ function ProjectsNav({
     ));
   }
 
+  const availableSources = Array.from(
+    new Set(
+      [personalChats, ...Object.values(projectThreadsById)]
+        .flat()
+        .map((thread) => threadSourceKey(thread)),
+    ),
+  ).sort();
+
   return (
     <>
+      <div className="drawer-filter-bar">
+        <SidebarFilters
+          filter={threadFilter}
+          onChange={setThreadFilter}
+          availableSources={availableSources}
+        />
+      </div>
       <section className="drawer-section drawer-personal-tree" data-project-tree="personal">
         <div className="drawer-chats-head">
           <button className="drawer-section-toggle" type="button" onClick={togglePersonal}>
