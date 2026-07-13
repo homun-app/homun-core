@@ -1,11 +1,6 @@
-import { PanelLeftOpen, Search } from "lucide-react";
 import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  ChatSearchModal,
-  NavDrawer,
-  SettingsDrawer,
-} from "./Sidebar";
+import { NavDrawer, SettingsDrawer } from "./Sidebar";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
 
 interface ShellProps {
@@ -28,6 +23,7 @@ interface ShellProps {
   // Sub-item within a section that has an inline expandable submenu (generic string).
   onSelectSettingsSub: (sub: string) => void;
   onToggleDrawer: () => void;
+  onSearchChat: () => void;
   onUnarchiveChatThread: (threadId: string) => void;
   settingsSection: SettingsSectionId;
   settingsSub: string;
@@ -59,6 +55,7 @@ export function Shell({
   onSelectSettingsSection,
   onSelectSettingsSub,
   onToggleDrawer,
+  onSearchChat,
   onUnarchiveChatThread,
   settingsSection,
   settingsSub,
@@ -66,14 +63,8 @@ export function Shell({
 }: ShellProps) {
   const { t } = useTranslation();
   const isSettings = activeView === "settings";
-  const [searchOpen, setSearchOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const [drawerWidth, setDrawerWidth] = useState(readStoredDrawerWidth);
-
-  function handleSelectSearchThread(threadId: string) {
-    setSearchOpen(false);
-    onSelectThread(threadId);
-  }
 
   function startResize(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -124,28 +115,8 @@ export function Shell({
           <div className="window-drag-strip window-drag-strip--right" aria-hidden="true" />
         </div>
       )}
-      {!drawerOpen && !isSettings && (
-        <div className="drawer-top-trigger">
-          <button
-            className="drawer-top-trigger-action"
-            type="button"
-            aria-label={t("sidebar.expandSidebar")}
-            title={t("sidebar.expandSidebar")}
-            onClick={onToggleDrawer}
-          >
-            <PanelLeftOpen size={18} />
-          </button>
-          <button
-            className="drawer-top-trigger-action"
-            type="button"
-            aria-label={t("sidebar.search")}
-            title={t("sidebar.search")}
-            onClick={() => setSearchOpen(true)}
-          >
-            <Search size={18} />
-          </button>
-        </div>
-      )}
+      {/* Collapsed-state reopen + search now live INSIDE the chat header (ChatView), rendered
+          as no-drag children of the titlebar so the drag region can't swallow their clicks. */}
       {drawerOpen && !isSettings && (
         <NavDrawer
           activeView={activeView}
@@ -158,7 +129,7 @@ export function Shell({
           onCreateteChatThread={onCreateteChatThread}
           onDeleteChatThread={onDeleteChatThread}
           onNavigate={onNavigate}
-          onSearchChat={() => setSearchOpen(true)}
+          onSearchChat={onSearchChat}
           onSelectThread={onSelectThread}
           onSetChatThreadPinned={onSetChatThreadPinned}
           onToggleDrawer={onToggleDrawer}
@@ -193,13 +164,6 @@ export function Shell({
               // ignore
             }
           }}
-        />
-      )}
-      {searchOpen && (
-        <ChatSearchModal
-          chatThreads={chatThreads}
-          onClose={() => setSearchOpen(false)}
-          onSelectThread={handleSelectSearchThread}
         />
       )}
       {children}

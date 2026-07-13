@@ -46,6 +46,7 @@ import {
   Play,
   Plug,
   Puzzle,
+  PanelLeftOpen,
   Reply,
   RotateCcw,
   Search,
@@ -160,6 +161,11 @@ const CHAT_VIEW_SESSION_ID =
     : `chat_view_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
 interface ChatViewProps {
+  // When the sidebar is collapsed, the chat header hosts the reopen + search controls (as
+  // no-drag children of the drag titlebar, so their clicks aren't swallowed).
+  sidebarCollapsed?: boolean;
+  onExpandSidebar?: () => void;
+  onOpenSearch?: () => void;
   approvals: ApprovelItem[];
   approvalBusyId: string | null;
   computerSessionId: string;
@@ -292,6 +298,9 @@ interface ChatAutoSubmit {
 }
 
 export function ChatView({
+  sidebarCollapsed,
+  onExpandSidebar,
+  onOpenSearch,
   approvals,
   approvalBusyId,
   computerSessionId,
@@ -2163,6 +2172,28 @@ export function ChatView({
     >
       <header className="task-topbar">
         <div className="task-title-area">
+          {sidebarCollapsed && (
+            <span className="task-collapsed-controls">
+              <button
+                type="button"
+                className="task-collapsed-action"
+                aria-label={t("sidebar.expandSidebar")}
+                title={t("sidebar.expandSidebar")}
+                onClick={() => onExpandSidebar?.()}
+              >
+                <PanelLeftOpen size={17} />
+              </button>
+              <button
+                type="button"
+                className="task-collapsed-action"
+                aria-label={t("sidebar.search")}
+                title={t("sidebar.search")}
+                onClick={() => onOpenSearch?.()}
+              >
+                <Search size={17} />
+              </button>
+            </span>
+          )}
           <div className="task-title-button" style={{ cursor: "default" }}>
             <span id="chat-title">{thread.title}</span>
           </div>

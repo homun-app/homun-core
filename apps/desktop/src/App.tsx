@@ -7,6 +7,7 @@ import { ChatView } from "./components/ChatView";
 import { ContainedComputerView } from "./components/ContainedComputerView";
 import { LearningView } from "./components/LearningView";
 import { Shell } from "./components/Shell";
+import { ChatSearchModal } from "./components/Sidebar";
 import { LoginGate } from "./components/LoginGate";
 import { ShallowView } from "./components/ShallowView";
 import { SettingsView } from "./components/SettingsView";
@@ -623,6 +624,9 @@ export default function App() {
   const [backgroundStreamIds, setBackgroundStreamIds] = useState<Set<string>>(new Set());
   const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 1024);
+  // Search modal lifted here (was in Shell) so BOTH the sidebar and the collapsed in-header
+  // controls can open it via one owner.
+  const [searchOpen, setSearchOpen] = useState(false);
   const activeThread = useMemo(
     () =>
       chatThreads.find((thread) => thread.threadId === activeThreadId) ??
@@ -1488,6 +1492,7 @@ export default function App() {
       onSelectThread={handleSelectThread}
       onSetChatThreadPinned={handleSetChatThreadPinned}
       onToggleDrawer={() => setDrawerOpen((value) => !value)}
+      onSearchChat={() => setSearchOpen(true)}
       onUnarchiveChatThread={handleUnarchiveChatThread}
       onSelectSettingsSection={setSettingsSection}
       settingsSection={settingsSection}
@@ -1502,6 +1507,9 @@ export default function App() {
         {activeView === "chat" && (
           <ChatView
             key={activeThread.threadId}
+            sidebarCollapsed={!drawerOpen}
+            onExpandSidebar={() => setDrawerOpen(true)}
+            onOpenSearch={() => setSearchOpen(true)}
             approvals={approvalItems}
             approvalBusyId={approvalBusyId}
             computerSessionId={activeThread.computerSessionId}
@@ -1596,6 +1604,16 @@ export default function App() {
         )}
       </main>
     </Shell>
+      {searchOpen && (
+        <ChatSearchModal
+          chatThreads={chatThreads}
+          onClose={() => setSearchOpen(false)}
+          onSelectThread={(threadId) => {
+            setSearchOpen(false);
+            void handleSelectThread(threadId);
+          }}
+        />
+      )}
       {/* Rendered AFTER Shell so the overlay's `-webkit-app-region: no-drag`
           regions are processed last and win over the main app's drag zones
           (e.g. .task-topbar), which otherwise swallow clicks on the onboarding's

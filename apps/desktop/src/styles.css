@@ -273,39 +273,6 @@ small {
   width: 24px;
 }
 
-/* Collapsed-sidebar controls: reopen + search stay at the TOP, just right of the macOS traffic
-   lights, so they read as always-on window chrome (not tucked into a corner at the bottom). */
-.drawer-top-trigger {
-  position: fixed;
-  top: 6px;
-  left: 82px;
-  /* Above the window drag-strip (200) so the collapsed reopen/search buttons are clickable. */
-  z-index: 210;
-  display: flex;
-  gap: 2px;
-  -webkit-app-region: no-drag;
-}
-.drawer-top-trigger-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  pointer-events: auto;
-  -webkit-app-region: no-drag;
-}
-.drawer-top-trigger-action:hover,
-.drawer-top-trigger-action:focus-visible {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-.drawer-top-trigger-action svg,
 .drawer-titlebar-action svg,
 .drawer-footer-action svg,
 .drawer-search-action svg {
@@ -2366,10 +2333,38 @@ body.resizing-drawer {
   padding-right: var(--island-edge);
   -webkit-app-region: drag;
 }
-/* Collapsed sidebar: the chat header spans the full window, so its title must clear the traffic
-   lights AND the top toggle/search controls that now sit over the top-left. */
+/* Collapsed sidebar: the header spans the full window, so it starts with a left inset that
+   clears the macOS traffic lights; the reopen + search controls (rendered inside the header)
+   then follow, and the title after them. */
 .app-shell.drawer-closed .task-topbar {
-  padding-left: 156px;
+  padding-left: 78px;
+}
+.task-collapsed-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 8px;
+  -webkit-app-region: no-drag;
+}
+.task-collapsed-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.task-collapsed-action:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.task-collapsed-action svg {
+  pointer-events: none;
 }
 
 .task-title-area,
