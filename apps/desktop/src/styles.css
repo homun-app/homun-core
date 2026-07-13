@@ -1384,6 +1384,29 @@ body.resizing-drawer {
   box-shadow: var(--shadow-menu);
 }
 
+/* Inline rename field for a chat (from the thread context menu). */
+.rename-popover {
+  position: fixed;
+  z-index: 65;
+  width: 240px;
+  max-width: calc(100vw - 24px);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+}
+.rename-popover-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-control);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
 /* Tag popover (assign/create tags for one thread or project) + the color chips on list rows. */
 .tag-menu {
   position: fixed;

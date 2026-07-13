@@ -187,6 +187,25 @@ export const chatApi = {
     }
   },
 
+  async renameChatThread(threadId: string, title: string) {
+    try {
+      return hydrateThreadSnapshot(
+        await gatewayJson<CoreChatThreadSnapshot>(
+          `/api/chat/threads/${encodeURIComponent(threadId)}/rename`,
+          {
+            method: "POST",
+            body: JSON.stringify({ title }),
+          },
+        ),
+      );
+    } catch {
+      localThreads = localThreads.map((thread) =>
+        thread.thread_id === threadId ? { ...thread, title } : thread,
+      );
+      return chatThreadSnapshot();
+    }
+  },
+
   async archiveChatThread(threadId: string) {
     try {
       return hydrateThreadSnapshot(

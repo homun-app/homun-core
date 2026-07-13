@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { settingsGroupLabels, settingsSections } from "../data/mockData";
@@ -802,6 +802,7 @@ interface NavDrawerProps {
   chatThreads: ChatThread[];
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
+  onRenameChatThread: (threadId: string, title: string) => void | Promise<void>;
   onCreateteChatThread: (workspaceId?: string) => void;
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
@@ -819,6 +820,7 @@ export function NavDrawer({
   chatThreads,
   navItems,
   onArchiveChatThread,
+  onRenameChatThread,
   onCreateteChatThread,
   onDeleteChatThread,
   onNavigate,
@@ -859,6 +861,12 @@ export function NavDrawer({
   const [tagMenu, setTagMenu] = useState<{
     entityType: "thread" | "project";
     entityId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    threadId: string;
+    title: string;
     x: number;
     y: number;
   } | null>(null);
@@ -1324,6 +1332,22 @@ export function NavDrawer({
             type="button"
             role="menuitem"
             onClick={() => {
+              setRenameTarget({
+                threadId: threadMenu.thread.threadId,
+                title: threadMenu.thread.title,
+                x: threadMenu.x,
+                y: threadMenu.y,
+              });
+              setThreadMenu(null);
+            }}
+          >
+            <Pencil size={15} />
+            <span>{t("sidebar.rename")}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
               setTagMenu({
                 entityType: "thread",
                 entityId: threadMenu.thread.threadId,
@@ -1355,6 +1379,19 @@ export function NavDrawer({
           x={tagMenu.x}
           y={tagMenu.y}
           onClose={() => setTagMenu(null)}
+        />
+      )}
+
+      {renameTarget && (
+        <RenamePopover
+          initial={renameTarget.title}
+          x={renameTarget.x}
+          y={renameTarget.y}
+          onClose={() => setRenameTarget(null)}
+          onSubmit={(title) => {
+            void onRenameChatThread(renameTarget.threadId, title);
+            setRenameTarget(null);
+          }}
         />
       )}
 
@@ -1609,6 +1646,59 @@ function threadTypeIcon(
     };
   }
   return null;
+}
+
+/** Small inline rename field for a chat, opened from the thread context menu. Enter commits,
+ *  Escape / outside-click cancels — no modal, keeps the sidebar interaction lightweight. */
+function RenamePopover({
+  initial,
+  x,
+  y,
+  onClose,
+  onSubmit,
+}: {
+  initial: string;
+  x: number;
+  y: number;
+  onClose: () => void;
+  onSubmit: (title: string) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (event: globalThis.MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [onClose]);
+
+  const commit = () => {
+    const trimmed = value.trim();
+    if (trimmed) onSubmit(trimmed);
+    else onClose();
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="rename-popover"
+      style={{ left: x, top: y }}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <input
+        className="rename-popover-input"
+        value={value}
+        autoFocus
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+          else if (event.key === "Escape") onClose();
+        }}
+      />
+    </div>
+  );
 }
 
 function ThreadLink({

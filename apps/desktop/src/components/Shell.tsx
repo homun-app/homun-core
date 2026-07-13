@@ -17,6 +17,7 @@ interface ShellProps {
   // Composed at runtime in App: static core + enabled addon entries (ADR 0011 §10-A).
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
+  onRenameChatThread: (threadId: string, title: string) => void | Promise<void>;
   onBackFromSettings: () => void;
   onCreateteChatThread: (workspaceId?: string) => void;
   onDeleteChatThread: (threadId: string) => void;
@@ -48,6 +49,7 @@ export function Shell({
   drawerOpen,
   navItems,
   onArchiveChatThread,
+  onRenameChatThread,
   onBackFromSettings,
   onCreateteChatThread,
   onDeleteChatThread,
@@ -141,6 +143,7 @@ export function Shell({
           chatThreads={chatThreads}
           navItems={navItems}
           onArchiveChatThread={onArchiveChatThread}
+          onRenameChatThread={onRenameChatThread}
           onCreateteChatThread={onCreateteChatThread}
           onDeleteChatThread={onDeleteChatThread}
           onNavigate={onNavigate}

@@ -2993,6 +2993,8 @@ export const coreBridge = {
   saveBrandKit: (kit: BrandKit) => electronSaveBrandKit(kit),
   setChatThreadPinned: (threadId: string, pinned: boolean) =>
     chatApi.setChatThreadPinned(threadId, pinned),
+  renameChatThread: (threadId: string, title: string) =>
+    chatApi.renameChatThread(threadId, title),
   archiveChatThread: (threadId: string) =>
     chatApi.archiveChatThread(threadId),
   unarchiveChatThread: (threadId: string) =>

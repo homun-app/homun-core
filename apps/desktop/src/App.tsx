@@ -1077,6 +1077,14 @@ export default function App() {
     }
   }
 
+  async function handleRenameChatThread(threadId: string, title: string) {
+    try {
+      await applyThreadSnapshot(await coreBridge.renameChatThread(threadId, title));
+    } catch (error) {
+      console.warn("chat_thread_rename unavailable", error);
+    }
+  }
+
   async function handleArchiveChatThread(threadId: string) {
     try {
       await applyThreadSnapshot(await coreBridge.archiveChatThread(threadId));
@@ -1467,6 +1475,7 @@ export default function App() {
       drawerOpen={drawerOpen}
       onCreateteChatThread={handleCreateteChatThread}
       onArchiveChatThread={handleArchiveChatThread}
+      onRenameChatThread={handleRenameChatThread}
       onBackFromSettings={() => setActiveView(previousView)}
       onDeleteChatThread={handleDeleteChatThread}
       navItems={composedNavItems}

@@ -916,6 +916,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(set_chat_thread_pinned),
         )
         .route(
+            "/api/chat/threads/{thread_id}/rename",
+            post(rename_chat_thread),
+        )
+        .route(
             "/api/chat/threads/{thread_id}/archive",
             post(archive_chat_thread),
         )
@@ -2296,6 +2300,31 @@ async fn set_chat_thread_pinned(
     Ok(Json(
         lock_store(&state)?
             .set_pinned(&thread_id, request.pinned)
+            .map_err(GatewayError::store)?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct RenameChatThreadRequest {
+    title: String,
+}
+
+async fn rename_chat_thread(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<RenameChatThreadRequest>,
+) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    let title = request.title.trim();
+    if title.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "thread_title_required",
+            message: "title must not be empty".to_string(),
+        });
+    }
+    Ok(Json(
+        lock_store(&state)?
+            .rename_thread(&thread_id, title)
             .map_err(GatewayError::store)?,
     ))
 }
