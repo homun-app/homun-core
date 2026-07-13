@@ -933,6 +933,8 @@ export function NavDrawer({
   onUnarchiveChatThread,
 }: NavDrawerProps) {
   const { t } = useTranslation();
+  const [profileImage] = useSetting<string>("profileImage", "");
+  const [displayName] = useSetting<string>("displayName", "");
   const [collapsedSections, setCollapsedSections] = useState({
     archived: false,
   });
@@ -1119,14 +1121,32 @@ export function NavDrawer({
     .filter((group) => group.items.length > 0);
   return (
     <aside className="nav-drawer" aria-label={t("sidebar.mainMenu")}>
+      {/* Titlebar: the collapse toggle + search-as-an-icon live up top (near the traffic
+          lights) to slim the list below — Search is no longer a full row. */}
+      <div className="drawer-titlebar">
+        <button
+          className="drawer-titlebar-action"
+          type="button"
+          aria-label={t("sidebar.search")}
+          title={t("sidebar.search")}
+          onClick={onSearchChat}
+        >
+          <Search size={16} />
+        </button>
+        <button
+          className="drawer-titlebar-action"
+          type="button"
+          aria-label={t("sidebar.collapseSidebar")}
+          title={t("sidebar.collapseSidebar")}
+          onClick={onToggleDrawer}
+        >
+          <PanelLeftClose size={16} />
+        </button>
+      </div>
       <div className="drawer-topbar">
         <button className="drawer-new-chat-action" type="button" onClick={openNewChatMenu}>
           <Pencil size={15} />
           <span>{t("sidebar.newChat")}</span>
-        </button>
-        <button className="drawer-search-action" type="button" onClick={onSearchChat}>
-          <Search size={15} />
-          <span>{t("sidebar.search")}</span>
         </button>
       </div>
 
@@ -1503,26 +1523,28 @@ export function NavDrawer({
       )}
 
       <footer className="drawer-footer">
-        <div className="drawer-persistent-actions" aria-label={t("sidebar.persistentActions")}>
-          <button
-            className="drawer-footer-action drawer-settings-action"
-            type="button"
-            aria-label={t("sidebar.settings")}
-            title={t("sidebar.settings")}
-            onClick={() => onNavigate("settings")}
-          >
-            <Settings size={16} />
-          </button>
-          <button
-            className="drawer-footer-action drawer-toggle-action"
-            type="button"
-            aria-label={t("sidebar.collapseSidebar")}
-            title={t("sidebar.collapseSidebar")}
-            onClick={onToggleDrawer}
-          >
-            <PanelLeftClose size={16} />
-          </button>
-        </div>
+        <button
+          className="drawer-profile"
+          type="button"
+          aria-label={t("sidebar.account")}
+          onClick={() => onNavigate("settings")}
+        >
+          {profileImage ? (
+            <img className="drawer-profile-avatar" src={profileImage} alt="" />
+          ) : (
+            <span className="drawer-profile-avatar" aria-hidden />
+          )}
+          <span className="drawer-profile-name">{displayName || t("sidebar.account")}</span>
+        </button>
+        <button
+          className="drawer-footer-action drawer-settings-action"
+          type="button"
+          aria-label={t("sidebar.settings")}
+          title={t("sidebar.settings")}
+          onClick={() => onNavigate("settings")}
+        >
+          <Settings size={16} />
+        </button>
       </footer>
     </aside>
   );

@@ -900,11 +900,72 @@ body.resizing-drawer {
 .drawer-footer {
   display: flex;
   align-items: center;
-  gap: 2px;
+  justify-content: space-between;
+  gap: 6px;
   flex: none;
   margin-top: 2px;
   padding-top: 6px;
   border-top: 1px solid var(--line);
+}
+/* Titlebar row: collapse toggle + search-as-icon, right-aligned so they sit clear of the
+   macOS traffic lights (top-left). */
+.drawer-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+.drawer-titlebar-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.drawer-titlebar-action:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+/* Footer profile: avatar + name, opens Settings. */
+.drawer-profile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  min-height: 30px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.drawer-profile:hover {
+  background: var(--surface-hover);
+}
+.drawer-profile-avatar {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: linear-gradient(135deg, #cfe6ff, #bfe9cf);
+  flex-shrink: 0;
+}
+.drawer-profile-name {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .drawer-footer-action {
   display: inline-flex;

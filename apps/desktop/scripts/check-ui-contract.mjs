@@ -161,7 +161,7 @@ assertContains("src/styles.css", ".drawer-bottom-trigger", "collapsed sidebar op
 assertContains("src/styles.css", "bottom: calc(var(--drawer-island-bottom) + 3px)", "collapsed sidebar opener must align with the sidebar footer zone");
 assertContains("src/styles.css", ".drawer-bottom-trigger svg", "sidebar toggle icon must not intercept pointer events from the button");
 assertContains("src/styles.css", ".app-shell.drawer-open > .nav-drawer", "open sidebar and Settings nav must use the same island styling");
-assertContains("src/components/Sidebar.tsx", "drawer-toggle-action", "expanded sidebar toggle must live in the persistent footer actions");
+assertContains("src/components/Sidebar.tsx", "drawer-titlebar-action", "expanded sidebar toggle + search must live in the top titlebar row");
 assertNotContains("src/components/Sidebar.tsx", "drawer-new-action", "sidebar search row must not include a global new-chat plus button");
 assertNotContains("src/components/Sidebar.tsx", "the gear becomes a back-to-app arrow", "Settings nav must not keep a duplicate footer back action");
 assertContains("src/styles.css", "overflow-y: auto;\n  overflow-x: hidden;", "expanded project trees must scroll inside the sidebar middle region instead of covering footer actions");
@@ -220,7 +220,7 @@ assertContains("src/plugins/presentations/index.tsx", "navSection: \"create\"", 
 assertContains("src/plugins/proattivita/index.tsx", "navSection: \"work\"", "proactivity addon must be promoted into the work section");
 assertContains("src/components/Shell.tsx", "{!drawerOpen && !isSettings && (", "transient drawer trigger must render when the drawer is closed and not in settings");
 assertContains("src/components/Shell.tsx", "{drawerOpen && !isSettings && (", "main drawer must render when open");
-assertContains("src/components/Sidebar.tsx", "drawer-persistent-actions", "open drawer must retain persistent actions");
+assertContains("src/components/Sidebar.tsx", "drawer-profile", "open drawer footer must show the user profile + settings");
 assertContains("src/components/ChatView.tsx", "composer-surface", "prompt composer must have a stable anchored surface");
 assertContains("src/components/ChatView.tsx", "local-computer-card", "active task must expose a local computer activity card");
 assertContains("src/components/ChatView.tsx", "timelineCollapsed", "computer timeline must keep collapsed state");
