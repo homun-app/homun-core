@@ -166,7 +166,7 @@ assertNotContains("src/components/Sidebar.tsx", "the gear becomes a back-to-app 
 assertContains("src/styles.css", "overflow-y: auto;\n  overflow-x: hidden;", "expanded project trees must scroll inside the sidebar middle region instead of covering footer actions");
 assertContains("src/styles.css", ".drawer-scroll::-webkit-scrollbar", "sidebar middle scrollbars must stay visually minimal");
 assertContains("src/styles.css", "z-index: 200", "custom window chrome must stay above the sidebar island");
-assertNotContains("src/styles.css", ".app-shell.drawer-closed .task-topbar", "closed sidebar header must not reserve space for titlebar/sidebar controls");
+assertContains("src/styles.css", ".app-shell.drawer-closed .task-topbar", "closed sidebar header must clear the top-left toggle/search controls");
 assertNotContains("src/components/Shell.tsx", "drawer-floating-host", "collapsed sidebar must not render a hover-only transient island");
 assertNotContains("src/components/Sidebar.tsx", "presentation?: \"pinned\" | \"floating\"", "drawer should not keep an unused transient presentation mode");
 assertNotContains("src/styles.css", ".nav-drawer.floating-island", "floating drawer styling should not remain without the hover-open mode");

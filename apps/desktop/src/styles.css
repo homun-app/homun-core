@@ -2293,7 +2293,10 @@ body.resizing-drawer {
      narrowing (only their content is inset). */
   --island-edge: 14px;
   --island-gap: clamp(16px, 3vw, 44px);
-  --island-w: 340px;
+  /* Cap to the viewport so a narrow window can't push the right-anchored island past the left
+     edge, where the layout's overflow:hidden would clip it away (the "island disappears" bug).
+     It overlaps the chat, so it only needs to fit the window, not leave room for the chat. */
+  --island-w: min(340px, calc(100vw - 72px));
   --island-reserve: calc(var(--island-edge) + var(--island-w) + var(--island-gap));
   height: 100%;
   min-height: 0;
@@ -2362,6 +2365,11 @@ body.resizing-drawer {
   padding-left: var(--island-gap);
   padding-right: var(--island-edge);
   -webkit-app-region: drag;
+}
+/* Collapsed sidebar: the chat header spans the full window, so its title must clear the traffic
+   lights AND the top toggle/search controls that now sit over the top-left. */
+.app-shell.drawer-closed .task-topbar {
+  padding-left: 156px;
 }
 
 .task-title-area,
