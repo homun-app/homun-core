@@ -1734,6 +1734,21 @@ async function electronDeleteWorkspace(id: string): Promise<WorkspacesSnapshot> 
   );
 }
 
+async function electronReorderWorkspaces(orderedIds: string[]): Promise<WorkspacesSnapshot> {
+  return gatewayPostJson<WorkspacesSnapshot>("/api/workspaces/reorder", {
+    ordered_ids: orderedIds,
+  });
+}
+async function electronReorderChatThreads(
+  workspaceId: string,
+  orderedIds: string[],
+): Promise<void> {
+  await gatewayPostJson("/api/chat/threads/reorder", {
+    workspace_id: workspaceId,
+    ordered_ids: orderedIds,
+  });
+}
+
 // ── Tags (cross-project colored labels) ──────────────────────────────────────────────────
 export type TagEntityType = "project" | "thread";
 export interface Tag {
@@ -2812,6 +2827,9 @@ export const coreBridge = {
   selectWorkspace: (id: string) => electronSelectWorkspace(id),
   renameWorkspace: (id: string, name: string) => electronRenameWorkspace(id, name),
   deleteWorkspace: (id: string) => electronDeleteWorkspace(id),
+  reorderWorkspaces: (orderedIds: string[]) => electronReorderWorkspaces(orderedIds),
+  reorderChatThreads: (workspaceId: string, orderedIds: string[]) =>
+    electronReorderChatThreads(workspaceId, orderedIds),
   listTags: () => electronListTags(),
   createTag: (name: string, color: string) => electronCreateTag(name, color),
   renameTag: (id: string, name: string) => electronRenameTag(id, name),

@@ -22,6 +22,21 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
+import {
+  DndContext,
+  type DragEndEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import { settingsGroupLabels, settingsSections } from "../data/mockData";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
@@ -206,6 +221,8 @@ function ProjectsNav({
   const { t } = useTranslation();
   const { assignments: tagAssignments } = useTags();
   const [threadFilter, setThreadFilter] = useState<ThreadFilter>(EMPTY_THREAD_FILTER);
+  // Drag-to-reorder: a small distance constraint so a plain click still selects/toggles.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(PERSONAL_WORKSPACE_ID);
   const [personalThreads, setPersonalThreads] = useState<ChatThread[]>([]);
@@ -465,10 +482,43 @@ function ProjectsNav({
     }
   }
 
+  function handleProjectDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = workspaces.findIndex((w) => w.id === active.id);
+    const newIndex = workspaces.findIndex((w) => w.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(workspaces, oldIndex, newIndex);
+    setWorkspaces(next); // optimistic
+    void coreBridge
+      .reorderWorkspaces(next.map((w) => w.id))
+      .catch(() => void reloadWorkspaces());
+  }
+
+  function handleProjectThreadsDragEnd(projectId: string, event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const list = projectThreadsById[projectId] ?? [];
+    const oldIndex = list.findIndex((thread) => thread.threadId === active.id);
+    const newIndex = list.findIndex((thread) => thread.threadId === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const next = arrayMove(list, oldIndex, newIndex);
+    setProjectThreadsById((current) => ({ ...current, [projectId]: next })); // optimistic
+    void coreBridge
+      .reorderChatThreads(
+        projectId,
+        next.map((thread) => thread.threadId),
+      )
+      .catch(() => {});
+  }
+
+  /** Render a thread list. When `reorder` is given, the list is drag-sortable (project tasks);
+   *  Personal stays static for now (its data is a parent prop → no local optimistic update). */
   function renderThreadList(
     threads: ChatThread[],
     emptyLabel: string,
     onSelect: (thread: ChatThread) => void,
+    reorder?: (event: DragEndEvent) => void,
   ) {
     const filtered = threads.filter((thread) =>
       threadMatchesFilter(
@@ -485,9 +535,8 @@ function ProjectsNav({
         </p>
       );
     }
-    return filtered.map((thread) => (
+    const renderThread = (thread: ChatThread) => (
       <ThreadLink
-        key={thread.threadId}
         active={thread.threadId === activeThreadId && activeView === "chat"}
         busy={busyThreadIds.has(thread.threadId)}
         thread={thread}
@@ -498,6 +547,27 @@ function ProjectsNav({
         onSelect={() => onSelect(thread)}
         tags={tagsForEntity(tagAssignments, "thread", thread.threadId)}
       />
+    );
+    // Drag-to-reorder only when a handler is given AND no filter is narrowing the list —
+    // reordering a filtered subset would persist a misleading order.
+    if (reorder && !threadFilterIsActive(threadFilter)) {
+      return (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorder}>
+          <SortableContext
+            items={filtered.map((thread) => thread.threadId)}
+            strategy={verticalListSortingStrategy}
+          >
+            {filtered.map((thread) => (
+              <SortableItem id={thread.threadId} key={thread.threadId}>
+                {renderThread(thread)}
+              </SortableItem>
+            ))}
+          </SortableContext>
+        </DndContext>
+      );
+    }
+    return filtered.map((thread) => (
+      <div key={thread.threadId}>{renderThread(thread)}</div>
     ));
   }
 
@@ -560,19 +630,28 @@ function ProjectsNav({
           </button>
         </div>
         {expandedGroups.projects && (
-          <>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleProjectDragEnd}
+          >
             {projects.length === 0 && <p className="drawer-empty">{t("sidebar.noProjects")}</p>}
-            {projects.map((project) => {
-              const expanded = expandedProjectIds.has(project.id);
-              const projectThreads = project.id === activeWorkspaceId
-                ? projectChats
-                : projectThreadsById[project.id] ?? [];
-              return (
-                <div
-                  key={project.id}
-                  className={`drawer-project ${project.id === activeWorkspaceId ? "active" : ""}`}
-                >
-                  <div className="drawer-project-row">
+            <SortableContext
+              items={projects.map((project) => project.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {projects.map((project) => {
+                const expanded = expandedProjectIds.has(project.id);
+                const projectThreads = project.id === activeWorkspaceId
+                  ? projectChats
+                  : projectThreadsById[project.id] ?? [];
+                return (
+                  <div
+                    key={project.id}
+                    className={`drawer-project ${project.id === activeWorkspaceId ? "active" : ""}`}
+                  >
+                    <SortableItem id={project.id}>
+                      <div className="drawer-project-row">
                     <button
                       className="drawer-link drawer-project-name"
                       type="button"
@@ -620,17 +699,28 @@ function ProjectsNav({
                       <MoreHorizontal size={13} />
                     </button>
                   </div>
+                    </SortableItem>
                   {expanded && (
                     <div className="drawer-project-chats">
-                      {renderThreadList(projectThreads, t("sidebar.noChatsYet"), (thread) => {
-                        void openProjectThread(project.id, thread.threadId);
-                      })}
+                      {renderThreadList(
+                        projectThreads,
+                        t("sidebar.noChatsYet"),
+                        (thread) => {
+                          void openProjectThread(project.id, thread.threadId);
+                        },
+                        // Reorder is optimistic against local `projectThreadsById`; the active
+                        // project renders from the parent prop, so skip DnD there for now.
+                        project.id !== activeWorkspaceId
+                          ? (event) => handleProjectThreadsDragEnd(project.id, event)
+                          : undefined,
+                      )}
                     </div>
                   )}
                 </div>
               );
             })}
-          </>
+            </SortableContext>
+          </DndContext>
         )}
       </section>
 
@@ -1645,6 +1735,30 @@ function threadTypeIcon(
     };
   }
   return null;
+}
+
+/** Drag-to-reorder wrapper. The whole row is the handle; a PointerSensor distance constraint
+ *  (set on the DndContext) keeps a plain click = select while a small drag = reorder. */
+function SortableItem({ id, children }: { id: string; children: ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : undefined,
+        position: "relative",
+        zIndex: isDragging ? 2 : undefined,
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** Small inline rename field for a chat, opened from the thread context menu. Enter commits,
