@@ -712,29 +712,26 @@ export default function App() {
   }
 
   async function handleSelectThread(threadId: string) {
-    // `select_chat_thread` is workspace-aware: it returns the target thread's workspace snapshot,
-    // so a thread in ANOTHER workspace switches context here WITHOUT a full page reload (the
-    // sidebar used to `window.location.reload()` for the cross-workspace case). No early return
-    // on a thread missing from the current list — that's exactly the cross-workspace case.
     const fallback = chatThreads.find((item) => item.threadId === threadId);
+    // Optimistic + instant: switch the center to the thread NOW, before any network. If its
+    // messages are already in memory the switch is truly immediate (no spinner, no refetch).
+    setActiveThreadId(threadId);
+    if (fallback) setSelectedTaskId(fallback.taskId);
+    setActiveView("chat");
     try {
+      // `select_chat_thread` is workspace-aware (returns the target thread's workspace snapshot),
+      // so a cross-workspace thread switches context here with no full page reload.
       const snapshot = await coreBridge.selectChatThread(threadId);
       const mappedThreads = snapshot.threads.map(mapCoreChatThread);
-      const selectedThread =
-        mappedThreads.find((item) => item.threadId === threadId) ??
-        fallback ??
-        mappedThreads[0] ??
-        defaultChatThread;
-      const messages = await coreBridge.chatMessages(threadId);
+      const selectedThread = mappedThreads.find((item) => item.threadId === threadId) ?? fallback;
       setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
-      setThreadMessagesFromBackend(threadId, messages.messages.map(mapCoreChatMessage));
-      setActiveThreadId(threadId);
-      setSelectedTaskId(selectedThread.taskId);
-      setActiveView("chat");
+      if (selectedThread) setSelectedTaskId(selectedThread.taskId);
+      // Fetch messages only when we don't already have them — re-selecting a thread is instant.
+      if (!threadMessages[threadId]) {
+        const messages = await coreBridge.chatMessages(threadId);
+        setThreadMessagesFromBackend(threadId, messages.messages.map(mapCoreChatMessage));
+      }
     } catch (error) {
-      setActiveThreadId(threadId);
-      if (fallback) setSelectedTaskId(fallback.taskId);
-      setActiveView("chat");
       console.warn("select_chat_thread unavailable", error);
     }
   }
