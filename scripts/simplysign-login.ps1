@@ -86,9 +86,37 @@ if ([string]::IsNullOrWhiteSpace($login)) { throw "SIMPLYSIGN_LOGIN is not set" 
 $otp = Get-Totp -Base32Secret $seed
 Write-Host "Generated OTP (length $($otp.Length)) — value not shown."
 
-# --- 2. Start SimplySign Desktop ---
-if (-not (Test-Path $SimplySignExe)) { throw "SimplySign Desktop not found at $SimplySignExe" }
-Start-Process -FilePath $SimplySignExe | Out-Null
+# --- 2. Locate + start SimplySign Desktop ---
+# The installer path varies (publisher is Asseco). If the assumed path is wrong, search
+# the usual install roots; if still not found, dump the vendor folders and fail loudly so
+# the exact path can be pinned from the CI log.
+if (-not (Test-Path $SimplySignExe)) {
+  $roots = @("$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:LOCALAPPDATA", "$env:APPDATA") |
+           Where-Object { $_ -and (Test-Path $_) }
+  $hit = Get-ChildItem -Path $roots -Recurse -Depth 4 -Filter "SimplySignDesktop.exe" -ErrorAction SilentlyContinue |
+         Select-Object -First 1
+  if (-not $hit) {
+    $hit = Get-ChildItem -Path $roots -Recurse -Depth 4 -Filter "*SimplySign*.exe" -ErrorAction SilentlyContinue |
+           Select-Object -First 1
+  }
+  if ($hit) { $SimplySignExe = $hit.FullName }
+}
+if (-not (Test-Path $SimplySignExe)) {
+  Write-Host "=== SimplySign exe not found. Vendor folders + .exe under Program Files: ==="
+  Get-ChildItem "$env:ProgramFiles", "${env:ProgramFiles(x86)}" -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match "Certum|Asseco|SimplySign|proCertum|pcert" } |
+    ForEach-Object {
+      Write-Host "-- $($_.FullName)"
+      Get-ChildItem $_.FullName -Recurse -Filter "*.exe" -ErrorAction SilentlyContinue |
+        Select-Object -First 20 -ExpandProperty FullName | ForEach-Object { Write-Host "   $_" }
+    }
+  throw "SimplySign Desktop executable not found after install (see listing above)."
+}
+Write-Host "SimplySign Desktop exe: $SimplySignExe"
+# The installer often auto-launches it; only start a new instance if none is running.
+if (-not (Get-Process -Name "SimplySignDesktop" -ErrorAction SilentlyContinue)) {
+  Start-Process -FilePath $SimplySignExe | Out-Null
+}
 Start-Sleep -Seconds 8   # TODO(ci): tune — wait for the tray app + login window.
 
 # --- 3. Drive the login dialog (FRAGILE — tune against a real run) ---
