@@ -278,6 +278,16 @@ pub const CHAT_STORE_MEMORY_BOUNDARY_AUDIT: &[ChatStoreMemoryBoundaryAudit] = &[
         canonical_policy: "proactive card read-model; accepted/dismissed outcomes write to MemoryFacade separately",
     },
     ChatStoreMemoryBoundaryAudit {
+        table: "tag_assignments",
+        graph_like: false,
+        canonical_policy: "UX-only: many-to-many tag↔project/conversation links for sidebar filtering; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
+        table: "tags",
+        graph_like: false,
+        canonical_policy: "UX-only: user-defined coloured labels for organising projects/conversations; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
         table: "task_thread_links",
         graph_like: false,
         canonical_policy: "task-to-thread routing; plan/workflow state lives in MemoryFacade open_loop",
