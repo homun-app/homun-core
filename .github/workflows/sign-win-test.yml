@@ -11,7 +11,7 @@
 # Required repo secrets:
 #   SIMPLYSIGN_TOTP_SEED   Base32 TOTP secret (from the setup QR's otpauth:// URI)
 #   SIMPLYSIGN_LOGIN       SimplySign login (email)
-#   SIMPLYSIGN_DESKTOP_URL direct download URL of the SimplySign Desktop Windows installer
+# The SimplySign Desktop MSI URL is public (hardcoded in the download step) — no secret.
 # No PIN: the token reports pin min/max 0/0; signing is authorized by the logged-in
 # session (email + OTP). If a CI run proves otherwise, add SIMPLYSIGN_PIN then.
 name: sign-win-test
@@ -33,36 +33,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download SimplySign Desktop installer
+      - name: Download SimplySign Desktop (MSI)
         shell: pwsh
-        env:
-          # Via env (not inline ${{ }}) to avoid PowerShell/workflow injection.
-          SIMPLYSIGN_DESKTOP_URL: ${{ secrets.SIMPLYSIGN_DESKTOP_URL }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:SIMPLYSIGN_DESKTOP_URL)) {
-            throw "Set the SIMPLYSIGN_DESKTOP_URL secret to the Windows installer URL."
-          }
-          Invoke-WebRequest -Uri $env:SIMPLYSIGN_DESKTOP_URL -OutFile "$env:RUNNER_TEMP\simplysign-setup.exe"
+          # Public Certum download — the 64-bit MSI. msiexec installs it silently (no GUI, no
+          # hang). The .exe installer (270 MB, InstallShield) does not honour /VERYSILENT.
+          $url = "https://files.certum.eu/software/SimplySignDesktop/Windows/9.4.4.92/SimplySignDesktop-9.4.4.92-64-bit-en.msi"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\simplysign.msi"
 
-      - name: Install SimplySign Desktop (silent)
+      - name: Install SimplySign Desktop (silent MSI)
         shell: pwsh
         run: |
-          $setup = "$env:RUNNER_TEMP\simplysign-setup.exe"
-          $fi = Get-Item $setup
-          Write-Host "downloaded: $([math]::Round($fi.Length/1MB,1)) MB"
-          # Detect installer type by magic bytes: MSI = D0CF11E0 (OLE), EXE = 4D5A (MZ).
-          $hex = (([System.IO.File]::ReadAllBytes($setup)[0..3]) | ForEach-Object { $_.ToString("X2") }) -join ""
-          Write-Host "magic: $hex"
-          if ($hex -like "D0CF11E0*") {
-            Write-Host "MSI -> msiexec /quiet"
-            $p = Start-Process "msiexec.exe" -ArgumentList "/i","`"$setup`"","/quiet","/norestart" -PassThru
-          } else {
-            Write-Host "EXE -> /VERYSILENT (Inno/InstallShield)"
-            $p = Start-Process $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -PassThru
-          }
-          # Timeout guard: NEVER -Wait without a bound (a GUI prompt would hang the job for 6h).
-          if (-not $p.WaitForExit(180000)) { try { $p.Kill() } catch {}; throw "installer did not finish in 180s (likely a GUI prompt / wrong silent flag)" }
-          Write-Host "installer exit code: $($p.ExitCode)"
+          $msi = "$env:RUNNER_TEMP\simplysign.msi"
+          Write-Host "msi: $([math]::Round((Get-Item $msi).Length/1MB,1)) MB"
+          $p = Start-Process "msiexec.exe" -ArgumentList "/i","`"$msi`"","/quiet","/norestart" -PassThru
+          # Timeout guard: never block unbounded (a prompt would hang the job for 6h).
+          if (-not $p.WaitForExit(180000)) { try { $p.Kill() } catch {}; throw "msiexec did not finish in 180s" }
+          Write-Host "msiexec exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "msiexec failed ($($p.ExitCode))" }
           Start-Sleep -Seconds 8
           Write-Host "=== SimplySignDesktop.exe found under: ==="
           Get-ChildItem "C:\Program Files","C:\Program Files (x86)","$env:LOCALAPPDATA","C:\ProgramData" `
