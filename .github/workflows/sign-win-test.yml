@@ -10,7 +10,7 @@
 #
 # Required repo secrets:
 #   SIMPLYSIGN_TOTP_SEED   Base32 TOTP secret (from the setup QR's otpauth:// URI)
-#   SIMPLYSIGN_TOKEN_ID    numeric SimplySign token/account id
+#   SIMPLYSIGN_LOGIN       SimplySign login (email)
 #   SIMPLYSIGN_PIN         card PIN (used by signtool at sign time)
 #   SIMPLYSIGN_DESKTOP_URL direct download URL of the SimplySign Desktop Windows installer
 name: sign-win-test
@@ -54,7 +54,7 @@ jobs:
         shell: pwsh
         env:
           SIMPLYSIGN_TOTP_SEED: ${{ secrets.SIMPLYSIGN_TOTP_SEED }}
-          SIMPLYSIGN_TOKEN_ID: ${{ secrets.SIMPLYSIGN_TOKEN_ID }}
+          SIMPLYSIGN_LOGIN: ${{ secrets.SIMPLYSIGN_LOGIN }}
         run: ./scripts/simplysign-login.ps1
 
       - name: Download the test executable

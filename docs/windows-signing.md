@@ -18,7 +18,7 @@ l'auto-update resta valido.
 
 SimplySign **non ha una CLI di login**. Il 2FA è un TOTP standard (SHA256/6/30s): dal seed
 estratto dal QR originale generiamo l'OTP con codice inline, poi si guida il dialog di login
-via `SendKeys` (Token ID + OTP). Questo è GUI-automation e **va tarato su una run reale**
+via `SendKeys` (email di login + OTP). Questo è GUI-automation e **va tarato su una run reale**
 (titolo finestra, numero di TAB, tempi). Lo script cattura uno screenshot in caso di errore.
 
 - Script: [`scripts/simplysign-login.ps1`](../scripts/simplysign-login.ps1)
@@ -29,7 +29,7 @@ via `SendKeys` (Token ID + OTP). Questo è GUI-automation e **va tarato su una r
 | Secret | Cos'è |
 | --- | --- |
 | `SIMPLYSIGN_TOTP_SEED` | segreto Base32 del TOTP (dal QR `otpauth://…?secret=…`) |
-| `SIMPLYSIGN_TOKEN_ID` | ID numerico del token/account SimplySign |
+| `SIMPLYSIGN_LOGIN` | email di login SimplySign (dal QR: fabio.cantone.dev@gmail.com) |
 | `SIMPLYSIGN_PIN` | PIN della card (usato da signtool in firma) |
 | `SIMPLYSIGN_DESKTOP_URL` | URL diretto dell'installer **Windows** di SimplySign Desktop |
 
@@ -40,7 +40,7 @@ Impostazione (i valori restano nel tuo terminale, non in chat):
 tr -d '\n\r' < ~/Documents/otpauthuri.txt \
   | sed -nE 's/.*[?&]secret=([A-Za-z0-9]+).*/\1/Ip' \
   | gh secret set SIMPLYSIGN_TOTP_SEED --repo homun-app/homun-core
-gh secret set SIMPLYSIGN_TOKEN_ID     --repo homun-app/homun-core   # incolli il Token ID
+gh secret set SIMPLYSIGN_LOGIN      --repo homun-app/homun-core   # incolli l'email di login
 gh secret set SIMPLYSIGN_PIN          --repo homun-app/homun-core   # incolli il PIN
 gh secret set SIMPLYSIGN_DESKTOP_URL  --repo homun-app/homun-core   # incolli l'URL installer Win
 ```

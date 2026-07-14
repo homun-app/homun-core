@@ -4,7 +4,7 @@
   (or electron-builder's certificateSubjectName) can sign using the cloud cert.
 
 .DESCRIPTION
-  SimplySign has no CLI login: after entering Token ID + a TOTP one-time code, the
+  SimplySign has no CLI login: after entering the login (email) + a TOTP one-time code, the
   Desktop app exposes the certificate to the Windows certificate store (CryptoAPI),
   where signtool picks it up. This script:
     1. reads the otpauth:// secret from $env:SIMPLYSIGN_TOTP_SEED (Base32),
@@ -20,7 +20,7 @@
 .NOTES
   Secrets expected in the environment (never echoed):
     SIMPLYSIGN_TOTP_SEED  Base32 TOTP secret (from the setup QR's otpauth:// URI)
-    SIMPLYSIGN_TOKEN_ID   numeric SimplySign account/token id
+    SIMPLYSIGN_LOGIN      SimplySign login (email)
     SIMPLYSIGN_PIN        card PIN (used by signtool at sign time, not here)
 #>
 [CmdletBinding()]
@@ -79,9 +79,9 @@ function Get-Totp {
 
 # --- 1. Read secrets (fail loudly if missing; never print their values) ---
 $seed    = $env:SIMPLYSIGN_TOTP_SEED
-$tokenId = $env:SIMPLYSIGN_TOKEN_ID
+$login = $env:SIMPLYSIGN_LOGIN
 if ([string]::IsNullOrWhiteSpace($seed))    { throw "SIMPLYSIGN_TOTP_SEED is not set" }
-if ([string]::IsNullOrWhiteSpace($tokenId)) { throw "SIMPLYSIGN_TOKEN_ID is not set" }
+if ([string]::IsNullOrWhiteSpace($login)) { throw "SIMPLYSIGN_LOGIN is not set" }
 
 $otp = Get-Totp -Base32Secret $seed
 Write-Host "Generated OTP (length $($otp.Length)) — value not shown."
@@ -99,8 +99,8 @@ $wshell = New-Object -ComObject WScript.Shell
 $null = $wshell.AppActivate("SimplySign")
 Start-Sleep -Seconds 2
 
-# TODO(ci): confirm field order. Typical: [Token ID] TAB [OTP] ENTER.
-$wshell.SendKeys($tokenId)
+# TODO(ci): confirm field order. Typical: [login email] TAB [OTP] ENTER.
+$wshell.SendKeys($login)
 Start-Sleep -Milliseconds 500
 $wshell.SendKeys("{TAB}")
 Start-Sleep -Milliseconds 500
