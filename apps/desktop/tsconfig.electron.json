@@ -1,0 +1,24 @@
+// Static checking for the ELECTRON MAIN PROCESS (`electron/*.cjs`), which had none.
+//
+// `npm run build` runs tsc over `src/` only, so a typo in main.cjs — say, calling a `log()` that does
+// not exist — compiles fine, ships, and throws a ReferenceError at runtime. And because the code that
+// handles failures is the code that runs least, the branches most likely to carry such a typo are the
+// ones nobody exercises: an error path that itself errors. That is exactly what happened here.
+//
+// `checkJs` gives us `no-undef` (and typo'd properties) for free from a dependency we already have.
+// Not a strict-mode gate: the goal is to catch names that don't exist, not to type the whole shell.
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "strict": false,
+    "noImplicitAny": false
+  },
+  "include": ["electron/**/*.cjs"]
+}

@@ -731,19 +731,42 @@ ipcMain.handle("lfpa:notify", (_event, payload) => {
   const title = String(payload?.title ?? "Homun");
   const body = String(payload?.body ?? "");
   const tag = payload?.tag ? String(payload.tag) : "";
-  try {
-    const notification = new Notification({ title, body });
-    notification.on("click", () => {
-      const win = focusMainWindow();
-      // Hand the tag back so the renderer can reopen the thread this notification came from.
-      if (tag && win) win.webContents.send("lfpa:notification-click", tag);
-    });
-    notification.show();
-    return { shown: true };
-  } catch (error) {
-    log(`notify: failed to show notification: ${error?.message ?? error}`);
-    return { shown: false, reason: String(error?.message ?? error) };
-  }
+
+  // The outcome is decided by the EVENTS, never by the return of show().
+  //
+  // `show()` resolves synchronously and throws nothing even when the OS goes on to refuse the
+  // notification: macOS reports the refusal asynchronously on "failed" (e.g. UNErrorDomain 1 —
+  // "notifications are not allowed for this application", which is what an unsigned/dev bundle gets).
+  // Trusting the synchronous return is precisely the mistake that made this feature look healthy while
+  // being dead, so we do not repeat it one layer up: wait for the verdict.
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    try {
+      const notification = new Notification({ title, body });
+      notification.on("show", () => settle({ shown: true }));
+      notification.on("failed", (_event2, error) => {
+        desktopLog.log(`notify: the OS refused the notification: ${error}`);
+        settle({ shown: false, reason: String(error) });
+      });
+      notification.on("click", () => {
+        const win = focusMainWindow();
+        // Hand the tag back so the renderer can reopen the thread this notification came from.
+        if (tag && win) win.webContents.send("lfpa:notification-click", tag);
+      });
+      notification.show();
+      // Not every platform emits "show"; don't leave the caller hanging on a notification that worked.
+      // "failed" arrives promptly when it arrives at all, so silence past this point means success.
+      setTimeout(() => settle({ shown: true }), 2000);
+    } catch (error) {
+      desktopLog.log(`notify: could not post notification: ${error?.message ?? error}`);
+      settle({ shown: false, reason: String(error?.message ?? error) });
+    }
+  });
 });
 
 // Auto-update via electron-updater. The feed is the public `homun-releases` repo
