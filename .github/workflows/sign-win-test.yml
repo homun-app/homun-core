@@ -11,8 +11,9 @@
 # Required repo secrets:
 #   SIMPLYSIGN_TOTP_SEED   Base32 TOTP secret (from the setup QR's otpauth:// URI)
 #   SIMPLYSIGN_LOGIN       SimplySign login (email)
-#   SIMPLYSIGN_PIN         card PIN (used by signtool at sign time)
 #   SIMPLYSIGN_DESKTOP_URL direct download URL of the SimplySign Desktop Windows installer
+# No PIN: the token reports pin min/max 0/0; signing is authorized by the logged-in
+# session (email + OTP). If a CI run proves otherwise, add SIMPLYSIGN_PIN then.
 name: sign-win-test
 
 on:
@@ -66,17 +67,14 @@ jobs:
 
       - name: Sign with signtool
         shell: pwsh
-        env:
-          SIMPLYSIGN_PIN: ${{ secrets.SIMPLYSIGN_PIN }}
         run: |
           # signtool ships with the Windows SDK on windows-latest.
           $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
                        Sort-Object FullName | Select-Object -Last 1).FullName
           Write-Host "signtool: $signtool"
-          # $env:THUMBPRINT was exported by the login script.
-          # TODO(ci): SimplySign's CSP may need the PIN. If signtool prompts/fails, the
-          # PIN likely must be supplied at SimplySign Desktop login (add it to the login
-          # script) or via the card's "cache PIN for session" option — tune here.
+          # $env:THUMBPRINT was exported by the login script. No PIN: the SimplySign
+          # session (email + OTP) authorizes signing. If signtool ever fails needing a
+          # PIN, supply it at SimplySign Desktop login (add to the login script) instead.
           & $signtool sign `
             /sha1 $env:THUMBPRINT `
             /fd sha256 /td sha256 `

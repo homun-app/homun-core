@@ -4,6 +4,12 @@ Obiettivo: firmare l'installer `.exe` in CI con il certificato **Certum "Open So
 Developer"** (cloud, SimplySign), così Windows non lo segnala come editore sconosciuto e
 l'auto-update resta valido.
 
+> **Certificato & licenza.** È un cert Certum *Open Source Code Signing* (CN "Open Source
+> Developer Fabio Cantone"). Certum ha **esaminato il repository `homun-core` e ne ha
+> autorizzato la firma**. ⚠️ Questo cert copre **solo `homun-core`** (open): i **plugin/parti
+> commerciali NON vanno firmati con questo certificato** (Certum revoca i cert Open Source usati
+> su software a distribuzione commerciale) — per quelli servirà un cert Certum *standard*.
+
 ## Perché questa architettura
 
 - **Runner Windows + `signtool` + smart-card virtuale SimplySign.** È il percorso
@@ -30,8 +36,11 @@ via `SendKeys` (email di login + OTP). Questo è GUI-automation e **va tarato su
 | --- | --- |
 | `SIMPLYSIGN_TOTP_SEED` | segreto Base32 del TOTP (dal QR `otpauth://…?secret=…`) |
 | `SIMPLYSIGN_LOGIN` | email di login SimplySign (dal QR: fabio.cantone.dev@gmail.com) |
-| `SIMPLYSIGN_PIN` | PIN della card (usato da signtool in firma) |
 | `SIMPLYSIGN_DESKTOP_URL` | URL diretto dell'installer **Windows** di SimplySign Desktop |
+
+> **Niente `SIMPLYSIGN_PIN`.** Il token SimplySign riporta `pin min/max: 0/0` (nessun PIN
+> imposto): la firma è autorizzata dalla **sessione** (email + OTP), non da un PIN separato.
+> Se una run in CI dimostrasse il contrario, aggiungeremo il secret allora.
 
 Impostazione (i valori restano nel tuo terminale, non in chat):
 
@@ -41,7 +50,6 @@ tr -d '\n\r' < ~/Documents/otpauthuri.txt \
   | sed -nE 's/.*[?&]secret=([A-Za-z0-9]+).*/\1/Ip' \
   | gh secret set SIMPLYSIGN_TOTP_SEED --repo homun-app/homun-core
 gh secret set SIMPLYSIGN_LOGIN      --repo homun-app/homun-core   # incolli l'email di login
-gh secret set SIMPLYSIGN_PIN          --repo homun-app/homun-core   # incolli il PIN
 gh secret set SIMPLYSIGN_DESKTOP_URL  --repo homun-app/homun-core   # incolli l'URL installer Win
 ```
 
