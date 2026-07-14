@@ -1150,10 +1150,6 @@ export function NavDrawer({
         </button>
       </div>
 
-      {/* Discreet "update available" pill — replaces the retired notification bell/page.
-          Renders nothing unless an update is actually pending. */}
-      <UpdatePill />
-
       <nav className="drawer-nav linear-sidebar-nav" aria-label="Workspace navigation">
         {groupedNavItems.map(({ section, items }) => (
           <section className="drawer-nav-group" key={section}>
@@ -1521,6 +1517,10 @@ export function NavDrawer({
           }}
         />
       )}
+
+      {/* Discreet "update available" indicator — sits just above the profile (status-bar
+          style), not at the top. Renders nothing unless an update is actually pending. */}
+      <UpdatePill />
 
       <footer className="drawer-footer">
         <button

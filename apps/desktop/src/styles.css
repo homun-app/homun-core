@@ -525,16 +525,16 @@ body.resizing-drawer {
   color: var(--text);
 }
 
-/* Discreet "update available" pill at the top of the sidebar (replaces the retired
-   notification bell/page). Green = actionable-but-calm; the component renders nothing until an
-   update is actually pending, so it never adds noise to the minimal sidebar. */
+/* Discreet "update available" pill just above the sidebar footer/profile (status-bar style,
+   not at the top). Green = actionable-but-calm; the component renders nothing until an update is
+   actually pending, so it never adds noise to the minimal sidebar. */
 .update-pill {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   min-height: 30px;
-  margin: 2px 0 4px;
+  margin: 0 0 6px;
   padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--green) 40%, transparent);
   border-radius: var(--radius-control);
