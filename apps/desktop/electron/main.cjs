@@ -722,12 +722,16 @@ function flattenReleaseNotes(notes) {
   return null;
 }
 
-// Only macOS ships a signed + notarized build, so only macOS may silently
-// auto-install an update. Windows/Linux are unsigned: the app must NOT auto-run
-// their binaries — it detects the new version and points the user to the download
-// page instead (see `update-open-download`). This flag tells the renderer which
-// affordance to show ("Install" vs "Download").
-const CAN_AUTO_INSTALL = process.platform === "darwin";
+// Which platforms may silently auto-install an update. Gate: the update binary must be
+// SIGNED, because auto-install auto-executes it (supply-chain risk otherwise).
+//   - macOS: signed + notarized -> yes.
+//   - Windows: signed via Certum (electron-updater verifies the downloaded installer's
+//     Authenticode publisher against ours before running it) -> yes.
+//   - Linux: .AppImage/.deb are UNSIGNED -> NO. Stay notify-only: detect the new version
+//     and point the user to the download page (see `update-open-download`).
+// This flag tells the renderer which affordance to show ("Install" vs "Download").
+const CAN_AUTO_INSTALL =
+  process.platform === "darwin" || process.platform === "win32";
 
 ipcMain.handle("lfpa:update-check", async () => {
   const current = app.getVersion();
@@ -750,10 +754,10 @@ ipcMain.handle("lfpa:update-check", async () => {
   }
 });
 
-// Unsigned platforms (Windows/Linux): open the releases page so the user
-// downloads + installs the new version manually. We never auto-execute an
-// unsigned binary (the supply-chain risk electron-updater's silent install would
-// carry). macOS uses the signed auto-install flow above instead.
+// Unsigned platform (Linux): open the releases page so the user downloads +
+// installs the new version manually. We never auto-execute an unsigned binary
+// (the supply-chain risk electron-updater's silent install would carry). macOS and
+// Windows are signed and use the auto-install flow above instead.
 ipcMain.handle("lfpa:update-open-download", async () => {
   try {
     await shell.openExternal(RELEASES_URL);
