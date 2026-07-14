@@ -794,7 +794,7 @@ export default function App() {
         notificationPermission() === "granted"
       ) {
         const threadId = event.thread_id;
-        showSystemNotification({
+        void showSystemNotification({
           title: event.title || t("notifications.newActivity"),
           body:
             event.channel === "scheduled"

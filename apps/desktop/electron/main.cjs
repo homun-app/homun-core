@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage, powerSaveBlocker, session } = require("electron");
+const { app, BrowserWindow, Menu, Notification, shell, ipcMain, dialog, nativeImage, powerSaveBlocker, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
@@ -49,6 +49,12 @@ process.env.HOMUN_DESKTOP_GATEWAY_TOKEN = GATEWAY_TOKEN;
 // before the app is ready, so the menu reflects it. Technical identifiers
 // (crate/binary "local-first-desktop-gateway", HOMUN_* env) are unchanged.
 app.setName("Homun");
+
+// WINDOWS: without an explicit AppUserModelID, toasts are posted under Electron's own identity and
+// Windows silently drops them — the notification never appears and nothing errors. It must match the
+// installer's appId (`build.appId` in package.json) or the shortcut Windows created won't be linked
+// to the toast. No-op on macOS/Linux, so it is unconditional.
+app.setAppUserModelId("app.homun.desktop");
 
 // Two app instances would spawn two gateways racing on the same port and the
 // same ~/.homun SQLite files — nondeterministic contention. First instance
@@ -470,10 +476,22 @@ function createWindow() {
 
   // Allow microphone access for on-device dictation (denied by default in
   // Electron). Scoped to "media"; everything else stays denied.
+  //
+  // Electron answers permission questions through TWO handlers, and they must AGREE. This one answers
+  // explicit requests; `setPermissionCheckHandler` below answers synchronous checks like
+  // `Notification.permission` — and its default, when unset, is to ALLOW. Leaving it unset let the
+  // renderer read "granted" for permissions this handler denies, which is precisely how the
+  // notification feature came to look enabled while being incapable of firing. Desktop notifications
+  // no longer need the renderer's permission at all (they go through the main process, see
+  // `lfpa:notify`), but a permission layer that contradicts itself will mislead the next feature too.
+  const allowedPermission = (permission) => permission === "media";
   window.webContents.session.setPermissionRequestHandler(
     (_webContents, permission, callback) => {
-      callback(permission === "media");
+      callback(allowedPermission(permission));
     },
+  );
+  window.webContents.session.setPermissionCheckHandler((_webContents, permission) =>
+    allowedPermission(permission),
   );
 
   const entry = rendererEntry();
@@ -677,7 +695,7 @@ ipcMain.handle("lfpa:feedback-bundle", async () => {
 });
 
 // Bring the window to the front when the user clicks a system notification.
-ipcMain.handle("lfpa:focus-window", () => {
+function focusMainWindow() {
   const win = BrowserWindow.getAllWindows()[0] ?? null;
   if (win) {
     if (win.isMinimized()) win.restore();
@@ -685,7 +703,47 @@ ipcMain.handle("lfpa:focus-window", () => {
     win.focus();
   }
   if (process.platform === "darwin" && app.dock) app.focus({ steal: true });
+  return win;
+}
+
+ipcMain.handle("lfpa:focus-window", () => {
+  focusMainWindow();
   return true;
+});
+
+// System notifications, posted from the MAIN process on every OS.
+//
+// They used to be fired from the renderer with the Web Notification API, and on the desktop that path
+// is a trap: the renderer reads `Notification.permission` through Electron's permission CHECK handler
+// (default: allow) while the app's permission REQUEST handler denies everything but the mic. So the UI
+// believed it had permission, `new Notification()` threw nothing, and the OS never saw a thing — a
+// failure with no error, no log and no symptom other than silence. Electron's native Notification
+// doesn't go through the permission layer at all and behaves the same on macOS (Notification Center),
+// Windows (toast — see setAppUserModelId) and Linux (libnotify).
+//
+// Returns {shown, reason} instead of void: a notification the OS refuses is something the user must be
+// TOLD about (Settings → "Test"), not something we swallow.
+ipcMain.handle("lfpa:notify", (_event, payload) => {
+  if (!Notification.isSupported()) {
+    // Linux without a notification daemon, or a locked-down OS.
+    return { shown: false, reason: "unsupported" };
+  }
+  const title = String(payload?.title ?? "Homun");
+  const body = String(payload?.body ?? "");
+  const tag = payload?.tag ? String(payload.tag) : "";
+  try {
+    const notification = new Notification({ title, body });
+    notification.on("click", () => {
+      const win = focusMainWindow();
+      // Hand the tag back so the renderer can reopen the thread this notification came from.
+      if (tag && win) win.webContents.send("lfpa:notification-click", tag);
+    });
+    notification.show();
+    return { shown: true };
+  } catch (error) {
+    log(`notify: failed to show notification: ${error?.message ?? error}`);
+    return { shown: false, reason: String(error?.message ?? error) };
+  }
 });
 
 // Auto-update via electron-updater. The feed is the public `homun-releases` repo
@@ -806,6 +864,13 @@ ipcMain.handle("lfpa:update-install", async (event) => {
 //   style-src  'unsafe-inline' — mermaid + highlight.js inject <style>, React uses
 //                                 inline style attributes.
 //   img/font   data:/blob: — screenshots, generated logos, bundled fonts.
+//   img-src    127.0.0.1   — images served BY the local gateway (e.g. the Composio brand logos, which
+//                            it proxies for us). NOTE the deliberate absence of any remote origin: the
+//                            renderer displays model-generated markdown, so an <img> pointing at an
+//                            arbitrary host is an exfiltration channel (the URL itself carries the
+//                            data). Anything remote we need to show goes through the gateway, which is
+//                            the app's single network egress. Do not "fix" a broken image by adding a
+//                            host here — proxy it.
 //   connect-src 127.0.0.1  — the local gateway (fetch + NDJSON streams).
 //   frame-src  127.0.0.1   — the embedded noVNC "contained computer" iframe.
 function applyContentSecurityPolicy() {
@@ -815,7 +880,7 @@ function applyContentSecurityPolicy() {
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*",
     "font-src 'self' data:",
     "media-src 'self' blob:",
     "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*",

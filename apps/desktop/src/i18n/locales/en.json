@@ -744,6 +744,7 @@
     "systemNotificationsDesc": "Alert me via the OS when a message arrives or a scheduled task is ready, even with the app in the background.",
     "systemNotificationsBlocked": "Blocked — enable Homun under System Settings → Notifications.",
     "systemNotificationsTest": "Notifications are on — you'll be alerted here.",
+    "systemNotificationsFailed": "The system refused to show the notification ({{reason}}). Check that Homun is allowed to notify you in your OS notification settings.",
     "test": "Test",
     "custom": "Custom",
     "describeNoProfile": "A model describes models without a profile",

@@ -42,6 +42,7 @@ import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
 import {
   coreBridge,
+  composioLogoUrl,
   type ActiveModelInfo,
   type AllowedTool,
   type ArtifactDestination,
@@ -76,7 +77,6 @@ import {
   type SkillsCatalogResponse,
   type RoleView,
   modelIsCloud,
-  type RoutingDecision,
   type TimezoneInfo,
   type SkillsDetail,
   type SkillsFileNode,
@@ -134,7 +134,7 @@ interface SettingsViewProps {
   connections: ConnectionItem[];
   section: SettingsSectionId;
   // Active sub-item for sections with an inline expandable submenu (e.g.
-  // runtime → routing|decisions|providers). Free-form string, defaulted per pane.
+  // runtime → routing|providers). Free-form string, defaulted per pane.
   sub?: string;
   // Called after an addon is toggled, so App can re-read enabled-state and
   // mount/unmount its nav entry + panel (ADR 0011 §10-A).
@@ -227,7 +227,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
         {section === "runtime" && (
           <RuntimePane
             model={model}
-            sub={sub === "decisions" || sub === "providers" ? sub : "routing"}
+            sub={sub === "providers" ? sub : "routing"}
           />
         )}
         {section === "privacy" && <PrivacyPane />}
@@ -1304,6 +1304,7 @@ function SystemNotificationsRow() {
   const { t } = useTranslation();
   const [enabled, setEnabled] = useSetting<boolean>("general.systemNotifications", false);
   const [perm, setPerm] = useState<NotificationPermission>(notificationPermission());
+  const [testError, setTestError] = useState<string | null>(null);
 
   const toggle = async (next: boolean) => {
     if (!next) {
@@ -1313,6 +1314,16 @@ function SystemNotificationsRow() {
     const granted = await requestNotificationPermission();
     setPerm(granted);
     setEnabled(granted === "granted");
+  };
+
+  // A "Test" that does nothing when the OS refuses is worse than no test at all — it was the entire
+  // reason this stayed broken without anyone being able to say what was wrong. Report the refusal.
+  const runTest = async () => {
+    const result = await showSystemNotification({
+      title: "Homun",
+      body: t("settings.systemNotificationsTest"),
+    });
+    setTestError(result.shown ? null : (result.reason ?? "unknown"));
   };
 
   const on = enabled && perm === "granted";
@@ -1325,19 +1336,15 @@ function SystemNotificationsRow() {
             ? t("settings.systemNotificationsBlocked")
             : t("settings.systemNotificationsDesc")}
         </div>
+        {testError && (
+          <div className="td mdl-row-warning">
+            {t("settings.systemNotificationsFailed", { reason: testError })}
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {on && (
-          <button
-            className="set-btn"
-            type="button"
-            onClick={() =>
-              showSystemNotification({
-                title: "Homun",
-                body: t("settings.systemNotificationsTest"),
-              })
-            }
-          >
+          <button className="set-btn" type="button" onClick={() => void runTest()}>
             {t("settings.test")}
           </button>
         )}
@@ -1536,12 +1543,11 @@ function RuntimePane({
   sub = "routing",
 }: {
   model: ActiveModelInfo | null;
-  sub?: "routing" | "decisions" | "providers";
+  sub?: "routing" | "providers";
 }) {
   const { t } = useTranslation();
   const [providers, setProviders] = useState<ProviderView[]>([]);
   const [roles, setRoles] = useState<RoleView[]>([]);
-  const [decisions, setDecisions] = useState<RoutingDecision[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // Provider modal: a provider id (edit existing) or "add" (new), null = closed.
@@ -1576,11 +1582,6 @@ function RuntimePane({
         /* leave empty */
       }
       await reloadRoles();
-      try {
-        setDecisions((await coreBridge.routingDecisions()).decisions);
-      } catch {
-        /* leave empty */
-      }
     })();
   }, []);
 
@@ -1798,42 +1799,14 @@ function RuntimePane({
         </>
       )}
 
-      {/* ── decisions → routing decisions ─────────────────────────── */}
-      {sub === "decisions" && (
-        <>
-          <div className="set-section-label">Routing decisions</div>
-          <p className="mdl-detail-sub" style={{ paddingLeft: "var(--s3)" }}>
-            When a task arrives, Homun estimates complexity, context length and tool needs,
-            then picks the model with the best quality/latency ratio. Here you see why the
-            router picked a model for each task (last{" "}
-            {decisions.length}).
-          </p>
-          {decisions.length === 0 ? (
-            <p className="set-hint">No decisions yet. Run a task to populate them.</p>
-          ) : (
-            decisions.map((d, i) => (
-              <div className="mdl-row" key={i}>
-                <div className="mdl-row-main">
-                  <div className="mdl-row-top">
-                    <strong>{d.chosen_model}</strong>
-                    <span className={`set-badge ${d.stage === "semantic" ? "green" : "muted"}`}>
-                      {d.stage === "semantic"
-                        ? t("settings.stageSemantic")
-                        : d.stage === "single_candidate"
-                          ? t("settings.stageSingle")
-                          : d.stage === "heuristic_disabled"
-                            ? t("settings.stageHeuristic")
-                            : t("settings.stageFallback")}
-                    </span>
-                    <span className="mdl-row-meta">{d.role} · {t("settings.candidates", { count: d.candidates.length })}</span>
-                  </div>
-                  <p className="mdl-detail-sub">«{d.goal}»</p>
-                </div>
-              </div>
-            ))
-          )}
-        </>
-      )}
+      {/* "Routing decisions" lived here and was REMOVED (2026-07-14): it could never show anything.
+          The recorder (`log_routing_decision`) is reachable only from `execute_subagent_task` →
+          `brain_materialize_tasks` → the `POST /api/chat/.../create_task` endpoint, which NO component
+          ever calls; the chat turn path never touches `resolve_role_for_task` at all. So the panel
+          truthfully reported "0 decisions" forever, which reads to the user as a broken feature rather
+          than an unwired one. The gateway side (writer, store, `/api/routing-decisions`) is intact and
+          correct — bringing the panel back means WIRING the semantic router into the chat path first,
+          which is a product decision (it costs one extra model call per turn), not a UI fix. */}
 
       {/* ── providers → card grid (+ modal) ───────────────────────── */}
       {sub === "providers" && (
@@ -3844,12 +3817,19 @@ function ComposioCard({
   onClick: () => void;
 }) {
   const { t } = useTranslation();
+  // Load through the gateway, not from Composio's CDN: the renderer may not fetch remote images (CSP),
+  // by design. `kit.logo` is only consulted to know whether a logo EXISTS — its URL is never used here.
   const [imgOk, setImgOk] = useState(Boolean(kit.logo));
   return (
     <button type="button" className={`cmp-card ${state}`} onClick={onClick}>
       <span className="cmp-card-logo">
         {imgOk && kit.logo ? (
-          <img src={kit.logo} alt="" loading="lazy" onError={() => setImgOk(false)} />
+          <img
+            src={composioLogoUrl(kit.slug)}
+            alt=""
+            loading="lazy"
+            onError={() => setImgOk(false)}
+          />
         ) : (
           <span className="conn-kit-fallback">{kit.name.slice(0, 1).toUpperCase()}</span>
         )}
@@ -3959,7 +3939,7 @@ function ConnectModal({
         <div className="cmp-modal-head">
           <span className="cmp-card-logo sm">
             {imgOk && kit.logo ? (
-              <img src={kit.logo} alt="" onError={() => setImgOk(false)} />
+              <img src={composioLogoUrl(kit.slug)} alt="" onError={() => setImgOk(false)} />
             ) : (
               <span className="conn-kit-fallback">{kit.name.slice(0, 1).toUpperCase()}</span>
             )}

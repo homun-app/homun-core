@@ -1560,7 +1560,8 @@ const SETTINGS_SUBNAV: Partial<
     defaultSub: "routing",
     items: [
       { id: "routing", label: "settings.subnavRouting" },
-      { id: "decisions", label: "settings.subnavDecisions" },
+      // "decisions" removed 2026-07-14: the panel could never populate (its recorder is only reachable
+      // from a subagent-task path no UI invokes) — see the note in SettingsView.
       { id: "providers", label: "settings.subnavProviders" },
     ],
   },

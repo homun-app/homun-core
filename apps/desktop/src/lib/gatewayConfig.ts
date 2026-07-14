@@ -32,6 +32,15 @@ interface LocalFirstDesktopConfig {
   ) => () => void;
   /** Bring the desktop window to the front (e.g. on a notification click). */
   focusWindow?: () => Promise<void>;
+  /** Post a system notification from the MAIN process (native, cross-OS). Resolves to whether the OS
+   *  actually showed it — a refusal must be surfaced, not swallowed. See `systemNotifications.ts`. */
+  notify?: (payload: {
+    title: string;
+    body?: string;
+    tag?: string;
+  }) => Promise<{ shown: boolean; reason?: string }>;
+  /** A click on a system notification delivers its `tag` here; returns an unsubscribe fn. */
+  onNotificationClick?: (cb: (tag: string) => void) => () => void;
   /** "Report a problem": builds a local tar.gz of ~/.homun/logs + report.json. */
   createFeedbackBundle?: () => Promise<{
     ok: boolean;

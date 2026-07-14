@@ -40,6 +40,18 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   openUpdateDownload: () => ipcRenderer.invoke("lfpa:update-open-download"),
   // Bring the app window to the front (notification click).
   focusWindow: () => ipcRenderer.invoke("lfpa:focus-window"),
+  // System notifications are posted from the MAIN process (Electron's native Notification), not from
+  // the renderer's Web Notification API: one call that behaves the same on macOS, Windows and Linux,
+  // and that isn't subject to the session permission handlers the renderer path silently died on.
+  // Returns {shown, reason} — the caller can TELL the user the OS refused instead of doing nothing.
+  notify: (payload) => ipcRenderer.invoke("lfpa:notify", payload),
+  // A click on a system notification arrives here carrying the notification's `tag`, so the renderer
+  // can reopen the thread it belongs to.
+  onNotificationClick: (cb) => {
+    const handler = (_event, tag) => cb(tag);
+    ipcRenderer.on("lfpa:notification-click", handler);
+    return () => ipcRenderer.removeListener("lfpa:notification-click", handler);
+  },
   // Subscribe to download progress ({percent,transferred,total}); returns an
   // unsubscribe fn.
   onUpdateProgress: (cb) => {

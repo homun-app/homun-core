@@ -744,6 +744,7 @@
     "systemNotificationsDesc": "Avvisami dal sistema quando arriva un messaggio o un task pianificato è pronto, anche con l'app in background.",
     "systemNotificationsBlocked": "Bloccate — abilita Homun in Impostazioni di Sistema → Notifiche.",
     "systemNotificationsTest": "Notifiche attive — verrai avvisato qui.",
+    "systemNotificationsFailed": "Il sistema ha rifiutato di mostrare la notifica ({{reason}}). Controlla che Homun sia autorizzata a notificarti nelle impostazioni di notifica del tuo sistema operativo.",
     "test": "Prova",
     "custom": "Personalizzato",
     "describeNoProfile": "Un modello descrive i modelli senza profilo",
