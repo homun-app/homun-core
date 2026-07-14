@@ -3125,6 +3125,7 @@ impl ChatStore {
         id: &str,
         text: &str,
         timestamp: &str,
+        attachments: &[serde_json::Value],
     ) -> rusqlite::Result<()> {
         let parent_id: Option<String> = conn
             .query_row(
@@ -3135,9 +3136,21 @@ impl ChatStore {
             .optional()?
             .flatten();
         let inserted = conn.execute(
-            "insert or ignore into chat_messages (id, thread_id, role, text, timestamp, parent_id)
-             values (?1, ?2, 'user', ?3, ?4, ?5)",
-            params![id, thread_id, text, timestamp, parent_id],
+            "insert or ignore into chat_messages (
+                id, thread_id, role, text, timestamp, attachments_json, parent_id
+             ) values (?1, ?2, 'user', ?3, ?4, ?5, ?6)",
+            params![
+                id,
+                thread_id,
+                text,
+                timestamp,
+                if attachments.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::to_string(attachments).map_err(json_error)?)
+                },
+                parent_id,
+            ],
         )?;
         if inserted == 1 {
             conn.execute(
@@ -3982,6 +3995,39 @@ mod tests {
     }
 
     #[test]
+    fn linked_user_message_keeps_inline_image_preview_after_reload() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let image = serde_json::json!({
+            "artifact_id": "inline_image_0",
+            "title_redacted": "Image 1",
+            "kind": "image",
+            "size_bytes": 0,
+            "preview_available": true,
+            "privacy_domain": "local_files",
+            "preview_url": "data:image/png;base64,AA=="
+        });
+
+        ChatStore::insert_linked_user_message(
+            &store.conn,
+            &thread.thread_id,
+            "user_with_inline_image",
+            "Describe this image.",
+            "100",
+            std::slice::from_ref(&image),
+        )
+        .unwrap();
+
+        let reloaded = store.messages(&thread.thread_id).unwrap();
+        let persisted_user = reloaded
+            .messages
+            .iter()
+            .find(|message| message.id == "user_with_inline_image")
+            .unwrap();
+        assert_eq!(persisted_user.attachments, vec![image]);
+    }
+
+    #[test]
     fn chat_thread_title_is_synthesized_from_first_user_prompt() {
         assert_eq!(
             compact_thread_title(
@@ -4298,7 +4344,7 @@ mod tests {
 
         // 1. Atomic enqueue links the prompt under the current leaf (the seed).
         let enqueued_id = "local_user_req1";
-        ChatStore::insert_linked_user_message(&store.conn, &tid, enqueued_id, "hello", "100")
+        ChatStore::insert_linked_user_message(&store.conn, &tid, enqueued_id, "hello", "100", &[])
             .unwrap();
         assert_eq!(parent(enqueued_id).as_deref(), Some(seed_id.as_str()));
         assert_eq!(leaf().as_deref(), Some(enqueued_id));

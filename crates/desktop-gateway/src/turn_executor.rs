@@ -157,6 +157,22 @@ pub fn execute_chat_turn_task(
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| task.workspace_id.as_str())
         .to_string();
+    // Legacy tasks have no attachment fields; defaulting keeps boot recovery
+    // compatible while new broker turns retain their original composer input.
+    let images = task
+        .input_json
+        .get("images")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
+        .unwrap_or_default();
+    let attachments = task
+        .input_json
+        .get("attachments")
+        .cloned()
+        .and_then(|value| {
+            serde_json::from_value::<Vec<local_first_desktop_gateway::AttachmentInput>>(value).ok()
+        })
+        .unwrap_or_default();
 
     // 2. Map `approval` → agent tool_policy. Unknown values fall back to the
     //    most capable policy (`full`) — matches the interactive default.
@@ -233,6 +249,8 @@ pub fn execute_chat_turn_task(
                 thread_id,
                 prompt,
                 tool_policy,
+                images,
+                attachments,
                 &visible_turn.user_message_id,
                 &visible_turn.assistant_message_id,
                 turn_id,

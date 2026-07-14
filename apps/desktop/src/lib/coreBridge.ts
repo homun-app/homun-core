@@ -90,6 +90,7 @@ export interface CoreChatAttachment {
   size_bytes: number;
   preview_available: boolean;
   privacy_domain: string;
+  preview_url?: string;
 }
 
 export interface OperationalPromptMessageInput {
@@ -4093,6 +4094,7 @@ async function submitBrokerRuntimeChatPromptStream(
   // commit_prompt_result — the broker commits.
   const enqueued = await enqueueTurn(threadId, requestId, prompt, {
     visiblePrompt,
+    images,
     attachments: attachments?.length ? attachments : undefined,
     mode,
     model,

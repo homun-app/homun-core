@@ -3,7 +3,15 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-10.**
+> **Ultimo aggiornamento: 2026-07-14.**
+
+## ⭐ CHECKPOINT 2026-07-14 — immagini inline nei turni broker
+
+Fix del difetto per cui un'immagine incollata o trascinata appariva nel composer ma il modello rispondeva
+di non riceverla. Il path broker ora conserva le immagini inline e gli allegati file normalizzati nel task,
+li passa alla richiesta canonica del modello e salva i metadati nel messaggio utente: rimangono quindi visibili
+anche dopo il reload della chat. Regressioni verdi su persistenza task e transcript; typecheck, UI contract e
+build desktop verdi. Risorse release aggiornate per l'app macOS.
 
 ## ⭐ CHECKPOINT 2026-07-10 (quater) — UI Codex-parity + proactivity-answer fix; direzione = rifinitura→early-access
 

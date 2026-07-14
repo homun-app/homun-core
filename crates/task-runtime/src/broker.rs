@@ -15,6 +15,9 @@ pub struct ChatTurnInput {
     pub request_id: String,
     pub prompt: String,
     pub visible_prompt: Option<String>,
+    /// Inline image data URLs from the composer. Clipboard images have no host
+    /// path, so the durable task must carry their content to its worker.
+    pub images: Vec<String>,
     pub attachments: Option<Value>,
     pub mode: Option<String>,
     pub model: Option<String>,
@@ -159,6 +162,7 @@ pub fn enqueue_chat_turn(
         "request_id": input.request_id,
         "prompt": input.prompt,
         "visible_prompt": input.visible_prompt,
+        "images": input.images,
         "attachments": input.attachments,
         "mode": input.mode,
         "model": input.model,
@@ -262,6 +266,7 @@ where
         "request_id": input.request_id,
         "prompt": input.prompt,
         "visible_prompt": input.visible_prompt,
+        "images": input.images,
         "attachments": input.attachments,
         "mode": input.mode,
         "model": input.model,
@@ -487,6 +492,7 @@ mod tests {
             request_id: request_id.to_string(),
             prompt: "hi".into(),
             visible_prompt: None,
+            images: Vec::new(),
             attachments: None,
             mode: None,
             model: None,
@@ -501,6 +507,25 @@ mod tests {
         let r = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &input("r1", "t1")).unwrap();
         assert_eq!(r.thread_id, "t1");
         assert_eq!(r.task_id.as_str(), "turn_r1");
+    }
+
+    #[test]
+    fn enqueue_persists_inline_images_for_the_executor() {
+        let s = store();
+        let mut turn = input("r1", "t1");
+        turn.images = vec!["data:image/png;base64,AA==".to_string()];
+
+        let enqueued = enqueue_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &turn)
+            .expect("enqueue image turn");
+        let stored = s
+            .get_task(&enqueued.task_id, &UserId::new("u"), &WorkspaceId::new("w"))
+            .expect("load queued turn")
+            .expect("queued turn exists");
+
+        assert_eq!(
+            stored.input_json["images"],
+            serde_json::json!(["data:image/png;base64,AA=="]),
+        );
     }
 
     #[test]
@@ -640,6 +665,7 @@ mod cancel_tests {
             request_id: request_id.to_string(),
             prompt: "hi".into(),
             visible_prompt: None,
+            images: Vec::new(),
             attachments: None,
             mode: None,
             model: None,
@@ -686,6 +712,7 @@ mod atomic_tests {
             request_id: request_id.to_string(),
             prompt: "p".into(),
             visible_prompt: None,
+            images: Vec::new(),
             attachments: None,
             mode: None,
             model: None,

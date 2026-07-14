@@ -117,6 +117,10 @@ pub struct EnqueueTurnRequest {
     pub request_id: Option<String>,
     #[serde(default)]
     pub visible_prompt: Option<String>,
+    /// Inline composer images. These are data URLs because a pasted image has
+    /// no stable path for the queued worker to re-open.
+    #[serde(default)]
+    pub images: Vec<String>,
     #[serde(default)]
     pub attachments: Option<serde_json::Value>,
     #[serde(default)]

@@ -181,6 +181,7 @@ function mapCoreChatAttachment(attachment: CoreChatAttachment): NonNullable<Chat
     sizeBytes: attachment.size_bytes,
     previewAvailable: attachment.preview_available,
     privacyDomain: attachment.privacy_domain,
+    previewUrl: attachment.preview_url,
   };
 }
 

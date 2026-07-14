@@ -753,7 +753,8 @@ export async function enqueueTurn(
   prompt: string,
   options?: {
     visiblePrompt?: string;
-    attachments?: unknown;
+    images?: string[];
+    attachments?: ChatAttachmentInput[];
     mode?: string;
     model?: string;
     source?: string;
@@ -767,7 +768,8 @@ export async function enqueueTurn(
       request_id: requestId,
       prompt,
       visible_prompt: options?.visiblePrompt,
-      attachments: options?.attachments,
+      images: options?.images,
+      attachments: options?.attachments?.map(toGatewayAttachmentInput),
       mode: options?.mode,
       model: options?.model,
       source: options?.source ?? "interactive",
@@ -832,4 +834,3 @@ export async function cancelTurn(turnId: string): Promise<void> {
     headers: gatewayHeaders(),
   });
 }
-

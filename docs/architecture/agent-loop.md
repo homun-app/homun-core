@@ -42,6 +42,9 @@ incondizionato, rotte montate sempre — il vecchio gate `turn_broker_enabled()`
 
 1. **POST `/api/chat/turns`** (`enqueue_turn`, `main.rs`) accoda un task `chat_turn`
    sul `TaskStore` e ritorna subito un `turn_id`.
+   Immagini inline (`data:image/...`) e allegati file normalizzati sono input durevoli
+   del task: l'executor li rende visibili al modello e ne conserva i metadati nel
+   messaggio utente, così transcript e turno eseguito restano coerenti dopo un reload.
 2. **L'executor** (`crates/desktop-gateway/src/turn_executor.rs`) esegue il task:
    chiama `start_visible_conversation_turn` poi
    `run_agent_turn_into_message_with_fanout`, cioè fa girare il **loop canonico**.

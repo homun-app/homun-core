@@ -88,7 +88,7 @@ use local_first_capabilities::{
     WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_desktop_gateway::{
-    BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
+    AttachmentInput, BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
     EnqueueTurnRequest, SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest,
     build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
@@ -28958,6 +28958,7 @@ async fn handle_channel_inbound(
                             request_id,
                             prompt: content.clone(),
                             visible_prompt: None,
+                            images: Vec::new(),
                             attachments: None,
                             mode: None,
                             model: None,
@@ -30191,6 +30192,8 @@ async fn run_agent_turn_into_message_with_fanout(
     thread_id: &str,
     prompt: &str,
     tool_policy: &str,
+    images: Vec<String>,
+    attachments: Vec<AttachmentInput>,
     source_user_message_id: &str,
     assistant_message_id: &str,
     turn_id: &str,
@@ -30209,8 +30212,8 @@ async fn run_agent_turn_into_message_with_fanout(
         context,
         max_context_chars: None,
         model: None,
-        images: Vec::new(),
-        attachments: Vec::new(),
+        images,
+        attachments,
         max_tokens: 2000,
         temperature: 0.3,
         wait_if_busy: true,
@@ -31899,6 +31902,7 @@ fn enqueue_chat_turn_core(
     let user_message_thread = input.thread_id.clone();
     let user_message_prompt = input.prompt.clone();
     let user_message_ts = now_epoch_secs().to_string();
+    let user_message_attachments = broker_turn_message_attachments(input);
     local_first_task_runtime::broker::enqueue_chat_turn_atomic(
         &store,
         &user_id,
@@ -31911,11 +31915,65 @@ fn enqueue_chat_turn_core(
                 &user_message_id,
                 &user_message_prompt,
                 &user_message_ts,
+                &user_message_attachments,
             )
             .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))?;
             Ok(())
         },
     )
+}
+
+/// Project durable broker inputs into the transcript once, at enqueue. The
+/// worker later consumes these same inputs, so transcript and model never
+/// disagree about which attachments belong to a turn.
+fn broker_turn_message_attachments(
+    input: &local_first_task_runtime::broker::ChatTurnInput,
+) -> Vec<serde_json::Value> {
+    let mut out = input
+        .attachments
+        .as_ref()
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter_map(|(index, attachment)| {
+            let display_name = attachment.get("display_name")?.as_str()?;
+            let mime_type = attachment
+                .get("mime_type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let kind = if mime_type.starts_with("image/") {
+                "image"
+            } else if mime_type.starts_with("text/") || mime_type == "application/json" {
+                "text"
+            } else {
+                "file"
+            };
+            Some(serde_json::json!({
+                "artifact_id": format!("pending_{}_{}", input.request_id, index),
+                "title_redacted": display_name,
+                "kind": kind,
+                "size_bytes": attachment
+                    .get("size_bytes")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or_default(),
+                "preview_available": kind == "image",
+                "privacy_domain": "local_files",
+            }))
+        })
+        .collect::<Vec<_>>();
+    out.extend(input.images.iter().enumerate().map(|(index, image)| {
+        serde_json::json!({
+            "artifact_id": format!("inline_image_{}_{}", input.request_id, index),
+            "title_redacted": format!("Image {}", index + 1),
+            "kind": "image",
+            "size_bytes": 0,
+            "preview_available": true,
+            "privacy_domain": "local_files",
+            "preview_url": image,
+        })
+    }));
+    out
 }
 
 async fn enqueue_turn(
@@ -31968,6 +32026,7 @@ async fn enqueue_turn(
         request_id: request_id.clone(),
         prompt: req.prompt.clone(),
         visible_prompt: req.visible_prompt.clone(),
+        images: req.images.clone(),
         attachments: req.attachments.clone(),
         mode: req.mode.clone(),
         model: req.model.clone(),
