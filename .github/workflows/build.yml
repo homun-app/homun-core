@@ -137,16 +137,55 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      # Windows/Linux are UNSIGNED but DO publish their installer + latest*.yml to
-      # the release, so the app can detect a new version and offer a DOWNLOAD. This
-      # is safe because the app never AUTO-INSTALLS unsigned platforms: only macOS
-      # (signed) auto-installs; on Windows/Linux the updater is notify-only and
-      # opens the releases page for a manual download (see main.cjs CAN_AUTO_INSTALL
-      # + update-open-download). No silent execution of an unsigned binary. Promote
-      # to full auto-install per-platform once it has real signing (Windows: Azure
-      # Trusted Signing + win.publisherName; Linux AppImage can verify via sha512).
-      - name: Build installer (Windows · unsigned, download-only)
-        if: matrix.platform == 'win'
+      # Windows: sign with the Certum SimplySign cloud cert when possible (best-effort),
+      # otherwise publish UNSIGNED download-only. Unsigned stays SAFE because the app never
+      # auto-installs an unsigned binary — on Windows/Linux the updater is notify-only and
+      # opens the releases page for a manual download (main.cjs CAN_AUTO_INSTALL). SimplySign
+      # login is a fragile tray-GUI flow, so the login AND the signed build both
+      # continue-on-error and fall through to the unsigned path — a signing hiccup must never
+      # block a release. Recipe + secrets: docs/windows-signing.md. (Linux stays unsigned.)
+      - name: SimplySign install + headless login (Windows)
+        id: winsign
+        if: matrix.platform == 'win' && startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
+        shell: pwsh
+        env:
+          SIMPLYSIGN_TOTP_SEED: ${{ secrets.SIMPLYSIGN_TOTP_SEED }}
+          SIMPLYSIGN_LOGIN: ${{ secrets.SIMPLYSIGN_LOGIN }}
+        run: |
+          $url = "https://files.certum.eu/software/SimplySignDesktop/Windows/9.4.4.92/SimplySignDesktop-9.4.4.92-64-bit-en.msi"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\simplysign.msi"
+          $p = Start-Process "msiexec.exe" -ArgumentList "/i","`"$env:RUNNER_TEMP\simplysign.msi`"","/quiet","/norestart" -PassThru
+          if (-not $p.WaitForExit(180000)) { try { $p.Kill() } catch {}; throw "msiexec timed out" }
+          if ($p.ExitCode -ne 0) { throw "msiexec exit $($p.ExitCode)" }
+          ./scripts/simplysign-login.ps1
+          "signed=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Build installer (Windows · signed)
+        id: winbuild_signed
+        if: matrix.platform == 'win' && steps.winsign.outputs.signed == 'true'
+        continue-on-error: true
+        working-directory: apps/desktop
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.RELEASES_TOKEN || '' }}
+        run: |
+          # pwsh array splatting keeps the spaced cert subject as ONE argv element (no quoting
+          # hell). electron-builder 25 moved these under win.signtoolOptions.
+          # Use the built-in env var (not ${{ github.ref }} interpolation) to avoid injection.
+          $publish = if ($env:GITHUB_REF.StartsWith("refs/tags/v")) { "always" } else { "never" }
+          $eb = @(
+            "electron-builder","--win",
+            "-c.win.signtoolOptions.certificateSubjectName=Open Source Developer Fabio Cantone",
+            "-c.win.signtoolOptions.publisherName=Open Source Developer Fabio Cantone",
+            "-c.win.signtoolOptions.rfc3161TimeStampServer=http://time.certum.pl",
+            "--publish",$publish
+          )
+          npx @eb
+          if ($LASTEXITCODE -ne 0) { throw "signed win build failed ($LASTEXITCODE)" }
+
+      - name: Build installer (Windows · unsigned download-only — fallback)
+        if: matrix.platform == 'win' && (steps.winsign.outputs.signed != 'true' || steps.winbuild_signed.outcome == 'failure')
         working-directory: apps/desktop
         run: npx electron-builder --win --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
         env:

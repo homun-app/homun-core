@@ -65,21 +65,30 @@ gh secret set SIMPLYSIGN_DESKTOP_URL  --repo homun-app/homun-core   # incolli l'
    (titolo finestra, TAB, `Start-Sleep`, step di "attivazione token", gestione PIN).
 4. Ripeti finché `signtool verify` è verde e l'artifact `signed-test-exe` è firmato.
 
-## Integrazione in `build.yml` (dopo che il test è verde)
+## Integrazione in `build.yml` — FATTA ✅
 
-Nel job `win` (runner `windows-latest`), **prima** di `electron-builder --win`:
-1. install SimplySign Desktop + run `scripts/simplysign-login.ps1` (gated sui secret).
-2. In `apps/desktop/package.json` → `build.win`:
-   ```json
-   "publisherName": "Open Source Developer Fabio Cantone",
-   "certificateSubjectName": "Open Source Developer Fabio Cantone"
+Nel job `build` (matrix `platform == win`, runner `windows-latest`), sui **tag** `v*`:
+1. **`SimplySign install + headless login (Windows)`** (`continue-on-error`): scarica l'MSI,
+   `msiexec /quiet`, esegue `scripts/simplysign-login.ps1` → il cert entra nello store, e imposta
+   l'output `signed=true`.
+2. **`Build installer (Windows · signed)`** (`continue-on-error`): `electron-builder --win` con la
+   config firma passata **via CLI** (electron-builder 25 → sotto `win.signtoolOptions`):
    ```
-   electron-builder firmerà via signtool con la card virtuale, e `latest.yml` sarà corretto.
-3. (Opzionale) abilitare l'auto-install Windows: oggi `CAN_AUTO_INSTALL` in `electron/main.cjs`
-   è solo `darwin`; con l'exe firmato si può estendere a `win32`.
+   -c.win.signtoolOptions.certificateSubjectName="Open Source Developer Fabio Cantone"
+   -c.win.signtoolOptions.publisherName="Open Source Developer Fabio Cantone"
+   -c.win.signtoolOptions.rfc3161TimeStampServer=http://time.certum.pl
+   ```
+   Firma durante il build → `latest.yml` (sha512) resta corretto in automatico.
+3. **`Build installer (Windows · unsigned … fallback)`**: gira se il login o la firma falliscono
+   (o su non-tag) → esce **non firmato download-only** come prima. Un intoppo SimplySign **non
+   blocca mai il rilascio**.
 
-⚠️ Non aggiungere `certificateSubjectName` alla config finché il login CI non funziona: il
-build win firmerebbe (e fallirebbe) anche senza sessione, rompendo i rilasci non firmati attuali.
+⚠️ **La config firma è SOLO via CLI sullo step firmato, MAI in `package.json`**: se fosse fissa
+in `package.json`, ogni build non-firmata (non-tag / login fallito) proverebbe a firmare e
+fallirebbe. `apps/desktop/package.json` resta invariato.
+
+(Opzionale, futuro) abilitare l'auto-install Windows: oggi `CAN_AUTO_INSTALL` in `electron/main.cjs`
+è solo `darwin`; con l'exe firmato si può estendere a `win32`.
 
 ## Alternativa (se il GUI-login resta troppo fragile)
 
