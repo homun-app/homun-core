@@ -123,8 +123,16 @@ Start-Sleep -Seconds 8   # TODO(ci): tune — wait for the tray app + login wind
 Add-Type -AssemblyName System.Windows.Forms
 $wshell = New-Object -ComObject WScript.Shell
 
-# TODO(ci): confirm the exact window title. Screenshot on failure and adjust.
-$null = $wshell.AppActivate("SimplySign")
+# Diagnostic: SimplySign Desktop is a tray app and may not pop the login window on launch.
+# List every process with a visible window so we can see the login window's exact title
+# (or confirm it's tray-only and needs a different trigger).
+Write-Host "=== windowed processes ==="
+Get-Process | Where-Object { $_.MainWindowTitle } |
+  ForEach-Object { Write-Host "  [$($_.ProcessName)] '$($_.MainWindowTitle)'" }
+
+# TODO(ci): set the real window title once known from the listing above.
+$activated = $wshell.AppActivate("SimplySign")
+Write-Host "AppActivate('SimplySign') -> $activated"
 Start-Sleep -Seconds 2
 
 # TODO(ci): confirm field order. Typical: [login email] TAB [OTP] ENTER.
