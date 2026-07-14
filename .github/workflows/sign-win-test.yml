@@ -1,0 +1,117 @@
+# Isolated harness to bring up Certum SimplySign signing on a Windows CI runner,
+# WITHOUT touching the real release pipeline (build.yml). Run it by hand
+# (workflow_dispatch), iterate on the fragile GUI-login automation until a test
+# .exe signs + verifies, THEN fold the proven steps into build.yml's win job.
+#
+# Why Windows (not a Linux osslsigncode job): signtool + the SimplySign virtual
+# smart card is Certum's supported path and sidesteps the libp11/PKCS#11
+# CKR_FUNCTION_FAILED wall we hit locally. Signing on the same runner as the build
+# also keeps electron-updater's latest.yml hash correct once integrated.
+#
+# Required repo secrets:
+#   SIMPLYSIGN_TOTP_SEED   Base32 TOTP secret (from the setup QR's otpauth:// URI)
+#   SIMPLYSIGN_TOKEN_ID    numeric SimplySign token/account id
+#   SIMPLYSIGN_PIN         card PIN (used by signtool at sign time)
+#   SIMPLYSIGN_DESKTOP_URL direct download URL of the SimplySign Desktop Windows installer
+name: sign-win-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      exe_url:
+        description: "URL of a .exe to sign (defaults to the v0.1.1056 release build)"
+        required: false
+        default: "https://github.com/homun-app/homun-releases/releases/download/v0.1.1056/Homun-0.1.1056-x64.exe"
+
+permissions:
+  contents: read
+
+jobs:
+  sign-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SimplySign Desktop installer
+        shell: pwsh
+        env:
+          # Via env (not inline ${{ }}) to avoid PowerShell/workflow injection.
+          SIMPLYSIGN_DESKTOP_URL: ${{ secrets.SIMPLYSIGN_DESKTOP_URL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:SIMPLYSIGN_DESKTOP_URL)) {
+            throw "Set the SIMPLYSIGN_DESKTOP_URL secret to the Windows installer URL."
+          }
+          Invoke-WebRequest -Uri $env:SIMPLYSIGN_DESKTOP_URL -OutFile "$env:RUNNER_TEMP\simplysign-setup.exe"
+
+      - name: Install SimplySign Desktop (silent)
+        shell: pwsh
+        run: |
+          # TODO(ci): confirm the installer's silent flags (/S for NSIS, /qn for MSI).
+          Start-Process -FilePath "$env:RUNNER_TEMP\simplysign-setup.exe" -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 5
+
+      - name: Headless SimplySign login (OTP + SendKeys)
+        shell: pwsh
+        env:
+          SIMPLYSIGN_TOTP_SEED: ${{ secrets.SIMPLYSIGN_TOTP_SEED }}
+          SIMPLYSIGN_TOKEN_ID: ${{ secrets.SIMPLYSIGN_TOKEN_ID }}
+        run: ./scripts/simplysign-login.ps1
+
+      - name: Download the test executable
+        shell: pwsh
+        env:
+          # Via env (not inline ${{ }}): exe_url is a user-supplied dispatch input.
+          EXE_URL: ${{ inputs.exe_url }}
+        run: Invoke-WebRequest -Uri $env:EXE_URL -OutFile "$env:RUNNER_TEMP\test.exe"
+
+      - name: Sign with signtool
+        shell: pwsh
+        env:
+          SIMPLYSIGN_PIN: ${{ secrets.SIMPLYSIGN_PIN }}
+        run: |
+          # signtool ships with the Windows SDK on windows-latest.
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+                       Sort-Object FullName | Select-Object -Last 1).FullName
+          Write-Host "signtool: $signtool"
+          # $env:THUMBPRINT was exported by the login script.
+          # TODO(ci): SimplySign's CSP may need the PIN. If signtool prompts/fails, the
+          # PIN likely must be supplied at SimplySign Desktop login (add it to the login
+          # script) or via the card's "cache PIN for session" option — tune here.
+          & $signtool sign `
+            /sha1 $env:THUMBPRINT `
+            /fd sha256 /td sha256 `
+            /tr http://time.certum.pl `
+            "$env:RUNNER_TEMP\test.exe"
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed ($LASTEXITCODE)" }
+
+      - name: Verify signature
+        shell: pwsh
+        run: |
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+                       Sort-Object FullName | Select-Object -Last 1).FullName
+          & $signtool verify /pa /v "$env:RUNNER_TEMP\test.exe"
+
+      - name: Upload signed exe
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-test-exe
+          path: ${{ runner.temp }}/test.exe
+
+      - name: Screenshot on failure (debug the GUI login)
+        if: failure()
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+          $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$env:RUNNER_TEMP\screen.png")
+
+      - name: Upload failure screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: login-screenshot
+          path: ${{ runner.temp }}/screen.png
