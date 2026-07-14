@@ -47,9 +47,18 @@ jobs:
       - name: Install SimplySign Desktop (silent)
         shell: pwsh
         run: |
-          # TODO(ci): confirm the installer's silent flags (/S for NSIS, /qn for MSI).
-          Start-Process -FilePath "$env:RUNNER_TEMP\simplysign-setup.exe" -ArgumentList "/S" -Wait
-          Start-Sleep -Seconds 5
+          $setup = "$env:RUNNER_TEMP\simplysign-setup.exe"
+          $fi = Get-Item $setup
+          Write-Host "installer: $([math]::Round($fi.Length/1MB,1)) MB | desc: $($fi.VersionInfo.FileDescription) | product: $($fi.VersionInfo.ProductName)"
+          # SimplySign Desktop ships an Inno Setup installer -> use Inno silent switches
+          # (/S is NSIS-only and silently no-ops here).
+          $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/SP-" -Wait -PassThru
+          Write-Host "installer exit code: $($p.ExitCode)"
+          Start-Sleep -Seconds 8
+          Write-Host "=== SimplySignDesktop.exe found under: ==="
+          Get-ChildItem "C:\Program Files","C:\Program Files (x86)","$env:LOCALAPPDATA","C:\ProgramData" `
+            -Recurse -Depth 5 -Filter "SimplySignDesktop.exe" -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
 
       - name: Headless SimplySign login (OTP + SendKeys)
         shell: pwsh
