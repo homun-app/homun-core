@@ -225,11 +225,30 @@ Invarianti:
     aggiorna `ModelEntry` + salva se cambiato), così la UI di gestione modelli mostra le capacità
     REALI invece delle euristiche da nome. Così
     l'harness **adatta** invece di indovinare (caposaldo #11). **Cablato:** `think:true` solo ai
-    thinking; `tools` (non offre tool a chi non li fa); `vision` (screenshot inviato solo ai
-    vision-model, altrimenti nota testuale → fallback allo snapshot testo). Tutti **fail-safe**:
+    thinking; `tools` (non offre tool a chi non li fa); `vision` → vedi sotto. Tutti **fail-safe**:
     profilo sconosciuto/cloud (None) → comportamento di oggi invariato. **Estratto, rimandato:**
     `context_length` (budget sulla finestra reale tocca il prompt-building → increment dedicato +
     validato). 2 test (`parse_ollama_capabilities`, `ollama_native_root`).
+  - **Vision — chi GUARDA l'immagine** (`crates/desktop-gateway/src/vision.rs`, 2026-07-14). La
+    domanda "questo modello vede?" ha **una sola fonte** (il catalogo, che `/api/show` auto-compila)
+    e **tre** risposte: `Yes | No | Unknown`. Il `Unknown` è essenziale: la cache
+    `ollama_capabilities` è seminata con `unwrap_or_default()` e inserita comunque, quindi per un
+    modello fuori catalogo restituisce un `vision:false` **mai stabilito** — un "non so" travestito
+    da "no". Nessun call-site può leggerla per questa decisione.
+    - **Screenshot del browser** (`GatewayTurnPolicy::supports_vision`): salta l'immagine solo per
+      un modello *noto-cieco*; `Unknown` → la manda (uno screenshot sprecato costa un round; negarlo
+      a chi vedeva acceca l'intero turno di browsing).
+    - **Allegati dell'utente** (`vision::plan_attachments`) fa il trade-off opposto, perché un
+      upload che muore su un 400 è un costo dell'*utente*: `Delegate` (manager noto-cieco → l'immagine
+      NON gli arriva: la descrive il modello del ruolo `vision` in un sub-turno isolato — forma
+      degenere della ricorsione di ADR 0025, un giro e zero tool — e la descrizione prende il posto
+      dell'immagine); `Refuse` (nessuno può vedere → lo diciamo); altrimenti `InlineWithFallback`,
+      cioè la manda **con la rete**: `ModelCallError::ImageUnsupported` non viene streammata, il loop
+      torna con `TurnOutcome.image_rejection` senza aver emesso nulla e `run_agent_rounds` **rigioca
+      il turno** dal seme con le immagini sostituite dalle descrizioni. Invariante: replay **solo** se
+      il turno non ha ancora usato tool (altrimenti effetti collaterali doppi).
+    - Il manager **non cambia mai modello** (ADR 0025 ha ritirato il model-switch di turno): cambia
+      cosa gli arriva. Ruolo `vision` nei Settings (auto-match sui soli modelli vision).
   - **`sanitize_model_text`** (F0.4): spostato in `model_normalize` (+ `strip_tag_blocks`/
     `strip_fullwidth_bar_tokens`) → tutta la normalizzazione testo nel modulo canonico, 1 test.
   - **`parse_text_tool_calls` + `synthesize_tool_calls`** (F0.5): l'ULTIMO pezzo sparpagliato —

@@ -24,7 +24,11 @@ use std::collections::BTreeSet;
 /// that carry pre-loop setup — `messages` (the initial system+user context, built
 /// gateway-side) is the first such field. `Send` (all fields are `Send`) because the
 /// loop runs inside `tokio::spawn`.
-#[derive(Debug, Default)]
+/// `Clone` so a turn can be REPLAYED from its pristine seed: the vision fallback re-runs a turn whose
+/// images the model refused to look at, from a conversation where they've been swapped for a vision
+/// model's description. Only ever cloned before the loop starts (a 2-message state), and only for a
+/// turn that carries images — never mid-loop, where a copy would mean two divergent histories.
+#[derive(Debug, Default, Clone)]
 pub struct LoopState {
     /// The OpenAI-compat conversation array the model sees: seeded gateway-side with the
     /// system+user messages, then grown by the loop (assistant turns, tool results,

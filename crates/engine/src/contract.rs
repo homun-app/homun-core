@@ -60,6 +60,12 @@ pub struct ModelRoundOutput {
 pub enum ModelCallError {
     Upstream(String),
     Transport(String),
+    /// An upstream rejection the caller can RECOVER from: the provider refused the request because it
+    /// cannot look at the image parts it carries. Unlike `Upstream`, this must NOT be streamed or
+    /// committed — the gateway re-seeds the turn with a vision model's description of the images and
+    /// runs it again, and the user should never learn that the first attempt happened. Carries the
+    /// provider's message anyway, for the case where no recovery is possible and it must be shown.
+    ImageUnsupported(String),
 }
 
 /// The single model seam. One `generate` per ReAct round. The future is `+ Send` and `on_delta` is

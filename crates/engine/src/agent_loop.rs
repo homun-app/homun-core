@@ -285,6 +285,23 @@ missing, give what you have and note the gap in one short line.",
                 break;
             }
             Err(crate::ModelCallError::Transport(_)) => break,
+            // The model can't see the images it was sent. This is recoverable — but ONLY as a replay of
+            // the whole turn from a re-seeded conversation, so it is recoverable only while the turn is
+            // still inert. Once a tool has run, replaying would run it twice; at that point the
+            // rejection is just a fatal upstream error like any other.
+            Err(crate::ModelCallError::ImageUnsupported(reason)) => {
+                if turn_used_tools {
+                    last_model_error = Some(reason);
+                    break;
+                }
+                // Return with NOTHING emitted and nothing committed: no Done, no answer, no memory. The
+                // gateway replaces the images with a vision model's description and calls us again, and
+                // the user never sees that this attempt happened.
+                return crate::TurnOutcome {
+                    image_rejection: Some(reason),
+                    ..Default::default()
+                };
+            }
         };
         let raw_content = message
             .get("content")
@@ -975,6 +992,9 @@ Tell me if you want me to retry or rephrase."
         browse_sources,
         // Carry the final runtime plan out for the gateway's turn_trace TurnEnd (observability only).
         final_plan: ls.plan,
+        // Reaching here means the turn ran to completion: any image rejection was either recovered by
+        // the caller before this attempt, or downgraded to a fatal error above.
+        image_rejection: None,
     }
 }
 

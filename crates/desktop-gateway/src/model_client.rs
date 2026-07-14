@@ -273,6 +273,19 @@ check/update the key in Settings → Model & Runtime."
                             .map(|s| s.trim().to_string())
                             .filter(|s| !s.is_empty())
                             .unwrap_or_else(|| err_body.trim().chars().take(240).collect());
+                        // The provider is telling us it cannot LOOK at the images this request carries.
+                        // That is recoverable — the gateway describes them on the vision role and
+                        // replays the turn — so it must not be streamed: emitting here would leave a
+                        // dead 400 stranded in the transcript above an answer that ultimately worked.
+                        // Gated on the request actually carrying an image, so an unrelated failure that
+                        // merely says the word "image" can't trigger a pointless replay.
+                        if crate::vision::messages_have_image(messages)
+                            && crate::vision::looks_like_image_rejection(&detail)
+                        {
+                            return Err(ModelCallError::ImageUnsupported(format!(
+                                "The model «{model}» cannot read images: {detail}"
+                            )));
+                        }
                         let reason = if detail.is_empty() {
                             format!("The model «{model}» responded with an error ({code}).")
                         } else {

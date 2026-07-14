@@ -27,4 +27,13 @@ pub struct TurnOutcome {
     /// so it can only reach the caller through the outcome. Observability-only; no path reads it for
     /// control flow (the `browse` recursion ignores it).
     pub final_plan: serde_json::Value,
+    /// Set when the turn died because the model cannot look at the images it was sent, and NOTHING was
+    /// streamed or committed for it (the loop returns before the final answer). Carries the provider's
+    /// message. The gateway either recovers — describe the images on the `vision` role, re-seed, re-run
+    /// — or, if it has no vision model to fall back on, surfaces this as the turn's answer.
+    ///
+    /// Only ever set on a turn that has not yet executed a tool: a replayed turn must not re-run side
+    /// effects, so a rejection arriving after the model has already acted takes the ordinary (fatal,
+    /// user-visible) error path instead.
+    pub image_rejection: Option<String>,
 }

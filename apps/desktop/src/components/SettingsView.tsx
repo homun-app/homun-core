@@ -159,6 +159,14 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   computer: "settings.computer",
 };
 
+// Roles that quietly lose a capability when no installed model meets their requirements — the picker
+// shows nothing and the user is never told why the feature isn't there. Keyed by role; a role absent
+// here degrades gracefully enough not to warrant a warning.
+const MISSING_ROLE_HINTS: Record<string, string> = {
+  image_generation: "settings.imageRoleMissingHint",
+  vision: "settings.visionRoleMissingHint",
+};
+
 export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewProps) {
   const { t } = useTranslation();
   const [model, setModel] = useState<ActiveModelInfo | null>(null);
@@ -1645,17 +1653,24 @@ function RuntimePane({
   const isCustomPreset = preset.id === "custom";
   const modalProvider = modal && modal !== "add" ? providers.find((p) => p.id === modal) : undefined;
 
-  // Per-role options: the image-generation role lists ONLY image-modality models
-  // (a chat model can't draw); every other role excludes image models. Empty
-  // optgroups are dropped so the picker reads cleanly.
+  // Per-role options, gated by what the role actually REQUIRES of a model (mirrors the backend's
+  // `role_requirements`): image-generation lists only image-modality models (a chat model can't draw),
+  // vision lists only models that can see (offering a text-only model as the image reader would
+  // configure a blind eye), and every other role excludes image models. Empty optgroups are dropped so
+  // the picker reads cleanly.
+  const modelEligibleForRole = (
+    model: { modality?: string; vision?: boolean },
+    roleKey: string,
+  ) => {
+    if (roleKey === "image_generation") return model.modality === "image";
+    if (roleKey === "vision") return model.modality !== "image" && !!model.vision;
+    return model.modality !== "image";
+  };
   const modelOptionsForRole = (roleKey: string) => {
-    const wantImage = roleKey === "image_generation";
     return (
       <>
         {providers.map((provider) => {
-          const models = provider.models.filter((m) =>
-            wantImage ? m.modality === "image" : m.modality !== "image",
-          );
+          const models = provider.models.filter((m) => modelEligibleForRole(m, roleKey));
           if (models.length === 0) return null;
           return (
             <optgroup key={provider.id} label={provider.label}>
@@ -1673,14 +1688,10 @@ function RuntimePane({
       </>
     );
   };
-  const hasModelOptionsForRole = (roleKey: string) => {
-    const wantImage = roleKey === "image_generation";
-    return providers.some((provider) =>
-      provider.models.some((model) =>
-        wantImage ? model.modality === "image" : model.modality !== "image",
-      ),
+  const hasModelOptionsForRole = (roleKey: string) =>
+    providers.some((provider) =>
+      provider.models.some((model) => modelEligibleForRole(model, roleKey)),
     );
-  };
 
   // Every provider shown at once: the whole catalog plus any custom endpoints the
   // user added. A configured provider (matched to a preset by base URL, or a
@@ -1748,7 +1759,13 @@ function RuntimePane({
           ) : (
             roles.map((role) => {
               const value = role.auto ? "auto" : `${role.binding_provider_id}::${role.binding_model}`;
-              const missingImageRole = role.key === "image_generation" && !hasModelOptionsForRole(role.key);
+              // A role whose requirements no installed model meets: the picker would be empty and the
+              // capability silently absent, so say what will happen instead (no image generation; no
+              // one to read attached images for a text-only chat model).
+              const missingRoleHint =
+                hasModelOptionsForRole(role.key) || !MISSING_ROLE_HINTS[role.key]
+                  ? null
+                  : t(MISSING_ROLE_HINTS[role.key]);
               return (
                 <div className="mdl-row" key={role.key}>
                   <div className="mdl-row-main">
@@ -1759,9 +1776,7 @@ function RuntimePane({
                       </span>
                     </div>
                     <p className="mdl-detail-sub">{role.description}</p>
-                    {missingImageRole && (
-                      <p className="mdl-row-warning">{t("settings.imageRoleMissingHint")}</p>
-                    )}
+                    {missingRoleHint && <p className="mdl-row-warning">{missingRoleHint}</p>}
                   </div>
                   <select
                     className="set-input mdl-row-select"

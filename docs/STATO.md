@@ -5,6 +5,60 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-14.**
 
+## ⭐ CHECKPOINT 2026-07-14 (bis) — vision routing: chi GUARDA l'immagine (ruolo `vision` + sub-turno)
+
+Seguito diretto del checkpoint qui sotto: le immagini ora **arrivano** al modello, ma nessuno controllava
+se quel modello sappia vederle → con un manager text-only (es. `deepseek-v4-pro:cloud`) l'utente riceveva
+il 400 grezzo del provider ("this model does not support image input — pick another model in Settings").
+Diagnosi: il ruolo `vision` esisteva in `role_requirements` ma **non aveva call-site** né voce nei Settings
+(mai perso: mai cablato); l'unica vision-awareness era il gate screenshot del browser, che *salta* l'immagine
+e non instrada.
+
+Fix, nella forma di ADR 0025 (delega ricorsiva, NON il model-switch di turno che 0025 ha ritirato):
+- **`crates/desktop-gateway/src/vision.rs`** (nuovo, tutto puro + il sub-turno): `VisionSupport`
+  {Yes,No,Unknown} — tre stati, perché "so che è cieco" ≠ "non so"; `plan_attachments` →
+  `Inline | InlineWithFallback | Delegate | Refuse`. Solo un modello **noto-cieco** si vede togliere
+  l'immagine (`Delegate`: la descrive il modello del ruolo `vision`, il manager resta il suo);
+  gli altri la ricevono, con la **rete** sotto se un modello vision esiste.
+- **Fallback ottimista** (`InlineWithFallback`): `ModelCallError::ImageUnsupported` (nuova variante
+  tipizzata) NON viene streammata; il loop torna con `TurnOutcome.image_rejection` senza aver emesso né
+  committato nulla, e `run_agent_rounds` **rigioca il turno** dal seme con le immagini sostituite dalle
+  descrizioni. Invariante: replay **solo** se il turno non ha ancora usato tool (altrimenti effetti doppi).
+- **Una sola verità** su "questo modello vede?": il **catalogo** (`ModelEntry.vision`, che `/api/show`
+  auto-compila). `GatewayTurnPolicy::supports_vision` non interroga più `ollama_capabilities` (cieco sui
+  cloud, e con `unwrap_or_default()` fabbrica un `false` mai stabilito).
+- **Bug di classe trovato dal test**: `auto_role` ripiegava sul modello attivo *ignorando il gate duro* →
+  il ruolo `vision` avrebbe restituito un modello cieco (e `image_generation` un modello di chat). Ora un
+  ruolo con gate duro (`needs_vision` / modality ≠ text) torna `None` invece di un modello che non sa fare
+  il lavoro. Chiude anche il difetto latente di `image_generation`.
+- Settings: ruolo **Vision** (data-driven da `ROLES`), picker filtrato ai soli modelli vision, avviso
+  generalizzato quando nessun modello soddisfa un ruolo.
+
+**⭐ Il test live ha scoperto il difetto più grosso — il CATALOGO mentiva.** Il primo giro reale è
+finito su `Delegate` (giusto) ma con descrizione fallita: il ruolo aveva auto-scelto
+`qwen3-vl:235b-cloud`, **ritirato da Ollama il 2026-06-16** (`410 Gone`). Causa: `ModelEntry.vision`
+era inferito **dal NOME** (`-vl`/`vision`/`llava`/`gemini`/`pixtral`…) anche per Ollama, che invece
+**dichiara** le capacità su `/api/show`. Nel catalogo di Fabio l'euristica dava per ciechi tutti e 8 i
+modelli vision veri (gemma4, minimax-m3, kimi-k2.5/2.6, qwen3.5, ministral-3) e flaggava vision l'unico
+morto. Fix:
+- **Il refresh del catalogo CHIEDE invece di indovinare** (`refresh_provider_models`): per i provider
+  Ollama interroga `/api/show` per ogni modello e sovrascrive `vision/tools/reasoning/modality/
+  context_window` con le capacità **reali**. L'euristica sul nome torna al suo ruolo: fallback per i
+  provider che tacciono.
+- **`ModelReport` {Capabilities, Retired, Unknown}** (`classify_model_report`, puro+testato): un `410`
+  ("was retired at …") è una **dichiarazione**, non un guasto → il modello perde i flag e nessun ruolo
+  lo pesca più. Un errore qualsiasi/Ollama vecchio = `Unknown` → si TIENE l'euristica (mai degradare un
+  modello sul nostro silenzio). ⚠️ Un ritirato NON risponde con `capabilities: []` (assunzione errata
+  fatta a metà lavoro e corretta): il campo è **assente** e lo status è **410**.
+- **Rete anche per il lettore**: `describe_images` scorre `vision_model_candidates()` (ruolo risolto,
+  poi gli altri eleggibili) e si ferma al primo che risponde, restando su quello. Un candidato morto
+  costa un retry, non la capacità.
+
+**LIVE-VALIDATO 2026-07-14** da Fabio: allegato reale su manager `deepseek-v4-pro:cloud` (text-only) →
+descritto via ruolo vision, nessun 400. 3 ritirati stanati e demoti (`glm-4.6:cloud`, `minimax-m2:cloud`,
+`qwen3-vl:235b-cloud`). Gate verdi: `cargo test --workspace`, `npm run build`, `npm run test:ui-contract`,
+`pre_release_gate.py`. Rilasciato in **v0.1.1059**.
+
 ## ⭐ CHECKPOINT 2026-07-14 — immagini inline nei turni broker
 
 Fix del difetto per cui un'immagine incollata o trascinata appariva nel composer ma il modello rispondeva

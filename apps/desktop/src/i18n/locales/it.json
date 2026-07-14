@@ -851,6 +851,7 @@
     "operationFailed": "Operazione non riuscita: {{message}}",
     "addProviderAndRefresh": "Add un provider e aggiorna i suoi modelli.",
     "imageRoleMissingHint": "Nessun modello di generazione immagini disponibile. I deck verranno creati senza immagini generate finché non abiliti un provider image-capable o aggiorni il suo catalogo modelli.",
+    "visionRoleMissingHint": "Nessun modello capace di vedere le immagini è disponibile. Se alleghi un'immagine a una chat il cui modello non vede, Homun dovrà dirti che non riesce a leggerla: installa o abilita un modello vision perché legga le immagini per qualsiasi chat.",
     "stageSemantic": "semantico",
     "stageSingle": "unico",
     "stageHeuristic": "euristico",

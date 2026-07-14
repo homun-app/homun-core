@@ -422,8 +422,10 @@ pub struct RoleInfo {
     pub description: &'static str,
 }
 
-/// The roles wired today. Vision/embeddings/image-gen will be added here when
-/// their call sites exist (image generation is a separate, later phase).
+/// The roles wired today. A role belongs here only once it has a CALL SITE — an entry with nobody
+/// asking for it is a Settings control that silently does nothing (which is what `vision` was until
+/// the attachment path started routing through it). `embeddings` is still resolved at its own call
+/// site rather than picked here.
 pub const ROLES: &[RoleInfo] = &[
     RoleInfo {
         key: "orchestrator",
@@ -444,6 +446,11 @@ pub const ROLES: &[RoleInfo] = &[
         key: "memory",
         label: "Memory",
         description: "Extracting facts/preferences from conversations: a fast and cheap model is best.",
+    },
+    RoleInfo {
+        key: "vision",
+        label: "Vision",
+        description: "Reads images for a chat model that cannot see them: when you attach a picture or a scanned PDF to a chat whose model is text-only, this model looks at it and describes it, so you don't have to switch models by hand. Only vision-capable models are listed.",
     },
     RoleInfo {
         key: "privacy_guard",
@@ -757,8 +764,19 @@ impl ProviderRegistry {
                 tier,
             });
         }
-        // No catalog yet: use the active provider's current model so roles still
-        // resolve before "Aggiorna modelli" has run.
+        // Nothing passed the gate. For a role that merely PREFERS a kind of model (a tier, a wide
+        // context), fall back to the active provider's current model so roles still resolve before
+        // "Aggiorna modelli" has run — any chat model can do the job, just less well.
+        //
+        // But a role with a HARD capability gate must NOT be satisfied this way. Handing back a
+        // text-only model as "the model that reads images", or a chat model as "the model that draws",
+        // doesn't make the capability exist — it just moves the failure to the provider, as a 400 the
+        // user has to decode. That is the exact bug this gate exists to prevent, and callers are
+        // written to handle `None`: no vision model means Homun SAYS it cannot read the image, and no
+        // image model means decks are built without generated images.
+        if req.needs_vision || req.modality != "text" {
+            return None;
+        }
         let provider = self.active()?;
         let model = provider.effective_model()?;
         let tier = self.tier_for(&provider.id, &model);
@@ -1075,6 +1093,25 @@ mod tests {
         let resolved = reg.resolve_role("image_generation").unwrap();
         assert_eq!(resolved.model, "z-image");
         assert!(resolved.auto);
+    }
+
+    #[test]
+    fn vision_role_auto_picks_a_model_that_can_actually_see() {
+        // The point of the role: the user attaches an image to a chat running a text-only model and
+        // never has to know that a different model read it. So it must resolve with NO configuration —
+        // and it must never resolve to a model that can't see, which is the whole failure it exists to
+        // prevent.
+        let mut reg = registry_with_two_models();
+        // A catalog of text-only models has nobody to do the job: better no role than a blind one.
+        assert!(reg.resolve_role("vision").is_none());
+
+        let mut ollama = reg.providers[0].clone();
+        ollama.models.push(ModelEntry::inferred("qwen3-vl:8b"));
+        reg.upsert(ollama);
+
+        let resolved = reg.resolve_role("vision").expect("a vision model resolves");
+        assert!(resolved.auto, "no pin needed — it just works");
+        assert_eq!(resolved.model, "qwen3-vl:8b");
     }
 
     #[test]

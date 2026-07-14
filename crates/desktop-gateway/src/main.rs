@@ -43,6 +43,7 @@ mod sandbox;
 mod seatbelt;
 mod task_registry;
 mod temporal;
+mod vision;
 mod turn_executor;
 mod ws_gateway;
 mod tool_exec;
@@ -15520,6 +15521,79 @@ fn parse_ollama_capabilities(show_body: &serde_json::Value) -> OllamaCapabilitie
     }
 }
 
+/// What a provider told us about one model when we asked.
+///
+/// The three cases are genuinely different and must not be flattened. Ollama answers `/api/show` with
+/// `200 + capabilities[]` for a live model, and with **`410 Gone`** — `"qwen3-vl:235b was retired at
+/// 2026-06-16"` — for one it has withdrawn. Anything else (unreachable, an older Ollama that doesn't
+/// report capabilities, a body we can't parse) tells us nothing at all.
+#[derive(Debug, PartialEq, Eq)]
+enum ModelReport {
+    /// The provider spoke: this is what the model can do.
+    Capabilities(Vec<String>, Option<u64>),
+    /// The provider says the model is GONE. Not an outage — a statement. A retired model must lose its
+    /// capability flags, or the name heuristic keeps it eligible and the router happily picks a model
+    /// that cannot be called (this is not hypothetical: a retired `qwen3-vl` was auto-matched as the
+    /// app's only eye, while eight live multimodal models sat unflagged beside it).
+    Retired,
+    /// We learned nothing. KEEP whatever we already believed — never downgrade a model on our silence.
+    Unknown,
+}
+
+/// Classify an `/api/show` response. Pure, so the three-way distinction is testable without a provider.
+fn classify_model_report(status: u16, body: &serde_json::Value) -> ModelReport {
+    // 410 is the retirement code; some providers phrase it in the body instead, so honour both.
+    let says_retired = body
+        .get("error")
+        .and_then(|e| e.as_str())
+        .is_some_and(|e| e.to_ascii_lowercase().contains("retired"));
+    if status == 410 || says_retired {
+        return ModelReport::Retired;
+    }
+    if status != 200 {
+        return ModelReport::Unknown;
+    }
+    let Some(caps) = body.get("capabilities").and_then(|c| c.as_array()) else {
+        // 200 without the field = an older Ollama. Silence, not a verdict.
+        return ModelReport::Unknown;
+    };
+    ModelReport::Capabilities(
+        caps.iter()
+            .filter_map(|c| c.as_str().map(str::to_string))
+            .collect(),
+        parse_ollama_capabilities(body).context_length,
+    )
+}
+
+/// Overwrite a catalog entry's capability flags with what the provider actually REPORTS.
+///
+/// `ModelEntry::inferred`'s name heuristic (`-vl`, `vision`, `gemini`, …) is the fallback for providers
+/// that cannot tell us what their models do. Using it where the provider CAN tell us is indefensible,
+/// and it showed: it flagged a retired `-vl` model as the app's only eye while calling eight genuinely
+/// multimodal models (gemma4, minimax-m3, kimi, qwen3.5, ministral-3) blind, because their names happen
+/// not to contain the magic words. Ask, don't guess.
+fn apply_reported_capabilities(
+    entry: &mut model_registry::ModelEntry,
+    caps: &[String],
+    context_length: Option<u64>,
+) {
+    let has = |name: &str| caps.iter().any(|c| c == name);
+    entry.vision = has("vision");
+    entry.tools = has("tools");
+    entry.reasoning = has("thinking");
+    entry.modality = if has("embedding") {
+        "embedding"
+    } else if has("image") {
+        "image"
+    } else {
+        "text"
+    }
+    .to_string();
+    if let Some(tokens) = context_length {
+        entry.context_window = u32::try_from(tokens).ok();
+    }
+}
+
 fn ollama_capabilities_cache()
 -> &'static std::sync::Mutex<std::collections::HashMap<String, OllamaCapabilities>> {
     static CELL: std::sync::OnceLock<
@@ -16044,6 +16118,63 @@ fn browser_openai_stream_config() -> Option<(String, String, Option<String>)> {
     }
     let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
     Some((resolved.base_url, resolved.model, api_key))
+}
+
+/// The model that LOOKS AT IMAGES on behalf of a chat model that can't (the `vision` role).
+///
+/// No fallback to the orchestrator, unlike the other roles: a chat model that cannot see is precisely
+/// the case we are covering, so falling back to it would be a no-op that fails at the provider. `None`
+/// means "nobody here can look at an image" — an answer the caller must handle, not paper over.
+fn vision_openai_config() -> Option<(String, String, Option<String>)> {
+    let resolved = load_provider_registry().resolve_role("vision")?;
+    let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+    Some((resolved.base_url, resolved.model, api_key))
+}
+
+/// Every model that could read an image, best first: the resolved `vision` role, then the other
+/// eligible vision models as backups.
+///
+/// One candidate is not enough, and we learned that the hard way: the role auto-matched a
+/// vision model the provider had RETIRED upstream, so the describe call 410'd and the capability was
+/// simply gone — even though another live vision model sat right there in the catalog. A catalog is a
+/// claim about the world, not the world. The whole point of this feature is that the user doesn't pay
+/// for our model bookkeeping being wrong, and that has to hold for the reader too, not just the
+/// manager.
+fn vision_model_candidates() -> Vec<vision::VisionModel> {
+    let registry = load_provider_registry();
+    let mut out: Vec<vision::VisionModel> = Vec::new();
+    let mut push = |provider_id: &str, base_url: String, model: String| {
+        if out.iter().any(|c| c.base_url == base_url && c.model == model) {
+            return;
+        }
+        let api_key = provider_api_key(provider_id).or_else(env_inference_api_key);
+        out.push(vision::VisionModel {
+            base_url,
+            model,
+            api_key,
+        });
+    };
+    // The role's own answer (an explicit pin, or the ranker's pick) goes first.
+    if let Some(resolved) = registry.resolve_role("vision") {
+        push(&resolved.provider_id, resolved.base_url, resolved.model);
+    }
+    // …then everyone else that passes the vision gate, as fallbacks.
+    for (provider, model) in registry.eligible_models("vision") {
+        push(&provider.id, provider.base_url.clone(), model.id.clone());
+    }
+    out
+}
+
+/// Is there anyone at all who can look at an image? Drives `vision::plan_attachments`.
+fn has_vision_model() -> bool {
+    !vision_model_candidates().is_empty()
+}
+
+/// Can THIS model look at an image? The one predicate — every call site that used to answer this for
+/// itself (the browser screenshot gate, and the attachment path, which used to not ask at all) now
+/// asks here. See `vision::vision_support` for why the catalog is the only signal consulted.
+fn model_vision_support(base_url: &str, model: &str) -> vision::VisionSupport {
+    vision::vision_support(registry_model_capabilities(base_url, model).map(|caps| caps.vision))
 }
 
 /// Provider/model for background MEMORY extraction: prefers the "memory" role
@@ -24630,7 +24761,9 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         serde_json::Value::Array(parts)
     };
     // Built once here, then moved into `ls.messages` at the loop's start (the loop grows it).
-    let messages = vec![
+    // `mut` because the vision policy below may swap the images out for a description (see
+    // `vision::AttachmentPlan`) before the manager ever sees them.
+    let mut messages = vec![
         serde_json::json!({ "role": "system", "content": system }),
         serde_json::json!({ "role": "user", "content": user_content }),
     ];
@@ -24688,6 +24821,55 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             .body(body)
             .expect("valid streaming response"));
     }
+
+    // Vision: this turn carries images, so decide WHO is allowed to look at them before the loop
+    // starts — the manager itself, a vision model standing in for it, or nobody. The manager's model
+    // never changes (ADR 0025 retired the mid-turn model switch); what changes is what reaches it.
+    let vision_fallback_armed = if vision::messages_have_image(&messages) {
+        match vision::plan_attachments(model_vision_support(&base_url, &model), has_vision_model()) {
+            // Known-blind manager and nobody to read for it. Say so — shipping the image to a provider
+            // that will reject it, and calling the rejection an answer, is what we're here to stop.
+            vision::AttachmentPlan::Refuse => {
+                let _ = emit_stream_event(
+                    &tx,
+                    GenerateStreamEvent::Done {
+                        text: vision::no_vision_model_message(&model),
+                        metrics: TokenMetrics::zero(),
+                        redacted_user_text: None,
+                    },
+                )
+                .await;
+                schedule_stream_registry_cleanup(resume_id.clone());
+                let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+                    rx.recv().await.map(|item| (item, rx))
+                }));
+                return Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/x-ndjson")
+                    .header("x-effective-model", "vision")
+                    .body(body)
+                    .expect("valid streaming response"));
+            }
+            // Known-blind manager, but a vision model can stand in: it looks at the image and its
+            // description takes the image's place. Same message, same position — only the modality
+            // changed, and the manager keeps its own model, tools and context.
+            vision::AttachmentPlan::Delegate => {
+                let readers = vision_model_candidates();
+                let images = vision::collect_image_urls(&messages);
+                let descriptions =
+                    vision::describe_images(&state.http, &readers, &images, &prompt).await;
+                vision::replace_images_with_descriptions(&mut messages, &descriptions);
+                false
+            }
+            // Sent inline, as before. The difference is only whether a vision model exists to rescue
+            // the turn should the provider refuse the image anyway (see `run_agent_rounds`).
+            vision::AttachmentPlan::InlineWithFallback => true,
+            vision::AttachmentPlan::Inline => false,
+        }
+    } else {
+        false
+    };
+
     // Dedicated STREAMING client: HTTP/1.1 (avoids HTTP/2 RST_STREAM that CDNs in
     // front of cloud model hosts can throw on long streams) + no idle connection
     // reuse (a stale pooled keep-alive connection is a classic cause of the
@@ -24938,7 +25120,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, &turn_trace).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, &turn_trace, vision_fallback_armed).await;
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
         // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
@@ -25060,6 +25242,10 @@ async fn run_agent_rounds(
     // Readable per-turn observability sink (ported): passed into the capability executor (Plan event)
     // and into `run_turn` (the in-loop events). No-op when disabled. See `engine::turn_trace`.
     turn_trace: &local_first_engine::turn_trace::TurnTrace,
+    // The turn is sending images to a model on a guess (`AttachmentPlan::InlineWithFallback`), and a
+    // vision model exists to describe them if the provider refuses. Passed rather than re-derived here:
+    // the policy is decided ONCE, in `vision::plan_attachments`, and this is its consequence.
+    vision_fallback_armed: bool,
 ) -> local_first_engine::TurnOutcome {
     // Build the seams `engine::run_turn` runs against — thin gateway adapters over AppState/transport/
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
@@ -25111,11 +25297,30 @@ async fn run_agent_rounds(
     let turn_policy = GatewayTurnPolicy { route: capability_route_for_runtime };
     let completion_judge = GatewayTurnCompletionJudge { state: state_owned.clone() };
 
+    // Vision fallback (`AttachmentPlan::InlineWithFallback`): this turn's images ride the manager's
+    // first call on nothing better than a catalog's opinion. Keep the turn's PRISTINE seed so we can
+    // replay it: a provider that refuses to look at the images kills the turn before it has streamed a
+    // token or run a tool (`TurnOutcome::image_rejection` — see the engine's early return), so we can
+    // describe them on the vision role and re-run from a conversation the manager can actually read.
+    // The user gets one answer, not a 400 followed by an apology. Cloning the seed is cheap (2
+    // messages) and happens only for image turns that have a vision model to fall back on.
+    let vision_seed = vision_fallback_armed.then(|| {
+        (
+            ls.clone(),
+            cfg.clone(),
+            memory_user_message.clone(),
+            memory_answer.clone(),
+            last_model_error.clone(),
+            browse_sources.clone(),
+            trace_dir.clone(),
+        )
+    });
+
     // ADR 0024 inc 5, 5.D2 — THE MOVE landed: the single guarded ReAct loop (motore #1) lives in
     // `engine::run_turn`. The gateway builds the seams above and invokes the ONE canonical loop — no
     // flag, no inline copy (converge, don't duplicate). ADR 0025 (browse-as-recursion) invokes this
     // same `run_turn` recursively for the browser.
-    local_first_engine::agent_loop::run_turn(
+    let outcome = local_first_engine::agent_loop::run_turn(
         ls,
         cfg,
         &model_client,
@@ -25138,6 +25343,82 @@ async fn run_agent_rounds(
         turn_used_tools,
         browse_sources,
         trace_dir,
+        turn_trace,
+    )
+    .await;
+
+    // The common case: the turn ran (whatever it concluded).
+    let Some(rejection) = outcome.image_rejection.clone() else {
+        return outcome;
+    };
+
+    let Some((mut seed_ls, seed_cfg, seed_user_msg, seed_answer, seed_error, seed_sources, seed_trace)) =
+        vision_seed
+    else {
+        // The model can't read the image and we have nobody to read it for us. The turn emitted
+        // nothing, so this is its answer — the one case where the provider's refusal is the honest
+        // thing to show.
+        let _ = emit_stream_event(
+            tx,
+            GenerateStreamEvent::Done {
+                text: rejection.clone(),
+                metrics: TokenMetrics::zero(),
+                redacted_user_text: None,
+            },
+        )
+        .await;
+        return local_first_engine::TurnOutcome {
+            memory_answer: rejection,
+            ..outcome
+        };
+    };
+
+    let readers = vision_model_candidates();
+    if readers.is_empty() {
+        // Armed at seed time but gone now (the role was cleared mid-turn) — same dead end.
+        let _ = emit_stream_event(
+            tx,
+            GenerateStreamEvent::Done {
+                text: rejection.clone(),
+                metrics: TokenMetrics::zero(),
+                redacted_user_text: None,
+            },
+        )
+        .await;
+        return local_first_engine::TurnOutcome {
+            memory_answer: rejection,
+            ..outcome
+        };
+    }
+
+    // Recover: describe the images the manager was refused, put the text where they were, run again.
+    let images = vision::collect_image_urls(&seed_ls.messages);
+    let descriptions = vision::describe_images(&http, &readers, &images, &prompt).await;
+    vision::replace_images_with_descriptions(&mut seed_ls.messages, &descriptions);
+
+    local_first_engine::agent_loop::run_turn(
+        seed_ls,
+        seed_cfg,
+        &model_client,
+        &capability_executor,
+        &mut browser_executor,
+        &plan_progress,
+        &completion_judge,
+        &compactor,
+        &turn_policy,
+        tx,
+        temperature,
+        thread_id.as_deref(),
+        &composio_writes,
+        &catalog_index,
+        seed_user_msg,
+        seed_answer,
+        seed_error,
+        final_done,
+        plan_nudges,
+        turn_used_tools,
+        seed_sources,
+        seed_trace,
         turn_trace,
     )
     .await
@@ -31632,8 +31913,14 @@ impl local_first_engine::TurnPolicy for GatewayTurnPolicy {
     }
 
     fn supports_vision(&self, base_url: &str, model: &str) -> bool {
-        // Undetected/cloud providers report no capabilities → default to sending the image (as today).
-        ollama_capabilities(base_url, model).map(|c| c.vision).unwrap_or(true)
+        // The browser's screenshot gate: skip the image ONLY for a model the catalog confidently calls
+        // text-only. `Unknown` still sends — a screenshot wasted on a blind model costs one round,
+        // whereas withholding it from a model that CAN see blinds the whole browsing turn. (The user's
+        // own uploads make the opposite trade: see `vision::plan_attachments`.)
+        !matches!(
+            model_vision_support(base_url, model),
+            vision::VisionSupport::No
+        )
     }
 }
 
@@ -42272,6 +42559,51 @@ async fn refresh_provider_models(
         })?;
     let ids = model_registry::parse_models_response(entry.kind, &body);
 
+    // Ask each model what it can DO. Ollama answers on `/api/show`, so the name heuristic has no
+    // business deciding here — it is the fallback for providers that stay SILENT, and using it where
+    // the provider speaks is what flagged a retired `-vl` model as the app's only eye while calling
+    // eight genuinely multimodal models (gemma4, minimax-m3, kimi, qwen3.5, ministral-3) blind, purely
+    // because their names lack the magic substrings. Best-effort per model: `Unknown` keeps the
+    // heuristic (fail-safe), `Retired` strips it (see `ModelReport`).
+    let mut reported: std::collections::HashMap<String, ModelReport> =
+        std::collections::HashMap::new();
+    if matches!(entry.kind, ProviderKind::Ollama) {
+        let show_endpoint = format!("{}/api/show", ollama_native_root(&entry.base_url));
+        for model_id in &ids {
+            let Ok(response) = state
+                .http
+                .post(&show_endpoint)
+                .json(&serde_json::json!({ "name": model_id }))
+                .timeout(std::time::Duration::from_secs(8))
+                .send()
+                .await
+            else {
+                continue;
+            };
+            let status = response.status().as_u16();
+            let show_body = response
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or(serde_json::Value::Null);
+            match classify_model_report(status, &show_body) {
+                ModelReport::Unknown => {}
+                report => {
+                    if report == ModelReport::Retired {
+                        eprintln!(
+                            "[gateway] catalog: «{model_id}» is retired upstream — dropping its capabilities so no role picks it"
+                        );
+                    }
+                    reported.insert(model_id.clone(), report);
+                }
+            }
+        }
+    }
+    // The per-process capability memo is now stale for these models (it may hold the very flags we
+    // just corrected). Drop it; `warm_ollama_capabilities` refills it from the fixed catalog.
+    if let Ok(mut cache) = ollama_capabilities_cache().lock() {
+        cache.clear();
+    }
+
     if let Some(stored) = registry.get_mut(&id) {
         // Preserve the user's manual profile edits across a catalog refresh;
         // re-infer everything else (so heuristic fixes apply).
@@ -42289,6 +42621,16 @@ async fn refresh_provider_models(
             .iter()
             .map(|model_id| {
                 let mut entry = model_registry::ModelEntry::inferred(model_id);
+                // The provider's own report wins over the name heuristic wherever we got one. A retired
+                // model is reported as having no capabilities at all → it drops out of every role's
+                // eligible set, instead of being recommended on the strength of its name.
+                match reported.get(model_id) {
+                    Some(ModelReport::Capabilities(caps, context_length)) => {
+                        apply_reported_capabilities(&mut entry, caps, *context_length);
+                    }
+                    Some(ModelReport::Retired) => apply_reported_capabilities(&mut entry, &[], None),
+                    Some(ModelReport::Unknown) | None => {}
+                }
                 if let Some(profile) = user_profiles.get(model_id) {
                     entry.profile = Some(profile.clone());
                 }
@@ -56947,6 +57289,63 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         // Missing everything → all false / None, never panics.
         let empty = super::parse_ollama_capabilities(&serde_json::json!({}));
         assert_eq!(empty, super::OllamaCapabilities::default());
+    }
+
+    #[test]
+    fn a_silent_provider_and_a_retired_model_are_not_the_same_thing() {
+        use super::ModelReport;
+        // The real shape of a retirement, verbatim from Ollama: 410 + "was retired at".
+        assert_eq!(
+            super::classify_model_report(
+                410,
+                &serde_json::json!({ "error": "qwen3-vl:235b was retired at 2026-06-16 00:00:00" })
+            ),
+            ModelReport::Retired
+        );
+        // An outage or an older Ollama teaches us NOTHING — we must not downgrade a model on our own
+        // silence, which would quietly delete a working capability.
+        assert_eq!(
+            super::classify_model_report(500, &serde_json::json!({ "error": "internal" })),
+            ModelReport::Unknown
+        );
+        assert_eq!(
+            super::classify_model_report(200, &serde_json::json!({ "model_info": {} })),
+            ModelReport::Unknown
+        );
+        // A live model speaks.
+        assert_eq!(
+            super::classify_model_report(
+                200,
+                &serde_json::json!({ "capabilities": ["completion", "vision", "tools"] })
+            ),
+            ModelReport::Capabilities(
+                vec!["completion".into(), "vision".into(), "tools".into()],
+                None
+            )
+        );
+    }
+
+    #[test]
+    fn the_provider_report_overrides_the_name_heuristic_both_ways() {
+        // `gemma4` has none of the magic substrings, yet Ollama reports vision — the name heuristic
+        // called it blind and hid it from the vision role. The report must win.
+        let mut seeing = super::model_registry::ModelEntry::inferred("gemma4:12b");
+        assert!(!seeing.vision, "the heuristic guesses wrong here — that's the point");
+        super::apply_reported_capabilities(
+            &mut seeing,
+            &["completion".into(), "vision".into(), "tools".into()],
+            Some(128_000),
+        );
+        assert!(seeing.vision && seeing.tools);
+        assert_eq!(seeing.modality, "text");
+        assert_eq!(seeing.context_window, Some(128_000));
+
+        // And the other way: `-vl` in the name made a RETIRED model look like the app's only eye.
+        // An empty report strips it of every capability, so no role can auto-match it.
+        let mut retired = super::model_registry::ModelEntry::inferred("qwen3-vl:235b-cloud");
+        assert!(retired.vision, "the heuristic trusted the name");
+        super::apply_reported_capabilities(&mut retired, &[], None);
+        assert!(!retired.vision && !retired.tools && !retired.reasoning);
     }
 
     #[test]
