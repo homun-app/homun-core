@@ -113,11 +113,14 @@ if (-not (Test-Path $SimplySignExe)) {
   throw "SimplySign Desktop executable not found after install (see listing above)."
 }
 Write-Host "SimplySign Desktop exe: $SimplySignExe"
-# The installer often auto-launches it; only start a new instance if none is running.
-if (-not (Get-Process -Name "SimplySignDesktop" -ErrorAction SilentlyContinue)) {
-  Start-Process -FilePath $SimplySignExe | Out-Null
-}
-Start-Sleep -Seconds 8   # TODO(ci): tune — wait for the tray app + login window.
+# SimplySign Desktop is a single-instance TRAY app: the installer may already have it
+# running with NO window. Launch the exe AGAIN — a single-instance app typically responds
+# by surfacing its (login) window instead of starting a second process. Do it a couple of
+# times with a pause; then §3 enumerates windows to see if a login dialog appeared.
+Start-Process -FilePath $SimplySignExe | Out-Null
+Start-Sleep -Seconds 6
+Start-Process -FilePath $SimplySignExe | Out-Null
+Start-Sleep -Seconds 8
 
 # --- 3. Drive the login dialog (FRAGILE — tune against a real run) ---
 Add-Type -AssemblyName System.Windows.Forms
