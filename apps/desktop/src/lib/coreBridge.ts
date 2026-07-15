@@ -2744,6 +2744,11 @@ async function electronTemplatePreviewBlobUrl(previewRef: string): Promise<strin
 // embedded via iframe srcDoc — the live-renderer preview path needs the raw markup, not a blob.
 async function electronTemplatePreviewHtml(previewRef: string): Promise<string> {
   const url = electronTemplatePreviewUrl(previewRef);
+  // Live preview HTML is only ever gateway-served (template-pack:// refs). Never
+  // send the bearer token to a foreign origin, and never render foreign HTML.
+  if (!url.startsWith(DESKTOP_GATEWAY_URL)) {
+    throw new Error("Template preview HTML must come from the local gateway.");
+  }
   const response = await fetch(url, { headers: gatewayHeaders() });
   if (!response.ok) {
     throw new Error(`Template preview unavailable: HTTP ${response.status}`);

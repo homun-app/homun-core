@@ -270,12 +270,15 @@ def v_gateway_templates(payload):
     templates = payload.get("templates") if isinstance(payload, dict) else None
     if not isinstance(templates, list) or not templates:
         return False, "no templates"
-    startup = next((entry for entry in templates if entry.get("id") == "monet/startup-pitch-clean-01"), None)
+    startup = next((entry for entry in templates if entry.get("id") == "homun/startup-pitch-clean-01"), None)
     if not startup:
         return False, "missing startup pitch template"
     preview = startup.get("preview_ref")
-    if not isinstance(preview, str) or not preview.startswith("builtin:template-preview/"):
-        return False, "missing built-in preview_ref"
+    if not isinstance(preview, str) or not preview.startswith("/api/templates/preview?ref="):
+        return False, "missing gateway-served preview_ref"
+    preview_html = startup.get("preview_html_ref")
+    if not isinstance(preview_html, str) or not preview_html.startswith("/api/templates/preview?ref="):
+        return False, "missing gateway-served preview_html_ref"
     forbidden = [entry for entry in templates if "schema" in entry or "callable" in entry]
     if forbidden:
         return False, "template leaked callable fields"

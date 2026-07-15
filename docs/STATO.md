@@ -59,8 +59,9 @@ preview/thumbnail esistenti.
     validazione propria);
   - search haystack nel catalogo confronta solo nome/descrizione **EN**, non le varianti `_it`
     (T9);
-  - `chat_store.rs` ha ancora una stringa libera `'monet/startup'` in un test (T7, sweep repo-wide
-    da fare).
+  - `eval_suite.py` è stato allineato al catalogo `homun/*` in questa stessa sessione (fix di
+    revisione finale); resta solo la stringa libera `'monet/startup'` in un test di `chat_store.rs`
+    per lo sweep repo-wide.
 
 **Reminder metodologico:** la validazione visiva del catalogo (anteprime, layout, fedeltà) la fa
 **Fabio a schermo** nell'app; niente computer-use per "verificare" l'UI in questo lavoro — il gate

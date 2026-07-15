@@ -11,8 +11,9 @@ class EvalSuiteTests(unittest.TestCase):
             {
                 "templates": [
                     {
-                        "id": "monet/startup-pitch-clean-01",
-                        "preview_ref": "builtin:template-preview/monet/startup-pitch-clean-01",
+                        "id": "homun/startup-pitch-clean-01",
+                        "preview_ref": "/api/templates/preview?ref=template-pack%3A%2F%2Fhomun%2Fstartup-pitch-clean-01%2Fthumbnails%2Fslide-001.png",
+                        "preview_html_ref": "/api/templates/preview?ref=template-pack%3A%2F%2Fhomun%2Fstartup-pitch-clean-01%2Fpreview.html",
                     }
                 ]
             }
@@ -23,8 +24,9 @@ class EvalSuiteTests(unittest.TestCase):
             {
                 "templates": [
                     {
-                        "id": "monet/startup-pitch-clean-01",
-                        "preview_ref": "builtin:template-preview/monet/startup-pitch-clean-01",
+                        "id": "homun/startup-pitch-clean-01",
+                        "preview_ref": "/api/templates/preview?ref=template-pack%3A%2F%2Fhomun%2Fstartup-pitch-clean-01%2Fthumbnails%2Fslide-001.png",
+                        "preview_html_ref": "/api/templates/preview?ref=template-pack%3A%2F%2Fhomun%2Fstartup-pitch-clean-01%2Fpreview.html",
                         "schema": {"type": "object"},
                     }
                 ]

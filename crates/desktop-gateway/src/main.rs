@@ -46501,10 +46501,12 @@ async fn template_catalog() -> Json<TemplateCatalogResponse> {
     ))
 }
 
-/// Whitelist of pack-relative assets the preview endpoint may serve. Anything
-/// else (source.pptx, nested paths, other extensions) must stay unreachable —
-/// this endpoint is outside the bearer layer like /api/ws (an <img>/iframe
-/// cannot send the Authorization header).
+/// Whitelist of pack-relative assets the preview endpoint may serve. The route
+/// IS bearer-gated (registered on `chat_routes`, under `require_gateway_token`;
+/// the UI fetches it with `gatewayHeaders()`). This whitelist is defense-in-depth
+/// so that even an authenticated caller can only reach the two known asset
+/// shapes (`thumbnails/*.png`, `preview.html`) and never `source.pptx` or other
+/// pack files. `jail_in_root` is the second fence, against path traversal.
 fn template_preview_content_type(relative_path: &str) -> Option<&'static str> {
     if relative_path == "preview.html" {
         return Some("text/html; charset=utf-8");
@@ -46559,7 +46561,7 @@ async fn template_preview(
             return Err(GatewayError {
                 status: StatusCode::NOT_FOUND,
                 code: "template_preview_missing",
-                message: "Template preview image is missing.".to_string(),
+                message: "Template preview asset is missing.".to_string(),
             });
         }
         let bytes = fs::read(&path).map_err(|error| GatewayError {
