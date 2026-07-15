@@ -3,7 +3,68 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-14.**
+> **Ultimo aggiornamento: 2026-07-16.**
+
+## ⭐ CHECKPOINT 2026-07-16 — Presentations F1 (real template packs) SHIPPED
+
+Spec approvata: `docs/superpowers/specs/2026-07-15-presentations-professional-templates-design.md`.
+Piano eseguito (10 task, SDD): `docs/superpowers/plans/2026-07-15-presentations-fase1-pack-foundations.md`
+(ledger task-by-task in `.superpowers/sdd/progress.md`). Tutti i 10 task mergiati su `main`, review
+clean (con fix-loop dove annotato).
+
+**Cosa è cambiato:** il catalogo template presentazioni passa da un seed hardcoded (`monet/*` in
+`main.rs`) a **pack reali su disco**, nello stesso formato usato per i pack importati — nessun
+terzo formato, convergenza sul parser (`parse_file_template_catalog_entry`) e sugli endpoint
+preview/thumbnail esistenti.
+
+- **`BundledTemplatePackProvider`** (`3f0b08a1`) + campi nuovi su `TemplateCatalogEntry` (nome/
+  descrizione localizzati IT, `preview_html_ref`, flag `bundled` che sopprime `is_imported`,
+  `04e46f3c`) — legge da `HOMUN_BUNDLED_TEMPLATES_DIR` con fallback dev `templates/`.
+- **Preview live**: l'endpoint preview serve l'HTML reale del pack (`44b06cfb`); nuovi layout
+  renderer `timeline` / `comparison` / `team_grid` in HTML+PPTX con test iniettivi sul contenuto
+  renderizzato, non solo sulla struttura (`d8fc171d`, `cfc5c410`, `161a4abd`).
+  `scripts/build_template_previews.py` genera le preview **dal renderer reale** e sono committate,
+  non disegnate a mano (`2701c509`, `75fae551`).
+  ⚠️ i test PPTX skippano su host senza `python-pptx` (vive solo nel container
+  `contained-computer`, `/opt/deck-venv`) — comportamento atteso, documentato nel docstring del
+  test file, non un gate rosso.
+- **2 pack presentazione v1** con preview byte-esatte rispetto al renderer: `homun/startup-pitch-
+  clean-01`, `homun/executive-update-board-01` (`f3402be4`, QA visiva umana fatta in review).
+- **Seed morto CANCELLATO**: `-266` righe da `main.rs`, zero riferimenti a `monet/*` nel codice di
+  prodotto (`b509d574`).
+- **Packaging Electron**: env `HOMUN_BUNDLED_TEMPLATES_DIR` + risorse pack incluse nel bundle
+  (`4d94390b`).
+- **UI**: card sintetiche RITIRATE, anteprime **HTML vive in iframe sandboxed**, nomi localizzati
+  IT (`0ec15b67`); ritiro delle card sintetiche bloccato da un lock nel `ui-contract`, modal preview
+  navigabile da tastiera (`81da8be3`).
+
+**Gate finali (tutti verdi, in ordine, sessione 2026-07-16):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-desktop-gateway` | 576 passed, 0 failed, 5 ignored |
+| `python3 -m unittest discover … test_deck_render.py` | 2 ok, 1 skipped (pptx assente sull'host, atteso) |
+| `npm run build` (desktop) | OK, tsc pulito |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN |
+
+**Cosa resta:**
+- **F2 — documenti** (piano separato): `doc_render.py`, 6 pack documento, `make_document.
+  template_ref`, `intake_questions` cablate.
+- **F3 — wow**: brand-kit live recolor via CSS var sull'iframe (`--brand/--brand2/--accent` già
+  presenti nell'HTML del renderer), hover page-cycling, demozione definitiva delle card sorgenti.
+- **Minori dal ledger** (non bloccanti, follow-up):
+  - thumbnails/`deck.pdf` paginano **PORTRAIT** (default Chromium Letter) invece di 16:9 — valutare
+    `@page` nel renderer per un formato 16:9 vero su deck.pdf+thumbnails (T5/T9, richiede
+    validazione propria);
+  - search haystack nel catalogo confronta solo nome/descrizione **EN**, non le varianti `_it`
+    (T9);
+  - `chat_store.rs` ha ancora una stringa libera `'monet/startup'` in un test (T7, sweep repo-wide
+    da fare).
+
+**Reminder metodologico:** la validazione visiva del catalogo (anteprime, layout, fedeltà) la fa
+**Fabio a schermo** nell'app; niente computer-use per "verificare" l'UI in questo lavoro — il gate
+si ferma a test verdi + preview.html ispezionabili nel browser.
 
 ## ⭐ CHECKPOINT 2026-07-14 (ter) — tre bug segnalati da Fabio: notifiche, icone Composio, pannello morto
 
