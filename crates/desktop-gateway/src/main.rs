@@ -55419,6 +55419,32 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn bundled_entries_do_not_report_as_imported() {
+        let manifest = serde_json::json!({
+            "provider_id": "acme",
+            "templates": [{
+                "id": "acme/bundled-01",
+                "kind": "presentation",
+                "name": "Bundled Pack",
+                "description": "A bundled template pack.",
+                "design_template": "startup_pitch",
+                "route_text": "bundled pack"
+            }]
+        });
+        let provider =
+            super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str())
+                .expect("provider");
+        let mut entry = provider.entries[0].clone();
+        entry.template_pack_root = Some(std::path::PathBuf::from("/tmp/pack"));
+        entry.bundled = true;
+        let response = super::template_catalog_response_from_entries(vec![entry.clone()]);
+        assert!(!response.templates[0].is_imported);
+        entry.bundled = false;
+        let response = super::template_catalog_response_from_entries(vec![entry]);
+        assert!(response.templates[0].is_imported);
+    }
+
+    #[test]
     fn file_template_catalog_provider_ignores_unsafe_preview_refs() {
         let manifest = serde_json::json!({
             "provider_id": "monet_file",
