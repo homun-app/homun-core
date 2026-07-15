@@ -205,15 +205,19 @@ def _html_slide(s, base_dir, logo):
     if layout == "comparison":
         headers = s.get("headers", [])[:4]
         rows = s.get("rows", [])[:8]
-        head = "".join(f"<th>{html_escape(h)}</th>" for h in headers)
-        body_rows = "".join(
-            "<tr>" + "".join(f"<td>{html_escape(c)}</td>" for c in row[: len(headers) or 4]) + "</tr>"
-            for row in rows
-        )
+        table = ""
+        # Mirror the PPTX guard: a headerless/rowless table is worse than no table
+        # (an empty <thead>/<tbody> still renders borders and wastes the slide).
+        if headers and rows:
+            head = "".join(f"<th>{html_escape(h)}</th>" for h in headers)
+            body_rows = "".join(
+                "<tr>" + "".join(f"<td>{html_escape(c)}</td>" for c in row[: len(headers) or 4]) + "</tr>"
+                for row in rows
+            )
+            table = f'<table class="cmp"><thead><tr>{head}</tr></thead><tbody>{body_rows}</tbody></table>'
         return (
             f'<section class="slide comparison">{_logo_html(logo)}'
-            f'<h2>{title}</h2><table class="cmp"><thead><tr>{head}</tr></thead>'
-            f"<tbody>{body_rows}</tbody></table>"
+            f"<h2>{title}</h2>{table}"
             f'<div class="accent-bar"></div></section>'
         )
     if layout == "team_grid":
@@ -721,9 +725,11 @@ def render_pptx(deck, base_dir, out_path):
                          for b in c.get("bullets", [])]
                 textbox(slide, left, Inches(1.9), Inches(5.6), Inches(4.6), runs)
         elif layout == "timeline":
-            top = 2.0
+            # Start/step/height tuned so 6 items (the max) fit inside the 7.5in slide:
+            # 1.9 + 5*0.9 + 0.85 = 7.25in, leaving room for the footer/accent bar.
+            top = 1.9
             for it in s.get("items", [])[:6]:
-                textbox(slide, Inches(0.9), Inches(top), Inches(1.5), Inches(0.8),
+                textbox(slide, Inches(0.9), Inches(top), Inches(1.5), Inches(0.85),
                         [(it.get("label", ""), 18, brand, head_font, True, False)])
                 dot = slide.shapes.add_shape(9, Inches(2.55), Inches(top + 0.08),
                                               Pt(11), Pt(11))  # 9 = MSO_SHAPE.OVAL
@@ -734,8 +740,8 @@ def render_pptx(deck, base_dir, out_path):
                 runs = [(it.get("title", ""), 17, brand, head_font, True, False)]
                 if it.get("text"):
                     runs.append((it.get("text", ""), 14, muted, body_font, False, False))
-                textbox(slide, Inches(3.0), Inches(top), Inches(9.3), Inches(0.95), runs)
-                top += 0.95
+                textbox(slide, Inches(3.0), Inches(top), Inches(9.3), Inches(0.85), runs)
+                top += 0.9
         elif layout == "comparison":
             headers = s.get("headers", [])[:4]
             rows = s.get("rows", [])[:8]

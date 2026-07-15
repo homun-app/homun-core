@@ -50,6 +50,18 @@ class RenderHtmlLayouts(unittest.TestCase):
     importlib.util.find_spec("pptx"), "python-pptx not installed on this host"
 )
 class RenderPptxLayouts(unittest.TestCase):
+    @staticmethod
+    def _slide_texts(slide):
+        texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                texts.append(shape.text_frame.text)
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    for cell in row.cells:
+                        texts.append(cell.text)
+        return " ".join(texts)
+
     def test_new_layouts_produce_slides(self):
         import tempfile
         from pptx import Presentation
@@ -59,6 +71,15 @@ class RenderPptxLayouts(unittest.TestCase):
             self.assertIsNotNone(stats)
             prs = Presentation(out)
             self.assertEqual(len(prs.slides), len(ALL_LAYOUTS_DECK["slides"]))
+
+            # Per-layout content assertions: catch a dead/mistyped elif branch that
+            # would otherwise silently fall through to the bullets fallback and
+            # still pass a slide-count-only check. Order follows ALL_LAYOUTS_DECK:
+            # cover, timeline, comparison, team_grid, closing.
+            slides = list(prs.slides)
+            self.assertIn("Q3", self._slide_texts(slides[1]))       # timeline label rendered
+            self.assertIn("Risk", self._slide_texts(slides[2]))     # comparison header cell
+            self.assertIn("ER", self._slide_texts(slides[3]))       # team_grid initials avatar
 
 
 if __name__ == "__main__":
