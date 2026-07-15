@@ -6786,8 +6786,6 @@ trait TemplateCatalogProvider {
     }
 }
 
-struct LocalTemplateCatalogProvider;
-
 #[derive(Debug, Clone)]
 struct FileTemplateCatalogProvider {
     provider_id: String,
@@ -6927,6 +6925,11 @@ fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
         .collect()
 }
 
+// Test-only fixture builder: its last production caller was the hardcoded
+// built-in template seed (Task 7 deleted it). Gate it out of the shipped
+// binary so it doesn't linger as dead_code there while it keeps serving test
+// fixtures below.
+#[cfg(test)]
 fn template_catalog_entry(
     provider: &str,
     id: &str,
@@ -6976,252 +6979,6 @@ fn template_catalog_entry(
         attribution_text: None,
         redistribution_policy: None,
         route_text: route_text.to_string(),
-    }
-}
-
-fn template_catalog_builtin_preview_ref(id: &str) -> Option<String> {
-    let slug = id.strip_prefix("monet/")?;
-    clean_template_catalog_ref(Some(&serde_json::Value::String(format!(
-        "builtin:template-preview/{slug}"
-    ))))
-}
-
-fn with_builtin_template_preview(mut entry: TemplateCatalogEntry) -> TemplateCatalogEntry {
-    entry.preview_ref = template_catalog_builtin_preview_ref(&entry.id);
-    entry
-}
-
-fn local_template_catalog_seed(provider: &str) -> Vec<TemplateCatalogEntry> {
-    vec![
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/startup-pitch-clean-01",
-            "Startup Pitch Clean",
-            "presentation",
-            "Clean startup pitch deck template for product intro, fundraising or customer pitch.",
-            &["pitch", "fundraising", "product intro"],
-            &["investors", "executives", "customers"],
-            "startup_pitch",
-            Some("clean_corporate"),
-            Some("sales_pitch"),
-            &["kpi_grid", "timeline", "quote_callout"],
-            &[
-                "cover", "problem", "solution", "traction", "roadmap", "closing",
-            ],
-            "startup pitch fundraising product intro clean corporate investor customer proposta commerciale presentazione homun",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/executive-update-board-01",
-            "Executive Update Board",
-            "presentation",
-            "Board-ready executive update with metrics, risks, decisions and next steps.",
-            &["board update", "status update", "management review"],
-            &["board", "executives", "leadership"],
-            "executive_update",
-            Some("high_contrast"),
-            Some("executive"),
-            &["kpi_grid", "risks_table", "timeline"],
-            &[
-                "cover",
-                "status",
-                "metrics",
-                "risks",
-                "decisions",
-                "next steps",
-            ],
-            "executive update board status management review KPI risks decisions leadership aggiornamento direzione CDA",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/project-plan-technical-01",
-            "Project Plan Technical",
-            "presentation",
-            "Technical project plan template with phases, process steps, risks and milestones.",
-            &["project plan", "technical roadmap", "implementation plan"],
-            &["engineering", "product", "PM"],
-            "project_plan",
-            Some("minimal_mono"),
-            Some("technical"),
-            &["process_steps", "timeline", "risks_table"],
-            &[
-                "cover",
-                "objective",
-                "phases",
-                "architecture",
-                "risks",
-                "milestones",
-            ],
-            "project plan technical roadmap implementation phases milestones risks PM engineering piano progetto tecnico roadmap",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/sales-proposal-warm-01",
-            "Sales Proposal Warm",
-            "document",
-            "Warm sales proposal document template for a client problem, solution, scope and next action.",
-            &["sales proposal", "client proposal", "commercial offer"],
-            &["clients", "buyers", "executives"],
-            "sales_proposal",
-            Some("warm_editorial"),
-            Some("sales_pitch"),
-            &["comparison_table", "timeline", "kpi_grid"],
-            &[
-                "summary",
-                "problem",
-                "solution",
-                "scope",
-                "timeline",
-                "next action",
-            ],
-            "sales proposal client commercial offer proposta commerciale preventivo cliente warm editorial documento",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/technical-brief-minimal-01",
-            "Technical Brief Minimal",
-            "document",
-            "Minimal technical brief template for architecture, tradeoffs, rollout and verification.",
-            &[
-                "technical brief",
-                "architecture brief",
-                "implementation note",
-            ],
-            &["engineering", "technical leadership", "product"],
-            "technical_brief",
-            Some("minimal_mono"),
-            Some("technical"),
-            &["process_steps", "comparison_table", "risks_table"],
-            &[
-                "summary",
-                "architecture",
-                "tradeoffs",
-                "implementation",
-                "verification",
-            ],
-            "technical brief architecture implementation tradeoffs verification engineering documento tecnico architettura",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/company-one-pager-clean-01",
-            "Company One-Pager Clean",
-            "document",
-            "One-page company overview for customers, partners or investors.",
-            &["one pager", "company overview", "partner brief"],
-            &["customers", "partners", "investors"],
-            "sales_proposal",
-            Some("clean_corporate"),
-            Some("executive"),
-            &["kpi_grid", "quote_callout", "comparison_table"],
-            &["headline", "company", "proof", "offer", "contact"],
-            "one pager company overview partner brief investor customer azienda presentazione sintetica scheda commerciale",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/customer-case-study-proof-01",
-            "Customer Case Study Proof",
-            "document",
-            "Customer case study template focused on situation, solution, proof metrics and outcomes.",
-            &["case study", "customer proof", "success story"],
-            &["customers", "sales", "marketing"],
-            "sales_proposal",
-            Some("warm_editorial"),
-            Some("sales_pitch"),
-            &["quote_callout", "kpi_grid", "timeline"],
-            &["customer", "challenge", "solution", "proof", "outcomes"],
-            "customer case study proof success story risultati cliente caso studio metriche outcomes marketing vendite",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/meeting-minutes-executive-01",
-            "Meeting Minutes Executive",
-            "document",
-            "Executive meeting minutes with decisions, owners, open actions and follow-up timeline.",
-            &["meeting minutes", "decision log", "action items"],
-            &["executives", "teams", "project leads"],
-            "executive_update",
-            Some("clean_corporate"),
-            Some("executive"),
-            &["process_steps", "risks_table", "timeline"],
-            &["context", "decisions", "actions", "risks", "follow-up"],
-            "meeting minutes verbale riunione decisioni azioni action items owner follow up executive team",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/product-launch-plan-01",
-            "Product Launch Plan",
-            "presentation",
-            "Product launch plan deck covering positioning, channels, timeline, risks and launch metrics.",
-            &["product launch", "go to market", "launch plan"],
-            &["product", "marketing", "sales"],
-            "project_plan",
-            Some("soft_gradient"),
-            Some("sales_pitch"),
-            &["timeline", "comparison_table", "kpi_grid", "risks_table"],
-            &[
-                "cover",
-                "positioning",
-                "channels",
-                "timeline",
-                "metrics",
-                "risks",
-            ],
-            "product launch go to market lancio prodotto piano marketing sales canali timeline metriche rischi",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/incident-review-technical-01",
-            "Incident Review Technical",
-            "document",
-            "Technical incident review with timeline, root cause, impact, remediation and prevention.",
-            &["incident review", "postmortem", "root cause analysis"],
-            &["engineering", "operations", "leadership"],
-            "technical_brief",
-            Some("minimal_mono"),
-            Some("technical"),
-            &["timeline", "process_steps", "risks_table"],
-            &[
-                "summary",
-                "impact",
-                "timeline",
-                "root cause",
-                "remediation",
-                "prevention",
-            ],
-            "incident review postmortem root cause analysis RCA timeline remediation prevenzione incidente tecnico operations",
-        )),
-        with_builtin_template_preview(template_catalog_entry(
-            provider,
-            "monet/product-roadmap-board-01",
-            "Product Roadmap Board",
-            "presentation",
-            "Board-level product roadmap with priorities, releases, dependencies, risks and asks.",
-            &["product roadmap", "release plan", "board roadmap"],
-            &["board", "product", "engineering"],
-            "project_plan",
-            Some("high_contrast"),
-            Some("executive"),
-            &["timeline", "kpi_grid", "risks_table"],
-            &[
-                "cover",
-                "priorities",
-                "roadmap",
-                "dependencies",
-                "risks",
-                "asks",
-            ],
-            "product roadmap board release plan priorità rilasci dipendenze rischi richieste CDA prodotto engineering",
-        )),
-    ]
-}
-
-impl TemplateCatalogProvider for LocalTemplateCatalogProvider {
-    fn provider_id(&self) -> &str {
-        "local_seed"
-    }
-
-    fn entries(&self) -> Vec<TemplateCatalogEntry> {
-        local_template_catalog_seed(self.provider_id())
     }
 }
 
@@ -7902,14 +7659,12 @@ fn import_pptx_template_pack(
 
 fn template_catalog_entries() -> Vec<TemplateCatalogEntry> {
     let bundled_provider = template_packs::bundled_template_pack_provider();
-    let local = LocalTemplateCatalogProvider;
     let file_provider = file_template_catalog_provider();
     let imported_provider = imported_template_pack_provider();
     let mut providers: Vec<&dyn TemplateCatalogProvider> = Vec::new();
     if let Some(provider) = bundled_provider.as_ref() {
         providers.push(provider);
     }
-    providers.push(&local);
     if let Some(provider) = file_provider.as_ref() {
         providers.push(provider);
     }
@@ -16798,7 +16553,7 @@ fn make_deck_tool_schema() -> serde_json::Value {
                     "brief": { "type": "string", "description": "What the deck is about, plus any structure, sections or points the user specified — verbatim." },
                     "language": { "type": "string", "description": "Deck language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." },
-                    "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. monet/startup-pitch-clean-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it." },
+                    "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. homun/startup-pitch-clean-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it." },
                     "design_template": deliverable_design_template_schema(),
                     "design_theme": deliverable_design_theme_schema(),
                     "design_profile": deliverable_design_profile_schema(),
@@ -16824,7 +16579,7 @@ fn make_document_tool_schema() -> serde_json::Value {
                     "brief": { "type": "string", "description": "What the document must contain, including any sections, audience, tone, constraints or source material the user provided — verbatim." },
                     "language": { "type": "string", "description": "Document language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple filename such as report.md, report.pdf or report.docx. If no name was specified, choose a concise descriptive .md filename." },
-                    "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. monet/sales-proposal-warm-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it." },
+                    "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. homun/executive-update-board-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it." },
                     "document_type": {
                         "type": "string",
                         "description": "Document shape requested by the user. Preserve explicit intent; do not infer from weak hints.",
@@ -53908,7 +53663,7 @@ prs.save(Path({path:?}))
                 "brief": "Quarterly results",
                 "language": "en",
                 "slides": 6,
-                "template_ref": "monet/executive-update-board-01",
+                "template_ref": "homun/executive-update-board-01",
                 "design_template": "executive_update",
                 "design_theme": "high_contrast",
                 "design_profile": "executive",
@@ -53941,7 +53696,7 @@ prs.save(Path({path:?}))
                 .arguments
                 .pointer("/input/template_ref")
                 .and_then(|value| value.as_str()),
-            Some("monet/executive-update-board-01"),
+            Some("homun/executive-update-board-01"),
         );
         assert_eq!(
             plan.steps[0]
@@ -54217,7 +53972,7 @@ prs.save(Path({path:?}))
         let ranked = super::bm25_rank(&corpus, "startup pitch investor", 3);
         let entry = ranked.first().expect("template catalog entry");
 
-        assert_eq!(entry.key, "monet/startup-pitch-clean-01");
+        assert_eq!(entry.key, "homun/startup-pitch-clean-01");
         assert_eq!(entry.source, super::CapabilitySource::TemplateCatalog);
         assert!(entry.schema.is_none());
         assert!(!entry.is_skill);
@@ -54806,46 +54561,6 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn local_template_catalog_provider_exposes_seed_templates() {
-        let provider = super::LocalTemplateCatalogProvider;
-        let entries = super::TemplateCatalogProvider::entries(&provider);
-
-        assert!(entries.len() >= 11);
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry.id == "monet/startup-pitch-clean-01")
-        );
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry.id == "monet/meeting-minutes-executive-01")
-        );
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry.id == "monet/customer-case-study-proof-01")
-        );
-        assert!(entries.iter().all(|entry| entry.provider == "local_seed"));
-        assert!(entries.iter().all(|entry| {
-            entry
-                .preview_ref
-                .as_deref()
-                .is_some_and(|preview| preview.starts_with("builtin:template-preview/"))
-        }));
-        assert_eq!(
-            super::TemplateCatalogProvider::get(&provider, "monet/sales-proposal-warm-01")
-                .map(|entry| entry.design_template),
-            Some("sales_proposal".to_string()),
-        );
-        assert_eq!(
-            super::TemplateCatalogProvider::get(&provider, "monet/product-roadmap-board-01")
-                .map(|entry| entry.design_template),
-            Some("project_plan".to_string()),
-        );
-    }
-
-    #[test]
     fn imported_template_pack_manifest_loads_real_pptx_metadata() {
         let root = std::env::temp_dir().join(format!(
             "homun-imported-template-pack-{}-{}",
@@ -54953,7 +54668,7 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn template_catalog_entries_include_imported_template_packs_after_seed_templates() {
+    fn template_catalog_entries_include_imported_template_packs_after_bundled_templates() {
         let root = std::env::temp_dir().join(format!(
             "homun-template-pack-aggregate-{}-{}",
             std::process::id(),
@@ -54987,20 +54702,22 @@ prs.save(Path({path:?}))
         .expect("manifest");
 
         let imported = super::ImportedTemplatePackProvider::from_root(&root).expect("provider");
-        let catalog = super::collect_template_catalog_entries(&[
-            &super::LocalTemplateCatalogProvider,
-            &imported,
-        ]);
-        let seed_position = catalog
+        let bundled_root =
+            super::template_packs::bundled_template_pack_root().expect("repo templates dir");
+        let bundled =
+            super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
+                .expect("bundled provider");
+        let catalog = super::collect_template_catalog_entries(&[&bundled, &imported]);
+        let bundled_position = catalog
             .iter()
-            .position(|entry| entry.id == "monet/startup-pitch-clean-01")
-            .expect("seed template");
+            .position(|entry| entry.id == "homun/startup-pitch-clean-01")
+            .expect("bundled template");
         let imported_position = catalog
             .iter()
             .position(|entry| entry.id == "slidescarnival/imported-pitch")
             .expect("imported template");
 
-        assert!(seed_position < imported_position);
+        assert!(bundled_position < imported_position);
         assert_eq!(
             catalog[imported_position].source_provider.as_deref(),
             Some("slidescarnival")
@@ -55193,7 +54910,7 @@ prs.save(Path({path:?}))
 
         assert!(!pack.exists(), "pack directory should be removed");
         assert!(
-            super::delete_imported_template_pack(&root, "monet/startup-pitch-clean-01").is_err()
+            super::delete_imported_template_pack(&root, "homun/startup-pitch-clean-01").is_err()
         );
 
         let _ = std::fs::remove_dir_all(root);
@@ -55268,17 +54985,20 @@ prs.save(Path({path:?}))
     fn expanded_template_catalog_routes_common_pmi_deliverables() {
         let corpus = super::template_catalog_capability_entries();
 
-        let meeting = super::bm25_rank(&corpus, "verbale riunione decisioni azioni", 1)
-            .into_iter()
-            .next()
-            .expect("meeting template");
-        assert_eq!(meeting.key, "monet/meeting-minutes-executive-01");
+        // Bundled-only catalog (Task 7): route against the two real shipped packs
+        // instead of the retired seed's meeting-minutes/case-study entries.
+        let executive_update =
+            super::bm25_rank(&corpus, "board update rischi decisioni next steps", 1)
+                .into_iter()
+                .next()
+                .expect("executive update template");
+        assert_eq!(executive_update.key, "homun/executive-update-board-01");
 
-        let case_study = super::bm25_rank(&corpus, "customer case study risultati proof", 1)
+        let startup_pitch = super::bm25_rank(&corpus, "startup pitch fundraising investor", 1)
             .into_iter()
             .next()
-            .expect("case study template");
-        assert_eq!(case_study.key, "monet/customer-case-study-proof-01");
+            .expect("startup pitch template");
+        assert_eq!(startup_pitch.key, "homun/startup-pitch-clean-01");
     }
 
     #[test]
@@ -55308,7 +55028,7 @@ prs.save(Path({path:?}))
                     ),
                     super::template_catalog_entry(
                         "extra",
-                        "monet/startup-pitch-clean-01",
+                        "homun/startup-pitch-clean-01",
                         "Duplicate Startup Pitch",
                         "presentation",
                         "Duplicate should not override first provider.",
@@ -55325,15 +55045,17 @@ prs.save(Path({path:?}))
             }
         }
 
-        let catalog = super::collect_template_catalog_entries(&[
-            &super::LocalTemplateCatalogProvider,
-            &ExtraProvider,
-        ]);
+        let bundled_root =
+            super::template_packs::bundled_template_pack_root().expect("repo templates dir");
+        let bundled =
+            super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
+                .expect("bundled provider");
+        let catalog = super::collect_template_catalog_entries(&[&bundled, &ExtraProvider]);
 
         assert_eq!(
             catalog
                 .iter()
-                .filter(|entry| entry.id == "monet/startup-pitch-clean-01")
+                .filter(|entry| entry.id == "homun/startup-pitch-clean-01")
                 .count(),
             1,
         );
@@ -55357,10 +55079,10 @@ prs.save(Path({path:?}))
     #[test]
     fn file_template_catalog_provider_loads_valid_manifest() {
         let manifest = serde_json::json!({
-            "provider_id": "monet_file",
+            "provider_id": "acme_file",
             "templates": [
                 {
-                    "id": "monet_file/investor-pitch-01",
+                    "id": "acme_file/investor-pitch-01",
                     "name": "Investor Pitch",
                     "kind": "presentation",
                     "description": "Investor pitch template from a local catalog file.",
@@ -55386,11 +55108,11 @@ prs.save(Path({path:?}))
 
         assert_eq!(
             super::TemplateCatalogProvider::provider_id(&provider),
-            "monet_file"
+            "acme_file"
         );
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].id, "monet_file/investor-pitch-01");
-        assert_eq!(entries[0].provider, "monet_file");
+        assert_eq!(entries[0].id, "acme_file/investor-pitch-01");
+        assert_eq!(entries[0].provider, "acme_file");
         assert_eq!(entries[0].design_template, "startup_pitch");
         assert_eq!(entries[0].design_theme.as_deref(), Some("clean_corporate"));
         assert_eq!(
@@ -55469,10 +55191,10 @@ prs.save(Path({path:?}))
     #[test]
     fn file_template_catalog_provider_ignores_unsafe_preview_refs() {
         let manifest = serde_json::json!({
-            "provider_id": "monet_file",
+            "provider_id": "acme_file",
             "templates": [
                 {
-                    "id": "monet_file/unsafe-preview-01",
+                    "id": "acme_file/unsafe-preview-01",
                     "name": "Unsafe Preview",
                     "kind": "document",
                     "description": "Template with unsafe preview metadata.",
@@ -55486,7 +55208,7 @@ prs.save(Path({path:?}))
         let provider =
             super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str())
                 .expect("file provider");
-        let entry = super::TemplateCatalogProvider::get(&provider, "monet_file/unsafe-preview-01")
+        let entry = super::TemplateCatalogProvider::get(&provider, "acme_file/unsafe-preview-01")
             .expect("entry");
 
         assert_eq!(entry.preview_ref, None);
@@ -55552,15 +55274,20 @@ prs.save(Path({path:?}))
 
     #[test]
     fn template_catalog_response_exposes_selection_notes_for_gallery() {
+        let bundled_root =
+            super::template_packs::bundled_template_pack_root().expect("repo templates dir");
+        let bundled =
+            super::template_packs::BundledTemplatePackProvider::from_root(&bundled_root)
+                .expect("bundled provider");
         let response = super::template_catalog_response_from_entries(
-            super::TemplateCatalogProvider::entries(&super::LocalTemplateCatalogProvider),
+            super::TemplateCatalogProvider::entries(&bundled),
         );
         let value = serde_json::to_value(&response).expect("json");
         let startup = value["templates"]
             .as_array()
             .expect("templates")
             .iter()
-            .find(|entry| entry["id"] == "monet/startup-pitch-clean-01")
+            .find(|entry| entry["id"] == "homun/startup-pitch-clean-01")
             .expect("startup pitch");
         let notes = startup["selection_notes"]
             .as_array()
@@ -55585,7 +55312,7 @@ prs.save(Path({path:?}))
         let corpus = super::template_catalog_capability_entries();
         let startup = corpus
             .iter()
-            .find(|entry| entry.key == "monet/startup-pitch-clean-01")
+            .find(|entry| entry.key == "homun/startup-pitch-clean-01")
             .expect("startup pitch");
 
         assert!(
@@ -56106,7 +55833,7 @@ prs.save(Path({path:?}))
     #[test]
     fn template_catalog_ref_resolves_deck_design_defaults() {
         let parsed = serde_json::json!({
-            "template_ref": "monet/startup-pitch-clean-01",
+            "template_ref": "homun/startup-pitch-clean-01",
         });
         let template_ref = super::deliverable_template_ref(&parsed);
         let catalog_template = super::template_catalog_by_id(template_ref.as_deref());
@@ -56141,17 +55868,21 @@ prs.save(Path({path:?}))
 
         assert_eq!(
             template_ref.as_deref(),
-            Some("monet/startup-pitch-clean-01")
+            Some("homun/startup-pitch-clean-01")
         );
         assert_eq!(design_template.as_deref(), Some("startup_pitch"));
         assert_eq!(design_theme.as_deref(), Some("clean_corporate"));
         assert_eq!(design_profile.as_deref(), Some("sales_pitch"));
+        // Defaults for startup_pitch (kpi_grid/timeline/quote_callout) plus the real
+        // bundled manifest's own design_components (kpi_grid/timeline/comparison_table)
+        // merged+deduped — comparison_table is the only net-new entry.
         assert_eq!(
             design_components,
             vec![
                 "kpi_grid".to_string(),
                 "timeline".to_string(),
                 "quote_callout".to_string(),
+                "comparison_table".to_string(),
             ],
         );
     }
@@ -56160,8 +55891,8 @@ prs.save(Path({path:?}))
     fn make_deck_content_failure_distinguishes_template_from_provider() {
         let message = super::make_deck_content_failure_message(
             "connection refused",
-            Some("monet/startup-pitch-clean-01"),
-            Some("monet/startup-pitch-clean-01"),
+            Some("homun/startup-pitch-clean-01"),
+            Some("homun/startup-pitch-clean-01"),
             "http://127.0.0.1:11434/v1",
             "kimi-k2.6:cloud",
         );
@@ -56620,7 +56351,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     #[test]
     fn make_document_generation_options_are_explicit_and_bounded() {
         let options = super::document_generation_options(&serde_json::json!({
-            "template_ref": "monet/sales-proposal-warm-01",
+            "template_ref": "homun/executive-update-board-01",
             "document_type": "report",
             "audience": " PMI italiana ",
             "tone": "executive",
@@ -56644,7 +56375,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         assert_eq!(
             options.template_ref.as_deref(),
-            Some("monet/sales-proposal-warm-01"),
+            Some("homun/executive-update-board-01"),
         );
         assert_eq!(options.document_type.as_deref(), Some("report"));
         assert_eq!(options.audience.as_deref(), Some("PMI italiana"));
@@ -56653,13 +56384,16 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(options.design_template.as_deref(), Some("executive_update"));
         assert_eq!(options.design_theme.as_deref(), Some("minimal_mono"));
         assert_eq!(options.design_profile.as_deref(), Some("technical"));
+        // Defaults for executive_update (kpi_grid/risks_table/timeline) already cover
+        // the real bundled manifest's own design_components (kpi_grid/risks_table),
+        // so nothing net-new is merged in here (contrast the make_deck test above,
+        // where startup_pitch's manifest DOES add comparison_table).
         assert_eq!(
             options.design_components,
             vec![
                 "kpi_grid".to_string(),
                 "risks_table".to_string(),
                 "timeline".to_string(),
-                "comparison_table".to_string(),
             ],
         );
         assert_eq!(
@@ -56673,7 +56407,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
         let directives = super::document_generation_directives(&options);
         assert!(
-            directives.contains("Template reference: monet/sales-proposal-warm-01."),
+            directives.contains("Template reference: homun/executive-update-board-01."),
             "{directives}"
         );
         assert!(
@@ -56721,7 +56455,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         );
 
         let ignored = super::document_generation_options(&serde_json::json!({
-            "template_ref": "monet/unknown",
+            "template_ref": "homun/unknown",
             "document_type": "pitch",
             "tone": "friendly",
             "layout_profile": "marketing_site",
@@ -57020,7 +56754,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     #[test]
     fn workflow_route_blocks_manual_tool_fallbacks() {
         let route = super::route_capability(
-            "Crea una presentazione pitch per Homun usando il template_ref monet/startup-pitch-clean-01",
+            "Crea una presentazione pitch per Homun usando il template_ref homun/startup-pitch-clean-01",
         );
 
         assert!(
