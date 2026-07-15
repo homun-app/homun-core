@@ -694,6 +694,7 @@ function TemplateLivePreview({
   entry: TemplateCatalogEntry;
   interactive?: boolean;
 }) {
+  const { i18n } = useTranslation();
   const [html, setHtml] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [scale, setScale] = useState(0.2);
@@ -748,12 +749,13 @@ function TemplateLivePreview({
       ref={wrapRef}
       className={`template-card-preview template-live-preview${interactive ? " interactive" : ""}`}
     >
+      {/* Card mode is a decorative thumbnail (inert, hidden from AT); interactive mode is the actual scrollable content, so it must be focusable and titled. */}
       <iframe
         sandbox=""
         srcDoc={html}
-        title=""
-        tabIndex={-1}
-        aria-hidden
+        title={interactive ? templateDisplayName(entry, i18n.language) : ""}
+        tabIndex={interactive ? 0 : -1}
+        aria-hidden={interactive ? undefined : true}
         style={{
           transform: `scale(${scale})`,
           height: interactive ? `${Math.round(560 / scale)}px` : "720px",
