@@ -46746,6 +46746,23 @@ async fn template_catalog() -> Json<TemplateCatalogResponse> {
     ))
 }
 
+/// Whitelist of pack-relative assets the preview endpoint may serve. Anything
+/// else (source.pptx, nested paths, other extensions) must stay unreachable —
+/// this endpoint is outside the bearer layer like /api/ws (an <img>/iframe
+/// cannot send the Authorization header).
+fn template_preview_content_type(relative_path: &str) -> Option<&'static str> {
+    if relative_path == "preview.html" {
+        return Some("text/html; charset=utf-8");
+    }
+    if relative_path.starts_with("thumbnails/")
+        && relative_path.ends_with(".png")
+        && relative_path.matches('/').count() == 1
+    {
+        return Some("image/png");
+    }
+    None
+}
+
 async fn template_preview(
     Query(query): Query<TemplatePreviewQuery>,
 ) -> Result<Response, GatewayError> {
@@ -46762,23 +46779,22 @@ async fn template_preview(
         let Some(pack_root) = entry.template_pack_root.as_ref() else {
             continue;
         };
-        let Some(internal_preview) = entry.preview_ref.as_deref() else {
-            continue;
-        };
-        if internal_preview != reference {
+        let matches_entry = entry.preview_ref.as_deref() == Some(reference)
+            || entry.preview_html_ref.as_deref() == Some(reference);
+        if !matches_entry {
             continue;
         }
         let prefix = format!("{}/", entry.id);
         let Some(relative_path) = rest.strip_prefix(&prefix) else {
             continue;
         };
-        if !relative_path.starts_with("thumbnails/") || !relative_path.ends_with(".png") {
+        let Some(content_type) = template_preview_content_type(relative_path) else {
             return Err(GatewayError {
                 status: StatusCode::BAD_REQUEST,
                 code: "template_preview_path_invalid",
                 message: "Template preview path is invalid.".to_string(),
             });
-        }
+        };
         let path = jail_in_root(pack_root, relative_path).map_err(|message| GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "template_preview_path_invalid",
@@ -46797,7 +46813,7 @@ async fn template_preview(
             message: error.to_string(),
         })?;
         return Response::builder()
-            .header(CONTENT_TYPE, "image/png")
+            .header(CONTENT_TYPE, content_type)
             .body(Body::from(bytes))
             .map_err(|error| GatewayError {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -55517,6 +55533,21 @@ prs.save(Path({path:?}))
         assert_eq!(first["tags"][0], "premium");
         assert!(first.get("schema").is_none());
         assert!(first.get("callable").is_none());
+    }
+
+    #[test]
+    fn template_preview_relative_paths_are_jailed_to_known_assets() {
+        assert_eq!(
+            super::template_preview_content_type("thumbnails/slide-001.png"),
+            Some("image/png")
+        );
+        assert_eq!(
+            super::template_preview_content_type("preview.html"),
+            Some("text/html; charset=utf-8")
+        );
+        assert_eq!(super::template_preview_content_type("thumbnails/evil.svg"), None);
+        assert_eq!(super::template_preview_content_type("source.pptx"), None);
+        assert_eq!(super::template_preview_content_type("nested/preview.html"), None);
     }
 
     #[test]
