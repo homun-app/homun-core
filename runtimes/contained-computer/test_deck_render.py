@@ -76,9 +76,14 @@ class RenderPptxLayouts(unittest.TestCase):
             # would otherwise silently fall through to the bullets fallback and
             # still pass a slide-count-only check. Order follows ALL_LAYOUTS_DECK:
             # cover, timeline, comparison, team_grid, closing.
+            # GOTCHA: the probe text must NOT be a substring of the slide TITLE —
+            # the title renders via the shared path for EVERY layout, so a
+            # title-substring probe (e.g. "Risk" ⊂ "Risks") passes vacuously.
             slides = list(prs.slides)
             self.assertIn("Q3", self._slide_texts(slides[1]))       # timeline label rendered
-            self.assertIn("Risk", self._slide_texts(slides[2]))     # comparison header cell
+            self.assertIn("Fuel", self._slide_texts(slides[2]))     # comparison body cell (not in title)
+            self.assertTrue(any(getattr(shape, "has_table", False)
+                                for shape in slides[2].shapes))     # a real table shape exists
             self.assertIn("ER", self._slide_texts(slides[3]))       # team_grid initials avatar
 
 

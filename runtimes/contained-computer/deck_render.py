@@ -211,7 +211,7 @@ def _html_slide(s, base_dir, logo):
         if headers and rows:
             head = "".join(f"<th>{html_escape(h)}</th>" for h in headers)
             body_rows = "".join(
-                "<tr>" + "".join(f"<td>{html_escape(c)}</td>" for c in row[: len(headers) or 4]) + "</tr>"
+                "<tr>" + "".join(f"<td>{html_escape(c)}</td>" for c in row[: len(headers)]) + "</tr>"
                 for row in rows
             )
             table = f'<table class="cmp"><thead><tr>{head}</tr></thead><tbody>{body_rows}</tbody></table>'
