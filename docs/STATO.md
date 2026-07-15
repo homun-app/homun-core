@@ -37,8 +37,21 @@
    **grafo di chiamate orfano**. Backend intatto; rimettere il pannello significa prima CABLARE il
    router semantico nel giro della chat — decisione di prodotto (costa una chiamata modello per turno).
 
-Gate: `pre_release_gate.py` ALL GREEN, `npm run build`, `test:ui-contract`, `test:electron` (12/12).
-⚠️ Le notifiche vanno provate a mano su ogni OS (il Test ora riporta il motivo del rifiuto).
+Gate: `pre_release_gate.py` ALL GREEN, `npm run build`, `test:ui-contract`, `test:electron` (13/13).
+
+**Follow-up notifiche (stessa sessione):** il primo giro sulla dev NON mostrava il banner e crashava il
+processo main con `ReferenceError: log is not defined` — avevo usato `log(...)` invece di
+`desktopLog.log(...)` **dentro l'handler `failed`**, cioè il codice che deve rendere VISIBILE il rifiuto
+esplodeva lui stesso. Due lezioni: (1) `Notification.show()` ritorna sincrono e non lancia anche quando
+l'OS poi rifiuta — l'esito va letto dagli eventi `show`/`failed`, non dal ritorno (macOS:
+`UNErrorDomain 1` = "notifiche non consentite per questa app", ciò che riceve un bundle dev firmato
+ad-hoc `com.github.Electron`); (2) **il processo Electron non aveva ALCUN controllo statico** (`npm run
+build` tipa solo `src/`), quindi un nome inesistente compilava e crashava a runtime — nel ramo d'errore,
+il meno esercitato. Chiuso con `tests/electron-main-names.test.mjs` (checkJs su `electron/*.cjs`, fallisce
+solo su `TS2304` "Cannot find name"; verificato reintroducendo il bug → lo prende → rimosso → 0). Poi
+**validato sulla BUILD FIRMATA locale** (`npm run dist`, `app.homun.desktop`, firma valida): il Test
+mostra la riga col motivo del rifiuto = catena renderer→preload→main→OS integra. Rilasciato in
+**v0.1.1060**.
 
 ## ⭐ CHECKPOINT 2026-07-14 (bis) — vision routing: chi GUARDA l'immagine (ruolo `vision` + sub-turno)
 
