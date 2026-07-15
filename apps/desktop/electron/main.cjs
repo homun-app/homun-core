@@ -307,6 +307,14 @@ function spawnGateway() {
     if (fs.existsSync(skillsDir)) env.HOMUN_DEFAULT_SKILLS_DIR = skillsDir;
   }
 
+  // Point the gateway at the bundled deliverable template packs (the "Homun"
+  // source of the Presentations catalog). Same dev/packaged story as above; in
+  // dev the gateway falls back to the repo-relative templates/ dir on its own.
+  if (!env.HOMUN_BUNDLED_TEMPLATES_DIR) {
+    const templatesDir = path.join(RESOURCES_ROOT, "templates");
+    if (fs.existsSync(templatesDir)) env.HOMUN_BUNDLED_TEMPLATES_DIR = templatesDir;
+  }
+
   // Point the gateway at the bundled channel-bridge sidecars (Telegram,
   // WhatsApp) so connecting a channel works from an installed app. Without this
   // the gateway only finds repo-relative bridge paths (absent from the bundle)

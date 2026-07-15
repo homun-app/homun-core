@@ -75,6 +75,17 @@ if (existsSync(skillsSource)) {
   cpSync(skillsSource, skillsTarget, { recursive: true });
 }
 
+// Stage the bundled deliverable template packs (the "Homun" source of the
+// Presentations catalog). The gateway is pointed here via
+// HOMUN_BUNDLED_TEMPLATES_DIR (see main.cjs). Committed previews included —
+// no Chromium/poppler needed at package time.
+const templatesSource = join(repoRoot, "templates");
+const templatesTarget = join(resourcesDir, "templates");
+if (!existsSync(templatesSource)) {
+  throw new Error(`Bundled template packs not found: ${templatesSource}`);
+}
+cpSync(templatesSource, templatesTarget, { recursive: true });
+
 // Stage the channel bridge sidecars next to the gateway so connecting a channel
 // works from an installed app. The gateway is pointed at each staged binary via
 // HOMUN_TELEGRAM_BIN / HOMUN_WHATSAPP_BIN (see main.cjs). Without this, channel
