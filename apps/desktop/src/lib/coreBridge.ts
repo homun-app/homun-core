@@ -2655,6 +2655,9 @@ export interface TemplateCatalogEntry {
   attribution_text: string | null;
   redistribution_policy: string | null;
   is_imported: boolean;
+  name_it: string | null;
+  description_it: string | null;
+  preview_html_ref: string | null;
 }
 
 export interface TemplateCatalogResponse {
@@ -2735,6 +2738,17 @@ async function electronTemplatePreviewBlobUrl(previewRef: string): Promise<strin
     throw new Error(`Template preview unavailable: HTTP ${response.status}`);
   }
   return URL.createObjectURL(await response.blob());
+}
+
+// Fetches the pack's preview.html as text (vs. the blob-URL sibling above) so it can be
+// embedded via iframe srcDoc — the live-renderer preview path needs the raw markup, not a blob.
+async function electronTemplatePreviewHtml(previewRef: string): Promise<string> {
+  const url = electronTemplatePreviewUrl(previewRef);
+  const response = await fetch(url, { headers: gatewayHeaders() });
+  if (!response.ok) {
+    throw new Error(`Template preview unavailable: HTTP ${response.status}`);
+  }
+  return response.text();
 }
 
 export interface CatalogPreview {
@@ -2978,6 +2992,7 @@ export const coreBridge = {
   templatePreviewUrl: (previewRef: string) => electronTemplatePreviewUrl(previewRef),
   templatePreviewBlobUrl: (previewRef: string) =>
     electronTemplatePreviewBlobUrl(previewRef),
+  templatePreviewHtml: (previewRef: string) => electronTemplatePreviewHtml(previewRef),
   catalogPreview: (slug: string) => electronCatalogPreview(slug),
   catalogInstall: (slug: string) => electronCatalogInstall(slug),
   chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),

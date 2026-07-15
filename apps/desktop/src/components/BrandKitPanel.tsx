@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ExternalLink,
@@ -54,6 +54,18 @@ const TEMPLATE_SOURCE_LINKS = [
     tags: ["paid", "premium", "commercial"],
   },
 ] as const;
+
+/** EN-canonical catalog + flat Italian override: the reply-language contract for
+ *  the catalog surface (Settings language only picks which string to show). */
+function templateDisplayName(entry: TemplateCatalogEntry, language: string): string {
+  return language.startsWith("it") && entry.name_it ? entry.name_it : entry.name;
+}
+
+function templateDisplayDescription(entry: TemplateCatalogEntry, language: string): string {
+  return language.startsWith("it") && entry.description_it
+    ? entry.description_it
+    : entry.description;
+}
 
 /** The Presentations plugin's panel: the persistent BRAND KIT (colours, fonts, logo)
  *  that the on-brand deck/document generators apply. Stored gateway-side. */
@@ -245,7 +257,7 @@ export function BrandKitPanel({ host }: { host: PluginHost }) {
 }
 
 function TemplateCatalogGallery({ host }: { host: PluginHost }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [templates, setTemplates] = useState<TemplateCatalogEntry[]>([]);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "presentation" | "document">("all");
@@ -449,16 +461,18 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
                   type="button"
                   className="template-card-preview-button"
                   onClick={() => setSelectedTemplate(entry)}
-                  aria-label={t("presentations:openTemplateDetails", { name: entry.name })}
+                  aria-label={t("presentations:openTemplateDetails", {
+                    name: templateDisplayName(entry, i18n.language),
+                  })}
                 >
                   <TemplateCardPreview entry={entry} />
                 </button>
                 <div className="template-card-body">
                   <div className="template-card-title-row">
-                    <h4>{entry.name}</h4>
+                    <h4>{templateDisplayName(entry, i18n.language)}</h4>
                     <span>{entry.kind === "presentation" ? "PPTX" : "DOCX"}</span>
                   </div>
-                  <p>{entry.description}</p>
+                  <p>{templateDisplayDescription(entry, i18n.language)}</p>
                   {sourceBadges.length > 0 && (
                     <div className="template-card-source">
                       {sourceBadges.map((badge) => (
@@ -593,7 +607,7 @@ function TemplateDetailModal({
   onUse: () => void;
   onDelete: () => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const sourceBadges = templateSourceBadges(entry);
   const chips = [...entry.use_cases, ...entry.audience].slice(0, 6);
   return (
@@ -603,7 +617,7 @@ function TemplateDetailModal({
         <header className="template-detail-head">
           <div>
             <p className="eyebrow">{t("presentations:templateInfo")}</p>
-            <h3 id="template-detail-title">{entry.name}</h3>
+            <h3 id="template-detail-title">{templateDisplayName(entry, i18n.language)}</h3>
           </div>
           <button type="button" className="set-modal-close" onClick={onClose} aria-label="Close">
             ×
@@ -611,7 +625,7 @@ function TemplateDetailModal({
         </header>
         <div className="template-detail-summary">
           <div>
-            <p>{entry.description}</p>
+            <p>{templateDisplayDescription(entry, i18n.language)}</p>
             <div className="template-card-source">
               {sourceBadges.map((badge) => (
                 <span key={badge}>{badge}</span>
@@ -646,14 +660,11 @@ function TemplateDetailModal({
           )}
         </div>
         <div className="template-detail-preview">
-          <TemplateCardPreview entry={entry} />
-        </div>
-        <div className="template-detail-strip" aria-label="Template slides">
-          {entry.layout_archetypes.slice(0, 5).map((layout, index) => (
-            <button type="button" className={index === 0 ? "active" : ""} key={layout}>
-              <TemplateCardPreview entry={{ ...entry, layout_archetypes: [layout] }} />
-            </button>
-          ))}
+          {entry.preview_html_ref ? (
+            <TemplateLivePreview entry={entry} interactive />
+          ) : (
+            <TemplateRasterOrContractPreview entry={entry} />
+          )}
         </div>
       </div>
     </div>
@@ -672,11 +683,97 @@ function templateSourceBadges(entry: TemplateCatalogEntry) {
   return badges;
 }
 
+/** Embeds the pack's REAL renderer output (preview.html) scaled into the card.
+ *  sandbox="" = no scripts, no same-origin: the HTML is trusted (we build it)
+ *  but the cheapest posture wins. Card mode is inert (pointer-events none);
+ *  interactive mode (detail modal) lets the user scroll through the pages. */
+function TemplateLivePreview({
+  entry,
+  interactive = false,
+}: {
+  entry: TemplateCatalogEntry;
+  interactive?: boolean;
+}) {
+  const [html, setHtml] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [scale, setScale] = useState(0.2);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setHtml(null);
+    setFailed(false);
+    if (!entry.preview_html_ref) {
+      setFailed(true);
+      return undefined;
+    }
+    void coreBridge
+      .templatePreviewHtml(entry.preview_html_ref)
+      .then((text) => {
+        if (active) setHtml(text);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [entry.preview_html_ref]);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return undefined;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth > 0) setScale(el.clientWidth / 1280);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [html]);
+
+  if (failed) return <TemplateRasterOrContractPreview entry={entry} />;
+  if (!html) {
+    return (
+      <div className="template-card-preview template-preview-loading">
+        <div className="template-preview-shimmer" />
+        <div className="template-preview-loading-lines">
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div
+      ref={wrapRef}
+      className={`template-card-preview template-live-preview${interactive ? " interactive" : ""}`}
+    >
+      <iframe
+        sandbox=""
+        srcDoc={html}
+        title=""
+        tabIndex={-1}
+        aria-hidden
+        style={{
+          transform: `scale(${scale})`,
+          height: interactive ? `${Math.round(560 / scale)}px` : "720px",
+        }}
+      />
+    </div>
+  );
+}
+
 function TemplateCardPreview({ entry }: { entry: TemplateCatalogEntry }) {
+  if (entry.preview_html_ref) return <TemplateLivePreview entry={entry} />;
+  return <TemplateRasterOrContractPreview entry={entry} />;
+}
+
+/** Fallback chain for packs without a live preview.html: an authenticated raster
+ *  fetch (imported PPTX thumbnails) first, a text-only "contract" card last. */
+function TemplateRasterOrContractPreview({ entry }: { entry: TemplateCatalogEntry }) {
   const { t } = useTranslation();
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [imageFailed, setImageFailed] = useState(false);
-  const canRenderBuiltin = entry.preview_ref?.startsWith("builtin:template-preview/");
   const canRenderImage = entry.preview_ref
     ? /^(https?:\/\/|\/api\/templates\/preview|template-pack:\/\/)/.test(entry.preview_ref)
     : false;
@@ -742,76 +839,22 @@ function TemplateCardPreview({ entry }: { entry: TemplateCatalogEntry }) {
     );
   }
 
-  if (!canRenderBuiltin) {
-    return (
-      <div className="template-card-contract">
-        <div className="template-contract-topline">
-          {entry.kind === "presentation" ? (
-            <Presentation size={18} aria-hidden />
-          ) : (
-            <FileText size={18} aria-hidden />
-          )}
-          <span>{entry.kind === "presentation" ? "Presentation" : "Document"}</span>
-        </div>
-        <strong>{entry.design_template.replaceAll("_", " ")}</strong>
-        <div className="template-layout-list">
-          {entry.layout_archetypes.slice(0, 4).map((layout) => (
-            <span key={layout}>{layout}</span>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  const theme = templateThemeClass(entry.design_theme);
-  const layouts = entry.layout_archetypes.slice(0, entry.kind === "presentation" ? 4 : 5);
-
   return (
-    <div className={`template-card-preview ${theme}`}>
-      <div className="template-preview-chrome">
-        <span />
-        <span />
-        <span />
+    <div className="template-card-contract">
+      <div className="template-contract-topline">
+        {entry.kind === "presentation" ? (
+          <Presentation size={18} aria-hidden />
+        ) : (
+          <FileText size={18} aria-hidden />
+        )}
+        <span>{entry.kind === "presentation" ? "Presentation" : "Document"}</span>
       </div>
-      <div className="template-preview-canvas">
-        <div className="template-preview-header">
-          {entry.kind === "presentation" ? (
-            <Presentation size={15} aria-hidden />
-          ) : (
-            <FileText size={15} aria-hidden />
-          )}
-          <strong>{entry.name}</strong>
-        </div>
-        <div className="template-preview-title">{entry.design_template.replaceAll("_", " ")}</div>
-        <div className="template-preview-blocks">
-          {layouts.map((layout, index) => (
-            <div className={`template-preview-block block-${index % 4}`} key={`${entry.id}-${layout}`}>
-              <span>{layout}</span>
-            </div>
-          ))}
-        </div>
-        <div className="template-preview-components">
-          {entry.design_components.slice(0, 3).map((component) => (
-            <i key={component}>{component.replaceAll("_", " ")}</i>
-          ))}
-        </div>
+      <strong>{entry.design_template.replaceAll("_", " ")}</strong>
+      <div className="template-layout-list">
+        {entry.layout_archetypes.slice(0, 4).map((layout) => (
+          <span key={layout}>{layout}</span>
+        ))}
       </div>
     </div>
   );
-}
-
-function templateThemeClass(theme: string | null) {
-  switch (theme) {
-    case "high_contrast":
-      return "theme-high-contrast";
-    case "minimal_mono":
-      return "theme-minimal-mono";
-    case "warm_editorial":
-      return "theme-warm-editorial";
-    case "soft_gradient":
-      return "theme-soft-gradient";
-    case "clean_corporate":
-    default:
-      return "theme-clean-corporate";
-  }
 }

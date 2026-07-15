@@ -12387,6 +12387,28 @@ body.resizing-drawer {
   height: 142px;
   object-fit: cover;
 }
+/* Live renderer preview: the pack's real preview.html rendered at native 1280x720
+   and scaled down via CSS transform to fit the card (or the modal, in interactive mode). */
+.template-live-preview {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #fff;
+}
+.template-live-preview iframe {
+  width: 1280px;
+  height: 720px;
+  border: 0;
+  transform-origin: top left;
+  pointer-events: none;
+}
+.template-live-preview.interactive {
+  aspect-ratio: auto;
+  height: 560px;
+}
+.template-live-preview.interactive iframe {
+  pointer-events: auto;
+}
 .template-preview-loading {
   position: relative;
   overflow: hidden;
@@ -12434,132 +12456,6 @@ body.resizing-drawer {
   100% {
     background-position: 160px 0, 0 0, 0 0;
   }
-}
-.template-preview-chrome {
-  display: flex;
-  gap: 5px;
-  margin-bottom: 8px;
-}
-.template-preview-chrome span {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.28);
-}
-.template-preview-canvas {
-  height: 108px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 6px;
-  padding: 10px;
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
-  gap: 7px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-  overflow: hidden;
-}
-.template-preview-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: 9px;
-  color: inherit;
-  opacity: 0.72;
-}
-.template-preview-header strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.template-preview-title {
-  font-size: 13px;
-  font-weight: 780;
-  line-height: 1.05;
-  text-transform: capitalize;
-}
-.template-preview-blocks {
-  display: grid;
-  grid-template-columns: 1.25fr 0.9fr;
-  gap: 5px;
-  min-height: 0;
-}
-.template-preview-block {
-  border-radius: 5px;
-  min-height: 16px;
-  padding: 4px 5px;
-  font-size: 7px;
-  font-weight: 750;
-  text-transform: uppercase;
-  letter-spacing: 0;
-  overflow: hidden;
-}
-.template-preview-block span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.template-preview-block.block-0 {
-  grid-row: span 2;
-}
-.template-preview-components {
-  display: flex;
-  gap: 4px;
-}
-.template-preview-components i {
-  border-radius: 999px;
-  padding: 2px 5px;
-  font-style: normal;
-  font-size: 7px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.template-card-preview.theme-clean-corporate .template-preview-canvas {
-  background: #f8fafc;
-  color: #162033;
-}
-.template-card-preview.theme-clean-corporate .template-preview-block,
-.template-card-preview.theme-clean-corporate .template-preview-components i {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-.template-card-preview.theme-high-contrast .template-preview-canvas {
-  background: #111827;
-  color: #f9fafb;
-}
-.template-card-preview.theme-high-contrast .template-preview-block,
-.template-card-preview.theme-high-contrast .template-preview-components i {
-  background: #facc15;
-  color: #111827;
-}
-.template-card-preview.theme-minimal-mono .template-preview-canvas {
-  background: #f7f7f5;
-  color: #1f2937;
-}
-.template-card-preview.theme-minimal-mono .template-preview-block,
-.template-card-preview.theme-minimal-mono .template-preview-components i {
-  background: #e5e7eb;
-  color: #374151;
-}
-.template-card-preview.theme-warm-editorial .template-preview-canvas {
-  background: #fff7ed;
-  color: #2f2417;
-}
-.template-card-preview.theme-warm-editorial .template-preview-block,
-.template-card-preview.theme-warm-editorial .template-preview-components i {
-  background: #fed7aa;
-  color: #7c2d12;
-}
-.template-card-preview.theme-soft-gradient .template-preview-canvas {
-  background: linear-gradient(135deg, #eff6ff 0%, #ecfdf5 100%);
-  color: #102a43;
-}
-.template-card-preview.theme-soft-gradient .template-preview-block,
-.template-card-preview.theme-soft-gradient .template-preview-components i {
-  background: #bbf7d0;
-  color: #14532d;
 }
 .template-card-contract {
   min-height: 112px;
@@ -12806,66 +12702,6 @@ body.resizing-drawer {
 .template-detail-preview .template-card-preview {
   min-height: 360px;
   border-bottom: 0;
-}
-.template-detail-preview .template-preview-canvas {
-  height: 320px;
-  padding: 26px;
-  gap: 18px;
-}
-.template-detail-preview .template-preview-title {
-  font-size: 34px;
-  max-width: 56%;
-}
-.template-detail-preview .template-preview-block {
-  min-height: 58px;
-  font-size: 12px;
-  padding: 10px;
-}
-.template-detail-preview .template-preview-components i {
-  font-size: 11px;
-  padding: 6px 9px;
-}
-.template-detail-strip {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-}
-.template-detail-strip button {
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 0;
-  background: var(--surface);
-  overflow: hidden;
-  cursor: pointer;
-}
-.template-detail-strip button.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
-}
-.template-detail-strip .template-card-preview {
-  min-height: 72px;
-  padding: 6px;
-  border: 0;
-}
-.template-detail-strip .template-preview-chrome {
-  display: none;
-}
-.template-detail-strip .template-preview-canvas {
-  height: 64px;
-  padding: 6px;
-  gap: 4px;
-}
-.template-detail-strip .template-preview-header,
-.template-detail-strip .template-preview-components {
-  display: none;
-}
-.template-detail-strip .template-preview-title {
-  font-size: 9px;
-}
-.template-detail-strip .template-preview-block {
-  min-height: 14px;
-  font-size: 6px;
-  padding: 3px;
 }
 
 /* Presentations studio redesign: compact brand rail + template workspace. */
@@ -13190,11 +13026,6 @@ body.resizing-drawer {
 .presentation-template-workspace .template-card-preview.image-preview img {
   height: 166px;
 }
-.presentation-template-workspace .template-preview-canvas {
-  height: 132px;
-  border-radius: 9px;
-  padding: 12px;
-}
 .presentation-template-workspace .template-card-contract {
   min-height: 166px;
   border-bottom: 1px solid var(--line);
@@ -13259,13 +13090,6 @@ body.resizing-drawer {
 }
 .template-detail-preview .template-card-preview {
   min-height: 390px;
-}
-.template-detail-preview .template-preview-canvas {
-  height: 346px;
-  border-radius: 12px;
-}
-.template-detail-strip button {
-  border-radius: 10px;
 }
 @media (max-width: 1120px) {
   .presentations-panel.presentation-studio {

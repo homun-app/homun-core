@@ -299,7 +299,8 @@ assertContains("src/components/AutomationsView.tsx", "t(\"automations.ifThis\")"
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.filter\")", "Event automation builder must expose the FILTER part explicitly");
 assertContains("src/i18n/locales/en.json", "\"ifThis\": \"If this happens\"", "Event automation IF label must be localized in English");
 assertContains("src/i18n/locales/en.json", "\"filter\": \"Filter\"", "Event automation FILTER label must be localized in English");
-assertContains("src/components/BrandKitPanel.tsx", "builtin:template-preview/", "template gallery must render built-in previews when the catalog declares preview_ref");
+assertContains("src/components/BrandKitPanel.tsx", "TemplateLivePreview", "template gallery must render the pack's live preview.html when the catalog declares preview_html_ref");
+assertContains("src/components/BrandKitPanel.tsx", "entry.preview_html_ref", "template gallery must route card/detail rendering by the catalog's preview_html_ref field");
 assertContains("src/components/BrandKitPanel.tsx", "TemplateCardPreview", "template gallery cards must route preview rendering through a dedicated component");
 assertContains("src/components/BrandKitPanel.tsx", "template-card-contract", "template gallery must keep the metadata contract fallback for catalogs without preview_ref");
 assertContains("src/components/BrandKitPanel.tsx", "selection_notes", "template gallery must expose catalog selection rationale, not only visual decoration");
