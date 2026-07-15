@@ -1,0 +1,34 @@
+{
+  "title": "Q3 Executive Update",
+  "subtitle": "Aurora Logistics — Board review, October",
+  "theme": {
+    "primary": "#101828",
+    "secondary": "#1d2939",
+    "accent": "#fbbf24",
+    "heading_font": "Inter",
+    "body_font": "Inter"
+  },
+  "slides": [
+    { "layout": "cover", "title": "Q3 Executive Update", "subtitle": "Aurora Logistics — Board review, October" },
+    { "layout": "kpi", "title": "Status", "kpi": "+12.4%", "kpi_label": "revenue vs Q2 — at 94% of the Q3 target" },
+    { "layout": "bullets", "title": "Highlights", "bullets": [
+      "Two enterprise renewals closed early (€480k ARR)",
+      "New Milan hub operational three weeks ahead of plan",
+      "Churn down to 1.1% after the support restructure"
+    ] },
+    { "layout": "comparison", "title": "Risks", "headers": ["Risk", "Impact", "Owner", "Mitigation"], "rows": [
+      ["Fuel cost volatility", "High", "COO", "Hedging contract signed for H1"],
+      ["Driver shortage in DACH", "Medium", "HR", "Partner agency plus retention bonus"],
+      ["Customs API migration", "Medium", "CTO", "Dual-run until January"]
+    ] },
+    { "layout": "two_column", "title": "Decisions needed", "columns": [
+      { "title": "Approve", "bullets": ["Budget for two senior ops hires", "Milan hub phase-2 automation"] },
+      { "title": "Discuss", "bullets": ["Pricing review for the SMB tier", "2027 fleet electrification pace"] }
+    ] },
+    { "layout": "closing", "title": "Next steps", "bullets": [
+      "Q4 target locked at +9% with current pipeline",
+      "Hiring plan review at the November board call",
+      "Fleet RFP results circulated by end of month"
+    ] }
+  ]
+}

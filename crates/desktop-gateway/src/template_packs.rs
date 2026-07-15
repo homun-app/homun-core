@@ -170,4 +170,16 @@ mod tests {
         let provider = BundledTemplatePackProvider::from_root(&dir).expect("provider");
         assert!(crate::TemplateCatalogProvider::entries(&provider).is_empty());
     }
+
+    #[test]
+    fn repo_templates_dir_ships_the_v1_presentation_packs() {
+        let root = bundled_template_pack_root().expect("repo templates dir");
+        let provider = BundledTemplatePackProvider::from_root(&root).expect("provider");
+        let ids: Vec<String> = crate::TemplateCatalogProvider::entries(&provider)
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert!(ids.contains(&"homun/startup-pitch-clean-01".to_string()));
+        assert!(ids.contains(&"homun/executive-update-board-01".to_string()));
+    }
 }

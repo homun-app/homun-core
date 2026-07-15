@@ -1,0 +1,76 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Kite Analytics</title><style>
+:root{--brand:#16436b;--brand2:#0c2233;--accent:#14b8a6;
+  --ink:#16202b;--muted:#5a6675;--paper:#ffffff;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);-webkit-font-smoothing:antialiased}
+.slide{width:100%;min-height:100vh;padding:9vh 9vw;display:flex;flex-direction:column;
+  justify-content:center;position:relative;page-break-after:always;overflow:hidden;
+  background:var(--paper)}
+.slide h1{font-size:4rem;line-height:1.04;font-weight:800;letter-spacing:-.02em}
+.slide h2{font-size:2.7rem;line-height:1.1;font-weight:800;letter-spacing:-.01em;
+  color:var(--ink);margin-bottom:.7em;padding-bottom:.32em;
+  border-bottom:4px solid var(--accent);display:inline-block}
+.slide h3{font-size:1.4rem;color:var(--brand);font-weight:700;margin-bottom:.4em}
+.slide h1,.slide h2,.slide h3,.slide li,.slide p,.slide .sub,.slide .col,
+.slide blockquote,.slide .kpi{overflow-wrap:anywhere;hyphens:auto}
+.body{font-family:'Inter',-apple-system,sans-serif}
+.slide ul{margin-top:.4rem}
+.slide li{font-size:1.6rem;line-height:1.4;color:var(--muted);margin:.75rem 0;
+  list-style:none;padding-left:1.9rem;position:relative}
+.slide li::before{content:"";position:absolute;left:0;top:.55em;width:.72rem;height:.72rem;
+  border-radius:2px;background:var(--accent)}
+/* left accent rail on every content slide */
+.slide:not(.cover):not(.section)::before{content:"";position:absolute;left:0;top:0;bottom:0;
+  width:12px;background:var(--brand)}
+.kpi{font-size:7rem;font-weight:800;color:var(--brand);line-height:1;letter-spacing:-.03em}
+.accent-bar{position:absolute;left:0;bottom:0;height:8px;width:100%;
+  background:linear-gradient(90deg,var(--brand),var(--accent))}
+.logo{position:absolute;top:6vh;right:9vw;max-height:46px}
+.cover,.section{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);color:#fff}
+.cover::after,.section::after{content:"";position:absolute;right:-10vw;top:-12vw;width:46vw;
+  height:46vw;border-radius:50%;background:rgba(255,255,255,.06)}
+.cover h1,.section h1{color:#fff;max-width:82%;position:relative}
+.cover .sub{font-size:1.5rem;opacity:.92;margin-top:1.3rem;font-weight:400;position:relative}
+.cover .rule{width:96px;height:6px;background:var(--accent);margin-top:2rem;position:relative}
+.img-led{display:grid;grid-template-columns:1fr 1fr;gap:5vw;align-items:center}
+.img-led .led{width:100%;border-radius:16px;object-fit:cover;max-height:64vh;
+  box-shadow:0 14px 44px rgba(0,0,0,.16)}
+.img-led .ph{background:#eef1f5;min-height:42vh;border-radius:16px}
+.inline-img{margin-top:1.4rem;max-height:44vh;border-radius:14px;object-fit:cover;
+  box-shadow:0 10px 30px rgba(0,0,0,.12)}
+.two-col .cols{display:grid;grid-template-columns:1fr 1fr;gap:5vw;margin-top:1.2rem}
+.two-col .col{border-top:4px solid var(--accent);padding-top:1rem}
+.kpi-slide .sub{font-size:1.6rem;color:var(--muted);margin-top:.6rem}
+.quote-slide blockquote{font-size:2.8rem;font-weight:700;color:var(--ink);max-width:86%;
+  line-height:1.25}
+.quote-slide blockquote::first-letter{color:var(--accent)}
+.quote-slide .sub{font-size:1.4rem;color:var(--brand);margin-top:1.4rem;font-weight:600}
+@media print{.slide{min-height:auto;height:100vh}}
+.tl{display:flex;flex-direction:column;gap:1.15rem;margin-top:1.3rem}
+.tl-item{display:grid;grid-template-columns:92px 18px 1fr;align-items:start;gap:1.1rem}
+.tl-label{font-weight:800;color:var(--brand);font-size:1.15rem;text-align:right}
+.tl-dot{width:14px;height:14px;border-radius:50%;background:var(--accent);margin-top:.28rem;position:relative}
+.tl-item:not(:last-child) .tl-dot::after{content:"";position:absolute;left:6px;top:17px;width:2px;height:2.6rem;background:#dfe5ec}
+.tl-text strong{font-size:1.25rem}
+.tl-text span{display:block;color:var(--muted);font-size:1.05rem;margin-top:.18rem}
+table.cmp{width:100%;border-collapse:collapse;margin-top:1.3rem;font-size:1.15rem}
+table.cmp th{text-align:left;background:var(--brand);color:#fff;padding:.7rem .95rem;font-weight:700}
+table.cmp td{padding:.68rem .95rem;color:var(--muted);border-bottom:1px solid #e4e9ef}
+table.cmp tr:nth-child(even) td{background:#f6f8fa}
+.team-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.7rem;margin-top:1.5rem}
+.member{display:flex;flex-direction:column;align-items:flex-start;gap:.4rem}
+.member .avatar{width:64px;height:64px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.3rem}
+.member strong{font-size:1.2rem}
+.member span{color:var(--muted);font-size:1rem}
+</style></head><body>
+<section class="slide cover"><h1>Kite Analytics</h1><div class="sub">Operational intelligence for mid-size manufacturers</div><div class="rule"></div><div class="accent-bar"></div></section>
+<section class="slide bullets"><h2>The problem</h2><ul class="body"><li>Production data lives in six disconnected tools</li><li>Plant managers decide on week-old spreadsheets</li><li>Downtime costs surface only when the quarter closes</li></ul><div class="accent-bar"></div></section>
+<section class="slide two-col"><h2>Our solution</h2><div class="cols"><div class="col"><h3>Connect</h3><ul class="body"><li>Plug-and-play adapters for PLCs and MES</li><li>No new hardware on the line</li></ul></div><div class="col"><h3>Decide</h3><ul class="body"><li>Live cost-of-downtime dashboard</li><li>Alerts routed to the right shift lead</li></ul></div></div><div class="accent-bar"></div></section>
+<section class="slide kpi-slide"><h2>Traction</h2><div class="kpi">38%</div><div class="sub">average downtime reduction across 24 pilot plants</div><div class="accent-bar"></div></section>
+<section class="slide comparison"><h2>Why we win</h2><table class="cmp"><thead><tr><th></th><th>Spreadsheets</th><th>Legacy MES</th><th>Kite</th></tr></thead><tbody><tr><td>Setup time</td><td>weeks</td><td>months</td><td>2 days</td></tr><tr><td>Live data</td><td>no</td><td>partial</td><td>yes</td></tr><tr><td>Cost per plant</td><td>hidden</td><td>high</td><td>low</td></tr></tbody></table><div class="accent-bar"></div></section>
+<section class="slide team"><h2>Team</h2><div class="team-grid"><div class="member"><div class="avatar">ER</div><strong>Elena Ricci</strong><span>CEO — former plant director</span></div><div class="member"><div class="avatar">MC</div><strong>Marco Chen</strong><span>CTO — industrial IoT</span></div><div class="member"><div class="avatar">SN</div><strong>Sara Novak</strong><span>Head of Sales — B2B SaaS</span></div><div class="member"><div class="avatar">LF</div><strong>Luca Ferri</strong><span>Lead Engineer — data platforms</span></div></div><div class="accent-bar"></div></section>
+<section class="slide timeline"><h2>Roadmap</h2><div class="tl"><div class="tl-item"><div class="tl-label">Q3</div><div class="tl-dot"></div><div class="tl-text"><strong>Self-serve onboarding</strong><span>From pilot to paid in one week</span></div></div><div class="tl-item"><div class="tl-label">Q4</div><div class="tl-dot"></div><div class="tl-text"><strong>Predictive alerts</strong><span>Failure-risk scoring on live signals</span></div></div><div class="tl-item"><div class="tl-label">Q1</div><div class="tl-dot"></div><div class="tl-text"><strong>EU expansion</strong><span>DACH go-to-market with two partners</span></div></div></div><div class="accent-bar"></div></section>
+<section class="slide bullets"><h2>The ask</h2><ul class="body"><li>€1.5M seed to reach 100 plants</li><li>Introductions to manufacturing operators</li><li>Pilot slots open for Q4</li></ul><div class="accent-bar"></div></section>
+</body></html>

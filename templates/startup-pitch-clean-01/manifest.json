@@ -1,0 +1,22 @@
+{
+  "id": "homun/startup-pitch-clean-01",
+  "kind": "presentation",
+  "name": "Startup Pitch Clean",
+  "name_it": "Pitch startup essenziale",
+  "description": "Clean startup pitch deck for product intro, fundraising or customer pitch.",
+  "description_it": "Pitch deck pulito per presentare prodotto, raccolta fondi o clienti.",
+  "design_template": "startup_pitch",
+  "design_theme": "clean_corporate",
+  "design_profile": "sales_pitch",
+  "design_components": ["kpi_grid", "timeline", "comparison_table"],
+  "layout_archetypes": ["cover", "bullets", "two_column", "kpi", "comparison", "team_grid", "timeline", "closing"],
+  "tags": ["clean corporate", "sales pitch", "kpi grid", "timeline"],
+  "use_cases": ["pitch", "fundraising", "product intro"],
+  "audience": ["investors", "executives", "customers"],
+  "intake_questions": [
+    "What is the company or product, in one line?",
+    "Who is the audience (investors, customer, internal) and what is the ask?",
+    "Which 2-3 numbers prove traction today?"
+  ],
+  "route_text": "startup pitch deck fundraising investor presentazione prodotto traction team roadmap ask seed round"
+}

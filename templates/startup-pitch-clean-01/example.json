@@ -1,0 +1,45 @@
+{
+  "title": "Kite Analytics",
+  "subtitle": "Operational intelligence for mid-size manufacturers",
+  "theme": {
+    "primary": "#16436b",
+    "secondary": "#0c2233",
+    "accent": "#14b8a6",
+    "heading_font": "Inter",
+    "body_font": "Inter"
+  },
+  "slides": [
+    { "layout": "cover", "title": "Kite Analytics", "subtitle": "Operational intelligence for mid-size manufacturers" },
+    { "layout": "bullets", "title": "The problem", "bullets": [
+      "Production data lives in six disconnected tools",
+      "Plant managers decide on week-old spreadsheets",
+      "Downtime costs surface only when the quarter closes"
+    ] },
+    { "layout": "two_column", "title": "Our solution", "columns": [
+      { "title": "Connect", "bullets": ["Plug-and-play adapters for PLCs and MES", "No new hardware on the line"] },
+      { "title": "Decide", "bullets": ["Live cost-of-downtime dashboard", "Alerts routed to the right shift lead"] }
+    ] },
+    { "layout": "kpi", "title": "Traction", "kpi": "38%", "kpi_label": "average downtime reduction across 24 pilot plants" },
+    { "layout": "comparison", "title": "Why we win", "headers": ["", "Spreadsheets", "Legacy MES", "Kite"], "rows": [
+      ["Setup time", "weeks", "months", "2 days"],
+      ["Live data", "no", "partial", "yes"],
+      ["Cost per plant", "hidden", "high", "low"]
+    ] },
+    { "layout": "team_grid", "title": "Team", "members": [
+      { "name": "Elena Ricci", "role": "CEO — former plant director" },
+      { "name": "Marco Chen", "role": "CTO — industrial IoT" },
+      { "name": "Sara Novak", "role": "Head of Sales — B2B SaaS" },
+      { "name": "Luca Ferri", "role": "Lead Engineer — data platforms" }
+    ] },
+    { "layout": "timeline", "title": "Roadmap", "items": [
+      { "label": "Q3", "title": "Self-serve onboarding", "text": "From pilot to paid in one week" },
+      { "label": "Q4", "title": "Predictive alerts", "text": "Failure-risk scoring on live signals" },
+      { "label": "Q1", "title": "EU expansion", "text": "DACH go-to-market with two partners" }
+    ] },
+    { "layout": "closing", "title": "The ask", "bullets": [
+      "€1.5M seed to reach 100 plants",
+      "Introductions to manufacturing operators",
+      "Pilot slots open for Q4"
+    ] }
+  ]
+}

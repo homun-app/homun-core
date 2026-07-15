@@ -1,0 +1,22 @@
+{
+  "id": "homun/executive-update-board-01",
+  "kind": "presentation",
+  "name": "Executive Update Board",
+  "name_it": "Aggiornamento executive per il board",
+  "description": "Board-ready executive update with metrics, risks, decisions and next steps.",
+  "description_it": "Aggiornamento executive pronto per il board: metriche, rischi, decisioni e prossimi passi.",
+  "design_template": "executive_update",
+  "design_theme": "high_contrast",
+  "design_profile": "executive",
+  "design_components": ["kpi_grid", "risks_table"],
+  "layout_archetypes": ["cover", "kpi", "bullets", "comparison", "two_column", "closing"],
+  "tags": ["high contrast", "executive", "kpi grid", "risks table"],
+  "use_cases": ["board update", "status update", "management review"],
+  "audience": ["board", "executives", "leadership"],
+  "intake_questions": [
+    "Which period and company/unit is this update about?",
+    "What are the 2-3 headline numbers and how do they compare to target?",
+    "Which risks and pending decisions must the board see?"
+  ],
+  "route_text": "executive update board review status report metriche rischi decisioni next steps trimestre CDA"
+}
