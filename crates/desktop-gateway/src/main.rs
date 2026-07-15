@@ -43,6 +43,7 @@ mod sandbox;
 mod seatbelt;
 mod task_registry;
 mod temporal;
+mod template_packs;
 mod vision;
 mod turn_executor;
 mod ws_gateway;
@@ -7900,10 +7901,15 @@ fn import_pptx_template_pack(
 }
 
 fn template_catalog_entries() -> Vec<TemplateCatalogEntry> {
+    let bundled_provider = template_packs::bundled_template_pack_provider();
     let local = LocalTemplateCatalogProvider;
     let file_provider = file_template_catalog_provider();
     let imported_provider = imported_template_pack_provider();
-    let mut providers: Vec<&dyn TemplateCatalogProvider> = vec![&local];
+    let mut providers: Vec<&dyn TemplateCatalogProvider> = Vec::new();
+    if let Some(provider) = bundled_provider.as_ref() {
+        providers.push(provider);
+    }
+    providers.push(&local);
     if let Some(provider) = file_provider.as_ref() {
         providers.push(provider);
     }
