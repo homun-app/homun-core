@@ -526,6 +526,8 @@ struct TemplateCatalogEntryResponse {
     name: String,
     kind: String,
     description: String,
+    name_it: Option<String>,
+    description_it: Option<String>,
     use_cases: Vec<String>,
     audience: Vec<String>,
     design_template: String,
@@ -536,6 +538,7 @@ struct TemplateCatalogEntryResponse {
     tags: Vec<String>,
     selection_notes: Vec<String>,
     preview_ref: Option<String>,
+    preview_html_ref: Option<String>,
     source_ref: Option<String>,
     license: Option<String>,
     source_provider: Option<String>,
@@ -6743,6 +6746,11 @@ struct TemplateCatalogEntry {
     name: String,
     kind: String,
     description: String,
+    // Flat locale overrides (name_it/description_it in the manifest): the catalog is
+    // EN-canonical, Italian is the one extra locale the product ships today. A map
+    // would be speculative — add locales when a third one actually exists.
+    name_it: Option<String>,
+    description_it: Option<String>,
     use_cases: Vec<String>,
     audience: Vec<String>,
     design_template: String,
@@ -6752,11 +6760,16 @@ struct TemplateCatalogEntry {
     layout_archetypes: Vec<String>,
     tags: Vec<String>,
     preview_ref: Option<String>,
+    // Live HTML preview (bundled packs): "template-pack://<id>/preview.html".
+    preview_html_ref: Option<String>,
     source_ref: Option<String>,
     license: Option<String>,
     source_provider: Option<String>,
     source_path: Option<PathBuf>,
     template_pack_root: Option<PathBuf>,
+    // Bundled (shipped-with-the-app) packs share the pack-dir shape with imported
+    // ones but must NOT look imported (no delete button, source filter "Homun").
+    bundled: bool,
     attribution_required: bool,
     attribution_text: Option<String>,
     redistribution_policy: Option<String>,
@@ -6934,6 +6947,8 @@ fn template_catalog_entry(
         name: name.to_string(),
         kind: kind.to_string(),
         description: description.to_string(),
+        name_it: None,
+        description_it: None,
         use_cases: use_cases.iter().map(|value| value.to_string()).collect(),
         audience: audience.iter().map(|value| value.to_string()).collect(),
         design_template: design_template.to_string(),
@@ -6949,11 +6964,13 @@ fn template_catalog_entry(
             .collect(),
         tags: Vec::new(),
         preview_ref: None,
+        preview_html_ref: None,
         source_ref: None,
         license: None,
         source_provider: None,
         source_path: None,
         template_pack_root: None,
+        bundled: false,
         attribution_required: false,
         attribution_text: None,
         redistribution_policy: None,
@@ -7491,6 +7508,8 @@ fn parse_file_template_catalog_entry(
         name,
         kind,
         description,
+        name_it: clean_template_catalog_text(value.get("name_it"), 80),
+        description_it: clean_template_catalog_text(value.get("description_it"), 240),
         use_cases: clean_template_catalog_string_list(value.get("use_cases"), 12, 80),
         audience: clean_template_catalog_string_list(value.get("audience"), 12, 80),
         design_template,
@@ -7504,11 +7523,13 @@ fn parse_file_template_catalog_entry(
         ),
         tags: clean_template_catalog_string_list(value.get("tags"), 16, 40),
         preview_ref: clean_template_catalog_ref(value.get("preview_ref")),
+        preview_html_ref: None,
         source_ref: clean_template_catalog_ref(value.get("source_ref")),
         license: clean_template_catalog_text(value.get("license"), 80),
         source_provider: None,
         source_path: None,
         template_pack_root: None,
+        bundled: false,
         attribution_required: false,
         attribution_text: None,
         redistribution_policy: None,
@@ -7918,6 +7939,8 @@ fn template_catalog_response_from_entries(
                     name: entry.name,
                     kind: entry.kind,
                     description: entry.description,
+                    name_it: entry.name_it,
+                    description_it: entry.description_it,
                     use_cases: entry.use_cases,
                     audience: entry.audience,
                     design_template: entry.design_template,
@@ -7928,13 +7951,14 @@ fn template_catalog_response_from_entries(
                     tags: entry.tags,
                     selection_notes,
                     preview_ref: template_catalog_preview_response_ref(entry.preview_ref),
+                    preview_html_ref: template_catalog_preview_response_ref(entry.preview_html_ref),
                     source_ref: entry.source_ref,
                     license: entry.license,
                     source_provider: entry.source_provider,
                     attribution_required: entry.attribution_required,
                     attribution_text: entry.attribution_text,
                     redistribution_policy: entry.redistribution_policy,
-                    is_imported: entry.template_pack_root.is_some(),
+                    is_imported: entry.template_pack_root.is_some() && !entry.bundled,
                 }
             })
             .collect(),
@@ -55175,6 +55199,8 @@ prs.save(Path({path:?}))
             name: "Sales Kickoff".to_string(),
             kind: "presentation".to_string(),
             description: "Imported template".to_string(),
+            name_it: None,
+            description_it: None,
             use_cases: Vec::new(),
             audience: Vec::new(),
             design_template: "startup_pitch".to_string(),
@@ -55184,11 +55210,13 @@ prs.save(Path({path:?}))
             layout_archetypes: Vec::new(),
             tags: Vec::new(),
             preview_ref: None,
+            preview_html_ref: None,
             source_ref: None,
             license: None,
             source_provider: Some("user_upload".to_string()),
             source_path: Some(source.clone()),
             template_pack_root: Some(root.clone()),
+            bundled: false,
             attribution_required: false,
             attribution_text: None,
             redistribution_policy: None,
@@ -55363,6 +55391,34 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn file_template_catalog_entry_parses_localized_names() {
+        let manifest = serde_json::json!({
+            "provider_id": "acme",
+            "templates": [{
+                "id": "acme/localized-01",
+                "kind": "presentation",
+                "name": "Localized Pitch",
+                "name_it": "Pitch localizzato",
+                "description": "A pitch template.",
+                "description_it": "Un template per pitch.",
+                "design_template": "startup_pitch",
+                "route_text": "pitch localized"
+            }]
+        });
+        let provider =
+            super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str())
+                .expect("provider");
+        let entry = &provider.entries[0];
+        assert_eq!(entry.name_it.as_deref(), Some("Pitch localizzato"));
+        assert_eq!(
+            entry.description_it.as_deref(),
+            Some("Un template per pitch.")
+        );
+        assert!(!entry.bundled);
+        assert!(entry.preview_html_ref.is_none());
+    }
+
+    #[test]
     fn file_template_catalog_provider_ignores_unsafe_preview_refs() {
         let manifest = serde_json::json!({
             "provider_id": "monet_file",
@@ -55398,6 +55454,8 @@ prs.save(Path({path:?}))
                 name: "Gallery Template".to_string(),
                 kind: "presentation".to_string(),
                 description: "Template prepared for gallery preview.".to_string(),
+                name_it: None,
+                description_it: None,
                 use_cases: vec!["pitch".to_string()],
                 audience: vec!["clients".to_string()],
                 design_template: "startup_pitch".to_string(),
@@ -55407,11 +55465,13 @@ prs.save(Path({path:?}))
                 layout_archetypes: vec!["cover".to_string()],
                 tags: vec!["premium".to_string()],
                 preview_ref: Some("assets/gallery-template.png".to_string()),
+                preview_html_ref: None,
                 source_ref: Some("https://example.com/gallery-template".to_string()),
                 license: Some("commercial".to_string()),
                 source_provider: None,
                 source_path: None,
                 template_pack_root: None,
+                bundled: false,
                 attribution_required: false,
                 attribution_text: None,
                 redistribution_policy: None,
@@ -56070,6 +56130,8 @@ prs.save(Path({path:?}))
             name: "Pitch Clean".to_string(),
             kind: "presentation".to_string(),
             description: "Imported template.".to_string(),
+            name_it: None,
+            description_it: None,
             use_cases: vec!["pitch".to_string()],
             audience: vec!["clients".to_string()],
             design_template: "startup_pitch".to_string(),
@@ -56081,11 +56143,13 @@ prs.save(Path({path:?}))
             preview_ref: Some(
                 "template-pack://slidescarnival/pitch-clean/thumbnails/slide-001.png".to_string(),
             ),
+            preview_html_ref: None,
             source_ref: Some("https://www.slidescarnival.com/template/example/123".to_string()),
             license: Some("Creative Commons Attribution 4.0".to_string()),
             source_provider: Some("slidescarnival".to_string()),
             source_path: None,
             template_pack_root: None,
+            bundled: false,
             attribution_required: true,
             attribution_text: Some("Template by SlidesCarnival".to_string()),
             redistribution_policy: Some("generated_decks_only".to_string()),
