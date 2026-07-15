@@ -55,6 +55,16 @@ def find_chromium():
     return None
 
 
+def run_tool(argv):
+    """check=True alone buries the tool's stderr inside the exception; surface it
+    so a Chromium/pdftoppm failure is actionable, not just "exit status N"."""
+    try:
+        subprocess.run(argv, check=True, capture_output=True)
+    except subprocess.CalledProcessError as error:
+        stderr = (error.stderr or b"").decode(errors="replace").strip()
+        sys.exit(f"{argv[0]} failed (exit {error.returncode}):\n{stderr}")
+
+
 def build_thumbnails(pack_dir, html_path):
     chromium = find_chromium()
     if not chromium or not shutil.which("pdftoppm"):
@@ -67,14 +77,12 @@ def build_thumbnails(pack_dir, html_path):
     os.makedirs(thumbs)
     with tempfile.TemporaryDirectory() as tmp:
         pdf = os.path.join(tmp, "preview.pdf")
-        subprocess.run(
+        run_tool(
             [chromium, "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
-             f"--print-to-pdf={pdf}", f"file://{os.path.abspath(html_path)}"],
-            check=True, capture_output=True)
-        subprocess.run(
+             f"--print-to-pdf={pdf}", f"file://{os.path.abspath(html_path)}"])
+        run_tool(
             ["pdftoppm", "-png", "-r", "96", "-f", "1", "-l", str(MAX_THUMBNAILS),
-             pdf, os.path.join(tmp, "slide")],
-            check=True, capture_output=True)
+             pdf, os.path.join(tmp, "slide")])
         pages = sorted(p for p in os.listdir(tmp) if p.startswith("slide") and p.endswith(".png"))
         for index, page in enumerate(pages, start=1):
             shutil.copyfile(os.path.join(tmp, page),
@@ -96,7 +104,10 @@ def main():
     if args.only:
         slugs = [slug for slug in slugs if slug == args.only]
     if not slugs:
-        sys.exit(f"no template packs with example.json under {TEMPLATES_DIR}")
+        if args.only:
+            sys.exit(f"pack '{args.only}' not found (or has no example.json) under {TEMPLATES_DIR}")
+        else:
+            sys.exit(f"no template packs with example.json under {TEMPLATES_DIR}")
 
     for slug in slugs:
         pack_dir = os.path.join(TEMPLATES_DIR, slug)
