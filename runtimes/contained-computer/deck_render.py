@@ -34,6 +34,9 @@ deck.json schema (all fields optional unless noted):
                                                           {"title":"R","bullets":[]}]},
     {"layout": "quote",   "quote": "...", "author": "..."},
     {"layout": "section", "title": "..."},
+    {"layout": "timeline", "title": "...", "items": [{"label":"Q1","title":"...","text":"..."}]},
+    {"layout": "comparison", "title": "...", "headers": ["A","B"], "rows": [["x","y"]]},
+    {"layout": "team_grid", "title": "...", "members": [{"name":"...","role":"..."}]},
     {"layout": "closing", "title": "Next steps", "bullets": [...]}
   ]
 }
@@ -125,6 +128,12 @@ def _logo_html(logo):
     return f'<img class="logo" src="{logo}">' if logo else ""
 
 
+def _initials(name):
+    """First letter of up to 2 words → avatar glyph when no headshot is provided."""
+    parts = [p for p in str(name or "").split() if p]
+    return "".join(p[0].upper() for p in parts[:2])
+
+
 def _html_slide(s, base_dir, logo):
     layout = s.get("layout", "bullets")
     title = html_escape(s.get("title", ""))
@@ -177,6 +186,47 @@ def _html_slide(s, base_dir, logo):
         return (
             f'<section class="slide two-col">{_logo_html(logo)}'
             f"<h2>{title}</h2><div class=\"cols\">{cells}</div>"
+            f'<div class="accent-bar"></div></section>'
+        )
+    if layout == "timeline":
+        items = s.get("items", [])[:6]
+        rows = "".join(
+            f'<div class="tl-item"><div class="tl-label">{html_escape(i.get("label", ""))}</div>'
+            f'<div class="tl-dot"></div>'
+            f'<div class="tl-text"><strong>{html_escape(i.get("title", ""))}</strong>'
+            f'<span>{html_escape(i.get("text", ""))}</span></div></div>'
+            for i in items
+        )
+        return (
+            f'<section class="slide timeline">{_logo_html(logo)}'
+            f'<h2>{title}</h2><div class="tl">{rows}</div>'
+            f'<div class="accent-bar"></div></section>'
+        )
+    if layout == "comparison":
+        headers = s.get("headers", [])[:4]
+        rows = s.get("rows", [])[:8]
+        head = "".join(f"<th>{html_escape(h)}</th>" for h in headers)
+        body_rows = "".join(
+            "<tr>" + "".join(f"<td>{html_escape(c)}</td>" for c in row[: len(headers) or 4]) + "</tr>"
+            for row in rows
+        )
+        return (
+            f'<section class="slide comparison">{_logo_html(logo)}'
+            f'<h2>{title}</h2><table class="cmp"><thead><tr>{head}</tr></thead>'
+            f"<tbody>{body_rows}</tbody></table>"
+            f'<div class="accent-bar"></div></section>'
+        )
+    if layout == "team_grid":
+        members = s.get("members", [])[:8]
+        cells = "".join(
+            f'<div class="member"><div class="avatar">{html_escape(_initials(m.get("name", "")))}</div>'
+            f'<strong>{html_escape(m.get("name", ""))}</strong>'
+            f'<span>{html_escape(m.get("role", ""))}</span></div>'
+            for m in members
+        )
+        return (
+            f'<section class="slide team">{_logo_html(logo)}'
+            f'<h2>{title}</h2><div class="team-grid">{cells}</div>'
             f'<div class="accent-bar"></div></section>'
         )
     # default: bullets (+ optional image, + optional body)
@@ -238,6 +288,22 @@ body{{font-family:'{heading}',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sa
 .quote-slide blockquote::first-letter{{color:var(--accent)}}
 .quote-slide .sub{{font-size:1.4rem;color:var(--brand);margin-top:1.4rem;font-weight:600}}
 @media print{{.slide{{min-height:auto;height:100vh}}}}
+.tl{{display:flex;flex-direction:column;gap:1.15rem;margin-top:1.3rem}}
+.tl-item{{display:grid;grid-template-columns:92px 18px 1fr;align-items:start;gap:1.1rem}}
+.tl-label{{font-weight:800;color:var(--brand);font-size:1.15rem;text-align:right}}
+.tl-dot{{width:14px;height:14px;border-radius:50%;background:var(--accent);margin-top:.28rem;position:relative}}
+.tl-item:not(:last-child) .tl-dot::after{{content:"";position:absolute;left:6px;top:17px;width:2px;height:2.6rem;background:#dfe5ec}}
+.tl-text strong{{font-size:1.25rem}}
+.tl-text span{{display:block;color:var(--muted);font-size:1.05rem;margin-top:.18rem}}
+table.cmp{{width:100%;border-collapse:collapse;margin-top:1.3rem;font-size:1.15rem}}
+table.cmp th{{text-align:left;background:var(--brand);color:#fff;padding:.7rem .95rem;font-weight:700}}
+table.cmp td{{padding:.68rem .95rem;color:var(--muted);border-bottom:1px solid #e4e9ef}}
+table.cmp tr:nth-child(even) td{{background:#f6f8fa}}
+.team-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.7rem;margin-top:1.5rem}}
+.member{{display:flex;flex-direction:column;align-items:flex-start;gap:.4rem}}
+.member .avatar{{width:64px;height:64px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.3rem}}
+.member strong{{font-size:1.2rem}}
+.member span{{color:var(--muted);font-size:1rem}}
 """
 
 _HTML_SHELL = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -654,6 +720,61 @@ def render_pptx(deck, base_dir, out_path):
                 runs += [(b, 17, muted, body_font, False, True)
                          for b in c.get("bullets", [])]
                 textbox(slide, left, Inches(1.9), Inches(5.6), Inches(4.6), runs)
+        elif layout == "timeline":
+            top = 2.0
+            for it in s.get("items", [])[:6]:
+                textbox(slide, Inches(0.9), Inches(top), Inches(1.5), Inches(0.8),
+                        [(it.get("label", ""), 18, brand, head_font, True, False)])
+                dot = slide.shapes.add_shape(9, Inches(2.55), Inches(top + 0.08),
+                                              Pt(11), Pt(11))  # 9 = MSO_SHAPE.OVAL
+                dot.fill.solid()
+                dot.fill.fore_color.rgb = accent
+                dot.line.fill.background()
+                dot.shadow.inherit = False
+                runs = [(it.get("title", ""), 17, brand, head_font, True, False)]
+                if it.get("text"):
+                    runs.append((it.get("text", ""), 14, muted, body_font, False, False))
+                textbox(slide, Inches(3.0), Inches(top), Inches(9.3), Inches(0.95), runs)
+                top += 0.95
+        elif layout == "comparison":
+            headers = s.get("headers", [])[:4]
+            rows = s.get("rows", [])[:8]
+            if headers and rows:
+                shape = slide.shapes.add_table(
+                    len(rows) + 1, len(headers),
+                    Inches(0.9), Inches(1.9), Inches(11.5),
+                    Inches(min(4.6, 0.55 + 0.5 * len(rows))))
+                table = shape.table
+                for c, h in enumerate(headers):
+                    table.cell(0, c).text = str(h)
+                for r, row in enumerate(rows, start=1):
+                    for c, cell_text in enumerate(row[: len(headers)]):
+                        table.cell(r, c).text = str(cell_text)
+                for row_cells in table.rows:
+                    for cell in row_cells.cells:
+                        for paragraph in cell.text_frame.paragraphs:
+                            for run in paragraph.runs:
+                                run.font.size = Pt(13)
+                                run.font.name = body_font
+        elif layout == "team_grid":
+            members = s.get("members", [])[:8]
+            per_row = 4 if len(members) > 4 else max(len(members), 1)
+            col_w = 11.5 / per_row
+            for i, m in enumerate(members):
+                row_i, col_i = divmod(i, per_row)
+                left = 0.9 + col_i * col_w
+                top = 2.1 + row_i * 2.3
+                avatar = slide.shapes.add_shape(9, Inches(left), Inches(top),
+                                                 Inches(0.85), Inches(0.85))
+                avatar.fill.solid()
+                avatar.fill.fore_color.rgb = brand
+                avatar.line.fill.background()
+                avatar.shadow.inherit = False
+                avatar.text_frame.text = _initials(m.get("name", ""))
+                textbox(slide, Inches(left), Inches(top + 0.95),
+                        Inches(col_w - 0.3), Inches(1.1),
+                        [(m.get("name", ""), 16, brand, head_font, True, False),
+                         (m.get("role", ""), 13, muted, body_font, False, False)])
         else:  # bullets
             runs = [(b, 20, muted, body_font, False, True) for b in s.get("bullets", [])]
             if s.get("body"):
