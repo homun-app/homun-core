@@ -12395,6 +12395,11 @@ body.resizing-drawer {
   overflow: hidden;
   background: #fff;
 }
+/* Document packs (A4 portrait pages) need a taller card than 16:9 decks so the
+   thumbnail shows more of the page instead of just its header band. */
+.template-live-preview.doc-preview {
+  aspect-ratio: 3 / 2;
+}
 .template-live-preview iframe {
   width: 1280px;
   height: 720px;
@@ -12679,6 +12684,20 @@ body.resizing-drawer {
 .template-detail-summary p {
   margin: 0 0 12px;
   max-width: 520px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.template-detail-questions {
+  margin: 0 0 12px;
+  max-width: 520px;
+}
+.template-detail-questions p.eyebrow {
+  margin: 0 0 4px;
+}
+.template-detail-questions ul {
+  margin: 0;
+  padding-left: 18px;
   color: var(--text);
   font-size: 13px;
   line-height: 1.5;

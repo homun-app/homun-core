@@ -2658,6 +2658,7 @@ export interface TemplateCatalogEntry {
   name_it: string | null;
   description_it: string | null;
   preview_html_ref: string | null;
+  intake_questions: string[];
 }
 
 export interface TemplateCatalogResponse {

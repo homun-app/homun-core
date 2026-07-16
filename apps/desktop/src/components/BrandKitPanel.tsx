@@ -626,6 +626,16 @@ function TemplateDetailModal({
         <div className="template-detail-summary">
           <div>
             <p>{templateDisplayDescription(entry, i18n.language)}</p>
+            {entry.intake_questions.length > 0 && (
+              <div className="template-detail-questions">
+                <p className="eyebrow">{t("presentations:templateQuestionsEyebrow")}</p>
+                <ul>
+                  {entry.intake_questions.map((question) => (
+                    <li key={question}>{question}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="template-card-source">
               {sourceBadges.map((badge) => (
                 <span key={badge}>{badge}</span>
@@ -699,6 +709,9 @@ function TemplateLivePreview({
   const [failed, setFailed] = useState(false);
   const [scale, setScale] = useState(0.2);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  // Document packs render at A4 width (794px @96dpi); presentations at 16:9 (1280px).
+  // The scale factor below is derived from this so the iframe always fits its card.
+  const designWidth = entry.kind === "document" ? 794 : 1280;
 
   useEffect(() => {
     let active = true;
@@ -725,11 +738,11 @@ function TemplateLivePreview({
     const el = wrapRef.current;
     if (!el) return undefined;
     const observer = new ResizeObserver(() => {
-      if (el.clientWidth > 0) setScale(el.clientWidth / 1280);
+      if (el.clientWidth > 0) setScale(el.clientWidth / designWidth);
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [html]);
+  }, [html, designWidth]);
 
   if (failed) return <TemplateRasterOrContractPreview entry={entry} />;
   if (!html) {
@@ -747,7 +760,7 @@ function TemplateLivePreview({
   return (
     <div
       ref={wrapRef}
-      className={`template-card-preview template-live-preview${interactive ? " interactive" : ""}`}
+      className={`template-card-preview template-live-preview${interactive ? " interactive" : ""}${entry.kind === "document" ? " doc-preview" : ""}`}
     >
       {/* Card mode is a decorative thumbnail (inert, hidden from AT); interactive mode is the actual scrollable content, so it must be focusable and titled. */}
       <iframe
@@ -757,6 +770,7 @@ function TemplateLivePreview({
         tabIndex={interactive ? 0 : -1}
         aria-hidden={interactive ? undefined : true}
         style={{
+          width: designWidth,
           transform: `scale(${scale})`,
           height: interactive ? `${Math.round(560 / scale)}px` : "720px",
         }}

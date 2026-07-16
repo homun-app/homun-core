@@ -984,6 +984,13 @@ export default function App() {
       "Do not generate the deck yet.",
       "Analyze the selected template as a constraint for style, layout and visual tone.",
       "First ask 2-4 essential questions to understand objective, audience, available content, slide count and tone.",
+      ...(input.template.intake_questions.length > 0
+        ? [
+            `Ask these template-specific questions first (one message): ${input.template.intake_questions
+              .map((question, index) => `${index + 1}. ${question}`)
+              .join(" ")}`,
+          ]
+        : []),
       "Then propose a concise plan and wait for confirmation before using make_deck.",
       `When the user confirms execution, use make_deck with template_ref="${input.template.id}".`,
     ].join("\n");

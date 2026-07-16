@@ -5,6 +5,72 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-16.**
 
+## ⭐ CHECKPOINT 2026-07-16 (bis) — Presentations F2 (documenti di prima classe) SHIPPED
+
+Piano eseguito (SDD, ledger task-by-task in `.superpowers/sdd/progress.md`, sezione `F2`):
+`docs/superpowers/plans/2026-07-16-presentations-fase2-documents.md`, spec di riferimento
+`docs/superpowers/specs/2026-07-15-presentations-professional-templates-design.md` (Sezioni 2-4).
+10 task, tutti mergiati su `main`, review clean (fix-loop dove annotato nel ledger).
+
+**Cosa è cambiato:** i documenti (CV, lettera di presentazione, catalogo prodotto) diventano
+deliverable di prima classe **nello stesso formato pack** delle presentazioni — niente terzo
+formato, stesso `doc.json` → render HTML/PDF/DOCX, stesso prefisso QA (`DECK_QA_JSON:`, parser
+riusato), stesso shim container, stesso script preview.
+
+- **`doc_render.py`** (`03263ec2`) + `design_tokens` condivisi con `deck_render` — 16 blocchi
+  strutturali/CV/commerciali (contact header, timeline, education, skill tags, product grid,
+  pricing/spec table, kpi band, testimonial, `649896cb`/`4d8f350f`/`039d2185`); temi parziali senza
+  nome ereditano `DEFAULT_THEME` (`17dcb8cc`).
+- **`deck_qa --mode document` + shim doc-render nel container** (`649896cb`) — ⚠️ la validazione
+  **live** del path templated richiede il **rebuild dell'immagine `contained-computer`** (`up.sh`);
+  in questa sessione i gate sono verdi su host (unit + injection), non live nel container.
+- **Whitelist `cv`/`cover_letter`/`product_catalog` + `intake_questions`** nel manifest pack, parsate
+  in `TemplateCatalogEntry` via `clean_template_catalog_string_list` ed esposte identiche su
+  `TemplateCatalogEntryResponse` (`d3eadb13`).
+- **`document_content.rs`**: schema slot-filling **strict** per pack (skeleton derivato
+  dall'esempio, blocchi mai scelti dal modello, assemble fallisce esplicito — Result-based, zero
+  panic path, `53044392`/`e49f2cc5`).
+- **`doc_json_to_docx` + kind `docx`** sull'artifact (`e2cb84ee`/`e93ebf46`, row clamp su header
+  width).
+- **`make_document` path templated**: risolve `template_ref`, slot-fill vincolato al
+  `content_schema`, render container, **degradazione onesta** se il container è giù (DOCX subito +
+  messaggio chiaro, mai fallback silente al markdown senza design) — `fc81b00f`, theme override
+  esplicito onorato (`42e8344e`).
+- **6 pack documento v1** con preview reali generate dal renderer (`8c309f3c`, contenuti fittizi
+  credibili, audit vs piano).
+- **UI (questo task, F2-T10)**: `TemplateLivePreview` scala su `designWidth = 794px` (A4) per
+  `entry.kind === "document"` invece di 1280px, card `.doc-preview` con `aspect-ratio: 3/2` per
+  mostrare più pagina; `TemplateCatalogEntry.intake_questions: string[]` nel bridge;
+  `handleStartTemplateWorkflow` inserisce le domande specifiche del template nel prompt operativo
+  quando presenti (resto del prompt invariato); `TemplateDetailModal` le mostra come lista puntata
+  sotto la descrizione.
+
+**Gate finali (tutti verdi, in ordine, sessione 2026-07-16):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-desktop-gateway` | 588 passed, 0 failed, 5 ignored |
+| `python3 -m unittest … test_deck_render.py` | 2 ok, 1 skipped (pptx assente sull'host, atteso) |
+| `python3 -m unittest … test_doc_render.py` | 7 ok |
+| `npm run build` (desktop) | OK, tsc pulito |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN |
+
+**Cosa resta:**
+- **F3 — wow**: brand-kit live recolor via CSS var sull'iframe (`--brand/--brand2/--accent` già
+  presenti nell'HTML del renderer), hover page-cycling, demozione definitiva delle card sorgenti.
+- ⚠️ **Validazione live del path templated documento**: richiede il **rebuild dell'immagine
+  `contained-computer`** via `up.sh` — Fabio a schermo, non fatta in questa sessione (i gate sono
+  unit/injection su host, non un run live nel container).
+- **Minori dal ledger** (non bloccanti, follow-up, invariati da F1):
+  - thumbnails/`deck.pdf` paginano **PORTRAIT** invece di 16:9 vero (valutare `@page` nel renderer);
+  - search haystack nel catalogo confronta solo nome/descrizione **EN**, non le varianti `_it`;
+  - sweep repo-wide della stringa libera `'monet/startup'` residua in un test di `chat_store.rs`.
+
+**Reminder metodologico:** la validazione visiva (anteprime documento, layout, fedeltà A4) la fa
+**Fabio a schermo** nell'app; niente computer-use per "verificare" l'UI in questo lavoro — il gate
+si ferma a test verdi + preview.html ispezionabili nel browser.
+
 ## ⭐ CHECKPOINT 2026-07-16 — Presentations F1 (real template packs) SHIPPED
 
 Spec approvata: `docs/superpowers/specs/2026-07-15-presentations-professional-templates-design.md`.

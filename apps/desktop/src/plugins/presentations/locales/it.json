@@ -41,6 +41,7 @@
   "copyTemplateRef": "Copia riferimento template",
   "copied": "Copiato",
   "templateInfo": "Info template",
+  "templateQuestionsEyebrow": "Ti chiederemo",
   "openTemplateDetails": "Apri dettagli template {{name}}",
   "useTemplate": "Usa template",
   "starting": "Apertura...",
