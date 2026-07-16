@@ -537,6 +537,7 @@ struct TemplateCatalogEntryResponse {
     design_components: Vec<String>,
     layout_archetypes: Vec<String>,
     tags: Vec<String>,
+    intake_questions: Vec<String>,
     selection_notes: Vec<String>,
     preview_ref: Option<String>,
     preview_html_ref: Option<String>,
@@ -6760,6 +6761,10 @@ struct TemplateCatalogEntry {
     design_components: Vec<String>,
     layout_archetypes: Vec<String>,
     tags: Vec<String>,
+    // Questions the UI should ask the user before generating from this template
+    // (e.g. a CV template asking for target role/seniority). Manifest-only content,
+    // not a design token — no whitelist, just length/count capped like other lists.
+    intake_questions: Vec<String>,
     preview_ref: Option<String>,
     // Live HTML preview (bundled packs): "template-pack://<id>/preview.html".
     preview_html_ref: Option<String>,
@@ -6967,6 +6972,7 @@ fn template_catalog_entry(
             .map(|value| value.to_string())
             .collect(),
         tags: Vec::new(),
+        intake_questions: Vec::new(),
         preview_ref: None,
         preview_html_ref: None,
         source_ref: None,
@@ -7280,6 +7286,7 @@ fn parse_file_template_catalog_entry(
             80,
         ),
         tags: clean_template_catalog_string_list(value.get("tags"), 16, 40),
+        intake_questions: clean_template_catalog_string_list(value.get("intake_questions"), 6, 200),
         preview_ref: clean_template_catalog_ref(value.get("preview_ref")),
         preview_html_ref: None,
         source_ref: clean_template_catalog_ref(value.get("source_ref")),
@@ -7710,6 +7717,7 @@ fn template_catalog_response_from_entries(
                     design_components: entry.design_components,
                     layout_archetypes: entry.layout_archetypes,
                     tags: entry.tags,
+                    intake_questions: entry.intake_questions,
                     selection_notes,
                     preview_ref: template_catalog_preview_response_ref(entry.preview_ref),
                     preview_html_ref: template_catalog_preview_response_ref(entry.preview_html_ref),
@@ -16664,6 +16672,9 @@ const DELIVERABLE_DESIGN_TEMPLATES: &[&str] = &[
     "project_plan",
     "technical_brief",
     "sales_proposal",
+    "cv",
+    "cover_letter",
+    "product_catalog",
 ];
 
 const DELIVERABLE_DESIGN_THEMES: &[&str] = &[
@@ -16732,6 +16743,9 @@ fn deliverable_template_defaults(
             Some("sales_pitch"),
             vec!["comparison_table", "timeline", "kpi_grid"],
         ),
+        Some("cv") => (Some("minimal"), vec!["timeline"]),
+        Some("cover_letter") => (Some("minimal"), Vec::new()),
+        Some("product_catalog") => (Some("editorial"), vec!["comparison_table"]),
         _ => (None, Vec::new()),
     }
 }
@@ -16840,6 +16854,24 @@ fn deliverable_design_template_directive(template: Option<&str>, medium: &str) -
         }
         (Some("sales_proposal"), "document") => {
             "Design template: sales_proposal. Structure around client problem, proposed solution, differentiators, scope, timeline and next action."
+        }
+        (Some("cv"), "deck") => {
+            "Design template: cv. Structure it as a professional CV: profile first, reverse-chronological experience, tight factual bullets."
+        }
+        (Some("cv"), "document") => {
+            "Design template: cv. Structure it as a professional CV: profile first, reverse-chronological experience, tight factual bullets."
+        }
+        (Some("cover_letter"), "deck") => {
+            "Design template: cover_letter. Structure it as a focused cover letter: opening hook, why-this-role fit, concrete proof points and a confident closing ask."
+        }
+        (Some("cover_letter"), "document") => {
+            "Design template: cover_letter. Structure it as a focused cover letter: opening hook, why-this-role fit, concrete proof points and a confident closing ask."
+        }
+        (Some("product_catalog"), "deck") => {
+            "Design template: product_catalog. Structure it as a product catalog: category grouping, consistent per-item specs, comparison points and pricing/availability call-outs."
+        }
+        (Some("product_catalog"), "document") => {
+            "Design template: product_catalog. Structure it as a product catalog: category grouping, consistent per-item specs, comparison points and pricing/availability call-outs."
         }
         _ => return None,
     };
@@ -54950,6 +54982,7 @@ prs.save(Path({path:?}))
             design_components: Vec::new(),
             layout_archetypes: Vec::new(),
             tags: Vec::new(),
+            intake_questions: Vec::new(),
             preview_ref: None,
             preview_html_ref: None,
             source_ref: None,
@@ -55165,6 +55198,26 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn file_template_catalog_entry_parses_intake_questions() {
+        let manifest = serde_json::json!({
+            "provider_id": "acme",
+            "templates": [{
+                "id": "acme/q-01", "kind": "document", "name": "Q",
+                "description": "Doc with questions.", "design_template": "sales_proposal",
+                "route_text": "q",
+                "intake_questions": ["Who is it for?", "Which numbers matter?"]
+            }]
+        });
+        let provider =
+            super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str())
+                .expect("provider");
+        assert_eq!(
+            provider.entries[0].intake_questions,
+            vec!["Who is it for?", "Which numbers matter?"]
+        );
+    }
+
+    #[test]
     fn bundled_entries_do_not_report_as_imported() {
         let manifest = serde_json::json!({
             "provider_id": "acme",
@@ -55236,6 +55289,7 @@ prs.save(Path({path:?}))
                 design_components: vec!["kpi_grid".to_string()],
                 layout_archetypes: vec!["cover".to_string()],
                 tags: vec!["premium".to_string()],
+                intake_questions: Vec::new(),
                 preview_ref: Some("assets/gallery-template.png".to_string()),
                 preview_html_ref: None,
                 source_ref: Some("https://example.com/gallery-template".to_string()),
@@ -55723,6 +55777,9 @@ prs.save(Path({path:?}))
             "project_plan",
             "technical_brief",
             "sales_proposal",
+            "cv",
+            "cover_letter",
+            "product_catalog",
         ]);
         let deck_templates = deck_schema
             .pointer("/function/parameters/properties/design_template/enum")
@@ -55833,6 +55890,15 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn document_template_families_are_whitelisted_with_defaults() {
+        for template in ["cv", "cover_letter", "product_catalog"] {
+            assert!(super::DELIVERABLE_DESIGN_TEMPLATES.contains(&template));
+            let (profile, _components) = super::deliverable_template_defaults(Some(template));
+            assert!(profile.is_some(), "{template} must have a default profile");
+        }
+    }
+
+    #[test]
     fn template_catalog_ref_resolves_deck_design_defaults() {
         let parsed = serde_json::json!({
             "template_ref": "homun/startup-pitch-clean-01",
@@ -55936,6 +56002,7 @@ prs.save(Path({path:?}))
             design_components: vec!["kpi_grid".to_string()],
             layout_archetypes: vec!["cover".to_string()],
             tags: vec!["slidescarnival".to_string()],
+            intake_questions: Vec::new(),
             preview_ref: Some(
                 "template-pack://slidescarnival/pitch-clean/thumbnails/slide-001.png".to_string(),
             ),
