@@ -18743,6 +18743,17 @@ fn docx_paragraph_xml(style: Option<&str>, runs_xml: &str) -> String {
     format!(r#"<w:p>{style_xml}{runs_xml}</w:p>"#)
 }
 
+/// A Heading1 paragraph, or nothing for empty text — same empty-means-absent
+/// convention as `docx_heading2_paragraph` (an empty cover title/contact name
+/// must not leave a stray empty heading paragraph in the document).
+fn docx_heading1_paragraph(text: &str) -> String {
+    if text.is_empty() {
+        String::new()
+    } else {
+        docx_paragraph_xml(Some("Heading1"), &markdown_inline_to_docx_runs(text))
+    }
+}
+
 /// A Heading2 paragraph, or nothing for an empty/absent title — most doc.json
 /// blocks carry an optional `title` field (`document_content.rs`'s block
 /// registry) and an empty block-level title is deliberate ("use \"\" if none"),
@@ -18765,9 +18776,10 @@ fn docx_normal_paragraph(text: &str) -> String {
     }
 }
 
-/// Read a string field off a doc.json block, defaulting to `""` — blocks are
-/// model-authored JSON and best-effort by design (PDF is the fidelity path;
-/// a missing/wrong-typed field here degrades gracefully instead of panicking).
+/// Read a string field off a doc.json block (or a nested entry/product/item
+/// object), defaulting to `""` — blocks are model-authored JSON and
+/// best-effort by design (PDF is the fidelity path; a missing/wrong-typed
+/// field here degrades gracefully instead of panicking).
 fn doc_block_field(block: &serde_json::Value, key: &str) -> String {
     block
         .get(key)
@@ -18804,18 +18816,12 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
     let kind = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
     match kind {
         "section_cover" => {
-            let mut out = docx_paragraph_xml(
-                Some("Heading1"),
-                &markdown_inline_to_docx_runs(&doc_block_field(block, "title")),
-            );
+            let mut out = docx_heading1_paragraph(&doc_block_field(block, "title"));
             out.push_str(&docx_normal_paragraph(&doc_block_field(block, "subtitle")));
             out
         }
         "contact_header" => {
-            let mut out = docx_paragraph_xml(
-                Some("Heading1"),
-                &markdown_inline_to_docx_runs(&doc_block_field(block, "name")),
-            );
+            let mut out = docx_heading1_paragraph(&doc_block_field(block, "name"));
             let headline = doc_block_field(block, "headline");
             if !headline.is_empty() {
                 out.push_str(&docx_paragraph_xml(
@@ -18881,6 +18887,11 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
         "pricing_table" | "spec_table" => {
             let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
             let headers = doc_block_string_array(block, "headers");
+            // Clamp each data row to the header width (defense-in-depth mirror
+            // of doc_render.py's `row[:len(headers)]`): markdown_table_to_docx
+            // derives col_count from the LONGEST row, so one over-wide
+            // hand-authored row would grow a blank shaded header cell over
+            // real data instead of being dropped.
             let rows: Vec<Vec<String>> = block
                 .get("rows")
                 .and_then(|v| v.as_array())
@@ -18891,6 +18902,7 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
                                 .map(|cells| {
                                     cells
                                         .iter()
+                                        .take(headers.len())
                                         .filter_map(|c| c.as_str())
                                         .map(str::to_string)
                                         .collect()
@@ -18921,21 +18933,9 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
                 ]];
                 for product in products {
                     rows.push(vec![
-                        product
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        product
-                            .get("description")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        product
-                            .get("price")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
+                        doc_block_field(product, "name"),
+                        doc_block_field(product, "description"),
+                        doc_block_field(product, "price"),
                     ]);
                 }
                 out.push_str(&markdown_table_to_docx(&rows));
@@ -18951,21 +18951,11 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
                 // markdown_table_to_docx header), single body row = labels.
                 let values = items
                     .iter()
-                    .map(|i| {
-                        i.get("value")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string()
-                    })
+                    .map(|i| doc_block_field(i, "value"))
                     .collect::<Vec<_>>();
                 let labels = items
                     .iter()
-                    .map(|i| {
-                        i.get("label")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string()
-                    })
+                    .map(|i| doc_block_field(i, "label"))
                     .collect::<Vec<_>>();
                 out.push_str(&markdown_table_to_docx(&[values, labels]));
             }
@@ -57154,6 +57144,35 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(document.contains("<w:tbl>"), "{document}");
         assert!(archive.by_name("[Content_Types].xml").is_ok());
         assert!(archive.by_name("word/styles.xml").is_ok());
+    }
+
+    #[test]
+    fn doc_table_rows_clamp_to_header_width() {
+        // Defense-in-depth mirror of doc_render.py: a hand-authored row wider
+        // than the header set must be clamped, or markdown_table_to_docx
+        // (col_count = longest row) renders a blank shaded header cell over
+        // real data. Also: an empty section_cover title must not leave a
+        // stray empty Heading1 paragraph (empty-means-absent convention).
+        let doc = serde_json::json!({"title": "Specs", "blocks": [
+            {"type": "section_cover", "title": "", "subtitle": ""},
+            {"type": "spec_table", "title": "Specs", "headers": ["Key", "Value"],
+             "rows": [["Weight", "2kg", "OverflowCellProbe"]]}
+        ]});
+        let bytes = super::doc_json_to_docx(&doc).expect("docx");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut document = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("word/document.xml").unwrap(),
+            &mut document,
+        )
+        .unwrap();
+        assert!(document.contains("Weight"), "{document}");
+        assert!(document.contains("2kg"), "{document}");
+        assert!(!document.contains("OverflowCellProbe"), "{document}");
+        assert!(
+            !document.contains(r#"<w:pStyle w:val="Heading1"/>"#),
+            "{document}"
+        );
     }
 
     #[test]
