@@ -74,6 +74,15 @@ RUN printf '#!/bin/sh\nexec /opt/deck-venv/bin/python /opt/deck/deck_render.py "
     && chmod +x /usr/local/bin/deck-render
 RUN chmod +x /usr/local/bin/deck-qa
 
+# Document renderer: same single-source-of-truth split as decks (doc.json ->
+# on-brand HTML), sharing deck_qa.py's --mode document for QA instead of a
+# second QA script. doc_render.py imports design_tokens from its own dir,
+# which resolves because the shim invokes it by path from /opt/deck/.
+COPY doc_render.py    /opt/deck/doc_render.py
+COPY design_tokens.py /opt/deck/design_tokens.py
+RUN printf '#!/bin/sh\nexec /opt/deck-venv/bin/python /opt/deck/doc_render.py "$@"\n' > /usr/local/bin/doc-render \
+ && chmod +x /usr/local/bin/doc-render
+
 # Non-root runtime user; the container boundary is the sandbox (ADR 0010).
 # `.cache` is pre-created and owned by agent so a named volume mounted there
 # inherits agent ownership on first init (persists the Whisper model download).

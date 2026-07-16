@@ -118,7 +118,12 @@ def _cdp_call(sock, method, params=None, msg_id=1):
 QA_JS = r"""
 (() => {
   const issues = [];
-  const slides = Array.from(document.querySelectorAll('.slide'));
+  // Deck slides are a fixed canvas (overflow = real defect); documents flow
+  // vertically across printed A4 pages, so their container is `.doc .block`
+  // and vertical overflow is normal pagination, not a bug.
+  const containerSelector = MODE === 'document' ? '.doc .block' : '.slide';
+  const unitLabel = MODE === 'document' ? 'block' : 'slide';
+  const containers = Array.from(document.querySelectorAll(containerSelector));
   const px = n => Math.round(Number(n || 0));
   const parseRgb = (value) => {
     const match = String(value || '').match(/rgba?\(([^)]+)\)/);
@@ -158,38 +163,55 @@ QA_JS = r"""
     const text = (el.innerText || el.alt || '').trim().replace(/\s+/g, ' ').slice(0, 72);
     return text ? `${tag} "${text}"` : tag;
   };
-  slides.forEach((slide, index) => {
-    const slideNo = index + 1;
-    const sr = slide.getBoundingClientRect();
-    if (slide.scrollWidth > slide.clientWidth + 2 || slide.scrollHeight > slide.clientHeight + 2) {
+  // Document mode: only the whole-column horizontal overflow is a defect
+  // (the .doc column has a fixed width; anything wider than it is clipped/
+  // truncated in the printed PDF). Vertical growth just means more pages.
+  if (MODE === 'document') {
+    const doc = document.querySelector('.doc');
+    if (doc && doc.scrollWidth > doc.clientWidth + 1) {
+      issues.push({
+        severity: 'error',
+        code: 'doc_horizontal_overflow',
+        message: `document overflows horizontally (${doc.scrollWidth} > ${doc.clientWidth})`
+      });
+    }
+  }
+  containers.forEach((container, index) => {
+    const unitNo = index + 1;
+    const cr = container.getBoundingClientRect();
+    // Fixed-canvas checks (overflow / out-of-bounds) only make sense for decks;
+    // a document block is free to grow vertically across page breaks.
+    if (MODE === 'deck' && (container.scrollWidth > container.clientWidth + 2 || container.scrollHeight > container.clientHeight + 2)) {
       issues.push({
         severity: 'error',
         code: 'slide_overflow',
-        message: `slide ${slideNo} overflows (${slide.scrollWidth}x${slide.scrollHeight} > ${slide.clientWidth}x${slide.clientHeight})`
+        message: `slide ${unitNo} overflows (${container.scrollWidth}x${container.scrollHeight} > ${container.clientWidth}x${container.clientHeight})`
       });
     }
-    const nodes = Array.from(slide.querySelectorAll('h1,h2,h3,li,p,blockquote,.kpi,.sub,.col,img'));
+    const nodes = Array.from(container.querySelectorAll('h1,h2,h3,li,p,blockquote,.kpi,.sub,.col,img'));
     nodes.forEach((node) => {
       const r = node.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) return;
-      const outside =
-        r.left < sr.left - 2 ||
-        r.top < sr.top - 2 ||
-        r.right > sr.right + 2 ||
-        r.bottom > sr.bottom + 2;
-      if (outside) {
-        issues.push({
-          severity: 'error',
-          code: 'element_outside_slide',
-          message: `slide ${slideNo}: ${label(node)} outside slide bounds`
-        });
+      if (MODE === 'deck') {
+        const outside =
+          r.left < cr.left - 2 ||
+          r.top < cr.top - 2 ||
+          r.right > cr.right + 2 ||
+          r.bottom > cr.bottom + 2;
+        if (outside) {
+          issues.push({
+            severity: 'error',
+            code: 'element_outside_slide',
+            message: `slide ${unitNo}: ${label(node)} outside slide bounds`
+          });
+        }
       }
       if (node.tagName && node.tagName.toLowerCase() === 'img') {
         if (!node.complete || node.naturalWidth === 0 || node.naturalHeight === 0) {
           issues.push({
             severity: 'error',
             code: 'image_not_loaded',
-            message: `slide ${slideNo}: image failed to load`
+            message: `${unitLabel} ${unitNo}: image failed to load`
           });
         }
         return;
@@ -203,7 +225,7 @@ QA_JS = r"""
           issues.push({
             severity: 'error',
             code: 'text_too_small',
-            message: `slide ${slideNo}: ${label(node)} font-size ${fontSize.toFixed(1)}px is below 12px`
+            message: `${unitLabel} ${unitNo}: ${label(node)} font-size ${fontSize.toFixed(1)}px is below 12px`
           });
         }
         const fg = parseRgb(style.color);
@@ -215,7 +237,7 @@ QA_JS = r"""
             issues.push({
               severity: 'error',
               code: 'low_contrast',
-              message: `slide ${slideNo}: ${label(node)} contrast ratio ${ratio.toFixed(2)} is below ${minRatio.toFixed(1)}`
+              message: `${unitLabel} ${unitNo}: ${label(node)} contrast ratio ${ratio.toFixed(2)} is below ${minRatio.toFixed(1)}`
             });
           }
         }
@@ -224,7 +246,7 @@ QA_JS = r"""
   });
   return {
     ok: issues.filter(issue => issue.severity === 'error').length === 0,
-    slide_count: slides.length,
+    slide_count: containers.length,
     viewport: { width: px(window.innerWidth), height: px(window.innerHeight) },
     issues
   };
@@ -232,7 +254,18 @@ QA_JS = r"""
 """
 
 
-def run_qa(path, chromium="chromium"):
+def build_qa_js(mode):
+    """Inject MODE as a plain JS constant prepended to QA_JS.
+
+    NOT a .format()/%-format over the whole script: QA_JS is full of JS object
+    / template-literal braces that would need double-escaping and silently
+    break (same anti-graffe lesson as design_tokens/doc_render CSS). A simple
+    string-concat prefix sidesteps that entirely.
+    """
+    return "const MODE = %r;\n" % mode + QA_JS
+
+
+def run_qa(path, chromium="chromium", mode="deck"):
     abs_path = os.path.abspath(path)
     if not os.path.isfile(abs_path):
         raise RuntimeError(f"HTML file not found: {path}")
@@ -286,7 +319,7 @@ def run_qa(path, chromium="chromium"):
             result = _cdp_call(
                 sock,
                 "Runtime.evaluate",
-                {"expression": QA_JS, "returnByValue": True, "awaitPromise": True},
+                {"expression": build_qa_js(mode), "returnByValue": True, "awaitPromise": True},
                 msg_id=3,
             )
         finally:
@@ -304,16 +337,30 @@ def run_qa(path, chromium="chromium"):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run rendered QA on a Homun deck HTML file.")
-    parser.add_argument("html", nargs="?", help="deck.html path")
+    parser = argparse.ArgumentParser(description="Run rendered QA on a Homun deck or document HTML file.")
+    parser.add_argument("html", nargs="?", help="deck.html / doc.html path")
     parser.add_argument("--json", action="store_true", help="print JSON result")
     parser.add_argument("--chromium", default=os.environ.get("CHROMIUM", "chromium"))
+    parser.add_argument("--mode", choices=["deck", "document"], default="deck",
+                         help="deck = .slide canvas checks; document = .doc .block, vertical overflow allowed")
     parser.add_argument("--self-test", action="store_true", help="verify built-in QA checks")
     args = parser.parse_args()
 
     if args.self_test:
-        required_codes = ["slide_overflow", "element_outside_slide", "image_not_loaded", "low_contrast", "text_too_small"]
+        required_codes = [
+            "slide_overflow", "element_outside_slide", "image_not_loaded",
+            "low_contrast", "text_too_small", "doc_horizontal_overflow",
+        ]
         missing = [code for code in required_codes if code not in QA_JS]
+        # Mode-injection marker: build_qa_js must prepend a real JS constant
+        # (not a template-formatted QA_JS) and QA_JS must actually branch on it —
+        # otherwise --mode document would silently run deck-only checks.
+        for probe_mode in ("deck", "document"):
+            js = build_qa_js(probe_mode)
+            if not js.startswith("const MODE = ") or repr(probe_mode) not in js.splitlines()[0]:
+                missing.append(f"mode-injection marker missing for mode={probe_mode}")
+        if "MODE ===" not in QA_JS:
+            missing.append("QA_JS does not branch on MODE")
         if missing:
             print(json.dumps({"ok": False, "missing": missing}, ensure_ascii=False))
             return 2
@@ -324,7 +371,7 @@ def main():
         parser.error("the following arguments are required: html")
 
     try:
-        result = run_qa(args.html, args.chromium)
+        result = run_qa(args.html, args.chromium, args.mode)
     except Exception as exc:
         result = {"ok": False, "slide_count": 0, "issues": [{
             "severity": "error",
