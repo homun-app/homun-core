@@ -3574,6 +3574,8 @@ fn artifact_memory_kind(name: &str) -> String {
         "pdf".to_string()
     } else if lower.ends_with(".pptx") {
         "presentation".to_string()
+    } else if lower.ends_with(".docx") {
+        "document".to_string()
     } else if lower.ends_with(".xlsx") || lower.ends_with(".csv") {
         "spreadsheet".to_string()
     } else if lower.ends_with(".html") {
@@ -18645,6 +18647,17 @@ fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
     if !saw_content {
         document_body.push_str(&markdown_line_to_docx_paragraph(title, true));
     }
+    docx_package(document_body)
+}
+
+/// Package a `word/document.xml` body into a minimal but valid Word (.docx)
+/// OOXML zip: content types + package/document rels + one shared styles.xml
+/// (Normal/Heading1-3/ListParagraph/TableGrid) + the body itself. Extracted
+/// out of `markdown_to_docx` (F2-T7) so `doc_json_to_docx` can reuse the SAME
+/// package writer instead of a second copy — converge, don't duplicate.
+/// Behavior-preserving: this is a verbatim lift of markdown_to_docx's former
+/// tail, guarded by its existing tests (they unzip and probe word/document.xml).
+fn docx_package(document_body: String) -> Result<Vec<u8>, String> {
     let document_xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:xml="http://www.w3.org/XML/1998/namespace">
@@ -18717,6 +18730,397 @@ fn markdown_to_docx(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
         writer.finish().map_err(|error| error.to_string())?;
     }
     Ok(cursor.into_inner())
+}
+
+/// `<w:p>` wrapper around pre-built run XML with an optional paragraph style.
+/// Sibling of `markdown_line_to_docx_paragraph` but takes already-built run
+/// XML instead of a markdown source line, since doc.json block fields are
+/// plain model-authored strings, not markdown syntax to re-parse.
+fn docx_paragraph_xml(style: Option<&str>, runs_xml: &str) -> String {
+    let style_xml = style
+        .map(|s| format!(r#"<w:pPr><w:pStyle w:val="{s}"/></w:pPr>"#))
+        .unwrap_or_default();
+    format!(r#"<w:p>{style_xml}{runs_xml}</w:p>"#)
+}
+
+/// A Heading2 paragraph, or nothing for an empty/absent title — most doc.json
+/// blocks carry an optional `title` field (`document_content.rs`'s block
+/// registry) and an empty block-level title is deliberate ("use \"\" if none"),
+/// not a paragraph to render.
+fn docx_heading2_paragraph(text: &str) -> String {
+    if text.is_empty() {
+        String::new()
+    } else {
+        docx_paragraph_xml(Some("Heading2"), &markdown_inline_to_docx_runs(text))
+    }
+}
+
+/// A Normal paragraph, or nothing for empty text (same "empty means absent"
+/// convention as `docx_heading2_paragraph`).
+fn docx_normal_paragraph(text: &str) -> String {
+    if text.is_empty() {
+        String::new()
+    } else {
+        docx_paragraph_xml(None, &markdown_inline_to_docx_runs(text))
+    }
+}
+
+/// Read a string field off a doc.json block, defaulting to `""` — blocks are
+/// model-authored JSON and best-effort by design (PDF is the fidelity path;
+/// a missing/wrong-typed field here degrades gracefully instead of panicking).
+fn doc_block_field(block: &serde_json::Value, key: &str) -> String {
+    block
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Read a string-array field off a doc.json block, defaulting to empty.
+fn doc_block_string_array(block: &serde_json::Value, key: &str) -> Vec<String> {
+    block
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Dispatch one doc.json block to OOXML paragraphs/tables. Mirrors
+/// `doc_render.py::render_block`'s type switch (same 16 registered block
+/// types — the shared registry in
+/// `docs/superpowers/plans/2026-07-16-presentations-fase2-documents.md`,
+/// schema in `document_content.rs::document_block_schema`) so the DOCX never
+/// drops content the designed HTML/PDF shows — only fidelity differs
+/// (declared best-effort: no new style plumbing beyond the shared styles.xml,
+/// YAGNI). Inner array caps (pricing/spec row & cell counts, etc.) are the
+/// model-facing schema's job (`document_content.rs`), not re-enforced here.
+fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
+    let kind = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    match kind {
+        "section_cover" => {
+            let mut out = docx_paragraph_xml(
+                Some("Heading1"),
+                &markdown_inline_to_docx_runs(&doc_block_field(block, "title")),
+            );
+            out.push_str(&docx_normal_paragraph(&doc_block_field(block, "subtitle")));
+            out
+        }
+        "contact_header" => {
+            let mut out = docx_paragraph_xml(
+                Some("Heading1"),
+                &markdown_inline_to_docx_runs(&doc_block_field(block, "name")),
+            );
+            let headline = doc_block_field(block, "headline");
+            if !headline.is_empty() {
+                out.push_str(&docx_paragraph_xml(
+                    None,
+                    &docx_text_run(&headline, false, true),
+                ));
+            }
+            let contacts = doc_block_string_array(block, "contact_items");
+            if !contacts.is_empty() {
+                out.push_str(&docx_paragraph_xml(
+                    None,
+                    &docx_text_run(&contacts.join("  ·  "), false, false),
+                ));
+            }
+            out
+        }
+        "timeline" | "education_list" => {
+            let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
+            for entry in block
+                .get("entries")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+            {
+                let heading = entry.get("heading").and_then(|v| v.as_str()).unwrap_or("");
+                if !heading.is_empty() {
+                    out.push_str(&docx_paragraph_xml(
+                        None,
+                        &docx_text_run(heading, true, false),
+                    ));
+                }
+                let label = entry.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                let subheading = entry
+                    .get("subheading")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                // "muted" (label — subheading) can't be a colour in a
+                // style-only writer, so italics carries the de-emphasis.
+                let meta = match (label.is_empty(), subheading.is_empty()) {
+                    (true, true) => String::new(),
+                    (false, true) => label.to_string(),
+                    (true, false) => subheading.to_string(),
+                    (false, false) => format!("{label} — {subheading}"),
+                };
+                if !meta.is_empty() {
+                    out.push_str(&docx_paragraph_xml(None, &docx_text_run(&meta, false, true)));
+                }
+                for point in entry
+                    .get("points")
+                    .and_then(|v| v.as_array())
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str())
+                {
+                    out.push_str(&docx_paragraph_xml(
+                        Some("ListParagraph"),
+                        &markdown_inline_to_docx_runs(point),
+                    ));
+                }
+            }
+            out
+        }
+        "pricing_table" | "spec_table" => {
+            let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
+            let headers = doc_block_string_array(block, "headers");
+            let rows: Vec<Vec<String>> = block
+                .get("rows")
+                .and_then(|v| v.as_array())
+                .map(|rows| {
+                    rows.iter()
+                        .map(|row| {
+                            row.as_array()
+                                .map(|cells| {
+                                    cells
+                                        .iter()
+                                        .filter_map(|c| c.as_str())
+                                        .map(str::to_string)
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !headers.is_empty() {
+                let mut table_rows = Vec::with_capacity(rows.len() + 1);
+                table_rows.push(headers);
+                table_rows.extend(rows);
+                out.push_str(&markdown_table_to_docx(&table_rows));
+            }
+            out.push_str(&docx_normal_paragraph(&doc_block_field(block, "note")));
+            out
+        }
+        "product_grid" => {
+            let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
+            if let Some(products) = block.get("products").and_then(|v| v.as_array())
+                && !products.is_empty()
+            {
+                let mut rows = vec![vec![
+                    "Name".to_string(),
+                    "Description".to_string(),
+                    "Price".to_string(),
+                ]];
+                for product in products {
+                    rows.push(vec![
+                        product
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        product
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        product
+                            .get("price")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    ]);
+                }
+                out.push_str(&markdown_table_to_docx(&rows));
+            }
+            out
+        }
+        "kpi_band" => {
+            let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
+            if let Some(items) = block.get("items").and_then(|v| v.as_array())
+                && !items.is_empty()
+            {
+                // One table: header row = values (bold/shaded like any
+                // markdown_table_to_docx header), single body row = labels.
+                let values = items
+                    .iter()
+                    .map(|i| {
+                        i.get("value")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>();
+                let labels = items
+                    .iter()
+                    .map(|i| {
+                        i.get("label")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>();
+                out.push_str(&markdown_table_to_docx(&[values, labels]));
+            }
+            out
+        }
+        "text_section" => {
+            let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
+            for para in doc_block_string_array(block, "paragraphs") {
+                out.push_str(&docx_normal_paragraph(&para));
+            }
+            for bullet in doc_block_string_array(block, "bullets") {
+                out.push_str(&docx_paragraph_xml(
+                    Some("ListParagraph"),
+                    &markdown_inline_to_docx_runs(&bullet),
+                ));
+            }
+            out
+        }
+        "profile_summary" => {
+            let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
+            out.push_str(&docx_normal_paragraph(&doc_block_field(block, "text")));
+            out
+        }
+        "skill_tags" => {
+            let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
+            for group in block
+                .get("groups")
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+            {
+                let label = group.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                let tags = group
+                    .get("tags")
+                    .and_then(|v| v.as_array())
+                    .map(|tags| {
+                        tags.iter()
+                            .filter_map(|t| t.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+                let line = match (label.is_empty(), tags.is_empty()) {
+                    (true, true) => continue,
+                    (false, true) => label.to_string(),
+                    (true, false) => tags,
+                    (false, false) => format!("{label}: {tags}"),
+                };
+                out.push_str(&docx_paragraph_xml(None, &docx_text_run(&line, false, false)));
+            }
+            out
+        }
+        // Best-effort flat paragraph dump — these blocks carry no "title"
+        // slot to promote to a heading; DOCX editability wins over layout
+        // fidelity (the designed HTML/PDF is the fidelity path).
+        "letterhead" => {
+            let mut out = docx_normal_paragraph(&doc_block_field(block, "organization"));
+            out.push_str(&docx_normal_paragraph(&doc_block_field(
+                block,
+                "contact_line",
+            )));
+            out.push_str(&docx_normal_paragraph(&doc_block_field(block, "date_line")));
+            for line in doc_block_string_array(block, "recipient_lines") {
+                out.push_str(&docx_normal_paragraph(&line));
+            }
+            out
+        }
+        "letter_body" => {
+            let mut out = docx_normal_paragraph(&doc_block_field(block, "salutation"));
+            for para in doc_block_string_array(block, "paragraphs") {
+                out.push_str(&docx_normal_paragraph(&para));
+            }
+            out
+        }
+        "signature_block" => {
+            let mut out = docx_normal_paragraph(&doc_block_field(block, "closing"));
+            out.push_str(&docx_normal_paragraph(&doc_block_field(block, "name")));
+            out.push_str(&docx_normal_paragraph(&doc_block_field(block, "role")));
+            out
+        }
+        "cta_footer" => {
+            let mut out = docx_normal_paragraph(&doc_block_field(block, "heading"));
+            for line in doc_block_string_array(block, "lines") {
+                out.push_str(&docx_normal_paragraph(&line));
+            }
+            out
+        }
+        "testimonial_quote" => {
+            let mut out = docx_normal_paragraph(&doc_block_field(block, "quote"));
+            let author = doc_block_field(block, "author");
+            let role = doc_block_field(block, "role");
+            let attribution = match (author.is_empty(), role.is_empty()) {
+                (true, true) => String::new(),
+                (false, true) => format!("— {author}"),
+                (true, false) => format!("— {role}"),
+                (false, false) => format!("— {author}, {role}"),
+            };
+            if !attribution.is_empty() {
+                out.push_str(&docx_paragraph_xml(
+                    None,
+                    &docx_text_run(&attribution, false, true),
+                ));
+            }
+            out
+        }
+        // Unregistered/unknown block type — never drop content silently
+        // (mirrors doc_render.py's own text_section fallback for the same
+        // reason): title -> Heading2, paragraphs/bullets if present.
+        _ => {
+            let mut out = docx_heading2_paragraph(&doc_block_field(block, "title"));
+            for para in doc_block_string_array(block, "paragraphs") {
+                out.push_str(&docx_normal_paragraph(&para));
+            }
+            for bullet in doc_block_string_array(block, "bullets") {
+                out.push_str(&docx_paragraph_xml(
+                    Some("ListParagraph"),
+                    &markdown_inline_to_docx_runs(&bullet),
+                ));
+            }
+            out
+        }
+    }
+}
+
+/// doc.json (F2 documents, `document_content.rs`) -> editable .docx. The
+/// designed HTML/PDF (`doc_render.py`) is the fidelity path; this writer's
+/// job is editability, reusing the exact package/style plumbing already
+/// shipped for `markdown_to_docx` (`docx_package`) so there is only ONE OOXML
+/// writer in the gateway, not two.
+///
+/// Not wired into any call site yet (that lands with F2-T8, the templated
+/// `make_document` path) — exercised directly by its unit test until then, so
+/// this and the block-dispatch helpers it alone reaches are allowed dead code
+/// (mirrors `document_content.rs`'s same not-yet-wired state).
+#[allow(dead_code)]
+fn doc_json_to_docx(doc: &serde_json::Value) -> Result<Vec<u8>, String> {
+    let title = doc.get("title").and_then(|t| t.as_str()).unwrap_or("Document");
+    let blocks = doc.get("blocks").and_then(|b| b.as_array());
+    let mut document_body = String::new();
+    match blocks {
+        Some(blocks) if !blocks.is_empty() => {
+            for block in blocks {
+                document_body.push_str(&doc_block_to_docx_xml(block));
+            }
+        }
+        // Malformed/empty doc.json — still produce something rather than a
+        // blank page, mirroring markdown_to_docx's own no-content fallback.
+        _ => {
+            document_body.push_str(&docx_paragraph_xml(
+                Some("Heading1"),
+                &markdown_inline_to_docx_runs(title),
+            ));
+        }
+    }
+    docx_package(document_body)
 }
 
 fn generate_image_tool_schema() -> serde_json::Value {
@@ -56710,6 +57114,52 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "{document}"
         );
         assert!(document.contains("1. Primo passo"), "{document}");
+    }
+
+    #[test]
+    fn doc_json_to_docx_renders_blocks_structurally() {
+        // Same probing technique as the markdown_to_docx tests above: the zip
+        // uses Deflated compression for word/document.xml, so we must unzip
+        // (a raw-bytes substring probe on the archive would NOT find plain text).
+        let doc = serde_json::json!({"title": "CV Elena", "blocks": [
+            {"type": "contact_header", "name": "Elena Ricci", "headline": "Ops Director",
+             "contact_items": ["elena@example.com"]},
+            {"type": "timeline", "title": "Experience", "entries": [
+                {"label": "2022", "heading": "Director", "subheading": "Aurora",
+                 "points": ["TimelinePointProbe"]}]},
+            {"type": "pricing_table", "title": "Pricing", "headers": ["Plan", "Price"],
+             "rows": [["Base", "PriceCellProbe"]], "note": ""}
+        ]});
+        let bytes = super::doc_json_to_docx(&doc).expect("docx");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        let mut document = String::new();
+        std::io::Read::read_to_string(
+            &mut archive.by_name("word/document.xml").unwrap(),
+            &mut document,
+        )
+        .unwrap();
+        for probe in ["Elena Ricci", "TimelinePointProbe", "PriceCellProbe"] {
+            assert!(document.contains(probe), "missing {probe}: {document}");
+        }
+        // Structural checks: contact name is Heading1, timeline point is a
+        // ListParagraph bullet, pricing renders as a real table (not prose).
+        assert!(
+            document.contains(r#"<w:pStyle w:val="Heading1"/>"#),
+            "{document}"
+        );
+        assert!(
+            document.contains(r#"<w:pStyle w:val="ListParagraph"/>"#),
+            "{document}"
+        );
+        assert!(document.contains("<w:tbl>"), "{document}");
+        assert!(archive.by_name("[Content_Types].xml").is_ok());
+        assert!(archive.by_name("word/styles.xml").is_ok());
+    }
+
+    #[test]
+    fn docx_artifacts_register_as_documents() {
+        assert_eq!(super::artifact_memory_kind("cv.docx"), "document");
+        assert_eq!(super::artifact_memory_kind("deck.pptx"), "presentation");
     }
 
     #[test]
