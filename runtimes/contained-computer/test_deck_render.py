@@ -45,6 +45,17 @@ class RenderHtmlLayouts(unittest.TestCase):
         self.assertEqual(deck_render._initials("Cher"), "C")
         self.assertEqual(deck_render._initials(""), "")
 
+    def test_theme_fonts_are_css_variables(self):
+        # Pins the parametric-font contract (--head/--body defined AND consumed):
+        # the brand-kit live recolor injects var overrides, so a regression to
+        # baked-in font literals would silently break recolor on deck previews.
+        html = deck_render.render_html(
+            {"title": "T", "theme": {"heading_font": "Georgia"},
+             "slides": [{"layout": "cover", "title": "T"}]}, HERE)
+        self.assertIn("--head:'Georgia'", html)
+        self.assertIn("var(--head)", html)
+        self.assertIn("var(--body)", html)
+
 
 @unittest.skipUnless(
     importlib.util.find_spec("pptx"), "python-pptx not installed on this host"

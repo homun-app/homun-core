@@ -5,6 +5,64 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-16.**
 
+## ⭐⭐ CHECKPOINT 2026-07-16 (tris) — Presentations F3 (wow layer) SHIPPED — arco COMPLETO
+
+Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `F3`): 2 task, entrambi su
+`main`. Con questo si chiude l'intero arco Presentations (F1 pack reali → F2 documenti di prima
+classe → F3 wow layer).
+
+**Cosa è cambiato:**
+- **Brand-kit live recolor su tutte le anteprime** (`e2d00f94`): `TemplateLivePreview` inietta
+  uno `<style>` di override nello `srcDoc` sandboxed (`sandbox=""`, nessun postMessage/DOM path)
+  con `:root{--brand;--brand2;--accent;--head;--body}` — **solo quando il kit differisce dai
+  default** (`brandPreviewOverride` ritorna `null` altrimenti: un utente non configurato deve
+  vedere il tema curato del pack, non un catalogo uniformemente ricolorato). Hardening in
+  `16b251d9`: `safeColor` valida contro `/^#[0-9a-fA-F]{3,8}$/` con fallback al default,
+  `safeFont` riduce a `[A-Za-z0-9 _-]` in un solo passaggio (prima si limitava a togliere gli
+  apici → possibile breakout dal tag `<style>` iniettato).
+- **`deck_render.py` convergiuto sul contratto parametrico** `--head`/`--body` (`16b251d9`): la
+  `_HTML_CSS` cuoceva i font come letterali statici e non definiva le variabili (a differenza di
+  `doc_render.py`) — il lato font del recolor live era un no-op sulle card presentazione. Aggiunte
+  le due var al `:root` e ripuntate le regole `font-family` su `var(--head)`/`var(--body)`; le due
+  preview pack presentazione rigenerate (pixel-identiche, solo indirection).
+- **Hover page-cycling CSS-only**: l'animazione usa `translate` (non `transform`) proprio perché
+  compone con l'inline `transform: scale(...)` impostato da JS — sono proprietà CSS separate, non
+  si sovrascrivono.
+- **Source cards demote**: `TemplateSourceDirectory` spostata **sotto** la griglia risultati
+  (prima sopra), classe `.demoted` — ora si legge come lista supplementare "non trovi il tuo
+  template", non in competizione col catalogo per il primo sguardo.
+- **Carried review item chiuso** (questo task, F3-T2): `test_deck_render.py` non aveva
+  un'asserzione che fissasse l'invariante `--head`/`--body` appena introdotto — aggiunto
+  `test_theme_fonts_are_css_variables` alla classe `RenderHtmlLayouts`.
+
+**Gate finali (tutti verdi, in ordine, sessione 2026-07-16):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-desktop-gateway` | 592 passed, 0 failed, 5 ignored |
+| `python3 -m unittest … test_deck_render.py` | 4 ok (nuovo test incluso), 1 skip (pptx assente sull'host, atteso) |
+| `python3 -m unittest … test_doc_render.py` | 7 ok |
+| `npm run build` (desktop) | OK, tsc pulito |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN |
+
+**Cosa resta dell'arco (tutto non bloccante):**
+- **Validazione live in-app**: Fabio a schermo (recolor live, hover cycling, demozione) — niente
+  computer-use per questo lavoro.
+- ⚠️ **Rebuild dell'immagine `contained-computer`** (`up.sh`) per validare live il path documenti
+  templated (F2) — i gate restano unit/injection su host, non un run nel container.
+- **Backlog minori** (invariato dal checkpoint F2, + due nuovi emersi nell'hardening di `16b251d9`,
+  tutti cosmetici):
+  - thumbnails/`deck.pdf` paginano PORTRAIT invece di 16:9 vero;
+  - search haystack nel catalogo confronta solo nome/descrizione EN, non le varianti `_it`;
+  - sweep repo-wide della stringa libera `'monet/startup'` residua in un test di `chat_store.rs`;
+  - `HEX_COLOR_PATTERN` (`/^#[0-9a-fA-F]{3,8}$/`) accetta anche lunghezze 5 e 7, che non sono hex
+    CSS validi (solo 3/4/6/8 lo sono) — passano la regex ma non sono un colore renderizzabile;
+  - `safeFont` è ASCII-only (`[A-Za-z0-9 _-]`) — penalizza font con nomi non-ASCII (es. accenti);
+  - `logo_data_url` viene interpolato in `src="${...}"` senza guard `startsWith("data:")` — è un
+    valore prodotto dal nostro canvas rasterizer (non input utente grezzo), ma manca la stessa
+    difesa-in-profondità applicata a colori/font.
+
 ## ⭐ CHECKPOINT 2026-07-16 (bis) — Presentations F2 (documenti di prima classe) SHIPPED
 
 Piano eseguito (SDD, ledger task-by-task in `.superpowers/sdd/progress.md`, sezione `F2`):
