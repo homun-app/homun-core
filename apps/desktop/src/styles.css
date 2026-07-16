@@ -12414,6 +12414,36 @@ body.resizing-drawer {
 .template-live-preview.interactive iframe {
   pointer-events: auto;
 }
+/* Card-mode hover: cycle through the pack's pages. `translate` (not `transform`)
+   so it composes with the inline `transform: scale(...)` set from JS — they are
+   separate CSS properties and don't clobber each other. --cycle-N are set from
+   the component, pre-multiplied by the current scale (see brandPreviewOverride's
+   neighbour TemplateLivePreview) so the shift lands correctly however small the
+   card is rendered. */
+.template-live-preview:not(.interactive):hover iframe {
+  animation: template-preview-cycle 9s ease-in-out infinite;
+}
+@keyframes template-preview-cycle {
+  0%,
+  14% {
+  }
+  22%,
+  36% {
+    translate: 0 var(--cycle-1);
+  }
+  44%,
+  58% {
+    translate: 0 var(--cycle-2);
+  }
+  66%,
+  80% {
+    translate: 0 var(--cycle-3);
+  }
+  88%,
+  100% {
+    translate: 0 0;
+  }
+}
 .template-preview-loading {
   position: relative;
   overflow: hidden;
@@ -12939,6 +12969,19 @@ body.resizing-drawer {
   border-radius: 13px;
   background: var(--bg);
   padding: 12px;
+}
+/* Demoted placement: now rendered below the results grid, so it reads as a
+   supplementary "still can't find it" list rather than competing with the
+   catalog for the user's first glance. */
+.template-source-directory.demoted {
+  margin: 28px 0 0;
+  opacity: 0.85;
+}
+.template-source-directory.demoted .template-source-directory-copy h4 {
+  font-size: 13px;
+}
+.template-source-directory.demoted .template-source-link {
+  padding: 8px 10px;
 }
 .template-source-directory-copy {
   min-width: 0;

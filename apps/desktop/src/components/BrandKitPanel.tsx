@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type CSSProperties, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ExternalLink,
@@ -251,12 +251,12 @@ export function BrandKitPanel({ host }: { host: PluginHost }) {
         </div>
       </section>
 
-      <TemplateCatalogGallery host={host} />
+      <TemplateCatalogGallery host={host} brandKit={kit} />
     </div>
   );
 }
 
-function TemplateCatalogGallery({ host }: { host: PluginHost }) {
+function TemplateCatalogGallery({ host, brandKit }: { host: PluginHost; brandKit: BrandKit }) {
   const { t, i18n } = useTranslation();
   const [templates, setTemplates] = useState<TemplateCatalogEntry[]>([]);
   const [query, setQuery] = useState("");
@@ -437,7 +437,6 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
           ))}
         </div>
       </div>
-      <TemplateSourceDirectory />
       {importError && <p className="template-import-error">{importError}</p>}
 
       {visible.length === 0 && !importingName ? (
@@ -465,7 +464,7 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
                     name: templateDisplayName(entry, i18n.language),
                   })}
                 >
-                  <TemplateCardPreview entry={entry} />
+                  <TemplateCardPreview entry={entry} brandKit={brandKit} />
                 </button>
                 <div className="template-card-body">
                   <div className="template-card-title-row">
@@ -522,9 +521,11 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
           })}
         </div>
       )}
+      <TemplateSourceDirectory />
       {selectedTemplate && (
         <TemplateDetailModal
           entry={selectedTemplate}
+          brandKit={brandKit}
           busy={startingTemplateId === selectedTemplate.id}
           deleting={deletingTemplateId === selectedTemplate.id}
           onClose={() => setSelectedTemplate(null)}
@@ -539,7 +540,10 @@ function TemplateCatalogGallery({ host }: { host: PluginHost }) {
 function TemplateSourceDirectory() {
   const { t } = useTranslation();
   return (
-    <section className="template-source-directory" aria-labelledby="template-source-directory-title">
+    <section
+      className="template-source-directory demoted"
+      aria-labelledby="template-source-directory-title"
+    >
       <div className="template-source-directory-copy">
         <p className="eyebrow">{t("presentations:sourceDirectoryEyebrow")}</p>
         <h4 id="template-source-directory-title">{t("presentations:sourceDirectoryTitle")}</h4>
@@ -594,6 +598,7 @@ function TemplateImportingCard({ name }: { name: string }) {
 
 function TemplateDetailModal({
   entry,
+  brandKit,
   busy,
   deleting,
   onClose,
@@ -601,6 +606,7 @@ function TemplateDetailModal({
   onDelete,
 }: {
   entry: TemplateCatalogEntry;
+  brandKit: BrandKit;
   busy: boolean;
   deleting: boolean;
   onClose: () => void;
@@ -671,7 +677,7 @@ function TemplateDetailModal({
         </div>
         <div className="template-detail-preview">
           {entry.preview_html_ref ? (
-            <TemplateLivePreview entry={entry} interactive />
+            <TemplateLivePreview entry={entry} interactive brandKit={brandKit} />
           ) : (
             <TemplateRasterOrContractPreview entry={entry} />
           )}
@@ -693,6 +699,37 @@ function templateSourceBadges(entry: TemplateCatalogEntry) {
   return badges;
 }
 
+/** Live brand recolor for catalog previews. The renderer HTML is parametric
+ *  by design (:root{--brand;--brand2;--accent;--head;--body}) — injecting an
+ *  override style into the sandboxed srcDoc recolors every card instantly as
+ *  the user edits the brand kit. Returns null when the kit still equals the
+ *  defaults: an unconfigured user must see each pack's curated theme, not a
+ *  uniformly-recolored catalog. String injection only — the iframe stays
+ *  sandbox="" (no scripts, opaque origin), so no postMessage/DOM path exists. */
+function brandPreviewOverride(kit: BrandKit): { style: string; logo: string } | null {
+  const isDefault =
+    kit.primary_color === DEFAULT_KIT.primary_color &&
+    kit.secondary_color === DEFAULT_KIT.secondary_color &&
+    kit.accent_color === DEFAULT_KIT.accent_color &&
+    kit.heading_font === DEFAULT_KIT.heading_font &&
+    kit.body_font === DEFAULT_KIT.body_font &&
+    !kit.logo_data_url;
+  if (isDefault) return null;
+  const style =
+    `<style>:root{--brand:${kit.primary_color} !important;` +
+    `--brand2:${kit.secondary_color} !important;` +
+    `--accent:${kit.accent_color} !important;` +
+    `--head:'${kit.heading_font.replaceAll("'", "")}' !important;` +
+    `--body:'${kit.body_font.replaceAll("'", "")}' !important;}</style>`;
+  // data: URL from our own canvas rasterizer — safe to inline; absolute over
+  // the first page only (body-anchored), matching where renderers put logos.
+  const logo = kit.logo_data_url
+    ? `<img src="${kit.logo_data_url}" style="position:absolute;top:26px;right:38px;` +
+      `max-height:42px;max-width:170px;z-index:99" alt="">`
+    : "";
+  return { style, logo };
+}
+
 /** Embeds the pack's REAL renderer output (preview.html) scaled into the card.
  *  sandbox="" = no scripts, no same-origin: the HTML is trusted (we build it)
  *  but the cheapest posture wins. Card mode is inert (pointer-events none);
@@ -700,9 +737,11 @@ function templateSourceBadges(entry: TemplateCatalogEntry) {
 function TemplateLivePreview({
   entry,
   interactive = false,
+  brandKit,
 }: {
   entry: TemplateCatalogEntry;
   interactive?: boolean;
+  brandKit?: BrandKit;
 }) {
   const { i18n } = useTranslation();
   const [html, setHtml] = useState<string | null>(null);
@@ -712,6 +751,14 @@ function TemplateLivePreview({
   // Document packs render at A4 width (794px @96dpi); presentations at 16:9 (1280px).
   // The scale factor below is derived from this so the iframe always fits its card.
   const designWidth = entry.kind === "document" ? 794 : 1280;
+  // Card mode is scrolled through a taller-than-viewport iframe on hover (see the
+  // template-preview-cycle keyframes in styles.css); the height/page-size below
+  // are generous fixed guesses (4 deck slides / 3 A4 pages) — the sandboxed
+  // iframe gives us no way to measure real content length, so packs shorter
+  // than that show blank space past their last page, which is an acceptable
+  // preview-only artifact.
+  const pageHeight = entry.kind === "document" ? 1123 : 720;
+  const previewHeight = pageHeight * (entry.kind === "document" ? 3 : 4);
 
   useEffect(() => {
     let active = true;
@@ -757,30 +804,48 @@ function TemplateLivePreview({
       </div>
     );
   }
+  // Recolor is a derived string, not a refetch: `html` stays keyed on preview_html_ref
+  // (fetched once above), so editing the brand kit only recomputes this cheap replace —
+  // instant recolor, zero network. Both renderers emit literal `</head>`/`<body>` anchors
+  // (deck_render _HTML_SHELL, doc_render render_html); if either is missing the replace
+  // is a no-op and `html` passes through untouched (fail-open, never a broken srcDoc).
+  const override = brandKit ? brandPreviewOverride(brandKit) : null;
+  const srcDoc = override
+    ? html
+        .replace("</head>", `${override.style}</head>`)
+        .replace(/<body([^>]*)>/, `<body$1>${override.logo}`)
+    : html;
   return (
     <div
       ref={wrapRef}
       className={`template-card-preview template-live-preview${interactive ? " interactive" : ""}${entry.kind === "document" ? " doc-preview" : ""}`}
+      style={
+        {
+          "--cycle-1": `-${Math.round(pageHeight * 1 * scale)}px`,
+          "--cycle-2": `-${Math.round(pageHeight * 2 * scale)}px`,
+          "--cycle-3": `-${Math.round(pageHeight * 3 * scale)}px`,
+        } as CSSProperties
+      }
     >
       {/* Card mode is a decorative thumbnail (inert, hidden from AT); interactive mode is the actual scrollable content, so it must be focusable and titled. */}
       <iframe
         sandbox=""
-        srcDoc={html}
+        srcDoc={srcDoc}
         title={interactive ? templateDisplayName(entry, i18n.language) : ""}
         tabIndex={interactive ? 0 : -1}
         aria-hidden={interactive ? undefined : true}
         style={{
           width: designWidth,
           transform: `scale(${scale})`,
-          height: interactive ? `${Math.round(560 / scale)}px` : "720px",
+          height: interactive ? `${Math.round(560 / scale)}px` : `${previewHeight}px`,
         }}
       />
     </div>
   );
 }
 
-function TemplateCardPreview({ entry }: { entry: TemplateCatalogEntry }) {
-  if (entry.preview_html_ref) return <TemplateLivePreview entry={entry} />;
+function TemplateCardPreview({ entry, brandKit }: { entry: TemplateCatalogEntry; brandKit: BrandKit }) {
+  if (entry.preview_html_ref) return <TemplateLivePreview entry={entry} brandKit={brandKit} />;
   return <TemplateRasterOrContractPreview entry={entry} />;
 }
 

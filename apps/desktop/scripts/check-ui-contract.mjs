@@ -316,6 +316,7 @@ assertContains("src/components/BrandKitPanel.tsx", ".templateSourceAttachment(en
 assertContains("src/components/BrandKitPanel.tsx", "await refreshTemplates()", "PPTX import must refresh the reusable catalog instead of immediately starting chat");
 assertNotContains("src/components/BrandKitPanel.tsx", "templateThemeClass", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
 assertNotContains("src/components/BrandKitPanel.tsx", "builtin:template-preview/", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
+assertContains("src/components/BrandKitPanel.tsx", "brandPreviewOverride", "the brand kit must recolor catalog previews live");
 assertContains("src/plugins/registry.tsx", "startTemplateWorkflow", "plugin host must expose a typed template workflow handoff");
 assertContains("src/App.tsx", "handleStartTemplateWorkflow", "App must own the template workflow chat creation path");
 assertContains("src/App.tsx", "template_ref=", "template workflow prompt must preserve the canonical template reference");
