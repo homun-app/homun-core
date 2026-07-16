@@ -6,6 +6,10 @@ mod browser_safety;
 mod chat_store;
 // One-shot fuse of the two legacy SQLite files into the unified homun.sqlite.
 mod db_migrate;
+// Document CONTENT slot-schema (Fase 2 documents, Task 6): strict slot-filling
+// schema derived from a pack's example.json skeleton + assembly back into
+// doc.json. Not wired into a call site yet (F2-T8, make_document).
+mod document_content;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod model_client;
 // Model-output normalization moved WHOLE into the engine crate (ADR 0024 inc 5e.3, pure serde
