@@ -1,0 +1,45 @@
+{
+  "title": "Logistics Optimization Proposal",
+  "theme": {
+    "primary": "#16436b",
+    "secondary": "#0c2233",
+    "accent": "#14b8a6",
+    "heading_font": "Inter",
+    "body_font": "Inter"
+  },
+  "blocks": [
+    { "type": "section_cover", "title": "Logistics Optimization Proposal",
+      "subtitle": "Prepared for Aurora Logistics" },
+    { "type": "text_section", "title": "Context & needs",
+      "paragraphs": [
+        "Aurora Logistics operates 24 distribution sites across Italy and the DACH region. Plant managers currently rely on end-of-week spreadsheets to catch downtime, so costly stoppages often stay invisible until the monthly close.",
+        "The operations team asked for a way to see cost-of-downtime in real time and route alerts to the right shift lead, without adding new hardware to the line."
+      ] },
+    { "type": "text_section", "title": "Proposed solution",
+      "paragraphs": [
+        "Kite Analytics deploys plug-and-play adapters against Aurora's existing PLCs and MES, live within two weeks per site."
+      ],
+      "bullets": [
+        "Live cost-of-downtime dashboard for every plant manager",
+        "Alerts routed automatically to the on-duty shift lead",
+        "Monthly variance report delivered straight to the COO's inbox"
+      ] },
+    { "type": "timeline", "title": "Rollout plan", "entries": [
+      { "label": "Weeks 1-2", "heading": "Pilot", "subheading": "4 sites in Northern Italy",
+        "points": ["Install adapters and validate the data feed", "Train shift leads on the live dashboard"] },
+      { "label": "Weeks 3-8", "heading": "Scale-up", "subheading": "20 remaining Italian and DACH sites",
+        "points": ["Roll out in batches of 5 sites per week", "Weekly check-in with the Aurora ops team"] },
+      { "label": "Weeks 9-10", "heading": "Handover", "subheading": "Steady state",
+        "points": ["Full documentation and admin training", "First quarterly business review scheduled"] }
+    ] },
+    { "type": "pricing_table", "title": "Investment", "headers": ["Plan", "Sites", "Monthly price"],
+      "rows": [
+        ["Starter", "Up to 5 sites", "€ 1,200/mo"],
+        ["Growth", "Up to 20 sites", "€ 3,800/mo"],
+        ["Enterprise", "24+ sites, dedicated CSM", "€ 5,900/mo"]
+      ],
+      "note": "Pricing valid for 60 days from the proposal date; annual billing saves 15%." },
+    { "type": "signature_block", "closing": "Looking forward to your decision,",
+      "name": "Sara Novak", "role": "Head of Sales, Kite Analytics" }
+  ]
+}

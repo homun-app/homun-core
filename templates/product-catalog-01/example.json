@@ -1,0 +1,39 @@
+{
+  "title": "Bottega Nova — Autumn Collection",
+  "theme": {
+    "primary": "#7c2d12",
+    "secondary": "#431407",
+    "accent": "#f59e0b",
+    "heading_font": "Georgia",
+    "body_font": "Inter"
+  },
+  "blocks": [
+    { "type": "section_cover", "title": "Autumn Collection",
+      "subtitle": "Bottega Nova — handmade leather goods" },
+    { "type": "text_section", "title": "Our craft",
+      "paragraphs": [
+        "Bottega Nova has hand-cut and stitched leather goods in Florence since 1978. Every piece in this collection is made to order by a team of six artisans, using vegetable-tanned leather sourced from a single tannery we have worked with for three generations.",
+        "This season pairs our classic silhouettes with a new chestnut-brown tanning batch, available while stock lasts."
+      ] },
+    { "type": "product_grid", "title": "Products", "products": [
+      { "name": "Marina Tote", "description": "Full-grain leather tote with a reinforced base and brass hardware.", "price": "€ 289", "badge": "" },
+      { "name": "Ponte Crossbody", "description": "Compact crossbody bag in soft nappa leather with an adjustable strap.", "price": "€ 179", "badge": "NEW" },
+      { "name": "Duomo Backpack", "description": "Structured leather backpack with a padded laptop sleeve.", "price": "€ 329", "badge": "" },
+      { "name": "Arno Belt", "description": "Reversible belt in chestnut and black, hand-stitched edges.", "price": "€ 79", "badge": "" },
+      { "name": "Vespucci Wallet", "description": "Slim bifold wallet with six card slots and a coin pocket.", "price": "€ 59", "badge": "BESTSELLER" },
+      { "name": "Fiesole Weekender", "description": "Soft-sided weekend bag with a detachable shoulder strap.", "price": "€ 259", "badge": "" }
+    ] },
+    { "type": "spec_table", "title": "Materials & sizing", "headers": ["Product", "Material", "Dimensions", "Weight"],
+      "rows": [
+        ["Marina Tote", "Full-grain calfskin", "38 × 29 × 14 cm", "950 g"],
+        ["Ponte Crossbody", "Nappa leather", "24 × 17 × 8 cm", "420 g"],
+        ["Duomo Backpack", "Full-grain calfskin", "32 × 42 × 13 cm", "1.4 kg"],
+        ["Vespucci Wallet", "Vegetable-tanned leather", "11 × 9 × 2 cm", "110 g"]
+      ] },
+    { "type": "cta_footer", "heading": "Orders & contact", "lines": [
+      "Wholesale enquiries: wholesale@bottega-nova.example",
+      "Retail: online store + our Florence atelier by appointment",
+      "Ships worldwide in 3-5 business days"
+    ] }
+  ]
+}

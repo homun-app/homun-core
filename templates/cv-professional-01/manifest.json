@@ -1,0 +1,21 @@
+{
+  "id": "homun/cv-professional-01",
+  "kind": "document",
+  "name": "Professional CV",
+  "name_it": "CV professionale",
+  "description": "Reverse-chronological CV with a clean profile, timeline and skills — one page, factual bullets.",
+  "description_it": "CV a ordine cronologico inverso con profilo, esperienze e competenze — una pagina, punti factual.",
+  "design_template": "cv",
+  "design_theme": "minimal_mono",
+  "design_profile": "minimal",
+  "layout_archetypes": ["contact_header", "profile_summary", "timeline", "education_list", "skill_tags"],
+  "tags": ["minimal mono", "cv", "resume", "timeline"],
+  "use_cases": ["job application", "recruiter outreach", "internal mobility"],
+  "audience": ["recruiters", "hiring managers"],
+  "intake_questions": [
+    "Whose CV is this and for which target role?",
+    "Which 3-5 experiences and results matter most?",
+    "Any constraints (length, language, format)?"
+  ],
+  "route_text": "cv resume curriculum vitae candidatura job application recruiter hiring esperienza professionale competenze skills timeline profilo"
+}

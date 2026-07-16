@@ -1,0 +1,21 @@
+{
+  "id": "homun/customer-case-study-01",
+  "kind": "document",
+  "name": "Customer Case Study",
+  "name_it": "Case study cliente",
+  "description": "Customer case study — challenge, solution, measurable results and a quote.",
+  "description_it": "Case study cliente — sfida, soluzione, risultati misurabili e testimonianza.",
+  "design_template": "sales_proposal",
+  "design_theme": "warm_editorial",
+  "design_profile": "editorial",
+  "layout_archetypes": ["section_cover", "text_section", "text_section", "kpi_band", "testimonial_quote", "cta_footer"],
+  "tags": ["warm editorial", "case study", "testimonial", "kpi band"],
+  "use_cases": ["customer story", "sales enablement", "website proof point"],
+  "audience": ["prospects", "sales teams", "marketing"],
+  "intake_questions": [
+    "Which customer and what problem did they have?",
+    "What did you deliver and in what timeframe?",
+    "Which measurable results and quote can we use?"
+  ],
+  "route_text": "case study cliente customer story risultati misurabili testimonianza quote sales enablement proof point"
+}

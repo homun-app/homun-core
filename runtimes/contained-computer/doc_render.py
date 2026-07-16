@@ -143,9 +143,10 @@ def render_block(block, base_dir, logo):
         return f'<section class="block text"><h2>{title}</h2>{table}{note_html}</section>'
     if kind == "product_grid":
         cards = "".join(
-            f'<div class="product">'
-            + (f'<i class="badge">{esc(p.get("badge", ""))}</i>' if p.get("badge") else "")
+            f'<div class="product"><div class="product-head">'
             + f'<strong>{esc(p.get("name", ""))}</strong>'
+            + (f'<i class="badge">{esc(p.get("badge", ""))}</i>' if p.get("badge") else "")
+            + '</div>'
             f'<p class="para">{esc(p.get("description", ""))}</p>'
             f'<span class="price">{esc(p.get("price", ""))}</span></div>'
             for p in block.get("products", [])[:9])
@@ -258,8 +259,13 @@ table.tbl td{padding:.5rem .8rem;color:#2a3542;border-bottom:1px solid #e4e9ef}
 table.tbl tr:nth-child(even) td{background:#f6f8fa}
 .note{margin-top:.5rem;font-size:.88rem}
 .products{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:.7rem}
-.product{border:1px solid #e4e9ef;border-radius:10px;padding:14px;position:relative}
-.product .badge{position:absolute;top:10px;right:10px;background:var(--accent);color:#fff;
+.product{border:1px solid #e4e9ef;border-radius:10px;padding:14px}
+/* Badge sits in a flex header NEXT TO the name (not position:absolute over it):
+   a long badge label (e.g. "BESTSELLER") used to overlap/clip a short product
+   name — flex-wrap lets it drop to its own line instead of covering the text. */
+.product-head{display:flex;align-items:flex-start;justify-content:space-between;
+  gap:8px;flex-wrap:wrap}
+.product .badge{background:var(--accent);color:#fff;flex:none;
   font-style:normal;font-size:.7rem;font-weight:800;border-radius:6px;padding:.15rem .45rem}
 .product .price{color:var(--brand);font-weight:800;margin-top:.4rem;display:block}
 .kpis{background:#f6f8fa;border-top:3px solid var(--accent)}

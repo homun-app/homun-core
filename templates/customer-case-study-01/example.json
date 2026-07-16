@@ -1,0 +1,41 @@
+{
+  "title": "Case Study — Aurora Logistics",
+  "theme": {
+    "primary": "#7c2d12",
+    "secondary": "#431407",
+    "accent": "#f59e0b",
+    "heading_font": "Georgia",
+    "body_font": "Inter"
+  },
+  "blocks": [
+    { "type": "section_cover", "title": "Case study — Aurora Logistics",
+      "subtitle": "38% less downtime in 6 months" },
+    { "type": "text_section", "title": "The challenge",
+      "paragraphs": [
+        "Aurora Logistics runs 24 distribution sites across Italy and the DACH region. Plant managers only found out about costly downtime when the monthly report landed — by then, the money was already lost.",
+        "Leadership needed real-time visibility without a multi-year IT project or new hardware on the line."
+      ] },
+    { "type": "text_section", "title": "The solution",
+      "paragraphs": [
+        "Kite Analytics connected Aurora's existing PLCs and MES in under two weeks per site, turning raw plant signals into a live cost-of-downtime dashboard."
+      ],
+      "bullets": [
+        "Alerts routed automatically to the on-duty shift lead",
+        "A weekly digest replaced the monthly spreadsheet ritual",
+        "Rollout completed across all 24 sites in ten weeks"
+      ] },
+    { "type": "kpi_band", "title": "Results after six months", "items": [
+      { "value": "38%", "label": "reduction in average plant downtime" },
+      { "value": "€1.1M", "label": "downtime cost avoided in the first two quarters" },
+      { "value": "10 weeks", "label": "to roll out across all 24 sites" }
+    ] },
+    { "type": "testimonial_quote",
+      "quote": "Kite gave every plant manager the number they used to wait a month for — in real time. It changed how fast we can act.",
+      "author": "Giulia Conti", "role": "COO, Aurora Logistics" },
+    { "type": "cta_footer", "heading": "See it on your plants", "lines": [
+      "Book a walkthrough: kiteanalytics.example/demo",
+      "hello@kiteanalytics.example",
+      "More case studies: kiteanalytics.example/customers"
+    ] }
+  ]
+}

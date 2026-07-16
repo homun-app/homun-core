@@ -172,14 +172,18 @@ mod tests {
     }
 
     #[test]
-    fn repo_templates_dir_ships_the_v1_presentation_packs() {
+    fn repo_templates_dir_ships_the_v1_packs() {
         let root = bundled_template_pack_root().expect("repo templates dir");
         let provider = BundledTemplatePackProvider::from_root(&root).expect("provider");
         let ids: Vec<String> = crate::TemplateCatalogProvider::entries(&provider)
             .into_iter()
             .map(|entry| entry.id)
             .collect();
-        assert!(ids.contains(&"homun/startup-pitch-clean-01".to_string()));
-        assert!(ids.contains(&"homun/executive-update-board-01".to_string()));
+        for id in ["homun/startup-pitch-clean-01", "homun/executive-update-board-01",
+                   "homun/cv-professional-01", "homun/cover-letter-01",
+                   "homun/product-catalog-01", "homun/sales-proposal-01",
+                   "homun/company-one-pager-01", "homun/customer-case-study-01"] {
+            assert!(ids.contains(&id.to_string()), "missing {id}");
+        }
     }
 }

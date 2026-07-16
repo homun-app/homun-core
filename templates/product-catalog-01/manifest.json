@@ -1,0 +1,21 @@
+{
+  "id": "homun/product-catalog-01",
+  "kind": "document",
+  "name": "Product Catalog",
+  "name_it": "Catalogo prodotti",
+  "description": "Seasonal product catalog with a brand cover, product grid and materials spec sheet.",
+  "description_it": "Catalogo prodotti stagionale con copertina brand, griglia prodotti e scheda materiali.",
+  "design_template": "product_catalog",
+  "design_theme": "warm_editorial",
+  "design_profile": "editorial",
+  "layout_archetypes": ["section_cover", "text_section", "product_grid", "spec_table", "cta_footer"],
+  "tags": ["warm editorial", "catalog", "product grid", "spec sheet"],
+  "use_cases": ["seasonal catalog", "wholesale lookbook", "retail lineup"],
+  "audience": ["retail buyers", "wholesale partners", "customers"],
+  "intake_questions": [
+    "Which products (name, price, one-line description)?",
+    "Who is the catalog for (retail, wholesale)?",
+    "Any sections beyond the product grid (specs, story)?"
+  ],
+  "route_text": "product catalog catalogo prodotti listino wholesale retail lookbook stagione materiali misure schede prodotto"
+}

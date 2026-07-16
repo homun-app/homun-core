@@ -1,0 +1,21 @@
+{
+  "id": "homun/cover-letter-01",
+  "kind": "document",
+  "name": "Cover Letter",
+  "name_it": "Lettera di presentazione",
+  "description": "Focused cover letter — hook, fit, proof and ask in four short paragraphs.",
+  "description_it": "Lettera di presentazione mirata — aggancio, coerenza, prova e richiesta in quattro paragrafi.",
+  "design_template": "cover_letter",
+  "design_theme": "minimal_mono",
+  "design_profile": "minimal",
+  "layout_archetypes": ["letterhead", "letter_body", "signature_block"],
+  "tags": ["minimal mono", "cover letter", "job application"],
+  "use_cases": ["job application", "speculative outreach"],
+  "audience": ["hiring managers", "recruiters"],
+  "intake_questions": [
+    "Who is applying, to which company/role?",
+    "Which one achievement proves the fit?",
+    "Formal or warm tone?"
+  ],
+  "route_text": "cover letter lettera di presentazione candidatura job application motivational letter recruiter hiring position colloquio"
+}

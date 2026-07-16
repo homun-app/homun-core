@@ -1,0 +1,39 @@
+{
+  "title": "Kite Analytics",
+  "theme": {
+    "primary": "#312e81",
+    "secondary": "#1e1b4b",
+    "accent": "#8b5cf6",
+    "heading_font": "Inter",
+    "body_font": "Inter"
+  },
+  "blocks": [
+    { "type": "section_cover", "title": "Kite Analytics",
+      "subtitle": "Operational intelligence for mid-size manufacturers" },
+    { "type": "text_section", "title": "What we do",
+      "paragraphs": [
+        "Kite gives plant managers the same real-time visibility that used to be reserved for Fortune 500 operations."
+      ],
+      "bullets": [
+        "Connect PLCs and MES in days, with no new hardware on the line",
+        "Turn plant-floor signals into a live cost-of-downtime dashboard",
+        "Route alerts to the right shift lead the moment something drifts"
+      ] },
+    { "type": "kpi_band", "title": "Proof, in numbers", "items": [
+      { "value": "38%", "label": "average downtime reduction across 24 pilot plants" },
+      { "value": "2 days", "label": "average time to go live per site" },
+      { "value": "94", "label": "plant managers using Kite daily" }
+    ] },
+    { "type": "text_section", "title": "How it works",
+      "bullets": [
+        "Plug-and-play adapters read existing PLC/MES signals — no rip and replace",
+        "A cost-of-downtime model turns raw signals into euros per minute",
+        "Alerts and weekly digests reach the shift lead, not just head office"
+      ] },
+    { "type": "cta_footer", "heading": "Talk to us", "lines": [
+      "hello@kiteanalytics.example",
+      "Book a 20-minute plant walkthrough: kiteanalytics.example/demo",
+      "Milan · remote-first across the EU"
+    ] }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "homun/sales-proposal-01",
+  "kind": "document",
+  "name": "Sales Proposal",
+  "name_it": "Proposta commerciale",
+  "description": "Client-ready proposal — context, solution, rollout timeline and pricing with a signature block.",
+  "description_it": "Proposta commerciale pronta per il cliente — contesto, soluzione, tempistiche e prezzi con firma.",
+  "design_template": "sales_proposal",
+  "design_theme": "clean_corporate",
+  "design_profile": "executive",
+  "layout_archetypes": ["section_cover", "text_section", "text_section", "timeline", "pricing_table", "signature_block"],
+  "tags": ["clean corporate", "sales proposal", "pricing table", "timeline"],
+  "use_cases": ["client proposal", "vendor pitch", "deal closing"],
+  "audience": ["clients", "procurement", "decision makers"],
+  "intake_questions": [
+    "Client and problem to solve?",
+    "Scope, phases and pricing structure?",
+    "Decision maker and deadline?"
+  ],
+  "route_text": "sales proposal proposta commerciale offerta cliente pricing prezzi timeline fasi progetto contratto firma"
+}

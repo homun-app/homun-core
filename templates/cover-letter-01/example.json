@@ -1,0 +1,25 @@
+{
+  "title": "Elena Ricci — Cover Letter",
+  "theme": {
+    "primary": "#111827",
+    "secondary": "#374151",
+    "accent": "#111827",
+    "heading_font": "Inter",
+    "body_font": "Inter"
+  },
+  "blocks": [
+    { "type": "letterhead", "organization": "Elena Ricci",
+      "contact_line": "Milano, Italy · elena.ricci@example.com · +39 335 123 4567",
+      "date_line": "14 January 2026",
+      "recipient_lines": ["Hiring Team", "Kite Analytics", "Via Tortona 33, 20144 Milano"] },
+    { "type": "letter_body", "salutation": "Dear Hiring Team,",
+      "paragraphs": [
+        "I am writing to apply for the Operations Director role at Kite Analytics. Your mission — giving mid-size manufacturers real-time visibility into their own plants — is the exact problem I have spent the last decade solving from the plant floor up.",
+        "At Aurora Logistics I lead operations across 24 sites, the same scale Kite is targeting for its next wave of customers; I know first-hand what a plant manager needs to see before trusting a new dashboard enough to act on it.",
+        "In eighteen months I cut average downtime 38% by pairing real-time data with a disciplined S&OP process — proof that software like Kite's only pays off when operations and technology are designed together.",
+        "I would welcome the chance to discuss how that experience could help Kite's pilot customers convert faster into long-term accounts. Thank you for your consideration."
+      ] },
+    { "type": "signature_block", "closing": "Kind regards,", "name": "Elena Ricci",
+      "role": "Operations Director, Aurora Logistics" }
+  ]
+}

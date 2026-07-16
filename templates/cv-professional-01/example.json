@@ -1,0 +1,42 @@
+{
+  "title": "Elena Ricci — CV",
+  "theme": {
+    "primary": "#111827",
+    "secondary": "#374151",
+    "accent": "#111827",
+    "heading_font": "Inter",
+    "body_font": "Inter"
+  },
+  "blocks": [
+    { "type": "contact_header", "name": "Elena Ricci", "headline": "Operations Director",
+      "contact_items": ["elena.ricci@example.com", "+39 335 123 4567", "Milano, Italy", "linkedin.com/in/elenaricci"] },
+    { "type": "profile_summary", "title": "Profile",
+      "text": "12 years in operations leadership across manufacturing and logistics in Southern Europe. Led the rollout of real-time plant monitoring across 24 sites, cutting average downtime by 38% in eighteen months. Managed a €14M operating budget and a 45-person team across three countries. Now targeting a COO-track role at an industrial-tech scale-up." },
+    { "type": "timeline", "title": "Experience", "entries": [
+      { "label": "2022 — Present", "heading": "Operations Director", "subheading": "Aurora Logistics, Milan",
+        "points": [
+          "Cut average plant downtime 38% across 24 sites in 18 months",
+          "Rebuilt the S&OP process, shortening the planning cycle from 6 weeks to 10 days",
+          "Managed a €14M operating budget and a 45-person cross-country team"
+        ] },
+      { "label": "2017 — 2022", "heading": "Plant Operations Manager", "subheading": "Ferretti Industrial, Bergamo",
+        "points": [
+          "Directed daily operations for a 300-person production plant",
+          "Introduced lean scheduling that lifted on-time delivery from 81% to 96%"
+        ] },
+      { "label": "2013 — 2017", "heading": "Process Engineer", "subheading": "Ferretti Industrial, Bergamo",
+        "points": [
+          "Redesigned two assembly lines, reducing changeover time by 45%",
+          "Trained 20 shift leads on statistical process control"
+        ] }
+    ] },
+    { "type": "education_list", "title": "Education", "entries": [
+      { "label": "2013", "heading": "MSc Industrial Engineering", "subheading": "Politecnico di Milano" },
+      { "label": "2011", "heading": "BSc Mechanical Engineering", "subheading": "Politecnico di Torino" }
+    ] },
+    { "type": "skill_tags", "title": "Skills", "groups": [
+      { "label": "Operations", "tags": ["Lean Manufacturing", "S&OP", "P&L Ownership", "Vendor Negotiation", "Team Leadership"] },
+      { "label": "Tools", "tags": ["SAP", "Power BI", "Tableau", "SQL"] }
+    ] }
+  ]
+}

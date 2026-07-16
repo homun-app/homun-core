@@ -1,0 +1,21 @@
+{
+  "id": "homun/company-one-pager-01",
+  "kind": "document",
+  "name": "Company One-Pager",
+  "name_it": "One-pager aziendale",
+  "description": "One-page company overview — what we do, proof numbers, how it works and a call to action.",
+  "description_it": "Presentazione aziendale in una pagina — cosa facciamo, numeri, come funziona e call to action.",
+  "design_template": "sales_proposal",
+  "design_theme": "soft_gradient",
+  "design_profile": "sales_pitch",
+  "layout_archetypes": ["section_cover", "text_section", "kpi_band", "text_section", "cta_footer"],
+  "tags": ["soft gradient", "one-pager", "kpi band", "sales pitch"],
+  "use_cases": ["company overview", "leave-behind", "website download"],
+  "audience": ["prospects", "partners", "investors"],
+  "intake_questions": [
+    "Company one-liner and audience?",
+    "Which 3 numbers prove it?",
+    "Primary call to action?"
+  ],
+  "route_text": "company one pager azienda presentazione sintetica numeri kpi call to action prospect partner investor"
+}
