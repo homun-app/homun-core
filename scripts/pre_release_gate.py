@@ -72,6 +72,11 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             [PYTHON, "-m", "unittest", "discover", "-s",
              "runtimes/contained-computer", "-p", "test_deck_render.py"],
         ),
+        Step(
+            "doc renderer tests",
+            [PYTHON, "-m", "unittest", "discover", "-s",
+             "runtimes/contained-computer", "-p", "test_doc_render.py"],
+        ),
     ]
     if truthy(env.get("HOMUN_RUN_MODEL_EVAL")):
         model = env.get("HOMUN_EVAL_MODEL", "gemma4:latest")
