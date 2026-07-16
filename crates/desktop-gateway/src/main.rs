@@ -4305,11 +4305,11 @@ async fn emit_rendered_deck_artifacts(
     // which is exactly what lets the make_document degraded-render branch
     // reuse this same helper: pass all 3 expected names, only the ones that
     // actually exist on disk get emitted.
-    names: &[String],
+    names: &[&str],
 ) -> Vec<String> {
     let host_dir = sandbox::artifacts_dir().join(thread_slug);
     let mut produced = Vec::new();
-    for fname in names {
+    for &fname in names {
         if let Ok(meta) = std::fs::metadata(host_dir.join(fname)) {
             if meta.len() == 0 {
                 continue;
@@ -4338,7 +4338,7 @@ async fn emit_rendered_deck_artifacts(
                 quality_metadata,
             )
             .await;
-            produced.push(fname.clone());
+            produced.push(fname.to_string());
         }
     }
     produced
@@ -19167,11 +19167,9 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
 /// shipped for `markdown_to_docx` (`docx_package`) so there is only ONE OOXML
 /// writer in the gateway, not two.
 ///
-/// Not wired into any call site yet (that lands with F2-T8, the templated
-/// `make_document` path) — exercised directly by its unit test until then, so
-/// this and the block-dispatch helpers it alone reaches are allowed dead code
-/// (mirrors `document_content.rs`'s same not-yet-wired state).
-#[allow(dead_code)]
+/// Wired into `make_document`'s templated path (F2-T8,
+/// `make_templated_document`), which produces the DOCX gateway-side from the
+/// same doc.json the container renders to HTML/PDF.
 fn doc_json_to_docx(doc: &serde_json::Value) -> Result<Vec<u8>, String> {
     let title = doc.get("title").and_then(|t| t.as_str()).unwrap_or("Document");
     let blocks = doc.get("blocks").and_then(|b| b.as_array());
@@ -21033,10 +21031,13 @@ async fn make_templated_document(
         Err(error) => return format!("Could not generate document content: {error}"),
     };
 
-    // 4) the pack's own curated theme names the render; doc_render.py then
+    // 4) name the render theme from the RESOLVED design_theme (explicit arg
+    // wins, else the pack's curated theme — the same value the content
+    // directives used, so an explicit "high_contrast" never renders as the
+    // pack default while the prose follows the override). doc_render.py then
     // merges brand.json UNDER it (brand colours win over the theme's own
     // defaults) — "il brand kit vince al render".
-    if let Some(theme_name) = entry.design_theme.as_deref() {
+    if let Some(theme_name) = document_options.design_theme.as_deref() {
         doc["theme"] = serde_json::json!({ "name": theme_name });
     }
 
@@ -21072,11 +21073,9 @@ async fn make_templated_document(
     // 6) render in the sandbox (no model shell) — same command shape as
     // deck, QA-gated on the SAME `DECK_QA_JSON:` prefix so the existing
     // parser converges across deck and document.
-    let names = vec![
-        format!("{stem}.html"),
-        format!("{stem}.pdf"),
-        docx_name.clone(),
-    ];
+    let html_name = format!("{stem}.html");
+    let pdf_name = format!("{stem}.pdf");
+    let names = [html_name.as_str(), pdf_name.as_str(), docx_name.as_str()];
     let container_out = sandbox::container_output_dir(thread_slug);
     let cmd = build_document_render_command(&container_out, &stem);
     sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
@@ -21699,11 +21698,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     &thread_slug,
                     "render_deck",
                     quality_metadata.as_ref(),
-                    &[
-                        "deck.pptx".to_string(),
-                        "deck.html".to_string(),
-                        "deck.pdf".to_string(),
-                    ],
+                    &["deck.pptx", "deck.html", "deck.pdf"],
                 )
                 .await;
                 effects.append_output.push(deck_out);
@@ -22056,11 +22051,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             &thread_slug,
                             "make_deck",
                             artifact_metadata_ref,
-                            &[
-                                "deck.pptx".to_string(),
-                                "deck.html".to_string(),
-                                "deck.pdf".to_string(),
-                            ],
+                            &["deck.pptx", "deck.html", "deck.pdf"],
                         )
                         .await;
                         effects.append_output.push(deck_out);
@@ -57306,6 +57297,16 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(ignored.design_profile, None);
         assert_eq!(ignored.design_components, vec!["kpi_grid".to_string()]);
         assert_eq!(ignored.sections, vec!["Valida".to_string()]);
+
+        // The pair the templated render's theme merge (F2-T8) relies on: the
+        // explicit design_theme above WINS over the pack's catalog theme, and
+        // with NO explicit theme the catalog entry's own theme degrades in —
+        // so doc.json's `theme.name` always matches what the content
+        // directives told the model.
+        let fallback = super::document_generation_options(&serde_json::json!({
+            "template_ref": "homun/executive-update-board-01",
+        }));
+        assert_eq!(fallback.design_theme.as_deref(), Some("high_contrast"));
     }
 
     #[test]
