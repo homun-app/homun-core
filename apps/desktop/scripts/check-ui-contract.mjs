@@ -320,6 +320,7 @@ assertContains("src/plugins/registry.tsx", "startTemplateWorkflow", "plugin host
 assertContains("src/App.tsx", "handleStartTemplateWorkflow", "App must own the template workflow chat creation path");
 assertContains("src/App.tsx", "template_ref=", "template workflow prompt must preserve the canonical template reference");
 assertContains("src/App.tsx", "Do not generate the deck yet.", "template workflow must start with discovery and planning, not immediate deck generation");
+assertContains("src/App.tsx", "make_document", "document packs must route to make_document from Use template");
 assertNotContains("src/App.tsx", "Aiutami a creare una presentazione", "template workflow default visible prompt must remain English");
 assertContains("src/lib/coreBridge.ts", "importPptxTemplate", "Desktop bridge must expose PPTX template import");
 assertContains("src/lib/coreBridge.ts", "templateSourceAttachment", "Desktop bridge must resolve local template attachments without exposing paths in the catalog");

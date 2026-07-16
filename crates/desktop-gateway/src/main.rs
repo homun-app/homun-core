@@ -8,7 +8,8 @@ mod chat_store;
 mod db_migrate;
 // Document CONTENT slot-schema (Fase 2 documents, Task 6): strict slot-filling
 // schema derived from a pack's example.json skeleton + assembly back into
-// doc.json. Not wired into a call site yet (F2-T8, make_document).
+// doc.json. Wired into make_document's templated path (F2-T8,
+// make_templated_document).
 mod document_content;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod model_client;
@@ -16594,7 +16595,7 @@ fn make_document_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "make_document",
-            "description": "Create a COMPLETE structured document artifact from a brief in ONE call. The engine drafts a polished Markdown document, writes it as managed Markdown/PDF/DOCX artifacts, and registers them in memory. Use this for requests to write/create/draft a document, report, memo, meeting minutes or relazione. Do NOT create a separate plan and do NOT call create_artifact/write_file/shell for this workflow. Just call make_document with the brief; when it returns, the document is DONE.",
+            "description": "Create a COMPLETE structured document artifact from a brief in ONE call. The engine drafts a polished Markdown document, writes it as managed Markdown/PDF/DOCX artifacts, and registers them in memory. With a bundled document template_ref, the engine instead renders the designed HTML/PDF and an editable DOCX (the formats arg does not apply on that path). Use this for requests to write/create/draft a document, report, memo, meeting minutes or relazione. Do NOT create a separate plan and do NOT call create_artifact/write_file/shell for this workflow. Just call make_document with the brief; when it returns, the document is DONE.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -19013,8 +19014,19 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
                     "Price".to_string(),
                 ]];
                 for product in products {
+                    // Fold a non-empty badge into the name cell ("Name — BADGE")
+                    // instead of dropping it — the badge is real product.json
+                    // content (doc_render.py's HTML renders it as a pill), and
+                    // the DOCX table has no spare column for a 5th field.
+                    let badge = doc_block_field(product, "badge");
+                    let name = doc_block_field(product, "name");
+                    let name_cell = if badge.trim().is_empty() {
+                        name
+                    } else {
+                        format!("{name} — {badge}")
+                    };
                     rows.push(vec![
-                        doc_block_field(product, "name"),
+                        name_cell,
                         doc_block_field(product, "description"),
                         doc_block_field(product, "price"),
                     ]);
@@ -20961,6 +20973,74 @@ Use the text snapshot."
         }
 }
 
+/// Pure decision for `make_templated_document`'s post-render outcome
+/// message, given which of {html, pdf, docx} actually landed on disk
+/// (`produced`, already filtered to existing non-zero-byte files by
+/// `emit_rendered_deck_artifacts`) plus the raw render output for
+/// diagnostics. Extracted from the async fn so the degraded-vs-success
+/// branch is unit-testable without a live sandbox.
+///
+/// GOTCHA this fixes: `sandbox::run_command` returning `Ok` only means the
+/// container was reachable, NOT that it produced the designed render — and
+/// the DOCX is written host-side BEFORE the container even runs, so
+/// `produced` containing the docx is never proof the render succeeded. A
+/// container-side render failure (missing html/pdf) must degrade honestly,
+/// the same as the `Err` (container-unreachable) branch, instead of
+/// reporting full success just because the pre-written DOCX exists.
+fn templated_document_outcome(
+    produced: &[String],
+    stem: &str,
+    workflow_id: &str,
+    qa_failure: Option<&str>,
+    render_out: &str,
+) -> String {
+    let html_name = format!("{stem}.html");
+    let pdf_name = format!("{stem}.pdf");
+    let docx_name = format!("{stem}.docx");
+    let has_html = produced.iter().any(|name| name == &html_name);
+    let has_pdf = produced.iter().any(|name| name == &pdf_name);
+    let has_docx = produced.iter().any(|name| name == &docx_name);
+
+    if let Some(error) = qa_failure {
+        return format!(
+            "Document created via workflow {workflow_id} with visual QA issues: {error}. Files available: {}. The DOCX is editable; .html/.pdf are previews.",
+            if produced.is_empty() {
+                "none".to_string()
+            } else {
+                produced.join(", ")
+            },
+        );
+    }
+
+    if !has_html || !has_pdf {
+        // Container ran (the Ok branch) but didn't actually produce the
+        // designed render — degrade exactly like the container-unreachable
+        // path, plus a short diagnostic tail of the renderer's own output so
+        // a silent render failure is debuggable instead of masked.
+        let tail_chars = render_out.chars().count();
+        let tail: String = if tail_chars > 300 {
+            render_out.chars().skip(tail_chars - 300).collect()
+        } else {
+            render_out.to_string()
+        };
+        return format!(
+            "Document created (DOCX). Designed HTML/PDF need the local computer (start it and retry for the full render). Render diagnostic: {tail}"
+        );
+    }
+
+    if has_docx {
+        format!(
+            "Document created via workflow {workflow_id}: {}. The DOCX is editable; .html/.pdf are previews. The document is DONE — give the user a one-line summary.",
+            produced.join(", "),
+        )
+    } else {
+        format!(
+            "Document render did NOT produce the expected files. Renderer output:\n{}",
+            render_out.chars().take(800).collect::<String>()
+        )
+    }
+}
+
 /// F2-T8 templated path for `make_document`: mirrors `make_deck`'s
 /// brand -> content -> render pipeline, but with a FIXED block skeleton (the
 /// pack's `example.json`, never chosen/reordered by the model) and a
@@ -21124,26 +21204,13 @@ async fn make_templated_document(
             )
             .await;
             append_output.push(doc_out);
-            if let Some(error) = rendered_deck_qa_failure(&render_out) {
-                format!(
-                    "Document created via workflow {workflow_id} with visual QA issues: {error}. Files available: {}. The DOCX is editable; .html/.pdf are previews.",
-                    if produced.is_empty() {
-                        "none".to_string()
-                    } else {
-                        produced.join(", ")
-                    },
-                )
-            } else if produced.iter().any(|name| name == &docx_name) {
-                format!(
-                    "Document created via workflow {workflow_id}: {}. The DOCX is editable; .html/.pdf are previews. The document is DONE — give the user a one-line summary.",
-                    produced.join(", "),
-                )
-            } else {
-                format!(
-                    "Document render did NOT produce the expected files. Renderer output:\n{}",
-                    render_out.chars().take(800).collect::<String>()
-                )
-            }
+            templated_document_outcome(
+                &produced,
+                &stem,
+                workflow_id,
+                rendered_deck_qa_failure(&render_out).as_deref(),
+                &render_out,
+            )
         }
     }
 }
@@ -56970,6 +57037,69 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(cmd.contains("--print-to-pdf=cv-elena.pdf"));
         assert!(cmd.contains("deck-qa cv-elena.html --json --mode document"));
         assert!(cmd.contains("DECK_QA_JSON:"));
+    }
+
+    #[test]
+    fn templated_document_outcome_degrades_when_render_produced_docx_only() {
+        // The container was reachable (Ok branch) but only the host-written
+        // DOCX exists on disk — html/pdf never landed. Before the fix this
+        // read as full success because the docx check alone can't tell a
+        // real render apart from a render that silently failed.
+        let produced = vec!["cv-elena.docx".to_string()];
+        let message = super::templated_document_outcome(
+            &produced,
+            "cv-elena",
+            "wf_1",
+            None,
+            "renderer crashed: some diagnostic tail",
+        );
+        assert!(
+            message.contains("Designed HTML/PDF need the local computer"),
+            "{message}"
+        );
+        assert!(!message.contains("The document is DONE"), "{message}");
+        assert!(message.contains("renderer crashed: some diagnostic tail"), "{message}");
+    }
+
+    #[test]
+    fn templated_document_outcome_succeeds_when_all_three_files_land() {
+        let produced = vec![
+            "cv-elena.html".to_string(),
+            "cv-elena.pdf".to_string(),
+            "cv-elena.docx".to_string(),
+        ];
+        let message =
+            super::templated_document_outcome(&produced, "cv-elena", "wf_1", None, "ok output");
+        assert!(message.contains("The document is DONE"), "{message}");
+        assert!(message.contains("cv-elena.html, cv-elena.pdf, cv-elena.docx"), "{message}");
+    }
+
+    #[test]
+    fn templated_document_outcome_reports_qa_failure_even_with_full_render() {
+        let produced = vec![
+            "cv-elena.html".to_string(),
+            "cv-elena.pdf".to_string(),
+            "cv-elena.docx".to_string(),
+        ];
+        let message = super::templated_document_outcome(
+            &produced,
+            "cv-elena",
+            "wf_1",
+            Some("low_contrast: p contrast ratio 2.1 is below 4.5"),
+            "ok output",
+        );
+        assert!(message.contains("with visual QA issues"), "{message}");
+        assert!(message.contains("low_contrast:"), "{message}");
+    }
+
+    #[test]
+    fn templated_document_outcome_truncates_diagnostic_tail_to_last_300_chars() {
+        let long_output = "x".repeat(1000) + "END_MARKER";
+        let produced: Vec<String> = vec![];
+        let message =
+            super::templated_document_outcome(&produced, "cv-elena", "wf_1", None, &long_output);
+        assert!(message.contains("END_MARKER"), "{message}");
+        assert!(message.len() < long_output.len(), "{message}");
     }
 
     #[test]

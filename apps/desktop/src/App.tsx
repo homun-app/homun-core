@@ -971,9 +971,16 @@ export default function App() {
     template: TemplateCatalogEntry;
     attachment?: ChatAttachmentInput;
   }) {
-    const visiblePrompt = `Help me create a presentation using the selected template "${input.template.name}".`;
+    // Document packs must route to the document-generation tool, not the
+    // deck one — the only branch point below is `isDocument`; every other
+    // line stays byte-identical to the presentation wording so this
+    // refactor changes nothing for decks.
+    const isDocument = input.template.kind === "document";
+    const artifactNoun = isDocument ? "document" : "presentation";
+    const makeTool = isDocument ? "make_document" : "make_deck";
+    const visiblePrompt = `Help me create a ${artifactNoun} using the selected template "${input.template.name}".`;
     const operativePrompt = [
-      "The user selected a template from the Presentations catalog and wants to use it to create a new presentation.",
+      `The user selected a template from the Presentations catalog and wants to use it to create a new ${artifactNoun}.`,
       `template_ref=${input.template.id}`,
       `template_name=${input.template.name}`,
       `source_provider=${input.template.source_provider ?? "user_upload"}`,
@@ -981,9 +988,11 @@ export default function App() {
         ? `attached_file=${input.attachment.displayName}`
         : "attached_file=none; use the catalog template_ref and metadata as the style constraint.",
       "",
-      "Do not generate the deck yet.",
+      isDocument ? "Do not generate the document yet." : "Do not generate the deck yet.",
       "Analyze the selected template as a constraint for style, layout and visual tone.",
-      "First ask 2-4 essential questions to understand objective, audience, available content, slide count and tone.",
+      isDocument
+        ? "First ask 2-4 essential questions to understand objective, audience, available content and tone."
+        : "First ask 2-4 essential questions to understand objective, audience, available content, slide count and tone.",
       ...(input.template.intake_questions.length > 0
         ? [
             `Ask these template-specific questions first (one message): ${input.template.intake_questions
@@ -991,8 +1000,8 @@ export default function App() {
               .join(" ")}`,
           ]
         : []),
-      "Then propose a concise plan and wait for confirmation before using make_deck.",
-      `When the user confirms execution, use make_deck with template_ref="${input.template.id}".`,
+      `Then propose a concise plan and wait for confirmation before using ${makeTool}.`,
+      `When the user confirms execution, use ${makeTool} with template_ref="${input.template.id}".`,
     ].join("\n");
     try {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
