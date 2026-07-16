@@ -4298,10 +4298,18 @@ async fn emit_rendered_deck_artifacts(
     thread_slug: &str,
     producer: &str,
     quality_metadata: Option<&serde_json::Value>,
+    // Generalized for F2-T8 (make_document templated path): the deck call
+    // sites pass the fixed ["deck.pptx","deck.html","deck.pdf"] (behavior
+    // unchanged — same list, same order), documents pass their own
+    // {stem}-prefixed names. Missing files are silently skipped either way,
+    // which is exactly what lets the make_document degraded-render branch
+    // reuse this same helper: pass all 3 expected names, only the ones that
+    // actually exist on disk get emitted.
+    names: &[String],
 ) -> Vec<String> {
     let host_dir = sandbox::artifacts_dir().join(thread_slug);
     let mut produced = Vec::new();
-    for fname in ["deck.pptx", "deck.html", "deck.pdf"] {
+    for fname in names {
         if let Ok(meta) = std::fs::metadata(host_dir.join(fname)) {
             if meta.len() == 0 {
                 continue;
@@ -4330,7 +4338,7 @@ async fn emit_rendered_deck_artifacts(
                 quality_metadata,
             )
             .await;
-            produced.push(fname.to_string());
+            produced.push(fname.clone());
         }
     }
     produced
@@ -16593,7 +16601,7 @@ fn make_document_tool_schema() -> serde_json::Value {
                     "brief": { "type": "string", "description": "What the document must contain, including any sections, audience, tone, constraints or source material the user provided — verbatim." },
                     "language": { "type": "string", "description": "Document language code, e.g. 'it' or 'en'. Default: the user's language." },
                     "name": { "type": "string", "description": "Artifact filename. If the user named the file, preserve that name exactly as a simple filename such as report.md, report.pdf or report.docx. If no name was specified, choose a concise descriptive .md filename." },
-                    "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. homun/executive-update-board-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it." },
+                    "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. homun/cv-professional-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it. Templated document packs render designed HTML/PDF + editable DOCX." },
                     "document_type": {
                         "type": "string",
                         "description": "Document shape requested by the user. Preserve explicit intent; do not infer from weak hints.",
@@ -17545,6 +17553,29 @@ fn merge_object_metadata(target: &mut serde_json::Value, extra: Option<&serde_js
     }
 }
 
+/// Discriminator for `make_document`'s templated path (F2-T8): a template_ref
+/// only qualifies when it resolves to a BUNDLED document pack with a pack root
+/// on disk — i.e. `document_content::load_pack_example` can actually read
+/// example.json. A presentation pack, an imported (non-bundled) pack, or no
+/// template at all must fall through to the existing markdown path; never
+/// guessed from partial data (a bundled flag without a pack root, say).
+fn document_template_pack(entry: Option<&TemplateCatalogEntry>) -> Option<&TemplateCatalogEntry> {
+    let entry = entry?;
+    (entry.kind == "document" && entry.bundled && entry.template_pack_root.is_some())
+        .then_some(entry)
+}
+
+/// Container-relative render command for a templated document — same shape as
+/// the deck command (cd into the bind-mounted output dir, render, headless
+/// Chromium to PDF, QA-gate on the SAME `DECK_QA_JSON:` prefix so the existing
+/// parser (`rendered_deck_qa_result`/`_failure`) converges across deck and
+/// document, non-zero QA exit propagates as the command's exit code).
+fn build_document_render_command(container_out: &str, stem: &str) -> String {
+    format!(
+        "cd '{container_out}' && doc-render {stem}.json --prefix {stem} && \\\n chromium --headless --no-sandbox --disable-gpu --print-to-pdf={stem}.pdf {stem}.html >/dev/null 2>&1 && \\\n qa=$(deck-qa {stem}.html --json --mode document 2>&1); qa_code=$?; \\\n echo \"DECK_QA_JSON:$qa\"; \\\n if [ \"$qa_code\" -ne 0 ]; then exit \"$qa_code\"; fi; \\\n ls -la {stem}.html {stem}.pdf 2>&1"
+    )
+}
+
 /// Produce the deck CONTENT as schema-enforced JSON. Uses the orchestrator-role
 /// endpoint with `response_format: json_schema` (constrained decoding — the
 /// cross-model floor), degrading ONCE to `json_object` on a 400 (e.g.
@@ -18014,6 +18045,56 @@ an AI. The output must be ready to save as a deliverable artifact.{directives}"
         Err("document generation returned empty content".to_string())
     } else {
         Ok(content)
+    }
+}
+
+/// Generate + assemble a templated document's doc.json (F2-T8), with ONE
+/// corrective retry if the model dropped a slot. `assemble_doc_json` fails
+/// loud rather than synthesizing placeholder content for a missing slot (that
+/// would launder content the model never wrote into the deliverable) — the
+/// retry hands the model the exact missing-slot error and one more chance
+/// before we give up honestly.
+async fn generate_templated_document_json(
+    http: &reqwest::Client,
+    base_url: &str,
+    model: &str,
+    api_key: Option<&str>,
+    brief: &str,
+    language: &str,
+    skeleton: &[document_content::DocBlockSlot],
+    design_directives: &str,
+    title_fallback: &str,
+) -> Result<serde_json::Value, String> {
+    let first_output = document_content::generate_document_content(
+        http,
+        base_url,
+        model,
+        api_key,
+        brief,
+        language,
+        skeleton,
+        design_directives,
+    )
+    .await?;
+    match document_content::assemble_doc_json(title_fallback, skeleton, &first_output) {
+        Ok(doc) => Ok(doc),
+        Err(missing) => {
+            let corrective = format!(
+                "{design_directives} CORRECTION: your previous JSON was rejected — {missing}. \
+                 Return the COMPLETE JSON again with EVERY slot key filled; never omit one."
+            );
+            let retry_output = document_content::generate_document_content(
+                http, base_url, model, api_key, brief, language, skeleton, &corrective,
+            )
+            .await?;
+            document_content::assemble_doc_json(title_fallback, skeleton, &retry_output).map_err(
+                |still_missing| {
+                    format!(
+                        "document content still incomplete after one corrective retry: {still_missing} (first attempt: {missing})"
+                    )
+                },
+            )
+        }
     }
 }
 
@@ -20882,6 +20963,192 @@ Use the text snapshot."
         }
 }
 
+/// F2-T8 templated path for `make_document`: mirrors `make_deck`'s
+/// brand -> content -> render pipeline, but with a FIXED block skeleton (the
+/// pack's `example.json`, never chosen/reordered by the model) and a
+/// gateway-side DOCX instead of a pptx. Kept as its own async fn — rather
+/// than inline in the `execute_chat_tool` dispatch match — so honest-failure
+/// early returns don't force a pyramid of nested match/if-let in the
+/// dispatch loop (the dispatch site just calls this and awaits).
+async fn make_templated_document(
+    ctx: &ChatToolCtx<'_>,
+    append_output: &mut Vec<String>,
+    thread_slug: &str,
+    workflow_id: &str,
+    document_options: &DocumentGenerationOptions,
+    fname: &str,
+    brief: &str,
+    language: &str,
+    entry: TemplateCatalogEntry,
+) -> String {
+    let _ = emit_stream_event(
+        ctx.tx,
+        GenerateStreamEvent::Delta {
+            text: "‹‹ACT››🧩 Building the document (brand · slots · render)‹‹/ACT››".to_string(),
+        },
+    )
+    .await;
+    // 1) brand into the output dir (same as make_deck — theme colours flow to
+    // the container renderer via brand.json; doc_render.py merges it UNDER
+    // the pack's own theme name, so the brand kit's colours win at render).
+    let slug_b = thread_slug.to_string();
+    let _ = tokio::task::spawn_blocking(move || materialize_brand_kit(&slug_b)).await;
+
+    // 2) curated block skeleton from the pack's example.json — NEVER
+    // inferred from the model (caposaldo: model fills slots, code owns
+    // structure).
+    let entry_for_load = entry.clone();
+    let example =
+        tokio::task::spawn_blocking(move || document_content::load_pack_example(&entry_for_load))
+            .await
+            .unwrap_or_else(|error| Err(format!("join error: {error}")));
+    let example = match example {
+        Ok(example) => example,
+        Err(error) => return format!("Could not load template pack «{}»: {error}", entry.id),
+    };
+    let skeleton = document_content::document_block_skeleton(&example);
+    let directives = document_generation_directives(document_options);
+    let stem = std::path::Path::new(fname)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(fname)
+        .to_string();
+
+    // 3) schema-enforced slot content, with ONE corrective retry if the model
+    // drops a slot — never synthesized, a second miss fails honestly.
+    let mut doc = match generate_templated_document_json(
+        &ctx.state.http,
+        ctx.base_url,
+        ctx.model,
+        ctx.api_key.as_deref(),
+        brief,
+        language,
+        &skeleton,
+        &directives,
+        &entry.name,
+    )
+    .await
+    {
+        Ok(doc) => doc,
+        Err(error) => return format!("Could not generate document content: {error}"),
+    };
+
+    // 4) the pack's own curated theme names the render; doc_render.py then
+    // merges brand.json UNDER it (brand colours win over the theme's own
+    // defaults) — "il brand kit vince al render".
+    if let Some(theme_name) = entry.design_theme.as_deref() {
+        doc["theme"] = serde_json::json!({ "name": theme_name });
+    }
+
+    // 5) write doc.json, then the editable DOCX gateway-side from the SAME
+    // doc.json — single source of truth, dual projection (mirrors deck's
+    // pptx/html split).
+    let doc_bytes = serde_json::to_vec_pretty(&doc).unwrap_or_default();
+    let json_name = format!("{stem}.json");
+    let slug_w = thread_slug.to_string();
+    let json_name_w = json_name.clone();
+    let write_json = tokio::task::spawn_blocking(move || {
+        write_artifact_bytes(&slug_w, &json_name_w, &doc_bytes)
+    })
+    .await
+    .unwrap_or_else(|error| Err(format!("join error: {error}")));
+    if let Err(error) = write_json {
+        return format!("Could not write {json_name}: {error}");
+    }
+
+    let docx_name = format!("{stem}.docx");
+    let slug_dw = thread_slug.to_string();
+    let docx_name_w = docx_name.clone();
+    let write_docx = tokio::task::spawn_blocking(move || {
+        let bytes = doc_json_to_docx(&doc)?;
+        write_artifact_bytes(&slug_dw, &docx_name_w, &bytes)
+    })
+    .await
+    .unwrap_or_else(|error| Err(format!("join error: {error}")));
+    if let Err(error) = write_docx {
+        return format!("Could not write {docx_name}: {error}");
+    }
+
+    // 6) render in the sandbox (no model shell) — same command shape as
+    // deck, QA-gated on the SAME `DECK_QA_JSON:` prefix so the existing
+    // parser converges across deck and document.
+    let names = vec![
+        format!("{stem}.html"),
+        format!("{stem}.pdf"),
+        docx_name.clone(),
+    ];
+    let container_out = sandbox::container_output_dir(thread_slug);
+    let cmd = build_document_render_command(&container_out, &stem);
+    sandbox_begin(cmd.clone(), ctx.thread_id.map(|s| s.to_string()));
+    let render = tokio::task::spawn_blocking(move || sandbox::run_command(&cmd, None))
+        .await
+        .unwrap_or_else(|error| Err(format!("join error: {error}")));
+
+    match render {
+        // Container down/unreachable: NEVER fall back to the markdown path
+        // (the template would be lost silently) — degrade honestly to the
+        // DOCX we already wrote host-side.
+        Err(error) => {
+            sandbox_end(error.clone());
+            let template_metadata = deck_template_metadata(Some(&entry));
+            let mut doc_out = String::new();
+            let _ = emit_rendered_deck_artifacts(
+                ctx.state,
+                ctx.tx,
+                &mut doc_out,
+                ctx.thread_id,
+                thread_slug,
+                "make_document",
+                Some(&template_metadata),
+                &names,
+            )
+            .await;
+            append_output.push(doc_out);
+            "Document created (DOCX). Designed HTML/PDF need the local computer (start it and retry for the full render).".to_string()
+        }
+        Ok(render_out) => {
+            sandbox_end(render_out.clone());
+            let qa_result = rendered_deck_qa_result(&render_out);
+            let quality_metadata = deck_quality_metadata_from_qa_result(qa_result.as_ref());
+            let mut artifact_metadata = deck_template_metadata(Some(&entry));
+            merge_object_metadata(&mut artifact_metadata, quality_metadata.as_ref());
+            let mut doc_out = String::new();
+            let produced = emit_rendered_deck_artifacts(
+                ctx.state,
+                ctx.tx,
+                &mut doc_out,
+                ctx.thread_id,
+                thread_slug,
+                "make_document",
+                Some(&artifact_metadata),
+                &names,
+            )
+            .await;
+            append_output.push(doc_out);
+            if let Some(error) = rendered_deck_qa_failure(&render_out) {
+                format!(
+                    "Document created via workflow {workflow_id} with visual QA issues: {error}. Files available: {}. The DOCX is editable; .html/.pdf are previews.",
+                    if produced.is_empty() {
+                        "none".to_string()
+                    } else {
+                        produced.join(", ")
+                    },
+                )
+            } else if produced.iter().any(|name| name == &docx_name) {
+                format!(
+                    "Document created via workflow {workflow_id}: {}. The DOCX is editable; .html/.pdf are previews. The document is DONE — give the user a one-line summary.",
+                    produced.join(", "),
+                )
+            } else {
+                format!(
+                    "Document render did NOT produce the expected files. Renderer output:\n{}",
+                    render_out.chars().take(800).collect::<String>()
+                )
+            }
+        }
+    }
+}
+
 /// Pure per-tool-call dispatch for the chat loop: the single `if name == … else if …`
 /// chain, extracted verbatim from `stream_chat_via_openai`'s dispatch loop (fase 1b).
 /// Turn-state is read/mutated through `ctx.<field>` exactly as inline (disjoint field
@@ -21432,6 +21699,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                     &thread_slug,
                     "render_deck",
                     quality_metadata.as_ref(),
+                    &[
+                        "deck.pptx".to_string(),
+                        "deck.html".to_string(),
+                        "deck.pdf".to_string(),
+                    ],
                 )
                 .await;
                 effects.append_output.push(deck_out);
@@ -21784,6 +22056,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             &thread_slug,
                             "make_deck",
                             artifact_metadata_ref,
+                            &[
+                                "deck.pptx".to_string(),
+                                "deck.html".to_string(),
+                                "deck.pdf".to_string(),
+                            ],
                         )
                         .await;
                         effects.append_output.push(deck_out);
@@ -21896,168 +22173,200 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 }
             };
             let thread_slug = artifact_thread_slug(ctx.thread_id);
-            let _ = emit_stream_event(
-                ctx.tx,
-                GenerateStreamEvent::Delta {
-                    text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
-                },
-            )
-            .await;
-            match generate_document_markdown(
-                &ctx.state.http,
-                ctx.base_url,
-                ctx.model,
-                ctx.api_key.as_deref(),
-                &brief,
-                &language,
-                &document_options,
-            )
-            .await
-            {
-                Err(error) => {
-                    format!("Could not generate document content: {error}")
-                }
-                Ok(markdown) => {
-                    let markdown = apply_document_design_components(
-                        &markdown,
-                        &document_options.design_components,
-                    );
-                    let (markdown, repaired_issues) =
-                        apply_document_quality_guardrails(&markdown);
-                    let quality_issues = document_quality_issues(&markdown);
-                    if !repaired_issues.is_empty() && quality_issues.is_empty() {
-                        let _ = emit_stream_event(
-                            ctx.tx,
-                            GenerateStreamEvent::Delta {
-                                text: format!(
-                                    "‹‹ACT››🔎 Document QA repaired {} table-layout items‹‹/ACT››",
-                                    repaired_issues.len()
-                                ),
-                            },
-                        )
-                        .await;
+            // F2-T8: a template_ref resolving to a BUNDLED document pack gets the
+            // templated pipeline (slot-filled doc.json -> container render ->
+            // designed html/pdf/docx); everything else — no template, an imported
+            // pack, or a presentation pack — keeps the Markdown path below
+            // byte-identical to before this task.
+            let catalog_template =
+                template_catalog_by_id(document_options.template_ref.as_deref());
+            match document_template_pack(catalog_template.as_ref()).cloned() {
+                None => {
+                let _ = emit_stream_event(
+                    ctx.tx,
+                    GenerateStreamEvent::Delta {
+                        text: "‹‹ACT››📝 Building the document (brief · draft · artifact · memory)‹‹/ACT››".to_string(),
+                    },
+                )
+                .await;
+                match generate_document_markdown(
+                    &ctx.state.http,
+                    ctx.base_url,
+                    ctx.model,
+                    ctx.api_key.as_deref(),
+                    &brief,
+                    &language,
+                    &document_options,
+                )
+                .await
+                {
+                    Err(error) => {
+                        format!("Could not generate document content: {error}")
                     }
-                    if !quality_issues.is_empty() {
-                        let summary = quality_issues
-                            .iter()
-                            .take(5)
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join("; ");
-                        format!(
-                            "Could not generate document artifact: document QA failed: {summary}"
-                        )
-                    } else {
-                        let mut produced = Vec::new();
-                        let mut artifact_error: Option<String> = None;
-                        for format in formats {
-                            let artifact_name =
-                                document_artifact_name_with_extension(
-                                    Some(&fname),
-                                    &format,
-                                );
-                            let slug_w = thread_slug.clone();
-                            let fname_w = artifact_name.clone();
-                            let markdown_w = markdown.clone();
-                            let result = tokio::task::spawn_blocking(move || {
-                                if format == "pdf" {
-                                    let title = fname_w
-                                        .trim_end_matches(".pdf")
-                                        .trim_end_matches(".PDF");
-                                    let bytes = pdf_render::markdown_to_pdf(
-                                        title,
-                                        &markdown_w,
-                                    )
-                                    .map_err(|e| {
-                                        format!("PDF render failed: {e}")
-                                    })?;
-                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                } else if format == "docx" {
-                                    let title = fname_w
-                                        .trim_end_matches(".docx")
-                                        .trim_end_matches(".DOCX");
-                                    let bytes =
-                                        markdown_to_docx(title, &markdown_w)
-                                            .map_err(|e| {
-                                                format!("DOCX render failed: {e}")
-                                            })?;
-                                    write_artifact_bytes(&slug_w, &fname_w, &bytes)
-                                } else {
-                                    write_text_artifact(
-                                        &slug_w,
-                                        &fname_w,
-                                        &markdown_w,
-                                    )
-                                }
-                            })
-                            .await
-                            .unwrap_or_else(|error| Err(format!("Error: {error}")));
-                            match result {
-                                Ok((size, updated)) => {
-                                    let marker = serde_json::json!({
-                                        "name": artifact_name,
-                                        "thread": thread_slug,
-                                        "size": size,
-                                        "updated": updated,
-                                        "source": "managed",
-                                        "managed_path": sandbox::artifacts_dir()
-                                            .join(&thread_slug)
-                                            .join(&artifact_name)
-                                            .to_string_lossy()
-                                            .to_string(),
-                                    });
-                                    let artifact_mark = format!(
-                                        "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
+                    Ok(markdown) => {
+                        let markdown = apply_document_design_components(
+                            &markdown,
+                            &document_options.design_components,
+                        );
+                        let (markdown, repaired_issues) =
+                            apply_document_quality_guardrails(&markdown);
+                        let quality_issues = document_quality_issues(&markdown);
+                        if !repaired_issues.is_empty() && quality_issues.is_empty() {
+                            let _ = emit_stream_event(
+                                ctx.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!(
+                                        "‹‹ACT››🔎 Document QA repaired {} table-layout items‹‹/ACT››",
+                                        repaired_issues.len()
+                                    ),
+                                },
+                            )
+                            .await;
+                        }
+                        if !quality_issues.is_empty() {
+                            let summary = quality_issues
+                                .iter()
+                                .take(5)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join("; ");
+                            format!(
+                                "Could not generate document artifact: document QA failed: {summary}"
+                            )
+                        } else {
+                            let mut produced = Vec::new();
+                            let mut artifact_error: Option<String> = None;
+                            for format in formats {
+                                let artifact_name =
+                                    document_artifact_name_with_extension(
+                                        Some(&fname),
+                                        &format,
                                     );
-                                    effects.append_output.push(artifact_mark.clone());
-                                    let _ = emit_stream_event(
-                                        ctx.tx,
-                                        GenerateStreamEvent::Delta {
-                                            text: artifact_mark,
-                                        },
-                                    )
-                                    .await;
-                                    let artifact_name = marker
-                                        .get("name")
-                                        .and_then(|value| value.as_str())
-                                        .unwrap_or("document.md")
-                                        .to_string();
-                                    register_artifact_memory(
-                                        ctx.state,
-                                        ctx.thread_id,
-                                        &thread_slug,
-                                        &artifact_name,
-                                        size,
-                                        updated,
-                                        "make_document",
-                                        None,
-                                    )
-                                    .await;
-                                    produced.push(artifact_name);
-                                }
-                                Err(error) => {
-                                    artifact_error = Some(error);
-                                    break;
+                                let slug_w = thread_slug.clone();
+                                let fname_w = artifact_name.clone();
+                                let markdown_w = markdown.clone();
+                                let result = tokio::task::spawn_blocking(move || {
+                                    if format == "pdf" {
+                                        let title = fname_w
+                                            .trim_end_matches(".pdf")
+                                            .trim_end_matches(".PDF");
+                                        let bytes = pdf_render::markdown_to_pdf(
+                                            title,
+                                            &markdown_w,
+                                        )
+                                        .map_err(|e| {
+                                            format!("PDF render failed: {e}")
+                                        })?;
+                                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                    } else if format == "docx" {
+                                        let title = fname_w
+                                            .trim_end_matches(".docx")
+                                            .trim_end_matches(".DOCX");
+                                        let bytes =
+                                            markdown_to_docx(title, &markdown_w)
+                                                .map_err(|e| {
+                                                    format!("DOCX render failed: {e}")
+                                                })?;
+                                        write_artifact_bytes(&slug_w, &fname_w, &bytes)
+                                    } else {
+                                        write_text_artifact(
+                                            &slug_w,
+                                            &fname_w,
+                                            &markdown_w,
+                                        )
+                                    }
+                                })
+                                .await
+                                .unwrap_or_else(|error| Err(format!("Error: {error}")));
+                                match result {
+                                    Ok((size, updated)) => {
+                                        let marker = serde_json::json!({
+                                            "name": artifact_name,
+                                            "thread": thread_slug,
+                                            "size": size,
+                                            "updated": updated,
+                                            "source": "managed",
+                                            "managed_path": sandbox::artifacts_dir()
+                                                .join(&thread_slug)
+                                                .join(&artifact_name)
+                                                .to_string_lossy()
+                                                .to_string(),
+                                        });
+                                        let artifact_mark = format!(
+                                            "‹‹ARTIFACT››{marker}‹‹/ARTIFACT››"
+                                        );
+                                        effects.append_output.push(artifact_mark.clone());
+                                        let _ = emit_stream_event(
+                                            ctx.tx,
+                                            GenerateStreamEvent::Delta {
+                                                text: artifact_mark,
+                                            },
+                                        )
+                                        .await;
+                                        let artifact_name = marker
+                                            .get("name")
+                                            .and_then(|value| value.as_str())
+                                            .unwrap_or("document.md")
+                                            .to_string();
+                                        register_artifact_memory(
+                                            ctx.state,
+                                            ctx.thread_id,
+                                            &thread_slug,
+                                            &artifact_name,
+                                            size,
+                                            updated,
+                                            "make_document",
+                                            None,
+                                        )
+                                        .await;
+                                        produced.push(artifact_name);
+                                    }
+                                    Err(error) => {
+                                        artifact_error = Some(error);
+                                        break;
+                                    }
                                 }
                             }
-                        }
-                        if let Some(error) = artifact_error {
-                            error
-                        } else {
-                            format!(
-                                "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
-                                workflow_plan
-                                    .steps
-                                    .first()
-                                    .and_then(|step| step
-                                        .arguments
-                                        .get("workflow_id"))
-                                    .and_then(|value| value.as_str())
-                                    .unwrap_or("make_document"),
-                                produced.join(", "),
-                            )
+                            if let Some(error) = artifact_error {
+                                error
+                            } else {
+                                format!(
+                                    "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
+                                    workflow_plan
+                                        .steps
+                                        .first()
+                                        .and_then(|step| step
+                                            .arguments
+                                            .get("workflow_id"))
+                                        .and_then(|value| value.as_str())
+                                        .unwrap_or("make_document"),
+                                    produced.join(", "),
+                                )
+                            }
                         }
                     }
+                    }
+                }
+                Some(entry) => {
+                    let workflow_id = workflow_plan
+                        .steps
+                        .first()
+                        .and_then(|step| step.arguments.get("workflow_id"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("make_document")
+                        .to_string();
+                    make_templated_document(
+                        ctx,
+                        &mut effects.append_output,
+                        &thread_slug,
+                        &workflow_id,
+                        &document_options,
+                        &fname,
+                        &brief,
+                        &language,
+                        entry,
+                    )
+                    .await
                 }
             }
         }
@@ -56660,6 +56969,62 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn document_render_command_is_container_relative_and_qa_gated() {
+        let cmd = super::build_document_render_command("/home/agent/output/t1", "cv-elena");
+        assert!(cmd.starts_with("cd '/home/agent/output/t1' && doc-render cv-elena.json"));
+        assert!(cmd.contains("--prefix cv-elena"));
+        assert!(cmd.contains("--print-to-pdf=cv-elena.pdf"));
+        assert!(cmd.contains("deck-qa cv-elena.html --json --mode document"));
+        assert!(cmd.contains("DECK_QA_JSON:"));
+    }
+
+    #[test]
+    fn document_template_pack_requires_document_kind_bundled_and_pack_root() {
+        // Base fixture: a document-kind entry but NOT yet bundled/pack-rooted
+        // (the fixture helper's defaults) — the discriminator must say No,
+        // never guess from a partial match.
+        let mut entry = super::template_catalog_entry(
+            "homun",
+            "homun/cv-professional-01",
+            "CV Professional",
+            "document",
+            "A professional CV template.",
+            &["cv", "resume"],
+            &["job_seeker"],
+            "cv",
+            Some("clean_corporate"),
+            None,
+            &[],
+            &[],
+            "cv resume professional",
+        );
+        assert!(super::document_template_pack(Some(&entry)).is_none());
+
+        // Bundled + a pack root on disk: now it qualifies.
+        entry.bundled = true;
+        entry.template_pack_root = Some(std::path::PathBuf::from("/tmp/does-not-need-to-exist"));
+        assert!(super::document_template_pack(Some(&entry)).is_some());
+
+        // A presentation pack (same bundled+root shape) must NOT qualify.
+        let mut presentation = entry.clone();
+        presentation.kind = "presentation".to_string();
+        assert!(super::document_template_pack(Some(&presentation)).is_none());
+
+        // Not bundled (e.g. a user-imported document pack) must NOT qualify.
+        let mut imported = entry.clone();
+        imported.bundled = false;
+        assert!(super::document_template_pack(Some(&imported)).is_none());
+
+        // Bundled flag without a pack root (shouldn't happen, but never guess)
+        // must NOT qualify either.
+        let mut no_root = entry.clone();
+        no_root.template_pack_root = None;
+        assert!(super::document_template_pack(Some(&no_root)).is_none());
+
+        assert!(super::document_template_pack(None).is_none());
     }
 
     #[test]

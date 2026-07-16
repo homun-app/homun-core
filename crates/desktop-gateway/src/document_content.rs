@@ -11,10 +11,10 @@
 //! `{"title","blocks":[...]}` doc.json the renderer expects, failing loudly (never
 //! inventing content) if a slot is missing.
 //!
-//! Not wired into any call site yet (that lands with F2-T8, make_document); the
-//! unit-testable half (skeleton/schema/assemble) is exercised below, the HTTP half
-//! (`generate_document_content`) is validated live once wired.
-#![allow(dead_code)]
+//! Wired into `make_document`'s templated path (F2-T8, `main.rs`'s
+//! `make_templated_document`): the unit-testable half (skeleton/schema/assemble)
+//! is exercised below, the HTTP half (`generate_document_content`) live via that
+//! call site.
 
 use serde_json::{Map, Value, json};
 
