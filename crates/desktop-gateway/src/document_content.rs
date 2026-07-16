@@ -278,25 +278,25 @@ pub(crate) fn document_block_schema(block_type: &str) -> Option<Value> {
 /// slot `required`. The model never sees or chooses block types — only the
 /// slot keys and their per-slot schema (caposaldo: model fills slots, code
 /// owns structure).
-pub(crate) fn document_content_schema(skeleton: &[DocBlockSlot]) -> Value {
+pub(crate) fn document_content_schema(skeleton: &[DocBlockSlot]) -> Result<Value, String> {
     let mut slot_properties = Map::new();
     let mut slot_required = Vec::new();
     for slot in skeleton {
-        // Unregistered block types would make the whole document ungenerable;
-        // this is a pack-authoring bug (F2-T9 pack content), not a runtime
-        // input to defend against here — fail loudly instead of silently
-        // skipping a slot (a skipped slot would desync assemble_doc_json's
-        // 1:1 slot↔block expectation).
-        let schema = document_block_schema(&slot.block_type).unwrap_or_else(|| {
-            panic!(
-                "document_content_schema: unregistered block type `{}` in pack skeleton",
-                slot.block_type
+        // An unregistered block type is a pack-authoring bug (F2-T9 pack
+        // content) that makes the whole document ungenerable — fail loud with
+        // the offending name (mirrors assemble_doc_json) instead of silently
+        // skipping the slot, which would desync assemble_doc_json's strict
+        // 1:1 slot↔block expectation.
+        let schema = document_block_schema(&slot.block_type).ok_or_else(|| {
+            format!(
+                "unregistered document block type `{}` in pack skeleton (slot `{}`)",
+                slot.block_type, slot.slot_key
             )
-        });
+        })?;
         slot_properties.insert(slot.slot_key.clone(), schema);
         slot_required.push(Value::String(slot.slot_key.clone()));
     }
-    json!({
+    Ok(json!({
         "type": "object",
         "properties": {
             "title": s("Document title."),
@@ -309,7 +309,7 @@ pub(crate) fn document_content_schema(skeleton: &[DocBlockSlot]) -> Value {
         },
         "required": ["title", "slots"],
         "additionalProperties": false,
-    })
+    }))
 }
 
 /// Reassemble the model's slot-keyed output into the ordered doc.json the
@@ -398,7 +398,9 @@ pub(crate) async fn generate_document_content(
         { "role": "system", "content": system },
         { "role": "user", "content": brief },
     ]);
-    let schema = document_content_schema(skeleton);
+    // A skeleton with an unregistered block type is a pack-authoring bug —
+    // surface it as this generation's error instead of crashing the gateway.
+    let schema = document_content_schema(skeleton)?;
     let attempts = [
         crate::structured_response_format("homun_document", Some(&schema)),
         crate::structured_response_format("homun_document", None),
@@ -512,7 +514,7 @@ mod tests {
     #[test]
     fn content_schema_is_strict_slot_filling() {
         let skeleton = document_block_skeleton(&example());
-        let schema = document_content_schema(&skeleton);
+        let schema = document_content_schema(&skeleton).expect("registered types only");
         let slots = &schema["properties"]["slots"];
         assert!(slots["properties"]["slot_0_contact_header"].is_object());
         assert_eq!(slots["additionalProperties"], json!(false));
@@ -548,6 +550,17 @@ mod tests {
             assert!(document_block_schema(block_type).is_some(), "{block_type}");
         }
         assert!(document_block_schema("mystery").is_none());
+    }
+
+    #[test]
+    fn content_schema_fails_loud_on_unregistered_block_type() {
+        let skeleton = document_block_skeleton(&json!({"blocks": [
+            {"type": "contact_header", "name": "X"},
+            {"type": "mystery_block", "title": "?"}
+        ]}));
+        let err = document_content_schema(&skeleton).unwrap_err();
+        assert!(err.contains("mystery_block"), "{err}");
+        assert!(err.contains("slot_1_mystery_block"), "{err}");
     }
 
     #[test]

@@ -37,8 +37,8 @@
 | `education_list` | title, entries[] {label, heading, subheading} (≤6) | |
 | `skill_tags` | title, groups[] {label, tags[] (≤10)} (≤4) | |
 | `product_grid` | title, products[] {name, description, price, badge} (≤9) | |
-| `pricing_table` | title, headers[] (≤5), rows[][] (≤10), note | |
-| `spec_table` | title, headers[] (≤4), rows[][] (≤12) | |
+| `pricing_table` | title, headers[] (≤5), rows[][] (≤10 righe, ≤5 celle per riga), note | celle per riga = cap degli headers |
+| `spec_table` | title, headers[] (≤4), rows[][] (≤12 righe, ≤4 celle per riga) | celle per riga = cap degli headers |
 | `kpi_band` | title, items[] {value, label} (≤4) | |
 | `testimonial_quote` | quote, author, role | |
 
