@@ -93,5 +93,34 @@ class RenderHtmlCvBlocks(unittest.TestCase):
         self.assertIn('class="tl-entry"', html)
 
 
+COMMERCE_DOC = {
+    "title": "Catalog",
+    "blocks": [
+        {"type": "product_grid", "title": "Products", "products": [
+            {"name": "ProductNameProbe", "description": "Small widget.",
+             "price": "€ 49", "badge": "NEW"}]},
+        {"type": "pricing_table", "title": "Pricing", "headers": ["Plan", "Price"],
+         "rows": [["PlanCellProbe", "€ 99/mo"]], "note": "PricingNoteProbe"},
+        {"type": "spec_table", "title": "Specs", "headers": ["Key", "Value"],
+         "rows": [["SpecKeyProbe", "10 kg"]]},
+        {"type": "kpi_band", "title": "Results", "items": [
+            {"value": "+38%", "label": "KpiLabelProbe"}]},
+        {"type": "testimonial_quote", "quote": "QuoteTextProbe",
+         "author": "Anna Bianchi", "role": "COO"},
+    ],
+}
+
+
+class RenderHtmlCommerceBlocks(unittest.TestCase):
+    def test_commerce_blocks_render_with_content_probes(self):
+        html = doc_render.render_html(COMMERCE_DOC, HERE)
+        for probe in ["ProductNameProbe", "PlanCellProbe", "PricingNoteProbe",
+                      "SpecKeyProbe", "KpiLabelProbe", "QuoteTextProbe"]:
+            self.assertIn(probe, html)
+        self.assertIn('<table class="tbl">', html)
+        self.assertIn('class="product"', html)
+        self.assertIn('class="kpi-item"', html)
+
+
 if __name__ == "__main__":
     unittest.main()

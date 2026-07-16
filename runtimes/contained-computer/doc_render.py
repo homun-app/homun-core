@@ -123,6 +123,46 @@ def render_block(block, base_dir, logo):
             + "</div>"
             for g in block.get("groups", [])[:4])
         return f'<section class="block text"><h2>{title}</h2>{groups}</section>'
+    if kind in ("pricing_table", "spec_table"):
+        # Shared table renderer for both kinds — same markup, different caps
+        # (pricing decks stay short/wide; spec sheets can run longer/narrower).
+        max_cols = 5 if kind == "pricing_table" else 4
+        max_rows = 10 if kind == "pricing_table" else 12
+        headers = block.get("headers", [])[:max_cols]
+        rows = block.get("rows", [])[:max_rows]
+        table = ""
+        if headers and rows:
+            head = "".join(f"<th>{esc(h)}</th>" for h in headers)
+            body = "".join(
+                "<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row[: len(headers)]) + "</tr>"
+                for row in rows)
+            table = (f'<table class="tbl"><thead><tr>{head}</tr></thead>'
+                     f"<tbody>{body}</tbody></table>")
+        note = block.get("note", "")
+        note_html = f'<p class="muted note">{esc(note)}</p>' if note else ""
+        return f'<section class="block text"><h2>{title}</h2>{table}{note_html}</section>'
+    if kind == "product_grid":
+        cards = "".join(
+            f'<div class="product">'
+            + (f'<i class="badge">{esc(p.get("badge", ""))}</i>' if p.get("badge") else "")
+            + f'<strong>{esc(p.get("name", ""))}</strong>'
+            f'<p class="para">{esc(p.get("description", ""))}</p>'
+            f'<span class="price">{esc(p.get("price", ""))}</span></div>'
+            for p in block.get("products", [])[:9])
+        return (f'<section class="block text"><h2>{title}</h2>'
+                f'<div class="products">{cards}</div></section>')
+    if kind == "kpi_band":
+        items = "".join(
+            f'<div class="kpi-item"><strong>{esc(i.get("value", ""))}</strong>'
+            f'<span>{esc(i.get("label", ""))}</span></div>'
+            for i in block.get("items", [])[:4])
+        return (f'<section class="block kpis">'
+                + (f"<h2>{title}</h2>" if title else "")
+                + f'<div class="kpi-row">{items}</div></section>')
+    if kind == "testimonial_quote":
+        return (f'<section class="block quote"><blockquote>“{esc(block.get("quote", ""))}”'
+                f"</blockquote><div class=\"muted\">— {esc(block.get('author', ''))}, "
+                f"{esc(block.get('role', ''))}</div></section>")
     # text_section is ALSO the fallback for unknown types: content survives,
     # never a hard failure on model drift (the schema layer prevents drift
     # upstream; this is the render-side safety net).
@@ -212,6 +252,23 @@ h1,h2,h3,strong{font-family:var(--head),sans-serif}
 .tag-label{font-weight:700;margin-right:.6rem;color:var(--brand2)}
 .tag{display:inline-block;background:#eef1f5;border-radius:999px;padding:.18rem .7rem;
   margin:.15rem .25rem;font-style:normal;font-size:.88rem;color:#2a3542}
+table.tbl{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.95rem}
+table.tbl th{text-align:left;background:var(--brand);color:#fff;padding:.55rem .8rem}
+table.tbl td{padding:.5rem .8rem;color:#2a3542;border-bottom:1px solid #e4e9ef}
+table.tbl tr:nth-child(even) td{background:#f6f8fa}
+.note{margin-top:.5rem;font-size:.88rem}
+.products{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:.7rem}
+.product{border:1px solid #e4e9ef;border-radius:10px;padding:14px;position:relative}
+.product .badge{position:absolute;top:10px;right:10px;background:var(--accent);color:#fff;
+  font-style:normal;font-size:.7rem;font-weight:800;border-radius:6px;padding:.15rem .45rem}
+.product .price{color:var(--brand);font-weight:800;margin-top:.4rem;display:block}
+.kpis{background:#f6f8fa;border-top:3px solid var(--accent)}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;
+  margin-top:.5rem}
+.kpi-item strong{font-size:1.8rem;color:var(--brand);display:block;letter-spacing:-.02em}
+.kpi-item span{color:#5a6675;font-size:.9rem}
+.quote blockquote{font-size:1.3rem;font-weight:700;line-height:1.4;color:#16202b}
+.quote blockquote::first-letter{color:var(--accent)}
 """
 
 
