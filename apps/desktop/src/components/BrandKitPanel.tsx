@@ -699,6 +699,25 @@ function templateSourceBadges(entry: TemplateCatalogEntry) {
   return badges;
 }
 
+const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{3,8}$/;
+
+/** Free-text colour inputs share the same state key as the <input type="color">
+ *  picker (COLOR_KEYS wires both to one `set(key, value)`), so a hand-typed
+ *  value never gets the picker's implicit #hex coercion. A malformed value
+ *  (e.g. `red}</style><img src=x onerror=...>`) must not reach the injected
+ *  <style> block below — validate against the grammar the CSS var expects and
+ *  fall back to the shipped default rather than passing free text through raw. */
+function safeColor(value: string, fallback: string): string {
+  return HEX_COLOR_PATTERN.test(value) ? value : fallback;
+}
+
+/** Fonts have no picker — they're always free text. Strip everything but the
+ *  charset a font-family token legitimately needs, which also closes off the
+ *  tag/quote/comment breakout the single-quote-only strip used to miss. */
+function safeFont(value: string): string {
+  return value.replace(/[^A-Za-z0-9 _-]/g, "");
+}
+
 /** Live brand recolor for catalog previews. The renderer HTML is parametric
  *  by design (:root{--brand;--brand2;--accent;--head;--body}) — injecting an
  *  override style into the sandboxed srcDoc recolors every card instantly as
@@ -715,12 +734,17 @@ function brandPreviewOverride(kit: BrandKit): { style: string; logo: string } | 
     kit.body_font === DEFAULT_KIT.body_font &&
     !kit.logo_data_url;
   if (isDefault) return null;
+  const primary = safeColor(kit.primary_color, DEFAULT_KIT.primary_color);
+  const secondary = safeColor(kit.secondary_color, DEFAULT_KIT.secondary_color);
+  const accent = safeColor(kit.accent_color, DEFAULT_KIT.accent_color);
+  const headingFont = safeFont(kit.heading_font);
+  const bodyFont = safeFont(kit.body_font);
   const style =
-    `<style>:root{--brand:${kit.primary_color} !important;` +
-    `--brand2:${kit.secondary_color} !important;` +
-    `--accent:${kit.accent_color} !important;` +
-    `--head:'${kit.heading_font.replaceAll("'", "")}' !important;` +
-    `--body:'${kit.body_font.replaceAll("'", "")}' !important;}</style>`;
+    `<style>:root{--brand:${primary} !important;` +
+    `--brand2:${secondary} !important;` +
+    `--accent:${accent} !important;` +
+    `--head:'${headingFont}' !important;` +
+    `--body:'${bodyFont}' !important;}</style>`;
   // data: URL from our own canvas rasterizer — safe to inline; absolute over
   // the first page only (body-anchored), matching where renderers put logos.
   const logo = kit.logo_data_url

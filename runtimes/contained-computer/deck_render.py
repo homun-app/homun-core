@@ -245,9 +245,10 @@ def _html_slide(s, base_dir, logo):
 
 _HTML_CSS = """
 :root{{--brand:{primary};--brand2:{secondary};--accent:{accent};
+  --head:'{heading}';--body:'{body}';
   --ink:#16202b;--muted:#5a6675;--paper:#ffffff;}}
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:'{heading}',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+body{{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   color:var(--ink);-webkit-font-smoothing:antialiased}}
 .slide{{width:100%;min-height:100vh;padding:9vh 9vw;display:flex;flex-direction:column;
   justify-content:center;position:relative;page-break-after:always;overflow:hidden;
@@ -259,7 +260,7 @@ body{{font-family:'{heading}',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sa
 .slide h3{{font-size:1.4rem;color:var(--brand);font-weight:700;margin-bottom:.4em}}
 .slide h1,.slide h2,.slide h3,.slide li,.slide p,.slide .sub,.slide .col,
 .slide blockquote,.slide .kpi{{overflow-wrap:anywhere;hyphens:auto}}
-.body{{font-family:'{body}',-apple-system,sans-serif}}
+.body{{font-family:var(--body),-apple-system,sans-serif}}
 .slide ul{{margin-top:.4rem}}
 .slide li{{font-size:1.6rem;line-height:1.4;color:var(--muted);margin:.75rem 0;
   list-style:none;padding-left:1.9rem;position:relative}}
