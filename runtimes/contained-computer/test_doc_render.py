@@ -51,6 +51,20 @@ class RenderHtmlStructuralBlocks(unittest.TestCase):
         html = doc_render.render_html({"title": "T", "blocks": []}, HERE)
         self.assertIn("--brand:#2b6cb0", html)  # DEFAULT_THEME primary
 
+    def test_partial_theme_without_name_keeps_default_base(self):
+        html = doc_render.render_html(
+            {"title": "T", "theme": {"primary": "#101828"}, "blocks": []}, HERE)
+        self.assertIn("--brand:#101828", html)      # explicit field wins
+        self.assertIn("--brand2:#1a202c", html)     # DEFAULT_THEME base, not clean_corporate
+
+    def test_named_theme_resolves_and_explicit_fields_win(self):
+        html = doc_render.render_html(
+            {"title": "T", "theme": {"name": "warm_editorial", "accent": "#000000"},
+             "blocks": []}, HERE)
+        self.assertIn("--brand:#7c2d12", html)      # THEMES[warm_editorial] primary
+        self.assertIn("--head:'Georgia'", html)     # THEMES[warm_editorial] heading font
+        self.assertIn("--accent:#000000", html)     # explicit override beats the theme
+
 
 if __name__ == "__main__":
     unittest.main()

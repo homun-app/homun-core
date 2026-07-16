@@ -107,13 +107,15 @@ def _logo(logo):
 
 def render_html(doc, base_dir):
     raw_theme = doc.get("theme") or {}
-    # GOTCHA: theme_values() with no name still resolves to clean_corporate
-    # (its own catalog fallback) — correct when the caller passed a partial
-    # theme dict without a name, but wrong when NO theme info was given at
-    # all: that case must keep DEFAULT_THEME (the brand-neutral blue shared
-    # with deck_render), not silently become clean_corporate.
-    theme = (dict(DEFAULT_THEME) if not raw_theme
-             else {**DEFAULT_THEME, **theme_values(raw_theme.get("name"), raw_theme)})
+    name = raw_theme.get("name")
+    # Explicit fields win; a NAMED theme resolves via THEMES; with no name the
+    # base is DEFAULT_THEME (never a silent clean_corporate fallback —
+    # theme_values() defaults nameless lookups to that catalog entry, which
+    # would leak its values into partial themes and no-theme docs alike).
+    if name:
+        theme = {**DEFAULT_THEME, **theme_values(name, raw_theme)}
+    else:
+        theme = {**DEFAULT_THEME, **{k: v for k, v in raw_theme.items() if v}}
     logo = data_url(theme.get("logo", ""), base_dir)
     body = "".join(render_block(b, base_dir, logo) for b in doc.get("blocks", []))
     tokens = _css_tokens(theme)
