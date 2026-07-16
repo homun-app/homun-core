@@ -66,5 +66,32 @@ class RenderHtmlStructuralBlocks(unittest.TestCase):
         self.assertIn("--accent:#000000", html)     # explicit override beats the theme
 
 
+CV_DOC = {
+    "title": "CV",
+    "blocks": [
+        {"type": "contact_header", "name": "Elena Ricci", "headline": "Operations Director",
+         "contact_items": ["elena@example.com", "+39 333 000000", "Milano"]},
+        {"type": "profile_summary", "title": "Profile", "text": "ProfileTextProbe."},
+        {"type": "timeline", "title": "Experience", "entries": [
+            {"label": "2022—now", "heading": "Ops Director", "subheading": "Aurora Logistics",
+             "points": ["TimelinePointProbe"]}]},
+        {"type": "education_list", "title": "Education", "entries": [
+            {"label": "2010", "heading": "MSc EduProbe", "subheading": "Politecnico"}]},
+        {"type": "skill_tags", "title": "Skills", "groups": [
+            {"label": "Ops", "tags": ["SkillTagProbe", "Lean"]}]},
+    ],
+}
+
+
+class RenderHtmlCvBlocks(unittest.TestCase):
+    def test_cv_blocks_render_with_content_probes(self):
+        html = doc_render.render_html(CV_DOC, HERE)
+        self.assertIn(">ER<", html)  # initials avatar, content-only probe
+        for probe in ["ProfileTextProbe", "TimelinePointProbe", "EduProbe", "SkillTagProbe"]:
+            self.assertIn(probe, html)
+        self.assertIn('class="tag"', html)
+        self.assertIn('class="tl-entry"', html)
+
+
 if __name__ == "__main__":
     unittest.main()

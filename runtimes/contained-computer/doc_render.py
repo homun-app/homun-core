@@ -91,6 +91,38 @@ def render_block(block, base_dir, logo):
         lines = "".join(f"<span>{esc(l)}</span>" for l in block.get("lines", [])[:3])
         return (f'<section class="block cta"><strong>{esc(block.get("heading", ""))}</strong>'
                 f'<div class="cta-lines">{lines}</div></section>')
+    if kind == "contact_header":
+        items = "".join(f"<span>{esc(i)}</span>" for i in block.get("contact_items", [])[:6])
+        return (f'<section class="block contact-header">'
+                f'<div class="avatar">{esc(_initials(block.get("name", "")))}</div>'
+                f'<div><h1>{esc(block.get("name", ""))}</h1>'
+                f'<div class="headline">{esc(block.get("headline", ""))}</div>'
+                f'<div class="contact-items">{items}</div></div></section>')
+    if kind == "profile_summary":
+        return (f'<section class="block text profile"><h2>{title}</h2>'
+                f'<p class="para">{esc(block.get("text", ""))}</p></section>')
+    if kind == "timeline":
+        entries = "".join(
+            f'<div class="tl-entry"><div class="tl-label">{esc(e.get("label", ""))}</div>'
+            f'<div class="tl-body"><strong>{esc(e.get("heading", ""))}</strong>'
+            f'<span class="muted">{esc(e.get("subheading", ""))}</span>'
+            f'{_bullets(e.get("points", [])[:4])}</div></div>'
+            for e in block.get("entries", [])[:8])
+        return f'<section class="block text"><h2>{title}</h2><div class="tl">{entries}</div></section>'
+    if kind == "education_list":
+        entries = "".join(
+            f'<div class="edu"><span class="tl-label">{esc(e.get("label", ""))}</span>'
+            f'<strong>{esc(e.get("heading", ""))}</strong>'
+            f'<span class="muted">{esc(e.get("subheading", ""))}</span></div>'
+            for e in block.get("entries", [])[:6])
+        return f'<section class="block text"><h2>{title}</h2>{entries}</section>'
+    if kind == "skill_tags":
+        groups = "".join(
+            f'<div class="tag-group"><span class="tag-label">{esc(g.get("label", ""))}</span>'
+            + "".join(f'<i class="tag">{esc(t)}</i>' for t in g.get("tags", [])[:10])
+            + "</div>"
+            for g in block.get("groups", [])[:4])
+        return f'<section class="block text"><h2>{title}</h2>{groups}</section>'
     # text_section is ALSO the fallback for unknown types: content survives,
     # never a hard failure on model drift (the schema layer prevents drift
     # upstream; this is the render-side safety net).
@@ -161,6 +193,25 @@ h1,h2,h3,strong{font-family:var(--head),sans-serif}
   align-items:center;gap:1rem;margin-top:12px}
 .cta .cta-lines{display:flex;gap:1.2rem;flex-wrap:wrap;opacity:.95}
 .logo{float:right;max-height:40px;max-width:160px}
+.contact-header{display:flex;gap:20px;align-items:center;border-bottom:4px solid var(--brand);
+  padding-bottom:22px}
+.contact-header .avatar{width:72px;height:72px;border-radius:50%;background:var(--brand);
+  color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;
+  font-size:1.5rem;flex:none}
+.contact-header h1{font-size:1.7rem;letter-spacing:-.01em}
+.contact-header .headline{color:var(--brand);font-weight:600;margin-top:.15rem}
+.contact-header .contact-items{display:flex;gap:.9rem;flex-wrap:wrap;color:#5a6675;
+  font-size:.9rem;margin-top:.45rem}
+.tl{display:flex;flex-direction:column;gap:.9rem}
+.tl-entry{display:grid;grid-template-columns:110px 1fr;gap:14px}
+.tl-label{color:var(--brand);font-weight:700;font-size:.9rem}
+.tl-body strong{display:block}
+.tl-body .muted{display:block;font-size:.92rem;margin:.1rem 0 .2rem}
+.edu{display:grid;grid-template-columns:110px 1fr auto;gap:14px;margin:.45rem 0;align-items:baseline}
+.tag-group{margin:.4rem 0}
+.tag-label{font-weight:700;margin-right:.6rem;color:var(--brand2)}
+.tag{display:inline-block;background:#eef1f5;border-radius:999px;padding:.18rem .7rem;
+  margin:.15rem .25rem;font-style:normal;font-size:.88rem;color:#2a3542}
 """
 
 
