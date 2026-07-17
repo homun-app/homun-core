@@ -122,5 +122,19 @@ class RenderHtmlCommerceBlocks(unittest.TestCase):
         self.assertIn('class="kpi-item"', html)
 
 
+class DesignTokens(unittest.TestCase):
+    def test_every_theme_has_surface_and_ink(self):
+        from design_tokens import THEMES
+        for name, t in THEMES.items():
+            for key in ("primary", "accent", "surface", "ink", "muted", "hairline", "on_brand"):
+                self.assertIn(key, t, f"{name} missing {key}")
+
+    def test_editorial_themes_present(self):
+        from design_tokens import THEMES
+        for name in ("editorial_noir", "editorial_warm", "editorial_bold"):
+            self.assertIn(name, THEMES)
+        self.assertEqual(THEMES["editorial_noir"]["surface"], "#0b0b0d")
+
+
 if __name__ == "__main__":
     unittest.main()
