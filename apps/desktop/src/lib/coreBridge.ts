@@ -2637,6 +2637,9 @@ export interface TemplateCatalogEntry {
   id: string;
   name: string;
   kind: "presentation" | "document";
+  // Use-case bucket for gallery filtering (S1a-T4 backend field); whitelist +
+  // "other" fallback, see presentationsShared.TEMPLATE_CATEGORY_ORDER.
+  category: string;
   description: string;
   use_cases: string[];
   audience: string[];
