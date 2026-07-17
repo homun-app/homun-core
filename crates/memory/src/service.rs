@@ -35,7 +35,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 
-use crate::{DataSensitivity, MemoryCollectionKey, MemoryScope, MemoryStatus, UserId, WorkspaceId};
+use crate::{
+    DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryScope, MemoryStatus, UserId,
+    WorkspaceId,
+};
 
 /// Un blocco di testo già formattato pronto da accodare al system prompt.
 ///
@@ -184,6 +187,29 @@ impl RecallPack {
     }
 }
 
+/// Compatibility path used when linked memory sources are disabled. Keeping it
+/// beside the structured pack makes the gateway's service-ON and service-OFF
+/// paths choose between exactly the same two coordinators.
+pub fn recall_single_scope_pack(
+    facade: &MemoryFacade,
+    user: &UserId,
+    workspace: &WorkspaceId,
+    query: &str,
+    query_vec: &[f32],
+    graph_context: Option<
+        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
+    >,
+) -> RecallPack {
+    let block =
+        crate::recall_search_on_facade(facade, user, workspace, query, query_vec, graph_context);
+    let scope = if workspace.as_str() == crate::PERSONAL_WORKSPACE {
+        MemoryScope::Personal
+    } else {
+        MemoryScope::Project(workspace.clone())
+    };
+    RecallPack::from_block(query, scope, block)
+}
+
 pub fn format_recall_hits(hits: &[RecallHit]) -> Option<String> {
     if hits.is_empty() {
         return None;
@@ -282,15 +308,17 @@ pub trait MemoryRecallService: Send + Sync {
 ///
 /// Memorizza i blocchi **cached** del briefing (profile + objective + brief;
 /// `recent_work` NON è qui perché dipende da git log, non dalla memoria, e va
-/// ricalcolato fresco ogni `brief()`). L'invalidazione è a generation: la cache
-/// hit richiede che `generation` combaci con quella corrente del facade AND che
-/// `prompt_fingerprint` combaci col prompt corrente (i blocchi profile/open-loops
-/// sono prompt-dipendenti).
+/// ricalcolato fresco ogni `brief()`). L'invalidazione include sia la generation
+/// locale sia il fingerprint delle fonti effettivamente usate; il prompt resta
+/// parte della chiave perché profile/open-loops sono prompt-dipendenti.
 #[derive(Debug, Clone)]
 pub struct CachedBriefing {
     /// Generation del facade al momento del rebuild. Se diverge da quella
     /// corrente → il contenuto dello scope è cambiato → cache miss.
     pub generation: u64,
+    /// Policy effettiva + generation delle fonti usate dal briefing. Revoca,
+    /// scadenza, modifica grant o scrittura in una source → cache miss.
+    pub source_fingerprint: u64,
     /// Fingerprint del `user_message` (hash) al momento del rebuild. I blocchi
     /// profile + open-loops dipendono dal prompt (gating `should_inject_*`):
     /// prompt diverso → cache miss anche se la generation combacia.
@@ -318,17 +346,21 @@ impl BriefingCache {
         }
     }
 
-    /// Lookup: hit solo se `generation` AND `prompt_fingerprint` combaciano.
+    /// Lookup: hit solo se tutti i fingerprint combaciano.
     /// Ritorna un clone dei blocchi cached (senza recent_work).
     pub fn get(
         &self,
         scope_key: &str,
         generation: u64,
+        source_fingerprint: u64,
         prompt_fingerprint: u64,
     ) -> Option<BriefingPack> {
         let entries = self.entries.lock().ok()?;
         let entry = entries.get(scope_key)?;
-        if entry.generation == generation && entry.prompt_fingerprint == prompt_fingerprint {
+        if entry.generation == generation
+            && entry.source_fingerprint == source_fingerprint
+            && entry.prompt_fingerprint == prompt_fingerprint
+        {
             Some(entry.pack_sans_recent_work.clone())
         } else {
             None
@@ -402,13 +434,32 @@ mod cache_tests {
         let cache = BriefingCache::new(4);
         let entry = CachedBriefing {
             generation: 7,
+            source_fingerprint: 11,
             prompt_fingerprint: 42,
             pack_sans_recent_work: empty_pack(),
         };
         cache.put("scope-1".to_string(), entry);
         assert!(
-            cache.get("scope-1", 7, 42).is_some(),
+            cache.get("scope-1", 7, 11, 42).is_some(),
             "hit quando generation e fingerprint combaciano"
+        );
+    }
+
+    #[test]
+    fn cache_misses_when_source_fingerprint_differs() {
+        let cache = BriefingCache::new(4);
+        cache.put(
+            "scope-1".to_string(),
+            CachedBriefing {
+                generation: 7,
+                source_fingerprint: 11,
+                prompt_fingerprint: 42,
+                pack_sans_recent_work: empty_pack(),
+            },
+        );
+        assert!(
+            cache.get("scope-1", 7, 12, 42).is_none(),
+            "una modifica a grant o source deve invalidare il briefing"
         );
     }
 
@@ -419,13 +470,14 @@ mod cache_tests {
             "scope-1".to_string(),
             CachedBriefing {
                 generation: 7,
+                source_fingerprint: 11,
                 prompt_fingerprint: 42,
                 pack_sans_recent_work: empty_pack(),
             },
         );
         // Una scrittura ha incrementato la generation nel facade → miss.
         assert!(
-            cache.get("scope-1", 8, 42).is_none(),
+            cache.get("scope-1", 8, 11, 42).is_none(),
             "miss quando la generation diverge (scrittura invalida)"
         );
     }
@@ -437,13 +489,14 @@ mod cache_tests {
             "scope-1".to_string(),
             CachedBriefing {
                 generation: 7,
+                source_fingerprint: 11,
                 prompt_fingerprint: 42,
                 pack_sans_recent_work: empty_pack(),
             },
         );
         // Prompt diverso (gating should_inject_* diverso) → miss.
         assert!(
-            cache.get("scope-1", 7, 999).is_none(),
+            cache.get("scope-1", 7, 11, 999).is_none(),
             "miss quando il prompt cambia (blocchi prompt-dipendenti)"
         );
     }
@@ -455,6 +508,7 @@ mod cache_tests {
             "a".to_string(),
             CachedBriefing {
                 generation: 1,
+                source_fingerprint: 1,
                 prompt_fingerprint: 1,
                 pack_sans_recent_work: empty_pack(),
             },
@@ -463,6 +517,7 @@ mod cache_tests {
             "b".to_string(),
             CachedBriefing {
                 generation: 1,
+                source_fingerprint: 1,
                 prompt_fingerprint: 1,
                 pack_sans_recent_work: empty_pack(),
             },
@@ -472,15 +527,19 @@ mod cache_tests {
             "c".to_string(),
             CachedBriefing {
                 generation: 1,
+                source_fingerprint: 1,
                 prompt_fingerprint: 1,
                 pack_sans_recent_work: empty_pack(),
             },
         );
         // Almeno una delle prime due è stata evicta; la terza è presente.
-        assert!(cache.get("c", 1, 1).is_some(), "la nuova entry è presente");
+        assert!(
+            cache.get("c", 1, 1, 1).is_some(),
+            "la nuova entry è presente"
+        );
         let present = ["a", "b"]
             .iter()
-            .filter(|k| cache.get(k, 1, 1).is_some())
+            .filter(|k| cache.get(k, 1, 1, 1).is_some())
             .count();
         assert!(
             present <= 1,
@@ -495,6 +554,7 @@ mod cache_tests {
             "a".to_string(),
             CachedBriefing {
                 generation: 1,
+                source_fingerprint: 1,
                 prompt_fingerprint: 1,
                 pack_sans_recent_work: empty_pack(),
             },
@@ -504,13 +564,17 @@ mod cache_tests {
             "a".to_string(),
             CachedBriefing {
                 generation: 2,
+                source_fingerprint: 1,
                 prompt_fingerprint: 1,
                 pack_sans_recent_work: empty_pack(),
             },
         );
-        assert!(cache.get("a", 2, 1).is_some(), "refresh aggiorna la entry");
         assert!(
-            cache.get("a", 1, 1).is_none(),
+            cache.get("a", 2, 1, 1).is_some(),
+            "refresh aggiorna la entry"
+        );
+        assert!(
+            cache.get("a", 1, 1, 1).is_none(),
             "la vecchia generation è invalidata"
         );
     }
