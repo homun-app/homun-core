@@ -52536,6 +52536,28 @@ mod tests {
     }
 
     #[test]
+    fn memory_sources_flag_defaults_off_until_live_gate() {
+        assert!(!memory_sources_flag(None));
+        assert!(memory_sources_flag(Some("on")));
+        assert!(!memory_sources_flag(Some("off")));
+    }
+
+    #[test]
+    fn no_grants_are_created_for_existing_projects() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory()
+                .expect("in-memory memory store"),
+        );
+        let grants = facade
+            .list_memory_source_grants(
+                &local_first_memory::UserId::new("owner"),
+                &local_first_memory::WorkspaceId::new("legacy-project"),
+            )
+            .expect("legacy project should be readable without a grant migration");
+        assert!(grants.is_empty());
+    }
+
+    #[test]
     fn memory_source_input_rejects_empty_duplicate_and_unsafe_policy_values() {
         let valid = || MemorySourceUpsertRequest {
             source_workspace_id: "project-b".to_string(),
