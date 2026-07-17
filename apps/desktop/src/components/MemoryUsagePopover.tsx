@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { RecallHitPayload } from "../lib/coreBridge";
+import { MemoryPublicationDialog } from "./MemoryPublicationDialog";
 
 type SourceGroup = {
   id: string;
@@ -36,7 +37,9 @@ export function MemoryUsagePopover({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [publicationHit, setPublicationHit] = useState<RecallHitPayload | null>(null);
   const rootRef = useRef<HTMLSpanElement>(null);
+  const publicationOpenerRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId().replace(/:/g, "");
   const groups = useMemo(() => groupHitsBySource(hits), [hits]);
 
@@ -97,6 +100,18 @@ export function MemoryUsagePopover({
                         {hit.grant_id ? ` · ${t("chat.memoryLinked")}` : ""}
                         {hit.conflict ? ` · ${t("chat.memoryConflict")}` : ""}
                       </small>
+                      {!hit.grant_id && hit.source_workspace_id !== "__personal__" ? (
+                        <button
+                          type="button"
+                          className="memory-publication-trigger"
+                          onClick={(event) => {
+                            publicationOpenerRef.current = event.currentTarget;
+                            setPublicationHit(hit);
+                          }}
+                        >
+                          {t("memoryPublication.publish")}
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -105,6 +120,19 @@ export function MemoryUsagePopover({
           </div>
         </section>
       )}
+      {publicationHit ? (
+        <MemoryPublicationDialog
+          sourceRef={publicationHit.ref}
+          sourceWorkspaceId={publicationHit.source_workspace_id}
+          initialText={publicationHit.text}
+          opener={publicationOpenerRef.current}
+          onClose={() => setPublicationHit(null)}
+          onPublished={() => {
+            setOpen(false);
+            setPublicationHit(null);
+          }}
+        />
+      ) : null}
     </span>
   );
 }

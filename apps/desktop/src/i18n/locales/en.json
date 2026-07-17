@@ -67,6 +67,35 @@
     "confirm": "Confirm connection",
     "saving": "Saving…"
   },
+  "memoryPublication": {
+    "title": "Publish to another memory",
+    "publish": "Publish…",
+    "text": "Text to publish",
+    "type": "Type",
+    "collection": "Collection",
+    "collectionDerived": "Derived from type",
+    "privacyDomain": "Privacy domain",
+    "sensitivity": "Sensitivity",
+    "destination": "Destination",
+    "chooseDestination": "Choose a destination",
+    "destinationRequired": "Choose a destination before creating the proposal.",
+    "duplicate": "A similar memory already exists",
+    "conflict": "The destination contains an incompatible version",
+    "createNew": "Create a new canonical memory",
+    "updateExisting": "Update the selected existing memory",
+    "consequence": "The destination becomes the canonical version. The source remains a published alias and is not synchronized automatically.",
+    "canonicalConfirmation": "I confirm that the destination memory will become the canonical version and will not be synchronized automatically.",
+    "review": "Review proposal",
+    "approve": "Publish memory",
+    "reject": "Cancel proposal",
+    "saving": "Saving…",
+    "loading": "Loading destinations…",
+    "domains": {
+      "personal": "Personal",
+      "work": "Work",
+      "general": "General"
+    }
+  },
   "filters": {
     "label": "Filter",
     "type": "Type",

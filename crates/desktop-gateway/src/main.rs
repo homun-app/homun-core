@@ -138,7 +138,8 @@ use local_first_memory::{
     ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
     MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryError, MemoryExtraction,
     MemoryFacade, MemoryGrantOverrideEffect, MemoryLifecycleRequest, MemoryRecallService,
-    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
+    MemoryPublicationDestination, MemoryPublicationEditInput, MemoryPublicationProposal,
+    MemoryPublicationResolution, MemoryPublicationResult, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
     MemorySourceCandidateProjection, MemorySourceGrant, MemoryStatus, MemoryUiReadModel,
     MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain, RecallPack,
     SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
@@ -1328,6 +1329,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/workspaces/{workspace_id}/memory-sources/candidates",
             get(memory_source_candidates),
+        )
+        .route("/api/memory/publications", post(memory_publication_create))
+        .route("/api/memory/publications/{proposal_id}", get(memory_publication_get))
+        .route(
+            "/api/memory/publications/{proposal_id}/approve",
+            post(memory_publication_approve),
+        )
+        .route(
+            "/api/memory/publications/{proposal_id}/reject",
+            post(memory_publication_reject),
         )
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/mcp/execute", post(mcp_execute))
@@ -50294,6 +50305,249 @@ struct ProjectAccessRemoveRequest {
     channel: String,
 }
 
+const MEMORY_PUBLICATION_BODY_MAX: usize = 64 * 1024;
+
+#[derive(Debug, Deserialize)]
+struct MemoryPublicationCreateRequest {
+    source_ref: String,
+    source_workspace_id: String,
+    destination_workspace_id: String,
+    #[serde(default)]
+    edit: Option<MemoryPublicationEditInput>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryPublicationApproveRequest {
+    #[serde(default)]
+    resolution: Option<MemoryPublicationResolution>,
+}
+
+fn memory_publication_error(status: StatusCode, code: &'static str) -> GatewayError {
+    GatewayError {
+        status,
+        code,
+        message: code.to_string(),
+    }
+}
+
+fn memory_publication_facade_error(error: MemoryError) -> GatewayError {
+    let (status, code) = match error {
+        MemoryError::NotFound(message) => match message.as_str() {
+            "publication_not_found" => (StatusCode::NOT_FOUND, "publication_not_found"),
+            "publication_source_not_found" => {
+                (StatusCode::NOT_FOUND, "publication_source_not_found")
+            }
+            _ => (StatusCode::NOT_FOUND, "memory_publication_not_found"),
+        },
+        MemoryError::Policy(message) => match message.as_str() {
+            "secret_never_shareable" => (StatusCode::CONFLICT, "secret_never_shareable"),
+            "vault_payload_never_shareable" => {
+                (StatusCode::CONFLICT, "vault_payload_never_shareable")
+            }
+            "publication_actor_mismatch" => {
+                (StatusCode::CONFLICT, "publication_actor_mismatch")
+            }
+            "publication_decision_required" => {
+                (StatusCode::CONFLICT, "publication_decision_required")
+            }
+            "publication_source_changed" => {
+                (StatusCode::CONFLICT, "publication_source_changed")
+            }
+            "publication_conflict" | "publication_already_pending" | "publication_not_pending"
+            | "publication_already_published"
+            | "publication_source_inactive" | "publication_sensitivity_not_allowed" => {
+                (StatusCode::CONFLICT, "publication_conflict")
+            }
+            _ => (StatusCode::CONFLICT, "publication_conflict"),
+        },
+        MemoryError::Validation(message) => match message.as_str() {
+            "publication_text_invalid" | "publication_memory_type_invalid"
+            | "publication_privacy_domain_invalid" | "publication_collection_unknown" => {
+                (StatusCode::BAD_REQUEST, "publication_edit_invalid")
+            }
+            _ => (StatusCode::BAD_REQUEST, "memory_publication_invalid"),
+        },
+        MemoryError::Store(_) => (StatusCode::INTERNAL_SERVER_ERROR, "memory_publication_store_error"),
+    };
+    memory_publication_error(status, code)
+}
+
+fn publication_workspace_from_snapshot(
+    snapshot: &WorkspacesFile,
+    raw_workspace_id: &str,
+    allow_personal: bool,
+) -> Result<MemoryWorkspaceId, &'static str> {
+    let raw_workspace_id = raw_workspace_id.trim();
+    let workspace_id = canonical_memory_workspace_id(raw_workspace_id);
+    if workspace_id.as_str().is_empty() {
+        return Err("publication_workspace_invalid");
+    }
+    if workspace_id.as_str() == THREADS_WORKSPACE {
+        return Err("publication_workspace_invalid");
+    }
+    if workspace_id.as_str() == PERSONAL_WORKSPACE {
+        return allow_personal
+            .then_some(workspace_id)
+            .ok_or("publication_source_not_local");
+    }
+    snapshot
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == raw_workspace_id)
+        .then_some(workspace_id)
+        .ok_or("publication_workspace_not_found")
+}
+
+fn validate_publication_owner_scope(
+    proposal: &MemoryPublicationProposal,
+    owner: &MemoryUserId,
+    snapshot: &WorkspacesFile,
+) -> Result<(), GatewayError> {
+    if proposal.proposed_by != owner.as_str()
+        || proposal.source_user_id != *owner
+        || proposal.destination_user_id != *owner
+    {
+        return Err(memory_publication_error(
+            StatusCode::CONFLICT,
+            "publication_actor_mismatch",
+        ));
+    }
+    publication_workspace_from_snapshot(snapshot, proposal.source_workspace_id.as_str(), false)
+        .map_err(|code| memory_publication_error(StatusCode::NOT_FOUND, code))?;
+    publication_workspace_from_snapshot(snapshot, proposal.destination_workspace_id.as_str(), true)
+        .map_err(|code| memory_publication_error(StatusCode::NOT_FOUND, code))?;
+    Ok(())
+}
+
+fn parse_publication_reference(
+    raw_reference: &str,
+    owner: &MemoryUserId,
+    source_workspace_id: &MemoryWorkspaceId,
+) -> Result<MemoryRef, GatewayError> {
+    if raw_reference.trim() != raw_reference {
+        return Err(memory_publication_error(
+            StatusCode::BAD_REQUEST,
+            "memory_publication_invalid",
+        ));
+    }
+    let reference = raw_reference.parse::<MemoryRef>().map_err(|_| {
+        memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+    })?;
+    if reference.to_string() != raw_reference
+        || reference.kind != MemoryRefKind::Memory
+        || reference.scope != "local"
+        || reference.user_id != *owner
+        || reference.workspace_id != *source_workspace_id
+    {
+        return Err(memory_publication_error(
+            StatusCode::BAD_REQUEST,
+            "memory_publication_invalid",
+        ));
+    }
+    Ok(reference)
+}
+
+async fn memory_publication_create(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
+        .await
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let request = serde_json::from_slice::<MemoryPublicationCreateRequest>(&body)
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let snapshot = load_workspaces_file();
+    let source_workspace_id = publication_workspace_from_snapshot(
+        &snapshot,
+        &request.source_workspace_id,
+        false,
+    )
+    .map_err(|code| memory_publication_error(StatusCode::BAD_REQUEST, code))?;
+    let destination_workspace_id = publication_workspace_from_snapshot(
+        &snapshot,
+        &request.destination_workspace_id,
+        true,
+    )
+    .map_err(|code| memory_publication_error(StatusCode::BAD_REQUEST, code))?;
+    let owner = gateway_memory_user_id();
+    let reference = parse_publication_reference(&request.source_ref, &owner, &source_workspace_id)?;
+    let facade = memory_facade(&state);
+    let source = facade
+        .get_memory_for_ui(&reference, &owner, &source_workspace_id)
+        .map_err(|_| {
+            memory_publication_error(StatusCode::INTERNAL_SERVER_ERROR, "memory_publication_store_error")
+        })?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_source_not_found"))?;
+    let proposal = facade
+        .create_publication_proposal_with_edit(
+            &source,
+            &MemoryPublicationDestination::new(owner.clone(), destination_workspace_id),
+            owner.as_str(),
+            request.edit.as_ref(),
+        )
+        .map_err(memory_publication_facade_error)?;
+    Ok(Json(proposal))
+}
+
+async fn memory_publication_get(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<String>,
+) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let owner = gateway_memory_user_id();
+    let proposal = memory_facade(&state)
+        .get_publication_proposal(&proposal_id)
+        .map_err(memory_publication_facade_error)?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
+    validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
+    Ok(Json(proposal))
+}
+
+async fn memory_publication_approve(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<String>,
+    request: Request,
+) -> Result<Json<MemoryPublicationResult>, GatewayError> {
+    let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
+        .await
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let request = serde_json::from_slice::<MemoryPublicationApproveRequest>(&body)
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let resolution = request.resolution.ok_or_else(|| {
+        memory_publication_error(StatusCode::CONFLICT, "publication_decision_required")
+    })?;
+    let owner = gateway_memory_user_id();
+    let facade = memory_facade(&state);
+    let proposal = facade
+        .get_publication_proposal(&proposal_id)
+        .map_err(memory_publication_facade_error)?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
+    validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
+    facade
+        .set_publication_resolution(&proposal_id, owner.as_str(), resolution)
+        .map_err(memory_publication_facade_error)?;
+    let result = facade
+        .approve_publication(&proposal_id, owner.as_str())
+        .map_err(memory_publication_facade_error)?;
+    Ok(Json(result))
+}
+
+async fn memory_publication_reject(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<String>,
+) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let owner = gateway_memory_user_id();
+    let facade = memory_facade(&state);
+    let proposal = facade
+        .get_publication_proposal(&proposal_id)
+        .map_err(memory_publication_facade_error)?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
+    validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
+    let rejected = facade
+        .reject_publication(&proposal_id, owner.as_str())
+        .map_err(memory_publication_facade_error)?;
+    Ok(Json(rejected))
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct MemorySourceOverrideInput {
     memory_ref: String,
@@ -52917,6 +53171,27 @@ mod tests {
             .with_state(state)
     }
 
+    fn memory_publication_route_test_app(state: super::AppState) -> axum::Router {
+        axum::Router::new()
+            .route(
+                "/api/memory/publications",
+                axum::routing::post(super::memory_publication_create),
+            )
+            .route(
+                "/api/memory/publications/{proposal_id}",
+                axum::routing::get(super::memory_publication_get),
+            )
+            .route(
+                "/api/memory/publications/{proposal_id}/approve",
+                axum::routing::post(super::memory_publication_approve),
+            )
+            .route(
+                "/api/memory/publications/{proposal_id}/reject",
+                axum::routing::post(super::memory_publication_reject),
+            )
+            .with_state(state)
+    }
+
     async fn memory_source_response_json(
         response: axum::response::Response,
     ) -> (axum::http::StatusCode, serde_json::Value) {
@@ -52951,6 +53226,221 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
+    }
+
+    fn create_publication_route_memory(
+        facade: &local_first_memory::MemoryFacade,
+        owner: local_first_memory::UserId,
+        workspace: &str,
+        text: &str,
+        sensitivity: local_first_memory::DataSensitivity,
+    ) -> local_first_memory::MemoryRecord {
+        facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: local_first_memory::MemoryLifecycleRequest {
+                    actor_id: "test".to_string(),
+                    user_id: owner,
+                    workspace_id: local_first_memory::WorkspaceId::new(workspace),
+                    purpose: "publication route test".to_string(),
+                },
+                memory_type: "preference".to_string(),
+                text: text.to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({}),
+            })
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_publication_routes_reload_local_source_require_decision_and_reject_foreign_actor() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let dir = isolated_gateway_test_dir("memory-publication-routes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, true);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let facade = super::memory_facade(&state);
+        let secret = create_publication_route_memory(
+            facade,
+            owner.clone(),
+            "project-a",
+            "hidden",
+            local_first_memory::DataSensitivity::Secret,
+        );
+        let app = memory_publication_route_test_app(state.clone());
+        let base = super::base_workspace_id();
+        let secret_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": secret.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": base,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, secret_body) = memory_source_response_json(secret_response).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(secret_body["error"]["code"], "secret_never_shareable");
+
+        let source = create_publication_route_memory(
+            facade,
+            owner.clone(),
+            "project-a",
+            "Prefer Italian",
+            local_first_memory::DataSensitivity::Private,
+        );
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": source.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": base,
+                            "edit": { "proposed_text": "Prefer concise Italian" }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, proposal) = memory_source_response_json(created).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let proposal_id = proposal["id"].as_str().unwrap();
+        assert_eq!(proposal["proposed_text"], "Prefer concise Italian");
+
+        let missing_decision = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/memory/publications/{proposal_id}/approve"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, missing_decision) = memory_source_response_json(missing_decision).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(missing_decision["error"]["code"], "publication_decision_required");
+
+        let approved = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/memory/publications/{proposal_id}/approve"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"resolution":{"kind":"create_new"}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, approved) = memory_source_response_json(approved).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(approved["proposal"]["status"], "approved");
+
+        let rejected_source = create_publication_route_memory(
+            facade,
+            owner.clone(),
+            "project-a",
+            "Keep this local",
+            local_first_memory::DataSensitivity::Private,
+        );
+        let rejected_created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": rejected_source.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": base,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, rejected_proposal) = memory_source_response_json(rejected_created).await;
+        let rejected = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/memory/publications/{}/reject",
+                        rejected_proposal["id"].as_str().unwrap()
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, rejected) = memory_source_response_json(rejected).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(rejected["status"], "rejected");
+        assert!(facade
+            .get_publication_link(&rejected_source.reference)
+            .unwrap()
+            .is_none());
+
+        let foreign_owner = local_first_memory::UserId::new("other-owner");
+        let foreign_source = create_publication_route_memory(
+            facade,
+            foreign_owner.clone(),
+            "project-b",
+            "Foreign preference",
+            local_first_memory::DataSensitivity::Private,
+        );
+        let foreign = facade
+            .create_publication_proposal(
+                &foreign_source,
+                &local_first_memory::MemoryPublicationDestination::personal(foreign_owner),
+                "other-owner",
+            )
+            .unwrap();
+        let foreign_response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/memory/publications/{}", foreign.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, foreign_body) = memory_source_response_json(foreign_response).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(foreign_body["error"]["code"], "publication_actor_mismatch");
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[tokio::test(flavor = "current_thread")]

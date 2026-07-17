@@ -19,7 +19,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemorySourceGrantStoreError {
@@ -861,9 +861,9 @@ impl SQLiteMemoryStore {
                     id, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
-                    proposed_sensitivity, candidate_json, resolution_json, status, reason_code,
+                    proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
                     failure_reason, proposed_by, decided_by, created_at, updated_at
-                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
                 params![
                     &proposal.id,
                     source_ref_json,
@@ -878,6 +878,7 @@ impl SQLiteMemoryStore {
                     proposal.proposed_privacy_domain.as_str(),
                     enum_name(&proposal.proposed_sensitivity)
                         .map_err(MemoryPublicationStoreError::store)?,
+                    &proposal.source_revision,
                     proposal
                         .candidate
                         .as_ref()
@@ -926,7 +927,7 @@ impl SQLiteMemoryStore {
             "select id, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
-                    proposed_sensitivity, candidate_json, resolution_json, status, reason_code,
+                    proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
                     failure_reason, proposed_by, decided_by, created_at, updated_at
              from memory_publication_proposals where id = ?1",
             [id],
@@ -3080,6 +3081,7 @@ impl SQLiteMemoryStore {
                     proposed_collection text not null,
                     proposed_privacy_domain text not null,
                     proposed_sensitivity text not null,
+                    source_revision text not null default 'legacy_unverifiable',
                     candidate_json text,
                     resolution_json text,
                     status text not null check(status in ('pending', 'approved', 'rejected', 'failed')),
@@ -3177,10 +3179,17 @@ impl SQLiteMemoryStore {
             "failure_reason",
             "alter table memory_publication_proposals add column failure_reason text",
         )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "source_revision",
+            "alter table memory_publication_proposals add column source_revision text not null default 'legacy_unverifiable'",
+        )?;
         Self::backfill_legacy_publication_proposals_on(
             &mut conn,
             legacy_publication_collection_missing,
         )?;
+        Self::fail_closed_legacy_pending_publications_on(&mut conn)?;
         conn.execute(
             "insert or replace into schema_metadata (key, value) values ('schema_version', ?1)",
             [SCHEMA_VERSION.to_string()],
@@ -3382,6 +3391,23 @@ impl SQLiteMemoryStore {
             )
             .map_err(|error| error.to_string())?;
         transaction.commit().map_err(|error| error.to_string())
+    }
+
+    /// A pre-revision pending proposal cannot prove that the source seen in its
+    /// preview is still the source approved later. Preserve it for audit, but
+    /// require the user to create a fresh proposal instead of guessing.
+    fn fail_closed_legacy_pending_publications_on(conn: &mut Connection) -> Result<(), String> {
+        conn.execute(
+            "update memory_publication_proposals
+             set status = 'failed', reason_code = 'publication_failed',
+                 failure_reason = 'publication_source_changed',
+                 decided_by = coalesce(decided_by, proposed_by),
+                 updated_at = updated_at
+             where status = 'pending' and source_revision = 'legacy_unverifiable'",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     fn count_table(&self, table: &str) -> Result<u64, String> {
@@ -3736,6 +3762,7 @@ fn validate_memory_publication_proposal(
         || proposal.destination_workspace_id.as_str().trim().is_empty()
         || proposal.proposed_text.trim().is_empty()
         || proposal.proposed_memory_type.trim().is_empty()
+        || proposal.source_revision.trim().is_empty()
     {
         return Err("publication proposal has an empty required field".to_string());
     }
@@ -3806,11 +3833,20 @@ fn validate_persisted_memory_publication_proposal(
     intrinsic.status = MemoryPublicationStatus::Pending;
     intrinsic.decided_by = None;
     intrinsic.failure_reason = None;
+    // Legacy terminal rows are retained for audit, while legacy pending rows are
+    // migrated to Failed. Do not reject a terminal audit row merely because it
+    // predates revision tracking.
+    if intrinsic.source_revision == "legacy_unverifiable" {
+        intrinsic.source_revision = "legacy_terminal".to_string();
+    }
     validate_memory_publication_proposal(&intrinsic)?;
     match proposal.status {
         MemoryPublicationStatus::Pending => {
             if proposal.decided_by.is_some() || proposal.failure_reason.is_some() {
                 return Err("pending publication has a terminal state payload".to_string());
+            }
+            if proposal.source_revision == "legacy_unverifiable" {
+                return Err("pending publication source revision is unverifiable".to_string());
             }
             let expected = match proposal.candidate {
                 Some(MemoryPublicationCandidate::CompatibleDuplicate { .. }) => {
@@ -3914,29 +3950,30 @@ fn memory_publication_proposal_from_row(
             row.get::<_, String>(10)
                 .map_err(|error| error.to_string())?,
         )?,
+        source_revision: row.get(11).map_err(|error| error.to_string())?,
         candidate: row
-            .get::<_, Option<String>>(11)
-            .map_err(|error| error.to_string())?
-            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
-            .transpose()?,
-        resolution: row
             .get::<_, Option<String>>(12)
             .map_err(|error| error.to_string())?
             .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
             .transpose()?,
+        resolution: row
+            .get::<_, Option<String>>(13)
+            .map_err(|error| error.to_string())?
+            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
+            .transpose()?,
         status: enum_from_name(
-            row.get::<_, String>(13)
-                .map_err(|error| error.to_string())?,
-        )?,
-        reason_code: enum_from_name(
             row.get::<_, String>(14)
                 .map_err(|error| error.to_string())?,
         )?,
-        failure_reason: row.get(15).map_err(|error| error.to_string())?,
-        proposed_by: row.get(16).map_err(|error| error.to_string())?,
-        decided_by: row.get(17).map_err(|error| error.to_string())?,
-        created_at: row.get(18).map_err(|error| error.to_string())?,
-        updated_at: row.get(19).map_err(|error| error.to_string())?,
+        reason_code: enum_from_name(
+            row.get::<_, String>(15)
+                .map_err(|error| error.to_string())?,
+        )?,
+        failure_reason: row.get(16).map_err(|error| error.to_string())?,
+        proposed_by: row.get(17).map_err(|error| error.to_string())?,
+        decided_by: row.get(18).map_err(|error| error.to_string())?,
+        created_at: row.get(19).map_err(|error| error.to_string())?,
+        updated_at: row.get(20).map_err(|error| error.to_string())?,
     })
 }
 
@@ -3958,7 +3995,7 @@ fn load_memory_publication_proposal_on(
         "select id, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
-                    proposed_sensitivity, candidate_json, resolution_json, status, reason_code,
+                    proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
                     failure_reason, proposed_by, decided_by, created_at, updated_at
          from memory_publication_proposals where id = ?1",
         [id],

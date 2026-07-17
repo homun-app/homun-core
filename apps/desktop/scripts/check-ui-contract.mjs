@@ -178,6 +178,9 @@ assertContains("src/components/MemorySourcesDialog.tsx", "coreBridge.upsertMemor
 assertContains("src/components/MemorySourcesDialog.tsx", "coreBridge.revokeMemorySource", "memory sources must support immediate revocation");
 assertContains("src/components/MemorySourcesDialog.tsx", "openModifyGrant", "available linked sources must support reviewing their authorization");
 assertContains("src/components/MemorySourcesDialog.tsx", "revokeConfirmation", "revocation must require an explicit confirmation state");
+assertContains("src/components/MemoryPublicationDialog.tsx", "proposed_text", "publication must preview exact text before approval");
+assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.approveMemoryPublication", "publication must require explicit approval");
+assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.rejectMemoryPublication", "publication must support rejection without writes");
 assertContains("src/components/MemorySourcesDialog.tsx", "closeDialog", "all dialog exits must reset transient source-management state");
 assertContains("src/components/MemorySourcesDialog.tsx", "Never consulted", "missing last-access timestamps must be disclosed clearly");
 assertContains("src/components/MemorySourcesDialog.tsx", "focusTrap", "memory source dialog must retain keyboard focus until closed");

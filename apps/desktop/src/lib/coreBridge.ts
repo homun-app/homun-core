@@ -533,6 +533,92 @@ export interface MemorySourceCandidatePagination {
   limit?: number;
 }
 
+export type MemoryPublicationSensitivity = "public" | "internal" | "private" | "confidential" | "secret";
+
+export interface MemoryPublicationRef {
+  kind: "memory";
+  scope: "local";
+  user_id: string;
+  workspace_id: string;
+  key: string;
+}
+
+export interface MemoryPublicationEditInput {
+  proposed_text?: string;
+  proposed_memory_type?: string;
+  proposed_privacy_domain?: "personal" | "work" | "general";
+  proposed_sensitivity?: MemoryPublicationSensitivity;
+}
+
+export type MemoryPublicationCandidate = {
+  kind: "compatible_duplicate" | "conflict";
+  destination_ref: MemoryPublicationRef;
+};
+
+export type MemoryPublicationResolution =
+  | { kind: "create_new" }
+  | { kind: "update_existing"; destination_ref: MemoryPublicationRef };
+
+export interface MemoryPublicationProposal {
+  id: string;
+  source_ref: MemoryPublicationRef;
+  source_user_id: string;
+  source_workspace_id: string;
+  destination_user_id: string;
+  destination_workspace_id: string;
+  proposed_text: string;
+  proposed_memory_type: string;
+  proposed_collection: MemoryCollectionKey;
+  proposed_privacy_domain: "personal" | "work" | "general";
+  proposed_sensitivity: MemoryPublicationSensitivity;
+  source_revision: string;
+  candidate?: MemoryPublicationCandidate | null;
+  resolution?: MemoryPublicationResolution | null;
+  status: "pending" | "approved" | "rejected" | "failed";
+  reason_code: string;
+  failure_reason?: string | null;
+  proposed_by: string;
+  decided_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryPublicationMemoryRecord {
+  reference: MemoryPublicationRef;
+  user_id: string;
+  workspace_id: string;
+  memory_type: string;
+  text: string;
+  aliases: string[];
+  language_hints: string[];
+  confidence: number;
+  status: "candidate" | "confirmed" | "rejected" | "stale" | "deleted";
+  privacy_domain: "personal" | "work" | "general";
+  sensitivity: MemoryPublicationSensitivity;
+  metadata: unknown;
+  created_at: string;
+  updated_at: string;
+  last_seen_at?: string | null;
+}
+
+export interface MemoryPublicationResult {
+  proposal: MemoryPublicationProposal;
+  destination: MemoryPublicationMemoryRecord;
+  link: {
+    source_ref: MemoryPublicationRef;
+    destination_ref: MemoryPublicationRef;
+    approved_by: string;
+    created_at: string;
+  };
+}
+
+export interface MemoryPublicationCreateInput {
+  source_ref: string;
+  source_workspace_id: string;
+  destination_workspace_id: string;
+  edit?: MemoryPublicationEditInput;
+}
+
 export interface ComposioConnectResult {
   provider_id: string;
   tools_cached: number;
@@ -1967,6 +2053,39 @@ async function electronRevokeMemorySource(
   );
 }
 
+async function electronCreateMemoryPublication(
+  input: MemoryPublicationCreateInput,
+): Promise<MemoryPublicationProposal> {
+  return gatewayPostJson<MemoryPublicationProposal>("/api/memory/publications", input);
+}
+
+async function electronMemoryPublication(
+  proposalId: string,
+): Promise<MemoryPublicationProposal> {
+  return gatewayGetJson<MemoryPublicationProposal>(
+    `/api/memory/publications/${encodeURIComponent(proposalId)}`,
+  );
+}
+
+async function electronApproveMemoryPublication(
+  proposalId: string,
+  resolution: MemoryPublicationResolution,
+): Promise<MemoryPublicationResult> {
+  return gatewayPostJson<MemoryPublicationResult>(
+    `/api/memory/publications/${encodeURIComponent(proposalId)}/approve`,
+    { resolution },
+  );
+}
+
+async function electronRejectMemoryPublication(
+  proposalId: string,
+): Promise<MemoryPublicationProposal> {
+  return gatewayPostJson<MemoryPublicationProposal>(
+    `/api/memory/publications/${encodeURIComponent(proposalId)}/reject`,
+    {},
+  );
+}
+
 /** A parameter (env var, argument, or HTTP header) a registry server needs. */
 export interface McpRegistryInput {
   key: string;
@@ -2996,6 +3115,12 @@ export const coreBridge = {
     electronUpsertMemorySource(workspaceId, input),
   revokeMemorySource: (workspaceId: string, grantId: string) =>
     electronRevokeMemorySource(workspaceId, grantId),
+  createMemoryPublication: (input: MemoryPublicationCreateInput) =>
+    electronCreateMemoryPublication(input),
+  memoryPublication: (proposalId: string) => electronMemoryPublication(proposalId),
+  approveMemoryPublication: (proposalId: string, resolution: MemoryPublicationResolution) =>
+    electronApproveMemoryPublication(proposalId, resolution),
+  rejectMemoryPublication: (proposalId: string) => electronRejectMemoryPublication(proposalId),
   mcpConnect: (input: {
     name: string;
     command?: string;

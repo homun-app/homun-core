@@ -67,6 +67,35 @@
     "confirm": "Conferma collegamento",
     "saving": "Salvataggio…"
   },
+  "memoryPublication": {
+    "title": "Pubblica in un'altra memoria",
+    "publish": "Pubblica…",
+    "text": "Testo da pubblicare",
+    "type": "Tipo",
+    "collection": "Raccolta",
+    "collectionDerived": "Derivata dal tipo",
+    "privacyDomain": "Ambito privacy",
+    "sensitivity": "Sensibilità",
+    "destination": "Destinazione",
+    "chooseDestination": "Scegli una destinazione",
+    "destinationRequired": "Scegli una destinazione prima di creare la proposta.",
+    "duplicate": "Esiste già una memoria simile",
+    "conflict": "La destinazione contiene una versione incompatibile",
+    "createNew": "Crea una nuova memoria canonica",
+    "updateExisting": "Aggiorna la memoria esistente selezionata",
+    "consequence": "La destinazione diventerà la versione canonica. La memoria sorgente resterà un alias pubblicato e non verrà sincronizzata automaticamente.",
+    "canonicalConfirmation": "Confermo che la memoria destinataria diventerà la versione canonica e che non verrà sincronizzata automaticamente.",
+    "review": "Rivedi proposta",
+    "approve": "Pubblica memoria",
+    "reject": "Annulla proposta",
+    "saving": "Salvataggio…",
+    "loading": "Caricamento destinazioni…",
+    "domains": {
+      "personal": "Personale",
+      "work": "Lavoro",
+      "general": "Generale"
+    }
+  },
   "filters": {
     "label": "Filtra",
     "type": "Tipo",

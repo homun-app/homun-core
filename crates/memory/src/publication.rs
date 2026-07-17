@@ -60,6 +60,17 @@ pub enum MemoryPublicationCandidate {
     Conflict { destination_ref: MemoryRef },
 }
 
+/// The only client-editable portion of a publication proposal. Scope, ownership,
+/// provenance, candidate and lifecycle state are deliberately absent: they are
+/// always reloaded and derived by the memory boundary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryPublicationEditInput {
+    pub proposed_text: Option<String>,
+    pub proposed_memory_type: Option<String>,
+    pub proposed_privacy_domain: Option<PrivacyDomain>,
+    pub proposed_sensitivity: Option<DataSensitivity>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryPublicationProposal {
     pub id: String,
@@ -75,6 +86,9 @@ pub struct MemoryPublicationProposal {
     pub proposed_collection: MemoryCollectionKey,
     pub proposed_privacy_domain: PrivacyDomain,
     pub proposed_sensitivity: DataSensitivity,
+    /// Fingerprint of the server-reloaded source when this preview was made.
+    /// A pending legacy proposal without a verifiable revision is fail-closed.
+    pub source_revision: String,
     pub candidate: Option<MemoryPublicationCandidate>,
     pub resolution: Option<MemoryPublicationResolution>,
     pub status: MemoryPublicationStatus,

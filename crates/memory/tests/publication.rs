@@ -1,9 +1,9 @@
 use local_first_memory::{
     AuthorizedMemorySource, DataSensitivity, MemoryCollectionKey, MemoryFacade,
-    MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationReasonCode,
-    MemoryPublicationResolution, MemoryPublicationStatus, MemoryPublicationStoreError,
-    MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId,
-    WorkspaceId, recall_source_on_facade,
+    MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationEditInput,
+    MemoryPublicationReasonCode, MemoryPublicationResolution, MemoryPublicationStatus,
+    MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus,
+    PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
 };
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -82,6 +82,81 @@ fn choose_create_new(facade: &MemoryFacade, proposal_id: &str) {
     facade
         .set_publication_resolution(proposal_id, OWNER, MemoryPublicationResolution::CreateNew)
         .unwrap();
+}
+
+#[test]
+fn edited_publication_persists_only_validated_safe_payload_and_source_revision() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let proposal = fixture
+        .facade
+        .create_publication_proposal_with_edit(
+            &source,
+            &fixture.personal_destination(),
+            OWNER,
+            Some(&MemoryPublicationEditInput {
+                proposed_text: Some("Prefers concise Italian replies".to_string()),
+                proposed_memory_type: Some("preference".to_string()),
+                proposed_privacy_domain: Some(PrivacyDomain::new("personal")),
+                proposed_sensitivity: Some(DataSensitivity::Private),
+            }),
+        )
+        .unwrap();
+
+    assert_eq!(proposal.proposed_text, "Prefers concise Italian replies");
+    assert_eq!(
+        proposal.proposed_collection,
+        MemoryCollectionKey::Preferences
+    );
+    assert!(!proposal.source_revision.is_empty());
+}
+
+#[test]
+fn edited_publication_rejects_secret_payload_and_stale_source_before_writing() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let secret = fixture.facade.create_publication_proposal_with_edit(
+        &source,
+        &fixture.personal_destination(),
+        OWNER,
+        Some(&MemoryPublicationEditInput {
+            proposed_text: Some("api_key=super-secret-value".to_string()),
+            proposed_memory_type: None,
+            proposed_privacy_domain: None,
+            proposed_sensitivity: None,
+        }),
+    );
+    assert_eq!(secret.unwrap_err().as_str(), "secret_never_shareable");
+
+    let proposal = fixture
+        .facade
+        .create_publication_proposal_with_edit(
+            &source,
+            &fixture.personal_destination(),
+            OWNER,
+            Some(&MemoryPublicationEditInput {
+                proposed_text: Some("Edited, but reviewed".to_string()),
+                proposed_memory_type: None,
+                proposed_privacy_domain: None,
+                proposed_sensitivity: None,
+            }),
+        )
+        .unwrap();
+    let mut changed = fixture.get_source(&source.reference);
+    changed.text = "Changed after preview".to_string();
+    changed.updated_at = "unix:2.000000000".to_string();
+    fixture.facade.upsert_memory(&changed).unwrap();
+    choose_create_new(&fixture.facade, &proposal.id);
+
+    assert_eq!(
+        fixture
+            .facade
+            .approve_publication(&proposal.id, OWNER)
+            .unwrap_err()
+            .as_str(),
+        "publication_source_changed"
+    );
+    assert!(fixture.personal_memories().is_empty());
 }
 
 #[test]
@@ -618,13 +693,13 @@ fn remove_sqlite_files(path: &Path) {
 }
 
 #[test]
-fn schema_v4_open_remains_compatible() {
+fn schema_v5_open_remains_compatible() {
     let path = unique_db_path("schema-v4");
     let store = SQLiteMemoryStore::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 4);
+    assert_eq!(store.schema_version().unwrap(), 5);
     drop(store);
     let reopened = SQLiteMemoryStore::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 4);
+    assert_eq!(reopened.schema_version().unwrap(), 5);
     remove_sqlite_files(&path);
 }
 
@@ -815,17 +890,18 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
             destination_ref: duplicate,
         })
     );
+    assert_eq!(pending_duplicate.status, MemoryPublicationStatus::Failed);
     assert_eq!(
-        pending_duplicate.reason_code,
-        MemoryPublicationReasonCode::PublicationDuplicateCompatible
+        pending_duplicate.failure_reason.as_deref(),
+        Some("publication_source_changed")
     );
     assert_eq!(
         facade
             .get_publication_proposal("pending")
             .unwrap()
             .unwrap()
-            .reason_code,
-        MemoryPublicationReasonCode::Pending
+            .status,
+        MemoryPublicationStatus::Failed
     );
     assert!(facade.get_publication_proposal("pending-corrupt").is_err());
     assert!(facade.get_publication_proposal("pending-fact").is_err());

@@ -7,17 +7,19 @@ use crate::{
     MemoryContextItem, MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError,
     MemoryEvent, MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryHealth,
     MemoryLifecycleRequest, MemoryMaintenanceReport, MemoryPolicyEngine,
-    MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationLink,
-    MemoryPublicationProposal, MemoryPublicationReasonCode, MemoryPublicationResolution,
-    MemoryPublicationResult, MemoryPublicationStatus, MemoryPublicationStoreError, MemoryRecord,
-    MemoryRef, MemoryRefKind, MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest,
-    MemorySearchResult, MemorySourceCandidateProjection, MemorySourceGrant,
-    MemorySourceGrantStoreError, MemoryStatus, MemoryUpdatePatch, PERSONAL_WORKSPACE,
-    PrivacyDomain, RoutineInference, RoutineInferenceSummary, RoutineRecord, RoutineStatus,
-    SQLiteMemoryStore, THREADS_WORKSPACE, UserId, VectorHit, WikiCorrectionSyncReport,
-    WikiFileStore, WikiPage, WorkspaceId, contains_secret, current_timestamp,
-    ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
+    MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationEditInput,
+    MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
+    MemoryPublicationResolution, MemoryPublicationResult, MemoryPublicationStatus,
+    MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
+    MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
+    MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus,
+    MemoryUpdatePatch, PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference,
+    RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore, THREADS_WORKSPACE,
+    UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId,
+    contains_secret, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
+    parse_wiki_markdown,
 };
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
@@ -1507,14 +1509,25 @@ impl MemoryFacade {
         destination: &MemoryPublicationDestination,
         actor: &str,
     ) -> MemoryResult<MemoryPublicationProposal> {
+        self.create_publication_proposal_with_edit(source, destination, actor, None)
+    }
+
+    pub fn create_publication_proposal_with_edit(
+        &self,
+        source: &MemoryRecord,
+        destination: &MemoryPublicationDestination,
+        actor: &str,
+        edit: Option<&MemoryPublicationEditInput>,
+    ) -> MemoryResult<MemoryPublicationProposal> {
         self.validate_publication_actor_and_destination(source, destination, actor)?;
         let source =
             self.load_publication_source(&source.reference, &source.user_id, &source.workspace_id)?;
         self.validate_publication_source(&source)?;
-        let proposed_collection = MemoryCollectionKey::for_memory(&source)
+        let proposed = publication_edited_payload(&source, edit)?;
+        let proposed_collection = MemoryCollectionKey::for_memory(&proposed)
             .ok_or_else(|| MemoryError::validation("publication_collection_unknown"))?;
         let candidate =
-            self.find_publication_candidate(&source, destination, proposed_collection)?;
+            self.find_publication_candidate(&proposed, destination, proposed_collection)?;
         let now = current_timestamp();
         let proposal = MemoryPublicationProposal {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1523,11 +1536,12 @@ impl MemoryFacade {
             source_workspace_id: source.workspace_id.clone(),
             destination_user_id: destination.user_id.clone(),
             destination_workspace_id: destination.workspace_id.clone(),
-            proposed_text: source.text.clone(),
-            proposed_memory_type: source.memory_type.clone(),
+            proposed_text: proposed.text,
+            proposed_memory_type: proposed.memory_type,
             proposed_collection,
-            proposed_privacy_domain: source.privacy_domain.clone(),
-            proposed_sensitivity: source.sensitivity,
+            proposed_privacy_domain: proposed.privacy_domain,
+            proposed_sensitivity: proposed.sensitivity,
+            source_revision: publication_source_revision(&source)?,
             reason_code: publication_pending_reason(candidate.as_ref()),
             candidate,
             resolution: None,
@@ -1585,8 +1599,11 @@ impl MemoryFacade {
             proposal.destination_user_id.clone(),
             proposal.destination_workspace_id.clone(),
         );
-        let candidate =
-            self.find_publication_candidate(&source, &destination, proposal.proposed_collection)?;
+        let candidate = self.find_publication_candidate(
+            &publication_candidate_record(&source, &proposal),
+            &destination,
+            proposal.proposed_collection,
+        )?;
         if candidate != proposal.candidate
             || !publication_resolution_matches_candidate(&resolution, candidate.as_ref())
         {
@@ -1652,11 +1669,7 @@ impl MemoryFacade {
             self.mark_publication_failed_if_pending(&proposal.id, actor, error.as_str());
             return Err(error);
         }
-        if source.text != proposal.proposed_text
-            || source.memory_type != proposal.proposed_memory_type
-            || source.privacy_domain != proposal.proposed_privacy_domain
-            || source.sensitivity != proposal.proposed_sensitivity
-        {
+        if publication_source_revision(&source)? != proposal.source_revision {
             self.mark_publication_failed_if_pending(
                 &proposal.id,
                 actor,
@@ -1670,8 +1683,9 @@ impl MemoryFacade {
             proposal.destination_workspace_id.clone(),
         );
         self.validate_publication_destination(&source, &destination_scope)?;
+        validate_publication_proposed_payload(&proposal)?;
         let candidate = self.find_publication_candidate(
-            &source,
+            &publication_candidate_record(&source, &proposal),
             &destination_scope,
             proposal.proposed_collection,
         )?;
@@ -2194,7 +2208,121 @@ impl MemoryFacade {
     }
 }
 
+const PUBLICATION_EDIT_TEXT_MAX: usize = 8 * 1024;
 const PUBLICATION_SEMANTIC_VALUE_MAX: usize = 256;
+
+fn publication_edited_payload(
+    source: &MemoryRecord,
+    edit: Option<&MemoryPublicationEditInput>,
+) -> MemoryResult<MemoryRecord> {
+    let mut proposed = source.clone();
+    let Some(edit) = edit else {
+        validate_publication_editable_fields(&proposed)?;
+        return Ok(proposed);
+    };
+    if let Some(text) = &edit.proposed_text {
+        proposed.text = text.trim().to_string();
+    }
+    if let Some(memory_type) = &edit.proposed_memory_type {
+        proposed.memory_type = memory_type.clone();
+    }
+    if let Some(domain) = &edit.proposed_privacy_domain {
+        proposed.privacy_domain = domain.clone();
+    }
+    if let Some(sensitivity) = edit.proposed_sensitivity {
+        proposed.sensitivity = sensitivity;
+    }
+    validate_publication_editable_fields(&proposed)?;
+    Ok(proposed)
+}
+
+fn validate_publication_editable_fields(proposed: &MemoryRecord) -> MemoryResult<()> {
+    if proposed.text.trim().is_empty() || proposed.text.len() > PUBLICATION_EDIT_TEXT_MAX {
+        return Err(MemoryError::validation("publication_text_invalid"));
+    }
+    if !matches!(
+        proposed.memory_type.as_str(),
+        "preference"
+            | "fact"
+            | "note"
+            | "decision"
+            | "goal"
+            | "objective"
+            | "open_loop"
+            | "artifact"
+            | "episode"
+    ) {
+        return Err(MemoryError::validation("publication_memory_type_invalid"));
+    }
+    if !matches!(
+        proposed.privacy_domain.as_str(),
+        "personal" | "work" | "general"
+    ) {
+        return Err(MemoryError::validation(
+            "publication_privacy_domain_invalid",
+        ));
+    }
+    if proposed.sensitivity > DataSensitivity::Private {
+        return Err(MemoryError::policy("publication_sensitivity_not_allowed"));
+    }
+    if contains_secret(&serde_json::json!({ "text": proposed.text })) {
+        return Err(MemoryError::policy("secret_never_shareable"));
+    }
+    Ok(())
+}
+
+fn validate_publication_proposed_payload(proposal: &MemoryPublicationProposal) -> MemoryResult<()> {
+    let record = MemoryRecord {
+        reference: proposal.source_ref.clone(),
+        user_id: proposal.source_user_id.clone(),
+        workspace_id: proposal.source_workspace_id.clone(),
+        memory_type: proposal.proposed_memory_type.clone(),
+        text: proposal.proposed_text.clone(),
+        aliases: Vec::new(),
+        language_hints: Vec::new(),
+        confidence: 1.0,
+        status: MemoryStatus::Confirmed,
+        privacy_domain: proposal.proposed_privacy_domain.clone(),
+        sensitivity: proposal.proposed_sensitivity,
+        metadata: serde_json::json!({}),
+        created_at: String::new(),
+        updated_at: String::new(),
+        last_seen_at: None,
+        supersedes: Vec::new(),
+        superseded_by: None,
+        correction_of: None,
+    };
+    validate_publication_editable_fields(&record)
+}
+
+fn publication_candidate_record(
+    source: &MemoryRecord,
+    proposal: &MemoryPublicationProposal,
+) -> MemoryRecord {
+    let mut candidate = source.clone();
+    candidate.text = proposal.proposed_text.clone();
+    candidate.memory_type = proposal.proposed_memory_type.clone();
+    candidate.privacy_domain = proposal.proposed_privacy_domain.clone();
+    candidate.sensitivity = proposal.proposed_sensitivity;
+    candidate
+}
+
+fn publication_source_revision(source: &MemoryRecord) -> MemoryResult<String> {
+    let payload = serde_json::json!({
+        "reference": &source.reference,
+        "memory_type": &source.memory_type,
+        "text": &source.text,
+        "privacy_domain": source.privacy_domain.as_str(),
+        "sensitivity": source.sensitivity,
+        "status": source.status,
+        "updated_at": &source.updated_at,
+        "semantic_metadata": publication_semantic_metadata(source)?,
+    });
+    let encoded = serde_json::to_vec(&payload).map_err(|_| {
+        MemoryError::Store("publication source revision serialization failed".to_string())
+    })?;
+    Ok(format!("sha256:{:x}", Sha256::digest(encoded)))
+}
 
 fn publication_system_ref(value: &serde_json::Value, user_id: &UserId) -> MemoryResult<MemoryRef> {
     let reference = serde_json::from_value::<MemoryRef>(value.clone())
