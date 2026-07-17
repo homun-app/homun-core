@@ -561,6 +561,7 @@ export type MemoryPublicationResolution =
 
 export interface MemoryPublicationProposal {
   id: string;
+  proposal_version: number;
   source_ref: MemoryPublicationRef;
   source_user_id: string;
   source_workspace_id: string;
@@ -2068,30 +2069,33 @@ async function electronMemoryPublication(
 
 async function electronUpdateMemoryPublication(
   proposalId: string,
+  expectedVersion: number,
   edit: MemoryPublicationEditInput,
 ): Promise<MemoryPublicationProposal> {
   return gatewayPostJson<MemoryPublicationProposal>(
     `/api/memory/publications/${encodeURIComponent(proposalId)}/edit`,
-    edit,
+    { expected_version: expectedVersion, edit },
   );
 }
 
 async function electronApproveMemoryPublication(
   proposalId: string,
+  expectedVersion: number,
   resolution: MemoryPublicationResolution,
 ): Promise<MemoryPublicationResult> {
   return gatewayPostJson<MemoryPublicationResult>(
     `/api/memory/publications/${encodeURIComponent(proposalId)}/approve`,
-    { resolution },
+    { expected_version: expectedVersion, resolution },
   );
 }
 
 async function electronRejectMemoryPublication(
   proposalId: string,
+  expectedVersion: number,
 ): Promise<MemoryPublicationProposal> {
   return gatewayPostJson<MemoryPublicationProposal>(
     `/api/memory/publications/${encodeURIComponent(proposalId)}/reject`,
-    {},
+    { expected_version: expectedVersion },
   );
 }
 
@@ -3127,11 +3131,12 @@ export const coreBridge = {
   createMemoryPublication: (input: MemoryPublicationCreateInput) =>
     electronCreateMemoryPublication(input),
   memoryPublication: (proposalId: string) => electronMemoryPublication(proposalId),
-  updateMemoryPublication: (proposalId: string, edit: MemoryPublicationEditInput) =>
-    electronUpdateMemoryPublication(proposalId, edit),
-  approveMemoryPublication: (proposalId: string, resolution: MemoryPublicationResolution) =>
-    electronApproveMemoryPublication(proposalId, resolution),
-  rejectMemoryPublication: (proposalId: string) => electronRejectMemoryPublication(proposalId),
+  updateMemoryPublication: (proposalId: string, expectedVersion: number, edit: MemoryPublicationEditInput) =>
+    electronUpdateMemoryPublication(proposalId, expectedVersion, edit),
+  approveMemoryPublication: (proposalId: string, expectedVersion: number, resolution: MemoryPublicationResolution) =>
+    electronApproveMemoryPublication(proposalId, expectedVersion, resolution),
+  rejectMemoryPublication: (proposalId: string, expectedVersion: number) =>
+    electronRejectMemoryPublication(proposalId, expectedVersion),
   mcpConnect: (input: {
     name: string;
     command?: string;

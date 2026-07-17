@@ -74,6 +74,8 @@ pub struct MemoryPublicationEditInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryPublicationProposal {
     pub id: String,
+    /// Monotonic optimistic-concurrency token for this exact preview.
+    pub proposal_version: u64,
     pub source_ref: MemoryRef,
     pub source_user_id: UserId,
     pub source_workspace_id: WorkspaceId,

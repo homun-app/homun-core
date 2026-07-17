@@ -1531,6 +1531,7 @@ impl MemoryFacade {
         let now = current_timestamp();
         let proposal = MemoryPublicationProposal {
             id: uuid::Uuid::new_v4().to_string(),
+            proposal_version: 1,
             source_ref: source.reference.clone(),
             source_user_id: source.user_id.clone(),
             source_workspace_id: source.workspace_id.clone(),
@@ -1576,10 +1577,27 @@ impl MemoryFacade {
         actor: &str,
         edit: &MemoryPublicationEditInput,
     ) -> MemoryResult<MemoryPublicationProposal> {
+        let version = self
+            .get_publication_proposal(id)?
+            .ok_or_else(|| MemoryError::not_found("publication_not_found"))?
+            .proposal_version;
+        self.update_publication_proposal_at_version(id, actor, version, edit)
+    }
+
+    pub fn update_publication_proposal_at_version(
+        &self,
+        id: &str,
+        actor: &str,
+        expected_version: u64,
+        edit: &MemoryPublicationEditInput,
+    ) -> MemoryResult<MemoryPublicationProposal> {
         let proposal = self
             .get_publication_proposal(id)?
             .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
         self.validate_publication_actor(&proposal, actor)?;
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryError::policy("publication_conflict"));
+        }
         if proposal.status != MemoryPublicationStatus::Pending {
             return Err(MemoryError::policy("publication_not_pending"));
         }
@@ -1590,16 +1608,26 @@ impl MemoryFacade {
         ) {
             Ok(source) => source,
             Err(error) => {
-                self.mark_publication_failed_if_pending(id, actor, error.as_str());
+                self.mark_publication_failed_if_pending(
+                    id,
+                    actor,
+                    expected_version,
+                    error.as_str(),
+                );
                 return Err(error);
             }
         };
         if let Err(error) = self.validate_publication_source(&source) {
-            self.mark_publication_failed_if_pending(id, actor, error.as_str());
+            self.mark_publication_failed_if_pending(id, actor, expected_version, error.as_str());
             return Err(error);
         }
         if publication_source_revision(&source)? != proposal.source_revision {
-            self.mark_publication_failed_if_pending(id, actor, "publication_source_changed");
+            self.mark_publication_failed_if_pending(
+                id,
+                actor,
+                expected_version,
+                "publication_source_changed",
+            );
             return Err(MemoryError::policy("publication_source_changed"));
         }
 
@@ -1626,9 +1654,12 @@ impl MemoryFacade {
         // Any prior decision is for the previous payload and must never carry
         // forward to a changed proposal.
         updated.resolution = None;
+        updated.proposal_version = expected_version
+            .checked_add(1)
+            .ok_or_else(|| MemoryError::validation("publication_version_invalid"))?;
         updated.updated_at = current_timestamp();
         self.store
-            .update_memory_publication_proposal(&updated, actor)
+            .update_memory_publication_proposal(&updated, actor, expected_version)
             .map_err(memory_publication_error)
     }
 
@@ -1647,10 +1678,27 @@ impl MemoryFacade {
         actor: &str,
         resolution: MemoryPublicationResolution,
     ) -> MemoryResult<MemoryPublicationProposal> {
+        let version = self
+            .get_publication_proposal(id)?
+            .ok_or_else(|| MemoryError::not_found("publication_not_found"))?
+            .proposal_version;
+        self.set_publication_resolution_at_version(id, actor, version, resolution)
+    }
+
+    pub fn set_publication_resolution_at_version(
+        &self,
+        id: &str,
+        actor: &str,
+        expected_version: u64,
+        resolution: MemoryPublicationResolution,
+    ) -> MemoryResult<MemoryPublicationProposal> {
         let proposal = self
             .get_publication_proposal(id)?
             .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
         self.validate_publication_actor(&proposal, actor)?;
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryError::policy("publication_conflict"));
+        }
         if proposal.status != MemoryPublicationStatus::Pending {
             return Err(MemoryError::policy("publication_not_pending"));
         }
@@ -1675,7 +1723,13 @@ impl MemoryFacade {
             return Err(MemoryError::policy("publication_conflict"));
         }
         self.store
-            .set_memory_publication_resolution(id, actor, &resolution, &current_timestamp())
+            .set_memory_publication_resolution(
+                id,
+                actor,
+                expected_version,
+                &resolution,
+                &current_timestamp(),
+            )
             .map_err(memory_publication_error)
     }
 
@@ -1684,12 +1738,28 @@ impl MemoryFacade {
         id: &str,
         actor: &str,
     ) -> MemoryResult<MemoryPublicationProposal> {
+        let version = self
+            .get_publication_proposal(id)?
+            .ok_or_else(|| MemoryError::not_found("publication_not_found"))?
+            .proposal_version;
+        self.reject_publication_at_version(id, actor, version)
+    }
+
+    pub fn reject_publication_at_version(
+        &self,
+        id: &str,
+        actor: &str,
+        expected_version: u64,
+    ) -> MemoryResult<MemoryPublicationProposal> {
         let proposal = self
             .get_publication_proposal(id)?
             .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
         self.validate_publication_actor(&proposal, actor)?;
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryError::policy("publication_conflict"));
+        }
         self.store
-            .reject_memory_publication(id, actor, &current_timestamp())
+            .reject_memory_publication(id, actor, expected_version, &current_timestamp())
             .map_err(memory_publication_error)
     }
 
@@ -1698,10 +1768,26 @@ impl MemoryFacade {
         id: &str,
         actor: &str,
     ) -> MemoryResult<MemoryPublicationResult> {
+        let version = self
+            .get_publication_proposal(id)?
+            .ok_or_else(|| MemoryError::not_found("publication_not_found"))?
+            .proposal_version;
+        self.approve_publication_at_version(id, actor, version)
+    }
+
+    pub fn approve_publication_at_version(
+        &self,
+        id: &str,
+        actor: &str,
+        expected_version: u64,
+    ) -> MemoryResult<MemoryPublicationResult> {
         let proposal = self
             .get_publication_proposal(id)?
             .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
         self.validate_publication_actor(&proposal, actor)?;
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryError::policy("publication_conflict"));
+        }
         if proposal.status == MemoryPublicationStatus::Approved {
             return self.approved_publication_result(proposal);
         }
@@ -1716,7 +1802,12 @@ impl MemoryFacade {
         ) {
             Ok(source) => source,
             Err(error) => {
-                self.mark_publication_failed_if_pending(&proposal.id, actor, error.as_str());
+                self.mark_publication_failed_if_pending(
+                    &proposal.id,
+                    actor,
+                    proposal.proposal_version,
+                    error.as_str(),
+                );
                 return Err(error);
             }
         };
@@ -1731,13 +1822,19 @@ impl MemoryFacade {
                     }
                 }
             }
-            self.mark_publication_failed_if_pending(&proposal.id, actor, error.as_str());
+            self.mark_publication_failed_if_pending(
+                &proposal.id,
+                actor,
+                proposal.proposal_version,
+                error.as_str(),
+            );
             return Err(error);
         }
         if publication_source_revision(&source)? != proposal.source_revision {
             self.mark_publication_failed_if_pending(
                 &proposal.id,
                 actor,
+                proposal.proposal_version,
                 "publication_source_changed",
             );
             return Err(MemoryError::policy("publication_source_changed"));
@@ -1825,7 +1922,12 @@ impl MemoryFacade {
                 }
             }
             Err(error) => {
-                self.mark_publication_failed_if_pending(&proposal.id, actor, error.as_str());
+                self.mark_publication_failed_if_pending(
+                    &proposal.id,
+                    actor,
+                    proposal.proposal_version,
+                    error.as_str(),
+                );
                 Err(error)
             }
         }
@@ -2066,10 +2168,20 @@ impl MemoryFacade {
         })
     }
 
-    fn mark_publication_failed_if_pending(&self, id: &str, actor: &str, reason: &str) {
-        let _ = self
-            .store
-            .mark_memory_publication_failed(id, actor, reason, &current_timestamp());
+    fn mark_publication_failed_if_pending(
+        &self,
+        id: &str,
+        actor: &str,
+        expected_version: u64,
+        reason: &str,
+    ) {
+        let _ = self.store.mark_memory_publication_failed(
+            id,
+            actor,
+            expected_version,
+            reason,
+            &current_timestamp(),
+        );
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> MemoryResult<MemoryBackupReport> {

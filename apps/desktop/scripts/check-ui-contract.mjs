@@ -180,6 +180,7 @@ assertContains("src/components/MemorySourcesDialog.tsx", "openModifyGrant", "ava
 assertContains("src/components/MemorySourcesDialog.tsx", "revokeConfirmation", "revocation must require an explicit confirmation state");
 assertContains("src/components/MemoryPublicationDialog.tsx", "proposed_text", "publication must preview exact text before approval");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.updateMemoryPublication", "changed publication fields must be revalidated by the server before approval");
+assertContains("src/components/MemoryPublicationDialog.tsx", "proposal.proposal_version", "publication mutations must bind to the server preview version");
 assertContains("src/components/MemoryPublicationDialog.tsx", "destination_workspace_id: destinationWorkspaceId", "initial publication preview must be created only after a destination is selected");
 assertNotContains("src/components/MemoryPublicationDialog.tsx", "initialText", "publication preview must not seed a client-side recall payload");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.approveMemoryPublication", "publication must require explicit approval");

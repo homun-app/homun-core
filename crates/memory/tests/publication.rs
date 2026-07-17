@@ -79,9 +79,26 @@ fn memory(user: &UserId, workspace: &WorkspaceId, kind: &str, text: &str) -> Mem
 }
 
 fn choose_create_new(facade: &MemoryFacade, proposal_id: &str) {
-    facade
-        .set_publication_resolution(proposal_id, OWNER, MemoryPublicationResolution::CreateNew)
+    let proposal = facade
+        .get_publication_proposal(proposal_id)
+        .unwrap()
         .unwrap();
+    facade
+        .set_publication_resolution_at_version(
+            proposal_id,
+            OWNER,
+            proposal.proposal_version,
+            MemoryPublicationResolution::CreateNew,
+        )
+        .unwrap();
+}
+
+fn publication_version(facade: &MemoryFacade, proposal_id: &str) -> u64 {
+    facade
+        .get_publication_proposal(proposal_id)
+        .unwrap()
+        .unwrap()
+        .proposal_version
 }
 
 #[test]
@@ -133,9 +150,10 @@ fn server_first_proposal_keeps_source_values_and_pending_edit_revalidates_them()
 
     let updated = fixture
         .facade
-        .update_publication_proposal(
+        .update_publication_proposal_at_version(
             &proposal.id,
             OWNER,
+            publication_version(&fixture.facade, &proposal.id),
             &MemoryPublicationEditInput {
                 proposed_text: Some("Prefers concise Italian replies".to_string()),
                 proposed_memory_type: Some("note".to_string()),
@@ -150,6 +168,152 @@ fn server_first_proposal_keeps_source_values_and_pending_edit_revalidates_them()
     assert_eq!(updated.proposed_collection, MemoryCollectionKey::Knowledge);
     assert!(updated.resolution.is_none());
     assert_eq!(updated.status, MemoryPublicationStatus::Pending);
+}
+
+#[test]
+fn stale_preview_versions_cannot_edit_reject_or_approve_after_a_newer_review() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let preview_a = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    assert_eq!(preview_a.proposal_version, 1);
+
+    let preview_b = fixture
+        .facade
+        .update_publication_proposal_at_version(
+            &preview_a.id,
+            OWNER,
+            preview_a.proposal_version,
+            &MemoryPublicationEditInput {
+                proposed_text: Some("Prefers concise Italian replies".to_string()),
+                proposed_memory_type: None,
+                proposed_privacy_domain: None,
+                proposed_sensitivity: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(preview_b.proposal_version, 2);
+
+    for stale in [
+        fixture.facade.update_publication_proposal_at_version(
+            &preview_a.id,
+            OWNER,
+            preview_a.proposal_version,
+            &MemoryPublicationEditInput {
+                proposed_text: Some("stale overwrite".to_string()),
+                proposed_memory_type: None,
+                proposed_privacy_domain: None,
+                proposed_sensitivity: None,
+            },
+        ),
+        fixture.facade.reject_publication_at_version(
+            &preview_a.id,
+            OWNER,
+            preview_a.proposal_version,
+        ),
+    ] {
+        assert_eq!(stale.unwrap_err().as_str(), "publication_conflict");
+    }
+    assert_eq!(
+        fixture
+            .facade
+            .set_publication_resolution_at_version(
+                &preview_a.id,
+                OWNER,
+                preview_a.proposal_version,
+                MemoryPublicationResolution::CreateNew,
+            )
+            .unwrap_err()
+            .as_str(),
+        "publication_conflict"
+    );
+    assert!(fixture.personal_memories().is_empty());
+
+    let reviewed = fixture
+        .facade
+        .set_publication_resolution_at_version(
+            &preview_b.id,
+            OWNER,
+            preview_b.proposal_version,
+            MemoryPublicationResolution::CreateNew,
+        )
+        .unwrap();
+    assert_eq!(reviewed.proposal_version, 3);
+    let approved = fixture
+        .facade
+        .approve_publication_at_version(&reviewed.id, OWNER, reviewed.proposal_version)
+        .unwrap();
+    assert_eq!(approved.proposal.status, MemoryPublicationStatus::Approved);
+    assert_eq!(approved.proposal.proposal_version, 4);
+}
+
+#[test]
+fn concurrent_edit_and_approve_accept_exactly_one_preview_version() {
+    let facade = Arc::new(MemoryFacade::new(
+        SQLiteMemoryStore::open_in_memory().unwrap(),
+    ));
+    let owner = UserId::new(OWNER);
+    let project = WorkspaceId::new(PROJECT);
+    let source = memory(&owner, &project, "preference", "Prefers Italian");
+    facade.upsert_memory(&source).unwrap();
+    let proposal = facade
+        .create_publication_proposal(
+            &source,
+            &MemoryPublicationDestination::personal(owner.clone()),
+            OWNER,
+        )
+        .unwrap();
+    choose_create_new(&facade, &proposal.id);
+    let version = publication_version(&facade, &proposal.id);
+    let barrier = Arc::new(Barrier::new(3));
+
+    let approve_facade = Arc::clone(&facade);
+    let approve_id = proposal.id.clone();
+    let approve_barrier = Arc::clone(&barrier);
+    let approve = std::thread::spawn(move || {
+        approve_barrier.wait();
+        approve_facade.approve_publication_at_version(&approve_id, OWNER, version)
+    });
+    let edit_facade = Arc::clone(&facade);
+    let edit_id = proposal.id.clone();
+    let edit_barrier = Arc::clone(&barrier);
+    let edit = std::thread::spawn(move || {
+        edit_barrier.wait();
+        edit_facade.update_publication_proposal_at_version(
+            &edit_id,
+            OWNER,
+            version,
+            &MemoryPublicationEditInput {
+                proposed_text: Some("Prefers concise Italian replies".to_string()),
+                proposed_memory_type: None,
+                proposed_privacy_domain: None,
+                proposed_sensitivity: None,
+            },
+        )
+    });
+    barrier.wait();
+    let approve = approve.join().unwrap();
+    let edit = edit.join().unwrap();
+    assert_eq!(usize::from(approve.is_ok()) + usize::from(edit.is_ok()), 1);
+
+    let personal = facade
+        .list_memories_for_ui(&owner, &WorkspaceId::new("__personal__"))
+        .unwrap();
+    if approve.is_ok() {
+        assert_eq!(personal.len(), 1);
+        assert!(edit.is_err());
+    } else {
+        assert!(personal.is_empty());
+        assert!(approve.is_err());
+        let current = facade
+            .get_publication_proposal(&proposal.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.status, MemoryPublicationStatus::Pending);
+        assert_eq!(current.proposal_version, version + 1);
+    }
 }
 
 #[test]
@@ -192,7 +356,11 @@ fn edited_publication_rejects_secret_payload_and_stale_source_before_writing() {
     assert_eq!(
         fixture
             .facade
-            .approve_publication(&proposal.id, OWNER)
+            .approve_publication_at_version(
+                &proposal.id,
+                OWNER,
+                publication_version(&fixture.facade, &proposal.id)
+            )
             .unwrap_err()
             .as_str(),
         "publication_source_changed"
@@ -212,7 +380,11 @@ fn approved_publication_creates_destination_and_marks_source_alias_atomically() 
     choose_create_new(&fixture.facade, &proposal.id);
     let result = fixture
         .facade
-        .approve_publication(&proposal.id, OWNER)
+        .approve_publication_at_version(
+            &proposal.id,
+            OWNER,
+            publication_version(&fixture.facade, &proposal.id),
+        )
         .unwrap();
 
     assert_eq!(result.proposal.status, MemoryPublicationStatus::Approved);
@@ -253,7 +425,11 @@ fn published_destination_exposes_structural_publication_link_to_recall_dedup() {
     choose_create_new(&fixture.facade, &proposal.id);
     let result = fixture
         .facade
-        .approve_publication(&proposal.id, OWNER)
+        .approve_publication_at_version(
+            &proposal.id,
+            OWNER,
+            publication_version(&fixture.facade, &proposal.id),
+        )
         .unwrap();
     let personal = AuthorizedMemorySource {
         source_user_id: fixture.owner.clone(),
@@ -288,7 +464,11 @@ fn rejected_publication_does_not_modify_either_scope() {
 
     let rejected = fixture
         .facade
-        .reject_publication(&proposal.id, OWNER)
+        .reject_publication_at_version(
+            &proposal.id,
+            OWNER,
+            publication_version(&fixture.facade, &proposal.id),
+        )
         .unwrap();
 
     assert_eq!(rejected.status, MemoryPublicationStatus::Rejected);
@@ -315,11 +495,15 @@ fn published_source_cannot_create_a_second_publication_and_approve_is_idempotent
 
     let first = fixture
         .facade
-        .approve_publication(&proposal.id, OWNER)
+        .approve_publication_at_version(
+            &proposal.id,
+            OWNER,
+            publication_version(&fixture.facade, &proposal.id),
+        )
         .unwrap();
     let repeated = fixture
         .facade
-        .approve_publication(&proposal.id, OWNER)
+        .approve_publication_at_version(&proposal.id, OWNER, first.proposal.proposal_version)
         .unwrap();
     let duplicate =
         fixture
@@ -357,16 +541,21 @@ fn compatible_destination_duplicate_is_reused_not_copied() {
     assert_eq!(
         fixture
             .facade
-            .approve_publication(&proposal.id, OWNER)
+            .approve_publication_at_version(
+                &proposal.id,
+                OWNER,
+                publication_version(&fixture.facade, &proposal.id)
+            )
             .unwrap_err()
             .as_str(),
         "publication_conflict"
     );
     fixture
         .facade
-        .set_publication_resolution(
+        .set_publication_resolution_at_version(
             &proposal.id,
             OWNER,
+            proposal.proposal_version,
             MemoryPublicationResolution::UpdateExisting {
                 destination_ref: existing.reference.clone(),
             },
@@ -375,7 +564,11 @@ fn compatible_destination_duplicate_is_reused_not_copied() {
 
     let result = fixture
         .facade
-        .approve_publication(&proposal.id, OWNER)
+        .approve_publication_at_version(
+            &proposal.id,
+            OWNER,
+            publication_version(&fixture.facade, &proposal.id),
+        )
         .unwrap();
     assert_eq!(result.destination.reference, existing.reference);
     assert_eq!(fixture.personal_memories().len(), 1);
@@ -407,7 +600,7 @@ fn incompatible_same_subject_requires_explicit_create_new_and_records_conflict()
     assert_eq!(
         fixture
             .facade
-            .approve_publication(&proposal.id, OWNER)
+            .approve_publication_at_version(&proposal.id, OWNER, proposal.proposal_version)
             .unwrap_err()
             .as_str(),
         "publication_conflict"
@@ -415,11 +608,20 @@ fn incompatible_same_subject_requires_explicit_create_new_and_records_conflict()
 
     fixture
         .facade
-        .set_publication_resolution(&proposal.id, OWNER, MemoryPublicationResolution::CreateNew)
+        .set_publication_resolution_at_version(
+            &proposal.id,
+            OWNER,
+            proposal.proposal_version,
+            MemoryPublicationResolution::CreateNew,
+        )
         .unwrap();
     let result = fixture
         .facade
-        .approve_publication(&proposal.id, OWNER)
+        .approve_publication_at_version(
+            &proposal.id,
+            OWNER,
+            publication_version(&fixture.facade, &proposal.id),
+        )
         .unwrap();
     assert_ne!(result.destination.reference, existing.reference);
     assert_eq!(fixture.personal_memories().len(), 2);
@@ -449,9 +651,10 @@ fn stale_or_invalid_update_existing_resolution_fails_closed() {
     assert_eq!(
         fixture
             .facade
-            .set_publication_resolution(
+            .set_publication_resolution_at_version(
                 &proposal.id,
                 OWNER,
+                proposal.proposal_version,
                 MemoryPublicationResolution::UpdateExisting {
                     destination_ref: wrong,
                 },
@@ -462,9 +665,10 @@ fn stale_or_invalid_update_existing_resolution_fails_closed() {
     );
     fixture
         .facade
-        .set_publication_resolution(
+        .set_publication_resolution_at_version(
             &proposal.id,
             OWNER,
+            proposal.proposal_version,
             MemoryPublicationResolution::UpdateExisting {
                 destination_ref: existing.reference.clone(),
             },
@@ -476,7 +680,11 @@ fn stale_or_invalid_update_existing_resolution_fails_closed() {
     assert_eq!(
         fixture
             .facade
-            .approve_publication(&proposal.id, OWNER)
+            .approve_publication_at_version(
+                &proposal.id,
+                OWNER,
+                publication_version(&fixture.facade, &proposal.id)
+            )
             .unwrap_err()
             .as_str(),
         "publication_conflict"
@@ -583,7 +791,7 @@ fn approval_revalidates_source_and_rejection_is_terminal() {
     assert_eq!(
         fixture
             .facade
-            .approve_publication(&proposal.id, OWNER)
+            .approve_publication_at_version(&proposal.id, OWNER, proposal.proposal_version)
             .unwrap_err()
             .as_str(),
         "publication_source_not_found"
@@ -597,12 +805,16 @@ fn approval_revalidates_source_and_rejection_is_terminal() {
         .unwrap();
     fixture
         .facade
-        .reject_publication(&proposal.id, OWNER)
+        .reject_publication_at_version(&proposal.id, OWNER, proposal.proposal_version)
         .unwrap();
     assert_eq!(
         fixture
             .facade
-            .approve_publication(&proposal.id, OWNER)
+            .approve_publication_at_version(
+                &proposal.id,
+                OWNER,
+                publication_version(&fixture.facade, &proposal.id)
+            )
             .unwrap_err()
             .as_str(),
         "publication_not_pending"
@@ -734,13 +946,13 @@ fn remove_sqlite_files(path: &Path) {
 }
 
 #[test]
-fn schema_v5_open_remains_compatible() {
+fn schema_v6_open_remains_compatible() {
     let path = unique_db_path("schema-v4");
     let store = SQLiteMemoryStore::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 5);
+    assert_eq!(store.schema_version().unwrap(), 6);
     drop(store);
     let reopened = SQLiteMemoryStore::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 5);
+    assert_eq!(reopened.schema_version().unwrap(), 6);
     remove_sqlite_files(&path);
 }
 
@@ -906,6 +1118,14 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
             .unwrap()
             .reason_code,
         MemoryPublicationReasonCode::Approved
+    );
+    assert_eq!(
+        facade
+            .get_publication_proposal("approved")
+            .unwrap()
+            .unwrap()
+            .proposal_version,
+        1
     );
     assert_eq!(
         facade

@@ -139,7 +139,12 @@ export function MemoryPublicationDialog({
     setSaving(true);
     setError(null);
     try {
-      if (pendingProposal?.status === "pending") await coreBridge.rejectMemoryPublication(pendingProposal.id);
+      if (pendingProposal?.status === "pending") {
+        await coreBridge.rejectMemoryPublication(
+          pendingProposal.id,
+          pendingProposal.proposal_version,
+        );
+      }
       if (!active.current || requestGeneration.current !== generation) return;
       closeDialog();
     } catch (err) {
@@ -223,7 +228,11 @@ export function MemoryPublicationDialog({
     setSaving(true);
     setError(null);
     try {
-      const next = await coreBridge.updateMemoryPublication(proposal.id, edit);
+      const next = await coreBridge.updateMemoryPublication(
+        proposal.id,
+        proposal.proposal_version,
+        edit,
+      );
       if (!active.current || requestGeneration.current !== generation) return;
       hydrateFromServer(next);
       setSaving(false);
@@ -241,7 +250,11 @@ export function MemoryPublicationDialog({
     setSaving(true);
     setError(null);
     try {
-      await coreBridge.approveMemoryPublication(proposal.id, resolution);
+      await coreBridge.approveMemoryPublication(
+        proposal.id,
+        proposal.proposal_version,
+        resolution,
+      );
       if (!active.current || requestGeneration.current !== generation) return;
       await onPublished();
       if (!active.current || requestGeneration.current !== generation) return;

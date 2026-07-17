@@ -682,7 +682,7 @@ fn grant_identity_is_immutable_on_conflicting_upsert() {
 
 #[test]
 fn memory_store_schema_version_is_four() {
-    assert_eq!(facade().memory_health().unwrap().schema_version, 5);
+    assert_eq!(facade().memory_health().unwrap().schema_version, 6);
 }
 
 fn assert_validation_error(result: Result<(), MemoryError>) {

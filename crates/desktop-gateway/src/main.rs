@@ -50320,8 +50320,19 @@ struct MemoryPublicationCreateRequest {
 
 #[derive(Debug, Deserialize)]
 struct MemoryPublicationApproveRequest {
-    #[serde(default)]
-    resolution: Option<MemoryPublicationResolution>,
+    expected_version: u64,
+    resolution: MemoryPublicationResolution,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryPublicationEditRequest {
+    expected_version: u64,
+    edit: MemoryPublicationEditInput,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryPublicationRejectRequest {
+    expected_version: u64,
 }
 
 fn memory_publication_error(status: StatusCode, code: &'static str) -> GatewayError {
@@ -50511,7 +50522,7 @@ async fn memory_publication_edit(
     let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
         .await
         .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
-    let edit = serde_json::from_slice::<MemoryPublicationEditInput>(&body)
+    let request = serde_json::from_slice::<MemoryPublicationEditRequest>(&body)
         .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
     let owner = gateway_memory_user_id();
     let facade = memory_facade(&state);
@@ -50521,7 +50532,12 @@ async fn memory_publication_edit(
         .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
     validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
     let updated = facade
-        .update_publication_proposal(&proposal_id, owner.as_str(), &edit)
+        .update_publication_proposal_at_version(
+            &proposal_id,
+            owner.as_str(),
+            request.expected_version,
+            &request.edit,
+        )
         .map_err(memory_publication_facade_error)?;
     Ok(Json(updated))
 }
@@ -50536,9 +50552,6 @@ async fn memory_publication_approve(
         .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
     let request = serde_json::from_slice::<MemoryPublicationApproveRequest>(&body)
         .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
-    let resolution = request.resolution.ok_or_else(|| {
-        memory_publication_error(StatusCode::CONFLICT, "publication_decision_required")
-    })?;
     let owner = gateway_memory_user_id();
     let facade = memory_facade(&state);
     let proposal = facade
@@ -50546,11 +50559,20 @@ async fn memory_publication_approve(
         .map_err(memory_publication_facade_error)?
         .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
     validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
-    facade
-        .set_publication_resolution(&proposal_id, owner.as_str(), resolution)
+    let resolved = facade
+        .set_publication_resolution_at_version(
+            &proposal_id,
+            owner.as_str(),
+            request.expected_version,
+            request.resolution,
+        )
         .map_err(memory_publication_facade_error)?;
     let result = facade
-        .approve_publication(&proposal_id, owner.as_str())
+        .approve_publication_at_version(
+            &proposal_id,
+            owner.as_str(),
+            resolved.proposal_version,
+        )
         .map_err(memory_publication_facade_error)?;
     Ok(Json(result))
 }
@@ -50558,7 +50580,13 @@ async fn memory_publication_approve(
 async fn memory_publication_reject(
     State(state): State<AppState>,
     Path(proposal_id): Path<String>,
+    request: Request,
 ) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
+        .await
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let request = serde_json::from_slice::<MemoryPublicationRejectRequest>(&body)
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
     let owner = gateway_memory_user_id();
     let facade = memory_facade(&state);
     let proposal = facade
@@ -50567,7 +50595,7 @@ async fn memory_publication_reject(
         .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
     validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
     let rejected = facade
-        .reject_publication(&proposal_id, owner.as_str())
+        .reject_publication_at_version(&proposal_id, owner.as_str(), request.expected_version)
         .map_err(memory_publication_facade_error)?;
     Ok(Json(rejected))
 }
@@ -53369,8 +53397,11 @@ mod tests {
                     .header("content-type", "application/json")
                     .body(Body::from(
                         serde_json::json!({
-                            "proposed_text": "Prefer concise Italian",
-                            "proposed_memory_type": "note"
+                            "expected_version": 1,
+                            "edit": {
+                                "proposed_text": "Prefer concise Italian",
+                                "proposed_memory_type": "note"
+                            }
                         })
                         .to_string(),
                     ))
@@ -53382,6 +53413,29 @@ mod tests {
         assert_eq!(status, axum::http::StatusCode::OK);
         assert_eq!(proposal["proposed_text"], "Prefer concise Italian");
         assert_eq!(proposal["proposed_memory_type"], "note");
+        assert_eq!(proposal["proposal_version"], 2);
+
+        for (suffix, body) in [
+            ("edit", serde_json::json!({ "expected_version": 1, "edit": { "proposed_text": "stale" } })),
+            ("reject", serde_json::json!({ "expected_version": 1 })),
+            ("approve", serde_json::json!({ "expected_version": 1, "resolution": { "kind": "create_new" } })),
+        ] {
+            let stale = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/memory/publications/{proposal_id}/{suffix}"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let (status, stale) = memory_source_response_json(stale).await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT);
+            assert_eq!(stale["error"]["code"], "publication_conflict");
+        }
 
         let missing_decision = app
             .clone()
@@ -53396,8 +53450,8 @@ mod tests {
             .await
             .unwrap();
         let (status, missing_decision) = memory_source_response_json(missing_decision).await;
-        assert_eq!(status, axum::http::StatusCode::CONFLICT);
-        assert_eq!(missing_decision["error"]["code"], "publication_decision_required");
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(missing_decision["error"]["code"], "memory_publication_invalid");
 
         let approved = app
             .clone()
@@ -53406,7 +53460,7 @@ mod tests {
                     .method("POST")
                     .uri(format!("/api/memory/publications/{proposal_id}/approve"))
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"resolution":{"kind":"create_new"}}"#))
+                    .body(Body::from(r#"{"expected_version":2,"resolution":{"kind":"create_new"}}"#))
                     .unwrap(),
             )
             .await
@@ -53451,7 +53505,8 @@ mod tests {
                         "/api/memory/publications/{}/reject",
                         rejected_proposal["id"].as_str().unwrap()
                     ))
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"expected_version":1}"#))
                     .unwrap(),
             )
             .await

@@ -19,7 +19,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-const SCHEMA_VERSION: u32 = 5;
+const SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemorySourceGrantStoreError {
@@ -858,14 +858,15 @@ impl SQLiteMemoryStore {
         transaction
             .execute(
                 "insert into memory_publication_proposals (
-                    id, source_ref_json, source_user_id, source_workspace_id,
+                    id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
                     proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
                     failure_reason, proposed_by, decided_by, created_at, updated_at
-                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
                 params![
                     &proposal.id,
+                    proposal.proposal_version,
                     source_ref_json,
                     proposal.source_user_id.as_str(),
                     proposal.source_workspace_id.as_str(),
@@ -924,7 +925,7 @@ impl SQLiteMemoryStore {
         let conn = self.read_conn();
         let proposal = query_optional(
             &conn,
-            "select id, source_ref_json, source_user_id, source_workspace_id,
+            "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
                     proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
@@ -948,6 +949,7 @@ impl SQLiteMemoryStore {
         &self,
         proposal: &MemoryPublicationProposal,
         actor: &str,
+        expected_version: u64,
     ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
         validate_memory_publication_proposal(proposal)
             .map_err(MemoryPublicationStoreError::validation)?;
@@ -965,6 +967,15 @@ impl SQLiteMemoryStore {
         if stored.status != MemoryPublicationStatus::Pending {
             return Err(MemoryPublicationStoreError::conflict(
                 "publication_not_pending",
+            ));
+        }
+        let next_version = expected_version.checked_add(1).ok_or_else(|| {
+            MemoryPublicationStoreError::validation("publication_version_invalid")
+        })?;
+        if stored.proposal_version != expected_version || proposal.proposal_version != next_version
+        {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
             ));
         }
         if stored.source_ref != proposal.source_ref
@@ -985,8 +996,8 @@ impl SQLiteMemoryStore {
                 "update memory_publication_proposals
                  set proposed_text = ?2, proposed_memory_type = ?3, proposed_collection = ?4,
                      proposed_privacy_domain = ?5, proposed_sensitivity = ?6, candidate_json = ?7,
-                     resolution_json = null, reason_code = ?8, updated_at = ?9
-                 where id = ?1 and status = 'pending'",
+                     resolution_json = null, reason_code = ?8, updated_at = ?9, proposal_version = ?10
+                 where id = ?1 and status = 'pending' and proposal_version = ?11",
                 params![
                     &proposal.id,
                     &proposal.proposed_text,
@@ -1004,6 +1015,8 @@ impl SQLiteMemoryStore {
                         .map_err(MemoryPublicationStoreError::store)?,
                     enum_name(&proposal.reason_code).map_err(MemoryPublicationStoreError::store)?,
                     &proposal.updated_at,
+                    proposal.proposal_version,
+                    expected_version,
                 ],
             )
             .map_err(MemoryPublicationStoreError::store)?;
@@ -1041,6 +1054,7 @@ impl SQLiteMemoryStore {
         &self,
         id: &str,
         actor: &str,
+        expected_version: u64,
         resolution: &MemoryPublicationResolution,
         updated_at: &str,
     ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
@@ -1060,16 +1074,26 @@ impl SQLiteMemoryStore {
                 "publication_not_pending",
             ));
         }
+        let next_version = expected_version.checked_add(1).ok_or_else(|| {
+            MemoryPublicationStoreError::validation("publication_version_invalid")
+        })?;
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
+            ));
+        }
         let changed = transaction
             .execute(
                 "update memory_publication_proposals
-                 set resolution_json = ?2, updated_at = ?3
-                 where id = ?1 and status = 'pending'",
+                 set resolution_json = ?2, updated_at = ?3, proposal_version = ?4
+                 where id = ?1 and status = 'pending' and proposal_version = ?5",
                 params![
                     id,
                     serde_json::to_string(resolution)
                         .map_err(MemoryPublicationStoreError::store)?,
                     updated_at,
+                    next_version,
+                    expected_version,
                 ],
             )
             .map_err(MemoryPublicationStoreError::store)?;
@@ -1090,6 +1114,7 @@ impl SQLiteMemoryStore {
         &self,
         id: &str,
         actor: &str,
+        expected_version: u64,
         updated_at: &str,
     ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
         if actor.trim().is_empty() {
@@ -1109,6 +1134,11 @@ impl SQLiteMemoryStore {
             ));
         }
         if proposal.status == MemoryPublicationStatus::Rejected {
+            if proposal.proposal_version != expected_version {
+                return Err(MemoryPublicationStoreError::conflict(
+                    "publication_conflict",
+                ));
+            }
             transaction
                 .commit()
                 .map_err(MemoryPublicationStoreError::store)?;
@@ -1119,12 +1149,21 @@ impl SQLiteMemoryStore {
                 "publication_not_pending",
             ));
         }
+        let next_version = expected_version.checked_add(1).ok_or_else(|| {
+            MemoryPublicationStoreError::validation("publication_version_invalid")
+        })?;
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
+            ));
+        }
         let changed = transaction
             .execute(
                 "update memory_publication_proposals
-                 set status = 'rejected', reason_code = 'rejected', decided_by = ?2, updated_at = ?3
-                 where id = ?1 and status = 'pending'",
-                params![id, actor, updated_at],
+                 set status = 'rejected', reason_code = 'rejected', decided_by = ?2, updated_at = ?3,
+                     proposal_version = ?4
+                 where id = ?1 and status = 'pending' and proposal_version = ?5",
+                params![id, actor, updated_at, next_version, expected_version],
             )
             .map_err(MemoryPublicationStoreError::store)?;
         if changed != 1 {
@@ -1144,6 +1183,7 @@ impl SQLiteMemoryStore {
         &self,
         id: &str,
         actor: &str,
+        expected_version: u64,
         failure_reason: &str,
         updated_at: &str,
     ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
@@ -1151,20 +1191,30 @@ impl SQLiteMemoryStore {
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(MemoryPublicationStoreError::store)?;
-        transaction
+        let next_version = expected_version.checked_add(1).ok_or_else(|| {
+            MemoryPublicationStoreError::validation("publication_version_invalid")
+        })?;
+        let changed = transaction
             .execute(
                 "update memory_publication_proposals
                  set status = 'failed', reason_code = 'publication_failed', failure_reason = ?3,
-                     decided_by = ?2, updated_at = ?4
-                 where id = ?1 and status = 'pending'",
+                     decided_by = ?2, updated_at = ?4, proposal_version = ?5
+                 where id = ?1 and status = 'pending' and proposal_version = ?6",
                 params![
                     id,
                     actor,
                     sanitize_publication_failure_reason(failure_reason),
-                    updated_at
+                    updated_at,
+                    next_version,
+                    expected_version,
                 ],
             )
             .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
+            ));
+        }
         let result = load_memory_publication_proposal_on(&transaction, id)?;
         transaction
             .commit()
@@ -1239,9 +1289,14 @@ impl SQLiteMemoryStore {
             .execute(
                 "update memory_publication_proposals
                  set status = 'approved', reason_code = 'approved', failure_reason = null,
-                     decided_by = ?2, updated_at = ?3
-                 where id = ?1 and status = 'pending'",
-                params![&proposal.id, &link.approved_by, &link.created_at],
+                     decided_by = ?2, updated_at = ?3, proposal_version = proposal_version + 1
+                 where id = ?1 and status = 'pending' and proposal_version = ?4",
+                params![
+                    &proposal.id,
+                    &link.approved_by,
+                    &link.created_at,
+                    proposal.proposal_version,
+                ],
             )
             .map_err(MemoryPublicationStoreError::store)?;
         if changed != 1 {
@@ -3150,6 +3205,7 @@ impl SQLiteMemoryStore {
 
                 create table if not exists memory_publication_proposals (
                     id text primary key,
+                    proposal_version integer not null default 1 check(proposal_version >= 1),
                     source_ref_json text not null,
                     source_user_id text not null,
                     source_workspace_id text not null,
@@ -3264,6 +3320,19 @@ impl SQLiteMemoryStore {
             "source_revision",
             "alter table memory_publication_proposals add column source_revision text not null default 'legacy_unverifiable'",
         )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "proposal_version",
+            "alter table memory_publication_proposals add column proposal_version integer not null default 1",
+        )?;
+        conn.execute(
+            "update memory_publication_proposals
+             set proposal_version = 1
+             where proposal_version is null or proposal_version < 1",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
         Self::backfill_legacy_publication_proposals_on(
             &mut conn,
             legacy_publication_collection_missing,
@@ -3834,6 +3903,7 @@ fn validate_memory_publication_proposal(
     proposal: &MemoryPublicationProposal,
 ) -> Result<(), String> {
     if proposal.id.trim().is_empty()
+        || proposal.proposal_version == 0
         || proposal.proposed_by.trim().is_empty()
         || proposal.source_user_id.as_str().trim().is_empty()
         || proposal.source_workspace_id.as_str().trim().is_empty()
@@ -4006,53 +4076,55 @@ fn memory_publication_proposal_from_row(
 ) -> Result<MemoryPublicationProposal, String> {
     Ok(MemoryPublicationProposal {
         id: row.get(0).map_err(|error| error.to_string())?,
-        source_ref: publication_ref_from_json(row.get(1).map_err(|error| error.to_string())?)?,
-        source_user_id: UserId::new(row.get::<_, String>(2).map_err(|error| error.to_string())?),
+        proposal_version: row.get(1).map_err(|error| error.to_string())?,
+        source_ref: publication_ref_from_json(row.get(2).map_err(|error| error.to_string())?)?,
+        source_user_id: UserId::new(row.get::<_, String>(3).map_err(|error| error.to_string())?),
         source_workspace_id: WorkspaceId::new(
-            row.get::<_, String>(3).map_err(|error| error.to_string())?,
-        ),
-        destination_user_id: UserId::new(
             row.get::<_, String>(4).map_err(|error| error.to_string())?,
         ),
-        destination_workspace_id: WorkspaceId::new(
+        destination_user_id: UserId::new(
             row.get::<_, String>(5).map_err(|error| error.to_string())?,
         ),
-        proposed_text: row.get(6).map_err(|error| error.to_string())?,
-        proposed_memory_type: row.get(7).map_err(|error| error.to_string())?,
+        destination_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(6).map_err(|error| error.to_string())?,
+        ),
+        proposed_text: row.get(7).map_err(|error| error.to_string())?,
+        proposed_memory_type: row.get(8).map_err(|error| error.to_string())?,
         proposed_collection: enum_from_name(
-            row.get::<_, String>(8).map_err(|error| error.to_string())?,
+            row.get::<_, String>(9).map_err(|error| error.to_string())?,
         )?,
         proposed_privacy_domain: PrivacyDomain::new(
-            row.get::<_, String>(9).map_err(|error| error.to_string())?,
-        ),
-        proposed_sensitivity: enum_from_name(
             row.get::<_, String>(10)
                 .map_err(|error| error.to_string())?,
+        ),
+        proposed_sensitivity: enum_from_name(
+            row.get::<_, String>(11)
+                .map_err(|error| error.to_string())?,
         )?,
-        source_revision: row.get(11).map_err(|error| error.to_string())?,
+        source_revision: row.get(12).map_err(|error| error.to_string())?,
         candidate: row
-            .get::<_, Option<String>>(12)
-            .map_err(|error| error.to_string())?
-            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
-            .transpose()?,
-        resolution: row
             .get::<_, Option<String>>(13)
             .map_err(|error| error.to_string())?
             .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
             .transpose()?,
+        resolution: row
+            .get::<_, Option<String>>(14)
+            .map_err(|error| error.to_string())?
+            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
+            .transpose()?,
         status: enum_from_name(
-            row.get::<_, String>(14)
-                .map_err(|error| error.to_string())?,
-        )?,
-        reason_code: enum_from_name(
             row.get::<_, String>(15)
                 .map_err(|error| error.to_string())?,
         )?,
-        failure_reason: row.get(16).map_err(|error| error.to_string())?,
-        proposed_by: row.get(17).map_err(|error| error.to_string())?,
-        decided_by: row.get(18).map_err(|error| error.to_string())?,
-        created_at: row.get(19).map_err(|error| error.to_string())?,
-        updated_at: row.get(20).map_err(|error| error.to_string())?,
+        reason_code: enum_from_name(
+            row.get::<_, String>(16)
+                .map_err(|error| error.to_string())?,
+        )?,
+        failure_reason: row.get(17).map_err(|error| error.to_string())?,
+        proposed_by: row.get(18).map_err(|error| error.to_string())?,
+        decided_by: row.get(19).map_err(|error| error.to_string())?,
+        created_at: row.get(20).map_err(|error| error.to_string())?,
+        updated_at: row.get(21).map_err(|error| error.to_string())?,
     })
 }
 
@@ -4071,7 +4143,7 @@ fn load_memory_publication_proposal_on(
 ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
     let proposal = query_optional(
         conn,
-        "select id, source_ref_json, source_user_id, source_workspace_id,
+        "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
                     proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
