@@ -1,14 +1,9 @@
 {
   "title": "Elena Ricci — Cover Letter",
-  "theme": {
-    "primary": "#111827",
-    "secondary": "#374151",
-    "accent": "#111827",
-    "heading_font": "Inter",
-    "body_font": "Inter"
-  },
+  "theme": { "name": "editorial_ivory" },
   "blocks": [
     { "type": "letterhead", "organization": "Elena Ricci",
+      "eyebrow": "COVER LETTER",
       "contact_line": "Milano, Italy · elena.ricci@example.com · +39 335 123 4567",
       "date_line": "14 January 2026",
       "recipient_lines": ["Hiring Team", "Kite Analytics", "Via Tortona 33, 20144 Milano"] },

@@ -16718,6 +16718,18 @@ const DELIVERABLE_DESIGN_THEMES: &[&str] = &[
     "warm_editorial",
     "minimal_mono",
     "soft_gradient",
+    // S1a editorial themes (design_tokens.py THEMES is the canonical source of
+    // truth for their surface/ink/muted/hairline/on_brand values — this
+    // whitelist just has to KNOW the names, or the bundled packs' own
+    // design_theme silently drops to None here and to the pack's default
+    // (white surface / brand-kit colours) at real generation time, even
+    // though the committed preview shows the dramatic theme. Found wiring
+    // S1a-T5's pack defaults through this exact gate.
+    "editorial_noir",
+    "editorial_warm",
+    "editorial_bold",
+    "editorial_ivory",
+    "editorial_slate",
 ];
 
 const DELIVERABLE_DESIGN_COMPONENTS: &[&str] = &[
@@ -17268,11 +17280,18 @@ fn apply_deck_design_components(deck: &mut serde_json::Value, components: &[Stri
 }
 
 fn design_theme_tokens(theme: Option<&str>, brand: &BrandKit) -> serde_json::Value {
+    // S1a editorial themes: values MUST match runtimes/contained-computer/design_tokens.py's
+    // THEMES dict (the canonical source deck_render.py resolves from) — keep the two in sync.
     let (primary, secondary, accent, heading_font, body_font) = match theme {
         Some("high_contrast") => ("#111827", "#000000", "#f59e0b", "Inter", "Inter"),
         Some("warm_editorial") => ("#7c2d12", "#431407", "#f97316", "Georgia", "Inter"),
         Some("minimal_mono") => ("#111827", "#374151", "#6b7280", "Inter", "Inter"),
         Some("soft_gradient") => ("#0f766e", "#164e63", "#14b8a6", "Inter", "Inter"),
+        Some("editorial_noir") => ("#c9a54e", "#1a1a1e", "#c9a54e", "Georgia", "Inter"),
+        Some("editorial_warm") => ("#8a3b1e", "#e7ddcb", "#c46a3a", "Georgia", "Inter"),
+        Some("editorial_bold") => ("#2f9d95", "#0a2a2b", "#f2c14e", "Georgia", "Inter"),
+        Some("editorial_ivory") => ("#1f4d3f", "#e9e3d6", "#1f4d3f", "Georgia", "Inter"),
+        Some("editorial_slate") => ("#1f4d6b", "#e6ebf0", "#1f4d6b", "Georgia", "Inter"),
         Some("clean_corporate") | None | Some(_) => (
             brand.primary_color.as_str(),
             brand.secondary_color.as_str(),
@@ -17282,6 +17301,16 @@ fn design_theme_tokens(theme: Option<&str>, brand: &BrandKit) -> serde_json::Val
         ),
     };
     serde_json::json!({
+        // "name" lets deck_render.py resolve the FULL editorial token set
+        // (surface/ink/muted/hairline/on_brand via design_tokens.THEMES) —
+        // without it, a bundled pack's editorial_* theme silently rendered on
+        // deck_render's plain white default surface at real generation time,
+        // even though the committed preview (built straight from example.json
+        // with "theme":{"name":...}) showed the dramatic surface. The
+        // primary/secondary/accent below still win as explicit overrides for
+        // the pre-existing 5 themes (theme_values() merges truthy overrides
+        // onto the name-resolved base), so their look is unchanged.
+        "name": theme,
         "organization": brand.organization,
         "primary": primary,
         "secondary": secondary,
@@ -56616,6 +56645,13 @@ prs.save(Path({path:?}))
             "warm_editorial",
             "minimal_mono",
             "soft_gradient",
+            // S1a: editorial themes (bundled packs' new defaults) must be
+            // pickable by the model too, not just resolved from a template.
+            "editorial_noir",
+            "editorial_warm",
+            "editorial_bold",
+            "editorial_ivory",
+            "editorial_slate",
         ]);
         let deck_themes = deck_schema
             .pointer("/function/parameters/properties/design_theme/enum")
@@ -56741,7 +56777,9 @@ prs.save(Path({path:?}))
             Some("homun/startup-pitch-clean-01")
         );
         assert_eq!(design_template.as_deref(), Some("startup_pitch"));
-        assert_eq!(design_theme.as_deref(), Some("clean_corporate"));
+        // S1a-T5: startup-pitch-clean-01's editorial default is editorial_bold
+        // (dark teal deck), not the old clean_corporate.
+        assert_eq!(design_theme.as_deref(), Some("editorial_bold"));
         assert_eq!(design_profile.as_deref(), Some("sales_pitch"));
         // Defaults for startup_pitch (kpi_grid/timeline/quote_callout) plus the real
         // bundled manifest's own design_components (kpi_grid/timeline/comparison_table)
@@ -56958,6 +56996,41 @@ prs.save(Path({path:?}))
         assert_eq!(
             deck.pointer("/theme/heading_font").and_then(|v| v.as_str()),
             Some("Georgia")
+        );
+    }
+
+    #[test]
+    fn deck_design_theme_passes_editorial_name_through_for_surface_ink_resolution() {
+        // Regression (found wiring S1a-T5): design_theme_tokens used to return
+        // ONLY flat primary/secondary/accent fields, no "name" — so an editorial
+        // theme's surface/ink/muted/hairline/on_brand (design_tokens.py THEMES)
+        // never reached deck_render.py at REAL generation time; a deck made
+        // from the startup-pitch-clean-01 template silently rendered on a
+        // plain white surface instead of the dramatic dark teal the committed
+        // preview shows. `name` must reach the theme object so
+        // deck_render.py's theme_values(name, overrides) resolves the rest.
+        let mut deck = serde_json::json!({
+            "title": "Homun",
+            "subtitle": "",
+            "slides": [
+                { "layout": "cover", "title": "Homun", "bullets": [], "notes": "", "want_image": true }
+            ]
+        });
+        let brand = super::BrandKit {
+            organization: "Homun".to_string(),
+            primary_color: "#123456".to_string(),
+            secondary_color: "#234567".to_string(),
+            accent_color: "#345678".to_string(),
+            heading_font: "Inter".to_string(),
+            body_font: "Inter".to_string(),
+            logo_data_url: String::new(),
+        };
+
+        super::apply_deck_design_theme(&mut deck, Some("editorial_bold"), &brand);
+
+        assert_eq!(
+            deck.pointer("/theme/name").and_then(|v| v.as_str()),
+            Some("editorial_bold")
         );
     }
 
@@ -57474,7 +57547,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let fallback = super::document_generation_options(&serde_json::json!({
             "template_ref": "homun/executive-update-board-01",
         }));
-        assert_eq!(fallback.design_theme.as_deref(), Some("high_contrast"));
+        // S1a-T5: executive-update-board-01's editorial default is editorial_noir
+        // (dark, boardroom-appropriate), not the old high_contrast.
+        assert_eq!(fallback.design_theme.as_deref(), Some("editorial_noir"));
     }
 
     #[test]

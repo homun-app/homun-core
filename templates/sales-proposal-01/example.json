@@ -1,15 +1,10 @@
 {
   "title": "Logistics Optimization Proposal",
-  "theme": {
-    "primary": "#16436b",
-    "secondary": "#0c2233",
-    "accent": "#14b8a6",
-    "heading_font": "Inter",
-    "body_font": "Inter"
-  },
+  "theme": { "name": "editorial_slate" },
   "blocks": [
     { "type": "section_cover", "title": "Logistics Optimization Proposal",
-      "subtitle": "Prepared for Aurora Logistics" },
+      "subtitle": "Prepared for Aurora Logistics",
+      "eyebrow": "PROPOSAL", "hero_art": "grid" },
     { "type": "text_section", "title": "Context & needs",
       "paragraphs": [
         "Aurora Logistics operates 24 distribution sites across Italy and the DACH region. Plant managers currently rely on end-of-week spreadsheets to catch downtime, so costly stoppages often stay invisible until the monthly close.",

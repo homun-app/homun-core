@@ -186,4 +186,15 @@ mod tests {
             assert!(ids.contains(&id.to_string()), "missing {id}");
         }
     }
+
+    // S1a-T5: every shipped pack must declare a real use-case category (not the
+    // "other" fallback) — the catalog's per-purpose grouping (S1b) depends on it.
+    #[test]
+    fn every_bundled_pack_declares_a_category() {
+        let root = bundled_template_pack_root().expect("repo templates dir");
+        let provider = BundledTemplatePackProvider::from_root(&root).expect("provider");
+        for entry in crate::TemplateCatalogProvider::entries(&provider) {
+            assert_ne!(entry.category, "other", "{} has no category", entry.id);
+        }
+    }
 }

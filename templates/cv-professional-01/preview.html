@@ -1,12 +1,12 @@
-<!doctype html><html><head><meta charset='utf-8'><title>Elena Ricci — CV</title><style>:root{--brand:#111827;--brand2:#374151;--accent:#111827;--head:'Inter';--body:'Inter';--doc-width:794px;}
+<!doctype html><html><head><meta charset='utf-8'><title>Elena Ricci — CV</title><style>:root{--brand:#1f4d3f;--brand2:#e9e3d6;--accent:#1f4d3f;--head:'Georgia';--body:'Inter';--doc-width:794px;--surface:#f6f3ec;--ink:#1c1b18;--muted:#6f6a5f;--hairline:#e2dccf;--on-brand:#f6f3ec;}
 @page{size:A4;margin:0}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--body),-apple-system,'Segoe UI',sans-serif;color:#16202b;background:#fff}
+body{font-family:var(--body),-apple-system,'Segoe UI',sans-serif;background:var(--surface);color:var(--ink)}
 .doc{width:var(--doc-width);margin:0 auto}
 .block{padding:28px 44px;overflow-wrap:anywhere}
 h1,h2,h3,strong{font-family:var(--head),sans-serif}
 .muted{color:#5a6675}
-.cover{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;
+.cover{background:var(--surface);color:var(--ink);
   padding:96px 44px 72px;page-break-after:always;min-height:280px}
 .cover h1{font-size:2.6rem;letter-spacing:-.02em}
 .cover .sub{margin-top:.6rem;opacity:.92;font-size:1.1rem}
@@ -28,7 +28,7 @@ h1,h2,h3,strong{font-family:var(--head),sans-serif}
 .contact-header{display:flex;gap:20px;align-items:center;border-bottom:4px solid var(--brand);
   padding-bottom:22px}
 .contact-header .avatar{width:72px;height:72px;border-radius:50%;background:var(--brand);
-  color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;
+  color:var(--on-brand);display:flex;align-items:center;justify-content:center;font-weight:800;
   font-size:1.5rem;flex:none}
 .contact-header h1{font-size:1.7rem;letter-spacing:-.01em}
 .contact-header .headline{color:var(--brand);font-weight:600;margin-top:.15rem}
@@ -41,16 +41,21 @@ h1,h2,h3,strong{font-family:var(--head),sans-serif}
 .tl-body .muted{display:block;font-size:.92rem;margin:.1rem 0 .2rem}
 .edu{display:grid;grid-template-columns:110px 1fr auto;gap:14px;margin:.45rem 0;align-items:baseline}
 .tag-group{margin:.4rem 0}
-.tag-label{font-weight:700;margin-right:.6rem;color:var(--brand2)}
-.tag{display:inline-block;background:#eef1f5;border-radius:999px;padding:.18rem .7rem;
+/* `muted`, not `secondary`/--brand2: the editorial themes use `secondary` as a
+   near-surface FILL tone (a light chip-background hue on light surfaces, a
+   near-black one on dark surfaces) — reading it as caption TEXT on `surface`
+   gave ~1.1:1 contrast (invisible). `muted` is the token contract's actual
+   "caption/metadata text on surface" colour and passes contrast on every theme. */
+.tag-label{font-weight:700;margin-right:.6rem;color:var(--muted)}
+.tag{display:inline-block;background:var(--hairline);border-radius:999px;padding:.18rem .7rem;
   margin:.15rem .25rem;font-style:normal;font-size:.88rem;color:#2a3542}
 table.tbl{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.95rem}
-table.tbl th{text-align:left;background:var(--brand);color:#fff;padding:.55rem .8rem}
-table.tbl td{padding:.5rem .8rem;color:#2a3542;border-bottom:1px solid #e4e9ef}
-table.tbl tr:nth-child(even) td{background:#f6f8fa}
+table.tbl th{text-align:left;background:var(--brand);color:var(--on-brand);padding:.55rem .8rem}
+table.tbl td{padding:.5rem .8rem;color:#2a3542;border-bottom:1px solid var(--hairline)}
+table.tbl tr:nth-child(even) td{background:var(--hairline)}
 .note{margin-top:.5rem;font-size:.88rem}
 .products{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:.7rem}
-.product{border:1px solid #e4e9ef;border-radius:10px;padding:14px}
+.product{border:1px solid var(--hairline);border-radius:10px;padding:14px}
 /* Badge sits in a flex header NEXT TO the name (not position:absolute over it):
    a long badge label (e.g. "BESTSELLER") used to overlap/clip a short product
    name — flex-wrap lets it drop to its own line instead of covering the text. */
@@ -59,11 +64,20 @@ table.tbl tr:nth-child(even) td{background:#f6f8fa}
 .product .badge{background:var(--accent);color:#fff;flex:none;
   font-style:normal;font-size:.7rem;font-weight:800;border-radius:6px;padding:.15rem .45rem}
 .product .price{color:var(--brand);font-weight:800;margin-top:.4rem;display:block}
-.kpis{background:#f6f8fa;border-top:3px solid var(--accent)}
+.kpis{background:var(--hairline);border-top:3px solid var(--accent)}
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;
   margin-top:.5rem}
 .kpi-item strong{font-size:1.8rem;color:var(--brand);display:block;letter-spacing:-.02em}
 .kpi-item span{color:#5a6675;font-size:.9rem}
 .quote blockquote{font-size:1.3rem;font-weight:700;line-height:1.4;color:#16202b}
 .quote blockquote::first-letter{color:var(--accent)}
-</style></head><body><div class="doc"><section class="block contact-header"><div class="avatar">ER</div><div><h1>Elena Ricci</h1><div class="headline">Operations Director</div><div class="contact-items"><span>elena.ricci@example.com</span><span>+39 335 123 4567</span><span>Milano, Italy</span><span>linkedin.com/in/elenaricci</span></div></div></section><section class="block text profile"><h2>Profile</h2><p class="para">12 years in operations leadership across manufacturing and logistics in Southern Europe. Led the rollout of real-time plant monitoring across 24 sites, cutting average downtime by 38% in eighteen months. Managed a €14M operating budget and a 45-person team across three countries. Now targeting a COO-track role at an industrial-tech scale-up.</p></section><section class="block text"><h2>Experience</h2><div class="tl"><div class="tl-entry"><div class="tl-label">2022 — Present</div><div class="tl-body"><strong>Operations Director</strong><span class="muted">Aurora Logistics, Milan</span><ul class="bullets"><li>Cut average plant downtime 38% across 24 sites in 18 months</li><li>Rebuilt the S&amp;OP process, shortening the planning cycle from 6 weeks to 10 days</li><li>Managed a €14M operating budget and a 45-person cross-country team</li></ul></div></div><div class="tl-entry"><div class="tl-label">2017 — 2022</div><div class="tl-body"><strong>Plant Operations Manager</strong><span class="muted">Ferretti Industrial, Bergamo</span><ul class="bullets"><li>Directed daily operations for a 300-person production plant</li><li>Introduced lean scheduling that lifted on-time delivery from 81% to 96%</li></ul></div></div><div class="tl-entry"><div class="tl-label">2013 — 2017</div><div class="tl-body"><strong>Process Engineer</strong><span class="muted">Ferretti Industrial, Bergamo</span><ul class="bullets"><li>Redesigned two assembly lines, reducing changeover time by 45%</li><li>Trained 20 shift leads on statistical process control</li></ul></div></div></div></section><section class="block text"><h2>Education</h2><div class="edu"><span class="tl-label">2013</span><strong>MSc Industrial Engineering</strong><span class="muted">Politecnico di Milano</span></div><div class="edu"><span class="tl-label">2011</span><strong>BSc Mechanical Engineering</strong><span class="muted">Politecnico di Torino</span></div></section><section class="block text"><h2>Skills</h2><div class="tag-group"><span class="tag-label">Operations</span><i class="tag">Lean Manufacturing</i><i class="tag">S&amp;OP</i><i class="tag">P&amp;L Ownership</i><i class="tag">Vendor Negotiation</i><i class="tag">Team Leadership</i></div><div class="tag-group"><span class="tag-label">Tools</span><i class="tag">SAP</i><i class="tag">Power BI</i><i class="tag">Tableau</i><i class="tag">SQL</i></div></section></div></body></html>
+.eyebrow{text-transform:uppercase;letter-spacing:.26em;font-size:.8rem;font-weight:700;
+  color:var(--accent);margin-bottom:.7rem}
+.cover h1{font-size:3.2rem;letter-spacing:-.02em}
+.cover .sub{color:var(--muted)}
+.hero-art{position:absolute;right:0;top:0;width:38%;height:100%;color:var(--accent);
+  opacity:.85;pointer-events:none}
+.hero-art.hero-grad{background:radial-gradient(120% 120% at 90% 0%,
+  color-mix(in srgb,var(--accent) 38%,transparent),transparent 62%)}
+.cover{position:relative;overflow:hidden}
+</style></head><body><div class="doc"><section class="block contact-header"><div class="avatar">ER</div><div><div class="eyebrow">CURRICULUM VITAE</div><h1>Elena Ricci</h1><div class="headline">Operations Director</div><div class="contact-items"><span>elena.ricci@example.com</span><span>+39 335 123 4567</span><span>Milano, Italy</span><span>linkedin.com/in/elenaricci</span></div></div></section><section class="block text profile"><h2>Profile</h2><p class="para">12 years in operations leadership across manufacturing and logistics in Southern Europe. Led the rollout of real-time plant monitoring across 24 sites, cutting average downtime by 38% in eighteen months. Managed a €14M operating budget and a 45-person team across three countries. Now targeting a COO-track role at an industrial-tech scale-up.</p></section><section class="block text"><h2>Experience</h2><div class="tl"><div class="tl-entry"><div class="tl-label">2022 — Present</div><div class="tl-body"><strong>Operations Director</strong><span class="muted">Aurora Logistics, Milan</span><ul class="bullets"><li>Cut average plant downtime 38% across 24 sites in 18 months</li><li>Rebuilt the S&amp;OP process, shortening the planning cycle from 6 weeks to 10 days</li><li>Managed a €14M operating budget and a 45-person cross-country team</li></ul></div></div><div class="tl-entry"><div class="tl-label">2017 — 2022</div><div class="tl-body"><strong>Plant Operations Manager</strong><span class="muted">Ferretti Industrial, Bergamo</span><ul class="bullets"><li>Directed daily operations for a 300-person production plant</li><li>Introduced lean scheduling that lifted on-time delivery from 81% to 96%</li></ul></div></div><div class="tl-entry"><div class="tl-label">2013 — 2017</div><div class="tl-body"><strong>Process Engineer</strong><span class="muted">Ferretti Industrial, Bergamo</span><ul class="bullets"><li>Redesigned two assembly lines, reducing changeover time by 45%</li><li>Trained 20 shift leads on statistical process control</li></ul></div></div></div></section><section class="block text"><h2>Education</h2><div class="edu"><span class="tl-label">2013</span><strong>MSc Industrial Engineering</strong><span class="muted">Politecnico di Milano</span></div><div class="edu"><span class="tl-label">2011</span><strong>BSc Mechanical Engineering</strong><span class="muted">Politecnico di Torino</span></div></section><section class="block text"><h2>Skills</h2><div class="tag-group"><span class="tag-label">Operations</span><i class="tag">Lean Manufacturing</i><i class="tag">S&amp;OP</i><i class="tag">P&amp;L Ownership</i><i class="tag">Vendor Negotiation</i><i class="tag">Team Leadership</i></div><div class="tag-group"><span class="tag-label">Tools</span><i class="tag">SAP</i><i class="tag">Power BI</i><i class="tag">Tableau</i><i class="tag">SQL</i></div></section></div></body></html>

@@ -1,15 +1,10 @@
 {
   "title": "Kite Analytics",
   "subtitle": "Operational intelligence for mid-size manufacturers",
-  "theme": {
-    "primary": "#16436b",
-    "secondary": "#0c2233",
-    "accent": "#14b8a6",
-    "heading_font": "Inter",
-    "body_font": "Inter"
-  },
+  "theme": { "name": "editorial_bold" },
   "slides": [
-    { "layout": "cover", "title": "Kite Analytics", "subtitle": "Operational intelligence for mid-size manufacturers" },
+    { "layout": "cover", "title": "Kite Analytics", "subtitle": "Operational intelligence for mid-size manufacturers",
+      "eyebrow": "SEED ROUND · 2026", "hero_art": "rings" },
     { "layout": "bullets", "title": "The problem", "bullets": [
       "Production data lives in six disconnected tools",
       "Plant managers decide on week-old spreadsheets",

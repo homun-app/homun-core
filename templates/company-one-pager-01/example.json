@@ -1,15 +1,10 @@
 {
   "title": "Kite Analytics",
-  "theme": {
-    "primary": "#312e81",
-    "secondary": "#1e1b4b",
-    "accent": "#8b5cf6",
-    "heading_font": "Inter",
-    "body_font": "Inter"
-  },
+  "theme": { "name": "editorial_slate" },
   "blocks": [
     { "type": "section_cover", "title": "Kite Analytics",
-      "subtitle": "Operational intelligence for mid-size manufacturers" },
+      "subtitle": "Operational intelligence for mid-size manufacturers",
+      "eyebrow": "REAL-TIME PLANT INTELLIGENCE", "hero_art": "rings" },
     { "type": "text_section", "title": "What we do",
       "paragraphs": [
         "Kite gives plant managers the same real-time visibility that used to be reserved for Fortune 500 operations."

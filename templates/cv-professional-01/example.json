@@ -1,14 +1,9 @@
 {
   "title": "Elena Ricci — CV",
-  "theme": {
-    "primary": "#111827",
-    "secondary": "#374151",
-    "accent": "#111827",
-    "heading_font": "Inter",
-    "body_font": "Inter"
-  },
+  "theme": { "name": "editorial_ivory" },
   "blocks": [
     { "type": "contact_header", "name": "Elena Ricci", "headline": "Operations Director",
+      "eyebrow": "CURRICULUM VITAE",
       "contact_items": ["elena.ricci@example.com", "+39 335 123 4567", "Milano, Italy", "linkedin.com/in/elenaricci"] },
     { "type": "profile_summary", "title": "Profile",
       "text": "12 years in operations leadership across manufacturing and logistics in Southern Europe. Led the rollout of real-time plant monitoring across 24 sites, cutting average downtime by 38% in eighteen months. Managed a €14M operating budget and a 45-person team across three countries. Now targeting a COO-track role at an industrial-tech scale-up." },

@@ -1,14 +1,14 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Kite Analytics</title><style>
-:root{--brand:#16436b;--brand2:#0c2233;--accent:#14b8a6;
-  --head:'Inter';--body:'Inter';
-  --ink:#16202b;--muted:#5a6675;--paper:#ffffff;}
+:root{--brand:#2f9d95;--brand2:#0a2a2b;--accent:#f2c14e;
+  --head:'Georgia';--body:'Inter';
+  --ink:#f3f6f4;--muted:#a9c3c1;--surface:#0f3d3e;--hairline:#1c5153;--on-brand:#f3f6f4;}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   color:var(--ink);-webkit-font-smoothing:antialiased}
 .slide{width:100%;min-height:100vh;padding:9vh 9vw;display:flex;flex-direction:column;
   justify-content:center;position:relative;page-break-after:always;overflow:hidden;
-  background:var(--paper)}
+  background:var(--surface)}
 .slide h1{font-size:4rem;line-height:1.04;font-weight:800;letter-spacing:-.02em}
 .slide h2{font-size:2.7rem;line-height:1.1;font-weight:800;letter-spacing:-.01em;
   color:var(--ink);margin-bottom:.7em;padding-bottom:.32em;
@@ -29,16 +29,12 @@ body{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,san
 .accent-bar{position:absolute;left:0;bottom:0;height:8px;width:100%;
   background:linear-gradient(90deg,var(--brand),var(--accent))}
 .logo{position:absolute;top:6vh;right:9vw;max-height:46px}
-.cover,.section{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);color:#fff}
-.cover::after,.section::after{content:"";position:absolute;right:-10vw;top:-12vw;width:46vw;
-  height:46vw;border-radius:50%;background:rgba(255,255,255,.06)}
-.cover h1,.section h1{color:#fff;max-width:82%;position:relative}
 .cover .sub{font-size:1.5rem;opacity:.92;margin-top:1.3rem;font-weight:400;position:relative}
 .cover .rule{width:96px;height:6px;background:var(--accent);margin-top:2rem;position:relative}
 .img-led{display:grid;grid-template-columns:1fr 1fr;gap:5vw;align-items:center}
 .img-led .led{width:100%;border-radius:16px;object-fit:cover;max-height:64vh;
   box-shadow:0 14px 44px rgba(0,0,0,.16)}
-.img-led .ph{background:#eef1f5;min-height:42vh;border-radius:16px}
+.img-led .ph{background:var(--hairline);min-height:42vh;border-radius:16px}
 .inline-img{margin-top:1.4rem;max-height:44vh;border-radius:14px;object-fit:cover;
   box-shadow:0 10px 30px rgba(0,0,0,.12)}
 .two-col .cols{display:grid;grid-template-columns:1fr 1fr;gap:5vw;margin-top:1.2rem}
@@ -53,20 +49,29 @@ body{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,san
 .tl-item{display:grid;grid-template-columns:92px 18px 1fr;align-items:start;gap:1.1rem}
 .tl-label{font-weight:800;color:var(--brand);font-size:1.15rem;text-align:right}
 .tl-dot{width:14px;height:14px;border-radius:50%;background:var(--accent);margin-top:.28rem;position:relative}
-.tl-item:not(:last-child) .tl-dot::after{content:"";position:absolute;left:6px;top:17px;width:2px;height:2.6rem;background:#dfe5ec}
+.tl-item:not(:last-child) .tl-dot::after{content:"";position:absolute;left:6px;top:17px;width:2px;height:2.6rem;background:var(--hairline)}
 .tl-text strong{font-size:1.25rem}
 .tl-text span{display:block;color:var(--muted);font-size:1.05rem;margin-top:.18rem}
 table.cmp{width:100%;border-collapse:collapse;margin-top:1.3rem;font-size:1.15rem}
-table.cmp th{text-align:left;background:var(--brand);color:#fff;padding:.7rem .95rem;font-weight:700}
-table.cmp td{padding:.68rem .95rem;color:var(--muted);border-bottom:1px solid #e4e9ef}
-table.cmp tr:nth-child(even) td{background:#f6f8fa}
+table.cmp th{text-align:left;background:var(--brand);color:var(--on-brand);padding:.7rem .95rem;font-weight:700}
+table.cmp td{padding:.68rem .95rem;color:var(--muted);border-bottom:1px solid var(--hairline)}
+table.cmp tr:nth-child(even) td{background:color-mix(in srgb,var(--hairline) 40%,transparent)}
 .team-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.7rem;margin-top:1.5rem}
 .member{display:flex;flex-direction:column;align-items:flex-start;gap:.4rem}
-.member .avatar{width:64px;height:64px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.3rem}
+.member .avatar{width:64px;height:64px;border-radius:50%;background:var(--brand);color:var(--on-brand);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.3rem}
 .member strong{font-size:1.2rem}
 .member span{color:var(--muted);font-size:1rem}
+.eyebrow{text-transform:uppercase;letter-spacing:.28em;font-size:.95rem;font-weight:700;
+  color:var(--accent);margin-bottom:1.1rem;position:relative}
+.cover,.section{background:var(--surface);color:var(--ink)}
+.cover h1,.section h1{color:var(--ink);font-size:5rem;max-width:88%;position:relative}
+.cover .sub{color:var(--muted)}
+.hero-art{position:absolute;right:-4vw;top:-4vw;width:44vw;height:44vw;color:var(--accent);
+  opacity:.9;pointer-events:none}
+.hero-art.hero-grad{background:radial-gradient(120% 120% at 80% 0%,
+  color-mix(in srgb,var(--accent) 40%,transparent),transparent 60%)}
 </style></head><body>
-<section class="slide cover"><h1>Kite Analytics</h1><div class="sub">Operational intelligence for mid-size manufacturers</div><div class="rule"></div><div class="accent-bar"></div></section>
+<section class="slide cover"><svg class="hero-art" viewBox="0 0 400 400" aria-hidden><g fill="none" stroke="currentColor" stroke-width="1.5" opacity=".5"><circle cx="300" cy="90" r="40"/><circle cx="300" cy="90" r="80"/><circle cx="300" cy="90" r="120"/><circle cx="300" cy="90" r="170"/></g></svg><div class="eyebrow">SEED ROUND · 2026</div><h1>Kite Analytics</h1><div class="sub">Operational intelligence for mid-size manufacturers</div><div class="rule"></div></section>
 <section class="slide bullets"><h2>The problem</h2><ul class="body"><li>Production data lives in six disconnected tools</li><li>Plant managers decide on week-old spreadsheets</li><li>Downtime costs surface only when the quarter closes</li></ul><div class="accent-bar"></div></section>
 <section class="slide two-col"><h2>Our solution</h2><div class="cols"><div class="col"><h3>Connect</h3><ul class="body"><li>Plug-and-play adapters for PLCs and MES</li><li>No new hardware on the line</li></ul></div><div class="col"><h3>Decide</h3><ul class="body"><li>Live cost-of-downtime dashboard</li><li>Alerts routed to the right shift lead</li></ul></div></div><div class="accent-bar"></div></section>
 <section class="slide kpi-slide"><h2>Traction</h2><div class="kpi">38%</div><div class="sub">average downtime reduction across 24 pilot plants</div><div class="accent-bar"></div></section>

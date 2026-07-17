@@ -1,15 +1,10 @@
 {
   "title": "Q3 Executive Update",
   "subtitle": "Aurora Logistics — Board review, October",
-  "theme": {
-    "primary": "#101828",
-    "secondary": "#1d2939",
-    "accent": "#fbbf24",
-    "heading_font": "Inter",
-    "body_font": "Inter"
-  },
+  "theme": { "name": "editorial_noir" },
   "slides": [
-    { "layout": "cover", "title": "Q3 Executive Update", "subtitle": "Aurora Logistics — Board review, October" },
+    { "layout": "cover", "title": "Q3 Executive Update", "subtitle": "Aurora Logistics — Board review, October",
+      "eyebrow": "BOARD REVIEW · Q3", "hero_art": "grid" },
     { "layout": "kpi", "title": "Status", "kpi": "+12.4%", "kpi_label": "revenue vs Q2 — at 94% of the Q3 target" },
     { "layout": "bullets", "title": "Highlights", "bullets": [
       "Two enterprise renewals closed early (€480k ARR)",

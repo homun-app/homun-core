@@ -1,15 +1,10 @@
 {
   "title": "Bottega Nova — Autumn Collection",
-  "theme": {
-    "primary": "#7c2d12",
-    "secondary": "#431407",
-    "accent": "#f59e0b",
-    "heading_font": "Georgia",
-    "body_font": "Inter"
-  },
+  "theme": { "name": "editorial_warm" },
   "blocks": [
     { "type": "section_cover", "title": "Autumn Collection",
-      "subtitle": "Bottega Nova — handmade leather goods" },
+      "subtitle": "Bottega Nova — handmade leather goods",
+      "eyebrow": "COLLECTION 2026", "hero_art": "gradient" },
     { "type": "text_section", "title": "Our craft",
       "paragraphs": [
         "Bottega Nova has hand-cut and stitched leather goods in Florence since 1978. Every piece in this collection is made to order by a team of six artisans, using vegetable-tanned leather sourced from a single tannery we have worked with for three generations.",

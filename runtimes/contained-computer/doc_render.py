@@ -22,6 +22,12 @@ doc.json schema:
               {"type": "section_cover", "title": "...", "subtitle": "...",
                "eyebrow": "CASE STUDY",       # small-caps kicker above the title
                "hero_art": "grid"},           # procedural SVG accent: grid|rings|gradient|none
+              # contact_header/letterhead (the CV/cover-letter "cover") accept the
+              # same small-caps "eyebrow" kicker — but NOT hero_art: they are compact
+              # header blocks sharing the page with body content, not a full-bleed
+              # cover, so a background SVG would crowd the text on a one-page CV.
+              {"type": "contact_header", "eyebrow": "CURRICULUM VITAE", "...": "..."},
+              {"type": "letterhead", "eyebrow": "COVER LETTER", "...": "..."},
             ]
 }
 
@@ -111,6 +117,7 @@ def render_block(block, base_dir, logo, seq=0):
     if kind == "letterhead":
         recipients = "".join(f"<div>{esc(r)}</div>" for r in block.get("recipient_lines", [])[:5])
         return (f'<section class="block letterhead">{_logo(logo)}'
+                f'{_eyebrow(block.get("eyebrow", ""))}'
                 f'<strong>{esc(block.get("organization", ""))}</strong>'
                 f'<span class="muted">{esc(block.get("contact_line", ""))}</span>'
                 f'<span class="date">{esc(block.get("date_line", ""))}</span>'
@@ -132,7 +139,7 @@ def render_block(block, base_dir, logo, seq=0):
         items = "".join(f"<span>{esc(i)}</span>" for i in block.get("contact_items", [])[:6])
         return (f'<section class="block contact-header">'
                 f'<div class="avatar">{esc(_initials(block.get("name", "")))}</div>'
-                f'<div><h1>{esc(block.get("name", ""))}</h1>'
+                f'<div>{_eyebrow(block.get("eyebrow", ""))}<h1>{esc(block.get("name", ""))}</h1>'
                 f'<div class="headline">{esc(block.get("headline", ""))}</div>'
                 f'<div class="contact-items">{items}</div></div></section>')
     if kind == "profile_summary":
@@ -291,7 +298,12 @@ h1,h2,h3,strong{font-family:var(--head),sans-serif}
 .tl-body .muted{display:block;font-size:.92rem;margin:.1rem 0 .2rem}
 .edu{display:grid;grid-template-columns:110px 1fr auto;gap:14px;margin:.45rem 0;align-items:baseline}
 .tag-group{margin:.4rem 0}
-.tag-label{font-weight:700;margin-right:.6rem;color:var(--brand2)}
+/* `muted`, not `secondary`/--brand2: the editorial themes use `secondary` as a
+   near-surface FILL tone (a light chip-background hue on light surfaces, a
+   near-black one on dark surfaces) — reading it as caption TEXT on `surface`
+   gave ~1.1:1 contrast (invisible). `muted` is the token contract's actual
+   "caption/metadata text on surface" colour and passes contrast on every theme. */
+.tag-label{font-weight:700;margin-right:.6rem;color:var(--muted)}
 .tag{display:inline-block;background:var(--hairline);border-radius:999px;padding:.18rem .7rem;
   margin:.15rem .25rem;font-style:normal;font-size:.88rem;color:#2a3542}
 table.tbl{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.95rem}
