@@ -3786,7 +3786,7 @@ fn validate_publication_candidate_and_resolution(
     }
     match (&proposal.resolution, candidate_ref) {
         (None, _) => {}
-        (Some(MemoryPublicationResolution::CreateNew), Some(_)) => {}
+        (Some(MemoryPublicationResolution::CreateNew), _) => {}
         (
             Some(MemoryPublicationResolution::UpdateExisting { destination_ref }),
             Some(candidate_ref),

@@ -78,6 +78,12 @@ fn memory(user: &UserId, workspace: &WorkspaceId, kind: &str, text: &str) -> Mem
     }
 }
 
+fn choose_create_new(facade: &MemoryFacade, proposal_id: &str) {
+    facade
+        .set_publication_resolution(proposal_id, OWNER, MemoryPublicationResolution::CreateNew)
+        .unwrap();
+}
+
 #[test]
 fn approved_publication_creates_destination_and_marks_source_alias_atomically() {
     let fixture = PublicationFixture::new();
@@ -87,6 +93,7 @@ fn approved_publication_creates_destination_and_marks_source_alias_atomically() 
         .facade
         .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
         .unwrap();
+    choose_create_new(&fixture.facade, &proposal.id);
     let result = fixture
         .facade
         .approve_publication(&proposal.id, OWNER)
@@ -127,6 +134,7 @@ fn published_destination_exposes_structural_publication_link_to_recall_dedup() {
         .facade
         .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
         .unwrap();
+    choose_create_new(&fixture.facade, &proposal.id);
     let result = fixture
         .facade
         .approve_publication(&proposal.id, OWNER)
@@ -148,7 +156,7 @@ fn published_destination_exposes_structural_publication_link_to_recall_dedup() {
         .expect(&format!("missing destination hit: {:?}", pack.hits));
     assert_eq!(
         hit.publication_link,
-        Some(serde_json::to_string(&source.reference).unwrap())
+        Some(serde_json::to_string(&result.destination.reference).unwrap())
     );
 }
 
@@ -160,6 +168,7 @@ fn rejected_publication_does_not_modify_either_scope() {
         .facade
         .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
         .unwrap();
+    choose_create_new(&fixture.facade, &proposal.id);
 
     let rejected = fixture
         .facade
@@ -185,6 +194,8 @@ fn published_source_cannot_create_a_second_publication_and_approve_is_idempotent
         .facade
         .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
         .unwrap();
+
+    choose_create_new(&fixture.facade, &proposal.id);
 
     let first = fixture
         .facade
@@ -497,6 +508,7 @@ fn forced_commit_failure_rolls_back_destination_alias_and_link() {
             OWNER,
         )
         .unwrap();
+    choose_create_new(&facade, &proposal.id);
 
     Connection::open(&path)
         .unwrap()
@@ -559,6 +571,7 @@ fn concurrent_approvals_produce_one_canonical_destination_and_link() {
             OWNER,
         )
         .unwrap();
+    choose_create_new(&facade, &proposal.id);
     let barrier = Arc::new(Barrier::new(3));
     let mut joins = Vec::new();
     for _ in 0..2 {
@@ -873,4 +886,147 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
     facade.approve_publication(&conflict.id, OWNER).unwrap();
     drop(facade);
     remove_sqlite_files(&path);
+}
+
+#[test]
+fn publication_preserves_safe_profile_semantics_and_detects_later_subject_conflict() {
+    let fixture = PublicationFixture::new();
+    let mut profile = memory(&fixture.owner, &fixture.project, "fact", "Uses Italian");
+    profile.metadata = serde_json::json!({"scope": "personal", "subject_key": "language"});
+    fixture.facade.upsert_memory(&profile).unwrap();
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&profile, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    choose_create_new(&fixture.facade, &proposal.id);
+    let published = fixture
+        .facade
+        .approve_publication(&proposal.id, OWNER)
+        .unwrap();
+    assert_eq!(
+        MemoryCollectionKey::for_memory(&published.destination),
+        Some(MemoryCollectionKey::Profile)
+    );
+    assert_eq!(published.destination.metadata["subject_key"], "language");
+
+    let mut contradictory = memory(&fixture.owner, &fixture.project, "fact", "Uses English");
+    contradictory.metadata = serde_json::json!({"scope": "personal", "subject_key": "language"});
+    fixture.facade.upsert_memory(&contradictory).unwrap();
+    let conflict = fixture
+        .facade
+        .create_publication_proposal(&contradictory, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    assert_eq!(
+        conflict.reason_code,
+        MemoryPublicationReasonCode::PublicationConflict
+    );
+}
+
+#[test]
+fn inactive_sources_and_destinations_do_not_participate_in_publication() {
+    let fixture = PublicationFixture::new();
+    for status in [MemoryStatus::Stale, MemoryStatus::Rejected] {
+        let mut source = fixture.insert_source_preference("Prefers Italian");
+        source.status = status;
+        fixture.facade.upsert_memory(&source).unwrap();
+        assert_eq!(
+            fixture
+                .facade
+                .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+                .unwrap_err()
+                .as_str(),
+            "publication_source_inactive"
+        );
+    }
+    for status in [MemoryStatus::Stale, MemoryStatus::Rejected] {
+        let mut destination = memory(
+            &fixture.owner,
+            &WorkspaceId::new("__personal__"),
+            "preference",
+            "Prefers Italian",
+        );
+        destination.status = status;
+        fixture.facade.upsert_memory(&destination).unwrap();
+    }
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    assert_eq!(proposal.reason_code, MemoryPublicationReasonCode::Pending);
+    assert_eq!(
+        fixture
+            .facade
+            .approve_publication(&proposal.id, OWNER)
+            .unwrap_err()
+            .as_str(),
+        "publication_decision_required"
+    );
+}
+
+#[test]
+fn update_existing_keeps_all_structural_provenance_and_stable_recall_link() {
+    let fixture = PublicationFixture::new();
+    let first = fixture.insert_source_preference("Prefers Italian");
+    let first_proposal = fixture
+        .facade
+        .create_publication_proposal(&first, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    choose_create_new(&fixture.facade, &first_proposal.id);
+    let first_result = fixture
+        .facade
+        .approve_publication(&first_proposal.id, OWNER)
+        .unwrap();
+    let second = fixture.insert_source_preference("Prefers Italian");
+    let second_proposal = fixture
+        .facade
+        .create_publication_proposal(&second, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    fixture
+        .facade
+        .set_publication_resolution(
+            &second_proposal.id,
+            OWNER,
+            MemoryPublicationResolution::UpdateExisting {
+                destination_ref: first_result.destination.reference.clone(),
+            },
+        )
+        .unwrap();
+    let second_result = fixture
+        .facade
+        .approve_publication(&second_proposal.id, OWNER)
+        .unwrap();
+    assert_eq!(
+        second_result.destination.reference,
+        first_result.destination.reference
+    );
+    let refs: Vec<MemoryRef> = serde_json::from_value(
+        second_result.destination.metadata["publication_source_refs"].clone(),
+    )
+    .unwrap();
+    assert!(refs.contains(&first.reference) && refs.contains(&second.reference));
+    let link = serde_json::to_string(&first_result.destination.reference).unwrap();
+    assert_eq!(second_result.destination.metadata["publication_link"], link);
+    assert_eq!(
+        fixture.get_source(&second.reference).metadata["publication_link"],
+        link
+    );
+    assert_eq!(
+        fixture
+            .facade
+            .get_publication_link(&first.reference)
+            .unwrap()
+            .unwrap()
+            .destination_ref,
+        first_result.destination.reference
+    );
+    assert_eq!(
+        fixture
+            .facade
+            .get_publication_link(&second.reference)
+            .unwrap()
+            .unwrap()
+            .destination_ref,
+        first_result.destination.reference
+    );
 }

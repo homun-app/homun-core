@@ -1689,12 +1689,13 @@ impl MemoryFacade {
         }
         let now = current_timestamp();
         let destination = match (&candidate, &proposal.resolution) {
-            (None, None | Some(MemoryPublicationResolution::CreateNew)) => {
-                self.publication_destination_record(&proposal, &source, None, &now)
+            (None, Some(MemoryPublicationResolution::CreateNew)) => {
+                self.publication_destination_record(&proposal, &source, None, &now)?
             }
+            (None, None) => return Err(MemoryError::policy("publication_decision_required")),
             (Some(_), None) => return Err(MemoryError::policy("publication_conflict")),
             (Some(_), Some(MemoryPublicationResolution::CreateNew)) => {
-                self.publication_destination_record(&proposal, &source, None, &now)
+                self.publication_destination_record(&proposal, &source, None, &now)?
             }
             (
                 Some(candidate),
@@ -1708,7 +1709,7 @@ impl MemoryFacade {
                         &proposal.destination_workspace_id,
                     )?
                     .ok_or_else(|| MemoryError::policy("publication_conflict"))?;
-                self.publication_destination_record(&proposal, &source, Some(&existing), &now)
+                self.publication_destination_record(&proposal, &source, Some(&existing), &now)?
             }
             _ => return Err(MemoryError::policy("publication_conflict")),
         };
@@ -1820,6 +1821,12 @@ impl MemoryFacade {
         if source.status == MemoryStatus::Deleted {
             return Err(MemoryError::not_found("publication_source_not_found"));
         }
+        if !matches!(
+            source.status,
+            MemoryStatus::Candidate | MemoryStatus::Confirmed
+        ) {
+            return Err(MemoryError::policy("publication_source_inactive"));
+        }
         if source.sensitivity == DataSensitivity::Secret {
             return Err(MemoryError::policy("secret_never_shareable"));
         }
@@ -1848,8 +1855,7 @@ impl MemoryFacade {
             .store
             .list_memories(&destination.user_id, &destination.workspace_id)?;
         if let Some(candidate) = candidates.iter().find(|candidate| {
-            candidate.reference.kind == MemoryRefKind::Memory
-                && candidate.status != MemoryStatus::Deleted
+            publication_candidate_is_eligible(candidate)
                 && !is_published_alias(candidate)
                 && candidate.text == source.text
                 && candidate.memory_type == source.memory_type
@@ -1865,8 +1871,7 @@ impl MemoryFacade {
             candidates
                 .into_iter()
                 .filter(|candidate| {
-                    candidate.reference.kind == MemoryRefKind::Memory
-                        && candidate.status != MemoryStatus::Deleted
+                    publication_candidate_is_eligible(candidate)
                         && !is_published_alias(candidate)
                         && candidate.memory_type == source.memory_type
                         && collection.matches(candidate)
@@ -1885,17 +1890,20 @@ impl MemoryFacade {
         source: &MemoryRecord,
         existing: Option<&MemoryRecord>,
         now: &str,
-    ) -> MemoryRecord {
-        MemoryRecord {
-            reference: existing
-                .map(|record| record.reference.clone())
-                .unwrap_or_else(|| {
-                    MemoryRef::generated(
-                        MemoryRefKind::Memory,
-                        proposal.destination_user_id.clone(),
-                        proposal.destination_workspace_id.clone(),
-                    )
-                }),
+    ) -> MemoryResult<MemoryRecord> {
+        let reference = existing
+            .map(|record| record.reference.clone())
+            .unwrap_or_else(|| {
+                MemoryRef::generated(
+                    MemoryRefKind::Memory,
+                    proposal.destination_user_id.clone(),
+                    proposal.destination_workspace_id.clone(),
+                )
+            });
+        let metadata =
+            publication_destination_metadata(source, existing, proposal, &reference, now)?;
+        Ok(MemoryRecord {
+            reference,
             user_id: proposal.destination_user_id.clone(),
             workspace_id: proposal.destination_workspace_id.clone(),
             memory_type: proposal.proposed_memory_type.clone(),
@@ -1906,14 +1914,7 @@ impl MemoryFacade {
             status: MemoryStatus::Confirmed,
             privacy_domain: proposal.proposed_privacy_domain.clone(),
             sensitivity: proposal.proposed_sensitivity,
-            metadata: serde_json::json!({
-                "publication_source_ref": &source.reference,
-                "publication": {
-                    "source_ref": &source.reference,
-                    "proposal_id": &proposal.id,
-                    "published_at": now,
-                }
-            }),
+            metadata,
             created_at: existing
                 .map(|record| record.created_at.clone())
                 .unwrap_or_else(|| now.to_string()),
@@ -1922,7 +1923,7 @@ impl MemoryFacade {
             supersedes: vec![],
             superseded_by: None,
             correction_of: None,
-        }
+        })
     }
 
     fn publication_source_alias(
@@ -1940,6 +1941,13 @@ impl MemoryFacade {
             MemoryError::Store("publication alias metadata is not an object".to_string())
         })?;
         metadata.insert("published_alias".to_string(), serde_json::Value::Bool(true));
+        metadata.insert(
+            "publication_link".to_string(),
+            serde_json::Value::String(
+                serde_json::to_string(&destination.reference)
+                    .map_err(|error| MemoryError::Store(error.to_string()))?,
+            ),
+        );
         metadata.insert(
             "publication".to_string(),
             serde_json::json!({
@@ -2185,6 +2193,112 @@ impl MemoryFacade {
     }
 }
 
+const PUBLICATION_SEMANTIC_VALUE_MAX: usize = 256;
+
+fn publication_semantic_metadata(
+    record: &MemoryRecord,
+) -> MemoryResult<serde_json::Map<String, serde_json::Value>> {
+    let mut projected = serde_json::Map::new();
+    let Some(metadata) = record.metadata.as_object() else {
+        return Ok(projected);
+    };
+    for key in ["subject_key", "canonical_key"] {
+        let Some(value) = metadata.get(key) else {
+            continue;
+        };
+        let Some(value) = value.as_str().map(str::trim) else {
+            return Err(MemoryError::policy("publication_semantic_metadata_invalid"));
+        };
+        if value.is_empty()
+            || value.len() > PUBLICATION_SEMANTIC_VALUE_MAX
+            || contains_secret(&serde_json::Value::String(value.to_string()))
+        {
+            return Err(MemoryError::policy("publication_semantic_metadata_unsafe"));
+        }
+        projected.insert(
+            key.to_string(),
+            serde_json::Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = metadata.get("scope") {
+        let Some(scope) = value.as_str() else {
+            return Err(MemoryError::policy("publication_semantic_metadata_invalid"));
+        };
+        if scope == "personal" {
+            projected.insert(
+                "scope".to_string(),
+                serde_json::Value::String(scope.to_string()),
+            );
+        }
+    }
+    Ok(projected)
+}
+
+fn publication_destination_metadata(
+    source: &MemoryRecord,
+    existing: Option<&MemoryRecord>,
+    proposal: &MemoryPublicationProposal,
+    destination_ref: &MemoryRef,
+    now: &str,
+) -> MemoryResult<serde_json::Value> {
+    let mut metadata = existing
+        .map(publication_semantic_metadata)
+        .transpose()?
+        .unwrap_or_default();
+    for (key, value) in publication_semantic_metadata(source)? {
+        metadata.entry(key).or_insert(value);
+    }
+    let mut refs = Vec::<MemoryRef>::new();
+    if let Some(existing) = existing {
+        if let Some(values) = existing.metadata.get("publication_source_refs") {
+            let Some(values) = values.as_array() else {
+                return Err(MemoryError::policy("publication_provenance_invalid"));
+            };
+            for value in values {
+                let reference = serde_json::from_value::<MemoryRef>(value.clone())
+                    .map_err(|_| MemoryError::policy("publication_provenance_invalid"))?;
+                if !refs.contains(&reference) {
+                    refs.push(reference);
+                }
+            }
+        }
+        if let Some(value) = existing.metadata.get("publication_source_ref") {
+            let reference = serde_json::from_value::<MemoryRef>(value.clone())
+                .map_err(|_| MemoryError::policy("publication_provenance_invalid"))?;
+            if !refs.contains(&reference) {
+                refs.push(reference);
+            }
+        }
+        if let Some(value) = existing.metadata.get("publication") {
+            metadata.insert("publication".to_string(), value.clone());
+        }
+    }
+    if !refs.contains(&source.reference) {
+        refs.push(source.reference.clone());
+    }
+    let first = refs
+        .first()
+        .cloned()
+        .ok_or_else(|| MemoryError::policy("publication_provenance_invalid"))?;
+    metadata.insert(
+        "publication_source_refs".to_string(),
+        serde_json::to_value(&refs).map_err(|e| MemoryError::Store(e.to_string()))?,
+    );
+    metadata.insert(
+        "publication_source_ref".to_string(),
+        serde_json::to_value(&first).map_err(|e| MemoryError::Store(e.to_string()))?,
+    );
+    metadata.entry("publication".to_string()).or_insert_with(|| serde_json::json!({"source_ref": first, "proposal_id": proposal.id, "published_at": now}));
+    metadata.insert(
+        "publication_link".to_string(),
+        serde_json::Value::String(
+            serde_json::to_string(destination_ref)
+                .map_err(|e| MemoryError::Store(e.to_string()))?,
+        ),
+    );
+    Ok(serde_json::Value::Object(metadata))
+}
+
 fn merge_reason(mut metadata: serde_json::Value, reason: &str) -> serde_json::Value {
     if let Some(object) = metadata.as_object_mut() {
         object.insert(
@@ -2207,6 +2321,22 @@ fn is_published_alias(memory: &MemoryRecord) -> bool {
         .get("published_alias")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
+}
+
+fn publication_candidate_is_eligible(memory: &MemoryRecord) -> bool {
+    memory.reference.kind == MemoryRefKind::Memory
+        && matches!(
+            memory.status,
+            MemoryStatus::Candidate | MemoryStatus::Confirmed
+        )
+        && memory.sensitivity != DataSensitivity::Secret
+        && !is_published_alias(memory)
+        && !contains_secret(&serde_json::json!({
+            "text": memory.text,
+            "aliases": memory.aliases,
+            "language_hints": memory.language_hints,
+            "metadata": memory.metadata,
+        }))
 }
 
 fn publication_subject_key(memory: &MemoryRecord) -> Option<&str> {
@@ -2248,7 +2378,7 @@ fn publication_resolution_matches_candidate(
     candidate: Option<&MemoryPublicationCandidate>,
 ) -> bool {
     match (resolution, candidate) {
-        (MemoryPublicationResolution::CreateNew, Some(_)) => true,
+        (MemoryPublicationResolution::CreateNew, _) => true,
         (MemoryPublicationResolution::UpdateExisting { destination_ref }, Some(candidate)) => {
             publication_candidate_ref(candidate) == destination_ref
         }
