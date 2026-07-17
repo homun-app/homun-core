@@ -12444,31 +12444,173 @@ body.resizing-drawer {
   background: var(--text);
   color: var(--surface);
 }
+/* Full-width editorial grid (S1b): auto-fill so the gallery uses all
+   available width instead of the old narrow auto-fit(240px) rail-sharing layout. */
 .template-gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
 }
-.template-card {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
+/* Full-bleed card (S1b): the preview fills the whole card (aspect-ratio per
+   kind), title/badge/actions live in a bottom scrim overlay instead of a
+   separate body section below the preview. */
+.tcard {
+  position: relative;
   overflow: hidden;
-  display: flex;
-  min-height: 282px;
-  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  box-shadow: var(--shadow-soft);
+  aspect-ratio: 16 / 9;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease;
 }
-.template-card-preview-button {
+.tcard.doc {
+  aspect-ratio: 3 / 2;
+}
+.tcard:hover,
+.tcard:focus-within {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+.tcard-pending {
+  pointer-events: none;
+}
+.tcard-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border: 0;
+  margin: 0;
   padding: 0;
   background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
+  display: block;
 }
-.template-card-preview-button:focus-visible {
+.tcard-preview:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+/* The preview variants (live iframe / raster image / contract fallback) each
+   size themselves for the old split-card layout (fixed heights or their own
+   aspect-ratio) — inside the full-bleed card they must stretch to fill the
+   button instead, so the outer .tcard (above) is the single source of aspect. */
+.tcard-preview .template-card-preview {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+  aspect-ratio: auto;
+}
+.tcard-preview .template-card-preview.image-preview img {
+  height: 100%;
+}
+.tcard-preview .template-card-contract {
+  height: 100%;
+  min-height: 0;
+  border-bottom: 0;
+}
+/* Bottom scrim: title + kind badge always visible; Use/Remove reveal on hover
+   so the card reads as a preview-first gallery tile, not a form row. */
+.tcard-scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 30px 12px 10px;
+  background: linear-gradient(to top, rgba(9, 11, 15, 0.88) 0%, rgba(9, 11, 15, 0.55) 60%, transparent 100%);
+  pointer-events: none;
+}
+.tcard-scrim > * {
+  pointer-events: auto;
+}
+.tcard-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tcard-title-row h4 {
+  margin: 0;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.3;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.tcard-badge {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 750;
+}
+.tcard-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+}
+.tcard-actions {
+  display: flex;
+  gap: 6px;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    opacity 140ms ease,
+    max-height 140ms ease;
+}
+.tcard:hover .tcard-actions,
+.tcard:focus-within .tcard-actions {
+  max-height: 40px;
+  opacity: 1;
+}
+.tcard-actions button {
+  flex: 1;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(3px);
+}
+.tcard-actions button:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+.tcard-actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.tcard-actions .tcard-remove {
+  background: rgba(220, 38, 38, 0.28);
+  border-color: rgba(220, 38, 38, 0.5);
+}
+.tcard-actions .tcard-remove:hover {
+  background: rgba(220, 38, 38, 0.42);
 }
 .template-card-preview {
   min-height: 142px;
@@ -12633,39 +12775,9 @@ body.resizing-drawer {
   font-size: 10px;
   font-weight: 650;
 }
-.template-card-body {
-  padding: 14px;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 10px;
-}
-.template-card-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-.template-card-title-row h4 {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.25;
-}
-.template-card-title-row span {
-  flex: 0 0 auto;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 3px 6px;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 750;
-}
-.template-card p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
+/* .template-card-fit / -source / -meta below are still used by
+   TemplateDetailModal (the full-bleed grid card dropped this secondary
+   metadata; it survives one click away in the detail view). */
 .template-card-fit {
   display: grid;
   gap: 5px;
@@ -12705,63 +12817,6 @@ body.resizing-drawer {
   padding: 4px 6px;
   font-size: 10px;
   font-weight: 650;
-}
-.template-use {
-  margin: 0 14px 14px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--text);
-  color: var(--surface);
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  justify-content: center;
-  padding: 6px 8px;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-.template-use {
-  color: var(--surface);
-}
-.template-use:hover {
-  background: color-mix(in srgb, var(--text) 86%, var(--surface));
-}
-.template-use:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-.template-remove {
-  margin: -6px 14px 14px;
-  border: 1px solid color-mix(in srgb, var(--danger) 36%, var(--line));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
-  color: var(--danger);
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  justify-content: center;
-  padding: 6px 8px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 720;
-  cursor: pointer;
-}
-.template-remove:hover {
-  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
-}
-.template-remove:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-.template-use-static {
-  cursor: wait;
-}
-.template-card-pending {
-  pointer-events: none;
 }
 .template-detail-overlay {
   position: fixed;
@@ -12931,71 +12986,58 @@ body.resizing-drawer {
 .template-search input::placeholder {
   color: var(--faint);
 }
-.template-source-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
+/* Source directory demoted to a compact disclosure (S1b) next to Import PPTX,
+   out of the results grid — a "still can't find it?" escape hatch, not cards
+   competing with the installed catalog. */
+.template-source-directory {
+  position: relative;
 }
-.template-source-tabs button {
-  min-height: 32px;
+.template-source-directory > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
   color: var(--muted);
-  padding: 5px 10px;
-  font: inherit;
+  padding: 0 12px;
   font-size: 12px;
   font-weight: 680;
   cursor: pointer;
+  list-style: none;
 }
-.template-source-tabs button:hover {
+.template-source-directory > summary::-webkit-details-marker {
+  display: none;
+}
+.template-source-directory > summary:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
-.template-source-tabs button.active {
-  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+.template-source-directory[open] > summary {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
   color: var(--text);
 }
-.template-source-directory {
-  display: grid;
-  grid-template-columns: minmax(190px, 0.75fr) minmax(0, 1.25fr);
-  gap: 12px;
-  align-items: stretch;
-  margin: 0 0 14px;
+.template-source-directory-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  width: min(420px, 86vw);
   border: 1px solid var(--line);
-  border-radius: 13px;
-  background: var(--bg);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
   padding: 12px;
 }
-/* Demoted placement: now rendered below the results grid, so it reads as a
-   supplementary "still can't find it" list rather than competing with the
-   catalog for the user's first glance. */
-.template-source-directory.demoted {
-  margin: 28px 0 0;
-  opacity: 0.85;
-}
-.template-source-directory.demoted .template-source-directory-copy h4 {
-  font-size: 13px;
-}
-.template-source-directory.demoted .template-source-link {
-  padding: 8px 10px;
-}
-.template-source-directory-copy {
-  min-width: 0;
-}
-.template-source-directory-copy h4 {
-  margin: 2px 0 6px;
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.2;
-}
-.template-source-directory-copy p:not(.eyebrow) {
-  margin: 0;
+.template-source-directory-panel p {
+  margin: 0 0 10px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+.template-source-directory-panel .template-source-directory-list {
+  grid-template-columns: 1fr;
 }
 .template-source-directory-list {
   display: grid;
@@ -13060,77 +13102,14 @@ body.resizing-drawer {
   font-style: normal;
   font-weight: 720;
 }
-.presentation-template-workspace .template-gallery-grid {
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
-}
-.presentation-template-workspace .template-card {
-  min-height: 338px;
-  border-radius: 13px;
-  background: var(--bg);
-  box-shadow: none;
-  transition:
-    border-color 140ms ease,
-    transform 140ms ease,
-    box-shadow 140ms ease;
-}
-.presentation-template-workspace .template-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 34%, var(--line));
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
-  transform: translateY(-1px);
-}
-.presentation-template-workspace .template-card-preview {
-  min-height: 166px;
-  padding: 12px;
-  background: var(--surface-muted);
-}
-.presentation-template-workspace .template-card-preview.image-preview img {
-  height: 166px;
-}
-.presentation-template-workspace .template-card-contract {
-  min-height: 166px;
-  border-bottom: 1px solid var(--line);
-}
-.presentation-template-workspace .template-card-body {
-  padding: 13px 14px 12px;
-  gap: 8px;
-}
-.presentation-template-workspace .template-card-title-row h4 {
-  font-size: 14px;
-}
-.presentation-template-workspace .template-card-title-row span {
-  border-radius: 999px;
-  background: var(--surface);
-}
-.presentation-template-workspace .template-card p {
-  display: -webkit-box;
-  min-height: 34px;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.presentation-template-workspace .template-card-source {
-  order: 1;
-}
-.presentation-template-workspace .template-card-fit {
-  order: 2;
-}
-.presentation-template-workspace .template-card-meta {
-  order: 3;
-}
+/* .template-card-fit span still styles the selection-notes chips inside
+   TemplateDetailModal (the grid card dropped this metadata, the modal kept it). */
 .presentation-template-workspace .template-card-fit span {
   border-left: 0;
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
   color: var(--text);
   padding: 6px 8px;
-}
-.presentation-template-workspace .template-use {
-  min-height: 36px;
-  margin: 0 14px 14px;
-  border-radius: 10px;
-  font-size: 12px;
-  font-weight: 740;
 }
 .template-detail-modal {
   width: min(920px, 92vw);
@@ -13156,11 +13135,10 @@ body.resizing-drawer {
   .template-gallery-toolbar {
     grid-template-columns: 1fr;
   }
-  .template-source-tabs {
-    justify-content: flex-start;
-  }
-  .template-source-directory {
-    grid-template-columns: 1fr;
+  .template-source-directory-panel {
+    left: 0;
+    right: auto;
+    width: min(360px, 90vw);
   }
 }
 @media (max-width: 900px) {

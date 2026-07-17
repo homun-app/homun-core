@@ -299,24 +299,35 @@ assertContains("src/components/AutomationsView.tsx", "t(\"automations.ifThis\")"
 assertContains("src/components/AutomationsView.tsx", "t(\"automations.filter\")", "Event automation builder must expose the FILTER part explicitly");
 assertContains("src/i18n/locales/en.json", "\"ifThis\": \"If this happens\"", "Event automation IF label must be localized in English");
 assertContains("src/i18n/locales/en.json", "\"filter\": \"Filter\"", "Event automation FILTER label must be localized in English");
-assertContains("src/components/BrandKitPanel.tsx", "TemplateLivePreview", "template gallery must render the pack's live preview.html when the catalog declares preview_html_ref");
-assertContains("src/components/BrandKitPanel.tsx", "entry.preview_html_ref", "template gallery must route card/detail rendering by the catalog's preview_html_ref field");
-assertContains("src/components/BrandKitPanel.tsx", "TemplateCardPreview", "template gallery cards must route preview rendering through a dedicated component");
-assertContains("src/components/BrandKitPanel.tsx", "template-card-contract", "template gallery must keep the metadata contract fallback for catalogs without preview_ref");
-assertContains("src/components/BrandKitPanel.tsx", "selection_notes", "template gallery must expose catalog selection rationale, not only visual decoration");
-assertContains("src/components/BrandKitPanel.tsx", "entry.selection_notes ?? []", "template gallery must tolerate legacy catalog entries without selection_notes");
-assertContains("src/components/BrandKitPanel.tsx", "Import PPTX", "Presentations must expose manual PPTX template import");
-assertContains("src/components/BrandKitPanel.tsx", "TEMPLATE_SOURCE_LINKS", "Presentations must keep provider-agnostic template source links");
-assertContains("src/components/BrandKitPanel.tsx", "TemplateSourceDirectory", "Presentations must separate external template sources from installed templates");
-assertNotContains("src/components/BrandKitPanel.tsx", "sourceFilter === \"slidescarnival\"", "SlidesCarnival must not be a hard-coded installed-catalog source filter");
-assertContains("src/components/BrandKitPanel.tsx", "attribution_required", "Presentations must surface attribution state for imported/source templates");
-assertContains("src/components/BrandKitPanel.tsx", "TemplateDetailModal", "template gallery must expose a catalog detail view before use");
-assertContains("src/components/BrandKitPanel.tsx", "useTemplate(entry", "template gallery must start chat workflows from the selected catalog entry");
-assertContains("src/components/BrandKitPanel.tsx", ".templateSourceAttachment(entry.id)", "imported PPTX templates must resolve their source attachment only when used");
-assertContains("src/components/BrandKitPanel.tsx", "await refreshTemplates()", "PPTX import must refresh the reusable catalog instead of immediately starting chat");
+// S1b-T3 split BrandKitPanel.tsx (compositor only) into TemplateGallery.tsx
+// (catalog/search/tabs/import/delete/use + detail modal) and TemplateCard.tsx
+// (full-bleed grid card + the live/raster/contract preview renderers); pure
+// helpers (brandPreviewOverride etc.) moved to presentationsShared.ts. Locks
+// below follow each symbol to its new file.
+assertContains("src/components/TemplateGallery.tsx", "TemplateLivePreview", "template gallery must render the pack's live preview.html when the catalog declares preview_html_ref");
+assertContains("src/components/TemplateCard.tsx", "entry.preview_html_ref", "template gallery must route card/detail rendering by the catalog's preview_html_ref field");
+assertContains("src/components/TemplateCard.tsx", "TemplateCardPreview", "template gallery cards must route preview rendering through a dedicated component");
+assertContains("src/components/TemplateCard.tsx", "template-card-contract", "template gallery must keep the metadata contract fallback for catalogs without preview_ref");
+assertContains("src/components/TemplateGallery.tsx", "selection_notes", "template gallery must expose catalog selection rationale, not only visual decoration");
+assertContains("src/components/TemplateGallery.tsx", "entry.selection_notes ?? []", "template gallery must tolerate legacy catalog entries without selection_notes");
+assertContains("src/components/TemplateGallery.tsx", "Import PPTX", "Presentations must expose manual PPTX template import");
+assertContains("src/components/TemplateGallery.tsx", "TEMPLATE_SOURCE_LINKS", "Presentations must keep provider-agnostic template source links");
+assertContains("src/components/TemplateGallery.tsx", "TemplateSourceDirectory", "Presentations must separate external template sources from installed templates");
+assertNotContains("src/components/TemplateGallery.tsx", "sourceFilter === \"slidescarnival\"", "SlidesCarnival must not be a hard-coded installed-catalog source filter");
+assertContains("src/components/TemplateGallery.tsx", "attribution_required", "Presentations must surface attribution state for imported/source templates");
+assertContains("src/components/TemplateGallery.tsx", "TemplateDetailModal", "template gallery must expose a catalog detail view before use");
+assertContains("src/components/TemplateGallery.tsx", "useTemplate(entry", "template gallery must start chat workflows from the selected catalog entry");
+assertContains("src/components/TemplateGallery.tsx", ".templateSourceAttachment(entry.id)", "imported PPTX templates must resolve their source attachment only when used");
+assertContains("src/components/TemplateGallery.tsx", "await refreshTemplates()", "PPTX import must refresh the reusable catalog instead of immediately starting chat");
+assertNotContains("src/components/TemplateCard.tsx", "templateThemeClass", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
+assertNotContains("src/components/TemplateGallery.tsx", "templateThemeClass", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
 assertNotContains("src/components/BrandKitPanel.tsx", "templateThemeClass", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
-assertNotContains("src/components/BrandKitPanel.tsx", "builtin:template-preview/", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
-assertContains("src/components/BrandKitPanel.tsx", "brandPreviewOverride", "the brand kit must recolor catalog previews live");
+assertNotContains("src/components/TemplateCard.tsx", "builtin:template-preview/", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
+assertNotContains("src/components/TemplateGallery.tsx", "builtin:template-preview/", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
+assertContains("src/components/presentationsShared.ts", "brandPreviewOverride", "the brand kit must recolor catalog previews live");
+// S1b-T3: purpose tabs (entry.category) replaced the old kind+source tabs.
+assertContains("src/components/TemplateGallery.tsx", "entry.category", "template gallery tabs must filter by the catalog's category field, not kind/source");
+assertContains("src/components/BrandKitPanel.tsx", "TemplateCatalogGallery", "BrandKitPanel must stay a thin compositor wiring the gallery + brand chip/drawer");
 assertContains("src/plugins/registry.tsx", "startTemplateWorkflow", "plugin host must expose a typed template workflow handoff");
 assertContains("src/App.tsx", "handleStartTemplateWorkflow", "App must own the template workflow chat creation path");
 assertContains("src/App.tsx", "template_ref=", "template workflow prompt must preserve the canonical template reference");
