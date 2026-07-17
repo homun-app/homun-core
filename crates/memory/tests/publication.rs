@@ -1130,3 +1130,60 @@ fn nested_publication_metadata_is_closed_schema() {
         );
     }
 }
+
+#[test]
+fn publication_link_requires_a_local_owned_memory_scope() {
+    let fixture = PublicationFixture::new();
+    for mut reference in [
+        MemoryRef::new(
+            MemoryRefKind::Memory,
+            fixture.owner.clone(),
+            WorkspaceId::new("__threads__"),
+            "thread",
+        ),
+        MemoryRef::new(
+            MemoryRefKind::Memory,
+            fixture.owner.clone(),
+            WorkspaceId::new("__personal__"),
+            "remote",
+        ),
+        MemoryRef::new(
+            MemoryRefKind::Memory,
+            fixture.owner.clone(),
+            WorkspaceId::new(""),
+            "empty",
+        ),
+    ] {
+        if reference.key == "remote" {
+            reference.scope = "remote".to_string();
+        }
+        let mut source = fixture.insert_source_preference("Invalid link");
+        source.metadata =
+            serde_json::json!({"publication_link": serde_json::to_string(&reference).unwrap()});
+        fixture.facade.upsert_memory(&source).unwrap();
+        assert_eq!(
+            fixture
+                .facade
+                .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+                .unwrap_err()
+                .as_str(),
+            "publication_provenance_invalid"
+        );
+    }
+    let mut valid = fixture.insert_source_preference("Valid link");
+    let reference = MemoryRef::new(
+        MemoryRefKind::Memory,
+        fixture.owner.clone(),
+        WorkspaceId::new("__personal__"),
+        "valid",
+    );
+    valid.metadata =
+        serde_json::json!({"publication_link": serde_json::to_string(&reference).unwrap()});
+    fixture.facade.upsert_memory(&valid).unwrap();
+    assert!(
+        fixture
+            .facade
+            .create_publication_proposal(&valid, &fixture.personal_destination(), OWNER)
+            .is_ok()
+    );
+}

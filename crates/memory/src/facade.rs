@@ -2201,6 +2201,8 @@ fn publication_system_ref(value: &serde_json::Value, user_id: &UserId) -> Memory
         .map_err(|_| MemoryError::policy("publication_provenance_invalid"))?;
     if reference.kind != MemoryRefKind::Memory
         || reference.user_id != *user_id
+        || reference.scope != "local"
+        || reference.workspace_id.as_str().trim().is_empty()
         || reference.workspace_id.as_str() == THREADS_WORKSPACE
     {
         return Err(MemoryError::policy("publication_provenance_invalid"));
@@ -2219,11 +2221,9 @@ fn publication_user_metadata_for_secret_scan(
         let encoded = value
             .as_str()
             .ok_or_else(|| MemoryError::policy("publication_provenance_invalid"))?;
-        let reference: MemoryRef = serde_json::from_str(encoded)
+        let reference: serde_json::Value = serde_json::from_str(encoded)
             .map_err(|_| MemoryError::policy("publication_provenance_invalid"))?;
-        if reference.kind != MemoryRefKind::Memory || reference.user_id != record.user_id {
-            return Err(MemoryError::policy("publication_provenance_invalid"));
-        }
+        publication_system_ref(&reference, &record.user_id)?;
         user.remove("publication_link");
     }
     if let Some(value) = object.get("publication_source_ref") {
