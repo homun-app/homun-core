@@ -648,6 +648,23 @@ fn intrinsic_grant_validation_rejects_unsafe_shapes_with_typed_errors() {
 }
 
 #[test]
+fn self_link_validation_precedes_cross_user_validation() {
+    let facade = facade();
+    let mut invalid = grant();
+    invalid.source_workspace_id = invalid.consumer_workspace_id.clone();
+    invalid.source_user_id = UserId::new("other-user");
+
+    let error = facade
+        .upsert_memory_source_grant(&invalid)
+        .expect_err("same-workspace source must be rejected before cross-user validation");
+
+    assert_eq!(
+        error.as_str(),
+        "memory source grant cannot link a workspace to itself"
+    );
+}
+
+#[test]
 fn override_validation_does_not_require_the_memory_row_to_exist() {
     let facade = facade();
     let grant = grant();

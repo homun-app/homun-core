@@ -684,55 +684,174 @@ fn policy_fingerprint_is_independent_of_override_insertion_order() {
 }
 
 #[test]
-fn policy_fingerprint_covers_every_effective_authorization_field() {
-    let base = resolver_grant("grant", "owner", "project-a", "owner", "project-b");
-    let fingerprint = |grant: MemorySourceGrant| {
-        memory_source_policy_fingerprint(
-            &resolve_memory_sources(
-                &UserId::new("owner"),
-                &WorkspaceId::new("project-a"),
-                &[grant],
-                100,
-            )
-            .unwrap(),
-        )
+fn policy_fingerprint_covers_each_encoded_dimension_in_isolation() {
+    let base = fingerprint_source();
+    let baseline = memory_source_policy_fingerprint(std::slice::from_ref(&base));
+    let assert_changed = |label: &str, source: AuthorizedMemorySource| {
+        assert_ne!(
+            memory_source_policy_fingerprint(&[source]),
+            baseline,
+            "fingerprint omitted {label}"
+        );
     };
-    let baseline = fingerprint(base.clone());
 
-    let mut mutations = Vec::new();
-    let mut source_identity = base.clone();
-    source_identity.source_workspace_id = WorkspaceId::new("project-c");
-    mutations.push(source_identity);
+    let mut source_user = base.clone();
+    source_user.source_user_id = UserId::new("other-owner");
+    assert_changed("source_user_id", source_user);
+
+    let mut source_workspace = base.clone();
+    source_workspace.source_workspace_id = WorkspaceId::new("project-c");
+    assert_changed("source_workspace_id", source_workspace);
+
+    let local_shape = AuthorizedMemorySource {
+        source_user_id: UserId::new("owner"),
+        source_workspace_id: WorkspaceId::new("project-a"),
+        source_label: "project-a".to_string(),
+        grant_id: None,
+        policy: None,
+        policy_version: 0,
+    };
+    let mut linked_marker = local_shape.clone();
+    linked_marker.grant_id = Some("marker-only".to_string());
+    assert_ne!(
+        memory_source_policy_fingerprint(&[local_shape]),
+        memory_source_policy_fingerprint(&[linked_marker]),
+        "fingerprint omitted the local/linked marker"
+    );
+
     let mut grant_id = base.clone();
-    grant_id.id = "other-grant".to_string();
-    mutations.push(grant_id);
-    let mut version = base.clone();
-    version.policy_version += 1;
-    mutations.push(version);
+    grant_id.grant_id = Some("other-grant".to_string());
+    assert_changed("grant ID value", grant_id);
+
+    let mut grant_presence = base.clone();
+    grant_presence.grant_id = None;
+    assert_changed("grant ID presence", grant_presence);
+
+    let mut policy_version = base.clone();
+    policy_version.policy_version += 1;
+    assert_changed("policy_version", policy_version);
+
+    let mut policy_presence = base.clone();
+    policy_presence.policy = None;
+    assert_changed("policy presence", policy_presence);
+
     let mut collections = base.clone();
-    collections.collections.insert(MemoryCollectionKey::Goals);
-    mutations.push(collections);
+    collections
+        .policy
+        .as_mut()
+        .unwrap()
+        .collections
+        .insert(MemoryCollectionKey::Goals);
+    assert_changed("collection set", collections);
+
     let mut sensitivity = base.clone();
-    sensitivity.max_sensitivity = DataSensitivity::Confidential;
-    mutations.push(sensitivity);
-    let mut override_ref = base.clone();
-    override_ref.overrides.insert(
+    sensitivity.policy.as_mut().unwrap().max_sensitivity = DataSensitivity::Confidential;
+    assert_changed("max_sensitivity", sensitivity);
+
+    let mut override_effect = base.clone();
+    *override_effect
+        .policy
+        .as_mut()
+        .unwrap()
+        .overrides
+        .values_mut()
+        .next()
+        .unwrap() = MemoryGrantOverrideEffect::Deny;
+    assert_changed("override effect", override_effect);
+
+    let ref_mutations: Vec<(&str, Box<dyn FnOnce(&mut MemoryRef)>)> = vec![
+        (
+            "override ref kind",
+            Box::new(|reference| reference.kind = MemoryRefKind::Entity),
+        ),
+        (
+            "override ref scope",
+            Box::new(|reference| reference.scope = "shared".to_string()),
+        ),
+        (
+            "override ref user_id",
+            Box::new(|reference| reference.user_id = UserId::new("other-owner")),
+        ),
+        (
+            "override ref workspace_id",
+            Box::new(|reference| reference.workspace_id = WorkspaceId::new("project-c")),
+        ),
+        (
+            "override ref key",
+            Box::new(|reference| reference.key = "other-key".to_string()),
+        ),
+    ];
+    for (label, mutate) in ref_mutations {
+        let mut source = base.clone();
+        let policy = source.policy.as_mut().unwrap();
+        let (mut reference, effect) = policy.overrides.drain().next().unwrap();
+        mutate(&mut reference);
+        policy.overrides.insert(reference, effect);
+        assert_changed(label, source);
+    }
+}
+
+#[test]
+fn policy_fingerprint_canonicalizes_order_and_ignores_only_source_label() {
+    let base = fingerprint_source();
+    let mut second = base.clone();
+    second.source_workspace_id = WorkspaceId::new("project-c");
+    second.grant_id = Some("grant-c".to_string());
+
+    let expected = memory_source_policy_fingerprint(&[base.clone(), second.clone()]);
+    assert_eq!(
+        memory_source_policy_fingerprint(&[second.clone(), base.clone()]),
+        expected,
+        "source input order must not affect the fingerprint"
+    );
+    assert_eq!(
+        memory_source_policy_fingerprint(&[base.clone(), second.clone()]),
+        expected,
+        "the same effective input must produce the same fingerprint"
+    );
+
+    let mut renamed = base.clone();
+    renamed.source_label = "Presentation-only label".to_string();
+    assert_eq!(
+        memory_source_policy_fingerprint(&[renamed, second]),
+        expected,
+        "source_label must remain presentation-only"
+    );
+
+    let mut forward = base.clone();
+    let policy = forward.policy.as_mut().unwrap();
+    policy.overrides.insert(
         MemoryRef::new(
             MemoryRefKind::Memory,
             UserId::new("owner"),
             WorkspaceId::new("project-b"),
-            "special",
+            "second",
         ),
-        MemoryGrantOverrideEffect::Allow,
+        MemoryGrantOverrideEffect::Deny,
     );
-    mutations.push(override_ref.clone());
-    let mut override_effect = override_ref;
-    *override_effect.overrides.values_mut().next().unwrap() = MemoryGrantOverrideEffect::Deny;
-    mutations.push(override_effect);
-
-    for mutation in mutations {
-        assert_ne!(fingerprint(mutation), baseline);
+    let mut reversed = fingerprint_source();
+    let entries = forward
+        .policy
+        .as_ref()
+        .unwrap()
+        .overrides
+        .iter()
+        .map(|(reference, effect)| (reference.clone(), *effect))
+        .collect::<Vec<_>>();
+    reversed.policy.as_mut().unwrap().overrides.clear();
+    for (reference, effect) in entries.into_iter().rev() {
+        reversed
+            .policy
+            .as_mut()
+            .unwrap()
+            .overrides
+            .insert(reference, effect);
     }
+    assert_eq!(
+        memory_source_policy_fingerprint(&[forward]),
+        memory_source_policy_fingerprint(&[reversed]),
+        "override insertion order must not affect the fingerprint"
+    );
 }
 
 #[test]
@@ -871,5 +990,27 @@ fn resolver_grant(
         created_by: consumer_user.to_string(),
         created_at: "2026-07-17T08:00:00Z".to_string(),
         updated_at: "2026-07-17T08:00:00Z".to_string(),
+    }
+}
+
+fn fingerprint_source() -> AuthorizedMemorySource {
+    let reference = MemoryRef {
+        kind: MemoryRefKind::Memory,
+        scope: "local".to_string(),
+        user_id: UserId::new("owner"),
+        workspace_id: WorkspaceId::new("project-b"),
+        key: "memory-key".to_string(),
+    };
+    AuthorizedMemorySource {
+        source_user_id: UserId::new("owner"),
+        source_workspace_id: WorkspaceId::new("project-b"),
+        source_label: "project-b".to_string(),
+        grant_id: Some("grant-b".to_string()),
+        policy: Some(MemorySourcePolicy {
+            collections: BTreeSet::from([MemoryCollectionKey::Knowledge]),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::from([(reference, MemoryGrantOverrideEffect::Allow)]),
+        }),
+        policy_version: 7,
     }
 }

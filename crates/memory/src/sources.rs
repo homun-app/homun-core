@@ -109,13 +109,11 @@ pub(crate) fn validate_memory_source_grant_intrinsic(
     if source_workspace == THREADS_WORKSPACE {
         return Err("reserved_source_scope".to_string());
     }
+    if grant.consumer_workspace_id == grant.source_workspace_id {
+        return Err("source_equals_consumer".to_string());
+    }
     if grant.consumer_user_id != grant.source_user_id {
         return Err("cross_user_source_not_supported".to_string());
-    }
-    if grant.consumer_user_id == grant.source_user_id
-        && grant.consumer_workspace_id == grant.source_workspace_id
-    {
-        return Err("source_equals_consumer".to_string());
     }
     if grant.collections.is_empty() && grant.overrides.is_empty() {
         return Err("empty_source_policy".to_string());
