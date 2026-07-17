@@ -1475,52 +1475,58 @@ fn forced_commit_failure_rolls_back_destination_alias_and_link() {
 }
 
 #[test]
-fn concurrent_approvals_produce_one_canonical_destination_and_link() {
-    let facade = Arc::new(MemoryFacade::new(
-        SQLiteMemoryStore::open_in_memory().unwrap(),
-    ));
-    let owner = UserId::new(OWNER);
-    let project = WorkspaceId::new(PROJECT);
-    let source = memory(&owner, &project, "preference", "Prefers Italian");
-    facade.upsert_memory(&source).unwrap();
-    let proposal = facade
-        .create_publication_proposal(
-            &source,
-            &MemoryPublicationDestination::personal(owner.clone()),
-            OWNER,
-        )
-        .unwrap();
-    choose_create_new(&facade, &proposal.id);
-    let barrier = Arc::new(Barrier::new(3));
-    let mut joins = Vec::new();
-    for _ in 0..2 {
-        let facade = Arc::clone(&facade);
-        let barrier = Arc::clone(&barrier);
-        let id = proposal.id.clone();
-        joins.push(std::thread::spawn(move || {
-            barrier.wait();
-            facade.approve_publication(&id, OWNER)
-        }));
+fn concurrent_approvals_are_idempotent_after_a_durable_approval() {
+    // Repeated, barrier-synchronised starts exercise concurrent approval without
+    // assuming which approver wins each round.
+    for attempt in 0..64 {
+        let facade = Arc::new(MemoryFacade::new(
+            SQLiteMemoryStore::open_in_memory().unwrap(),
+        ));
+        let owner = UserId::new(OWNER);
+        let project = WorkspaceId::new(PROJECT);
+        let source = memory(&owner, &project, "preference", "Prefers Italian");
+        facade.upsert_memory(&source).unwrap();
+        let proposal = facade
+            .create_publication_proposal(
+                &source,
+                &MemoryPublicationDestination::personal(owner.clone()),
+                OWNER,
+            )
+            .unwrap();
+        choose_create_new(&facade, &proposal.id);
+        let barrier = Arc::new(Barrier::new(3));
+        let mut joins = Vec::new();
+        for _ in 0..2 {
+            let facade = Arc::clone(&facade);
+            let barrier = Arc::clone(&barrier);
+            let id = proposal.id.clone();
+            joins.push(std::thread::spawn(move || {
+                barrier.wait();
+                facade.approve_publication(&id, OWNER)
+            }));
+        }
+        barrier.wait();
+        let results = joins
+            .into_iter()
+            .map(|join| join.join().unwrap())
+            .collect::<Vec<_>>();
+        assert!(results.iter().all(Result::is_ok), "round {attempt}: {results:?}");
+        assert_eq!(
+            facade
+                .list_memories_for_ui(&owner, &WorkspaceId::new("__personal__"))
+                .unwrap()
+                .len(),
+            1,
+            "round {attempt}"
+        );
+        assert!(
+            facade
+                .get_publication_link(&source.reference)
+                .unwrap()
+                .is_some(),
+            "round {attempt}"
+        );
     }
-    barrier.wait();
-    let results = joins
-        .into_iter()
-        .map(|join| join.join().unwrap())
-        .collect::<Vec<_>>();
-    assert!(results.iter().all(Result::is_ok), "{results:?}");
-    assert_eq!(
-        facade
-            .list_memories_for_ui(&owner, &WorkspaceId::new("__personal__"))
-            .unwrap()
-            .len(),
-        1
-    );
-    assert!(
-        facade
-            .get_publication_link(&source.reference)
-            .unwrap()
-            .is_some()
-    );
 }
 
 fn unique_db_path(label: &str) -> PathBuf {

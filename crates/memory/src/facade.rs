@@ -2007,7 +2007,7 @@ impl MemoryFacade {
                 actor,
             ) {
                 Ok(_) | Err(MemoryError::Policy(_)) => {
-                    return Err(MemoryError::policy("publication_preview_stale"));
+                    return self.approved_publication_result_or_preview_stale(id);
                 }
                 Err(error) => return Err(error),
             }
@@ -2110,7 +2110,7 @@ impl MemoryFacade {
                     actor,
                 ) {
                     Ok(_) | Err(MemoryError::Policy(_)) => {
-                        Err(MemoryError::policy("publication_preview_stale"))
+                        self.approved_publication_result_or_preview_stale(id)
                     }
                     Err(rebase_error) => Err(rebase_error),
                 }
@@ -2405,6 +2405,18 @@ impl MemoryFacade {
             destination,
             link,
         })
+    }
+
+    fn approved_publication_result_or_preview_stale(
+        &self,
+        id: &str,
+    ) -> MemoryResult<MemoryPublicationResult> {
+        match self.get_publication_proposal(id)? {
+            Some(proposal) if proposal.status == MemoryPublicationStatus::Approved => {
+                self.approved_publication_result(proposal)
+            }
+            _ => Err(MemoryError::policy("publication_preview_stale")),
+        }
     }
 
     fn mark_publication_failed_if_pending(
