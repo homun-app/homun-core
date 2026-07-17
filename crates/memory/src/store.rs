@@ -3321,11 +3321,16 @@ impl SQLiteMemoryStore {
         };
         for (id, status, proposed_memory_type, duplicate_ref_json) in rows {
             let proposed_collection = legacy_publication_collection_missing.then(|| {
-                MemoryCollectionKey::from_memory_type(&proposed_memory_type)
+                MemoryCollectionKey::from_legacy_memory_type(&proposed_memory_type)
                     .and_then(|collection| enum_name(&collection).ok())
-                    // Unknown legacy types must make this row unreadable instead of
-                    // silently treating it as generic knowledge.
-                    .unwrap_or_else(|| "legacy_unknown".to_string())
+                    .unwrap_or_else(|| match proposed_memory_type.as_str() {
+                        // A legacy fact has no metadata to distinguish Profile
+                        // from Knowledge, so it must not be guessed.
+                        "fact" => "legacy_ambiguous_collection".to_string(),
+                        // Unknown legacy types must make this row unreadable
+                        // instead of silently treating it as generic knowledge.
+                        _ => "legacy_unknown".to_string(),
+                    })
             });
             let (candidate_json, reason_code, failure_reason) = match status.as_str() {
                 "approved" => (None, "approved", None),

@@ -686,17 +686,18 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
         )
         .unwrap();
     for (id, status, decided_by, memory_type, duplicate_ref) in [
-        ("approved", "approved", Some(OWNER), "fact", None),
-        ("rejected", "rejected", Some(OWNER), "fact", None),
-        ("failed", "failed", Some(OWNER), "fact", None),
+        ("approved", "approved", Some(OWNER), "preference", None),
+        ("rejected", "rejected", Some(OWNER), "preference", None),
+        ("failed", "failed", Some(OWNER), "preference", None),
         (
             "pending-duplicate",
             "pending",
             None,
-            "fact",
+            "preference",
             Some(duplicate.clone()),
         ),
-        ("pending", "pending", None, "fact", None),
+        ("pending", "pending", None, "note", None),
+        ("pending-fact", "pending", None, "fact", None),
         ("pending-preference", "pending", None, "preference", None),
         ("pending-goal", "pending", None, "goal", None),
         ("pending-artifact", "pending", None, "artifact", None),
@@ -754,7 +755,7 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
                 OWNER,
                 "__personal__",
                 "Prefers Italian",
-                "fact",
+                "preference",
                 "personal",
                 "private",
                 "{corrupt-legacy-ref",
@@ -814,6 +815,7 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
         MemoryPublicationReasonCode::Pending
     );
     assert!(facade.get_publication_proposal("pending-corrupt").is_err());
+    assert!(facade.get_publication_proposal("pending-fact").is_err());
     assert!(facade.get_publication_proposal("pending-unknown").is_err());
     for (id, expected_collection) in [
         ("pending-preference", MemoryCollectionKey::Preferences),

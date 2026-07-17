@@ -20,12 +20,12 @@ pub enum MemoryCollectionKey {
 
 impl MemoryCollectionKey {
     pub fn for_memory(memory: &MemoryRecord) -> Option<Self> {
-        Self::from_memory_type_and_metadata(&memory.memory_type, &memory.metadata)
+        Self::from_live_memory_type_and_metadata(&memory.memory_type, &memory.metadata)
     }
 
-    /// Returns the sole source-policy collection for a persisted candidate.
+    /// Returns the sole source-policy collection for a live persisted candidate.
     /// The ordering keeps personal-profile facts distinct from ordinary facts.
-    pub fn from_memory_type_and_metadata(
+    pub fn from_live_memory_type_and_metadata(
         memory_type: &str,
         metadata: &serde_json::Value,
     ) -> Option<Self> {
@@ -43,9 +43,18 @@ impl MemoryCollectionKey {
     }
 
     /// Legacy publication rows only persisted the type, never the metadata.
-    /// A type with no unambiguous source-policy collection returns `None`.
-    pub fn from_memory_type(memory_type: &str) -> Option<Self> {
-        Self::from_memory_type_and_metadata(memory_type, &serde_json::Value::Null)
+    /// `fact` could be either Profile or Knowledge, so it deliberately returns
+    /// `None` rather than assigning a collection without evidence.
+    pub fn from_legacy_memory_type(memory_type: &str) -> Option<Self> {
+        match memory_type {
+            "preference" => Some(Self::Preferences),
+            "note" => Some(Self::Knowledge),
+            "decision" => Some(Self::Decisions),
+            "goal" | "objective" | "open_loop" => Some(Self::Goals),
+            "artifact" => Some(Self::Artifacts),
+            "episode" => Some(Self::Episodes),
+            "fact" | _ => None,
+        }
     }
 
     pub fn matches(&self, memory: &MemoryRecord) -> bool {

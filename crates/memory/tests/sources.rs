@@ -132,6 +132,22 @@ fn collections_match_exactly_their_declared_memory_types() {
 }
 
 #[test]
+fn live_fact_collection_derivation_preserves_metadata_semantics() {
+    let mut personal_fact = memory("profile", "fact", DataSensitivity::Private);
+    personal_fact.metadata = serde_json::json!({"scope": "personal"});
+    let ordinary_fact = memory("fact", "fact", DataSensitivity::Private);
+
+    assert_eq!(
+        MemoryCollectionKey::for_memory(&personal_fact),
+        Some(MemoryCollectionKey::Profile)
+    );
+    assert_eq!(
+        MemoryCollectionKey::for_memory(&ordinary_fact),
+        Some(MemoryCollectionKey::Knowledge)
+    );
+}
+
+#[test]
 fn secret_bearing_text_and_metadata_are_never_shareable() {
     let policy = MemorySourcePolicy::for_collections(
         vec![MemoryCollectionKey::Preferences],
