@@ -236,6 +236,7 @@ function ProjectsNav({
   const [accessProject, setAccessProject] = useState<WorkspaceRecord | null>(null);
   const [memorySourcesProject, setMemorySourcesProject] = useState<WorkspaceRecord | null>(null);
   const memorySourcesOpenerRef = useRef<HTMLElement | null>(null);
+  const projectMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [projectMenu, setProjectMenu] = useState<{
     project: WorkspaceRecord;
     x: number;
@@ -396,8 +397,10 @@ function ProjectsNav({
     setAccessProject(project);
   }
 
-  function openMemorySources(project: WorkspaceRecord, opener: HTMLElement) {
-    memorySourcesOpenerRef.current = opener;
+  function openMemorySources(project: WorkspaceRecord) {
+    // The context-menu item disappears as soon as the menu closes. Preserve the
+    // project-row trigger instead, so dialog close always returns focus to a live control.
+    memorySourcesOpenerRef.current = projectMenuTriggerRef.current;
     setProjectMenu(null);
     setMemorySourcesProject(project);
   }
@@ -712,10 +715,12 @@ function ProjectsNav({
                     <button
                       className="drawer-row-action"
                       type="button"
+                      data-project-menu-trigger={project.id}
                       aria-label={`Project menu for ${project.name}`}
                       disabled={busy}
                       onClick={(event) => {
                         event.stopPropagation();
+                        projectMenuTriggerRef.current = event.currentTarget;
                         setProjectMenu({ project, x: event.clientX, y: event.clientY });
                       }}
                     >
@@ -780,7 +785,7 @@ function ProjectsNav({
             <Shield size={15} />
             <span>Manage access</span>
           </button>
-          <button type="button" role="menuitem" onClick={(event) => openMemorySources(projectMenu.project, event.currentTarget)}>
+          <button type="button" role="menuitem" onClick={() => openMemorySources(projectMenu.project)}>
             <Brain size={15} />
             <span>{t("memorySources.title")}</span>
           </button>

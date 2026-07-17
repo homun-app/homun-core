@@ -114,8 +114,17 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
     setRevokeConfirmation(null);
     setEditingGrant(null);
     setError(null);
+    const openerToRestore = openerRef.current;
     onClose();
-    window.setTimeout(() => openerRef.current?.focus(), 0);
+    window.setTimeout(() => {
+      if (openerToRestore?.isConnected) {
+        openerToRestore.focus();
+        return;
+      }
+      // A project can disappear while the dialog is open. In that case, retain
+      // keyboard continuity by selecting the first still-mounted project trigger.
+      document.querySelector<HTMLElement>("[data-project-menu-trigger]")?.focus();
+    }, 0);
   }
 
   function focusTrap(event: KeyboardEvent) {
@@ -138,9 +147,16 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
   }
 
   useEffect(() => {
-    if (!workspace) return;
-    if (!openerRef.current) {
-      openerRef.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    if (!workspace) {
+      openerRef.current = null;
+      return;
+    }
+    if (opener?.isConnected) {
+      // Sidebar passes the persistent project-row trigger on every open; do not
+      // capture the short-lived context-menu action as the restoration target.
+      openerRef.current = opener;
+    } else if (!openerRef.current?.isConnected) {
+      openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     }
     const initialFocus = window.setTimeout(() => {
       const nestedFirstAction = revokeConfirmRef.current?.querySelector<HTMLElement>("button:not([disabled])");
