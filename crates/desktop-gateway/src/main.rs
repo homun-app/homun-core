@@ -64,7 +64,7 @@ use crate::tool_safety::{SafetyDecision, SandboxPolicy, assess_tool_safety};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path, Query, Request, State},
+    extract::{Path, Query, RawQuery, Request, State},
     http::{
         HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
         header::{AUTHORIZATION, CONTENT_TYPE},
@@ -50043,17 +50043,20 @@ fn validate_memory_source_input(
 
     let mut collections = BTreeSet::new();
     for collection in &request.collections {
-        let collection = parse_memory_collection(collection.trim())?;
+        let collection = parse_memory_collection(collection)?;
         if !collections.insert(collection) {
             return Err("duplicate_collection");
         }
     }
-    let max_sensitivity = parse_grant_sensitivity(request.max_sensitivity.trim())?;
+    let max_sensitivity = parse_grant_sensitivity(&request.max_sensitivity)?;
 
     let mut seen_overrides = HashSet::new();
     let mut overrides = Vec::with_capacity(request.overrides.len());
     for override_input in &request.overrides {
         let raw_reference = override_input.memory_ref.as_str();
+        if raw_reference.trim() != raw_reference {
+            return Err("noncanonical_memory_ref");
+        }
         let reference = raw_reference
             .parse::<MemoryRef>()
             .map_err(|_| "invalid_memory_ref")?;
@@ -50074,7 +50077,7 @@ fn validate_memory_source_input(
         if !seen_overrides.insert(reference.to_string()) {
             return Err("duplicate_override_ref");
         }
-        let effect = match override_input.effect.trim() {
+        let effect = match override_input.effect.as_str() {
             "allow" => MemoryGrantOverrideEffect::Allow,
             "deny" => MemoryGrantOverrideEffect::Deny,
             _ => return Err("override_effect_not_allowed"),
@@ -50212,6 +50215,15 @@ fn all_memory_collections() -> Vec<MemoryCollectionKey> {
     ]
 }
 
+fn memory_source_workspace_label(workspace: &WorkspaceRecord) -> String {
+    let name = workspace.name.trim();
+    if name.is_empty() {
+        workspace.id.clone()
+    } else {
+        name.to_string()
+    }
+}
+
 fn memory_source_grant_views(
     consumer: &WorkspaceRecord,
     workspaces: &[WorkspaceRecord],
@@ -50227,7 +50239,7 @@ fn memory_source_grant_views(
                     .iter()
                     .find(|workspace| workspace.id == grant.source_workspace_id.as_str())
                 {
-                    (workspace.name.clone(), true)
+                    (memory_source_workspace_label(workspace), true)
                 } else {
                     (grant.source_workspace_id.as_str().to_string(), false)
                 };
@@ -50262,7 +50274,7 @@ fn memory_source_grant_views(
     views.push(MemorySourceGrantView {
         id: None,
         source_workspace_id: consumer.id.clone(),
-        source_label: consumer.name.clone(),
+        source_label: memory_source_workspace_label(consumer),
         source_available: true,
         local: true,
         read_only: false,
@@ -50354,7 +50366,7 @@ fn build_memory_source_grant(
         });
     }
     Ok(MemorySourceGrant {
-        id: format!("memory-source-{}", uuid::Uuid::new_v4().simple()),
+        id: uuid::Uuid::new_v4().to_string(),
         consumer_user_id: owner.clone(),
         consumer_workspace_id: consumer_workspace.clone(),
         source_user_id: owner.clone(),
@@ -50913,11 +50925,17 @@ async fn memory_sources_list(
 async fn memory_source_upsert(
     State(state): State<AppState>,
     Path(workspace_id): Path<String>,
-    Json(request): Json<MemorySourceUpsertRequest>,
+    request: Request,
 ) -> Result<Json<Vec<MemorySourceGrantView>>, GatewayError> {
     if !memory_sources_enabled() {
         return Err(memory_source_disabled_error());
     }
+
+    let body = axum::body::to_bytes(request.into_body(), 64 * 1024)
+        .await
+        .map_err(|_| memory_source_bad_request("memory_source_invalid_json"))?;
+    let request = serde_json::from_slice::<MemorySourceUpsertRequest>(&body)
+        .map_err(|_| memory_source_bad_request("memory_source_invalid_json"))?;
 
     let snapshot = load_workspaces_file();
     let validated =
@@ -51009,11 +51027,18 @@ async fn memory_source_revoke(
 async fn memory_source_candidates(
     State(state): State<AppState>,
     Path(workspace_id): Path<String>,
-    Query(query): Query<MemorySourceCandidatesQuery>,
+    RawQuery(raw_query): RawQuery,
 ) -> Result<Json<Vec<MemorySourceCandidateView>>, GatewayError> {
     if !memory_sources_enabled() {
         return Err(memory_source_disabled_error());
     }
+    let raw_query = raw_query
+        .ok_or_else(|| memory_source_bad_request("memory_source_query_invalid"))?;
+    let uri = format!("/?{raw_query}")
+        .parse::<axum::http::Uri>()
+        .map_err(|_| memory_source_bad_request("memory_source_query_invalid"))?;
+    let Query(query) = Query::<MemorySourceCandidatesQuery>::try_from_uri(&uri)
+        .map_err(|_| memory_source_bad_request("memory_source_query_invalid"))?;
     let snapshot = load_workspaces_file();
     validate_memory_source_workspaces(&snapshot, &workspace_id, &query.source_workspace_id)
         .map_err(memory_source_bad_request)?;
@@ -51817,6 +51842,53 @@ mod tests {
     }
 
     #[test]
+    fn memory_source_input_requires_exact_collection_sensitivity_and_effect_tokens() {
+        let request_for = |collection: &str, sensitivity: &str, effect: &str| {
+            MemorySourceUpsertRequest {
+                source_workspace_id: "project-b".to_string(),
+                collections: vec![collection.to_string()],
+                max_sensitivity: sensitivity.to_string(),
+                expires_at: None,
+                overrides: vec![MemorySourceOverrideInput {
+                    memory_ref: "memory:local:owner:project-b:item".to_string(),
+                    effect: effect.to_string(),
+                }],
+            }
+        };
+
+        for collection in [" knowledge", "knowledge ", "Knowledge"] {
+            assert_eq!(
+                validate_memory_source_input(
+                    "project-a",
+                    &request_for(collection, "private", "allow")
+                )
+                .unwrap_err(),
+                "collection_not_allowed"
+            );
+        }
+        for sensitivity in [" private", "private ", "Private"] {
+            assert_eq!(
+                validate_memory_source_input(
+                    "project-a",
+                    &request_for("knowledge", sensitivity, "allow")
+                )
+                .unwrap_err(),
+                "sensitivity_not_allowed"
+            );
+        }
+        for effect in [" allow", "allow ", "Allow"] {
+            assert_eq!(
+                validate_memory_source_input(
+                    "project-a",
+                    &request_for("knowledge", "private", effect)
+                )
+                .unwrap_err(),
+                "override_effect_not_allowed"
+            );
+        }
+    }
+
+    #[test]
     fn memory_source_input_rejects_malformed_noncanonical_and_wrong_source_refs() {
         let request_for = |memory_ref: &str| MemorySourceUpsertRequest {
             source_workspace_id: "project-b".to_string(),
@@ -51855,6 +51927,14 @@ mod tests {
             )
             .unwrap_err(),
             "override_outside_source"
+        );
+        assert_eq!(
+            validate_memory_source_input(
+                "project-a",
+                &request_for("memory:local:owner:project-b:item ")
+            )
+            .unwrap_err(),
+            "noncanonical_memory_ref"
         );
     }
 
@@ -52030,6 +52110,44 @@ mod tests {
     }
 
     #[test]
+    fn memory_source_grant_views_fall_back_to_workspace_ids_for_blank_labels() {
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemorySourceGrant, UserId, WorkspaceId,
+        };
+        let mut consumer = memory_source_test_workspace("project-a", "   ");
+        let mut source = memory_source_test_workspace("project-b", "");
+        let grant = MemorySourceGrant {
+            id: "grant-project-b".to_string(),
+            consumer_user_id: UserId::new("owner"),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: UserId::new("owner"),
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: "owner".to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        let views = memory_source_grant_views(
+            &consumer,
+            &[consumer.clone(), source.clone()],
+            vec![grant.clone()],
+        );
+        assert_eq!(views[0].source_label, "project-a");
+        assert_eq!(views[1].source_label, "project-b");
+
+        consumer.name = "  Alpha  ".to_string();
+        source.name = "  Beta  ".to_string();
+        let views = memory_source_grant_views(&consumer, &[consumer.clone(), source], vec![grant]);
+        assert_eq!(views[0].source_label, "Alpha");
+        assert_eq!(views[1].source_label, "Beta");
+    }
+
+    #[test]
     fn memory_source_grant_builder_starts_at_one_and_preserves_identity_on_update() {
         use local_first_memory::{MemoryCollectionKey, UserId, WorkspaceId};
         let owner = UserId::new("owner");
@@ -52046,6 +52164,10 @@ mod tests {
                 .unwrap();
         assert_eq!(new_grant.policy_version, 1);
         assert_eq!(new_grant.created_at, "unix:100.000000000");
+        assert_eq!(
+            uuid::Uuid::parse_str(&new_grant.id).unwrap().to_string(),
+            new_grant.id
+        );
 
         let original_id = new_grant.id.clone();
         let original_creator = new_grant.created_by.clone();
@@ -52232,6 +52354,185 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    struct TestMemorySourcesFlag {
+        _lock: MutexGuard<'static, ()>,
+        restore: Option<String>,
+    }
+
+    impl TestMemorySourcesFlag {
+        fn set(value: Option<&str>) -> Self {
+            let lock = TEST_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let restore = std::env::var("HOMUN_MEMORY_SOURCES").ok();
+            // SAFETY: serialized by TEST_ENV_LOCK and restored in Drop.
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var("HOMUN_MEMORY_SOURCES", value),
+                    None => std::env::remove_var("HOMUN_MEMORY_SOURCES"),
+                }
+            }
+            Self {
+                _lock: lock,
+                restore,
+            }
+        }
+    }
+
+    impl Drop for TestMemorySourcesFlag {
+        fn drop(&mut self) {
+            // SAFETY: serialized by TEST_ENV_LOCK and restored before releasing it.
+            unsafe {
+                match &self.restore {
+                    Some(value) => std::env::set_var("HOMUN_MEMORY_SOURCES", value),
+                    None => std::env::remove_var("HOMUN_MEMORY_SOURCES"),
+                }
+            }
+        }
+    }
+
+    async fn memory_source_response_code(response: axum::response::Response) -> Option<String> {
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .ok()?;
+        serde_json::from_slice::<serde_json::Value>(&body)
+            .ok()?
+            .pointer("/error/code")?
+            .as_str()
+            .map(str::to_string)
+    }
+
+    fn memory_source_route_test_app() -> axum::Router {
+        axum::Router::new()
+            .route(
+                "/api/workspaces/{workspace_id}/memory-sources/upsert",
+                axum::routing::post(super::memory_source_upsert),
+            )
+            .route(
+                "/api/workspaces/{workspace_id}/memory-sources/candidates",
+                axum::routing::get(super::memory_source_candidates),
+            )
+            .with_state(super::AppState::for_tests())
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_return_disabled_before_body_or_query_parsing() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(None);
+        let app = memory_source_route_test_app();
+        let malformed_body = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces/project-a/memory-sources/upsert")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(malformed_body).await.as_deref(),
+            Some("memory_sources_disabled")
+        );
+
+        let missing_query = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources/candidates")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(missing_query).await.as_deref(),
+            Some("memory_sources_disabled")
+        );
+
+        let malformed_query = app
+            .oneshot(
+                Request::builder()
+                    .uri(concat!(
+                        "/api/workspaces/project-a/memory-sources/candidates?",
+                        "source_workspace_id=a&source_workspace_id=b"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(malformed_query)
+                .await
+                .as_deref(),
+            Some("memory_sources_disabled")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_return_typed_input_errors_when_enabled() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let app = memory_source_route_test_app();
+        let malformed_body = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces/project-a/memory-sources/upsert")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(malformed_body).await.as_deref(),
+            Some("memory_source_invalid_json")
+        );
+
+        let missing_query = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources/candidates")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(missing_query).await.as_deref(),
+            Some("memory_source_query_invalid")
+        );
+
+        let malformed_query = app
+            .oneshot(
+                Request::builder()
+                    .uri(concat!(
+                        "/api/workspaces/project-a/memory-sources/candidates?",
+                        "source_workspace_id=a&source_workspace_id=b"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(malformed_query)
+                .await
+                .as_deref(),
+            Some("memory_source_query_invalid")
         );
     }
 
