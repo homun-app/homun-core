@@ -99,6 +99,7 @@ import {
   type ProjectSubdir,
   modelIsCloud,
   type ProviderModelsGroup,
+  type RoutingBindingInput,
   type SkillsSummary,
   type VaultProposalAcceptResult,
 } from "../lib/coreBridge";
@@ -295,6 +296,10 @@ interface ChatAutoSubmit {
   attachments: ChatAttachmentInput[];
   visibleAttachments?: ChatAttachment[];
   mode?: string;
+  // S2: deterministic routing binding for a plugin workflow launch (e.g. "Use
+  // template"). Rides only this first auto-submitted turn — the gateway persists
+  // it thread-scoped, so later turns in the thread don't resend it.
+  routingBinding?: RoutingBindingInput;
 }
 
 export function ChatView({
@@ -787,6 +792,7 @@ export function ChatView({
     baseMessages?: ChatMessage[],
     mode?: string,
     branchFromId?: string,
+    routingBinding?: RoutingBindingInput,
   ) {
     const text = prompt.trim();
     if (!text) return;
@@ -978,6 +984,7 @@ export function ChatView({
         images,
         mode,
         branchFromId,
+        routingBinding,
       );
       if (cancelledStreamIdsRef.current.has(requestId)) {
         return;
@@ -1102,6 +1109,8 @@ export function ChatView({
       undefined,
       undefined,
       autoSubmit.mode,
+      undefined,
+      autoSubmit.routingBinding,
     );
     // submitPrompt intentionally owns the live streaming lifecycle. This effect
     // only bridges externally-created threads into that canonical chat pipeline.

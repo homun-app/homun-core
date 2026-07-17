@@ -337,6 +337,10 @@ assertContains("src/App.tsx", "template_ref=", "template workflow prompt must pr
 assertContains("src/App.tsx", "Do not generate the deck yet.", "template workflow must start with discovery and planning, not immediate deck generation");
 assertContains("src/App.tsx", "make_document", "document packs must route to make_document from Use template");
 assertNotContains("src/App.tsx", "Aiutami a creare una presentazione", "template workflow default visible prompt must remain English");
+// S2 T6: Use template builds a deterministic routing binding (App.tsx uses the
+// camelCase field per TS convention; the wire-format lock below on chatApi.ts guards
+// the literal `routing_binding` key the Rust gateway's EnqueueTurnRequest reads).
+assertContains("src/App.tsx", "routingBinding", "Use template must build a deterministic routing binding");
 assertContains("src/lib/coreBridge.ts", "importPptxTemplate", "Desktop bridge must expose PPTX template import");
 assertContains("src/lib/coreBridge.ts", "templateSourceAttachment", "Desktop bridge must resolve local template attachments without exposing paths in the catalog");
 assertContains("src/lib/coreBridge.ts", "attachments?: CoreChatAttachment[]", "streamed prompt commits must be able to preserve user attachments");
@@ -345,6 +349,10 @@ assertContains("src/components/ChatView.tsx", "coreBridge.submitChatPromptStream
 assertContains("src/lib/coreBridge.ts", "submitBrowserRuntimeChatPromptStream", "Electron bridge must stream from the local Gemma runtime through Electron-safe transport");
 assertContains("src/lib/coreBridge.ts", "enqueueTurn(", "Electron bridge must submit chat turns through the Rust gateway's turn broker");
 assertContains("src/lib/chatApi.ts", "/api/chat/turns", "broker turn API must POST turns to the local gateway endpoint");
+// S2 T6: enqueueTurn must forward the routing binding under the exact wire key the Rust
+// gateway's EnqueueTurnRequest.routing_binding reads (main.rs), so "Use template" attaches a
+// deterministic routing binding instead of pleading in the prompt.
+assertContains("src/lib/chatApi.ts", "routing_binding", "Use template must attach a deterministic routing binding");
 assertNotContains("src/lib/coreBridge.ts", "127.0.0.1:8765", "renderer must not call Gemma runtime directly");
 assertContains("src/lib/gatewayConfig.ts", "localFirstDesktop", "desktop renderer must receive packaged gateway config through Electron preload");
 assertContains("src/lib/gatewayConfig.ts", "VITE_HOMUN_DESKTOP_GATEWAY_TOKEN", "desktop renderer may receive the local gateway token through Vite env in tests/dev");

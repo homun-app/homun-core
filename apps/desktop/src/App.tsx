@@ -44,6 +44,7 @@ import {
   type CoreTaskQueueSnapshot,
   type ProactivitySuggestion,
   type PluginState,
+  type RoutingBindingInput,
   type TemplateCatalogEntry,
 } from "./lib/coreBridge";
 import { wsSubscription } from "./lib/wsSubscription";
@@ -599,6 +600,9 @@ export default function App() {
     attachments: ChatAttachmentInput[];
     visibleAttachments?: ChatAttachment[];
     mode?: string;
+    // S2: deterministic routing binding for this template launch — carried only on
+    // the first auto-submitted turn (see handleStartTemplateWorkflow).
+    routingBinding?: RoutingBindingInput;
   } | null>(null);
   // The thread currently generating a chat answer (real-time signal from ChatView,
   // sub-polling cadence). Used to mark the thread busy in the sidebar immediately,
@@ -1001,14 +1005,19 @@ export default function App() {
           ]
         : []),
       `Then propose a concise plan and wait for confirmation before using ${makeTool}.`,
-      // Weak local managers tend to wander to generic skills + shell file-writing
-      // (observed: a model hand-wrote a .md via `cat` heredoc through a "Create
-      // Documents" skill, bypassing the template entirely). The operative prompt
-      // must forbid every wrong path and mandate the one tool, or the selected
-      // template is silently ignored. (Harness-level determinism is the deeper fix.)
-      `IMPORTANT: the ONLY correct way to produce this deliverable is the \`${makeTool}\` tool with template_ref="${input.template.id}". Do NOT use any skill (e.g. «Create Documents», «Create Presentations»), do NOT write files with shell/cat/heredoc, do NOT use ${isDocument ? "make_deck" : "make_document"}. Any other path produces a generic file that ignores the template and is WRONG.`,
-      `When the user confirms, your very next action MUST be a single \`${makeTool}\` tool call with template_ref="${input.template.id}" and the user's answers folded into the brief — no extra planning, no narration before the call.`,
     ].join("\n");
+    // S2 (plugin-owned deterministic routing): weak local managers used to wander to
+    // generic skills + shell file-writing (observed: a model hand-wrote a .md via `cat`
+    // heredoc through a "Create Documents" skill, bypassing the template entirely). The
+    // fix used to be pleading in the prompt (IMPORTANT/MUST text); that's now enforced
+    // deterministically by the gateway off this binding (S2 T3-T5: forces tool_choice to
+    // makeTool and denies skill/shell tools once intake is past its first round), so the
+    // operative prompt above stays brief + intake only.
+    const routingBinding: RoutingBindingInput = {
+      plugin_id: "presentations",
+      route_id: isDocument ? "presentations.template_document" : "presentations.template_deck",
+      args: { template_ref: input.template.id },
+    };
     try {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
       const messages = await coreBridge.chatMessages(created.threadId);
@@ -1036,6 +1045,7 @@ export default function App() {
           ? [pendingChatAttachmentFromInput(input.attachment)]
           : undefined,
         mode: "plan",
+        routingBinding,
       });
     } catch (error) {
       console.warn("start_template_workflow unavailable", error);

@@ -725,6 +725,16 @@ function currentTimestampSeconds() {
 // the enqueue, runs the turn, persists the assistant message on done, and emits
 // durable turn_events (delivered live over the unified WebSocket /api/ws).
 
+/** S2 (plugin-owned deterministic routing): a routing binding attached to the FIRST
+ *  auto-submitted turn of a plugin workflow (e.g. "Use template"). Mirrors the Rust
+ *  `RoutingBinding` (crates/desktop-gateway/src/lib.rs) — the gateway persists it
+ *  thread-scoped on that first turn, so intake follow-ups don't need to re-send it. */
+export interface RoutingBindingInput {
+  plugin_id: string;
+  route_id: string;
+  args: Record<string, unknown>;
+}
+
 /** Response body for POST /api/chat/turns. */
 export interface EnqueueTurnResponse {
   turn_id: string;
@@ -758,6 +768,7 @@ export async function enqueueTurn(
     mode?: string;
     model?: string;
     source?: string;
+    routingBinding?: RoutingBindingInput;
   },
 ): Promise<EnqueueTurnResponse> {
   const res = await fetch(`${DESKTOP_GATEWAY_URL}/api/chat/turns`, {
@@ -773,6 +784,10 @@ export async function enqueueTurn(
       mode: options?.mode,
       model: options?.model,
       source: options?.source ?? "interactive",
+      // S2: absent/undefined serializes to a missing key → Rust's
+      // `#[serde(default)] Option<RoutingBinding>` reads None (fail-open) for every
+      // turn that isn't a plugin-workflow launch.
+      routing_binding: options?.routingBinding,
     }),
   });
   if (res.status === 201) return (await res.json()) as EnqueueTurnResponse;

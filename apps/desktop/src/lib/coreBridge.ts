@@ -1,7 +1,8 @@
 import { chatApi } from "./chatApi";
 import { cancelTurn, enqueueTurn, openTurnStream } from "./chatApi";
+import type { RoutingBindingInput } from "./chatApi";
 import { wsSubscription } from "./wsSubscription";
-export type { CoreBranchPoint, CoreBranchOption } from "./chatApi";
+export type { CoreBranchPoint, CoreBranchOption, RoutingBindingInput } from "./chatApi";
 import {
   DESKTOP_GATEWAY_URL,
   gatewayHeaders,
@@ -3157,6 +3158,7 @@ export const coreBridge = {
     images?: string[],
     mode?: string,
     branchFromId?: string | null,
+    routingBinding?: RoutingBindingInput,
   ) =>
     submitBrowserRuntimeChatPromptStream(
       requestId,
@@ -3171,6 +3173,9 @@ export const coreBridge = {
       attachments,
       mode,
       branchFromId,
+      undefined,
+      undefined,
+      routingBinding,
     ),
   // Regenerate an answer as a persisted SIBLING branch under its user message.
   // `context` is the history up to (and including) that user message, excluding
@@ -4118,6 +4123,7 @@ async function submitBrokerRuntimeChatPromptStream(
   branchFromId?: string | null,
   regenerateFromUserId?: string | null,
   contextOverride?: Array<{ role: "user" | "assistant"; text: string }>,
+  routingBinding?: RoutingBindingInput,
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
   const maxTokens = browserChatMaxTokens(prompt);
@@ -4133,6 +4139,7 @@ async function submitBrokerRuntimeChatPromptStream(
     attachments: attachments?.length ? attachments : undefined,
     mode,
     model,
+    routingBinding,
   });
   const turnId = enqueued.turn_id;
   const promptBuildSeconds = roundedSeconds(
@@ -4264,6 +4271,7 @@ async function submitBrowserRuntimeChatPromptStream(
   branchFromId?: string | null,
   regenerateFromUserId?: string | null,
   contextOverride?: Array<{ role: "user" | "assistant"; text: string }>,
+  routingBinding?: RoutingBindingInput,
 ): Promise<CorePromptSubmissionResult> {
   // Broker is the only path now (legacy NDJSON removed). It enqueues the turn
   // and the unified WS delivers the turn events (delta/activity/done/…).
@@ -4282,6 +4290,7 @@ async function submitBrowserRuntimeChatPromptStream(
     branchFromId,
     regenerateFromUserId,
     contextOverride,
+    routingBinding,
   );
 }
 
