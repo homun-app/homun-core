@@ -4,6 +4,8 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 
+pub const AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX: usize = 100;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemorySearchRequest {
     pub access: MemoryAccessRequest,

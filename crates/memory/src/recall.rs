@@ -303,6 +303,10 @@ pub fn recall_source_on_facade(
         let Some(collection) = collection_for_record(&record) else {
             continue;
         };
+        let subject_key = match explicit_subject_key(&record.metadata) {
+            Some(subject_key) => Some(subject_key),
+            None => facade.canonical_subject_key_for_memory(source, &memory_ref)?,
+        };
         let importance = record
             .metadata
             .get("importance")
@@ -328,7 +332,7 @@ pub fn recall_source_on_facade(
             sensitivity: record.sensitivity,
             status: record.status,
             updated_at: record.updated_at,
-            subject_key: explicit_subject_key(&record.metadata),
+            subject_key,
             conflict: false,
         });
     }
@@ -360,9 +364,13 @@ fn collection_for_record(record: &MemoryRecord) -> Option<MemoryCollectionKey> {
 fn explicit_subject_key(metadata: &serde_json::Value) -> Option<String> {
     ["subject_key", "canonical_key"]
         .into_iter()
-        .find_map(|key| metadata.get(key).and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .find_map(|key| {
+            metadata
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
         .map(str::to_string)
 }
 

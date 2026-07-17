@@ -1,5 +1,6 @@
 use crate::{
-    AccessDecisionKind, AuthorizedMemorySearchRequest, AuthorizedMemorySource,
+    AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AccessDecisionKind, AuthorizedMemorySearchRequest,
+    AuthorizedMemorySource,
     AutomationCandidateCreateRequest, AutomationCandidateRecord, AutomationCandidateStatus,
     DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
@@ -13,7 +14,7 @@ use crate::{
     PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference, RoutineInferenceSummary, RoutineRecord,
     RoutineStatus, SQLiteMemoryStore, UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore,
     WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
-    parse_wiki_markdown,
+    contains_secret, parse_wiki_markdown,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -916,7 +917,7 @@ impl MemoryFacade {
         Ok(MemorySearchPage {
             items,
             total,
-            limit: request.limit,
+            limit: request.limit.min(AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX),
             offset: request.offset,
         })
     }
@@ -927,52 +928,34 @@ impl MemoryFacade {
         &self,
         request: AuthorizedMemorySearchRequest,
     ) -> MemoryResult<MemorySearchPage> {
-        // Compile the allowed record set first. The FTS result can only select
-        // from this set; policy-denied records never enter `allowed` or consume
-        // pagination/candidate budget.
-        let mut allowed_by_ref = HashMap::<MemoryRef, MemoryRecord>::new();
-        for memory in self
-            .store
-            .list_memories(&request.access.user_id, &request.access.workspace_id)?
-        {
-            let decision = self.policy.decide_memory(&request.access, &memory);
-            self.store
-                .record_access_decision(&request.access, &decision)?;
-            if decision.kind == AccessDecisionKind::Deny
-                || request
-                    .source_policy
-                    .as_ref()
-                    .is_some_and(|policy| !policy.allows(&memory).is_allowed())
-                || is_published_alias(&memory)
-                || (!request.statuses.is_empty() && !request.statuses.contains(&memory.status))
-                || (!request.memory_types.is_empty()
-                    && !request
-                        .memory_types
-                        .iter()
-                        .any(|memory_type| memory_type == &memory.memory_type))
-            {
-                continue;
-            }
-            allowed_by_ref.insert(memory.reference.clone(), memory);
-        }
-        let refs = self.store.search_memory_refs(
+        let (refs, total) = self.store.search_memory_refs_filtered(
             &request.access.user_id,
             &request.access.workspace_id,
             &request.query,
+            request.limit,
+            request.offset,
+            |memory| self.memory_is_allowed_for_authorized_search(&request, memory),
         )?;
-        let mut allowed = Vec::new();
+        let mut allowed = Vec::with_capacity(refs.len());
         for reference in refs {
-            let Some(memory) = allowed_by_ref.remove(&reference) else {
+            let Some(memory) = self.store.get_memory(
+                &reference,
+                &request.access.user_id,
+                &request.access.workspace_id,
+            )? else {
                 continue;
             };
+            if !self.memory_is_allowed_for_authorized_search(&request, &memory) {
+                continue;
+            }
+            let decision = self.policy.decide_memory(&request.access, &memory);
+            self.store
+                .record_access_decision(&request.access, &decision)?;
             allowed.push(memory);
         }
 
-        let total = allowed.len();
         let items = allowed
             .into_iter()
-            .skip(request.offset)
-            .take(request.limit)
             .enumerate()
             .map(|(index, memory)| MemorySearchResult {
                 reference: memory.reference,
@@ -994,6 +977,25 @@ impl MemoryFacade {
         })
     }
 
+    fn memory_is_allowed_for_authorized_search(
+        &self,
+        request: &AuthorizedMemorySearchRequest,
+        memory: &MemoryRecord,
+    ) -> bool {
+        self.policy.decide_memory(&request.access, memory).kind != AccessDecisionKind::Deny
+            && request
+                .source_policy
+                .as_ref()
+                .is_none_or(|policy| policy.allows(memory).is_allowed())
+            && !is_published_alias(memory)
+            && (request.statuses.is_empty() || request.statuses.contains(&memory.status))
+            && (request.memory_types.is_empty()
+                || request
+                    .memory_types
+                    .iter()
+                    .any(|memory_type| memory_type == &memory.memory_type))
+    }
+
     /// Revalidation used immediately before a hit is materialized. Keeping it
     /// on the facade composes exact source scope, base privacy policy and grant
     /// policy without widening `MemoryPolicyEngine` to cross-scope access.
@@ -1013,6 +1015,79 @@ impl MemoryFacade {
         Ok(self
             .memory_is_allowed_for_source(source, &memory)
             .then_some(memory))
+    }
+
+    /// Canonical subject derived only from the typed graph relation used by
+    /// the existing mention linker (`memory --mentions--> entity`). Multiple
+    /// distinct entities are ambiguous and fail closed.
+    pub fn canonical_subject_key_for_memory(
+        &self,
+        source: &AuthorizedMemorySource,
+        reference: &MemoryRef,
+    ) -> MemoryResult<Option<String>> {
+        if reference.kind != MemoryRefKind::Memory
+            || reference.user_id != source.source_user_id
+            || reference.workspace_id != source.source_workspace_id
+        {
+            return Ok(None);
+        }
+        let max_sensitivity = source
+            .policy
+            .as_ref()
+            .map(|policy| policy.max_sensitivity)
+            .unwrap_or(DataSensitivity::Private);
+        let mut subject = None::<String>;
+        for relation in self.store.relations_for(
+            reference,
+            &source.source_user_id,
+            &source.source_workspace_id,
+        )? {
+            if relation.relation_type != "mentions"
+                || relation.source_ref != *reference
+                || relation.target_ref.kind != MemoryRefKind::Entity
+                || relation.target_ref.user_id != source.source_user_id
+                || relation.target_ref.workspace_id != source.source_workspace_id
+                || !matches!(
+                    relation.privacy_domain.as_str(),
+                    "personal" | "work" | "general"
+                )
+                || relation.sensitivity == DataSensitivity::Secret
+                || relation.sensitivity > max_sensitivity
+                || contains_secret(&relation.metadata)
+            {
+                continue;
+            }
+            let Some(entity) = self.store.get_entity(
+                &relation.target_ref,
+                &source.source_user_id,
+                &source.source_workspace_id,
+            )? else {
+                continue;
+            };
+            let canonical_key = entity.canonical_key.trim();
+            let payload = serde_json::json!({
+                "canonical_key": canonical_key,
+                "metadata": &entity.metadata,
+            });
+            if canonical_key.is_empty()
+                || entity.reference.key != canonical_key
+                || !matches!(
+                    entity.privacy_domain.as_str(),
+                    "personal" | "work" | "general"
+                )
+                || entity.sensitivity == DataSensitivity::Secret
+                || entity.sensitivity > max_sensitivity
+                || contains_secret(&payload)
+            {
+                continue;
+            }
+            match subject.as_deref() {
+                None => subject = Some(canonical_key.to_string()),
+                Some(existing) if existing == canonical_key => {}
+                Some(_) => return Ok(None),
+            }
+        }
+        Ok(subject)
     }
 
     fn memory_is_allowed_for_source(

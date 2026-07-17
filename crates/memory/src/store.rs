@@ -3,7 +3,7 @@ use crate::{
     KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
     MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
     MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceCandidateProjection,
-    MemorySourceGrant, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
+    MemorySourceGrant, AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
     MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord, UserId, VectorHit, WikiPage,
     WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
     validate_memory_source_grant_intrinsic,
@@ -1071,6 +1071,129 @@ impl SQLiteMemoryStore {
             )?);
         }
         Ok(refs)
+    }
+
+    /// Query-local lexical index populated only with records accepted by
+    /// `allows`. Records are streamed from SQLite into a TEMP FTS table on the
+    /// same guarded read connection, so denied records cannot affect BM25
+    /// statistics, ordering or the result limit. No ref list is materialized
+    /// in Rust and the returned page is hard-capped.
+    pub(crate) fn search_memory_refs_filtered<F>(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        query: &str,
+        limit: usize,
+        offset: usize,
+        mut allows: F,
+    ) -> Result<(Vec<MemoryRef>, usize), String>
+    where
+        F: FnMut(&MemoryRecord) -> bool,
+    {
+        let fts = fts_or_query(query);
+        let limit = limit.min(AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX);
+        if fts.is_empty() || limit == 0 {
+            return Ok((Vec::new(), 0));
+        }
+        let limit = i64::try_from(limit).map_err(|error| error.to_string())?;
+        let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+        let conn = self.read_conn();
+        conn.execute_batch(
+            "create virtual table if not exists temp.authorized_memory_search_fts using fts5(
+                 ref unindexed,
+                 text,
+                 aliases
+             );
+             delete from temp.authorized_memory_search_fts;",
+        )
+        .map_err(|error| error.to_string())?;
+
+        let mut run = || -> Result<(Vec<MemoryRef>, usize), String> {
+            let mut records_statement = conn
+                .prepare(
+                    "select m.ref, m.user_id, m.workspace_id, m.memory_type, m.text,
+                            m.aliases_json, m.language_hints_json, m.confidence, m.status,
+                            m.privacy_domain, m.sensitivity, m.metadata_json, m.created_at,
+                            m.updated_at, m.last_seen_at, m.supersedes_json,
+                            m.superseded_by, m.correction_of
+                     from memories m
+                     where m.user_id = ?1 and m.workspace_id = ?2
+                       and not exists (
+                           select 1 from tombstones t
+                           where t.ref = m.ref
+                             and t.user_id = m.user_id
+                             and t.workspace_id = m.workspace_id
+                       )
+                     order by m.ref",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut insert_statement = conn
+                .prepare(
+                    "insert into temp.authorized_memory_search_fts (ref, text, aliases)
+                     values (?1, ?2, ?3)",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut rows = records_statement
+                .query((user_id.as_str(), workspace_id.as_str()))
+                .map_err(|error| error.to_string())?;
+            while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+                let memory = memory_from_row(row)?;
+                if !allows(&memory) {
+                    continue;
+                }
+                insert_statement
+                    .execute((
+                        memory.reference.to_string(),
+                        memory.text,
+                        memory.aliases.join(" "),
+                    ))
+                    .map_err(|error| error.to_string())?;
+            }
+            drop(rows);
+            drop(insert_statement);
+            drop(records_statement);
+
+            let total = conn
+                .query_row(
+                    "select count(*)
+                     from temp.authorized_memory_search_fts
+                     where authorized_memory_search_fts match ?1",
+                    [fts.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?;
+            let total = usize::try_from(total).map_err(|error| error.to_string())?;
+            let mut search_statement = conn
+                .prepare(
+                    "select ref
+                     from temp.authorized_memory_search_fts
+                     where authorized_memory_search_fts match ?1
+                     order by bm25(authorized_memory_search_fts), text, ref
+                     limit ?2 offset ?3",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut search_rows = search_statement
+                .query((fts.as_str(), limit, offset))
+                .map_err(|error| error.to_string())?;
+            let mut refs = Vec::new();
+            while let Some(row) = search_rows.next().map_err(|error| error.to_string())? {
+                refs.push(parse_ref(
+                    row.get::<_, String>(0).map_err(|error| error.to_string())?,
+                )?);
+            }
+            Ok((refs, total))
+        };
+
+        let result = run();
+        let cleanup = conn
+            .execute("delete from temp.authorized_memory_search_fts", [])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        match (result, cleanup) {
+            (Ok(page), Ok(())) => Ok(page),
+            (Err(error), _) => Err(error),
+            (Ok(_), Err(error)) => Err(error),
+        }
     }
 
     pub fn rebuild_memory_search_index(&self) -> Result<(), String> {

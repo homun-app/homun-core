@@ -1,7 +1,7 @@
 use local_first_memory::{
-    AuthorizedMemorySource, DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryRecord,
-    MemoryRef, MemoryRefKind, MemoryScope, MemorySourcePolicy, MemoryStatus, PrivacyDomain,
-    SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
+    AuthorizedMemorySource, DataSensitivity, MemoryCollectionKey, MemoryEntity, MemoryFacade,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySourcePolicy,
+    MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
 };
 
 struct RecallFixture {
@@ -235,4 +235,233 @@ fn lexical_candidates_are_policy_filtered_before_the_recall_budget() {
         pack.hits[0].subject_key.as_deref(),
         Some("preference:release-notes")
     );
+}
+
+#[test]
+fn denied_corpus_cannot_change_authorized_lexical_ranking() {
+    fn authorized_order(denied_alpha_records: usize) -> Vec<String> {
+        let fixture = RecallFixture::new();
+        fixture.insert(
+            "allowed-alpha",
+            "preference",
+            "alpha alpha alpha",
+            DataSensitivity::Private,
+            serde_json::json!({}),
+            &[0.0, 1.0],
+        );
+        fixture.insert(
+            "allowed-beta",
+            "preference",
+            "beta",
+            DataSensitivity::Private,
+            serde_json::json!({}),
+            &[0.0, 1.0],
+        );
+        for index in 0..denied_alpha_records {
+            fixture.insert(
+                &format!("denied-{index:03}"),
+                "fact",
+                "alpha",
+                DataSensitivity::Private,
+                serde_json::json!({}),
+                &[0.0, 1.0],
+            );
+        }
+        let policy = MemorySourcePolicy::for_collections(
+            vec![MemoryCollectionKey::Preferences],
+            DataSensitivity::Private,
+        );
+        recall_source_on_facade(
+            &fixture.facade,
+            &fixture.source(policy),
+            "alpha beta",
+            &[],
+            None,
+        )
+        .expect("lexical recall")
+        .hits
+        .into_iter()
+        .map(|hit| hit.memory_ref)
+        .collect()
+    }
+
+    let authorized_only = authorized_order(0);
+    let with_denied_corpus = authorized_order(64);
+
+    assert_eq!(authorized_only.len(), 2);
+    assert_eq!(with_denied_corpus, authorized_only);
+}
+
+#[test]
+fn subject_key_uses_one_canonical_mentions_relation_and_fails_closed_on_ambiguity() {
+    let fixture = RecallFixture::new();
+    let memory_ref = fixture.insert(
+        "related-subject",
+        "preference",
+        "Keep release notes concise",
+        DataSensitivity::Private,
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    let entity_ref = MemoryRef::new(
+        MemoryRefKind::Entity,
+        fixture.user.clone(),
+        fixture.source_workspace.clone(),
+        "topic:release-notes",
+    );
+    fixture
+        .facade
+        .upsert_entity(&MemoryEntity {
+            reference: entity_ref.clone(),
+            user_id: fixture.user.clone(),
+            workspace_id: fixture.source_workspace.clone(),
+            entity_type: "topic".to_string(),
+            name: "Release notes".to_string(),
+            canonical_key: "topic:release-notes".to_string(),
+            aliases: vec![],
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: DataSensitivity::Private,
+            metadata: serde_json::json!({}),
+        })
+        .expect("entity");
+    fixture
+        .facade
+        .upsert_relation(&MemoryRelation {
+            reference: MemoryRef::new(
+                MemoryRefKind::Relation,
+                fixture.user.clone(),
+                fixture.source_workspace.clone(),
+                "mentions-release-notes",
+            ),
+            user_id: fixture.user.clone(),
+            workspace_id: fixture.source_workspace.clone(),
+            source_ref: memory_ref.clone(),
+            relation_type: "mentions".to_string(),
+            target_ref: entity_ref,
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: DataSensitivity::Private,
+            evidence: vec![],
+            metadata: serde_json::json!({}),
+        })
+        .expect("relation");
+    let policy = MemorySourcePolicy::for_collections(
+        vec![MemoryCollectionKey::Preferences],
+        DataSensitivity::Private,
+    );
+
+    let one_subject = recall_source_on_facade(
+        &fixture.facade,
+        &fixture.source(policy.clone()),
+        "How should release notes be written?",
+        &[1.0, 0.0],
+        None,
+    )
+    .expect("recall");
+    assert_eq!(
+        one_subject.hits[0].subject_key.as_deref(),
+        Some("topic:release-notes")
+    );
+
+    let second_entity_ref = MemoryRef::new(
+        MemoryRefKind::Entity,
+        fixture.user.clone(),
+        fixture.source_workspace.clone(),
+        "project:other",
+    );
+    fixture
+        .facade
+        .upsert_entity(&MemoryEntity {
+            reference: second_entity_ref.clone(),
+            user_id: fixture.user.clone(),
+            workspace_id: fixture.source_workspace.clone(),
+            entity_type: "project".to_string(),
+            name: "Other".to_string(),
+            canonical_key: "project:other".to_string(),
+            aliases: vec![],
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: DataSensitivity::Private,
+            metadata: serde_json::json!({}),
+        })
+        .expect("second entity");
+    fixture
+        .facade
+        .upsert_relation(&MemoryRelation {
+            reference: MemoryRef::new(
+                MemoryRefKind::Relation,
+                fixture.user.clone(),
+                fixture.source_workspace.clone(),
+                "mentions-other",
+            ),
+            user_id: fixture.user.clone(),
+            workspace_id: fixture.source_workspace.clone(),
+            source_ref: memory_ref,
+            relation_type: "mentions".to_string(),
+            target_ref: second_entity_ref,
+            confidence: 1.0,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: DataSensitivity::Private,
+            evidence: vec![],
+            metadata: serde_json::json!({}),
+        })
+        .expect("second relation");
+
+    let ambiguous = recall_source_on_facade(
+        &fixture.facade,
+        &fixture.source(policy),
+        "How should release notes be written?",
+        &[1.0, 0.0],
+        None,
+    )
+    .expect("recall");
+    assert_eq!(ambiguous.hits[0].subject_key, None);
+}
+
+#[test]
+fn authorized_lexical_index_works_on_the_file_backed_reader_pool() {
+    let path = std::env::temp_dir().join(format!(
+        "homun-authorized-recall-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let fixture = RecallFixture {
+        facade: MemoryFacade::new(SQLiteMemoryStore::open(&path).expect("file-backed store")),
+        user: UserId::new("pooled-recall-user"),
+        source_workspace: WorkspaceId::new("pooled-source"),
+    };
+    let allowed = fixture.insert(
+        "pooled-allowed",
+        "preference",
+        "pooled lexical preference",
+        DataSensitivity::Private,
+        serde_json::json!({}),
+        &[0.0, 1.0],
+    );
+    for index in 0..16 {
+        fixture.insert(
+            &format!("pooled-denied-{index}"),
+            "fact",
+            "pooled lexical preference",
+            DataSensitivity::Private,
+            serde_json::json!({}),
+            &[0.0, 1.0],
+        );
+    }
+    let policy = MemorySourcePolicy::for_collections(
+        vec![MemoryCollectionKey::Preferences],
+        DataSensitivity::Private,
+    );
+
+    let pack = recall_source_on_facade(
+        &fixture.facade,
+        &fixture.source(policy),
+        "pooled lexical preference",
+        &[],
+        None,
+    )
+    .expect("pooled recall");
+
+    assert_eq!(pack.hits.len(), 1);
+    assert_eq!(pack.hits[0].memory_ref, allowed.to_string());
+    drop(fixture);
+    let _ = std::fs::remove_file(path);
 }
