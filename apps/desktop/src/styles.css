@@ -3583,12 +3583,96 @@ body.resizing-drawer {
 .memory-recall-badge {
   margin-left: 6px;
   padding: 1px 6px;
+  border: 1px solid var(--line);
   border-radius: 8px;
+  font: inherit;
   font-size: 11px;
   color: var(--muted);
-  background: var(--bg-elevated, rgba(127, 127, 127, 0.12));
-  cursor: help;
+  background: var(--surface-muted);
+  cursor: pointer;
   white-space: nowrap;
+}
+
+.memory-recall-badge:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.memory-recall-badge:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.memory-usage-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.memory-usage-popover {
+  position: absolute;
+  z-index: 25;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  gap: var(--s2);
+  width: min(360px, calc(100vw - 48px));
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--text);
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+  font-family: var(--font-sans);
+}
+
+.memory-usage-title {
+  font-size: var(--text-sm);
+}
+
+.memory-usage-groups {
+  display: grid;
+  gap: var(--s2);
+}
+
+.memory-usage-source {
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line);
+}
+
+.memory-usage-source header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.memory-usage-source header strong {
+  color: var(--text);
+}
+
+.memory-usage-source ul {
+  display: grid;
+  gap: var(--s1);
+  margin: var(--s1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.memory-usage-source li {
+  display: grid;
+  gap: 1px;
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.memory-usage-source small {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .message.system p,

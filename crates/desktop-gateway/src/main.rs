@@ -1538,6 +1538,57 @@ fn scope_display_name(scope: &str) -> String {
     }
 }
 
+/// Resolve provenance labels at emission time rather than trusting a label that
+/// travelled through recall. Renames are therefore visible immediately and the
+/// reserved personal space never leaks as an implementation id.
+fn recall_source_label(scope: &str) -> String {
+    if scope == PERSONAL_WORKSPACE {
+        return if effective_user_language() == "it" {
+            "Personale".to_string()
+        } else {
+            "Personal".to_string()
+        };
+    }
+    scope_display_name(scope)
+}
+
+fn recall_collection_token(collection: MemoryCollectionKey) -> &'static str {
+    match collection {
+        MemoryCollectionKey::Preferences => "preferences",
+        MemoryCollectionKey::Profile => "profile",
+        MemoryCollectionKey::Knowledge => "knowledge",
+        MemoryCollectionKey::Decisions => "decisions",
+        MemoryCollectionKey::Goals => "goals",
+        MemoryCollectionKey::Artifacts => "artifacts",
+        MemoryCollectionKey::Episodes => "episodes",
+    }
+}
+
+fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::RecallStreamPayload {
+    local_first_subagents::RecallStreamPayload {
+        query: pack.query.clone(),
+        hits: pack
+            .hits
+            .iter()
+            .map(|hit| local_first_subagents::RecallStreamHit {
+                r#ref: hit.memory_ref.clone(),
+                text: hit.text.clone(),
+                score: hit.score,
+                kind: hit.kind.clone(),
+                source_workspace_id: hit.source_workspace_id.as_str().to_string(),
+                source_label: recall_source_label(hit.source_workspace_id.as_str()),
+                collection: recall_collection_token(hit.collection).to_string(),
+                grant_id: hit.grant_id.clone(),
+                conflict: hit.conflict,
+            })
+            .collect(),
+        scope: match &pack.scope {
+            MemoryScope::Personal => "personal".to_string(),
+            MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
+        },
+    }
+}
+
 /// Durable knowledge of a scope (facts/preferences/decisions/goals), capped to
 /// keep the prompt bounded. `scope` is a workspace id or PERSONAL_WORKSPACE —
 /// which is exactly the suggestion card's `scope`, so no translation is needed.
@@ -22806,6 +22857,11 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                                 text: text.clone(),
                                 score: 0.0,
                                 kind: kind.clone(),
+                                source_workspace_id: gateway_memory_workspace_id().as_str().to_string(),
+                                source_label: recall_source_label(gateway_memory_workspace_id().as_str()),
+                                collection: "knowledge".to_string(),
+                                grant_id: None,
+                                conflict: false,
                             })
                             .collect(),
                         scope: outcome.scope.clone(),
@@ -25029,6 +25085,9 @@ save/export a file to a folder, call save_artifact(file, destination)."
         .as_ref()
         .map(|context| context.can_use_project_memory)
         .unwrap_or(true);
+    // This is emitted as a structured stream event once the transport exists below.
+    // Keep it next to prompt assembly so UI provenance and actual RAG context cannot diverge.
+    let mut automatic_recall_payload = None;
     let system = if contact_only {
         let cx = contact_ctx
             .as_ref()
@@ -25145,6 +25204,7 @@ normal answers."
             if let Some(service) = state.memory_service.as_ref() {
                 let scope = scope_from_active_workspace();
                 let pack = service.recall(&request.prompt, &scope).await;
+                automatic_recall_payload = Some(recall_stream_payload_from_pack(&pack));
                 match pack.block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
@@ -25178,6 +25238,7 @@ normal answers."
                         graph_context,
                     )
                 };
+                automatic_recall_payload = Some(recall_stream_payload_from_pack(&block));
                 match block.block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
@@ -25855,6 +25916,12 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     tokio::spawn(async move {
         let mut ls = local_first_engine::LoopState::new();
         ls.messages = messages;
+        // RAG completed before the loop starts. Publish the exact selected hits before any
+        // narration delta so a resumed client and the persisted assistant message agree on
+        // which memory sources informed this turn.
+        if let Some(payload) = automatic_recall_payload {
+            let _ = emit_stream_event(&tx, GenerateStreamEvent::Recall { payload }).await;
+        }
         // Phase 3 (per-project skill confirmations): seed the turn's force-confirm set with the
         // workspace's configured categories so an effectful action is gated even with NO
         // sensitive skill loaded. Fail-safe — this only ADDS to `active_sensitive`; the loop
@@ -31156,6 +31223,7 @@ async fn drain_agent_stream_into_message(
     };
     for line in snapshot {
         let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        persist_recall_event_part(state, thread_id, assistant_message_id, &line);
         if streamed_text.len() != last_flushed_len
             && last_flush.elapsed() >= std::time::Duration::from_millis(200)
         {
@@ -31177,6 +31245,7 @@ async fn drain_agent_stream_into_message(
         match brx.recv().await {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                persist_recall_event_part(state, thread_id, assistant_message_id, &line);
                 if streamed_text.len() != last_flushed_len
                     && last_flush.elapsed() >= std::time::Duration::from_millis(200)
                 {
@@ -31207,23 +31276,14 @@ async fn drain_agent_stream_into_message(
     Some(final_text)
 }
 
-/// Maps a raw stream NDJSON line to a TurnEventKind + payload and emits it via
-/// the turn_executor fan-out (durable turn_events + live broadcast). Best-effort:
-/// unparseable lines or unknown types are silently skipped (they don't affect the
-/// assistant message accumulation either).
-fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
-    let line = line.trim();
-    if line.is_empty() {
-        return;
-    }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-        return;
-    };
+/// Maps a raw stream value to a durable TurnEventKind and its transport payload.
+fn turn_event_from_stream_value(
+    value: &serde_json::Value,
+) -> Option<(local_first_task_runtime::TurnEventKind, serde_json::Value)> {
     let kind_str = match value.get("type").and_then(|t| t.as_str()) {
         Some(t) => t,
-        None => return,
+        None => return None,
     };
-    tracing::debug!(target: "broker::fanout", turn_id = %turn_id, kind = %kind_str, "stream event");
     let (kind, payload) = match kind_str {
         "delta" => (
             local_first_task_runtime::TurnEventKind::Delta,
@@ -31245,12 +31305,59 @@ fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
             local_first_task_runtime::TurnEventKind::Tool,
             value.clone(),
         ),
+        "recall" => (
+            local_first_task_runtime::TurnEventKind::Recall,
+            value.get("payload").cloned().unwrap_or(serde_json::Value::Null),
+        ),
         "error" => (
             local_first_task_runtime::TurnEventKind::Error,
             value.clone(),
         ),
         // unknown event types (e.g. choice_prompt, vault_propose) are not turn events
-        _ => return,
+        _ => return None,
+    };
+    Some((kind, payload))
+}
+
+/// Stores an emitted Recall part with the assistant message. This is deliberately
+/// idempotent because a stream snapshot and its broadcast tail can overlap.
+fn persist_recall_event_part(
+    state: &AppState,
+    thread_id: &str,
+    assistant_message_id: &str,
+    line: &str,
+) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return;
+    };
+    if value.get("type").and_then(|kind| kind.as_str()) != Some("recall") {
+        return;
+    }
+    let Some(payload) = value.get("payload") else {
+        return;
+    };
+    let part = serde_json::json!({ "type": "recall", "payload": payload });
+    if let Ok(store) = lock_store(state) {
+        let _ = store.append_assistant_event_part(thread_id, assistant_message_id, &part);
+    }
+}
+
+/// Maps a raw stream NDJSON line to a TurnEventKind + payload and emits it via
+/// the turn_executor fan-out (durable turn_events + live broadcast). Best-effort:
+/// unparseable lines or unknown types are silently skipped (they don't affect the
+/// assistant message accumulation either).
+fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
+    let line = line.trim();
+    if line.is_empty() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
+    };
+    let kind_str = value.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
+    tracing::debug!(target: "broker::fanout", turn_id = %turn_id, kind = %kind_str, "stream event");
+    let Some((kind, payload)) = turn_event_from_stream_value(&value) else {
+        return;
     };
     if let Ok(store) = state.task_store.lock() {
         let _ = crate::turn_executor::emit_turn_event(state, &store, turn_id, kind, payload);
@@ -31279,6 +31386,7 @@ async fn drain_agent_stream_into_message_with_fanout(
     };
     for line in snapshot {
         let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        persist_recall_event_part(state, thread_id, assistant_message_id, &line);
         fanout_turn_event(state, turn_id, &line);
         if streamed_text.len() != last_flushed_len
             && last_flush.elapsed() >= std::time::Duration::from_millis(200)
@@ -31301,6 +31409,7 @@ async fn drain_agent_stream_into_message_with_fanout(
         match brx.recv().await {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                persist_recall_event_part(state, thread_id, assistant_message_id, &line);
                 fanout_turn_event(state, turn_id, &line);
                 if streamed_text.len() != last_flushed_len
                     && last_flush.elapsed() >= std::time::Duration::from_millis(200)
@@ -60623,6 +60732,42 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             &mut final_text,
         ));
         assert_eq!(final_text.as_deref(), Some("final answer"));
+    }
+
+    #[test]
+    fn fanout_recall_preserves_the_payload_and_uses_recall_kind() {
+        let raw = serde_json::json!({
+            "type": "recall",
+            "payload": {
+                "query": "launch",
+                "hits": [{
+                    "ref": "memory:owner:project-a:1",
+                    "source_workspace_id": "project-a",
+                    "source_label": "Homun roadmap",
+                    "collection": "decisions",
+                    "grant_id": null,
+                    "conflict": false
+                }],
+                "scope": "project"
+            }
+        });
+        let (kind, payload) = super::turn_event_from_stream_value(&raw).expect("recall maps");
+        assert_eq!(kind, local_first_task_runtime::TurnEventKind::Recall);
+        assert_eq!(payload, raw["payload"]);
+    }
+
+    #[test]
+    fn automatic_recall_payload_keeps_an_empty_recall_visible_to_the_stream() {
+        let pack = local_first_memory::RecallPack::from_block(
+            "launch",
+            local_first_memory::MemoryScope::Personal,
+            None,
+        );
+
+        let payload = super::recall_stream_payload_from_pack(&pack);
+        assert_eq!(payload.query, "launch");
+        assert!(payload.hits.is_empty());
+        assert_eq!(payload.scope, "personal");
     }
 
     #[test]

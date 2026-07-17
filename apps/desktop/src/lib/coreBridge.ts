@@ -371,6 +371,16 @@ export interface RecallHitPayload {
   text: string;
   score: number;
   type: string;
+  /** Canonical workspace that supplied this hit (including __personal__). */
+  source_workspace_id: string;
+  /** Human-readable source label resolved by the gateway for this turn. */
+  source_label: string;
+  /** System collection that classified/authorized the record. */
+  collection: string;
+  /** Direct grant used for a linked source; omitted for the local source. */
+  grant_id?: string | null;
+  /** The recall coordinator detected a semantic conflict for this hit. */
+  conflict: boolean;
 }
 
 /** D3 (Piano UI): una modifica di codice proposta dal modello (diff inline). */
@@ -4585,6 +4595,7 @@ function parseBrowserStreamEvent(line: string) {
       | "vault_reveal"
       | "payment_approval"
       | "tool_result"
+      | "recall"
       | "done"
       | "error";
     text?: string;
@@ -4619,6 +4630,8 @@ function parseTurnStreamEventAsLegacy(line: string) {
       return { type: "plan_update" as const, markdown: String(payload.markdown ?? "") };
     case "tool":
       return { type: "tool_result" as const, payload: raw.payload };
+    case "recall":
+      return { type: "recall" as const, payload: raw.payload };
     case "error":
       return {
         type: "error" as const,
@@ -4661,6 +4674,7 @@ function browserStreamEventToCoreEvent(
     case "vault_reveal":
     case "payment_approval":
     case "tool_result":
+    case "recall":
       return {
         type: event.type,
         request_id: requestId,
