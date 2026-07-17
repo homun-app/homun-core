@@ -222,6 +222,129 @@ fn server_first_proposal_keeps_source_values_and_pending_edit_revalidates_them()
 }
 
 #[test]
+fn reopening_a_pending_publication_returns_the_same_server_preview() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let first = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    let reopened = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+
+    assert_eq!(reopened.id, first.id);
+    assert_eq!(reopened.proposal_version, first.proposal_version);
+    assert_eq!(reopened, first);
+}
+
+#[test]
+fn reopening_a_pending_publication_preserves_its_reviewed_payload() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let first = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    let edited = fixture
+        .facade
+        .update_publication_proposal_at_version(
+            &first.id,
+            OWNER,
+            first.proposal_version,
+            &MemoryPublicationEditInput {
+                proposed_text: Some("Prefers concise Italian replies".to_string()),
+                proposed_memory_type: Some("note".to_string()),
+                proposed_privacy_domain: Some(PrivacyDomain::new("work")),
+                proposed_sensitivity: Some(DataSensitivity::Private),
+            },
+        )
+        .unwrap();
+    let reopened = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+
+    assert_eq!(reopened.id, first.id);
+    assert_eq!(reopened.proposal_version, edited.proposal_version);
+    assert_eq!(reopened.proposed_text, edited.proposed_text);
+    assert_eq!(reopened.proposed_memory_type, edited.proposed_memory_type);
+    assert_eq!(
+        reopened.proposed_privacy_domain,
+        edited.proposed_privacy_domain
+    );
+}
+
+#[test]
+fn reopening_after_source_change_fails_stale_pending_and_creates_a_fresh_preview() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let first = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    let mut changed = fixture.get_source(&source.reference);
+    changed.text = "Prefers concise Italian replies".to_string();
+    changed.updated_at = "unix:2.000000000".to_string();
+    fixture.facade.upsert_memory(&changed).unwrap();
+
+    let fresh = fixture
+        .facade
+        .create_publication_proposal(&changed, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    let stale = fixture
+        .facade
+        .get_publication_proposal(&first.id)
+        .unwrap()
+        .unwrap();
+
+    assert_ne!(fresh.id, first.id);
+    assert_eq!(fresh.proposed_text, changed.text);
+    assert_eq!(stale.status, MemoryPublicationStatus::Failed);
+    assert_eq!(
+        stale.failure_reason.as_deref(),
+        Some("publication_source_changed")
+    );
+}
+
+#[test]
+fn concurrent_server_first_creates_resume_one_pending_preview() {
+    let facade = Arc::new(MemoryFacade::new(
+        SQLiteMemoryStore::open_in_memory().unwrap(),
+    ));
+    let owner = UserId::new(OWNER);
+    let project = WorkspaceId::new(PROJECT);
+    let source = memory(&owner, &project, "preference", "Prefers Italian");
+    facade.upsert_memory(&source).unwrap();
+    let barrier = Arc::new(Barrier::new(3));
+    let mut joins = Vec::new();
+    for _ in 0..2 {
+        let facade = Arc::clone(&facade);
+        let barrier = Arc::clone(&barrier);
+        let source = source.clone();
+        let owner = owner.clone();
+        joins.push(std::thread::spawn(move || {
+            barrier.wait();
+            facade.create_publication_proposal(
+                &source,
+                &MemoryPublicationDestination::personal(owner),
+                OWNER,
+            )
+        }));
+    }
+    barrier.wait();
+    let proposals = joins
+        .into_iter()
+        .map(|join| join.join().unwrap().unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(proposals[0].id, proposals[1].id);
+    assert_eq!(proposals[0].proposal_version, proposals[1].proposal_version);
+    assert_eq!(proposals[0].status, MemoryPublicationStatus::Pending);
+}
+
+#[test]
 fn stale_preview_versions_cannot_edit_reject_or_approve_after_a_newer_review() {
     let fixture = PublicationFixture::new();
     let source = fixture.insert_source_preference("Prefers Italian");

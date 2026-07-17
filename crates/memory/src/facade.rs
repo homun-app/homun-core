@@ -1523,15 +1523,54 @@ impl MemoryFacade {
         let source =
             self.load_publication_source(&source.reference, &source.user_id, &source.workspace_id)?;
         self.validate_publication_source(&source)?;
+        let source_evidence = self
+            .store
+            .evidence_for(&source.reference, &source.user_id, &source.workspace_id)
+            .map_err(MemoryError::Store)?;
+        let source_revision = publication_source_revision(&source, &source_evidence)?;
+
+        // Opening the publish UI again is a resume operation, not a second
+        // request. Only the server-first/no-edit path may resume: it returns
+        // the exact persisted draft (including review edits and its version).
+        if edit.is_none() {
+            for _ in 0..8 {
+                let Some(pending) = self
+                    .store
+                    .pending_memory_publication_for_source(&source.reference)
+                    .map_err(memory_publication_error)?
+                else {
+                    break;
+                };
+                let same_owner_and_destination = pending.proposed_by == actor
+                    && pending.source_user_id == source.user_id
+                    && pending.source_workspace_id == source.workspace_id
+                    && pending.destination_user_id == destination.user_id
+                    && pending.destination_workspace_id == destination.workspace_id;
+                if !same_owner_and_destination {
+                    return Err(MemoryError::policy("publication_already_pending"));
+                }
+                if pending.source_revision == source_revision {
+                    return Ok(pending);
+                }
+                match self.store.mark_memory_publication_failed(
+                    &pending.id,
+                    actor,
+                    pending.proposal_version,
+                    "publication_source_changed",
+                    &current_timestamp(),
+                ) {
+                    Ok(_) => continue,
+                    Err(MemoryPublicationStoreError::Conflict(_)) => continue,
+                    Err(error) => return Err(memory_publication_error(error)),
+                }
+            }
+        }
+
         let proposed = publication_edited_payload(&source, edit)?;
         let proposed_collection = MemoryCollectionKey::for_memory(&proposed)
             .ok_or_else(|| MemoryError::validation("publication_collection_unknown"))?;
         let candidate =
             self.find_publication_candidate(&proposed, destination, proposed_collection)?;
-        let source_evidence = self
-            .store
-            .evidence_for(&source.reference, &source.user_id, &source.workspace_id)
-            .map_err(MemoryError::Store)?;
         let now = current_timestamp();
         let proposal = MemoryPublicationProposal {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1546,7 +1585,7 @@ impl MemoryFacade {
             proposed_collection,
             proposed_privacy_domain: proposed.privacy_domain,
             proposed_sensitivity: proposed.sensitivity,
-            source_revision: publication_source_revision(&source, &source_evidence)?,
+            source_revision: source_revision.clone(),
             reason_code: publication_pending_reason(candidate.as_ref()),
             candidate,
             resolution: None,
@@ -1557,10 +1596,48 @@ impl MemoryFacade {
             created_at: now.clone(),
             updated_at: now,
         };
-        self.store
-            .create_memory_publication_proposal(&proposal)
-            .map_err(memory_publication_error)?;
-        Ok(proposal)
+        match self.store.create_memory_publication_proposal(&proposal) {
+            Ok(()) => Ok(proposal),
+            // A concurrent no-edit create may have won after our resumability
+            // read. Reload its exact persisted preview rather than producing a
+            // duplicate or forcing the UI to reject it.
+            Err(MemoryPublicationStoreError::Conflict(message))
+                if edit.is_none() && message == "publication_already_pending" =>
+            {
+                let pending = self
+                    .store
+                    .pending_memory_publication_for_source(&source.reference)
+                    .map_err(memory_publication_error)?
+                    .ok_or_else(|| MemoryError::policy("publication_conflict"))?;
+                let same_owner_and_destination = pending.proposed_by == actor
+                    && pending.source_user_id == source.user_id
+                    && pending.source_workspace_id == source.workspace_id
+                    && pending.destination_user_id == destination.user_id
+                    && pending.destination_workspace_id == destination.workspace_id;
+                if same_owner_and_destination && pending.source_revision == source_revision {
+                    Ok(pending)
+                } else if same_owner_and_destination {
+                    // The winner was built from a now-stale source. Terminally
+                    // fail it by version and re-enter the normal resume/create
+                    // path, which reloads whichever proposal wins next.
+                    match self.store.mark_memory_publication_failed(
+                        &pending.id,
+                        actor,
+                        pending.proposal_version,
+                        "publication_source_changed",
+                        &current_timestamp(),
+                    ) {
+                        Ok(_) | Err(MemoryPublicationStoreError::Conflict(_)) => {
+                            self.create_publication_proposal(&source, destination, actor)
+                        }
+                        Err(error) => Err(memory_publication_error(error)),
+                    }
+                } else {
+                    Err(MemoryError::policy("publication_conflict"))
+                }
+            }
+            Err(error) => Err(memory_publication_error(error)),
+        }
     }
 
     pub fn get_publication_proposal(

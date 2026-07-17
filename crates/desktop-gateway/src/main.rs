@@ -53415,6 +53415,34 @@ mod tests {
         assert_eq!(proposal["proposed_memory_type"], "note");
         assert_eq!(proposal["proposal_version"], 2);
 
+        // Reopening the publish surface uses the server-first create endpoint;
+        // it must resume the edited pending review instead of returning a
+        // conflict or generating a second draft.
+        let reopened = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": source.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": base,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, reopened) = memory_source_response_json(reopened).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(reopened["id"], proposal_id);
+        assert_eq!(reopened["proposal_version"], 2);
+        assert_eq!(reopened["proposed_text"], "Prefer concise Italian");
+
         for (suffix, body) in [
             ("edit", serde_json::json!({ "expected_version": 1, "edit": { "proposed_text": "stale" } })),
             ("reject", serde_json::json!({ "expected_version": 1 })),

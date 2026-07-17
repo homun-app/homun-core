@@ -182,6 +182,7 @@ assertContains("src/components/MemoryPublicationDialog.tsx", "proposed_text", "p
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.updateMemoryPublication", "changed publication fields must be revalidated by the server before approval");
 assertContains("src/components/MemoryPublicationDialog.tsx", "proposal.proposal_version", "publication mutations must bind to the server preview version");
 assertContains("src/components/MemoryPublicationDialog.tsx", "destination_workspace_id: destinationWorkspaceId", "initial publication preview must be created only after a destination is selected");
+assertContains("src/components/MemoryPublicationDialog.tsx", "hydrateFromServer(next)", "reopened pending publication previews must hydrate the exact server draft");
 assertNotContains("src/components/MemoryPublicationDialog.tsx", "initialText", "publication preview must not seed a client-side recall payload");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.approveMemoryPublication", "publication must require explicit approval");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.rejectMemoryPublication", "publication must support rejection without writes");

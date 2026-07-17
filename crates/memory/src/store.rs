@@ -942,6 +942,38 @@ impl SQLiteMemoryStore {
         Ok(proposal)
     }
 
+    /// Returns the one pending publication that currently owns a source ref.
+    /// Publication creation takes the writer transaction before inserting, so
+    /// this read is only a resumability hint; callers still handle a concurrent
+    /// insert by reloading the winner after `publication_already_pending`.
+    pub fn pending_memory_publication_for_source(
+        &self,
+        source_ref: &MemoryRef,
+    ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
+        let conn = self.read_conn();
+        let proposal = query_optional(
+            &conn,
+            "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_collection, proposed_privacy_domain,
+                    proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
+                    failure_reason, proposed_by, decided_by, created_at, updated_at
+             from memory_publication_proposals
+             where source_ref_json = ?1 and status = 'pending'
+             order by created_at, id
+             limit 1",
+            [publication_ref_json(source_ref).map_err(MemoryPublicationStoreError::store)?],
+            memory_publication_proposal_from_row,
+        )
+        .map_err(MemoryPublicationStoreError::store)?;
+        proposal
+            .as_ref()
+            .map(validate_persisted_memory_publication_proposal)
+            .transpose()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(proposal)
+    }
+
     /// Updates only a pending proposal. The caller supplies an already
     /// revalidated proposal from the facade; this transaction still protects
     /// against ownership, state, and identity changes between read and write.
