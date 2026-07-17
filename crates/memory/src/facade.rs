@@ -917,7 +917,7 @@ impl MemoryFacade {
         Ok(MemorySearchPage {
             items,
             total,
-            limit: request.limit.min(AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX),
+            limit: request.limit,
             offset: request.offset,
         })
     }
@@ -972,7 +972,7 @@ impl MemoryFacade {
         Ok(MemorySearchPage {
             items,
             total,
-            limit: request.limit,
+            limit: request.limit.min(AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX),
             offset: request.offset,
         })
     }

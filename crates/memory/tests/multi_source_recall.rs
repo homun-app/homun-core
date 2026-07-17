@@ -1,7 +1,8 @@
 use local_first_memory::{
-    AuthorizedMemorySource, DataSensitivity, MemoryCollectionKey, MemoryEntity, MemoryFacade,
-    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySourcePolicy,
-    MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
+    AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, MemoryAccessRequest,
+    MemoryCollectionKey, MemoryEntity, MemoryFacade, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, MemoryScope, MemorySourcePolicy, MemoryStatus, PrivacyDomain,
+    SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
 };
 
 struct RecallFixture {
@@ -464,4 +465,50 @@ fn authorized_lexical_index_works_on_the_file_backed_reader_pool() {
     assert_eq!(pack.hits[0].memory_ref, allowed.to_string());
     drop(fixture);
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn authorized_search_reports_the_effective_bounded_limit() {
+    let fixture = RecallFixture::new();
+    for index in 0..120 {
+        fixture.insert(
+            &format!("bounded-{index:03}"),
+            "preference",
+            &format!("Authorized bounded result {index:03}"),
+            DataSensitivity::Private,
+            serde_json::json!({}),
+            &[0.0, 1.0],
+        );
+    }
+    let policy = MemorySourcePolicy::for_collections(
+        vec![MemoryCollectionKey::Preferences],
+        DataSensitivity::Private,
+    );
+
+    let page = fixture
+        .facade
+        .search_authorized_memories(AuthorizedMemorySearchRequest {
+            access: MemoryAccessRequest {
+                actor_id: "test".to_string(),
+                user_id: fixture.user.clone(),
+                workspace_id: fixture.source_workspace.clone(),
+                purpose: "chat_context".to_string(),
+                allowed_domains: vec![PrivacyDomain::new("personal")],
+                max_sensitivity: DataSensitivity::Private,
+                allow_raw_payload: false,
+                allow_export: true,
+                broad_query: false,
+            },
+            source_policy: Some(policy),
+            query: "authorized bounded".to_string(),
+            statuses: vec![MemoryStatus::Confirmed],
+            memory_types: vec!["preference".to_string()],
+            limit: 150,
+            offset: 0,
+        })
+        .expect("authorized search");
+
+    assert_eq!(page.total, 120);
+    assert_eq!(page.items.len(), 100);
+    assert_eq!(page.limit, 100);
 }

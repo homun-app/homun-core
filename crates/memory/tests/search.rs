@@ -71,6 +71,35 @@ fn search_paginates_after_filters() {
     assert_eq!(page.items[0].summary, "Zed beta");
 }
 
+#[test]
+fn legacy_search_preserves_limits_above_authorized_source_cap() {
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+    let lifecycle = lifecycle_request();
+    for index in 0..101 {
+        create_confirmed(
+            &facade,
+            &lifecycle,
+            "preference",
+            &format!("Legacy wide result {index:03}"),
+        );
+    }
+
+    let page = facade
+        .search_memories(MemorySearchRequest {
+            access: access_request(vec!["work"], DataSensitivity::Private),
+            query: "legacy wide".to_string(),
+            statuses: vec![MemoryStatus::Confirmed],
+            memory_types: vec!["preference".to_string()],
+            limit: 101,
+            offset: 0,
+        })
+        .unwrap();
+
+    assert_eq!(page.total, 101);
+    assert_eq!(page.items.len(), 101);
+    assert_eq!(page.limit, 101);
+}
+
 fn seeded_facade() -> MemoryFacade {
     let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
     let lifecycle = lifecycle_request();
