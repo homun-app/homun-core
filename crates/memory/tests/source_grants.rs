@@ -87,6 +87,52 @@ fn remove_sqlite_files(path: &Path) {
     let _ = std::fs::remove_file(format!("{}-shm", path.display()));
 }
 
+fn active_source_index_count(path: &Path) -> i64 {
+    Connection::open(path)
+        .unwrap()
+        .query_row(
+            "select count(*) from sqlite_master
+             where type = 'index' and name = 'idx_memory_source_grants_active_source'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn drop_active_source_index_and_clone_grant(path: &Path, original_id: &str, duplicate_id: &str) {
+    let connection = Connection::open(path).unwrap();
+    connection
+        .execute_batch("drop index idx_memory_source_grants_active_source;")
+        .unwrap();
+    connection
+        .execute(
+            "insert into memory_source_grants (
+                id, consumer_user_id, consumer_workspace_id, source_user_id,
+                source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                policy_version, created_by, created_at, updated_at
+             ) select ?1, consumer_user_id, consumer_workspace_id, source_user_id,
+                      source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                      policy_version, created_by, created_at, updated_at
+               from memory_source_grants where id = ?2",
+            (duplicate_id, original_id),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "insert into memory_source_grant_collections (grant_id, collection_key)
+             select ?1, collection_key from memory_source_grant_collections where grant_id = ?2",
+            (duplicate_id, original_id),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "insert into memory_source_grant_overrides (grant_id, memory_ref, effect)
+             select ?1, memory_ref, effect from memory_source_grant_overrides where grant_id = ?2",
+            (duplicate_id, original_id),
+        )
+        .unwrap();
+}
+
 fn assert_corrupt_grant_is_rejected(label: &str, corrupt: impl FnOnce(&Connection)) {
     let path = unique_db_path(label);
     let persisted = grant();
@@ -434,45 +480,31 @@ fn persisted_reserved_or_self_source_workspace_fails_closed_on_get_and_list() {
 }
 
 #[test]
-fn duplicate_hydrated_sources_are_classified_as_store_corruption() {
+fn preindex_v4_duplicates_reopen_and_resolve_as_store_corruption() {
     let path = unique_db_path("duplicate-legacy-corruption");
     let original = grant();
-    let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
-    facade.upsert_memory_source_grant(&original).unwrap();
     {
-        let connection = Connection::open(&path).unwrap();
-        connection
-            .execute_batch("drop index idx_memory_source_grants_active_source;")
-            .unwrap();
-        connection
-            .execute(
-                "insert into memory_source_grants (
-                    id, consumer_user_id, consumer_workspace_id, source_user_id,
-                    source_workspace_id, max_sensitivity, expires_at, revoked_at,
-                    policy_version, created_by, created_at, updated_at
-                 ) select ?1, consumer_user_id, consumer_workspace_id, source_user_id,
-                          source_workspace_id, max_sensitivity, expires_at, revoked_at,
-                          policy_version, created_by, created_at, updated_at
-                   from memory_source_grants where id = ?2",
-                ("grant-duplicate-corrupt", original.id.as_str()),
-            )
-            .unwrap();
-        connection
-            .execute(
-                "insert into memory_source_grant_collections (grant_id, collection_key)
-                 select ?1, collection_key from memory_source_grant_collections where grant_id = ?2",
-                ("grant-duplicate-corrupt", original.id.as_str()),
-            )
-            .unwrap();
-        connection
-            .execute(
-                "insert into memory_source_grant_overrides (grant_id, memory_ref, effect)
-                 select ?1, memory_ref, effect from memory_source_grant_overrides where grant_id = ?2",
-                ("grant-duplicate-corrupt", original.id.as_str()),
-            )
-            .unwrap();
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+        facade.upsert_memory_source_grant(&original).unwrap();
+        drop(facade);
+        drop_active_source_index_and_clone_grant(
+            &path,
+            original.id.as_str(),
+            "grant-duplicate-corrupt",
+        );
     }
 
+    let facade = MemoryFacade::new(
+        SQLiteMemoryStore::open(&path)
+            .expect("pre-index v4 databases with duplicates must still reopen"),
+    );
+    assert_eq!(
+        facade
+            .list_memory_source_grants(&original.consumer_user_id, &original.consumer_workspace_id,)
+            .unwrap()
+            .len(),
+        2
+    );
     let error = facade
         .resolve_memory_sources(
             &original.consumer_user_id,
@@ -482,6 +514,96 @@ fn duplicate_hydrated_sources_are_classified_as_store_corruption() {
         .expect_err("duplicate persisted sources must fail as store corruption");
     assert!(matches!(error, MemoryError::Store(_)));
     assert!(error.as_str().contains("duplicate_active_source"));
+    assert_eq!(active_source_index_count(&path), 0);
+
+    drop(facade);
+    remove_sqlite_files(&path);
+}
+
+#[test]
+fn preindex_v4_duplicates_install_index_after_scoped_revoke_and_reopen() {
+    let path = unique_db_path("duplicate-legacy-recovery");
+    let original = grant();
+    {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+        facade.upsert_memory_source_grant(&original).unwrap();
+    }
+    drop_active_source_index_and_clone_grant(
+        &path,
+        original.id.as_str(),
+        "grant-duplicate-revoked",
+    );
+
+    {
+        let facade = MemoryFacade::new(
+            SQLiteMemoryStore::open(&path).expect("duplicate legacy database must reopen"),
+        );
+        facade
+            .revoke_memory_source_grant(
+                &original.consumer_user_id,
+                &original.consumer_workspace_id,
+                "grant-duplicate-revoked",
+                100,
+            )
+            .unwrap();
+        assert_eq!(active_source_index_count(&path), 0);
+    }
+
+    let facade = MemoryFacade::new(
+        SQLiteMemoryStore::open(&path).expect("recovered database must reopen with unique index"),
+    );
+    assert_eq!(active_source_index_count(&path), 1);
+    let grants = facade
+        .list_memory_source_grants(&original.consumer_user_id, &original.consumer_workspace_id)
+        .unwrap();
+    assert_eq!(grants.len(), 2);
+    assert_eq!(
+        grants
+            .iter()
+            .filter(|grant| grant.revoked_at.is_some())
+            .count(),
+        1
+    );
+    let sources = facade
+        .resolve_memory_sources(
+            &original.consumer_user_id,
+            &original.consumer_workspace_id,
+            100,
+        )
+        .unwrap();
+    assert_eq!(sources.len(), 2);
+    assert_eq!(sources[1].grant_id.as_deref(), Some(original.id.as_str()));
+
+    drop(facade);
+    remove_sqlite_files(&path);
+}
+
+#[test]
+fn clean_preindex_v4_reopens_and_installs_active_source_index() {
+    let path = unique_db_path("clean-preindex-v4");
+    let original = grant();
+    {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+        facade.upsert_memory_source_grant(&original).unwrap();
+    }
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch("drop index idx_memory_source_grants_active_source;")
+            .unwrap();
+    }
+    assert_eq!(active_source_index_count(&path), 0);
+
+    let facade = MemoryFacade::new(
+        SQLiteMemoryStore::open(&path).expect("clean pre-index v4 database must reopen"),
+    );
+    assert_eq!(active_source_index_count(&path), 1);
+    assert_eq!(
+        facade
+            .list_memory_source_grants(&original.consumer_user_id, &original.consumer_workspace_id,)
+            .unwrap(),
+        vec![original]
+    );
 
     drop(facade);
     remove_sqlite_files(&path);

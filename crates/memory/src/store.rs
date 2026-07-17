@@ -2065,7 +2065,7 @@ impl SQLiteMemoryStore {
     fn init(&self) -> Result<(), String> {
         // init() crea lo schema + rebuild FTS: gira sulla writer (in pooled mode
         // i reader vedranno lo schema via WAL; init idempotente su reader è harmless).
-        let conn = self.write_conn();
+        let mut conn = self.write_conn();
         conn
             .execute_batch(
                 "create table if not exists schema_metadata (
@@ -2256,11 +2256,6 @@ impl SQLiteMemoryStore {
                 );
                 create index if not exists idx_memory_source_grants_consumer
                     on memory_source_grants(consumer_user_id, consumer_workspace_id, revoked_at);
-                create unique index if not exists idx_memory_source_grants_active_source
-                    on memory_source_grants(
-                        consumer_user_id, consumer_workspace_id,
-                        source_user_id, source_workspace_id
-                    ) where revoked_at is null;
 
                 create table if not exists memory_source_grant_collections (
                     grant_id text not null references memory_source_grants(id) on delete cascade,
@@ -2278,6 +2273,7 @@ impl SQLiteMemoryStore {
             .map_err(|error| error.to_string())?;
         // I sub-helper (ensure_column, rebuild) ricevono questa stessa connection
         // (lock unico su writer) — evita di riprendere il Mutex e fare deadlock.
+        Self::install_memory_source_active_index_on(&mut conn)?;
         let conn_ref: &Connection = &conn;
         self.ensure_column_on(
             conn_ref,
@@ -2322,6 +2318,44 @@ impl SQLiteMemoryStore {
         .map_err(|error| error.to_string())?;
         self.rebuild_memory_search_index_on(conn_ref)?;
         Ok(())
+    }
+
+    fn install_memory_source_active_index_on(conn: &mut Connection) -> Result<(), String> {
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let has_legacy_duplicates = transaction
+            .query_row(
+                "select exists(
+                    select 1 from memory_source_grants
+                    where revoked_at is null
+                    group by consumer_user_id, consumer_workspace_id,
+                             source_user_id, source_workspace_id
+                    having count(*) > 1
+                    limit 1
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| error.to_string())?;
+
+        // Pre-index v4 databases may contain ambiguous links. Preserve their
+        // history and defer the index until a scoped revoke resolves the conflict;
+        // the resolver remains fail-closed while duplicates exist.
+        if !has_legacy_duplicates {
+            transaction
+                .execute(
+                    "create unique index if not exists idx_memory_source_grants_active_source
+                     on memory_source_grants(
+                         consumer_user_id, consumer_workspace_id,
+                         source_user_id, source_workspace_id
+                     ) where revoked_at is null",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
+        transaction.commit().map_err(|error| error.to_string())
     }
 
     fn ensure_column_on(
