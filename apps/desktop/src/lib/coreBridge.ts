@@ -477,6 +477,46 @@ export interface ProjectAccessGrant {
 
 export type ProjectAccessInput = Omit<ProjectAccessGrant, "workspace_id" | "updated_at">;
 
+export type MemoryCollectionKey =
+  | "preferences"
+  | "profile"
+  | "knowledge"
+  | "decisions"
+  | "goals"
+  | "artifacts"
+  | "episodes";
+
+export interface MemorySourceGrantView {
+  id: string | null;
+  source_workspace_id: string;
+  source_label: string;
+  source_available: boolean;
+  local: boolean;
+  read_only: boolean;
+  collections: MemoryCollectionKey[];
+  max_sensitivity: "public" | "internal" | "private" | "confidential";
+  expires_at?: number | null;
+  revoked_at?: number | null;
+  policy_version: number;
+  last_used_at?: number | null;
+}
+
+export interface MemorySourceUpsertInput {
+  source_workspace_id: string;
+  collections: MemoryCollectionKey[];
+  max_sensitivity: MemorySourceGrantView["max_sensitivity"];
+  expires_at?: number | null;
+  overrides: Array<{ memory_ref: string; effect: "allow" | "deny" }>;
+}
+
+export interface MemorySourceCandidateView {
+  ref: string;
+  summary: string;
+  type: string;
+  collection: MemoryCollectionKey;
+  sensitivity: MemorySourceGrantView["max_sensitivity"];
+}
+
 export interface ComposioConnectResult {
   provider_id: string;
   tools_cached: number;
@@ -1870,6 +1910,43 @@ async function electronRemoveProjectAccess(
   );
 }
 
+async function electronMemorySources(
+  workspaceId: string,
+): Promise<MemorySourceGrantView[]> {
+  return gatewayGetJson<MemorySourceGrantView[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources`,
+  );
+}
+
+async function electronMemorySourceCandidates(
+  workspaceId: string,
+  sourceWorkspaceId: string,
+): Promise<MemorySourceCandidateView[]> {
+  return gatewayGetJson<MemorySourceCandidateView[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources/candidates?source_workspace_id=${encodeURIComponent(sourceWorkspaceId)}`,
+  );
+}
+
+async function electronUpsertMemorySource(
+  workspaceId: string,
+  input: MemorySourceUpsertInput,
+): Promise<MemorySourceGrantView[]> {
+  return gatewayPostJson<MemorySourceGrantView[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources/upsert`,
+    input,
+  );
+}
+
+async function electronRevokeMemorySource(
+  workspaceId: string,
+  grantId: string,
+): Promise<MemorySourceGrantView[]> {
+  return gatewayPostJson<MemorySourceGrantView[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources/${encodeURIComponent(grantId)}/revoke`,
+    {},
+  );
+}
+
 /** A parameter (env var, argument, or HTTP header) a registry server needs. */
 export interface McpRegistryInput {
   key: string;
@@ -2889,6 +2966,13 @@ export const coreBridge = {
     electronUpsertProjectAccess(workspaceId, input),
   removeProjectAccess: (workspaceId: string, contactReference: string, channel: string) =>
     electronRemoveProjectAccess(workspaceId, contactReference, channel),
+  memorySources: (workspaceId: string) => electronMemorySources(workspaceId),
+  memorySourceCandidates: (workspaceId: string, sourceWorkspaceId: string) =>
+    electronMemorySourceCandidates(workspaceId, sourceWorkspaceId),
+  upsertMemorySource: (workspaceId: string, input: MemorySourceUpsertInput) =>
+    electronUpsertMemorySource(workspaceId, input),
+  revokeMemorySource: (workspaceId: string, grantId: string) =>
+    electronRevokeMemorySource(workspaceId, grantId),
   mcpConnect: (input: {
     name: string;
     command?: string;

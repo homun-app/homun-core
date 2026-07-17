@@ -135,12 +135,14 @@ use local_first_local_computer_session::{
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
     BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
-    ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCreateRequest,
-    MemoryDashboard, MemoryEntity, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest,
-    MemoryRecord, MemoryRecallService, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope,
-    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
+    ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
+    MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryError, MemoryExtraction,
+    MemoryFacade, MemoryGrantOverrideEffect, MemoryLifecycleRequest, MemoryRecallService,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
+    MemorySourceGrant, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
     PERSONAL_WORKSPACE, PrivacyDomain, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId,
-    WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId, briefing_cache, prompt_fingerprint,
+    WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId, briefing_cache, contains_secret,
+    prompt_fingerprint, redact_text as redact_memory_text,
 };
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
@@ -168,7 +170,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashMap, HashSet},
     env, fs,
     io::{Cursor, Write},
     net::SocketAddr,
@@ -1314,6 +1316,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/workspaces/{workspace_id}/access/remove",
             post(project_access_remove),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/memory-sources",
+            get(memory_sources_list),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/memory-sources/upsert",
+            post(memory_source_upsert),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/memory-sources/{grant_id}/revoke",
+            post(memory_source_revoke),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/memory-sources/candidates",
+            get(memory_source_candidates),
         )
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/mcp/execute", post(mcp_execute))
@@ -49898,6 +49916,508 @@ struct ProjectAccessRemoveRequest {
     channel: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct MemorySourceOverrideInput {
+    memory_ref: String,
+    effect: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MemorySourceUpsertRequest {
+    source_workspace_id: String,
+    collections: Vec<String>,
+    max_sensitivity: String,
+    expires_at: Option<i64>,
+    overrides: Vec<MemorySourceOverrideInput>,
+}
+
+#[derive(Debug, Clone)]
+struct ValidatedMemorySourceInput {
+    source_workspace_id: MemoryWorkspaceId,
+    collections: BTreeSet<MemoryCollectionKey>,
+    max_sensitivity: MemoryDataSensitivity,
+    expires_at: Option<i64>,
+    overrides: Vec<(MemoryRef, MemoryGrantOverrideEffect)>,
+}
+
+#[derive(Debug, Clone)]
+struct MemorySourceWorkspaceContext {
+    consumer: WorkspaceRecord,
+    source_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemorySourceGrantView {
+    id: Option<String>,
+    source_workspace_id: String,
+    source_label: String,
+    source_available: bool,
+    local: bool,
+    read_only: bool,
+    collections: Vec<MemoryCollectionKey>,
+    max_sensitivity: MemoryDataSensitivity,
+    expires_at: Option<i64>,
+    revoked_at: Option<i64>,
+    policy_version: u64,
+    last_used_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemorySourceCandidateView {
+    #[serde(rename = "ref")]
+    reference: String,
+    summary: String,
+    #[serde(rename = "type")]
+    memory_type: String,
+    collection: MemoryCollectionKey,
+    sensitivity: MemoryDataSensitivity,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemorySourceCandidatesQuery {
+    source_workspace_id: String,
+}
+
+fn memory_sources_flag(value: Option<&str>) -> bool {
+    matches!(
+        value.map(str::trim),
+        Some("1") | Some("on") | Some("ON") | Some("On")
+    )
+}
+
+fn memory_sources_enabled() -> bool {
+    memory_sources_flag(env::var("HOMUN_MEMORY_SOURCES").ok().as_deref())
+}
+
+fn parse_memory_collection(value: &str) -> Result<MemoryCollectionKey, &'static str> {
+    match value {
+        "preferences" => Ok(MemoryCollectionKey::Preferences),
+        "profile" => Ok(MemoryCollectionKey::Profile),
+        "knowledge" => Ok(MemoryCollectionKey::Knowledge),
+        "decisions" => Ok(MemoryCollectionKey::Decisions),
+        "goals" => Ok(MemoryCollectionKey::Goals),
+        "artifacts" => Ok(MemoryCollectionKey::Artifacts),
+        "episodes" => Ok(MemoryCollectionKey::Episodes),
+        _ => Err("collection_not_allowed"),
+    }
+}
+
+fn parse_grant_sensitivity(value: &str) -> Result<MemoryDataSensitivity, &'static str> {
+    match value {
+        "public" => Ok(MemoryDataSensitivity::Public),
+        "internal" => Ok(MemoryDataSensitivity::Internal),
+        "private" => Ok(MemoryDataSensitivity::Private),
+        "confidential" => Ok(MemoryDataSensitivity::Confidential),
+        _ => Err("sensitivity_not_allowed"),
+    }
+}
+
+fn validate_memory_source_input(
+    consumer_workspace_id: &str,
+    request: &MemorySourceUpsertRequest,
+) -> Result<ValidatedMemorySourceInput, &'static str> {
+    let consumer_workspace_id = consumer_workspace_id.trim();
+    if consumer_workspace_id.is_empty() {
+        return Err("empty_consumer_workspace");
+    }
+    if matches!(
+        consumer_workspace_id,
+        PERSONAL_WORKSPACE | THREADS_WORKSPACE
+    ) {
+        return Err("reserved_consumer_scope");
+    }
+
+    let source_workspace_id = request.source_workspace_id.trim();
+    if source_workspace_id.is_empty() {
+        return Err("empty_source_workspace");
+    }
+    if source_workspace_id == THREADS_WORKSPACE {
+        return Err("reserved_source_scope");
+    }
+    if source_workspace_id == consumer_workspace_id {
+        return Err("source_equals_consumer");
+    }
+    if request.collections.is_empty() && request.overrides.is_empty() {
+        return Err("empty_source_policy");
+    }
+
+    let mut collections = BTreeSet::new();
+    for collection in &request.collections {
+        let collection = parse_memory_collection(collection.trim())?;
+        if !collections.insert(collection) {
+            return Err("duplicate_collection");
+        }
+    }
+    let max_sensitivity = parse_grant_sensitivity(request.max_sensitivity.trim())?;
+
+    let mut seen_overrides = HashSet::new();
+    let mut overrides = Vec::with_capacity(request.overrides.len());
+    for override_input in &request.overrides {
+        let raw_reference = override_input.memory_ref.as_str();
+        let reference = raw_reference
+            .parse::<MemoryRef>()
+            .map_err(|_| "invalid_memory_ref")?;
+        if reference.to_string() != raw_reference
+            || reference.scope != "local"
+            || reference.user_id.as_str().trim().is_empty()
+            || reference.workspace_id.as_str().trim().is_empty()
+            || reference.key.trim().is_empty()
+        {
+            return Err("noncanonical_memory_ref");
+        }
+        if reference.kind != MemoryRefKind::Memory {
+            return Err("invalid_override_kind");
+        }
+        if reference.workspace_id.as_str() != source_workspace_id {
+            return Err("override_outside_source");
+        }
+        if !seen_overrides.insert(reference.to_string()) {
+            return Err("duplicate_override_ref");
+        }
+        let effect = match override_input.effect.trim() {
+            "allow" => MemoryGrantOverrideEffect::Allow,
+            "deny" => MemoryGrantOverrideEffect::Deny,
+            _ => return Err("override_effect_not_allowed"),
+        };
+        overrides.push((reference, effect));
+    }
+
+    Ok(ValidatedMemorySourceInput {
+        source_workspace_id: MemoryWorkspaceId::new(source_workspace_id),
+        collections,
+        max_sensitivity,
+        expires_at: request.expires_at,
+        overrides,
+    })
+}
+
+fn validate_memory_source_workspaces(
+    snapshot: &WorkspacesFile,
+    consumer_workspace_id: &str,
+    source_workspace_id: &str,
+) -> Result<MemorySourceWorkspaceContext, &'static str> {
+    let consumer_workspace_id = consumer_workspace_id.trim();
+    if consumer_workspace_id.is_empty() {
+        return Err("empty_consumer_workspace");
+    }
+    if matches!(
+        consumer_workspace_id,
+        PERSONAL_WORKSPACE | THREADS_WORKSPACE
+    ) {
+        return Err("reserved_consumer_scope");
+    }
+    let consumer = snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == consumer_workspace_id)
+        .cloned()
+        .ok_or("consumer_workspace_not_found")?;
+
+    let source_workspace_id = source_workspace_id.trim();
+    if source_workspace_id.is_empty() {
+        return Err("empty_source_workspace");
+    }
+    if source_workspace_id == THREADS_WORKSPACE {
+        return Err("reserved_source_scope");
+    }
+    if source_workspace_id == consumer_workspace_id {
+        return Err("source_equals_consumer");
+    }
+    if source_workspace_id == PERSONAL_WORKSPACE {
+        return Ok(MemorySourceWorkspaceContext {
+            consumer,
+            source_available: true,
+        });
+    }
+    if !snapshot
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == source_workspace_id)
+    {
+        return Err("source_workspace_not_found");
+    }
+    Ok(MemorySourceWorkspaceContext {
+        consumer,
+        source_available: true,
+    })
+}
+
+fn validate_memory_source_consumer(
+    snapshot: &WorkspacesFile,
+    consumer_workspace_id: &str,
+) -> Result<WorkspaceRecord, &'static str> {
+    let consumer_workspace_id = consumer_workspace_id.trim();
+    if consumer_workspace_id.is_empty() {
+        return Err("empty_consumer_workspace");
+    }
+    if matches!(
+        consumer_workspace_id,
+        PERSONAL_WORKSPACE | THREADS_WORKSPACE
+    ) {
+        return Err("reserved_consumer_scope");
+    }
+    snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == consumer_workspace_id)
+        .cloned()
+        .ok_or("consumer_workspace_not_found")
+}
+
+fn memory_source_bad_request(code: &'static str) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code,
+        message: code.to_string(),
+    }
+}
+
+fn memory_source_disabled_error() -> GatewayError {
+    GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "memory_sources_disabled",
+        message: "memory_sources_disabled".to_string(),
+    }
+}
+
+fn memory_source_facade_error(error: MemoryError) -> GatewayError {
+    match error {
+        MemoryError::NotFound(_) => GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "memory_source_grant_not_found",
+            message: "memory_source_grant_not_found".to_string(),
+        },
+        MemoryError::Validation(_) | MemoryError::Policy(_) => GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "memory_source_invalid",
+            message: "memory_source_invalid".to_string(),
+        },
+        MemoryError::Store(_) => GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "memory_source_store_error",
+            message: "memory_source_store_error".to_string(),
+        },
+    }
+}
+
+fn all_memory_collections() -> Vec<MemoryCollectionKey> {
+    vec![
+        MemoryCollectionKey::Preferences,
+        MemoryCollectionKey::Profile,
+        MemoryCollectionKey::Knowledge,
+        MemoryCollectionKey::Decisions,
+        MemoryCollectionKey::Goals,
+        MemoryCollectionKey::Artifacts,
+        MemoryCollectionKey::Episodes,
+    ]
+}
+
+fn memory_source_grant_views(
+    consumer: &WorkspaceRecord,
+    workspaces: &[WorkspaceRecord],
+    grants: Vec<MemorySourceGrant>,
+) -> Vec<MemorySourceGrantView> {
+    let mut linked = grants
+        .into_iter()
+        .map(|grant| {
+            let (source_label, source_available) =
+                if grant.source_workspace_id.as_str() == PERSONAL_WORKSPACE {
+                    ("Personal".to_string(), true)
+                } else if let Some(workspace) = workspaces
+                    .iter()
+                    .find(|workspace| workspace.id == grant.source_workspace_id.as_str())
+                {
+                    (workspace.name.clone(), true)
+                } else {
+                    (grant.source_workspace_id.as_str().to_string(), false)
+                };
+            MemorySourceGrantView {
+                id: Some(grant.id),
+                source_workspace_id: grant.source_workspace_id.as_str().to_string(),
+                source_label,
+                source_available,
+                local: false,
+                read_only: true,
+                collections: grant.collections.into_iter().collect(),
+                max_sensitivity: grant
+                    .max_sensitivity
+                    .min(MemoryDataSensitivity::Confidential),
+                expires_at: grant.expires_at,
+                revoked_at: grant.revoked_at,
+                policy_version: grant.policy_version,
+                last_used_at: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    linked.sort_by(|left, right| {
+        left.revoked_at
+            .is_some()
+            .cmp(&right.revoked_at.is_some())
+            .then_with(|| left.source_label.cmp(&right.source_label))
+            .then_with(|| left.source_workspace_id.cmp(&right.source_workspace_id))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut views = Vec::with_capacity(linked.len() + 1);
+    views.push(MemorySourceGrantView {
+        id: None,
+        source_workspace_id: consumer.id.clone(),
+        source_label: consumer.name.clone(),
+        source_available: true,
+        local: true,
+        read_only: false,
+        collections: all_memory_collections(),
+        max_sensitivity: MemoryDataSensitivity::Confidential,
+        expires_at: None,
+        revoked_at: None,
+        policy_version: 0,
+        last_used_at: None,
+    });
+    views.extend(linked);
+    views
+}
+
+fn memory_source_candidates_from_records(
+    records: &[MemoryRecord],
+    owner: &MemoryUserId,
+    source_workspace: &MemoryWorkspaceId,
+) -> Vec<MemorySourceCandidateView> {
+    let mut candidates = records
+        .iter()
+        .filter(|record| {
+            record.user_id == *owner
+                && record.workspace_id == *source_workspace
+                && matches!(
+                    record.status,
+                    MemoryStatus::Confirmed | MemoryStatus::Candidate
+                )
+                && record.sensitivity != MemoryDataSensitivity::Secret
+                && !contains_secret(&serde_json::json!({
+                    "text": &record.text,
+                    "metadata": &record.metadata,
+                }))
+        })
+        .filter_map(|record| {
+            let collection = all_memory_collections()
+                .into_iter()
+                .find(|collection| collection.matches(record))?;
+            let normalized = redact_memory_text(&record.text)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            Some(MemorySourceCandidateView {
+                reference: record.reference.to_string(),
+                summary: truncate_chars(&normalized, 180),
+                memory_type: record.memory_type.clone(),
+                collection,
+                sensitivity: record.sensitivity,
+            })
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        left.collection
+            .cmp(&right.collection)
+            .then_with(|| left.memory_type.cmp(&right.memory_type))
+            .then_with(|| left.reference.cmp(&right.reference))
+    });
+    candidates
+}
+
+fn build_memory_source_grant(
+    owner: &MemoryUserId,
+    consumer_workspace: &MemoryWorkspaceId,
+    validated: ValidatedMemorySourceInput,
+    overrides: HashMap<MemoryRef, MemoryGrantOverrideEffect>,
+    existing: Option<MemorySourceGrant>,
+    now: i64,
+) -> Result<MemorySourceGrant, &'static str> {
+    let timestamp = format!("unix:{now}.000000000");
+    if let Some(existing) = existing {
+        return Ok(MemorySourceGrant {
+            id: existing.id,
+            consumer_user_id: existing.consumer_user_id,
+            consumer_workspace_id: existing.consumer_workspace_id,
+            source_user_id: existing.source_user_id,
+            source_workspace_id: existing.source_workspace_id,
+            collections: validated.collections,
+            max_sensitivity: validated.max_sensitivity,
+            overrides,
+            expires_at: validated.expires_at,
+            revoked_at: None,
+            policy_version: existing
+                .policy_version
+                .checked_add(1)
+                .ok_or("policy_version_overflow")?,
+            created_by: existing.created_by,
+            created_at: existing.created_at,
+            updated_at: timestamp,
+        });
+    }
+    Ok(MemorySourceGrant {
+        id: format!("memory-source-{}", uuid::Uuid::new_v4().simple()),
+        consumer_user_id: owner.clone(),
+        consumer_workspace_id: consumer_workspace.clone(),
+        source_user_id: owner.clone(),
+        source_workspace_id: validated.source_workspace_id,
+        collections: validated.collections,
+        max_sensitivity: validated.max_sensitivity,
+        overrides,
+        expires_at: validated.expires_at,
+        revoked_at: None,
+        policy_version: 1,
+        created_by: owner.as_str().to_string(),
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
+    })
+}
+
+fn validate_memory_source_overrides(
+    facade: &MemoryFacade,
+    owner: &MemoryUserId,
+    validated: &ValidatedMemorySourceInput,
+) -> Result<HashMap<MemoryRef, MemoryGrantOverrideEffect>, GatewayError> {
+    let mut overrides = HashMap::with_capacity(validated.overrides.len());
+    for (reference, effect) in &validated.overrides {
+        if reference.user_id != *owner
+            || reference.workspace_id != validated.source_workspace_id
+            || reference.kind != MemoryRefKind::Memory
+        {
+            return Err(memory_source_bad_request("override_outside_source"));
+        }
+        let record = facade
+            .get_memory_for_ui(reference, owner, &validated.source_workspace_id)
+            .map_err(|_| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "memory_source_store_error",
+                message: "memory_source_store_error".to_string(),
+            })?
+            .ok_or_else(|| memory_source_bad_request("override_memory_not_found"))?;
+        if matches!(
+            record.status,
+            MemoryStatus::Rejected | MemoryStatus::Deleted
+        ) {
+            return Err(memory_source_bad_request("override_memory_not_found"));
+        }
+        if record.sensitivity == MemoryDataSensitivity::Secret
+            || contains_secret(&serde_json::json!({
+                "text": &record.text,
+                "metadata": &record.metadata,
+            }))
+        {
+            return Err(memory_source_bad_request("override_memory_not_shareable"));
+        }
+        if *effect == MemoryGrantOverrideEffect::Allow
+            && record.sensitivity > validated.max_sensitivity
+        {
+            return Err(memory_source_bad_request("override_above_max_sensitivity"));
+        }
+        if overrides.insert(reference.clone(), *effect).is_some() {
+            return Err(memory_source_bad_request("duplicate_override_ref"));
+        }
+    }
+    Ok(overrides)
+}
+
 fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
     let base = gateway_data_dir()?;
     Ok(base.join("workspaces.json"))
@@ -50364,6 +50884,153 @@ async fn project_access_remove(
         },
     )?;
     Ok(Json(list_project_access(&workspace_id)))
+}
+
+async fn memory_sources_list(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<Vec<MemorySourceGrantView>>, GatewayError> {
+    let snapshot = load_workspaces_file();
+    let consumer = validate_memory_source_consumer(&snapshot, &workspace_id)
+        .map_err(memory_source_bad_request)?;
+    let grants = if memory_sources_enabled() {
+        memory_facade(&state)
+            .list_memory_source_grants(
+                &gateway_memory_user_id(),
+                &MemoryWorkspaceId::new(consumer.id.clone()),
+            )
+            .map_err(memory_source_facade_error)?
+    } else {
+        Vec::new()
+    };
+    Ok(Json(memory_source_grant_views(
+        &consumer,
+        &snapshot.workspaces,
+        grants,
+    )))
+}
+
+async fn memory_source_upsert(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+    Json(request): Json<MemorySourceUpsertRequest>,
+) -> Result<Json<Vec<MemorySourceGrantView>>, GatewayError> {
+    if !memory_sources_enabled() {
+        return Err(memory_source_disabled_error());
+    }
+
+    let snapshot = load_workspaces_file();
+    let validated =
+        validate_memory_source_input(&workspace_id, &request).map_err(memory_source_bad_request)?;
+    let source_context = validate_memory_source_workspaces(
+        &snapshot,
+        &workspace_id,
+        validated.source_workspace_id.as_str(),
+    )
+    .map_err(memory_source_bad_request)?;
+    if !source_context.source_available {
+        return Err(memory_source_bad_request("source_workspace_not_found"));
+    }
+    let now = i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX);
+    if validated.expires_at.is_some_and(|expiry| expiry <= now) {
+        return Err(memory_source_bad_request("expiry_not_future"));
+    }
+
+    let owner = gateway_memory_user_id();
+    let consumer_workspace = MemoryWorkspaceId::new(source_context.consumer.id.clone());
+    let facade = memory_facade(&state);
+    let overrides = validate_memory_source_overrides(facade, &owner, &validated)?;
+
+    let existing = facade
+        .list_memory_source_grants(&owner, &consumer_workspace)
+        .map_err(memory_source_facade_error)?
+        .into_iter()
+        .find(|grant| {
+            grant.revoked_at.is_none()
+                && grant.source_user_id == owner
+                && grant.source_workspace_id == validated.source_workspace_id
+        });
+    let grant = build_memory_source_grant(
+        &owner,
+        &consumer_workspace,
+        validated,
+        overrides,
+        existing,
+        now,
+    )
+    .map_err(memory_source_bad_request)?;
+    facade
+        .upsert_memory_source_grant(&grant)
+        .map_err(memory_source_facade_error)?;
+    let grants = facade
+        .list_memory_source_grants(&owner, &consumer_workspace)
+        .map_err(memory_source_facade_error)?;
+    Ok(Json(memory_source_grant_views(
+        &source_context.consumer,
+        &snapshot.workspaces,
+        grants,
+    )))
+}
+
+async fn memory_source_revoke(
+    State(state): State<AppState>,
+    Path((workspace_id, grant_id)): Path<(String, String)>,
+) -> Result<Json<Vec<MemorySourceGrantView>>, GatewayError> {
+    if !memory_sources_enabled() {
+        return Err(memory_source_disabled_error());
+    }
+    let snapshot = load_workspaces_file();
+    let consumer = validate_memory_source_consumer(&snapshot, &workspace_id)
+        .map_err(memory_source_bad_request)?;
+    if grant_id.trim().is_empty() {
+        return Err(memory_source_bad_request("empty_grant_id"));
+    }
+    let owner = gateway_memory_user_id();
+    let consumer_workspace = MemoryWorkspaceId::new(consumer.id.clone());
+    let facade = memory_facade(&state);
+    facade
+        .revoke_memory_source_grant(
+            &owner,
+            &consumer_workspace,
+            &grant_id,
+            i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+        )
+        .map_err(memory_source_facade_error)?;
+    let grants = facade
+        .list_memory_source_grants(&owner, &consumer_workspace)
+        .map_err(memory_source_facade_error)?;
+    Ok(Json(memory_source_grant_views(
+        &consumer,
+        &snapshot.workspaces,
+        grants,
+    )))
+}
+
+async fn memory_source_candidates(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+    Query(query): Query<MemorySourceCandidatesQuery>,
+) -> Result<Json<Vec<MemorySourceCandidateView>>, GatewayError> {
+    if !memory_sources_enabled() {
+        return Err(memory_source_disabled_error());
+    }
+    let snapshot = load_workspaces_file();
+    validate_memory_source_workspaces(&snapshot, &workspace_id, &query.source_workspace_id)
+        .map_err(memory_source_bad_request)?;
+    let owner = gateway_memory_user_id();
+    let source_workspace = MemoryWorkspaceId::new(query.source_workspace_id.trim());
+    let records = memory_facade(&state)
+        .list_memories_for_ui(&owner, &source_workspace)
+        .map_err(|_| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "memory_source_store_error",
+            message: "memory_source_store_error".to_string(),
+        })?;
+    Ok(Json(memory_source_candidates_from_records(
+        &records,
+        &owner,
+        &source_workspace,
+    )))
 }
 
 async fn create_workspace(
@@ -50937,12 +51604,13 @@ mod tests {
     use super::{
         ActiveModelInputs, ChannelSettings, ConnectorErrorKind, InboundAction, LegacyDirAction,
         MAX_PLAN_STALL_RESUMES, MemoryCandidate, MemoryDataSensitivity,
-        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, active_llm_concurrency, adapt_skill_body,
-        aggregate_session_state_from_counts,
+        MemorySourceOverrideInput, MemorySourceUpsertRequest, TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
+        ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile, active_llm_concurrency,
+        adapt_skill_body, aggregate_session_state_from_counts,
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
         browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
-        build_plan_markdown,
+        build_memory_source_grant, build_plan_markdown,
         capability_call_completed_outcome, classify_connector_error,
         collect_member_counts, composio_tool_is_read, connector_error_hint,
         default_browser_headless_value, evaluate_simple_arithmetic, extract_source_urls,
@@ -50952,7 +51620,8 @@ mod tests {
         enforce_monotonic_plan_progress, legacy_dir_action,
         llm_concurrency_view, mcp_error_hint,
         mcp_provider_slug, mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata,
-        memory_age_days, merge_plan,
+        memory_age_days, memory_source_candidates_from_records, memory_source_grant_views,
+        memory_sources_flag, merge_plan,
         next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
@@ -50966,7 +51635,8 @@ mod tests {
         strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_executor_worker_count,
         task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
-        tool_touches_contacts, wiki_title_from_text, workspace_write_roots,
+        tool_touches_contacts, validate_memory_source_input, validate_memory_source_overrides,
+        validate_memory_source_workspaces, wiki_title_from_text, workspace_write_roots,
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
@@ -50986,7 +51656,7 @@ mod tests {
         UserId, WorkspaceId,
     };
     use local_first_vault::VaultStore;
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
     use std::sync::{Mutex, MutexGuard};
 
     static GATEWAY_DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -51033,6 +51703,536 @@ mod tests {
 
     fn isolated_gateway_test_dir(prefix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("homun-{prefix}-{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    #[test]
+    fn memory_source_input_rejects_self_source_and_unknown_collection() {
+        let request = MemorySourceUpsertRequest {
+            source_workspace_id: "project-a".to_string(),
+            collections: vec!["knowledge".to_string()],
+            max_sensitivity: "private".to_string(),
+            expires_at: None,
+            overrides: Vec::new(),
+        };
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "source_equals_consumer"
+        );
+
+        let request = MemorySourceUpsertRequest {
+            source_workspace_id: "project-b".to_string(),
+            collections: vec!["everything".to_string()],
+            max_sensitivity: "private".to_string(),
+            expires_at: None,
+            overrides: vec![MemorySourceOverrideInput {
+                memory_ref: "memory:local:owner:project-b:known".to_string(),
+                effect: "deny".to_string(),
+            }],
+        };
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "collection_not_allowed"
+        );
+    }
+
+    #[test]
+    fn memory_source_flag_accepts_only_documented_on_values() {
+        for enabled in ["1", "on", "ON", "On", " on ", "ON ", " 1 "] {
+            assert!(
+                memory_sources_flag(Some(enabled)),
+                "expected enabled: {enabled:?}"
+            );
+        }
+        for disabled in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("off"),
+            Some("oN"),
+            Some("true"),
+        ] {
+            assert!(
+                !memory_sources_flag(disabled),
+                "expected disabled: {disabled:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn memory_source_input_rejects_empty_duplicate_and_unsafe_policy_values() {
+        let valid = || MemorySourceUpsertRequest {
+            source_workspace_id: "project-b".to_string(),
+            collections: vec!["knowledge".to_string()],
+            max_sensitivity: "private".to_string(),
+            expires_at: None,
+            overrides: Vec::new(),
+        };
+
+        let mut request = valid();
+        request.collections.clear();
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "empty_source_policy"
+        );
+
+        let mut request = valid();
+        request.collections.push("knowledge".to_string());
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "duplicate_collection"
+        );
+
+        let mut request = valid();
+        request.max_sensitivity = "secret".to_string();
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "sensitivity_not_allowed"
+        );
+
+        let mut request = valid();
+        request.overrides = vec![MemorySourceOverrideInput {
+            memory_ref: "memory:local:owner:project-b:item".to_string(),
+            effect: "maybe".to_string(),
+        }];
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "override_effect_not_allowed"
+        );
+
+        let mut request = valid();
+        request.overrides = vec![
+            MemorySourceOverrideInput {
+                memory_ref: "memory:local:owner:project-b:item".to_string(),
+                effect: "deny".to_string(),
+            },
+            MemorySourceOverrideInput {
+                memory_ref: "memory:local:owner:project-b:item".to_string(),
+                effect: "allow".to_string(),
+            },
+        ];
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "duplicate_override_ref"
+        );
+    }
+
+    #[test]
+    fn memory_source_input_rejects_malformed_noncanonical_and_wrong_source_refs() {
+        let request_for = |memory_ref: &str| MemorySourceUpsertRequest {
+            source_workspace_id: "project-b".to_string(),
+            collections: Vec::new(),
+            max_sensitivity: "private".to_string(),
+            expires_at: None,
+            overrides: vec![MemorySourceOverrideInput {
+                memory_ref: memory_ref.to_string(),
+                effect: "deny".to_string(),
+            }],
+        };
+        assert_eq!(
+            validate_memory_source_input("project-a", &request_for("not-a-ref")).unwrap_err(),
+            "invalid_memory_ref"
+        );
+        assert_eq!(
+            validate_memory_source_input(
+                "project-a",
+                &request_for("memory:local:owner:project-b:")
+            )
+            .unwrap_err(),
+            "noncanonical_memory_ref"
+        );
+        assert_eq!(
+            validate_memory_source_input(
+                "project-a",
+                &request_for("entity:local:owner:project-b:item")
+            )
+            .unwrap_err(),
+            "invalid_override_kind"
+        );
+        assert_eq!(
+            validate_memory_source_input(
+                "project-a",
+                &request_for("memory:local:owner:project-c:item")
+            )
+            .unwrap_err(),
+            "override_outside_source"
+        );
+    }
+
+    fn memory_source_test_workspace(id: &str, name: &str) -> WorkspaceRecord {
+        WorkspaceRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            folder: None,
+            sandbox_mode: None,
+            approval_policy: None,
+            writable_roots: None,
+            skill_confirmations: None,
+        }
+    }
+
+    #[test]
+    fn memory_source_workspace_validation_uses_snapshot_and_allows_personal_source() {
+        let file = WorkspacesFile {
+            active: "project-a".to_string(),
+            workspaces: vec![
+                memory_source_test_workspace("project-a", "Alpha"),
+                memory_source_test_workspace("project-b", "Beta"),
+            ],
+        };
+        let project = validate_memory_source_workspaces(&file, "project-a", "project-b").unwrap();
+        assert_eq!(project.consumer.name, "Alpha");
+        assert!(project.source_available);
+
+        let personal =
+            validate_memory_source_workspaces(&file, "project-a", "__personal__").unwrap();
+        assert!(personal.source_available);
+
+        assert_eq!(
+            validate_memory_source_workspaces(&file, "project-a", "deleted-project").unwrap_err(),
+            "source_workspace_not_found"
+        );
+        assert_eq!(
+            validate_memory_source_workspaces(&file, "__personal__", "project-b").unwrap_err(),
+            "reserved_consumer_scope"
+        );
+    }
+
+    fn memory_source_test_record(
+        workspace: &str,
+        key: &str,
+        memory_type: &str,
+        text: &str,
+        sensitivity: local_first_memory::DataSensitivity,
+        metadata: serde_json::Value,
+    ) -> local_first_memory::MemoryRecord {
+        let user = local_first_memory::UserId::new("owner");
+        let workspace_id = local_first_memory::WorkspaceId::new(workspace);
+        local_first_memory::MemoryRecord {
+            reference: local_first_memory::MemoryRef::new(
+                local_first_memory::MemoryRefKind::Memory,
+                user.clone(),
+                workspace_id.clone(),
+                key,
+            ),
+            user_id: user,
+            workspace_id,
+            memory_type: memory_type.to_string(),
+            text: text.to_string(),
+            aliases: Vec::new(),
+            language_hints: Vec::new(),
+            confidence: 1.0,
+            status: local_first_memory::MemoryStatus::Confirmed,
+            privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+            sensitivity,
+            metadata,
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+            last_seen_at: None,
+            supersedes: Vec::new(),
+            superseded_by: None,
+            correction_of: None,
+        }
+    }
+
+    #[test]
+    fn memory_source_candidates_are_source_scoped_redacted_and_never_secret() {
+        use local_first_memory::DataSensitivity;
+        let records = vec![
+            memory_source_test_record(
+                "project-b",
+                "note",
+                "note",
+                "  useful   context  ",
+                DataSensitivity::Internal,
+                serde_json::json!({}),
+            ),
+            memory_source_test_record(
+                "project-c",
+                "other",
+                "note",
+                "wrong source",
+                DataSensitivity::Internal,
+                serde_json::json!({}),
+            ),
+            memory_source_test_record(
+                "project-b",
+                "secret",
+                "note",
+                "hidden",
+                DataSensitivity::Secret,
+                serde_json::json!({}),
+            ),
+            memory_source_test_record(
+                "project-b",
+                "vault",
+                "note",
+                "visible",
+                DataSensitivity::Internal,
+                serde_json::json!({"password": "hidden"}),
+            ),
+            memory_source_test_record(
+                "project-b",
+                "unknown",
+                "custom",
+                "unmapped",
+                DataSensitivity::Internal,
+                serde_json::json!({}),
+            ),
+        ];
+        let candidates = memory_source_candidates_from_records(
+            &records,
+            &local_first_memory::UserId::new("owner"),
+            &local_first_memory::WorkspaceId::new("project-b"),
+        );
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].summary, "useful context");
+        assert_eq!(
+            candidates[0].collection,
+            local_first_memory::MemoryCollectionKey::Knowledge
+        );
+        let json = serde_json::to_string(&candidates).unwrap();
+        assert!(!json.contains("hidden"));
+        assert!(!json.contains("metadata"));
+    }
+
+    #[test]
+    fn memory_source_grant_views_keep_local_first_and_deleted_sources_revocable() {
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemorySourceGrant, UserId, WorkspaceId,
+        };
+        let consumer = memory_source_test_workspace("project-a", "Alpha");
+        let workspaces = vec![consumer.clone()];
+        let grant = MemorySourceGrant {
+            id: "grant-deleted".to_string(),
+            consumer_user_id: UserId::new("owner"),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: UserId::new("owner"),
+            source_workspace_id: WorkspaceId::new("deleted-project"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: "owner".to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        let views = memory_source_grant_views(&consumer, &workspaces, vec![grant]);
+        assert_eq!(views[0].source_workspace_id, "project-a");
+        assert!(views[0].local);
+        assert_eq!(views[1].id.as_deref(), Some("grant-deleted"));
+        assert!(!views[1].source_available);
+        assert!(views[1].read_only);
+        let json = serde_json::to_string(&views).unwrap();
+        assert!(!json.contains("memory_text"));
+        assert!(!json.contains("metadata"));
+    }
+
+    #[test]
+    fn memory_source_grant_builder_starts_at_one_and_preserves_identity_on_update() {
+        use local_first_memory::{MemoryCollectionKey, UserId, WorkspaceId};
+        let owner = UserId::new("owner");
+        let consumer = WorkspaceId::new("project-a");
+        let input = ValidatedMemorySourceInput {
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: local_first_memory::DataSensitivity::Private,
+            expires_at: None,
+            overrides: Vec::new(),
+        };
+        let new_grant =
+            build_memory_source_grant(&owner, &consumer, input.clone(), HashMap::new(), None, 100)
+                .unwrap();
+        assert_eq!(new_grant.policy_version, 1);
+        assert_eq!(new_grant.created_at, "unix:100.000000000");
+
+        let original_id = new_grant.id.clone();
+        let original_creator = new_grant.created_by.clone();
+        let original_created_at = new_grant.created_at.clone();
+        let updated = build_memory_source_grant(
+            &owner,
+            &consumer,
+            input,
+            HashMap::new(),
+            Some(new_grant),
+            200,
+        )
+        .unwrap();
+        assert_eq!(updated.id, original_id);
+        assert_eq!(updated.created_by, original_creator);
+        assert_eq!(updated.created_at, original_created_at);
+        assert_eq!(updated.updated_at, "unix:200.000000000");
+        assert_eq!(updated.policy_version, 2);
+    }
+
+    #[test]
+    fn memory_source_scoped_revoke_cannot_target_another_consumer() {
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemoryFacade, MemorySourceGrant,
+            SQLiteMemoryStore, UserId, WorkspaceId,
+        };
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let owner = UserId::new("owner");
+        let grant = MemorySourceGrant {
+            id: "scoped-grant".to_string(),
+            consumer_user_id: owner.clone(),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: owner.clone(),
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: "owner".to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        facade.upsert_memory_source_grant(&grant).unwrap();
+        let error = facade
+            .revoke_memory_source_grant(&owner, &WorkspaceId::new("project-c"), &grant.id, 2)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            local_first_memory::MemoryError::NotFound(_)
+        ));
+        assert!(
+            facade
+                .get_memory_source_grant(&owner, &WorkspaceId::new("project-a"), &grant.id)
+                .unwrap()
+                .unwrap()
+                .revoked_at
+                .is_none()
+        );
+    }
+
+    fn create_memory_source_override_record(
+        facade: &local_first_memory::MemoryFacade,
+        sensitivity: local_first_memory::DataSensitivity,
+        metadata: serde_json::Value,
+    ) -> local_first_memory::MemoryRecord {
+        let owner = local_first_memory::UserId::new("owner");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: local_first_memory::MemoryLifecycleRequest {
+                    actor_id: "test".to_string(),
+                    user_id: owner,
+                    workspace_id: source,
+                    purpose: "memory source override test".to_string(),
+                },
+                memory_type: "note".to_string(),
+                text: "shareable context".to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity,
+                evidence_refs: Vec::new(),
+                metadata,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn memory_source_override_validation_rejects_missing_wrong_owner_secret_and_vault() {
+        use local_first_memory::{
+            DataSensitivity, MemoryFacade, MemoryGrantOverrideEffect, MemoryRef, MemoryRefKind,
+            SQLiteMemoryStore, UserId, WorkspaceId,
+        };
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let owner = UserId::new("owner");
+        let source = WorkspaceId::new("project-b");
+        let validated_for = |reference: MemoryRef, effect| ValidatedMemorySourceInput {
+            source_workspace_id: source.clone(),
+            collections: BTreeSet::new(),
+            max_sensitivity: DataSensitivity::Private,
+            expires_at: None,
+            overrides: vec![(reference, effect)],
+        };
+
+        let missing = validated_for(
+            MemoryRef::new(
+                MemoryRefKind::Memory,
+                owner.clone(),
+                source.clone(),
+                "missing",
+            ),
+            MemoryGrantOverrideEffect::Deny,
+        );
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &missing)
+                .unwrap_err()
+                .code,
+            "override_memory_not_found"
+        );
+
+        let wrong_owner = validated_for(
+            MemoryRef::new(
+                MemoryRefKind::Memory,
+                UserId::new("other"),
+                source.clone(),
+                "missing",
+            ),
+            MemoryGrantOverrideEffect::Deny,
+        );
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &wrong_owner)
+                .unwrap_err()
+                .code,
+            "override_outside_source"
+        );
+
+        let secret = create_memory_source_override_record(
+            &facade,
+            DataSensitivity::Secret,
+            serde_json::json!({}),
+        );
+        let secret_input = validated_for(secret.reference, MemoryGrantOverrideEffect::Deny);
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &secret_input)
+                .unwrap_err()
+                .code,
+            "override_memory_not_shareable"
+        );
+
+        let vault = create_memory_source_override_record(
+            &facade,
+            DataSensitivity::Internal,
+            serde_json::json!({"password": "hidden"}),
+        );
+        let vault_input = validated_for(vault.reference, MemoryGrantOverrideEffect::Deny);
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &vault_input)
+                .unwrap_err()
+                .code,
+            "override_memory_not_shareable"
+        );
+
+        let confidential = create_memory_source_override_record(
+            &facade,
+            DataSensitivity::Confidential,
+            serde_json::json!({}),
+        );
+        let allow_input = validated_for(
+            confidential.reference.clone(),
+            MemoryGrantOverrideEffect::Allow,
+        );
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &allow_input)
+                .unwrap_err()
+                .code,
+            "override_above_max_sensitivity"
+        );
+        let deny_input = validated_for(confidential.reference, MemoryGrantOverrideEffect::Deny);
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &deny_input)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
