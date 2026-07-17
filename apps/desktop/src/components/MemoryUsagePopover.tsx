@@ -64,7 +64,6 @@ export function MemoryUsagePopover({
         type="button"
         className="memory-recall-badge"
         aria-expanded={open}
-        aria-haspopup="dialog"
         aria-controls={popoverId}
         aria-label={buttonLabel}
         title={buttonLabel}
@@ -76,7 +75,7 @@ export function MemoryUsagePopover({
         <section
           id={popoverId}
           className="memory-usage-popover"
-          role="dialog"
+          role="region"
           aria-label={buttonLabel}
         >
           <strong className="memory-usage-title">{buttonLabel}</strong>
@@ -92,7 +91,9 @@ export function MemoryUsagePopover({
                     <li key={`${hit.ref || hit.text}-${index}`}>
                       <span>{hit.text}</span>
                       <small>
-                        {hit.collection}
+                        {t(`memoryCollections.${hit.collection}`, {
+                          defaultValue: hit.collection,
+                        })}
                         {hit.grant_id ? ` · ${t("chat.memoryLinked")}` : ""}
                         {hit.conflict ? ` · ${t("chat.memoryConflict")}` : ""}
                       </small>

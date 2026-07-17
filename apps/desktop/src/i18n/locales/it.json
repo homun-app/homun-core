@@ -7,6 +7,15 @@
     "create": "Crea",
     "menuLabel": "Tag"
   },
+  "memoryCollections": {
+    "preferences": "Preferenze",
+    "profile": "Profilo",
+    "knowledge": "Conoscenza",
+    "decisions": "Decisioni",
+    "goals": "Obiettivi",
+    "artifacts": "Artefatti",
+    "episodes": "Episodi"
+  },
   "filters": {
     "label": "Filtra",
     "type": "Tipo",

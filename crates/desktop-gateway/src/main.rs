@@ -13365,21 +13365,39 @@ fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
     ((now_secs - secs).max(0) as f32) / 86_400.0
 }
 
-/// Esito di `recall_memory`: la risposta testuale per il modello + i hits
-/// strutturati (per l'evento UI Recall) + lo scope. ADR 0022 (Piano UI A2/A3).
+/// Esito di `recall_memory`: la risposta testuale per il modello e il payload
+/// UI costruito dagli stessi hit autorizzati. ADR 0022 (Piano UI A2/A3).
 struct RecallOutcome {
     /// Risposta formattata per il modello (stringa tool result).
     response: String,
-    /// Hits strutturati per la UI (kind, text). Pari ai `lines` non-vault.
-    hits: Vec<(String, String)>,
-    /// Scope della recall ("personal" | "project").
-    scope: String,
+    /// Provenienza completa: non ricostruire mai gli hit nel trasporto del tool.
+    payload: local_first_subagents::RecallStreamPayload,
+}
+
+fn recall_stream_payload_from_outcome(
+    outcome: &RecallOutcome,
+    query: &str,
+) -> local_first_subagents::RecallStreamPayload {
+    let mut payload = outcome.payload.clone();
+    payload.query = if query.is_empty() {
+        "(query)".to_string()
+    } else {
+        query.to_string()
+    };
+    payload
 }
 
 fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     let query = query.trim();
     let empty = |msg: &str| -> RecallOutcome {
-        RecallOutcome { response: msg.to_string(), hits: Vec::new(), scope: "personal".to_string() }
+        RecallOutcome {
+            response: msg.to_string(),
+            payload: local_first_subagents::RecallStreamPayload {
+                query: query.to_string(),
+                hits: Vec::new(),
+                scope: "personal".to_string(),
+            },
+        }
     };
     if query.is_empty() {
         return empty("No query provided.");
@@ -13387,11 +13405,11 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
-    let search = |workspace: MemoryWorkspaceId| -> Vec<(String, String)> {
+    let search = |workspace: MemoryWorkspaceId| -> Vec<local_first_subagents::RecallStreamHit> {
         let access = MemoryAccessRequest {
             actor_id: "recall".to_string(),
             user_id: user.clone(),
-            workspace_id: workspace,
+            workspace_id: workspace.clone(),
             purpose: "recall".to_string(),
             allowed_domains: vec![
                 PrivacyDomain::new("personal"),
@@ -13416,10 +13434,29 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                 page.items
                     .into_iter()
                     .map(|item| {
-                        (
-                            item.memory_type,
-                            format_recall_entry(&item.summary, &item.metadata),
-                        )
+                        let collection = [
+                            MemoryCollectionKey::Preferences,
+                            MemoryCollectionKey::Profile,
+                            MemoryCollectionKey::Knowledge,
+                            MemoryCollectionKey::Decisions,
+                            MemoryCollectionKey::Goals,
+                            MemoryCollectionKey::Artifacts,
+                            MemoryCollectionKey::Episodes,
+                        ]
+                        .into_iter()
+                        .find(|collection| collection.matches_candidate(&item.memory_type, &item.metadata))
+                        .unwrap_or(MemoryCollectionKey::Knowledge);
+                        local_first_subagents::RecallStreamHit {
+                            r#ref: item.reference.to_string(),
+                            text: format_recall_entry(&item.summary, &item.metadata),
+                            score: 1.0 / item.rank.max(1) as f32,
+                            kind: item.memory_type,
+                            source_workspace_id: workspace.as_str().to_string(),
+                            source_label: recall_source_label(workspace.as_str()),
+                            collection: recall_collection_token(collection).to_string(),
+                            grant_id: None,
+                            conflict: false,
+                        }
                     })
                     .collect()
             })
@@ -13427,18 +13464,19 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     };
     let in_project = active.as_str() != PERSONAL_WORKSPACE;
     let mut lines = Vec::new();
-    // Hits strutturati per la UI: raccolgo (kind, text) man mano che costruisco lines.
-    let mut ui_hits: Vec<(String, String)> = Vec::new();
+    // Keep the full structured hit alongside the text given to the model.
+    let mut ui_hits: Vec<local_first_subagents::RecallStreamHit> = Vec::new();
     if memory_sources_enabled() && in_project {
         let pack = recall_pack_on_facade(&facade, &user, &active, query, &[], None);
+        let payload = recall_stream_payload_from_pack(&pack);
         for hit in pack.hits {
             lines.push(format!("- [{}] {}", hit.kind, hit.text));
-            ui_hits.push((hit.kind, hit.text));
         }
+        ui_hits.extend(payload.hits);
     } else {
-        for (kind, text) in search(active.clone()) {
-            lines.push(format!("- [{kind}] {text}"));
-            ui_hits.push((kind, text));
+        for hit in search(active.clone()) {
+            lines.push(format!("- [{}] {}", hit.kind, hit.text));
+            ui_hits.push(hit);
         }
     }
     if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
@@ -13466,10 +13504,20 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
             .map(|m| format!("- [conversation] {}", m.text))
             .collect();
         hits.truncate(8);
-        // Episodi come hits UI (kind "conversation").
+        // Episodi come hits UI, nello stesso scope locale della recall.
         for h in &hits {
             if let Some(text) = h.strip_prefix("- [conversation] ") {
-                ui_hits.push(("conversation".to_string(), text.to_string()));
+                ui_hits.push(local_first_subagents::RecallStreamHit {
+                    r#ref: String::new(),
+                    text: text.to_string(),
+                    score: 0.0,
+                    kind: "conversation".to_string(),
+                    source_workspace_id: active.as_str().to_string(),
+                    source_label: recall_source_label(active.as_str()),
+                    collection: "episodes".to_string(),
+                    grant_id: None,
+                    conflict: false,
+                });
             }
         }
         lines.extend(hits);
@@ -13504,7 +13552,14 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
         Err(_) if in_project => format!("Memories relevant to THIS project:\n{}", lines.join("\n")),
         Err(_) => format!("Relevant memories from memory:\n{}", lines.join("\n")),
     };
-    RecallOutcome { response, hits: ui_hits, scope }
+    RecallOutcome {
+        response,
+        payload: local_first_subagents::RecallStreamPayload {
+            query: query.to_string(),
+            hits: ui_hits,
+            scope,
+        },
+    }
 }
 
 fn recall_memory_response_with_vault_fallback(
@@ -22835,37 +22890,22 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
             // ADR 0022 (Piano UI A2/A3): emetti l'evento strutturato
             // `Recall` con i hits richiamati (visibile in UI: fase
             // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
-            let query_for_ui = if query.is_empty() { "(query)".to_string() } else { query.clone() };
             let st = ctx.state.clone();
-            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+            let recall_query = query.clone();
+            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &recall_query))
                 .await
                 .unwrap_or_else(|e| RecallOutcome {
                     response: format!("Execution error: {e}"),
-                    hits: Vec::new(),
-                    scope: "personal".to_string(),
+                    payload: local_first_subagents::RecallStreamPayload {
+                        query: "(query)".to_string(),
+                        hits: Vec::new(),
+                        scope: "personal".to_string(),
+                    },
                 });
             let _ = emit_stream_event(
                 ctx.tx,
                 GenerateStreamEvent::Recall {
-                    payload: local_first_subagents::RecallStreamPayload {
-                        query: query_for_ui,
-                        hits: outcome
-                            .hits
-                            .iter()
-                            .map(|(kind, text)| local_first_subagents::RecallStreamHit {
-                                r#ref: String::new(),
-                                text: text.clone(),
-                                score: 0.0,
-                                kind: kind.clone(),
-                                source_workspace_id: gateway_memory_workspace_id().as_str().to_string(),
-                                source_label: recall_source_label(gateway_memory_workspace_id().as_str()),
-                                collection: "knowledge".to_string(),
-                                grant_id: None,
-                                conflict: false,
-                            })
-                            .collect(),
-                        scope: outcome.scope.clone(),
-                    },
+                    payload: recall_stream_payload_from_outcome(&outcome, &query),
                 },
             )
             .await;
@@ -62632,6 +62672,16 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         super::set_memory_workspace("project-a");
         let project = super::recall_memory(&state, "When do we launch?");
         assert!(project.response.contains("Launch in September"));
+        let payload = super::recall_stream_payload_from_outcome(&project, "When do we launch?");
+        let hit = payload.hits.first().expect("linked source hit is surfaced to UI");
+        assert_eq!(hit.source_workspace_id, "project-b");
+        assert_eq!(hit.source_label, "project-b");
+        assert_eq!(hit.collection, "decisions");
+        assert_eq!(hit.grant_id.as_deref(), Some("tool-grant"));
+        assert!(!hit.conflict);
+        assert!(hit.score > 0.0);
+        assert!(!hit.r#ref.is_empty());
+        assert_eq!(hit.kind, "decision");
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         let personal = super::recall_memory(&state, "When do we launch?");
         assert!(!personal.response.contains("Launch in September"));
