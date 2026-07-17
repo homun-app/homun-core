@@ -317,7 +317,7 @@ impl SQLiteMemoryStore {
         let integrity: String = conn
             .query_row("pragma integrity_check", [], |row| row.get(0))
             .map_err(|error| error.to_string())?;
-        self.rebuild_memory_search_index()?;
+        self.rebuild_memory_search_index_on(&conn)?;
         Ok(MemoryMaintenanceReport {
             integrity_ok: integrity == "ok",
             fts_rebuilt: true,
