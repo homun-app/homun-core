@@ -12288,6 +12288,105 @@ body.resizing-drawer {
   display: flex;
   justify-content: flex-end;
 }
+
+/* Brand chip (gallery header) + slide-in drawer — the brand kit is set-once
+ * config, not a permanent panel: the chip is a glanceable summary, the drawer
+ * (reusing the .brandkit-* form styles above) is the actual editor, opened on
+ * demand. Drawer z-index sits above the template detail modal (420) so it
+ * stays on top if both happen to be open at once. */
+.brand-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+.brand-chip:hover {
+  background: var(--surface-hover);
+  border-color: var(--line-strong);
+}
+.brand-chip-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  object-fit: contain;
+  background: var(--bg);
+}
+.brand-chip-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  flex-shrink: 0;
+}
+.brand-chip-name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brand-chip-dots {
+  display: flex;
+  gap: 3px;
+}
+.brand-chip-dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: block;
+}
+.brand-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 428;
+  background: rgba(20, 20, 20, 0.42);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+.brand-drawer-scrim.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.brand-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 430;
+  width: min(380px, 100vw);
+  overflow-y: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: -24px 0 70px rgba(15, 23, 42, 0.26);
+  padding: 20px;
+  transform: translateX(100%);
+  transition: transform 0.24s ease;
+  pointer-events: none;
+}
+.brand-drawer.open {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+.brand-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.brand-drawer-header h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
 .template-gallery {
   border-top: 1px solid var(--line);
   padding-top: 24px;
@@ -12752,116 +12851,17 @@ body.resizing-drawer {
   border-bottom: 0;
 }
 
-/* Presentations studio redesign: compact brand rail + template workspace. */
-.presentations-panel.presentation-studio {
-  display: grid;
-  grid-template-columns: minmax(230px, 282px) minmax(0, 1fr);
-  gap: 18px;
-  align-items: start;
+/* Presentations studio v2: the brand kit rail is gone — it's set-once config,
+ * not a permanent panel — so the gallery is the only flow child and gets the
+ * full width. The brand chip + drawer (below) replace the rail entirely. */
+.presentations-panel.presentation-studio-v2 {
+  display: block;
 }
-.presentation-brand-rail,
 .presentation-template-workspace {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
   box-shadow: var(--shadow-soft);
-}
-.presentation-brand-rail {
-  position: sticky;
-  top: 0;
-  padding: 18px;
-}
-.presentation-rail-header h2 {
-  margin: 2px 0 6px;
-  font-size: 20px;
-  line-height: 1.15;
-}
-.presentation-rail-header .lead-copy {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-.presentation-brand-rail .brandkit-grid {
-  grid-template-columns: 1fr;
-  gap: 11px;
-  margin-top: 16px;
-}
-.presentation-brand-rail .brandkit-field {
-  gap: 5px;
-  font-size: 12px;
-}
-.presentation-brand-rail .brandkit-field > span {
-  color: var(--faint);
-  font-size: 11px;
-  font-weight: 720;
-}
-.presentation-brand-rail .brandkit-field input[type="text"],
-.presentation-brand-rail .brandkit-field > input,
-.presentation-brand-rail .brandkit-color input:not([type="color"]) {
-  min-height: 34px;
-  border-radius: 9px;
-  background: var(--bg);
-  font-size: 12px;
-}
-.presentation-brand-rail .brandkit-color input[type="color"] {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-}
-.presentation-brand-rail .brandkit-logo {
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-.presentation-brand-rail .brandkit-logo img {
-  max-width: 112px;
-  max-height: 36px;
-}
-.presentation-brand-rail .brandkit-logo-empty {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: var(--bg);
-}
-.presentation-brand-rail .brandkit-logo-upload {
-  cursor: pointer;
-}
-.presentation-brand-rail .brandkit-logo-upload input {
-  display: none;
-}
-.presentation-brand-rail .brandkit-logo .auto-btn,
-.presentation-brand-rail .brandkit-logo-upload {
-  min-height: 30px;
-  padding: 5px 9px;
-  font-size: 11px;
-}
-.presentation-brand-rail .brandkit-preview {
-  margin-top: 16px;
-  min-height: 88px;
-  border: 1px solid color-mix(in srgb, #fff 22%, transparent);
-  border-radius: 12px;
-  padding: 16px;
-}
-.presentation-brand-rail .brandkit-preview-logo {
-  max-width: 92px;
-  max-height: 26px;
-}
-.presentation-brand-rail .brandkit-preview-title {
-  font-size: 18px;
-  line-height: 1.15;
-}
-.presentation-brand-rail .brandkit-preview-accent {
-  height: 5px;
-}
-.presentation-brand-rail .brandkit-actions {
-  margin-top: 14px;
-}
-.presentation-brand-rail .auto-btn-accent {
-  width: 100%;
-  justify-content: center;
-  min-height: 34px;
-  font-size: 12px;
 }
 .presentation-template-workspace.template-gallery {
   border-top: 0;
@@ -13153,9 +13153,6 @@ body.resizing-drawer {
   min-height: 390px;
 }
 @media (max-width: 1120px) {
-  .presentations-panel.presentation-studio {
-    grid-template-columns: minmax(210px, 248px) minmax(0, 1fr);
-  }
   .template-gallery-toolbar {
     grid-template-columns: 1fr;
   }
@@ -13167,16 +13164,6 @@ body.resizing-drawer {
   }
 }
 @media (max-width: 900px) {
-  .presentations-panel.presentation-studio {
-    grid-template-columns: 1fr;
-  }
-  .presentation-template-workspace {
-    order: 1;
-  }
-  .presentation-brand-rail {
-    position: static;
-    order: 2;
-  }
   .template-source-directory-list {
     grid-template-columns: 1fr;
   }

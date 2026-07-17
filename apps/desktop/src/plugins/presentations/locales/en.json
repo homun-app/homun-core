@@ -3,6 +3,8 @@
   "nav": "Presentations",
   "eyebrow": "Brand kit",
   "lead": "Your brand identity — colours, fonts and logo — applied to every presentation and document Homun creates.",
+  "editBrand": "Edit brand kit",
+  "brandChipFallback": "Brand kit",
   "organization": "Organization name",
   "primary_color": "Primary colour",
   "secondary_color": "Secondary colour",

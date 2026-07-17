@@ -1,12 +1,10 @@
-import { type ChangeEvent, type CSSProperties, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ExternalLink,
   FileText,
-  ImageIcon,
   Loader2,
   Presentation,
-  Save,
   Search,
   Trash2,
   Upload,
@@ -15,6 +13,8 @@ import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/cor
 import { EmptyState } from "./StateViews";
 import { fileLocalPathFromBridge } from "../lib/gatewayConfig";
 import type { PluginHost } from "../plugins/registry";
+import { BrandChip } from "./BrandChip";
+import { BrandDrawer } from "./BrandDrawer";
 
 const DEFAULT_KIT: BrandKit = {
   organization: "",
@@ -25,8 +25,6 @@ const DEFAULT_KIT: BrandKit = {
   body_font: "Inter",
   logo_data_url: "",
 };
-
-const COLOR_KEYS = ["primary_color", "secondary_color", "accent_color"] as const;
 
 const TEMPLATE_SOURCE_LINKS = [
   {
@@ -70,11 +68,13 @@ function templateDisplayDescription(entry: TemplateCatalogEntry, language: strin
 /** The Presentations plugin's panel: the persistent BRAND KIT (colours, fonts, logo)
  *  that the on-brand deck/document generators apply. Stored gateway-side. */
 export function BrandKitPanel({ host }: { host: PluginHost }) {
-  const { t } = useTranslation();
   const [kit, setKit] = useState<BrandKit>(DEFAULT_KIT);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Kit state stays lifted here (not inside the drawer): the gallery needs
+  // `brandKit` live for its recolor preview regardless of drawer open/closed.
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -93,46 +93,6 @@ export function BrandKitPanel({ host }: { host: PluginHost }) {
 
   const set = <K extends keyof BrandKit>(key: K, value: BrandKit[K]) =>
     setKit((prev) => ({ ...prev, [key]: value }));
-
-  const onLogo = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-picking the same file
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result ?? "");
-      // Rasterise the logo to PNG so it embeds EVERYWHERE — including the editable
-      // .pptx (PowerPoint can't embed SVG; an SVG logo would render in the HTML/PDF
-      // preview but silently drop from the .pptx). Any format in → PNG out.
-      const img = new Image();
-      img.onload = () => {
-        const maxW = 720;
-        let w = img.naturalWidth || 600;
-        let h = img.naturalHeight || 200;
-        if (w > maxW) {
-          h = Math.round((h * maxW) / w);
-          w = maxW;
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          set("logo_data_url", src);
-          return;
-        }
-        ctx.drawImage(img, 0, 0, w, h);
-        try {
-          set("logo_data_url", canvas.toDataURL("image/png"));
-        } catch {
-          set("logo_data_url", src); // tainted canvas → keep the original
-        }
-      };
-      img.onerror = () => set("logo_data_url", src);
-      img.src = src;
-    };
-    reader.readAsDataURL(file);
-  };
 
   const save = async () => {
     setSaving(true);
@@ -156,107 +116,34 @@ export function BrandKitPanel({ host }: { host: PluginHost }) {
   }
 
   return (
-    <div className="presentations-panel presentation-studio">
-      <section className="brandkit presentation-brand-rail" aria-labelledby="brandkit-title">
-        <header className="presentation-rail-header">
-          <div>
-            <p className="eyebrow">{t("presentations:eyebrow")}</p>
-            <h2 id="brandkit-title">{t("presentations:title")}</h2>
-            <p className="lead-copy">{t("presentations:lead")}</p>
-          </div>
-        </header>
-
-        <div className="brandkit-grid">
-          <label className="brandkit-field">
-            <span>{t("presentations:organization")}</span>
-            <input
-              value={kit.organization}
-              onChange={(e) => set("organization", e.target.value)}
-              placeholder="Acme S.r.l."
-            />
-          </label>
-
-          {COLOR_KEYS.map((key) => (
-            <label className="brandkit-field" key={key}>
-              <span>{t(`presentations:${key}`)}</span>
-              <div className="brandkit-color">
-                <input
-                  type="color"
-                  value={kit[key] || "#000000"}
-                  onChange={(e) => set(key, e.target.value)}
-                />
-                <input value={kit[key]} onChange={(e) => set(key, e.target.value)} />
-              </div>
-            </label>
-          ))}
-
-          <label className="brandkit-field">
-            <span>{t("presentations:heading_font")}</span>
-            <input
-              value={kit.heading_font}
-              onChange={(e) => set("heading_font", e.target.value)}
-              placeholder="Inter"
-            />
-          </label>
-          <label className="brandkit-field">
-            <span>{t("presentations:body_font")}</span>
-            <input
-              value={kit.body_font}
-              onChange={(e) => set("body_font", e.target.value)}
-              placeholder="Inter"
-            />
-          </label>
-
-          <label className="brandkit-field brandkit-field-wide">
-            <span>{t("presentations:logo")}</span>
-            <div className="brandkit-logo">
-              {kit.logo_data_url ? (
-                <img src={kit.logo_data_url} alt="logo" />
-              ) : (
-                <div className="brandkit-logo-empty">
-                  <ImageIcon size={18} aria-hidden />
-                </div>
-              )}
-              <label className="auto-btn brandkit-logo-upload">
-                <Upload size={13} aria-hidden />
-                {t("presentations:uploadLogo")}
-                <input type="file" accept="image/*" onChange={onLogo} />
-              </label>
-              {kit.logo_data_url && (
-                <button type="button" className="auto-btn" onClick={() => set("logo_data_url", "")}>
-                  {t("presentations:removeLogo")}
-                </button>
-              )}
-            </div>
-          </label>
-        </div>
-
-        <div
-          className="brandkit-preview"
-          style={{ background: kit.primary_color, fontFamily: kit.heading_font }}
-        >
-          {kit.logo_data_url && (
-            <img src={kit.logo_data_url} alt="" className="brandkit-preview-logo" />
-          )}
-          <div className="brandkit-preview-title">
-            {kit.organization || t("presentations:previewTitle")}
-          </div>
-          <div className="brandkit-preview-accent" style={{ background: kit.accent_color }} />
-        </div>
-
-        <div className="brandkit-actions">
-          <button className="auto-btn-accent" onClick={() => void save()} disabled={saving}>
-            <Save size={14} aria-hidden /> {saved ? t("presentations:saved") : t("presentations:save")}
-          </button>
-        </div>
-      </section>
-
-      <TemplateCatalogGallery host={host} brandKit={kit} />
+    <div className="presentations-panel presentation-studio-v2">
+      <TemplateCatalogGallery
+        host={host}
+        brandKit={kit}
+        brandChip={<BrandChip kit={kit} onEdit={() => setDrawerOpen(true)} />}
+      />
+      <BrandDrawer
+        open={drawerOpen}
+        kit={kit}
+        onChange={set}
+        onSave={() => void save()}
+        saving={saving}
+        saved={saved}
+        onClose={() => setDrawerOpen(false)}
+      />
     </div>
   );
 }
 
-function TemplateCatalogGallery({ host, brandKit }: { host: PluginHost; brandKit: BrandKit }) {
+function TemplateCatalogGallery({
+  host,
+  brandKit,
+  brandChip,
+}: {
+  host: PluginHost;
+  brandKit: BrandKit;
+  brandChip: ReactNode;
+}) {
   const { t, i18n } = useTranslation();
   const [templates, setTemplates] = useState<TemplateCatalogEntry[]>([]);
   const [query, setQuery] = useState("");
@@ -391,6 +278,8 @@ function TemplateCatalogGallery({ host, brandKit }: { host: PluginHost; brandKit
           </p>
         </div>
         <div className="template-gallery-controls">
+          {/* T3 will refine placement; for now the chip lives next to Import PPTX. */}
+          {brandChip}
           <label className="auto-btn template-import-button">
             <Upload size={14} aria-hidden />
             {importing ? t("presentations:importing") : t("presentations:importPptx")}
@@ -702,8 +591,8 @@ function templateSourceBadges(entry: TemplateCatalogEntry) {
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{3,8}$/;
 
 /** Free-text colour inputs share the same state key as the <input type="color">
- *  picker (COLOR_KEYS wires both to one `set(key, value)`), so a hand-typed
- *  value never gets the picker's implicit #hex coercion. A malformed value
+ *  picker (BrandDrawer's COLOR_KEYS wires both to one `onChange(key, value)`),
+ *  so a hand-typed value never gets the picker's implicit #hex coercion. A malformed value
  *  (e.g. `red}</style><img src=x onerror=...>`) must not reach the injected
  *  <style> block below — validate against the grammar the CSS var expects and
  *  fall back to the shipped default rather than passing free text through raw. */
