@@ -1088,3 +1088,45 @@ fn validated_structural_provenance_is_not_secret_scanned_but_malformed_fields_fa
         "publication_provenance_invalid"
     );
 }
+
+#[test]
+fn nested_publication_metadata_is_closed_schema() {
+    let fixture = PublicationFixture::new();
+    for (extra, proposal_id, published_at) in [
+        (
+            Some(("extra_secret", "AKIAIOSFODNN7EXAMPLE")),
+            uuid::Uuid::new_v4().to_string(),
+            "unix:1.000000000".to_string(),
+        ),
+        (
+            None,
+            "AKIAIOSFODNN7EXAMPLE".to_string(),
+            "unix:1.000000000".to_string(),
+        ),
+        (
+            None,
+            uuid::Uuid::new_v4().to_string(),
+            "not-a-timestamp".to_string(),
+        ),
+    ] {
+        let mut source = fixture.insert_source_preference("Nested metadata");
+        let mut publication = serde_json::json!({
+            "source_ref": source.reference,
+            "proposal_id": proposal_id,
+            "published_at": published_at,
+        });
+        if let Some((key, value)) = extra {
+            publication[key] = serde_json::Value::String(value.to_string());
+        }
+        source.metadata = serde_json::json!({"publication": publication});
+        fixture.facade.upsert_memory(&source).unwrap();
+        assert_eq!(
+            fixture
+                .facade
+                .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+                .unwrap_err()
+                .as_str(),
+            "publication_provenance_invalid"
+        );
+    }
+}

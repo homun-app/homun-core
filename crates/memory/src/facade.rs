@@ -2246,21 +2246,44 @@ fn publication_user_metadata_for_secret_scan(
         let nested = value
             .as_object()
             .ok_or_else(|| MemoryError::policy("publication_provenance_invalid"))?;
+        if nested.keys().any(|key| {
+            !matches!(
+                key.as_str(),
+                "source_ref" | "destination_ref" | "proposal_id" | "published_at"
+            )
+        }) {
+            return Err(MemoryError::policy("publication_provenance_invalid"));
+        }
         if let Some(reference) = nested.get("source_ref") {
             publication_system_ref(reference, &record.user_id)?;
         }
         if let Some(reference) = nested.get("destination_ref") {
             publication_system_ref(reference, &record.user_id)?;
         }
-        if nested
+        if nested.get("source_ref").is_none() == nested.get("destination_ref").is_none() {
+            return Err(MemoryError::policy("publication_provenance_invalid"));
+        }
+        let proposal_id = nested
             .get("proposal_id")
             .and_then(serde_json::Value::as_str)
-            .is_none()
-            || nested
-                .get("published_at")
-                .and_then(serde_json::Value::as_str)
-                .is_none()
-        {
+            .ok_or_else(|| MemoryError::policy("publication_provenance_invalid"))?;
+        if uuid::Uuid::parse_str(proposal_id).is_err() {
+            return Err(MemoryError::policy("publication_provenance_invalid"));
+        }
+        let published_at = nested
+            .get("published_at")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| MemoryError::policy("publication_provenance_invalid"))?;
+        let valid_timestamp = published_at
+            .strip_prefix("unix:")
+            .and_then(|value| value.split_once('.'))
+            .is_some_and(|(seconds, nanos)| {
+                !seconds.is_empty()
+                    && seconds.bytes().all(|byte| byte.is_ascii_digit())
+                    && nanos.len() == 9
+                    && nanos.bytes().all(|byte| byte.is_ascii_digit())
+            });
+        if !valid_timestamp {
             return Err(MemoryError::policy("publication_provenance_invalid"));
         }
         user.remove("publication");
