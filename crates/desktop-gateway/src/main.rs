@@ -92,13 +92,13 @@ use local_first_capabilities::{
     InMemoryCapabilityAudit, McpCapabilityProvider, McpStdioConfig, McpStdioTransport,
     McpToolPolicy, McpTransport, PluginRegistryEntry, PluginRegistryIndex, PolicyContext,
     ProviderId as CapabilityProviderId, UserId as CapabilityUserId,
-    WorkspaceId as CapabilityWorkspaceId,
+    WorkflowRoutingRegistry, WorkspaceId as CapabilityWorkspaceId,
 };
 use local_first_desktop_gateway::{
     AttachmentInput, BuildPromptRequest, BuildPromptResponse, ChatContextMessage, ChatContextRole,
     ChatGenerateStreamRequest, ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot,
-    EnqueueTurnRequest, SetActiveLeafRequest, SetBranchLabelRequest, SetThreadPinnedRequest,
-    build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
+    EnqueueTurnRequest, RoutingBinding, SetActiveLeafRequest, SetBranchLabelRequest,
+    SetThreadPinnedRequest, build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
 };
 // The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
@@ -8060,6 +8060,52 @@ fn route_capability(prompt: &str) -> CapabilityRouteDecision {
     CapabilityRouteDecision::AgentLoop {
         reason: "The best capability candidate was not a native workflow.".to_string(),
     }
+}
+
+/// S2 (plugin-owned deterministic routing): an active `RoutingBinding` — thread-scoped,
+/// set once when the user picks a template/route (e.g. "Use template"; see
+/// `RoutingBinding` in lib.rs, `ChatStore::thread_routing_binding`) — decides the route
+/// DIRECTLY when it resolves to a registered deterministic `WorkflowRouting`, bypassing
+/// per-turn BM25 (`route_capability`) entirely. This is the root-cause fix for "Use
+/// template" intake follow-up turns ("mio", "1 Senior developer…") that don't BM25-match
+/// the original route text and would otherwise fall through to the general AgentLoop (no
+/// tool pruning → a weak model wanders into skills/shell).
+///
+/// `enabled: &|_| true` — not a plugin-enablement gate — because the persisted binding
+/// itself IS the enablement signal: the user already chose this route this thread.
+///
+/// Falls back to `route_capability(prompt)` (today's behaviour, unchanged) when: there is
+/// no binding, the bound `route_id` isn't a known deterministic routing, or (today
+/// unreachable — both seeded system routings map onto native workflows) the routing's
+/// `tool_name` isn't a native workflow. `CapabilityRouteDecision::Workflow::tool_name` is
+/// `&'static str`, sourced from `native_workflow_by_tool_name`; without a native match
+/// there is no static string to hand back, so we fail open to BM25 rather than fabricate
+/// one — revisit if a non-native deterministic routing is ever registered.
+fn route_capability_with_binding(
+    prompt: &str,
+    binding: Option<&RoutingBinding>,
+) -> CapabilityRouteDecision {
+    if let Some(binding) = binding {
+        let registry = WorkflowRoutingRegistry::system();
+        let forced = registry
+            .routings(&|_| true)
+            .into_iter()
+            .find(|routing| routing.deterministic && routing.route_id == binding.route_id)
+            .and_then(|routing| {
+                native_workflow_by_tool_name(&routing.tool_name)
+                    .map(|capability| (routing, capability))
+            });
+        if let Some((routing, capability)) = forced {
+            return CapabilityRouteDecision::Workflow {
+                workflow_id: capability.workflow_id,
+                tool_name: capability.tool_name,
+                scaffolding_tier: capability.scaffolding_tier,
+                reason: format!("deterministic plugin routing: {}", routing.route_id),
+                alternatives: vec![],
+            };
+        }
+    }
+    route_capability(prompt)
 }
 
 fn atomic_pdf_operation_reason(prompt: &str) -> Option<String> {
@@ -25039,13 +25085,34 @@ message — both your step-by-step narration AND the final answer. If the user w
 Italian, reply entirely in Italian; if in English, in English. Match the user and never \
 switch language on your own. (Tool arguments, code, file paths and URLs stay as-is.)"
     );
+    // S2 (plugin-owned deterministic routing): an active thread-scoped RoutingBinding
+    // (set once at "Use template" intake — EnqueueTurnRequest::routing_binding /
+    // ChatStore::thread_routing_binding) decides the route BEFORE per-turn BM25 runs at
+    // all — see route_capability_with_binding. Lock is taken and dropped inline here
+    // (mirrors the workspace_for_thread read above); never held across generation.
+    // Missing thread_id, no persisted binding, or malformed JSON all fail open to
+    // ordinary BM25 routing, same as today.
+    let routing_binding: Option<RoutingBinding> = request
+        .thread_id
+        .as_deref()
+        .and_then(|tid| {
+            lock_store(state)
+                .ok()
+                .and_then(|store| store.thread_routing_binding(tid).ok().flatten())
+        })
+        .and_then(|json| serde_json::from_str::<RoutingBinding>(&json).ok());
+    let routed = route_capability_with_binding(&request.prompt, routing_binding.as_ref());
+    let was_workflow = matches!(routed, CapabilityRouteDecision::Workflow { .. });
     // Adaptive floor (ADR 0018), Fase 2: for a CAPABLE model, relax a Workflow
     // route to AgentLoop (the workflow tool stays offered; the model just isn't
-    // forced into it). Weak/Balanced and flag-off keep the forced behaviour.
-    let routed = route_capability(&request.prompt);
-    let was_workflow = matches!(routed, CapabilityRouteDecision::Workflow { .. });
-    let mut capability_route =
-        relax_route_for_tier(routed, turn_scaffold.workflow_bias, floor_acting);
+    // forced into it). Weak/Balanced and flag-off keep the forced behaviour. A
+    // deterministic plugin binding is an explicit user choice, not a per-turn BM25
+    // guess — it is NOT subject to this relax; the floor only softens the heuristic.
+    let mut capability_route = if routing_binding.is_some() {
+        routed
+    } else {
+        relax_route_for_tier(routed, turn_scaffold.workflow_bias, floor_acting)
+    };
     if floor_observing
         && was_workflow
         && matches!(capability_route, CapabilityRouteDecision::AgentLoop { .. })
@@ -58078,6 +58145,28 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(matches!(
             super::relax_route_for_tier(pdf, WorkflowBias::AllowAgentic, true),
             super::CapabilityRouteDecision::AtomicTool { .. }
+        ));
+    }
+
+    #[test]
+    fn active_binding_forces_workflow_route_bypassing_bm25_and_relax() {
+        let binding = super::RoutingBinding {
+            plugin_id: "presentations".into(),
+            route_id: "presentations.template_document".into(),
+            args: serde_json::json!({"template_ref":"homun/cv-professional-01"}),
+        };
+        // prompt che da solo NON instraderebbe a make_document (mima un turno d'intake)
+        let routed = super::route_capability_with_binding("mio", Some(&binding));
+        match routed {
+            super::CapabilityRouteDecision::Workflow { tool_name, .. } => {
+                assert_eq!(tool_name, "make_document")
+            }
+            other => panic!("expected forced Workflow route, got {other:?}"),
+        }
+        // senza binding, "mio" NON è una workflow route
+        assert!(!matches!(
+            super::route_capability_with_binding("mio", None),
+            super::CapabilityRouteDecision::Workflow { .. }
         ));
     }
 
