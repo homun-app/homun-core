@@ -1,15 +1,15 @@
 use crate::{
-    AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, EncryptedJson,
-    KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
-    MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceCandidateProjection,
-    MemorySourceGrant, AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
-    MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord, UserId, VectorHit, WikiPage,
-    WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
-    validate_memory_source_grant_intrinsic,
+    AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AutomationCandidateRecord, AutomationCandidateStatus,
+    DataSensitivity, EncryptedJson, KeyProvider, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
+    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity, MemoryEvent,
+    MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, MemoryRestoreMode, MemorySourceAccessEvent, MemorySourceAccessOutcome,
+    MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantValidationError,
+    PrivacyDomain, RoutineRecord, UserId, VectorHit, WikiPage, WorkspaceId, current_timestamp,
+    decrypt_json, encrypt_json, validate_memory_source_grant_intrinsic,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -112,6 +112,57 @@ fn validate_persisted_memory_source_grant(
         })
 }
 
+fn validate_memory_source_access_event(event: &MemorySourceAccessEvent) -> Result<(), String> {
+    if uuid::Uuid::parse_str(event.id.trim()).is_err()
+        || event.consumer_user_id.as_str().trim().is_empty()
+        || event.consumer_workspace_id.as_str().trim().is_empty()
+        || event.source_workspace_id.as_str().trim().is_empty()
+    {
+        return Err("invalid memory source access event identity".to_string());
+    }
+    match event.grant_id.as_deref() {
+        None if event.policy_version != 0 => {
+            return Err("local memory source access must use policy version zero".to_string());
+        }
+        Some(grant_id) if grant_id.trim().is_empty() || event.policy_version == 0 => {
+            return Err(
+                "linked memory source access requires grant and policy version".to_string(),
+            );
+        }
+        _ => {}
+    }
+    let reason_allowed = match event.outcome {
+        MemorySourceAccessOutcome::Allow => event.reason == "allowed",
+        MemorySourceAccessOutcome::Deny => event.reason == "intent_not_selected",
+        MemorySourceAccessOutcome::Degraded => matches!(
+            event.reason.as_str(),
+            "source_unavailable"
+                | "policy_changed"
+                | "policy_revalidation_failed"
+                | "audit_unavailable"
+        ),
+    };
+    if !reason_allowed {
+        return Err("invalid memory source access reason code".to_string());
+    }
+    if event.injected_refs.len() > event.candidate_count {
+        return Err("memory source access injected refs exceed candidates".to_string());
+    }
+    let mut unique_refs = HashSet::new();
+    for value in &event.injected_refs {
+        let reference = MemoryRef::from_str(value)
+            .map_err(|_| "memory source access payload must contain refs only".to_string())?;
+        if reference.kind != MemoryRefKind::Memory
+            || reference.user_id != event.consumer_user_id
+            || reference.workspace_id != event.source_workspace_id
+            || !unique_refs.insert(reference)
+        {
+            return Err("memory source access injected ref is outside source".to_string());
+        }
+    }
+    Ok(())
+}
+
 /// ADR 0022 (Tappa 2) — modello di connessione dello store.
 ///
 /// - `Single`: una `Connection` dietro `Mutex` (path legacy, `HOMUN_MEMORY_POOL`
@@ -207,10 +258,7 @@ impl SQLiteMemoryStore {
 
     /// Costruisce il modello di connessione in base al flag. In Single mode una
     /// sola connection (legacy). In Pooled mode apre writer + N reader WAL.
-    fn build_connections(
-        in_memory: bool,
-        path: &Option<PathBuf>,
-    ) -> Result<Connections, String> {
+    fn build_connections(in_memory: bool, path: &Option<PathBuf>) -> Result<Connections, String> {
         if !Self::pool_enabled() {
             let conn = Self::open_raw(in_memory, path)?;
             return Ok(Connections::Single(Mutex::new(conn)));
@@ -265,7 +313,11 @@ impl SQLiteMemoryStore {
                     .map_err(|_| "memory single connection poisoned".to_string())
                     .expect("memory single connection poisoned"),
             ),
-            Connections::Pooled { readers, reader_idx, .. } => {
+            Connections::Pooled {
+                readers,
+                reader_idx,
+                ..
+            } => {
                 // Round-robin: ogni read prende la reader successiva. Se quella
                 // specifica è occupata (altro read in corso su di essa), attende.
                 let len = readers.len().max(1);
@@ -731,6 +783,68 @@ impl SQLiteMemoryStore {
             .map_err(MemorySourceGrantStoreError::store)
     }
 
+    pub fn record_memory_source_access(
+        &self,
+        event: &MemorySourceAccessEvent,
+    ) -> Result<(), String> {
+        validate_memory_source_access_event(event)?;
+        let policy_version =
+            i64::try_from(event.policy_version).map_err(|error| error.to_string())?;
+        let candidate_count =
+            i64::try_from(event.candidate_count).map_err(|error| error.to_string())?;
+        let outcome = match event.outcome {
+            MemorySourceAccessOutcome::Allow => "allow",
+            MemorySourceAccessOutcome::Deny => "deny",
+            MemorySourceAccessOutcome::Degraded => "degraded",
+        };
+        let conn = self.write_conn();
+        conn.execute(
+            "insert into memory_source_access_events (
+                id, consumer_user_id, consumer_workspace_id, source_workspace_id,
+                grant_id, policy_version, turn_id, outcome, reason, candidate_count,
+                injected_refs_json, created_at
+             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &event.id,
+                event.consumer_user_id.as_str(),
+                event.consumer_workspace_id.as_str(),
+                event.source_workspace_id.as_str(),
+                event.grant_id.as_deref(),
+                policy_version,
+                event.turn_id.as_deref(),
+                outcome,
+                &event.reason,
+                candidate_count,
+                serde_json::to_string(&event.injected_refs).map_err(|error| error.to_string())?,
+                event.created_at,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn last_memory_source_access(
+        &self,
+        grant_id: &str,
+    ) -> Result<Option<MemorySourceAccessEvent>, String> {
+        if grant_id.trim().is_empty() {
+            return Err("memory source access grant id cannot be empty".to_string());
+        }
+        let conn = self.read_conn();
+        query_optional(
+            &conn,
+            "select id, consumer_user_id, consumer_workspace_id, source_workspace_id,
+                    grant_id, policy_version, turn_id, outcome, reason, candidate_count,
+                    injected_refs_json, created_at
+             from memory_source_access_events
+             where grant_id = ?1
+             order by created_at desc, rowid desc
+             limit 1",
+            [grant_id],
+            memory_source_access_from_row,
+        )
+    }
+
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<MemoryBackupReport, String> {
         let Some(source_path) = &self.db_path else {
             return Err("memory backup requires file-backed store".to_string());
@@ -858,8 +972,7 @@ impl SQLiteMemoryStore {
                 &memory.memory_type,
                 &memory.text,
                 serde_json::to_string(&memory.aliases).map_err(|error| error.to_string())?,
-                serde_json::to_string(&memory.language_hints)
-                    .map_err(|error| error.to_string())?,
+                serde_json::to_string(&memory.language_hints).map_err(|error| error.to_string())?,
                 memory.confidence,
                 enum_name(&memory.status)?,
                 memory.privacy_domain.as_str(),
@@ -1024,19 +1137,14 @@ impl SQLiteMemoryStore {
         let mut candidates = Vec::new();
         while let Some(row) = rows.next().map_err(|error| error.to_string())? {
             candidates.push(MemorySourceCandidateProjection {
-                reference: parse_ref(
-                    row.get::<_, String>(0)
-                        .map_err(|error| error.to_string())?,
-                )?,
+                reference: parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?,
                 memory_type: row.get(1).map_err(|error| error.to_string())?,
                 text: row.get(2).map_err(|error| error.to_string())?,
                 sensitivity: enum_from_name(
-                    row.get::<_, String>(3)
-                        .map_err(|error| error.to_string())?,
+                    row.get::<_, String>(3).map_err(|error| error.to_string())?,
                 )?,
                 metadata: serde_json::from_str(
-                    &row.get::<_, String>(4)
-                        .map_err(|error| error.to_string())?,
+                    &row.get::<_, String>(4).map_err(|error| error.to_string())?,
                 )
                 .map_err(|error| error.to_string())?,
             });
@@ -1314,18 +1422,18 @@ impl SQLiteMemoryStore {
         let conn = self.write_conn();
         for col in ["source_ref", "target_ref"] {
             conn.execute(
-                    &format!(
-                        "update relations set {col} = ?1
+                &format!(
+                    "update relations set {col} = ?1
                          where {col} = ?2 and user_id = ?3 and workspace_id = ?4"
-                    ),
-                    params![
-                        to_ref.to_string(),
-                        from_ref.to_string(),
-                        user_id.as_str(),
-                        workspace_id.as_str(),
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
+                ),
+                params![
+                    to_ref.to_string(),
+                    from_ref.to_string(),
+                    user_id.as_str(),
+                    workspace_id.as_str(),
+                ],
+            )
+            .map_err(|error| error.to_string())?;
         }
         Ok(())
     }
@@ -1342,16 +1450,16 @@ impl SQLiteMemoryStore {
     ) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "update memories set memory_type = ?1, updated_at = current_timestamp \
+            "update memories set memory_type = ?1, updated_at = current_timestamp \
                  where ref = ?2 and user_id = ?3 and workspace_id = ?4",
-                params![
-                    new_type,
-                    reference.to_string(),
-                    user_id.as_str(),
-                    workspace_id.as_str()
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                new_type,
+                reference.to_string(),
+                user_id.as_str(),
+                workspace_id.as_str()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1377,17 +1485,17 @@ impl SQLiteMemoryStore {
         workspace_id: &WorkspaceId,
     ) -> Result<(), String> {
         conn.execute(
-                "delete from relations where user_id = ?1 and workspace_id = ?2
+            "delete from relations where user_id = ?1 and workspace_id = ?2
                  and json_extract(metadata_json, '$.source') = 'graphify'",
-                params![user_id.as_str(), workspace_id.as_str()],
-            )
-            .map_err(|error| error.to_string())?;
+            params![user_id.as_str(), workspace_id.as_str()],
+        )
+        .map_err(|error| error.to_string())?;
         conn.execute(
-                "delete from entities where user_id = ?1 and workspace_id = ?2
+            "delete from entities where user_id = ?1 and workspace_id = ?2
                  and json_extract(metadata_json, '$.source') = 'graphify'",
-                params![user_id.as_str(), workspace_id.as_str()],
-            )
-            .map_err(|error| error.to_string())?;
+            params![user_id.as_str(), workspace_id.as_str()],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1496,14 +1604,14 @@ impl SQLiteMemoryStore {
     ) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "delete from tombstones where ref = ?1 and user_id = ?2 and workspace_id = ?3",
-                params![
-                    reference.to_string(),
-                    user_id.as_str(),
-                    workspace_id.as_str()
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            "delete from tombstones where ref = ?1 and user_id = ?2 and workspace_id = ?3",
+            params![
+                reference.to_string(),
+                user_id.as_str(),
+                workspace_id.as_str()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1514,30 +1622,26 @@ impl SQLiteMemoryStore {
 
     /// `upsert_entity` su una `&Connection` data. Usato da `import_graphify_batch`
     /// (vedi `clear_graphify_on`) per non riprendere il lock writer dentro la tx.
-    fn upsert_entity_on(
-        &self,
-        conn: &Connection,
-        entity: &MemoryEntity,
-    ) -> Result<(), String> {
+    fn upsert_entity_on(&self, conn: &Connection, entity: &MemoryEntity) -> Result<(), String> {
         conn.execute(
-                "insert or replace into entities (
+            "insert or replace into entities (
                     ref, user_id, workspace_id, entity_type, name, canonical_key,
                     aliases_json, privacy_domain, sensitivity, metadata_json
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                (
-                    entity.reference.to_string(),
-                    entity.user_id.as_str(),
-                    entity.workspace_id.as_str(),
-                    &entity.entity_type,
-                    &entity.name,
-                    &entity.canonical_key,
-                    serde_json::to_string(&entity.aliases).map_err(|error| error.to_string())?,
-                    entity.privacy_domain.as_str(),
-                    enum_name(&entity.sensitivity)?,
-                    serde_json::to_string(&entity.metadata).map_err(|error| error.to_string())?,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                entity.reference.to_string(),
+                entity.user_id.as_str(),
+                entity.workspace_id.as_str(),
+                &entity.entity_type,
+                &entity.name,
+                &entity.canonical_key,
+                serde_json::to_string(&entity.aliases).map_err(|error| error.to_string())?,
+                entity.privacy_domain.as_str(),
+                enum_name(&entity.sensitivity)?,
+                serde_json::to_string(&entity.metadata).map_err(|error| error.to_string())?,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1611,25 +1715,25 @@ impl SQLiteMemoryStore {
         relation: &MemoryRelation,
     ) -> Result<(), String> {
         conn.execute(
-                "insert or replace into relations (
+            "insert or replace into relations (
                     ref, user_id, workspace_id, source_ref, relation_type, target_ref,
                     confidence, privacy_domain, sensitivity, evidence_json, metadata_json
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                (
-                    relation.reference.to_string(),
-                    relation.user_id.as_str(),
-                    relation.workspace_id.as_str(),
-                    relation.source_ref.to_string(),
-                    &relation.relation_type,
-                    relation.target_ref.to_string(),
-                    relation.confidence,
-                    relation.privacy_domain.as_str(),
-                    enum_name(&relation.sensitivity)?,
-                    serde_json::to_string(&relation.evidence).map_err(|error| error.to_string())?,
-                    serde_json::to_string(&relation.metadata).map_err(|error| error.to_string())?,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                relation.reference.to_string(),
+                relation.user_id.as_str(),
+                relation.workspace_id.as_str(),
+                relation.source_ref.to_string(),
+                &relation.relation_type,
+                relation.target_ref.to_string(),
+                relation.confidence,
+                relation.privacy_domain.as_str(),
+                enum_name(&relation.sensitivity)?,
+                serde_json::to_string(&relation.evidence).map_err(|error| error.to_string())?,
+                serde_json::to_string(&relation.metadata).map_err(|error| error.to_string())?,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1645,12 +1749,12 @@ impl SQLiteMemoryStore {
     ) -> Result<usize, String> {
         let conn = self.write_conn();
         conn.execute(
-                "delete from relations
+            "delete from relations
                  where user_id = ?1 and workspace_id = ?2 and relation_type = 'mentions'
                    and json_extract(metadata_json, '$.source') = 'mention-linker'",
-                params![user_id.as_str(), workspace_id.as_str()],
-            )
-            .map_err(|error| error.to_string())
+            params![user_id.as_str(), workspace_id.as_str()],
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn relations_for(
@@ -1756,15 +1860,15 @@ impl SQLiteMemoryStore {
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "insert or replace into memory_evidence (memory_ref, evidence_ref, note)
+            "insert or replace into memory_evidence (memory_ref, evidence_ref, note)
                  values (?1, ?2, ?3)",
-                (
-                    evidence.memory_ref.to_string(),
-                    evidence.evidence_ref.to_string(),
-                    &evidence.note,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                evidence.memory_ref.to_string(),
+                evidence.evidence_ref.to_string(),
+                &evidence.note,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1908,23 +2012,23 @@ impl SQLiteMemoryStore {
     pub fn record_wiki_page(&self, page: &WikiPage) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "insert or replace into wiki_pages (
+            "insert or replace into wiki_pages (
                     ref, user_id, workspace_id, path, title, body, linked_refs_json,
                     privacy_domain, sensitivity
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                (
-                    page.reference.to_string(),
-                    page.user_id.as_str(),
-                    page.workspace_id.as_str(),
-                    &page.path,
-                    &page.title,
-                    &page.body,
-                    serde_json::to_string(&page.linked_refs).map_err(|error| error.to_string())?,
-                    page.privacy_domain.as_str(),
-                    enum_name(&page.sensitivity)?,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                page.reference.to_string(),
+                page.user_id.as_str(),
+                page.workspace_id.as_str(),
+                &page.path,
+                &page.title,
+                &page.body,
+                serde_json::to_string(&page.linked_refs).map_err(|error| error.to_string())?,
+                page.privacy_domain.as_str(),
+                enum_name(&page.sensitivity)?,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -2016,30 +2120,29 @@ impl SQLiteMemoryStore {
     pub fn upsert_routine(&self, routine: &RoutineRecord) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "insert or replace into routines (
+            "insert or replace into routines (
                     ref, user_id, workspace_id, name, intent, confidence, status,
                     schedule_hint_json, privacy_domain, sensitivity, evidence_json,
                     metadata_json, created_at, updated_at
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                (
-                    routine.reference.to_string(),
-                    routine.user_id.as_str(),
-                    routine.workspace_id.as_str(),
-                    &routine.name,
-                    &routine.intent,
-                    routine.confidence,
-                    enum_name(&routine.status)?,
-                    serde_json::to_string(&routine.schedule_hint)
-                        .map_err(|error| error.to_string())?,
-                    routine.privacy_domain.as_str(),
-                    enum_name(&routine.sensitivity)?,
-                    serde_json::to_string(&routine.evidence).map_err(|error| error.to_string())?,
-                    serde_json::to_string(&routine.metadata).map_err(|error| error.to_string())?,
-                    &routine.created_at,
-                    &routine.updated_at,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                routine.reference.to_string(),
+                routine.user_id.as_str(),
+                routine.workspace_id.as_str(),
+                &routine.name,
+                &routine.intent,
+                routine.confidence,
+                enum_name(&routine.status)?,
+                serde_json::to_string(&routine.schedule_hint).map_err(|error| error.to_string())?,
+                routine.privacy_domain.as_str(),
+                enum_name(&routine.sensitivity)?,
+                serde_json::to_string(&routine.evidence).map_err(|error| error.to_string())?,
+                serde_json::to_string(&routine.metadata).map_err(|error| error.to_string())?,
+                &routine.created_at,
+                &routine.updated_at,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -2109,17 +2212,17 @@ impl SQLiteMemoryStore {
     ) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "update automation_candidates set status = ?1, updated_at = ?2
+            "update automation_candidates set status = ?1, updated_at = ?2
                  where ref = ?3 and user_id = ?4 and workspace_id = ?5",
-                params![
-                    enum_name(status)?,
-                    current_timestamp(),
-                    reference.to_string(),
-                    user_id.as_str(),
-                    workspace_id.as_str(),
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                enum_name(status)?,
+                current_timestamp(),
+                reference.to_string(),
+                user_id.as_str(),
+                workspace_id.as_str(),
+            ],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -2199,31 +2302,31 @@ impl SQLiteMemoryStore {
         }
         let conn = self.write_conn();
         conn.execute(
-                "insert or replace into tombstones (ref, user_id, workspace_id, reason)
+            "insert or replace into tombstones (ref, user_id, workspace_id, reason)
                  values (?1, ?2, ?3, ?4)",
-                (
-                    reference.to_string(),
-                    user_id.as_str(),
-                    workspace_id.as_str(),
-                    reason,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                reference.to_string(),
+                user_id.as_str(),
+                workspace_id.as_str(),
+                reason,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         // Cascade: a dead ref must not keep edges in the graph — drop every
         // relation touching it (memory→entity "mentions", entity↔entity links).
         // Both delete paths (delete_memory and tombstone_entity) funnel through
         // here, so this single seam keeps the relations table free of danglers.
         conn.execute(
-                "delete from relations
+            "delete from relations
                  where user_id = ?1 and workspace_id = ?2
                    and (source_ref = ?3 or target_ref = ?3)",
-                (
-                    user_id.as_str(),
-                    workspace_id.as_str(),
-                    reference.to_string(),
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                user_id.as_str(),
+                workspace_id.as_str(),
+                reference.to_string(),
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -2255,10 +2358,10 @@ impl SQLiteMemoryStore {
             "wiki_pages",
         ] {
             conn.execute(
-                    &format!("DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"),
-                    (uid, wid),
-                )
-                .map_err(|e| e.to_string())?;
+                &format!("DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"),
+                (uid, wid),
+            )
+            .map_err(|e| e.to_string())?;
         }
         Ok(count as usize)
     }
@@ -2575,7 +2678,28 @@ impl SQLiteMemoryStore {
                     memory_ref text not null,
                     effect text not null check(effect in ('allow', 'deny')),
                     primary key(grant_id, memory_ref)
-                );",
+                );
+
+                create table if not exists memory_source_access_events (
+                    id text primary key,
+                    consumer_user_id text not null,
+                    consumer_workspace_id text not null,
+                    source_workspace_id text not null,
+                    grant_id text,
+                    policy_version integer not null,
+                    turn_id text,
+                    outcome text not null check(outcome in ('allow', 'deny', 'degraded')),
+                    reason text not null,
+                    candidate_count integer not null check(candidate_count >= 0),
+                    injected_refs_json text not null,
+                    created_at integer not null
+                );
+                create index if not exists idx_memory_source_access_consumer
+                    on memory_source_access_events(
+                        consumer_user_id, consumer_workspace_id, created_at
+                    );
+                create index if not exists idx_memory_source_access_grant
+                    on memory_source_access_events(grant_id, created_at);",
             )
             .map_err(|error| error.to_string())?;
         // I sub-helper (ensure_column, rebuild) ricevono questa stessa connection
@@ -2942,6 +3066,43 @@ fn parse_optional_ref(value: Option<String>) -> Result<Option<MemoryRef>, String
 
 fn parse_refs_json(value: String) -> Result<Vec<MemoryRef>, String> {
     serde_json::from_str(&value).map_err(|error| error.to_string())
+}
+
+fn memory_source_access_from_row(row: &Row<'_>) -> Result<MemorySourceAccessEvent, String> {
+    let outcome = match row
+        .get::<_, String>(7)
+        .map_err(|error| error.to_string())?
+        .as_str()
+    {
+        "allow" => MemorySourceAccessOutcome::Allow,
+        "deny" => MemorySourceAccessOutcome::Deny,
+        "degraded" => MemorySourceAccessOutcome::Degraded,
+        value => return Err(format!("unknown memory source access outcome: {value}")),
+    };
+    Ok(MemorySourceAccessEvent {
+        id: row.get(0).map_err(|error| error.to_string())?,
+        consumer_user_id: UserId::new(row.get::<_, String>(1).map_err(|error| error.to_string())?),
+        consumer_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(2).map_err(|error| error.to_string())?,
+        ),
+        source_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(3).map_err(|error| error.to_string())?,
+        ),
+        grant_id: row.get(4).map_err(|error| error.to_string())?,
+        policy_version: u64::try_from(row.get::<_, i64>(5).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?,
+        turn_id: row.get(6).map_err(|error| error.to_string())?,
+        outcome,
+        reason: row.get(8).map_err(|error| error.to_string())?,
+        candidate_count: usize::try_from(row.get::<_, i64>(9).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?,
+        injected_refs: serde_json::from_str(
+            &row.get::<_, String>(10)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+        created_at: row.get(11).map_err(|error| error.to_string())?,
+    })
 }
 
 fn memory_source_grant_base_from_row(row: &Row<'_>) -> Result<MemorySourceGrant, String> {

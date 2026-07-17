@@ -115,6 +115,9 @@ pub struct RecallHit {
     pub subject_key: Option<String>,
     /// Marcato dai task di merge quando due hit restano in conflitto.
     pub conflict: bool,
+    /// Identita del collegamento di pubblicazione, quando disponibile. Due copie
+    /// che condividono questo valore rappresentano la stessa conoscenza canonica.
+    pub publication_link: Option<String>,
 }
 
 /// Risultato della recall RAG episodica — contesto *mirato* alla query.
@@ -135,6 +138,8 @@ pub struct RecallPack {
     /// Blocco testuale già formattato per il system prompt, oppure `None` se
     /// la recall non ha surface-ato nulla. In Tappa 1 è l'unico campo pieno.
     pub block: Option<String>,
+    /// Fonti non locali che non hanno contribuito, con soli reason code sicuri.
+    pub degraded_sources: Vec<(WorkspaceId, String)>,
 }
 
 impl RecallPack {
@@ -145,6 +150,7 @@ impl RecallPack {
             scope,
             hits: Vec::new(),
             block,
+            degraded_sources: Vec::new(),
         }
     }
 
@@ -157,22 +163,52 @@ impl RecallPack {
             scope,
             hits,
             block,
+            degraded_sources: Vec::new(),
+        }
+    }
+
+    pub fn from_hits_and_degraded(
+        query: String,
+        scope: MemoryScope,
+        hits: Vec<RecallHit>,
+        degraded_sources: Vec<(WorkspaceId, String)>,
+    ) -> Self {
+        let block = format_recall_hits(&hits);
+        Self {
+            query,
+            scope,
+            hits,
+            block,
+            degraded_sources,
         }
     }
 }
 
-fn format_recall_hits(hits: &[RecallHit]) -> Option<String> {
+pub fn format_recall_hits(hits: &[RecallHit]) -> Option<String> {
     if hits.is_empty() {
         return None;
     }
-    let lines = hits
+    let normal = hits
         .iter()
-        .map(|hit| {
-            let conflict = if hit.conflict { " [conflict]" } else { "" };
-            format!("- [source: {}] {}{}", hit.source_label, hit.text, conflict)
-        })
+        .filter(|hit| !hit.conflict)
+        .map(|hit| format!("- [source: {}] {}", hit.source_label, hit.text))
         .collect::<Vec<_>>();
-    Some(format!("RELEVANT MEMORY:\n{}", lines.join("\n")))
+    let conflicting = hits
+        .iter()
+        .filter(|hit| hit.conflict)
+        .map(|hit| format!("- [source: {}] {}", hit.source_label, hit.text))
+        .collect::<Vec<_>>();
+    let mut sections = Vec::new();
+    if !normal.is_empty() {
+        sections.push(format!("RELEVANT MEMORY:\n{}", normal.join("\n")));
+    }
+    if !conflicting.is_empty() {
+        sections.push(format!(
+            "CONFLICTING MEMORY (do not merge silently):\n{}",
+            conflicting.join("\n")
+        ));
+    }
+    Some(sections.join("\n\n"))
 }
 
 /// Uno scambio completo turno utente↔assistente, input di [`MemoryRecallService::learn`].
@@ -442,8 +478,14 @@ mod cache_tests {
         );
         // Almeno una delle prime due è stata evicta; la terza è presente.
         assert!(cache.get("c", 1, 1).is_some(), "la nuova entry è presente");
-        let present = ["a", "b"].iter().filter(|k| cache.get(k, 1, 1).is_some()).count();
-        assert!(present <= 1, "bounded: al massimo max_entries entry coesistono");
+        let present = ["a", "b"]
+            .iter()
+            .filter(|k| cache.get(k, 1, 1).is_some())
+            .count();
+        assert!(
+            present <= 1,
+            "bounded: al massimo max_entries entry coesistono"
+        );
     }
 
     #[test]
@@ -467,7 +509,10 @@ mod cache_tests {
             },
         );
         assert!(cache.get("a", 2, 1).is_some(), "refresh aggiorna la entry");
-        assert!(cache.get("a", 1, 1).is_none(), "la vecchia generation è invalidata");
+        assert!(
+            cache.get("a", 1, 1).is_none(),
+            "la vecchia generation è invalidata"
+        );
     }
 
     #[test]
@@ -494,11 +539,7 @@ mod tests {
             brief: Some("BRIEF".to_string()),
             recent_work: Some("RECENT".to_string()),
         };
-        let ordered: Vec<String> = pack
-            .ordered_blocks()
-            .into_iter()
-            .flatten()
-            .collect();
+        let ordered: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
         assert_eq!(ordered, vec!["PROFILE", "OBJECTIVE", "BRIEF", "RECENT"]);
     }
 
@@ -517,12 +558,12 @@ mod tests {
             recent_work: None,
         };
         // Per Personal, solo il profile_block contribuisce al prompt.
-        let non_empty: Vec<String> = pack
-            .ordered_blocks()
-            .into_iter()
-            .flatten()
-            .collect();
-        assert_eq!(non_empty.len(), 1, "Personal briefing deve avere shape snella");
+        let non_empty: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
+        assert_eq!(
+            non_empty.len(),
+            1,
+            "Personal briefing deve avere shape snella"
+        );
         assert_eq!(non_empty[0], "- preferenza: risposte in italiano");
     }
 
@@ -536,11 +577,7 @@ mod tests {
             brief: None,
             recent_work: Some("RECENT".to_string()),
         };
-        let ordered: Vec<String> = pack
-            .ordered_blocks()
-            .into_iter()
-            .flatten()
-            .collect();
+        let ordered: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
         assert_eq!(ordered, vec!["OBJECTIVE", "RECENT"]);
     }
 

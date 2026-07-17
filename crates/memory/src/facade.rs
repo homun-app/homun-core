@@ -1,8 +1,7 @@
 use crate::{
     AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AccessDecisionKind, AuthorizedMemorySearchRequest,
-    AuthorizedMemorySource,
-    AutomationCandidateCreateRequest, AutomationCandidateRecord, AutomationCandidateStatus,
-    DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
+    AuthorizedMemorySource, AutomationCandidateCreateRequest, AutomationCandidateRecord,
+    AutomationCandidateStatus, DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
     MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence,
@@ -10,16 +9,25 @@ use crate::{
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
     MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus,
-    MemoryUpdatePatch,
-    PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference, RoutineInferenceSummary, RoutineRecord,
-    RoutineStatus, SQLiteMemoryStore, UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore,
-    WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
-    contains_secret, parse_wiki_markdown,
+    MemoryUpdatePatch, PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference,
+    RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, VectorHit,
+    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, contains_secret,
+    current_timestamp, ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
 };
 use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Mutex;
+
+const AUTHORIZED_VECTOR_INDEX_CACHE_MAX: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct AuthorizedVectorIndexKey {
+    source_user_id: String,
+    source_workspace_id: String,
+    policy_fingerprint: u64,
+    source_generation: u64,
+}
 
 pub struct MemoryWikiProjection {
     pub page: WikiPage,
@@ -29,6 +37,8 @@ pub struct MemoryFacade {
     store: SQLiteMemoryStore,
     policy: MemoryPolicyEngine,
     vector_indexes: Mutex<HashMap<String, crate::MemoryVectorIndexCache>>,
+    authorized_vector_indexes:
+        Mutex<HashMap<AuthorizedVectorIndexKey, crate::MemoryVectorIndexCache>>,
     /// ADR 0022 (Tappa 1.5) — generation counter per scope, usato per invalidare
     /// la cache del briefing. Ogni scrittura che muta il contenuto di uno scope
     /// (memorie/wiki) incrementa la generation; la cache del briefing confronta
@@ -53,6 +63,7 @@ impl MemoryFacade {
             store,
             policy: MemoryPolicyEngine,
             vector_indexes: Mutex::new(HashMap::new()),
+            authorized_vector_indexes: Mutex::new(HashMap::new()),
             briefing_generations: Mutex::new(HashMap::new()),
         }
     }
@@ -125,7 +136,8 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
         reason: &str,
     ) -> MemoryResult<()> {
-        self.store.tombstone(reference, user_id, workspace_id, reason)?;
+        self.store
+            .tombstone(reference, user_id, workspace_id, reason)?;
         self.bump_briefing_generation(user_id, workspace_id);
         Ok(())
     }
@@ -137,7 +149,8 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
         reason: &str,
     ) -> MemoryResult<()> {
-        self.store.tombstone(reference, user_id, workspace_id, reason)?;
+        self.store
+            .tombstone(reference, user_id, workspace_id, reason)?;
         self.bump_briefing_generation(user_id, workspace_id);
         Ok(())
     }
@@ -330,6 +343,7 @@ impl MemoryFacade {
     ) -> MemoryResult<()> {
         self.store
             .upsert_embedding(reference, user_id, workspace_id, model, vector)?;
+        self.bump_briefing_generation(user_id, workspace_id);
         self.update_vector_index_cache(reference, user_id, workspace_id, vector)?;
         Ok(())
     }
@@ -365,16 +379,33 @@ impl MemoryFacade {
         crate::MemoryVectorIndex::search(index, query, limit)
     }
 
-    /// Dense search for a single authorized source. Unlike `search_embeddings`,
-    /// this builds a query-local derived index and never seeds/reuses the full
-    /// scoped cache: embeddings denied by the source policy cannot influence
-    /// ranking or become candidates.
+    /// Dense search for a single authorized source. This derived cache is
+    /// separate from the full scoped index and its key includes effective policy
+    /// plus source generation, so stale/denied embeddings cannot influence a hit.
     pub fn search_authorized_embeddings(
         &self,
         source: &AuthorizedMemorySource,
         query: &[f32],
         limit: usize,
     ) -> MemoryResult<Vec<VectorHit>> {
+        let key = AuthorizedVectorIndexKey {
+            source_user_id: source.source_user_id.as_str().to_string(),
+            source_workspace_id: source.source_workspace_id.as_str().to_string(),
+            policy_fingerprint: crate::memory_source_policy_fingerprint(std::slice::from_ref(
+                source,
+            )),
+            source_generation: self
+                .briefing_generation(&source.source_user_id, &source.source_workspace_id),
+        };
+        {
+            let indexes = self.authorized_vector_indexes.lock().map_err(|_| {
+                MemoryError::Store("authorized memory vector index cache poisoned".to_string())
+            })?;
+            if let Some(index) = indexes.get(&key) {
+                return crate::MemoryVectorIndex::search(index, query, limit);
+            }
+        }
+
         let allowed_refs: std::collections::HashSet<MemoryRef> = self
             .store
             .list_memories(&source.source_user_id, &source.source_workspace_id)?
@@ -388,7 +419,35 @@ impl MemoryFacade {
             .into_iter()
             .filter(|(reference, _)| allowed_refs.contains(reference));
         let index = crate::MemoryVectorIndexCache::from_embeddings(embeddings)?;
-        crate::MemoryVectorIndex::search(&index, query, limit)
+        let result = crate::MemoryVectorIndex::search(&index, query, limit)?;
+        let mut indexes = self.authorized_vector_indexes.lock().map_err(|_| {
+            MemoryError::Store("authorized memory vector index cache poisoned".to_string())
+        })?;
+        indexes.entry(key.clone()).or_insert(index);
+        while indexes.len() > AUTHORIZED_VECTOR_INDEX_CACHE_MAX {
+            let eviction_key = indexes
+                .keys()
+                .min_by(|left, right| {
+                    (
+                        left.source_generation,
+                        left.source_user_id.as_str(),
+                        left.source_workspace_id.as_str(),
+                        left.policy_fingerprint,
+                    )
+                        .cmp(&(
+                            right.source_generation,
+                            right.source_user_id.as_str(),
+                            right.source_workspace_id.as_str(),
+                            right.policy_fingerprint,
+                        ))
+                })
+                .cloned();
+            let Some(eviction_key) = eviction_key else {
+                break;
+            };
+            indexes.remove(&eviction_key);
+        }
+        Ok(result)
     }
 
     fn update_vector_index_cache(
@@ -415,6 +474,30 @@ impl MemoryFacade {
             .lock()
             .map(|indexes| indexes.len())
             .unwrap_or_default()
+    }
+
+    #[doc(hidden)]
+    pub fn authorized_vector_index_cache_len_for_tests(&self) -> usize {
+        self.authorized_vector_indexes
+            .lock()
+            .map(|indexes| indexes.len())
+            .unwrap_or_default()
+    }
+
+    #[doc(hidden)]
+    pub fn authorized_vector_index_cache_workspaces_for_tests(&self) -> Vec<String> {
+        let mut workspaces = self
+            .authorized_vector_indexes
+            .lock()
+            .map(|indexes| {
+                indexes
+                    .keys()
+                    .map(|key| key.source_workspace_id.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        workspaces.sort();
+        workspaces
     }
 
     #[doc(hidden)]
@@ -942,7 +1025,8 @@ impl MemoryFacade {
                 &reference,
                 &request.access.user_id,
                 &request.access.workspace_id,
-            )? else {
+            )?
+            else {
                 continue;
             };
             if !self.memory_is_allowed_for_authorized_search(&request, &memory) {
@@ -1061,7 +1145,8 @@ impl MemoryFacade {
                 &relation.target_ref,
                 &source.source_user_id,
                 &source.source_workspace_id,
-            )? else {
+            )?
+            else {
                 continue;
             };
             let canonical_key = entity.canonical_key.trim();
@@ -1383,6 +1468,24 @@ impl MemoryFacade {
         self.store
             .revoke_memory_source_grant(consumer_user_id, consumer_workspace_id, id, revoked_at)
             .map_err(memory_source_grant_error)
+    }
+
+    pub fn record_memory_source_access(
+        &self,
+        event: &crate::MemorySourceAccessEvent,
+    ) -> MemoryResult<()> {
+        self.store
+            .record_memory_source_access(event)
+            .map_err(MemoryError::from)
+    }
+
+    pub fn last_memory_source_access(
+        &self,
+        grant_id: &str,
+    ) -> MemoryResult<Option<crate::MemorySourceAccessEvent>> {
+        self.store
+            .last_memory_source_access(grant_id)
+            .map_err(MemoryError::from)
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> MemoryResult<MemoryBackupReport> {
