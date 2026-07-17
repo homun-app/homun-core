@@ -183,8 +183,12 @@ fn grants_list_in_id_order_within_the_consumer_scope() {
 
     let mut later = grant();
     later.id = "grant-z".to_string();
+    later.source_workspace_id = WorkspaceId::new("project-z");
+    later.overrides.clear();
     let mut earlier = grant();
     earlier.id = "grant-a".to_string();
+    earlier.source_workspace_id = WorkspaceId::new("project-b");
+    earlier.overrides.clear();
 
     facade.upsert_memory_source_grant(&later).unwrap();
     facade.upsert_memory_source_grant(&earlier).unwrap();
@@ -205,6 +209,87 @@ fn grants_list_in_id_order_within_the_consumer_scope() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn duplicate_unrevoked_source_is_rejected_until_the_first_grant_is_revoked() {
+    let facade = facade();
+    let mut first = grant();
+    first.expires_at = Some(1);
+    let mut second = first.clone();
+    second.id = "grant-2".to_string();
+
+    facade.upsert_memory_source_grant(&first).unwrap();
+    let duplicate = facade
+        .upsert_memory_source_grant(&second)
+        .expect_err("a second unrevoked grant to the same source must fail");
+    assert!(matches!(duplicate, MemoryError::Validation(_)));
+    assert_eq!(duplicate.as_str(), "duplicate_active_source");
+    assert_eq!(
+        facade
+            .list_memory_source_grants(&first.consumer_user_id, &first.consumer_workspace_id)
+            .unwrap(),
+        vec![first.clone()]
+    );
+
+    facade
+        .revoke_memory_source_grant(
+            &first.consumer_user_id,
+            &first.consumer_workspace_id,
+            &first.id,
+            100,
+        )
+        .unwrap();
+    facade.upsert_memory_source_grant(&second).unwrap();
+    assert_eq!(
+        facade
+            .list_memory_source_grants(&first.consumer_user_id, &first.consumer_workspace_id)
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn duplicate_source_upserts_are_serialized_across_store_instances() {
+    let path = unique_db_path("duplicate-race");
+    let first_facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+    let second_facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+    let barrier = Arc::new(std::sync::Barrier::new(2));
+    let first_barrier = Arc::clone(&barrier);
+    let second_barrier = Arc::clone(&barrier);
+    let first = grant();
+    let mut second = first.clone();
+    second.id = "grant-race-2".to_string();
+
+    let first_writer = std::thread::spawn(move || {
+        first_barrier.wait();
+        first_facade.upsert_memory_source_grant(&first)
+    });
+    let second_writer = std::thread::spawn(move || {
+        second_barrier.wait();
+        second_facade.upsert_memory_source_grant(&second)
+    });
+    let results = [first_writer.join().unwrap(), second_writer.join().unwrap()];
+
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Err(MemoryError::Validation(message)) if message == "duplicate_active_source"))
+            .count(),
+        1
+    );
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+    assert_eq!(
+        facade
+            .list_memory_source_grants(&UserId::new("owner"), &WorkspaceId::new("project-a"))
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(facade);
+    remove_sqlite_files(&path);
 }
 
 #[test]
@@ -346,6 +431,60 @@ fn persisted_reserved_or_self_source_workspace_fails_closed_on_get_and_list() {
                 .unwrap();
         });
     }
+}
+
+#[test]
+fn duplicate_hydrated_sources_are_classified_as_store_corruption() {
+    let path = unique_db_path("duplicate-legacy-corruption");
+    let original = grant();
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+    facade.upsert_memory_source_grant(&original).unwrap();
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch("drop index idx_memory_source_grants_active_source;")
+            .unwrap();
+        connection
+            .execute(
+                "insert into memory_source_grants (
+                    id, consumer_user_id, consumer_workspace_id, source_user_id,
+                    source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                    policy_version, created_by, created_at, updated_at
+                 ) select ?1, consumer_user_id, consumer_workspace_id, source_user_id,
+                          source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                          policy_version, created_by, created_at, updated_at
+                   from memory_source_grants where id = ?2",
+                ("grant-duplicate-corrupt", original.id.as_str()),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "insert into memory_source_grant_collections (grant_id, collection_key)
+                 select ?1, collection_key from memory_source_grant_collections where grant_id = ?2",
+                ("grant-duplicate-corrupt", original.id.as_str()),
+            )
+            .unwrap();
+        connection
+            .execute(
+                "insert into memory_source_grant_overrides (grant_id, memory_ref, effect)
+                 select ?1, memory_ref, effect from memory_source_grant_overrides where grant_id = ?2",
+                ("grant-duplicate-corrupt", original.id.as_str()),
+            )
+            .unwrap();
+    }
+
+    let error = facade
+        .resolve_memory_sources(
+            &original.consumer_user_id,
+            &original.consumer_workspace_id,
+            100,
+        )
+        .expect_err("duplicate persisted sources must fail as store corruption");
+    assert!(matches!(error, MemoryError::Store(_)));
+    assert!(error.as_str().contains("duplicate_active_source"));
+
+    drop(facade);
+    remove_sqlite_files(&path);
 }
 
 #[test]
@@ -809,6 +948,7 @@ fn pooled_reads_never_assemble_parent_and_children_from_different_commits() {
     for index in 0..199 {
         let mut filler = grant();
         filler.id = format!("grant-{index:03}");
+        filler.source_workspace_id = WorkspaceId::new(format!("project-filler-{index:03}"));
         filler.policy_version = 1;
         filler.collections = BTreeSet::from([MemoryCollectionKey::Preferences]);
         filler.overrides.clear();

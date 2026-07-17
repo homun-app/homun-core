@@ -414,6 +414,30 @@ fn resolver_always_places_the_implicit_local_source_first() {
 }
 
 #[test]
+fn personal_consumer_is_always_local_only_and_ignores_matching_grants() {
+    let consumer_user = UserId::new("owner");
+    let personal = WorkspaceId::new("__personal__");
+    let arbitrary_matching_grant =
+        resolver_grant("ignored", "owner", "__personal__", "owner", "project-b");
+
+    let sources =
+        resolve_memory_sources(&consumer_user, &personal, &[arbitrary_matching_grant], 100)
+            .unwrap();
+
+    assert_eq!(
+        sources,
+        vec![AuthorizedMemorySource {
+            source_user_id: consumer_user,
+            source_workspace_id: personal,
+            source_label: "Personal".to_string(),
+            grant_id: None,
+            policy: None,
+            policy_version: 0,
+        }]
+    );
+}
+
+#[test]
 fn resolver_returns_only_direct_grants_for_the_requested_consumer() {
     let direct = resolver_grant("direct", "owner", "project-a", "owner", "project-b");
     let transitive = resolver_grant("transitive", "owner", "project-b", "owner", "project-c");
@@ -558,13 +582,16 @@ fn resolver_fails_closed_for_invalid_matching_grants() {
         );
     }
 
-    for reserved in ["__personal__", "__threads__"] {
-        assert_eq!(
-            resolve_memory_sources(&UserId::new("owner"), &WorkspaceId::new(reserved), &[], 100,)
-                .unwrap_err(),
-            "reserved_consumer_scope"
-        );
-    }
+    assert_eq!(
+        resolve_memory_sources(
+            &UserId::new("owner"),
+            &WorkspaceId::new("__threads__"),
+            &[],
+            100,
+        )
+        .unwrap_err(),
+        "reserved_consumer_scope"
+    );
     assert_eq!(
         resolve_memory_sources(&UserId::new(""), &WorkspaceId::new("project-a"), &[], 100,)
             .unwrap_err(),
@@ -606,6 +633,59 @@ fn resolver_rejects_duplicate_active_sources_but_ignores_inactive_duplicates() {
     )
     .unwrap();
     assert_eq!(sources.len(), 2);
+}
+
+#[test]
+fn resolver_rejects_duplicate_matching_grant_ids_before_activity_filtering() {
+    let active = resolver_grant("duplicate", "owner", "project-a", "owner", "project-b");
+    let other_active = resolver_grant("duplicate", "owner", "project-a", "owner", "project-c");
+    assert_eq!(
+        resolve_memory_sources(
+            &UserId::new("owner"),
+            &WorkspaceId::new("project-a"),
+            &[active.clone(), other_active],
+            100,
+        )
+        .unwrap_err(),
+        "duplicate_grant_id"
+    );
+
+    let mut revoked = resolver_grant("duplicate", "owner", "project-a", "owner", "project-c");
+    revoked.revoked_at = Some(99);
+    assert_eq!(
+        resolve_memory_sources(
+            &UserId::new("owner"),
+            &WorkspaceId::new("project-a"),
+            &[active.clone(), revoked],
+            100,
+        )
+        .unwrap_err(),
+        "duplicate_grant_id"
+    );
+
+    let mut expired = resolver_grant("duplicate", "owner", "project-a", "owner", "project-c");
+    expired.expires_at = Some(100);
+    assert_eq!(
+        resolve_memory_sources(
+            &UserId::new("owner"),
+            &WorkspaceId::new("project-a"),
+            &[active.clone(), expired],
+            100,
+        )
+        .unwrap_err(),
+        "duplicate_grant_id"
+    );
+
+    let other_consumer = resolver_grant("duplicate", "owner", "project-z", "owner", "project-c");
+    let sources = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &[active, other_consumer],
+        100,
+    )
+    .unwrap();
+    assert_eq!(sources.len(), 2);
+    assert_eq!(sources[1].source_workspace_id.as_str(), "project-b");
 }
 
 #[test]
@@ -855,6 +935,17 @@ fn policy_fingerprint_canonicalizes_order_and_ignores_only_source_label() {
 }
 
 #[test]
+fn policy_fingerprint_preserves_duplicate_source_entries() {
+    let source = fingerprint_source();
+
+    assert_ne!(
+        memory_source_policy_fingerprint(std::slice::from_ref(&source)),
+        memory_source_policy_fingerprint(&[source.clone(), source]),
+        "fingerprint must encode the complete source slice without deduplication"
+    );
+}
+
+#[test]
 fn policy_fingerprint_changes_when_expiry_or_revocation_removes_a_source() {
     let mut grant = resolver_grant("grant", "owner", "project-a", "owner", "project-b");
     grant.expires_at = Some(101);
@@ -910,6 +1001,53 @@ fn facade_resolves_only_persisted_direct_grants_for_the_requested_consumer() {
             .collect::<Vec<_>>(),
         vec!["project-a", "project-b"]
     );
+}
+
+#[test]
+fn facade_personal_resolution_does_not_read_corrupt_personal_consumer_rows() {
+    let path = std::env::temp_dir().join(format!(
+        "local-first-memory-personal-resolver-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+    {
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute(
+                "insert into memory_source_grants (
+                    id, consumer_user_id, consumer_workspace_id, source_user_id,
+                    source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                    policy_version, created_by, created_at, updated_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, null, null, 1, ?7, ?8, ?8)",
+                (
+                    "corrupt-personal-consumer",
+                    "owner",
+                    "__personal__",
+                    "owner",
+                    "project-b",
+                    "private",
+                    "owner",
+                    "2026-07-17T08:00:00Z",
+                ),
+            )
+            .unwrap();
+    }
+
+    let sources = facade
+        .resolve_memory_sources(
+            &UserId::new("owner"),
+            &WorkspaceId::new("__personal__"),
+            100,
+        )
+        .unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].source_label, "Personal");
+    assert_eq!(sources[0].grant_id, None);
+
+    drop(facade);
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
 }
 
 fn memory(key: &str, memory_type: &str, sensitivity: DataSensitivity) -> MemoryRecord {

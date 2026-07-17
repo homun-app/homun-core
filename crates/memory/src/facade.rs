@@ -8,10 +8,11 @@ use crate::{
     MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
-    MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
-    RoutineInference, RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore,
-    UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId,
-    current_timestamp, ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
+    MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus, MemoryUpdatePatch,
+    PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference, RoutineInferenceSummary, RoutineRecord,
+    RoutineStatus, SQLiteMemoryStore, UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore,
+    WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
+    parse_wiki_markdown,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -1106,9 +1107,21 @@ impl MemoryFacade {
         workspace: &WorkspaceId,
         now_unix: i64,
     ) -> MemoryResult<Vec<AuthorizedMemorySource>> {
+        if workspace.as_str() == PERSONAL_WORKSPACE {
+            return crate::resolve_memory_sources(user, workspace, &[], now_unix)
+                .map_err(MemoryError::validation);
+        }
         let grants = self.list_memory_source_grants(user, workspace)?;
-        crate::resolve_memory_sources(user, workspace, &grants, now_unix)
-            .map_err(MemoryError::validation)
+        crate::resolve_memory_sources(user, workspace, &grants, now_unix).map_err(|error| {
+            if matches!(
+                error.as_str(),
+                "duplicate_active_source" | "duplicate_grant_id"
+            ) {
+                MemoryError::Store(error)
+            } else {
+                MemoryError::validation(error)
+            }
+        })
     }
 
     pub fn get_memory_source_grant(

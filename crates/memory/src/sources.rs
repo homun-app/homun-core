@@ -81,55 +81,109 @@ pub struct AuthorizedMemorySource {
     pub policy_version: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemorySourceGrantValidationError {
+    EmptyGrantId,
+    EmptyConsumerUser,
+    EmptyConsumerWorkspace,
+    EmptySourceUser,
+    EmptySourceWorkspace,
+    EmptyCreatedBy,
+    ReservedConsumerScope,
+    ReservedSourceScope,
+    SourceEqualsConsumer,
+    CrossUserSourceNotSupported,
+    EmptySourcePolicy,
+    InvalidOverrideKind,
+    OverrideOutsideSource,
+    InvalidPolicyVersion,
+}
+
+impl MemorySourceGrantValidationError {
+    fn resolver_code(self) -> &'static str {
+        match self {
+            Self::EmptyGrantId => "empty_grant_id",
+            Self::EmptyConsumerUser => "empty_consumer_user",
+            Self::EmptyConsumerWorkspace => "empty_consumer_workspace",
+            Self::EmptySourceUser => "empty_source_user",
+            Self::EmptySourceWorkspace => "empty_source_workspace",
+            Self::EmptyCreatedBy => "empty_created_by",
+            Self::ReservedConsumerScope => "reserved_consumer_scope",
+            Self::ReservedSourceScope => "reserved_source_scope",
+            Self::SourceEqualsConsumer => "source_equals_consumer",
+            Self::CrossUserSourceNotSupported => "cross_user_source_not_supported",
+            Self::EmptySourcePolicy => "empty_source_policy",
+            Self::InvalidOverrideKind => "invalid_override_kind",
+            Self::OverrideOutsideSource => "override_outside_source",
+            Self::InvalidPolicyVersion => "invalid_policy_version",
+        }
+    }
+}
+
 pub(crate) fn validate_memory_source_grant_intrinsic(
     grant: &MemorySourceGrant,
-) -> Result<(), String> {
+) -> Result<(), MemorySourceGrantValidationError> {
     let required_identities = [
-        ("empty_grant_id", grant.id.as_str()),
-        ("empty_consumer_user", grant.consumer_user_id.as_str()),
         (
-            "empty_consumer_workspace",
+            MemorySourceGrantValidationError::EmptyGrantId,
+            grant.id.as_str(),
+        ),
+        (
+            MemorySourceGrantValidationError::EmptyConsumerUser,
+            grant.consumer_user_id.as_str(),
+        ),
+        (
+            MemorySourceGrantValidationError::EmptyConsumerWorkspace,
             grant.consumer_workspace_id.as_str(),
         ),
-        ("empty_source_user", grant.source_user_id.as_str()),
-        ("empty_source_workspace", grant.source_workspace_id.as_str()),
-        ("empty_created_by", grant.created_by.as_str()),
+        (
+            MemorySourceGrantValidationError::EmptySourceUser,
+            grant.source_user_id.as_str(),
+        ),
+        (
+            MemorySourceGrantValidationError::EmptySourceWorkspace,
+            grant.source_workspace_id.as_str(),
+        ),
+        (
+            MemorySourceGrantValidationError::EmptyCreatedBy,
+            grant.created_by.as_str(),
+        ),
     ];
     for (error, value) in required_identities {
         if value.trim().is_empty() {
-            return Err(error.to_string());
+            return Err(error);
         }
     }
 
     let consumer_workspace = grant.consumer_workspace_id.as_str();
     let source_workspace = grant.source_workspace_id.as_str();
     if matches!(consumer_workspace, PERSONAL_WORKSPACE | THREADS_WORKSPACE) {
-        return Err("reserved_consumer_scope".to_string());
+        return Err(MemorySourceGrantValidationError::ReservedConsumerScope);
     }
     if source_workspace == THREADS_WORKSPACE {
-        return Err("reserved_source_scope".to_string());
+        return Err(MemorySourceGrantValidationError::ReservedSourceScope);
     }
     if grant.consumer_workspace_id == grant.source_workspace_id {
-        return Err("source_equals_consumer".to_string());
+        return Err(MemorySourceGrantValidationError::SourceEqualsConsumer);
     }
     if grant.consumer_user_id != grant.source_user_id {
-        return Err("cross_user_source_not_supported".to_string());
+        return Err(MemorySourceGrantValidationError::CrossUserSourceNotSupported);
     }
     if grant.collections.is_empty() && grant.overrides.is_empty() {
-        return Err("empty_source_policy".to_string());
+        return Err(MemorySourceGrantValidationError::EmptySourcePolicy);
     }
     for reference in grant.overrides.keys() {
         if reference.kind != MemoryRefKind::Memory {
-            return Err("invalid_override_kind".to_string());
+            return Err(MemorySourceGrantValidationError::InvalidOverrideKind);
         }
         if reference.user_id != grant.source_user_id
             || reference.workspace_id != grant.source_workspace_id
         {
-            return Err("override_outside_source".to_string());
+            return Err(MemorySourceGrantValidationError::OverrideOutsideSource);
         }
     }
     if grant.policy_version == 0 {
-        return Err("invalid_policy_version".to_string());
+        return Err(MemorySourceGrantValidationError::InvalidPolicyVersion);
     }
 
     Ok(())
@@ -147,21 +201,29 @@ pub fn resolve_memory_sources(
     if consumer_workspace.as_str().trim().is_empty() {
         return Err("empty_consumer_workspace".to_string());
     }
-    if matches!(
-        consumer_workspace.as_str(),
-        PERSONAL_WORKSPACE | THREADS_WORKSPACE
-    ) {
+    if consumer_workspace.as_str() == PERSONAL_WORKSPACE {
+        return Ok(vec![implicit_local_source(
+            consumer_user,
+            consumer_workspace,
+        )]);
+    }
+    if consumer_workspace.as_str() == THREADS_WORKSPACE {
         return Err("reserved_consumer_scope".to_string());
     }
 
     let mut linked = Vec::new();
+    let mut matching_grant_ids = BTreeSet::new();
     let mut active_source_scopes = BTreeSet::new();
 
     for grant in grants.iter().filter(|grant| {
         grant.consumer_user_id == *consumer_user
             && grant.consumer_workspace_id == *consumer_workspace
     }) {
-        validate_memory_source_grant_intrinsic(grant)?;
+        validate_memory_source_grant_intrinsic(grant)
+            .map_err(|error| error.resolver_code().to_string())?;
+        if !matching_grant_ids.insert(grant.id.as_str()) {
+            return Err("duplicate_grant_id".to_string());
+        }
 
         if grant.revoked_at.is_some() || grant.expires_at.is_some_and(|expiry| expiry <= now_unix) {
             continue;
@@ -207,18 +269,33 @@ pub fn resolve_memory_sources(
     });
 
     let mut sources = Vec::with_capacity(linked.len() + 1);
-    sources.push(AuthorizedMemorySource {
-        source_user_id: consumer_user.clone(),
-        source_workspace_id: consumer_workspace.clone(),
-        source_label: consumer_workspace.as_str().to_string(),
-        grant_id: None,
-        policy: None,
-        policy_version: 0,
-    });
+    sources.push(implicit_local_source(consumer_user, consumer_workspace));
     sources.extend(linked);
     Ok(sources)
 }
 
+fn implicit_local_source(
+    consumer_user: &UserId,
+    consumer_workspace: &WorkspaceId,
+) -> AuthorizedMemorySource {
+    AuthorizedMemorySource {
+        source_user_id: consumer_user.clone(),
+        source_workspace_id: consumer_workspace.clone(),
+        source_label: if consumer_workspace.as_str() == PERSONAL_WORKSPACE {
+            "Personal".to_string()
+        } else {
+            consumer_workspace.as_str().to_string()
+        },
+        grant_id: None,
+        policy: None,
+        policy_version: 0,
+    }
+}
+
+/// Deterministic cache/revalidation token for an effective source set.
+///
+/// This truncated hash is not an authorization credential and must never replace
+/// resolver or policy checks.
 pub fn memory_source_policy_fingerprint(sources: &[AuthorizedMemorySource]) -> u64 {
     let mut encoded_sources = sources.iter().map(encode_source).collect::<Vec<_>>();
     encoded_sources.sort_unstable();

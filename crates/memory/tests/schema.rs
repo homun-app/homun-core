@@ -192,6 +192,17 @@ fn populated_v3_store_migrates_to_v4_without_data_loss() {
             )
             .unwrap();
         assert_eq!(index_count, 1);
+        let active_source_index_sql: String = connection
+            .query_row(
+                "select sql from sqlite_master
+                 where type = 'index' and name = 'idx_memory_source_grants_active_source'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let active_source_index_sql = active_source_index_sql.to_ascii_lowercase();
+        assert!(active_source_index_sql.contains("create unique index"));
+        assert!(active_source_index_sql.contains("where revoked_at is null"));
     }
     {
         let reopened = SQLiteMemoryStore::open(&path).unwrap();

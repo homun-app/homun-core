@@ -2,11 +2,12 @@ use crate::{
     AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, EncryptedJson,
     KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
     MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceGrant, PrivacyDomain,
-    RoutineRecord, UserId, VectorHit, WikiPage, WorkspaceId, current_timestamp, decrypt_json,
-    encrypt_json, validate_memory_source_grant_intrinsic,
+    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceGrant,
+    MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord, UserId, VectorHit, WikiPage,
+    WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
+    validate_memory_source_grant_intrinsic,
 };
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,40 +37,49 @@ impl MemorySourceGrantStoreError {
 }
 
 pub(crate) fn validate_memory_source_grant(grant: &MemorySourceGrant) -> Result<i64, String> {
-    validate_memory_source_grant_intrinsic(grant).map_err(|error| match error.as_str() {
-        "empty_grant_id" => "memory source grant grant id cannot be empty".to_string(),
-        "empty_consumer_user" => "memory source grant consumer user cannot be empty".to_string(),
-        "empty_consumer_workspace" => {
+    validate_memory_source_grant_intrinsic(grant).map_err(|error| match error {
+        MemorySourceGrantValidationError::EmptyGrantId => {
+            "memory source grant grant id cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::EmptyConsumerUser => {
+            "memory source grant consumer user cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::EmptyConsumerWorkspace => {
             "memory source grant consumer workspace cannot be empty".to_string()
         }
-        "empty_source_user" => "memory source grant source user cannot be empty".to_string(),
-        "empty_source_workspace" => {
+        MemorySourceGrantValidationError::EmptySourceUser => {
+            "memory source grant source user cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::EmptySourceWorkspace => {
             "memory source grant source workspace cannot be empty".to_string()
         }
-        "empty_created_by" => "memory source grant created by cannot be empty".to_string(),
-        "reserved_consumer_scope" => {
+        MemorySourceGrantValidationError::EmptyCreatedBy => {
+            "memory source grant created by cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::ReservedConsumerScope => {
             "memory source grant consumer must be a project workspace".to_string()
         }
-        "reserved_source_scope" => "thread memory cannot be a linked source".to_string(),
-        "source_equals_consumer" => {
+        MemorySourceGrantValidationError::ReservedSourceScope => {
+            "thread memory cannot be a linked source".to_string()
+        }
+        MemorySourceGrantValidationError::SourceEqualsConsumer => {
             "memory source grant cannot link a workspace to itself".to_string()
         }
-        "cross_user_source_not_supported" => {
+        MemorySourceGrantValidationError::CrossUserSourceNotSupported => {
             "cross-user memory source grants are not supported".to_string()
         }
-        "empty_source_policy" => {
+        MemorySourceGrantValidationError::EmptySourcePolicy => {
             "memory source grant must allow a collection or override".to_string()
         }
-        "invalid_override_kind" => {
+        MemorySourceGrantValidationError::InvalidOverrideKind => {
             "memory source grant overrides require memory refs".to_string()
         }
-        "override_outside_source" => {
+        MemorySourceGrantValidationError::OverrideOutsideSource => {
             "memory source grant override is outside the declared source".to_string()
         }
-        "invalid_policy_version" => {
+        MemorySourceGrantValidationError::InvalidPolicyVersion => {
             "memory source grant policy version must be positive".to_string()
         }
-        _ => error,
     })?;
 
     let policy_version = i64::try_from(grant.policy_version)
@@ -370,7 +380,7 @@ impl SQLiteMemoryStore {
             validate_memory_source_grant(grant).map_err(MemorySourceGrantStoreError::Validation)?;
         let mut conn = self.write_conn();
         let transaction = conn
-            .transaction()
+            .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(MemorySourceGrantStoreError::store)?;
 
         let mut existing = {
@@ -433,6 +443,32 @@ impl SQLiteMemoryStore {
                 return Err(MemorySourceGrantStoreError::validation(format!(
                     "memory source grant update requires policy version {expected_version}"
                 )));
+            }
+        }
+
+        if grant.revoked_at.is_none() {
+            let duplicate_id = transaction
+                .query_row(
+                    "select id from memory_source_grants
+                     where consumer_user_id = ?1 and consumer_workspace_id = ?2
+                       and source_user_id = ?3 and source_workspace_id = ?4
+                       and revoked_at is null and id <> ?5
+                     limit 1",
+                    params![
+                        grant.consumer_user_id.as_str(),
+                        grant.consumer_workspace_id.as_str(),
+                        grant.source_user_id.as_str(),
+                        grant.source_workspace_id.as_str(),
+                        grant.id.as_str(),
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(MemorySourceGrantStoreError::store)?;
+            if duplicate_id.is_some() {
+                return Err(MemorySourceGrantStoreError::validation(
+                    "duplicate_active_source",
+                ));
             }
         }
 
@@ -2220,6 +2256,11 @@ impl SQLiteMemoryStore {
                 );
                 create index if not exists idx_memory_source_grants_consumer
                     on memory_source_grants(consumer_user_id, consumer_workspace_id, revoked_at);
+                create unique index if not exists idx_memory_source_grants_active_source
+                    on memory_source_grants(
+                        consumer_user_id, consumer_workspace_id,
+                        source_user_id, source_workspace_id
+                    ) where revoked_at is null;
 
                 create table if not exists memory_source_grant_collections (
                     grant_id text not null references memory_source_grants(id) on delete cascade,
