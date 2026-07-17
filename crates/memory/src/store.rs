@@ -2,11 +2,13 @@ use crate::{
     AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AutomationCandidateRecord, AutomationCandidateStatus,
     DataSensitivity, EncryptedJson, KeyProvider, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity, MemoryEvent,
-    MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryPublicationLink,
+    MemoryPublicationProposal, MemoryPublicationStatus, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryRestoreMode, MemorySourceAccessEvent, MemorySourceAccessOutcome,
     MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantValidationError,
-    PrivacyDomain, RoutineRecord, UserId, VectorHit, WikiPage, WorkspaceId, current_timestamp,
-    decrypt_json, encrypt_json, validate_memory_source_grant_intrinsic,
+    PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId,
+    contains_secret, current_timestamp, decrypt_json, encrypt_json,
+    validate_memory_source_grant_intrinsic,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -39,6 +41,34 @@ impl MemorySourceGrantStoreError {
 
     fn conflict(message: impl Into<String>) -> Self {
         Self::Conflict(message.into())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryPublicationStoreError {
+    Validation(String),
+    Conflict(String),
+    NotFound(String),
+    Store(String),
+}
+
+pub type MemoryPublicationStoreResult<T> = Result<T, MemoryPublicationStoreError>;
+
+impl MemoryPublicationStoreError {
+    fn validation(message: impl Into<String>) -> Self {
+        Self::Validation(message.into())
+    }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self::Conflict(message.into())
+    }
+
+    fn not_found(message: impl Into<String>) -> Self {
+        Self::NotFound(message.into())
+    }
+
+    fn store(error: impl ToString) -> Self {
+        Self::Store(error.to_string())
     }
 }
 
@@ -783,6 +813,295 @@ impl SQLiteMemoryStore {
             .map_err(MemorySourceGrantStoreError::store)
     }
 
+    pub fn create_memory_publication_proposal(
+        &self,
+        proposal: &MemoryPublicationProposal,
+    ) -> MemoryPublicationStoreResult<()> {
+        validate_memory_publication_proposal(proposal)
+            .map_err(MemoryPublicationStoreError::validation)?;
+        let source_ref_json = publication_ref_json(&proposal.source_ref)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+
+        let already_linked = transaction
+            .query_row(
+                "select exists(select 1 from memory_publication_links where source_ref_json = ?1)",
+                [&source_ref_json],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if already_linked {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_already_published",
+            ));
+        }
+        let already_pending = transaction
+            .query_row(
+                "select exists(
+                    select 1 from memory_publication_proposals
+                    where source_ref_json = ?1 and status = 'pending'
+                 )",
+                [&source_ref_json],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if already_pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_already_pending",
+            ));
+        }
+
+        transaction
+            .execute(
+                "insert into memory_publication_proposals (
+                    id, source_ref_json, source_user_id, source_workspace_id,
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_privacy_domain, proposed_sensitivity,
+                    duplicate_ref_json, status, proposed_by, decided_by, created_at, updated_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                params![
+                    &proposal.id,
+                    source_ref_json,
+                    proposal.source_user_id.as_str(),
+                    proposal.source_workspace_id.as_str(),
+                    proposal.destination_user_id.as_str(),
+                    proposal.destination_workspace_id.as_str(),
+                    &proposal.proposed_text,
+                    &proposal.proposed_memory_type,
+                    proposal.proposed_privacy_domain.as_str(),
+                    enum_name(&proposal.proposed_sensitivity)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    proposal
+                        .duplicate_ref
+                        .as_ref()
+                        .map(publication_ref_json)
+                        .transpose()
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    enum_name(&proposal.status).map_err(MemoryPublicationStoreError::store)?,
+                    &proposal.proposed_by,
+                    proposal.decided_by.as_deref(),
+                    &proposal.created_at,
+                    &proposal.updated_at,
+                ],
+            )
+            .map_err(|error| {
+                if error.to_string().contains("UNIQUE constraint failed") {
+                    MemoryPublicationStoreError::conflict("publication_already_exists")
+                } else {
+                    MemoryPublicationStoreError::store(error)
+                }
+            })?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)
+    }
+
+    pub fn get_memory_publication_proposal(
+        &self,
+        id: &str,
+    ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
+        if id.trim().is_empty() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication proposal id cannot be empty",
+            ));
+        }
+        let conn = self.read_conn();
+        query_optional(
+            &conn,
+            "select id, source_ref_json, source_user_id, source_workspace_id,
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_privacy_domain, proposed_sensitivity,
+                    duplicate_ref_json, status, proposed_by, decided_by, created_at, updated_at
+             from memory_publication_proposals where id = ?1",
+            [id],
+            memory_publication_proposal_from_row,
+        )
+        .map_err(MemoryPublicationStoreError::store)
+    }
+
+    pub fn get_memory_publication_link(
+        &self,
+        source_ref: &MemoryRef,
+    ) -> MemoryPublicationStoreResult<Option<MemoryPublicationLink>> {
+        let source_ref_json =
+            publication_ref_json(source_ref).map_err(MemoryPublicationStoreError::store)?;
+        let conn = self.read_conn();
+        query_optional(
+            &conn,
+            "select source_ref_json, destination_ref_json, approved_by, created_at
+             from memory_publication_links where source_ref_json = ?1",
+            [&source_ref_json],
+            memory_publication_link_from_row,
+        )
+        .map_err(MemoryPublicationStoreError::store)
+    }
+
+    pub fn reject_memory_publication(
+        &self,
+        id: &str,
+        actor: &str,
+        updated_at: &str,
+    ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
+        if actor.trim().is_empty() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication actor cannot be empty",
+            ));
+        }
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let proposal = load_memory_publication_proposal_on(&transaction, id)?
+            .ok_or_else(|| MemoryPublicationStoreError::not_found("publication_not_found"))?;
+        if actor != proposal.proposed_by || actor != proposal.source_user_id.as_str() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication_actor_mismatch",
+            ));
+        }
+        if proposal.status == MemoryPublicationStatus::Rejected {
+            transaction
+                .commit()
+                .map_err(MemoryPublicationStoreError::store)?;
+            return Ok(proposal);
+        }
+        if proposal.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_not_pending",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set status = 'rejected', decided_by = ?2, updated_at = ?3
+                 where id = ?1 and status = 'pending'",
+                params![id, actor, updated_at],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let rejected = load_memory_publication_proposal_on(&transaction, id)?
+            .ok_or_else(|| MemoryPublicationStoreError::store("publication disappeared"))?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(rejected)
+    }
+
+    pub fn mark_memory_publication_failed(
+        &self,
+        id: &str,
+        actor: &str,
+        updated_at: &str,
+    ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        transaction
+            .execute(
+                "update memory_publication_proposals
+                 set status = 'failed', decided_by = ?2, updated_at = ?3
+                 where id = ?1 and status = 'pending'",
+                params![id, actor, updated_at],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        let result = load_memory_publication_proposal_on(&transaction, id)?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(result)
+    }
+
+    /// Commits every visible side effect of publication in a single SQLite
+    /// transaction. A stale proposal state, duplicate link, or failed statement
+    /// rolls back the destination write and source alias together.
+    pub fn commit_publication(
+        &self,
+        proposal: &MemoryPublicationProposal,
+        destination: &MemoryRecord,
+        source_with_alias: &MemoryRecord,
+        link: &MemoryPublicationLink,
+    ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let stored = load_memory_publication_proposal_on(&transaction, &proposal.id)?
+            .ok_or_else(|| MemoryPublicationStoreError::not_found("publication_not_found"))?;
+        if stored != *proposal || stored.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_not_pending",
+            ));
+        }
+        if destination.user_id != proposal.destination_user_id
+            || destination.workspace_id != proposal.destination_workspace_id
+            || source_with_alias.reference != proposal.source_ref
+            || source_with_alias.user_id != proposal.source_user_id
+            || source_with_alias.workspace_id != proposal.source_workspace_id
+            || link.source_ref != proposal.source_ref
+            || link.destination_ref != destination.reference
+            || link.approved_by != proposal.proposed_by
+        {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication transaction scope mismatch",
+            ));
+        }
+
+        upsert_memory_on(&transaction, destination).map_err(MemoryPublicationStoreError::store)?;
+        self.index_memory_on(&transaction, destination)
+            .map_err(MemoryPublicationStoreError::store)?;
+        upsert_memory_on(&transaction, source_with_alias)
+            .map_err(MemoryPublicationStoreError::store)?;
+        self.index_memory_on(&transaction, source_with_alias)
+            .map_err(MemoryPublicationStoreError::store)?;
+        transaction
+            .execute(
+                "insert into memory_publication_links(
+                    source_ref_json, destination_ref_json, approved_by, created_at
+                 ) values (?1, ?2, ?3, ?4)",
+                params![
+                    publication_ref_json(&link.source_ref)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    publication_ref_json(&link.destination_ref)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    &link.approved_by,
+                    &link.created_at,
+                ],
+            )
+            .map_err(|error| {
+                if error.to_string().contains("UNIQUE constraint failed") {
+                    MemoryPublicationStoreError::conflict("publication_already_published")
+                } else {
+                    MemoryPublicationStoreError::store(error)
+                }
+            })?;
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set status = 'approved', decided_by = ?2, updated_at = ?3
+                 where id = ?1 and status = 'pending'",
+                params![&proposal.id, &link.approved_by, &link.created_at],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let approved = load_memory_publication_proposal_on(&transaction, &proposal.id)?
+            .ok_or_else(|| MemoryPublicationStoreError::store("publication disappeared"))?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(approved)
+    }
+
     pub fn record_memory_source_access(
         &self,
         event: &MemorySourceAccessEvent,
@@ -959,38 +1278,7 @@ impl SQLiteMemoryStore {
 
     pub fn upsert_memory(&self, memory: &MemoryRecord) -> Result<(), String> {
         let conn = self.write_conn();
-        conn.execute(
-            "insert or replace into memories (
-                ref, user_id, workspace_id, memory_type, text, aliases_json,
-                language_hints_json, confidence, status, privacy_domain, sensitivity,
-                metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
-                superseded_by, correction_of
-            ) values (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                ?16, ?17, ?18
-            )",
-            params![
-                memory.reference.to_string(),
-                memory.user_id.as_str(),
-                memory.workspace_id.as_str(),
-                &memory.memory_type,
-                &memory.text,
-                serde_json::to_string(&memory.aliases).map_err(|error| error.to_string())?,
-                serde_json::to_string(&memory.language_hints).map_err(|error| error.to_string())?,
-                memory.confidence,
-                enum_name(&memory.status)?,
-                memory.privacy_domain.as_str(),
-                enum_name(&memory.sensitivity)?,
-                serde_json::to_string(&memory.metadata).map_err(|error| error.to_string())?,
-                &memory.created_at,
-                &memory.updated_at,
-                memory.last_seen_at.as_deref(),
-                serde_json::to_string(&memory.supersedes).map_err(|error| error.to_string())?,
-                memory.superseded_by.as_ref().map(ToString::to_string),
-                memory.correction_of.as_ref().map(ToString::to_string),
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        upsert_memory_on(&conn, memory)?;
         self.index_memory_on(&conn, memory)?;
         Ok(())
     }
@@ -2703,7 +2991,37 @@ impl SQLiteMemoryStore {
                         consumer_user_id, consumer_workspace_id, created_at
                     );
                 create index if not exists idx_memory_source_access_grant
-                    on memory_source_access_events(grant_id, created_at);",
+                    on memory_source_access_events(grant_id, created_at);
+
+                create table if not exists memory_publication_proposals (
+                    id text primary key,
+                    source_ref_json text not null,
+                    source_user_id text not null,
+                    source_workspace_id text not null,
+                    destination_user_id text not null,
+                    destination_workspace_id text not null,
+                    proposed_text text not null,
+                    proposed_memory_type text not null,
+                    proposed_privacy_domain text not null,
+                    proposed_sensitivity text not null,
+                    duplicate_ref_json text,
+                    status text not null check(status in ('pending', 'approved', 'rejected', 'failed')),
+                    proposed_by text not null,
+                    decided_by text,
+                    created_at text not null,
+                    updated_at text not null
+                );
+                create index if not exists idx_memory_publication_proposals_source
+                    on memory_publication_proposals(source_ref_json, status);
+
+                create table if not exists memory_publication_links (
+                    source_ref_json text primary key,
+                    destination_ref_json text not null,
+                    approved_by text not null,
+                    created_at text not null
+                );
+                create unique index if not exists idx_memory_publication_links_destination_source
+                    on memory_publication_links(destination_ref_json, source_ref_json);",
             )
             .map_err(|error| error.to_string())?;
         // I sub-helper (ensure_column, rebuild) ricevono questa stessa connection
@@ -2882,6 +3200,45 @@ where
         Some(row) => mapper(row).map(Some),
         None => Ok(None),
     }
+}
+
+/// Writes a memory through an already-open SQLite connection. Callers that own a
+/// transaction (publication) use this instead of re-entering `upsert_memory` and
+/// taking the writer mutex recursively.
+fn upsert_memory_on(conn: &Connection, memory: &MemoryRecord) -> Result<(), String> {
+    conn.execute(
+        "insert or replace into memories (
+            ref, user_id, workspace_id, memory_type, text, aliases_json,
+            language_hints_json, confidence, status, privacy_domain, sensitivity,
+            metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
+            superseded_by, correction_of
+        ) values (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+            ?16, ?17, ?18
+        )",
+        params![
+            memory.reference.to_string(),
+            memory.user_id.as_str(),
+            memory.workspace_id.as_str(),
+            &memory.memory_type,
+            &memory.text,
+            serde_json::to_string(&memory.aliases).map_err(|error| error.to_string())?,
+            serde_json::to_string(&memory.language_hints).map_err(|error| error.to_string())?,
+            memory.confidence,
+            enum_name(&memory.status)?,
+            memory.privacy_domain.as_str(),
+            enum_name(&memory.sensitivity)?,
+            serde_json::to_string(&memory.metadata).map_err(|error| error.to_string())?,
+            &memory.created_at,
+            &memory.updated_at,
+            memory.last_seen_at.as_deref(),
+            serde_json::to_string(&memory.supersedes).map_err(|error| error.to_string())?,
+            memory.superseded_by.as_ref().map(ToString::to_string),
+            memory.correction_of.as_ref().map(ToString::to_string),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn memory_from_row(row: &Row<'_>) -> Result<MemoryRecord, String> {
@@ -3107,6 +3464,127 @@ fn memory_source_access_from_row(row: &Row<'_>) -> Result<MemorySourceAccessEven
         .map_err(|error| error.to_string())?,
         created_at: row.get(11).map_err(|error| error.to_string())?,
     })
+}
+
+fn publication_ref_json(reference: &MemoryRef) -> Result<String, String> {
+    serde_json::to_string(reference).map_err(|error| error.to_string())
+}
+
+fn publication_ref_from_json(value: String) -> Result<MemoryRef, String> {
+    serde_json::from_str(&value).map_err(|error| error.to_string())
+}
+
+fn validate_memory_publication_proposal(
+    proposal: &MemoryPublicationProposal,
+) -> Result<(), String> {
+    if proposal.id.trim().is_empty()
+        || proposal.proposed_by.trim().is_empty()
+        || proposal.source_user_id.as_str().trim().is_empty()
+        || proposal.source_workspace_id.as_str().trim().is_empty()
+        || proposal.destination_user_id.as_str().trim().is_empty()
+        || proposal.destination_workspace_id.as_str().trim().is_empty()
+        || proposal.proposed_text.trim().is_empty()
+        || proposal.proposed_memory_type.trim().is_empty()
+    {
+        return Err("publication proposal has an empty required field".to_string());
+    }
+    if proposal.status != MemoryPublicationStatus::Pending || proposal.decided_by.is_some() {
+        return Err("new publication proposal must be pending and undecided".to_string());
+    }
+    if proposal.source_ref.kind != MemoryRefKind::Memory
+        || proposal.source_ref.user_id != proposal.source_user_id
+        || proposal.source_ref.workspace_id != proposal.source_workspace_id
+    {
+        return Err("publication proposal source ref does not match scope".to_string());
+    }
+    if proposal.proposed_by != proposal.source_user_id.as_str()
+        || proposal.source_user_id != proposal.destination_user_id
+        || proposal.source_workspace_id == proposal.destination_workspace_id
+        || proposal.source_workspace_id.as_str() == THREADS_WORKSPACE
+        || proposal.destination_workspace_id.as_str() == THREADS_WORKSPACE
+    {
+        return Err("publication proposal source and destination are not allowed".to_string());
+    }
+    if proposal.proposed_sensitivity == DataSensitivity::Secret
+        || contains_secret(&serde_json::json!({ "text": proposal.proposed_text }))
+    {
+        return Err("publication proposal contains a secret payload".to_string());
+    }
+    if let Some(duplicate_ref) = &proposal.duplicate_ref {
+        if duplicate_ref.kind != MemoryRefKind::Memory
+            || duplicate_ref.user_id != proposal.destination_user_id
+            || duplicate_ref.workspace_id != proposal.destination_workspace_id
+        {
+            return Err("publication proposal duplicate ref is outside destination".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn memory_publication_proposal_from_row(
+    row: &Row<'_>,
+) -> Result<MemoryPublicationProposal, String> {
+    Ok(MemoryPublicationProposal {
+        id: row.get(0).map_err(|error| error.to_string())?,
+        source_ref: publication_ref_from_json(row.get(1).map_err(|error| error.to_string())?)?,
+        source_user_id: UserId::new(row.get::<_, String>(2).map_err(|error| error.to_string())?),
+        source_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(3).map_err(|error| error.to_string())?,
+        ),
+        destination_user_id: UserId::new(
+            row.get::<_, String>(4).map_err(|error| error.to_string())?,
+        ),
+        destination_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(5).map_err(|error| error.to_string())?,
+        ),
+        proposed_text: row.get(6).map_err(|error| error.to_string())?,
+        proposed_memory_type: row.get(7).map_err(|error| error.to_string())?,
+        proposed_privacy_domain: PrivacyDomain::new(
+            row.get::<_, String>(8).map_err(|error| error.to_string())?,
+        ),
+        proposed_sensitivity: enum_from_name(
+            row.get::<_, String>(9).map_err(|error| error.to_string())?,
+        )?,
+        duplicate_ref: row
+            .get::<_, Option<String>>(10)
+            .map_err(|error| error.to_string())?
+            .map(publication_ref_from_json)
+            .transpose()?,
+        status: enum_from_name(
+            row.get::<_, String>(11)
+                .map_err(|error| error.to_string())?,
+        )?,
+        proposed_by: row.get(12).map_err(|error| error.to_string())?,
+        decided_by: row.get(13).map_err(|error| error.to_string())?,
+        created_at: row.get(14).map_err(|error| error.to_string())?,
+        updated_at: row.get(15).map_err(|error| error.to_string())?,
+    })
+}
+
+fn memory_publication_link_from_row(row: &Row<'_>) -> Result<MemoryPublicationLink, String> {
+    Ok(MemoryPublicationLink {
+        source_ref: publication_ref_from_json(row.get(0).map_err(|error| error.to_string())?)?,
+        destination_ref: publication_ref_from_json(row.get(1).map_err(|error| error.to_string())?)?,
+        approved_by: row.get(2).map_err(|error| error.to_string())?,
+        created_at: row.get(3).map_err(|error| error.to_string())?,
+    })
+}
+
+fn load_memory_publication_proposal_on(
+    conn: &Connection,
+    id: &str,
+) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
+    query_optional(
+        conn,
+        "select id, source_ref_json, source_user_id, source_workspace_id,
+                destination_user_id, destination_workspace_id, proposed_text,
+                proposed_memory_type, proposed_privacy_domain, proposed_sensitivity,
+                duplicate_ref_json, status, proposed_by, decided_by, created_at, updated_at
+         from memory_publication_proposals where id = ?1",
+        [id],
+        memory_publication_proposal_from_row,
+    )
+    .map_err(MemoryPublicationStoreError::store)
 }
 
 fn memory_source_grant_base_from_row(row: &Row<'_>) -> Result<MemorySourceGrant, String> {

@@ -6,13 +6,16 @@ use crate::{
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
     MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence,
     MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
-    MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryMaintenanceReport, MemoryPolicyEngine, MemoryPublicationDestination,
+    MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationResult,
+    MemoryPublicationStatus, MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
     MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus,
     MemoryUpdatePatch, PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference,
-    RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, VectorHit,
-    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, contains_secret,
-    current_timestamp, ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
+    RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore, THREADS_WORKSPACE,
+    UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId,
+    contains_secret, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
+    parse_wiki_markdown,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -54,6 +57,15 @@ fn memory_source_grant_error(error: MemorySourceGrantStoreError) -> MemoryError 
         MemorySourceGrantStoreError::Conflict(message) => MemoryError::policy(message),
         MemorySourceGrantStoreError::NotFound(message) => MemoryError::not_found(message),
         MemorySourceGrantStoreError::Store(message) => MemoryError::Store(message),
+    }
+}
+
+fn memory_publication_error(error: MemoryPublicationStoreError) -> MemoryError {
+    match error {
+        MemoryPublicationStoreError::Validation(message) => MemoryError::validation(message),
+        MemoryPublicationStoreError::Conflict(message) => MemoryError::policy(message),
+        MemoryPublicationStoreError::NotFound(message) => MemoryError::not_found(message),
+        MemoryPublicationStoreError::Store(message) => MemoryError::Store(message),
     }
 }
 
@@ -1486,6 +1498,385 @@ impl MemoryFacade {
         self.store
             .last_memory_source_access(grant_id)
             .map_err(MemoryError::from)
+    }
+
+    pub fn create_publication_proposal(
+        &self,
+        source: &MemoryRecord,
+        destination: &MemoryPublicationDestination,
+        actor: &str,
+    ) -> MemoryResult<MemoryPublicationProposal> {
+        self.validate_publication_actor_and_destination(source, destination, actor)?;
+        let source =
+            self.load_publication_source(&source.reference, &source.user_id, &source.workspace_id)?;
+        self.validate_publication_source(&source)?;
+        let now = current_timestamp();
+        let proposal = MemoryPublicationProposal {
+            id: uuid::Uuid::new_v4().to_string(),
+            source_ref: source.reference.clone(),
+            source_user_id: source.user_id.clone(),
+            source_workspace_id: source.workspace_id.clone(),
+            destination_user_id: destination.user_id.clone(),
+            destination_workspace_id: destination.workspace_id.clone(),
+            proposed_text: source.text.clone(),
+            proposed_memory_type: source.memory_type.clone(),
+            proposed_privacy_domain: source.privacy_domain.clone(),
+            proposed_sensitivity: source.sensitivity,
+            duplicate_ref: self.find_publication_duplicate(&source, destination)?,
+            status: MemoryPublicationStatus::Pending,
+            proposed_by: actor.to_string(),
+            decided_by: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        self.store
+            .create_memory_publication_proposal(&proposal)
+            .map_err(memory_publication_error)?;
+        Ok(proposal)
+    }
+
+    pub fn get_publication_proposal(
+        &self,
+        id: &str,
+    ) -> MemoryResult<Option<MemoryPublicationProposal>> {
+        self.store
+            .get_memory_publication_proposal(id)
+            .map_err(memory_publication_error)
+    }
+
+    pub fn get_publication_link(
+        &self,
+        source_ref: &MemoryRef,
+    ) -> MemoryResult<Option<MemoryPublicationLink>> {
+        self.store
+            .get_memory_publication_link(source_ref)
+            .map_err(memory_publication_error)
+    }
+
+    pub fn reject_publication(
+        &self,
+        id: &str,
+        actor: &str,
+    ) -> MemoryResult<MemoryPublicationProposal> {
+        let proposal = self
+            .get_publication_proposal(id)?
+            .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
+        self.validate_publication_actor(&proposal, actor)?;
+        self.store
+            .reject_memory_publication(id, actor, &current_timestamp())
+            .map_err(memory_publication_error)
+    }
+
+    pub fn approve_publication(
+        &self,
+        id: &str,
+        actor: &str,
+    ) -> MemoryResult<MemoryPublicationResult> {
+        let proposal = self
+            .get_publication_proposal(id)?
+            .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
+        self.validate_publication_actor(&proposal, actor)?;
+        if proposal.status == MemoryPublicationStatus::Approved {
+            return self.approved_publication_result(proposal);
+        }
+        if proposal.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryError::policy("publication_not_pending"));
+        }
+
+        let source = match self.load_publication_source(
+            &proposal.source_ref,
+            &proposal.source_user_id,
+            &proposal.source_workspace_id,
+        ) {
+            Ok(source) => source,
+            Err(error) => {
+                self.mark_publication_failed_if_pending(&proposal.id, actor);
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.validate_publication_source(&source) {
+            // A concurrent approver may have committed between this turn's source
+            // reload and validation. Re-read only the durable proposal state: an
+            // approved result is safely idempotent; every other state stays closed.
+            if error.as_str() == "publication_already_published" {
+                if let Some(latest) = self.get_publication_proposal(id)? {
+                    if latest.status == MemoryPublicationStatus::Approved {
+                        return self.approved_publication_result(latest);
+                    }
+                }
+            }
+            self.mark_publication_failed_if_pending(&proposal.id, actor);
+            return Err(error);
+        }
+        if source.text != proposal.proposed_text
+            || source.memory_type != proposal.proposed_memory_type
+            || source.privacy_domain != proposal.proposed_privacy_domain
+            || source.sensitivity != proposal.proposed_sensitivity
+        {
+            self.mark_publication_failed_if_pending(&proposal.id, actor);
+            return Err(MemoryError::policy("publication_source_changed"));
+        }
+
+        let destination_scope = MemoryPublicationDestination::new(
+            proposal.destination_user_id.clone(),
+            proposal.destination_workspace_id.clone(),
+        );
+        self.validate_publication_destination(&source, &destination_scope)?;
+        let duplicate = self.find_publication_duplicate(&source, &destination_scope)?;
+        let now = current_timestamp();
+        let destination = match duplicate {
+            Some(reference) => self
+                .store
+                .get_memory(
+                    &reference,
+                    &proposal.destination_user_id,
+                    &proposal.destination_workspace_id,
+                )?
+                .ok_or_else(|| MemoryError::policy("publication_duplicate_changed"))?,
+            None => self.publication_destination_record(&proposal, &source, &now),
+        };
+        let source_with_alias =
+            self.publication_source_alias(&source, &proposal, &destination, &now)?;
+        let link = MemoryPublicationLink {
+            source_ref: source.reference.clone(),
+            destination_ref: destination.reference.clone(),
+            approved_by: actor.to_string(),
+            created_at: now,
+        };
+        match self
+            .store
+            .commit_publication(&proposal, &destination, &source_with_alias, &link)
+            .map_err(memory_publication_error)
+        {
+            Ok(approved) => {
+                self.bump_briefing_generation(&source.user_id, &source.workspace_id);
+                self.bump_briefing_generation(&destination.user_id, &destination.workspace_id);
+                Ok(MemoryPublicationResult {
+                    proposal: approved,
+                    destination,
+                    link,
+                })
+            }
+            Err(error) if error.as_str() == "publication_not_pending" => {
+                let latest = self
+                    .get_publication_proposal(id)?
+                    .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
+                if latest.status == MemoryPublicationStatus::Approved {
+                    self.approved_publication_result(latest)
+                } else {
+                    Err(error)
+                }
+            }
+            Err(error) => {
+                self.mark_publication_failed_if_pending(&proposal.id, actor);
+                Err(error)
+            }
+        }
+    }
+
+    fn validate_publication_actor_and_destination(
+        &self,
+        source: &MemoryRecord,
+        destination: &MemoryPublicationDestination,
+        actor: &str,
+    ) -> MemoryResult<()> {
+        if actor.trim().is_empty() || actor != source.user_id.as_str() {
+            return Err(MemoryError::policy("publication_actor_mismatch"));
+        }
+        self.validate_publication_destination(source, destination)
+    }
+
+    fn validate_publication_actor(
+        &self,
+        proposal: &MemoryPublicationProposal,
+        actor: &str,
+    ) -> MemoryResult<()> {
+        if actor.trim().is_empty()
+            || actor != proposal.proposed_by
+            || actor != proposal.source_user_id.as_str()
+            || proposal.source_user_id != proposal.destination_user_id
+        {
+            return Err(MemoryError::policy("publication_actor_mismatch"));
+        }
+        Ok(())
+    }
+
+    fn validate_publication_destination(
+        &self,
+        source: &MemoryRecord,
+        destination: &MemoryPublicationDestination,
+    ) -> MemoryResult<()> {
+        if destination.user_id != source.user_id {
+            return Err(MemoryError::validation("publication_scope_mismatch"));
+        }
+        if destination.workspace_id.as_str().trim().is_empty()
+            || destination.workspace_id.as_str() == THREADS_WORKSPACE
+        {
+            return Err(MemoryError::validation("publication_destination_invalid"));
+        }
+        if destination.workspace_id == source.workspace_id {
+            return Err(MemoryError::validation("publication_same_scope"));
+        }
+        Ok(())
+    }
+
+    fn load_publication_source(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> MemoryResult<MemoryRecord> {
+        if reference.kind != MemoryRefKind::Memory
+            || reference.user_id != *user_id
+            || reference.workspace_id != *workspace_id
+            || workspace_id.as_str().trim().is_empty()
+            || workspace_id.as_str() == THREADS_WORKSPACE
+        {
+            return Err(MemoryError::validation("publication_source_scope_mismatch"));
+        }
+        self.store
+            .get_memory(reference, user_id, workspace_id)?
+            .ok_or_else(|| MemoryError::not_found("publication_source_not_found"))
+    }
+
+    fn validate_publication_source(&self, source: &MemoryRecord) -> MemoryResult<()> {
+        if source.status == MemoryStatus::Deleted {
+            return Err(MemoryError::not_found("publication_source_not_found"));
+        }
+        if source.sensitivity == DataSensitivity::Secret {
+            return Err(MemoryError::policy("secret_never_shareable"));
+        }
+        let payload = serde_json::json!({
+            "text": source.text,
+            "aliases": source.aliases,
+            "language_hints": source.language_hints,
+            "metadata": source.metadata,
+        });
+        if contains_secret(&payload) {
+            return Err(MemoryError::policy("vault_payload_never_shareable"));
+        }
+        if is_published_alias(source) || self.get_publication_link(&source.reference)?.is_some() {
+            return Err(MemoryError::policy("publication_already_published"));
+        }
+        Ok(())
+    }
+
+    fn find_publication_duplicate(
+        &self,
+        source: &MemoryRecord,
+        destination: &MemoryPublicationDestination,
+    ) -> MemoryResult<Option<MemoryRef>> {
+        Ok(self
+            .store
+            .list_memories(&destination.user_id, &destination.workspace_id)?
+            .into_iter()
+            .find(|candidate| {
+                candidate.reference.kind == MemoryRefKind::Memory
+                    && candidate.status != MemoryStatus::Deleted
+                    && !is_published_alias(candidate)
+                    && candidate.text == source.text
+                    && candidate.memory_type == source.memory_type
+                    && candidate.privacy_domain == source.privacy_domain
+                    && candidate.sensitivity == source.sensitivity
+            })
+            .map(|candidate| candidate.reference))
+    }
+
+    fn publication_destination_record(
+        &self,
+        proposal: &MemoryPublicationProposal,
+        source: &MemoryRecord,
+        now: &str,
+    ) -> MemoryRecord {
+        MemoryRecord {
+            reference: MemoryRef::generated(
+                MemoryRefKind::Memory,
+                proposal.destination_user_id.clone(),
+                proposal.destination_workspace_id.clone(),
+            ),
+            user_id: proposal.destination_user_id.clone(),
+            workspace_id: proposal.destination_workspace_id.clone(),
+            memory_type: proposal.proposed_memory_type.clone(),
+            text: proposal.proposed_text.clone(),
+            aliases: vec![],
+            language_hints: source.language_hints.clone(),
+            confidence: source.confidence,
+            status: MemoryStatus::Confirmed,
+            privacy_domain: proposal.proposed_privacy_domain.clone(),
+            sensitivity: proposal.proposed_sensitivity,
+            metadata: serde_json::json!({
+                "publication": {
+                    "source_ref": &source.reference,
+                    "proposal_id": &proposal.id,
+                    "published_at": now,
+                }
+            }),
+            created_at: now.to_string(),
+            updated_at: now.to_string(),
+            last_seen_at: Some(now.to_string()),
+            supersedes: vec![],
+            superseded_by: None,
+            correction_of: None,
+        }
+    }
+
+    fn publication_source_alias(
+        &self,
+        source: &MemoryRecord,
+        proposal: &MemoryPublicationProposal,
+        destination: &MemoryRecord,
+        now: &str,
+    ) -> MemoryResult<MemoryRecord> {
+        let mut alias = source.clone();
+        if !alias.metadata.is_object() {
+            alias.metadata = serde_json::json!({ "previous_metadata": alias.metadata });
+        }
+        let metadata = alias.metadata.as_object_mut().ok_or_else(|| {
+            MemoryError::Store("publication alias metadata is not an object".to_string())
+        })?;
+        metadata.insert("published_alias".to_string(), serde_json::Value::Bool(true));
+        metadata.insert(
+            "publication".to_string(),
+            serde_json::json!({
+                "proposal_id": &proposal.id,
+                "destination_ref": &destination.reference,
+                "published_at": now,
+            }),
+        );
+        alias.updated_at = now.to_string();
+        Ok(alias)
+    }
+
+    fn approved_publication_result(
+        &self,
+        proposal: MemoryPublicationProposal,
+    ) -> MemoryResult<MemoryPublicationResult> {
+        let link = self
+            .get_publication_link(&proposal.source_ref)?
+            .ok_or_else(|| {
+                MemoryError::Store("approved publication link is missing".to_string())
+            })?;
+        let destination = self
+            .store
+            .get_memory(
+                &link.destination_ref,
+                &proposal.destination_user_id,
+                &proposal.destination_workspace_id,
+            )?
+            .ok_or_else(|| {
+                MemoryError::Store("approved publication destination is missing".to_string())
+            })?;
+        Ok(MemoryPublicationResult {
+            proposal,
+            destination,
+            link,
+        })
+    }
+
+    fn mark_publication_failed_if_pending(&self, id: &str, actor: &str) {
+        let _ = self
+            .store
+            .mark_memory_publication_failed(id, actor, &current_timestamp());
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> MemoryResult<MemoryBackupReport> {
