@@ -1001,7 +1001,13 @@ export default function App() {
           ]
         : []),
       `Then propose a concise plan and wait for confirmation before using ${makeTool}.`,
-      `When the user confirms execution, use ${makeTool} with template_ref="${input.template.id}".`,
+      // Weak local managers tend to wander to generic skills + shell file-writing
+      // (observed: a model hand-wrote a .md via `cat` heredoc through a "Create
+      // Documents" skill, bypassing the template entirely). The operative prompt
+      // must forbid every wrong path and mandate the one tool, or the selected
+      // template is silently ignored. (Harness-level determinism is the deeper fix.)
+      `IMPORTANT: the ONLY correct way to produce this deliverable is the \`${makeTool}\` tool with template_ref="${input.template.id}". Do NOT use any skill (e.g. «Create Documents», «Create Presentations»), do NOT write files with shell/cat/heredoc, do NOT use ${isDocument ? "make_deck" : "make_document"}. Any other path produces a generic file that ignores the template and is WRONG.`,
+      `When the user confirms, your very next action MUST be a single \`${makeTool}\` tool call with template_ref="${input.template.id}" and the user's answers folded into the brief — no extra planning, no narration before the call.`,
     ].join("\n");
     try {
       const created = mapCoreChatThread(await coreBridge.createChatThread());
