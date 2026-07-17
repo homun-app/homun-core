@@ -5,6 +5,45 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-17.**
 
+## ⭐⭐⭐ CHECKPOINT 2026-07-17 (tris) — Presentations S1c (polish minimale) SHIPPED
+
+Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `S1c`): 2 task su `main`,
+commit `278242e1` (+ questo checkpoint). Chiude S1c, l'ultimo feedback minimale di Fabio a schermo
+sulla galleria template — dopo S1a (temi editoriali) + S1b (relayout galleria).
+
+**Cosa è cambiato** (S1c-T1, `278242e1`, UI-only — `TemplateCard.tsx`, `TemplateGallery.tsx`,
+`styles.css`):
+- **Card senza box-contenitore**: rimosso il container corporate (bordo/scrim scuro pesante) —
+  la card ora è un'**anteprima incorniciata** leggera (thumbnail arrotondata) + una **caption
+  pulita SOTTO** con titolo + kind badge, niente più overlay a scrim scuro sopra l'immagine.
+  Le azioni Use/Remove si rivelano come **hover overlay leggero** solo sulla preview.
+- **Header + toolbar FISSI, solo la griglia scrolla**: brand chip + titolo + Import PPTX
+  (header) e search + tab per categoria (toolbar) restano fermi; è stato introdotto un wrapper
+  dedicato `.template-gallery-scroll` che contiene SOLO la griglia dei template, con lo scroll
+  isolato lì invece che sull'intera pagina.
+
+**Gate finali (tutti verdi, in ordine, sessione 2026-07-17):**
+| Gate | Esito |
+| --- | --- |
+| `npm run build` (desktop) | OK, tsc pulito |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `cargo test -p local-first-desktop-gateway` | 599 passed, 0 failed, 5 ignored |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN (gateway/ui-contract/desktop-build/eval/deck/doc renderer tests) |
+
+**Cosa resta:**
+- **S2**: brief operativo ottimizzato (vedi backlog invariato sotto, checkpoint S1b/S1a).
+- **⚠️ BUG OSSERVATO in validazione live (Fabio, sessione 2026-07-17) — target primario di S2:**
+  "Use template" su un pack **documento** (CV) ha prodotto un output che **non rispecchia il
+  template scelto** — il modello debole (`deepseek-v4-pro`) ha instradato la richiesta a un
+  generatore generico invece che a `make_document` con `template_ref=homun/cv-professional-01`,
+  producendo un artifact markdown generico (`cv-fabio-cantone.md/.html/.pdf`, path markdown puro)
+  anziché il documento templatizzato atteso. Il routing "Use template" → `make_document(template_ref=…)`
+  è oggi affidato al prompt operativo, non deterministico — su modelli deboli il routing salta.
+  **S2 deve rendere questo binding deterministico** (nel codice/tool-contract, non nel prompt),
+  non un caso isolato del CV: qualunque pack documento è esposto allo stesso rischio.
+- **S3**: font picker (invariato).
+
 ## ⭐⭐ CHECKPOINT 2026-07-17 (bis) — Presentations S1b (relayout galleria) SHIPPED
 
 Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `S1b`; piano
