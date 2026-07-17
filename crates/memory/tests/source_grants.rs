@@ -269,7 +269,7 @@ fn duplicate_unrevoked_source_is_rejected_until_the_first_grant_is_revoked() {
     let duplicate = facade
         .upsert_memory_source_grant(&second)
         .expect_err("a second unrevoked grant to the same source must fail");
-    assert!(matches!(duplicate, MemoryError::Validation(_)));
+    assert!(matches!(duplicate, MemoryError::Policy(_)));
     assert_eq!(duplicate.as_str(), "duplicate_active_source");
     assert_eq!(
         facade
@@ -322,7 +322,7 @@ fn duplicate_source_upserts_are_serialized_across_store_instances() {
     assert_eq!(
         results
             .iter()
-            .filter(|result| matches!(result, Err(MemoryError::Validation(message)) if message == "duplicate_active_source"))
+            .filter(|result| matches!(result, Err(MemoryError::Policy(message)) if message == "duplicate_active_source"))
             .count(),
         1
     );
@@ -692,12 +692,16 @@ fn assert_validation_error(result: Result<(), MemoryError>) {
     );
 }
 
-fn assert_rejected_upsert_leaves_grant_unchanged(candidate: MemorySourceGrant) {
+fn assert_conflicting_upsert_leaves_grant_unchanged(candidate: MemorySourceGrant) {
     let facade = facade();
     let original = grant();
     facade.upsert_memory_source_grant(&original).unwrap();
 
-    assert_validation_error(facade.upsert_memory_source_grant(&candidate));
+    let error = facade.upsert_memory_source_grant(&candidate).unwrap_err();
+    assert!(
+        matches!(error, MemoryError::Policy(_)),
+        "expected policy conflict, got {error:?}"
+    );
     assert_eq!(get_grant(&facade, &original.id).unwrap(), Some(original));
 }
 
@@ -707,17 +711,17 @@ fn active_grant_updates_require_the_exact_next_policy_version() {
 
     let mut same_version_change = original.clone();
     same_version_change.collections = BTreeSet::from([MemoryCollectionKey::Goals]);
-    assert_rejected_upsert_leaves_grant_unchanged(same_version_change);
+    assert_conflicting_upsert_leaves_grant_unchanged(same_version_change);
 
     let mut lower_version = original.clone();
     lower_version.policy_version -= 1;
     lower_version.collections = BTreeSet::from([MemoryCollectionKey::Goals]);
-    assert_rejected_upsert_leaves_grant_unchanged(lower_version);
+    assert_conflicting_upsert_leaves_grant_unchanged(lower_version);
 
     let mut skipped_version = original.clone();
     skipped_version.policy_version += 2;
     skipped_version.collections = BTreeSet::from([MemoryCollectionKey::Goals]);
-    assert_rejected_upsert_leaves_grant_unchanged(skipped_version);
+    assert_conflicting_upsert_leaves_grant_unchanged(skipped_version);
 }
 
 #[test]

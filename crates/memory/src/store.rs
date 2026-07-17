@@ -2,7 +2,8 @@ use crate::{
     AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, EncryptedJson,
     KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
     MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceGrant,
+    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceCandidateProjection,
+    MemorySourceGrant, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
     MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord, UserId, VectorHit, WikiPage,
     WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
     validate_memory_source_grant_intrinsic,
@@ -20,6 +21,7 @@ const SCHEMA_VERSION: u32 = 4;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemorySourceGrantStoreError {
     Validation(String),
+    Conflict(String),
     NotFound(String),
     Store(String),
 }
@@ -33,6 +35,10 @@ impl MemorySourceGrantStoreError {
 
     fn validation(message: impl Into<String>) -> Self {
         Self::Validation(message.into())
+    }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self::Conflict(message.into())
     }
 }
 
@@ -440,7 +446,7 @@ impl SQLiteMemoryStore {
                 )
             })?;
             if grant.policy_version != expected_version {
-                return Err(MemorySourceGrantStoreError::validation(format!(
+                return Err(MemorySourceGrantStoreError::conflict(format!(
                     "memory source grant update requires policy version {expected_version}"
                 )));
             }
@@ -466,7 +472,7 @@ impl SQLiteMemoryStore {
                 .optional()
                 .map_err(MemorySourceGrantStoreError::store)?;
             if duplicate_id.is_some() {
-                return Err(MemorySourceGrantStoreError::validation(
+                return Err(MemorySourceGrantStoreError::conflict(
                     "duplicate_active_source",
                 ));
             }
@@ -716,7 +722,7 @@ impl SQLiteMemoryStore {
             )
             .map_err(MemorySourceGrantStoreError::store)?;
         if changed != 1 {
-            return Err(MemorySourceGrantStoreError::validation(
+            return Err(MemorySourceGrantStoreError::conflict(
                 "memory source grant changed concurrently during revoke",
             ));
         }
@@ -927,6 +933,80 @@ impl SQLiteMemoryStore {
             }
         }
         Ok(memories)
+    }
+
+    /// Active source-picker memories for one exact owner/workspace scope.
+    ///
+    /// Candidate and Confirmed are the only picker-visible lifecycle states.
+    /// Secret, tombstoned, and oversized payloads are omitted in SQL before any
+    /// Rust materialization; callers still perform full payload secret scanning.
+    pub fn list_memory_source_candidates(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<MemorySourceCandidateProjection>, String> {
+        const TEXT_MAX_BYTES: i64 = 32 * 1024;
+        const METADATA_MAX_BYTES: i64 = 32 * 1024;
+
+        let limit = limit.min(MEMORY_SOURCE_CANDIDATE_PAGE_MAX);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).map_err(|error| error.to_string())?;
+        let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+        let conn = self.read_conn();
+        let mut statement = conn
+            .prepare(
+                "select m.ref, m.memory_type, m.text, m.sensitivity, m.metadata_json
+                 from memories m
+                 where m.user_id = ?1 and m.workspace_id = ?2
+                   and m.status in ('candidate', 'confirmed')
+                   and m.sensitivity <> 'secret'
+                   and length(cast(m.text as blob)) <= ?3
+                   and length(cast(m.metadata_json as blob)) <= ?4
+                   and not exists (
+                       select 1 from tombstones t
+                       where t.ref = m.ref
+                         and t.user_id = m.user_id
+                         and t.workspace_id = m.workspace_id
+                   )
+                 order by m.ref
+                 limit ?5 offset ?6",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query(params![
+                user_id.as_str(),
+                workspace_id.as_str(),
+                TEXT_MAX_BYTES,
+                METADATA_MAX_BYTES,
+                limit,
+                offset,
+            ])
+            .map_err(|error| error.to_string())?;
+        let mut candidates = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            candidates.push(MemorySourceCandidateProjection {
+                reference: parse_ref(
+                    row.get::<_, String>(0)
+                        .map_err(|error| error.to_string())?,
+                )?,
+                memory_type: row.get(1).map_err(|error| error.to_string())?,
+                text: row.get(2).map_err(|error| error.to_string())?,
+                sensitivity: enum_from_name(
+                    row.get::<_, String>(3)
+                        .map_err(|error| error.to_string())?,
+                )?,
+                metadata: serde_json::from_str(
+                    &row.get::<_, String>(4)
+                        .map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?,
+            });
+        }
+        Ok(candidates)
     }
 
     /// Texts of memories the user FORGOT (status deleted/rejected) in a scope.

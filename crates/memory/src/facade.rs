@@ -8,7 +8,8 @@ use crate::{
     MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
-    MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus, MemoryUpdatePatch,
+    MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus,
+    MemoryUpdatePatch,
     PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference, RoutineInferenceSummary, RoutineRecord,
     RoutineStatus, SQLiteMemoryStore, UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore,
     WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
@@ -39,6 +40,7 @@ pub struct MemoryFacade {
 fn memory_source_grant_error(error: MemorySourceGrantStoreError) -> MemoryError {
     match error {
         MemorySourceGrantStoreError::Validation(message) => MemoryError::validation(message),
+        MemorySourceGrantStoreError::Conflict(message) => MemoryError::policy(message),
         MemorySourceGrantStoreError::NotFound(message) => MemoryError::not_found(message),
         MemorySourceGrantStoreError::Store(message) => MemoryError::Store(message),
     }
@@ -1179,6 +1181,18 @@ impl MemoryFacade {
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<MemoryRecord>, String> {
         self.store.list_memories(user_id, workspace_id)
+    }
+
+    pub fn list_memory_source_candidates(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        offset: usize,
+        limit: usize,
+    ) -> MemoryResult<Vec<MemorySourceCandidateProjection>> {
+        Ok(self
+            .store
+            .list_memory_source_candidates(user_id, workspace_id, offset, limit)?)
     }
 
     /// Texts of forgotten (deleted/rejected) memories in a scope — the suppression

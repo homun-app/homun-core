@@ -20,29 +20,45 @@ pub enum MemoryCollectionKey {
 
 impl MemoryCollectionKey {
     pub fn matches(&self, memory: &MemoryRecord) -> bool {
-        let is_personal_profile = memory.memory_type == "fact"
-            && memory
-                .metadata
+        self.matches_candidate(&memory.memory_type, &memory.metadata)
+    }
+
+    pub fn matches_candidate(&self, memory_type: &str, metadata: &serde_json::Value) -> bool {
+        let is_personal_profile = memory_type == "fact"
+            && metadata
                 .get("scope")
                 .and_then(serde_json::Value::as_str)
                 == Some("personal");
 
         match self {
-            Self::Preferences => memory.memory_type == "preference",
+            Self::Preferences => memory_type == "preference",
             Self::Profile => is_personal_profile,
             Self::Knowledge => {
-                memory.memory_type == "note"
-                    || (memory.memory_type == "fact" && !is_personal_profile)
+                memory_type == "note" || (memory_type == "fact" && !is_personal_profile)
             }
-            Self::Decisions => memory.memory_type == "decision",
+            Self::Decisions => memory_type == "decision",
             Self::Goals => matches!(
-                memory.memory_type.as_str(),
+                memory_type,
                 "goal" | "objective" | "open_loop"
             ),
-            Self::Artifacts => memory.memory_type == "artifact",
-            Self::Episodes => memory.memory_type == "episode",
+            Self::Artifacts => memory_type == "artifact",
+            Self::Episodes => memory_type == "episode",
         }
     }
+}
+
+/// Maximum number of source-picker rows materialized by one store call.
+pub const MEMORY_SOURCE_CANDIDATE_PAGE_MAX: usize = 100;
+
+/// Bounded read model for the memory-source picker. The store intentionally
+/// omits aliases, evidence, lifecycle history and supersession data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemorySourceCandidateProjection {
+    pub reference: MemoryRef,
+    pub memory_type: String,
+    pub text: String,
+    pub sensitivity: DataSensitivity,
+    pub metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
