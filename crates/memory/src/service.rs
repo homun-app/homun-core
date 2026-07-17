@@ -35,7 +35,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 
-use crate::MemoryScope;
+use crate::{DataSensitivity, MemoryCollectionKey, MemoryScope, MemoryStatus, UserId, WorkspaceId};
 
 /// Un blocco di testo già formattato pronto da accodare al system prompt.
 ///
@@ -99,6 +99,22 @@ pub struct RecallHit {
     pub score: f32,
     /// `memory_type` del record (`decision`/`fact`/`goal`/`preference`/…).
     pub kind: String,
+    /// Scope canonico della fonte da cui proviene l'hit.
+    pub source_user_id: UserId,
+    pub source_workspace_id: WorkspaceId,
+    /// Etichetta sicura mostrabile nel prompt e nella UI.
+    pub source_label: String,
+    /// Raccolta di sistema che ha autorizzato/classificato il record.
+    pub collection: MemoryCollectionKey,
+    /// Grant che autorizza una fonte collegata; `None` per la fonte locale.
+    pub grant_id: Option<String>,
+    pub sensitivity: DataSensitivity,
+    pub status: MemoryStatus,
+    pub updated_at: String,
+    /// Identità semantica esplicita, mai inferita dal testo libero.
+    pub subject_key: Option<String>,
+    /// Marcato dai task di merge quando due hit restano in conflitto.
+    pub conflict: bool,
 }
 
 /// Risultato della recall RAG episodica — contesto *mirato* alla query.
@@ -131,6 +147,32 @@ impl RecallPack {
             block,
         }
     }
+
+    /// Costruisce prompt e output strutturato dalla stessa lista di hit, così
+    /// provenienza e testo iniettato non possono divergere.
+    pub fn from_hits(query: String, scope: MemoryScope, hits: Vec<RecallHit>) -> Self {
+        let block = format_recall_hits(&hits);
+        Self {
+            query,
+            scope,
+            hits,
+            block,
+        }
+    }
+}
+
+fn format_recall_hits(hits: &[RecallHit]) -> Option<String> {
+    if hits.is_empty() {
+        return None;
+    }
+    let lines = hits
+        .iter()
+        .map(|hit| {
+            let conflict = if hit.conflict { " [conflict]" } else { "" };
+            format!("- [source: {}] {}{}", hit.source_label, hit.text, conflict)
+        })
+        .collect::<Vec<_>>();
+    Some(format!("RELEVANT MEMORY:\n{}", lines.join("\n")))
 }
 
 /// Uno scambio completo turno utente↔assistente, input di [`MemoryRecallService::learn`].
@@ -536,4 +578,3 @@ mod tests {
         // Se la firma qui sopra tipa, il trait è object-safe.
     }
 }
-

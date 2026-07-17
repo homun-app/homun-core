@@ -190,8 +190,10 @@ pub const DEDUP_JACCARD: f32 = 0.55;
 // ──────────────────────────────────────────────────────────────────────────
 
 use crate::{
-    DataSensitivity, MemoryAccessRequest, MemoryFacade, MemoryRecord, MemorySearchRequest,
-    MemoryStatus, PrivacyDomain, UserId, WorkspaceId,
+    AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, MemoryAccessRequest,
+    MemoryCollectionKey, MemoryFacade, MemoryRecord, MemoryResult, MemoryScope,
+    MemorySearchRequest, MemoryStatus, PERSONAL_WORKSPACE, PrivacyDomain, RecallHit, RecallPack,
+    UserId, WorkspaceId,
 };
 
 /// Soglia minima di lunghezza della query perché il recall parta (il gateway
@@ -208,6 +210,160 @@ const RECALL_DENSE_MIN_SCORE: f32 = 0.5;
 /// `MutexGuard` non attraversa un await (che romperebbe `Send`).
 pub async fn embed_query(embedding: &dyn EmbeddingClient, query: &str) -> Vec<f32> {
     embedding.embed(query.trim()).await
+}
+
+/// Recall di una sola fonte già risolta/autorizzata. FTS e ricerca densa
+/// restano nello scope esatto della source; la policy della grant restringe
+/// ulteriormente i candidati senza allargare il `MemoryPolicyEngine`.
+pub fn recall_source_on_facade(
+    facade: &MemoryFacade,
+    source: &AuthorizedMemorySource,
+    query: &str,
+    query_vec: &[f32],
+    _graph_context: Option<
+        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
+    >,
+) -> MemoryResult<RecallPack> {
+    let query = query.trim();
+    let scope = if source.source_workspace_id.as_str() == PERSONAL_WORKSPACE {
+        MemoryScope::Personal
+    } else {
+        MemoryScope::Project(source.source_workspace_id.clone())
+    };
+    if query.chars().count() < RECALL_MIN_QUERY_CHARS {
+        return Ok(RecallPack::from_hits(query.to_string(), scope, Vec::new()));
+    }
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let access = MemoryAccessRequest {
+        actor_id: "chat_rag".to_string(),
+        user_id: source.source_user_id.clone(),
+        workspace_id: source.source_workspace_id.clone(),
+        purpose: "chat_context".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("general"),
+        ],
+        max_sensitivity: source
+            .policy
+            .as_ref()
+            .map(|policy| policy.max_sensitivity)
+            .unwrap_or(DataSensitivity::Private),
+        allow_raw_payload: false,
+        allow_export: true,
+        broad_query: false,
+    };
+
+    let mut fts_rank = std::collections::HashMap::<String, usize>::new();
+    let lexical = facade.search_authorized_memories(AuthorizedMemorySearchRequest {
+        access,
+        source_policy: source.policy.clone(),
+        query: query.to_string(),
+        statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+        memory_types: Vec::new(),
+        limit: 8,
+        offset: 0,
+    })?;
+    for item in lexical.items {
+        fts_rank
+            .entry(item.reference.to_string())
+            .or_insert(item.rank);
+    }
+
+    let mut dense_rank = std::collections::HashMap::<String, usize>::new();
+    if !query_vec.is_empty() {
+        for (index, hit) in facade
+            .search_authorized_embeddings(source, query_vec, 32)?
+            .into_iter()
+            .filter(|hit| hit.score >= RECALL_DENSE_MIN_SCORE)
+            .take(8)
+            .enumerate()
+        {
+            dense_rank
+                .entry(hit.memory_ref.to_string())
+                .or_insert(index + 1);
+        }
+    }
+
+    let mut references = std::collections::HashSet::<String>::new();
+    references.extend(fts_rank.keys().cloned());
+    references.extend(dense_rank.keys().cloned());
+    let mut hits = Vec::<RecallHit>::new();
+    for reference in references {
+        let Ok(memory_ref) = reference.parse() else {
+            continue;
+        };
+        let Some(record) = facade.get_authorized_memory_for_source(source, &memory_ref)? else {
+            continue;
+        };
+        let Some(collection) = collection_for_record(&record) else {
+            continue;
+        };
+        let importance = record
+            .metadata
+            .get("importance")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.5) as f32;
+        let candidate = MemoryCandidate {
+            reference: reference.clone(),
+            fts_rank: fts_rank.get(&reference).copied(),
+            dense_rank: dense_rank.get(&reference).copied(),
+            importance,
+            age_days: memory_age_days(&record.created_at, now_secs),
+        };
+        hits.push(RecallHit {
+            memory_ref: reference,
+            text: format_recall_entry(&record.text, &record.metadata),
+            score: hybrid_memory_score(&candidate),
+            kind: record.memory_type,
+            source_user_id: source.source_user_id.clone(),
+            source_workspace_id: source.source_workspace_id.clone(),
+            source_label: source.source_label.clone(),
+            collection,
+            grant_id: source.grant_id.clone(),
+            sensitivity: record.sensitivity,
+            status: record.status,
+            updated_at: record.updated_at,
+            subject_key: explicit_subject_key(&record.metadata),
+            conflict: false,
+        });
+    }
+    hits.sort_by(|left, right| {
+        right
+            .score
+            .total_cmp(&left.score)
+            .then_with(|| left.memory_ref.cmp(&right.memory_ref))
+    });
+    hits.truncate(10);
+
+    Ok(RecallPack::from_hits(query.to_string(), scope, hits))
+}
+
+fn collection_for_record(record: &MemoryRecord) -> Option<MemoryCollectionKey> {
+    [
+        MemoryCollectionKey::Preferences,
+        MemoryCollectionKey::Profile,
+        MemoryCollectionKey::Knowledge,
+        MemoryCollectionKey::Decisions,
+        MemoryCollectionKey::Goals,
+        MemoryCollectionKey::Artifacts,
+        MemoryCollectionKey::Episodes,
+    ]
+    .into_iter()
+    .find(|collection| collection.matches(record))
+}
+
+fn explicit_subject_key(metadata: &serde_json::Value) -> Option<String> {
+    ["subject_key", "canonical_key"]
+        .into_iter()
+        .find_map(|key| metadata.get(key).and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 /// Recall RAG episodico — fase 2: FTS + vector search + fusione RRF + formatting,

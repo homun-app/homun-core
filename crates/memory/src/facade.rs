@@ -1,7 +1,7 @@
 use crate::{
-    AccessDecisionKind, AuthorizedMemorySource, AutomationCandidateCreateRequest,
-    AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, GraphifyArtifacts,
-    GraphifyCli, GraphifyImport,
+    AccessDecisionKind, AuthorizedMemorySearchRequest, AuthorizedMemorySource,
+    AutomationCandidateCreateRequest, AutomationCandidateRecord, AutomationCandidateStatus,
+    DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
     MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence,
@@ -362,6 +362,32 @@ impl MemoryFacade {
             return Ok(Vec::new());
         };
         crate::MemoryVectorIndex::search(index, query, limit)
+    }
+
+    /// Dense search for a single authorized source. Unlike `search_embeddings`,
+    /// this builds a query-local derived index and never seeds/reuses the full
+    /// scoped cache: embeddings denied by the source policy cannot influence
+    /// ranking or become candidates.
+    pub fn search_authorized_embeddings(
+        &self,
+        source: &AuthorizedMemorySource,
+        query: &[f32],
+        limit: usize,
+    ) -> MemoryResult<Vec<VectorHit>> {
+        let allowed_refs: std::collections::HashSet<MemoryRef> = self
+            .store
+            .list_memories(&source.source_user_id, &source.source_workspace_id)?
+            .into_iter()
+            .filter(|memory| self.memory_is_allowed_for_source(source, memory))
+            .map(|memory| memory.reference)
+            .collect();
+        let embeddings = self
+            .store
+            .list_embeddings(&source.source_user_id, &source.source_workspace_id)?
+            .into_iter()
+            .filter(|(reference, _)| allowed_refs.contains(reference));
+        let index = crate::MemoryVectorIndexCache::from_embeddings(embeddings)?;
+        crate::MemoryVectorIndex::search(&index, query, limit)
     }
 
     fn update_vector_index_cache(
@@ -895,6 +921,141 @@ impl MemoryFacade {
         })
     }
 
+    /// Lexical search constrained by the compiled source policy before a
+    /// record is admitted to the returned candidate set.
+    pub fn search_authorized_memories(
+        &self,
+        request: AuthorizedMemorySearchRequest,
+    ) -> MemoryResult<MemorySearchPage> {
+        // Compile the allowed record set first. The FTS result can only select
+        // from this set; policy-denied records never enter `allowed` or consume
+        // pagination/candidate budget.
+        let mut allowed_by_ref = HashMap::<MemoryRef, MemoryRecord>::new();
+        for memory in self
+            .store
+            .list_memories(&request.access.user_id, &request.access.workspace_id)?
+        {
+            let decision = self.policy.decide_memory(&request.access, &memory);
+            self.store
+                .record_access_decision(&request.access, &decision)?;
+            if decision.kind == AccessDecisionKind::Deny
+                || request
+                    .source_policy
+                    .as_ref()
+                    .is_some_and(|policy| !policy.allows(&memory).is_allowed())
+                || is_published_alias(&memory)
+                || (!request.statuses.is_empty() && !request.statuses.contains(&memory.status))
+                || (!request.memory_types.is_empty()
+                    && !request
+                        .memory_types
+                        .iter()
+                        .any(|memory_type| memory_type == &memory.memory_type))
+            {
+                continue;
+            }
+            allowed_by_ref.insert(memory.reference.clone(), memory);
+        }
+        let refs = self.store.search_memory_refs(
+            &request.access.user_id,
+            &request.access.workspace_id,
+            &request.query,
+        )?;
+        let mut allowed = Vec::new();
+        for reference in refs {
+            let Some(memory) = allowed_by_ref.remove(&reference) else {
+                continue;
+            };
+            allowed.push(memory);
+        }
+
+        let total = allowed.len();
+        let items = allowed
+            .into_iter()
+            .skip(request.offset)
+            .take(request.limit)
+            .enumerate()
+            .map(|(index, memory)| MemorySearchResult {
+                reference: memory.reference,
+                memory_type: memory.memory_type,
+                summary: memory.text,
+                metadata: memory.metadata,
+                status: memory.status,
+                privacy_domain: memory.privacy_domain,
+                sensitivity: memory.sensitivity,
+                rank: request.offset + index + 1,
+            })
+            .collect();
+
+        Ok(MemorySearchPage {
+            items,
+            total,
+            limit: request.limit,
+            offset: request.offset,
+        })
+    }
+
+    /// Revalidation used immediately before a hit is materialized. Keeping it
+    /// on the facade composes exact source scope, base privacy policy and grant
+    /// policy without widening `MemoryPolicyEngine` to cross-scope access.
+    pub fn get_authorized_memory_for_source(
+        &self,
+        source: &AuthorizedMemorySource,
+        reference: &MemoryRef,
+    ) -> MemoryResult<Option<MemoryRecord>> {
+        let Some(memory) = self.store.get_memory(
+            reference,
+            &source.source_user_id,
+            &source.source_workspace_id,
+        )?
+        else {
+            return Ok(None);
+        };
+        Ok(self
+            .memory_is_allowed_for_source(source, &memory)
+            .then_some(memory))
+    }
+
+    fn memory_is_allowed_for_source(
+        &self,
+        source: &AuthorizedMemorySource,
+        memory: &MemoryRecord,
+    ) -> bool {
+        if memory.user_id != source.source_user_id
+            || memory.workspace_id != source.source_workspace_id
+            || !matches!(
+                memory.status,
+                MemoryStatus::Candidate | MemoryStatus::Confirmed
+            )
+            || is_published_alias(memory)
+        {
+            return false;
+        }
+        let access = MemoryAccessRequest {
+            actor_id: "chat_rag".to_string(),
+            user_id: source.source_user_id.clone(),
+            workspace_id: source.source_workspace_id.clone(),
+            purpose: "chat_context".to_string(),
+            allowed_domains: vec![
+                PrivacyDomain::new("personal"),
+                PrivacyDomain::new("work"),
+                PrivacyDomain::new("general"),
+            ],
+            max_sensitivity: source
+                .policy
+                .as_ref()
+                .map(|policy| policy.max_sensitivity)
+                .unwrap_or(DataSensitivity::Private),
+            allow_raw_payload: false,
+            allow_export: true,
+            broad_query: false,
+        };
+        self.policy.decide_memory(&access, memory).kind != AccessDecisionKind::Deny
+            && source
+                .policy
+                .as_ref()
+                .is_none_or(|policy| policy.allows(memory).is_allowed())
+    }
+
     pub fn project_to_wiki(
         &self,
         wiki: &WikiFileStore,
@@ -1364,6 +1525,14 @@ fn merge_reason(mut metadata: serde_json::Value, reason: &str) -> serde_json::Va
 
 fn vector_index_scope_key(user_id: &UserId, workspace_id: &WorkspaceId) -> String {
     format!("{}|{}", user_id.as_str(), workspace_id.as_str())
+}
+
+fn is_published_alias(memory: &MemoryRecord) -> bool {
+    memory
+        .metadata
+        .get("published_alias")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn merge_entity_metadata(
