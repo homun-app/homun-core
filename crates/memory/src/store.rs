@@ -941,6 +941,85 @@ impl SQLiteMemoryStore {
         Ok(proposal)
     }
 
+    /// Updates only a pending proposal. The caller supplies an already
+    /// revalidated proposal from the facade; this transaction still protects
+    /// against ownership, state, and identity changes between read and write.
+    pub fn update_memory_publication_proposal(
+        &self,
+        proposal: &MemoryPublicationProposal,
+        actor: &str,
+    ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
+        validate_memory_publication_proposal(proposal)
+            .map_err(MemoryPublicationStoreError::validation)?;
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let stored = load_memory_publication_proposal_on(&transaction, &proposal.id)?
+            .ok_or_else(|| MemoryPublicationStoreError::not_found("publication_not_found"))?;
+        if actor != stored.proposed_by || actor != stored.source_user_id.as_str() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication_actor_mismatch",
+            ));
+        }
+        if stored.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_not_pending",
+            ));
+        }
+        if stored.source_ref != proposal.source_ref
+            || stored.source_user_id != proposal.source_user_id
+            || stored.source_workspace_id != proposal.source_workspace_id
+            || stored.destination_user_id != proposal.destination_user_id
+            || stored.destination_workspace_id != proposal.destination_workspace_id
+            || stored.source_revision != proposal.source_revision
+            || stored.proposed_by != proposal.proposed_by
+            || stored.created_at != proposal.created_at
+        {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set proposed_text = ?2, proposed_memory_type = ?3, proposed_collection = ?4,
+                     proposed_privacy_domain = ?5, proposed_sensitivity = ?6, candidate_json = ?7,
+                     resolution_json = null, reason_code = ?8, updated_at = ?9
+                 where id = ?1 and status = 'pending'",
+                params![
+                    &proposal.id,
+                    &proposal.proposed_text,
+                    &proposal.proposed_memory_type,
+                    enum_name(&proposal.proposed_collection)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    proposal.proposed_privacy_domain.as_str(),
+                    enum_name(&proposal.proposed_sensitivity)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    proposal
+                        .candidate
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    enum_name(&proposal.reason_code).map_err(MemoryPublicationStoreError::store)?,
+                    &proposal.updated_at,
+                ],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let updated = load_memory_publication_proposal_on(&transaction, &proposal.id)?
+            .ok_or_else(|| MemoryPublicationStoreError::store("publication disappeared"))?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(updated)
+    }
+
     pub fn get_memory_publication_link(
         &self,
         source_ref: &MemoryRef,

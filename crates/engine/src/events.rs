@@ -23,8 +23,9 @@ pub struct RecallStreamHit {
     pub source_label: String,
     /// Raccolta di sistema che ha autorizzato/classificato il record.
     pub collection: String,
-    /// Grant che ha autorizzato una fonte collegata; assente per la fonte locale.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Grant che ha autorizzato una fonte collegata; `null` denotes the local
+    /// source. Keeping the null explicit lets UI authorization fail closed for
+    /// legacy events that did not carry provenance.
     pub grant_id: Option<String>,
     /// Il coordinatore ha rilevato un conflitto semantico con un altro hit.
     pub conflict: bool,

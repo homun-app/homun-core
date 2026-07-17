@@ -1333,6 +1333,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/memory/publications", post(memory_publication_create))
         .route("/api/memory/publications/{proposal_id}", get(memory_publication_get))
         .route(
+            "/api/memory/publications/{proposal_id}/edit",
+            post(memory_publication_edit),
+        )
+        .route(
             "/api/memory/publications/{proposal_id}/approve",
             post(memory_publication_approve),
         )
@@ -50312,8 +50316,6 @@ struct MemoryPublicationCreateRequest {
     source_ref: String,
     source_workspace_id: String,
     destination_workspace_id: String,
-    #[serde(default)]
-    edit: Option<MemoryPublicationEditInput>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50479,11 +50481,10 @@ async fn memory_publication_create(
         })?
         .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_source_not_found"))?;
     let proposal = facade
-        .create_publication_proposal_with_edit(
+        .create_publication_proposal(
             &source,
             &MemoryPublicationDestination::new(owner.clone(), destination_workspace_id),
             owner.as_str(),
-            request.edit.as_ref(),
         )
         .map_err(memory_publication_facade_error)?;
     Ok(Json(proposal))
@@ -50500,6 +50501,29 @@ async fn memory_publication_get(
         .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
     validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
     Ok(Json(proposal))
+}
+
+async fn memory_publication_edit(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<String>,
+    request: Request,
+) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
+        .await
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let edit = serde_json::from_slice::<MemoryPublicationEditInput>(&body)
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let owner = gateway_memory_user_id();
+    let facade = memory_facade(&state);
+    let proposal = facade
+        .get_publication_proposal(&proposal_id)
+        .map_err(memory_publication_facade_error)?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
+    validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
+    let updated = facade
+        .update_publication_proposal(&proposal_id, owner.as_str(), &edit)
+        .map_err(memory_publication_facade_error)?;
+    Ok(Json(updated))
 }
 
 async fn memory_publication_approve(
@@ -53182,6 +53206,10 @@ mod tests {
                 axum::routing::get(super::memory_publication_get),
             )
             .route(
+                "/api/memory/publications/{proposal_id}/edit",
+                axum::routing::post(super::memory_publication_edit),
+            )
+            .route(
                 "/api/memory/publications/{proposal_id}/approve",
                 axum::routing::post(super::memory_publication_approve),
             )
@@ -53318,8 +53346,7 @@ mod tests {
                         serde_json::json!({
                             "source_ref": source.reference.to_string(),
                             "source_workspace_id": "project-a",
-                            "destination_workspace_id": base,
-                            "edit": { "proposed_text": "Prefer concise Italian" }
+                            "destination_workspace_id": base
                         })
                         .to_string(),
                     ))
@@ -53330,7 +53357,31 @@ mod tests {
         let (status, proposal) = memory_source_response_json(created).await;
         assert_eq!(status, axum::http::StatusCode::OK);
         let proposal_id = proposal["id"].as_str().unwrap();
+        assert_eq!(proposal["proposed_text"], "Prefer Italian");
+        assert_eq!(proposal["proposed_memory_type"], "preference");
+
+        let edited = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/memory/publications/{proposal_id}/edit"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "proposed_text": "Prefer concise Italian",
+                            "proposed_memory_type": "note"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, proposal) = memory_source_response_json(edited).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
         assert_eq!(proposal["proposed_text"], "Prefer concise Italian");
+        assert_eq!(proposal["proposed_memory_type"], "note");
 
         let missing_decision = app
             .clone()

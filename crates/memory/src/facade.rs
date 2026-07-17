@@ -1567,6 +1567,71 @@ impl MemoryFacade {
             .map_err(memory_publication_error)
     }
 
+    /// Revalidates a pending proposal after an explicit user edit. The source is
+    /// always reloaded here so a client can never turn stale recall data into a
+    /// publication payload.
+    pub fn update_publication_proposal(
+        &self,
+        id: &str,
+        actor: &str,
+        edit: &MemoryPublicationEditInput,
+    ) -> MemoryResult<MemoryPublicationProposal> {
+        let proposal = self
+            .get_publication_proposal(id)?
+            .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
+        self.validate_publication_actor(&proposal, actor)?;
+        if proposal.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryError::policy("publication_not_pending"));
+        }
+        let source = match self.load_publication_source(
+            &proposal.source_ref,
+            &proposal.source_user_id,
+            &proposal.source_workspace_id,
+        ) {
+            Ok(source) => source,
+            Err(error) => {
+                self.mark_publication_failed_if_pending(id, actor, error.as_str());
+                return Err(error);
+            }
+        };
+        if let Err(error) = self.validate_publication_source(&source) {
+            self.mark_publication_failed_if_pending(id, actor, error.as_str());
+            return Err(error);
+        }
+        if publication_source_revision(&source)? != proposal.source_revision {
+            self.mark_publication_failed_if_pending(id, actor, "publication_source_changed");
+            return Err(MemoryError::policy("publication_source_changed"));
+        }
+
+        let proposed = publication_edited_payload(
+            &publication_candidate_record(&source, &proposal),
+            Some(edit),
+        )?;
+        let proposed_collection = MemoryCollectionKey::for_memory(&proposed)
+            .ok_or_else(|| MemoryError::validation("publication_collection_unknown"))?;
+        let destination = MemoryPublicationDestination::new(
+            proposal.destination_user_id.clone(),
+            proposal.destination_workspace_id.clone(),
+        );
+        let candidate =
+            self.find_publication_candidate(&proposed, &destination, proposed_collection)?;
+        let mut updated = proposal;
+        updated.proposed_text = proposed.text;
+        updated.proposed_memory_type = proposed.memory_type;
+        updated.proposed_collection = proposed_collection;
+        updated.proposed_privacy_domain = proposed.privacy_domain;
+        updated.proposed_sensitivity = proposed.sensitivity;
+        updated.candidate = candidate;
+        updated.reason_code = publication_pending_reason(updated.candidate.as_ref());
+        // Any prior decision is for the previous payload and must never carry
+        // forward to a changed proposal.
+        updated.resolution = None;
+        updated.updated_at = current_timestamp();
+        self.store
+            .update_memory_publication_proposal(&updated, actor)
+            .map_err(memory_publication_error)
+    }
+
     pub fn get_publication_link(
         &self,
         source_ref: &MemoryRef,

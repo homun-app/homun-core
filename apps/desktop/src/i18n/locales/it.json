@@ -90,6 +90,19 @@
     "reject": "Annulla proposta",
     "saving": "Salvataggio…",
     "loading": "Caricamento destinazioni…",
+    "errors": {
+      "generic": "Non è stato possibile aggiornare la proposta. Riprova.",
+      "secret_never_shareable": "Le memorie con segreti non possono essere pubblicate.",
+      "vault_payload_never_shareable": "I dati del vault non possono essere pubblicati.",
+      "publication_actor_mismatch": "Non hai l'autorizzazione per questa proposta.",
+      "publication_decision_required": "Scegli esplicitamente come gestire la memoria destinataria.",
+      "publication_conflict": "La proposta non è più valida: rivedila e riprova.",
+      "publication_source_changed": "La memoria sorgente è cambiata: crea una nuova proposta.",
+      "publication_edit_invalid": "La modifica non rispetta i requisiti di pubblicazione.",
+      "memory_publication_invalid": "La richiesta di pubblicazione non è valida.",
+      "publication_not_found": "La proposta non è più disponibile.",
+      "publication_source_not_found": "La memoria sorgente non è più disponibile."
+    },
     "domains": {
       "personal": "Personale",
       "work": "Lavoro",

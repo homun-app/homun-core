@@ -112,6 +112,47 @@ fn edited_publication_persists_only_validated_safe_payload_and_source_revision()
 }
 
 #[test]
+fn server_first_proposal_keeps_source_values_and_pending_edit_revalidates_them() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+
+    // A no-op preview must be the exact persisted source, not a client-side
+    // default such as a note or a public/general memory.
+    assert_eq!(proposal.proposed_text, source.text);
+    assert_eq!(proposal.proposed_memory_type, "preference");
+    assert_eq!(
+        proposal.proposed_privacy_domain,
+        PrivacyDomain::new("personal")
+    );
+    assert_eq!(proposal.proposed_sensitivity, DataSensitivity::Private);
+    choose_create_new(&fixture.facade, &proposal.id);
+
+    let updated = fixture
+        .facade
+        .update_publication_proposal(
+            &proposal.id,
+            OWNER,
+            &MemoryPublicationEditInput {
+                proposed_text: Some("Prefers concise Italian replies".to_string()),
+                proposed_memory_type: Some("note".to_string()),
+                proposed_privacy_domain: Some(PrivacyDomain::new("work")),
+                proposed_sensitivity: Some(DataSensitivity::Private),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(updated.proposed_memory_type, "note");
+    assert_eq!(updated.proposed_privacy_domain, PrivacyDomain::new("work"));
+    assert_eq!(updated.proposed_collection, MemoryCollectionKey::Knowledge);
+    assert!(updated.resolution.is_none());
+    assert_eq!(updated.status, MemoryPublicationStatus::Pending);
+}
+
+#[test]
 fn edited_publication_rejects_secret_payload_and_stale_source_before_writing() {
     let fixture = PublicationFixture::new();
     let source = fixture.insert_source_preference("Prefers Italian");

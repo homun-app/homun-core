@@ -179,8 +179,14 @@ assertContains("src/components/MemorySourcesDialog.tsx", "coreBridge.revokeMemor
 assertContains("src/components/MemorySourcesDialog.tsx", "openModifyGrant", "available linked sources must support reviewing their authorization");
 assertContains("src/components/MemorySourcesDialog.tsx", "revokeConfirmation", "revocation must require an explicit confirmation state");
 assertContains("src/components/MemoryPublicationDialog.tsx", "proposed_text", "publication must preview exact text before approval");
+assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.updateMemoryPublication", "changed publication fields must be revalidated by the server before approval");
+assertContains("src/components/MemoryPublicationDialog.tsx", "destination_workspace_id: destinationWorkspaceId", "initial publication preview must be created only after a destination is selected");
+assertNotContains("src/components/MemoryPublicationDialog.tsx", "initialText", "publication preview must not seed a client-side recall payload");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.approveMemoryPublication", "publication must require explicit approval");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.rejectMemoryPublication", "publication must support rejection without writes");
+assertContains("src/components/MemoryUsagePopover.tsx", "hit.source_workspace_id === consumerWorkspaceId", "publication must be limited to the current consumer workspace");
+assertContains("src/components/MemoryUsagePopover.tsx", "hit.grant_id === null", "publication must never be offered for linked or legacy sources");
+assertContains("src/components/ChatView.tsx", "onPublicationApproved={refreshAfterChatSubmit}", "successful publication must refresh persisted task data");
 assertContains("src/components/MemorySourcesDialog.tsx", "closeDialog", "all dialog exits must reset transient source-management state");
 assertContains("src/components/MemorySourcesDialog.tsx", "Never consulted", "missing last-access timestamps must be disclosed clearly");
 assertContains("src/components/MemorySourcesDialog.tsx", "focusTrap", "memory source dialog must retain keyboard focus until closed");

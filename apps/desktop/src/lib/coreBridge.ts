@@ -377,8 +377,8 @@ export interface RecallHitPayload {
   source_label: string;
   /** System collection that classified/authorized the record. */
   collection: MemoryCollectionKey;
-  /** Direct grant used for a linked source; omitted for the local source. */
-  grant_id?: string | null;
+  /** Direct grant used for a linked source; null only for an explicitly local source. */
+  grant_id: string | null;
   /** The recall coordinator detected a semantic conflict for this hit. */
   conflict: boolean;
 }
@@ -616,7 +616,6 @@ export interface MemoryPublicationCreateInput {
   source_ref: string;
   source_workspace_id: string;
   destination_workspace_id: string;
-  edit?: MemoryPublicationEditInput;
 }
 
 export interface ComposioConnectResult {
@@ -2067,6 +2066,16 @@ async function electronMemoryPublication(
   );
 }
 
+async function electronUpdateMemoryPublication(
+  proposalId: string,
+  edit: MemoryPublicationEditInput,
+): Promise<MemoryPublicationProposal> {
+  return gatewayPostJson<MemoryPublicationProposal>(
+    `/api/memory/publications/${encodeURIComponent(proposalId)}/edit`,
+    edit,
+  );
+}
+
 async function electronApproveMemoryPublication(
   proposalId: string,
   resolution: MemoryPublicationResolution,
@@ -3118,6 +3127,8 @@ export const coreBridge = {
   createMemoryPublication: (input: MemoryPublicationCreateInput) =>
     electronCreateMemoryPublication(input),
   memoryPublication: (proposalId: string) => electronMemoryPublication(proposalId),
+  updateMemoryPublication: (proposalId: string, edit: MemoryPublicationEditInput) =>
+    electronUpdateMemoryPublication(proposalId, edit),
   approveMemoryPublication: (proposalId: string, resolution: MemoryPublicationResolution) =>
     electronApproveMemoryPublication(proposalId, resolution),
   rejectMemoryPublication: (proposalId: string) => electronRejectMemoryPublication(proposalId),

@@ -31,9 +31,13 @@ function groupHitsBySource(hits: RecallHitPayload[]): SourceGroup[] {
 export function MemoryUsagePopover({
   hits,
   buttonLabel,
+  consumerWorkspaceId,
+  onPublicationApproved,
 }: {
   hits: RecallHitPayload[];
   buttonLabel: string;
+  consumerWorkspaceId: string | null | undefined;
+  onPublicationApproved: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -100,7 +104,10 @@ export function MemoryUsagePopover({
                         {hit.grant_id ? ` · ${t("chat.memoryLinked")}` : ""}
                         {hit.conflict ? ` · ${t("chat.memoryConflict")}` : ""}
                       </small>
-                      {!hit.grant_id && hit.source_workspace_id !== "__personal__" ? (
+                      {consumerWorkspaceId?.trim()
+                        && consumerWorkspaceId !== "__personal__"
+                        && hit.source_workspace_id === consumerWorkspaceId
+                        && hit.grant_id === null ? (
                         <button
                           type="button"
                           className="memory-publication-trigger"
@@ -124,12 +131,12 @@ export function MemoryUsagePopover({
         <MemoryPublicationDialog
           sourceRef={publicationHit.ref}
           sourceWorkspaceId={publicationHit.source_workspace_id}
-          initialText={publicationHit.text}
           opener={publicationOpenerRef.current}
           onClose={() => setPublicationHit(null)}
           onPublished={() => {
             setOpen(false);
             setPublicationHit(null);
+            return onPublicationApproved();
           }}
         />
       ) : null}

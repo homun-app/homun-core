@@ -2537,6 +2537,8 @@ export function ChatView({
                         <MemoryUsagePopover
                           hits={recallHits}
                           buttonLabel={t("chat.memoryBadge", { count: recallHits.length })}
+                          consumerWorkspaceId={thread.workspaceId}
+                          onPublicationApproved={refreshAfterChatSubmit}
                         />
                       );
                     })()}

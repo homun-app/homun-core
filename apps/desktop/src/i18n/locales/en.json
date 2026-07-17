@@ -90,6 +90,19 @@
     "reject": "Cancel proposal",
     "saving": "Saving…",
     "loading": "Loading destinations…",
+    "errors": {
+      "generic": "The proposal could not be updated. Try again.",
+      "secret_never_shareable": "Memories containing secrets cannot be published.",
+      "vault_payload_never_shareable": "Vault data cannot be published.",
+      "publication_actor_mismatch": "You are not authorized to use this proposal.",
+      "publication_decision_required": "Explicitly choose how to handle the destination memory.",
+      "publication_conflict": "The proposal is no longer valid. Review it and try again.",
+      "publication_source_changed": "The source memory changed. Create a new proposal.",
+      "publication_edit_invalid": "The edit does not meet publication requirements.",
+      "memory_publication_invalid": "The publication request is invalid.",
+      "publication_not_found": "The proposal is no longer available.",
+      "publication_source_not_found": "The source memory is no longer available."
+    },
     "domains": {
       "personal": "Personal",
       "work": "Work",
