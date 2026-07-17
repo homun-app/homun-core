@@ -5,6 +5,62 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-17.**
 
+## ⭐⭐ CHECKPOINT 2026-07-17 (bis) — Presentations S1b (relayout galleria) SHIPPED
+
+Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `S1b`; piano
+`docs/superpowers/plans/2026-07-17-presentations-s1b-gallery-relayout.md`): 5 task su `main`,
+commit `4f9f3e58..de6b6ce1` (+ questo checkpoint). Chiude S1b e con essa **la metà "layout" della
+critica di Fabio** sullo studio Presentations — l'altra metà (temi editoriali) era già chiusa da
+S1a; insieme, S1a+S1b coprono l'intero redesign approvato.
+
+**Cosa è cambiato:** la pagina Presentations passa da *rail permanente* a **gallery-first**.
+
+- **Brand kit: da colonna fissa a chip+drawer** (`8ce58645`, behavior-preserving — stesso
+  `coreBridge.brandKit()`/`saveBrandKit`, stesso rasterizzatore logo, stesso `brandPreviewOverride`):
+  `BrandChip` compatto in header (org + pallini colore + logo mini) apre `BrandDrawer`, un pannello
+  slide-in da destra con scrim; il kit è **set-once**, non occupa più permanentemente la colonna.
+  Fix di follow-up (`5799779a`): il drawer chiuso era ancora **raggiungibile da tab/screen-reader**
+  (nodi nel DOM ma fuori vista) — reso `inert` quando chiuso.
+- **Catalogo full-width con tab per scopo** (`8943daac`): le vecchie tab per formato
+  (All/Presentations/Documents) + le source-tabs sono sostituite da **4 tab d'uso** lette da
+  `entry.category` (S1a-T4): *Pitch & Vendite* (`pitch_sales`), *CV & Carriera* (`cv_career`),
+  *Report & Update* (`report_update`), *Catalogo & Marketing* (`catalog_marketing`) + `other` come
+  fallback. Le card diventano **full-bleed editoriali**: la preview riempie la card, titolo + kind
+  badge in overlay su uno scrim in basso (prima erano card corporate con bordi/padding uniformi).
+  La directory delle fonti esterne (source cards) è **demossa** a disclosure compatta accanto a
+  Import PPTX, invece di competere in griglia col catalogo.
+- **`BrandKitPanel.tsx` splittato per responsabilità** (`8943daac`, da 854 → **79 righe**,
+  compositore magro che tiene solo `kit`/`drawerOpen`): `TemplateGallery.tsx` (448 righe — header,
+  tab, search, griglia, empty-state, detail modal, import/delete/use), `TemplateCard.tsx` (292 —
+  la card full-bleed), `presentationsShared.ts` (100 — helper puri condivisi: `brandPreviewOverride`,
+  `safeColor`/`safeFont`, `templateDisplayName`/`Description`, `TEMPLATE_CATEGORY_ORDER`,
+  `DARK_SURFACE_THEMES`); `BrandChip.tsx` (29) e `BrandDrawer.tsx` (196) dal commit precedente.
+  I lock di `check-ui-contract.mjs` sulle stringhe spostate sono stati aggiornati ai nuovi path.
+  Fix di follow-up (`4b888328`): lo split aveva perso il **guard globale in-flight** sulle card
+  (doppio-click → doppia generazione) — ripristinato in `TemplateCard`/`TemplateGallery`.
+- **Recolor-dark-guard** (`de6b6ce1`, chiude il deferral S1a #5): il live brand recolor
+  (`brandPreviewOverride`, F3) ora **salta** i pack su superfici scure editoriali
+  (`editorial_noir`/`editorial_bold`, via `DARK_SURFACE_THEMES`) — un brand utente chiaro iniettato
+  su un tema scuro curato avrebbe reso gli accenti illeggibili/invisibili; i pack chiari continuano
+  a recolorarsi live come prima.
+
+**Gate finali (tutti verdi, in ordine, sessione 2026-07-17):**
+| Gate | Esito |
+| --- | --- |
+| `npm run build` (desktop) | OK, tsc pulito |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `cargo test -p local-first-desktop-gateway` | 599 passed, 0 failed, 5 ignored |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN (capability/orchestrator/gateway/ui-contract/desktop-build/eval/deck/doc renderer tests) |
+
+**Cosa resta:**
+- **S2**: brief operativo ottimizzato — include portare `eyebrow`/`hero_art` fino alla
+  **generazione reale** (oggi il modello di contenuto non li valorizza, solo gli `example.json` dei
+  pack committati li hanno).
+- **S3**: font picker.
+- **Validazione live in-app**: Fabio a schermo sul binario nuovo — nessuna verifica visiva umana
+  ancora fatta su questo relayout (chip/drawer, tab per scopo, card full-bleed, recolor-guard).
+
 ## ⭐ CHECKPOINT 2026-07-17 — Presentations S1a (renderer editoriale) SHIPPED
 
 Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `S1a`; piano
