@@ -246,34 +246,39 @@ export function TemplateCatalogGallery({
       </div>
       {importError && <p className="template-import-error">{importError}</p>}
 
-      {visible.length === 0 && !importingName ? (
-        <EmptyState
-          icon={<Presentation size={22} aria-hidden />}
-          title={t("presentations:noTemplatesTitle")}
-          description={t("presentations:noTemplatesBody")}
-          card
-        />
-      ) : (
-        <div className="template-gallery-grid">
-          {importingName && <TemplateImportingCard name={importingName} />}
-          {visible.map((entry) => (
-            <TemplateCard
-              key={entry.id}
-              entry={entry}
-              brandKit={brandKit}
-              starting={startingTemplateId === entry.id}
-              deleting={deletingTemplateId === entry.id}
-              // Any in-flight use/delete disables Use/Remove on every card:
-              // the workflow starters aren't re-entrant, so this prevents two
-              // cards racing a startTemplateWorkflow into concurrent threads.
-              disabled={anyBusy}
-              onOpen={() => setSelectedTemplate(entry)}
-              onUse={() => void useTemplate(entry)}
-              onDelete={() => void deleteTemplate(entry)}
-            />
-          ))}
-        </div>
-      )}
+      {/* S1c: header + toolbar above are fixed (flex:none); this wrapper is the
+          ONLY scrolling region so a long catalog never pushes the brand chip
+          / search / tabs out of view. */}
+      <div className="template-gallery-scroll">
+        {visible.length === 0 && !importingName ? (
+          <EmptyState
+            icon={<Presentation size={22} aria-hidden />}
+            title={t("presentations:noTemplatesTitle")}
+            description={t("presentations:noTemplatesBody")}
+            card
+          />
+        ) : (
+          <div className="template-gallery-grid">
+            {importingName && <TemplateImportingCard name={importingName} />}
+            {visible.map((entry) => (
+              <TemplateCard
+                key={entry.id}
+                entry={entry}
+                brandKit={brandKit}
+                starting={startingTemplateId === entry.id}
+                deleting={deletingTemplateId === entry.id}
+                // Any in-flight use/delete disables Use/Remove on every card:
+                // the workflow starters aren't re-entrant, so this prevents two
+                // cards racing a startTemplateWorkflow into concurrent threads.
+                disabled={anyBusy}
+                onOpen={() => setSelectedTemplate(entry)}
+                onUse={() => void useTemplate(entry)}
+                onDelete={() => void deleteTemplate(entry)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
       {selectedTemplate && (
         <TemplateDetailModal
           entry={selectedTemplate}
@@ -325,11 +330,16 @@ function TemplateSourceDirectory() {
   );
 }
 
+/** Pending card while a PPTX import is in flight: same no-box structure as
+ *  TemplateCard (frame + caption below) but inert — no click-to-open button,
+ *  no hover actions, just a shimmer placeholder and an "Importing…" status
+ *  line under the caption. `.tcard-pending` (pointer-events: none) keeps it
+ *  non-interactive until the catalog refresh replaces it with a real card. */
 function TemplateImportingCard({ name }: { name: string }) {
   const { t } = useTranslation();
   return (
     <article className="tcard tcard-pending" aria-live="polite">
-      <div className="tcard-preview">
+      <div className="tcard-frame">
         <div className="template-card-preview template-preview-loading">
           <div className="template-preview-shimmer" />
           <div className="template-preview-loading-lines">
@@ -339,16 +349,14 @@ function TemplateImportingCard({ name }: { name: string }) {
           </div>
         </div>
       </div>
-      <div className="tcard-scrim">
-        <div className="tcard-title-row">
-          <h4>{name}</h4>
-          <span className="tcard-badge">PPTX</span>
-        </div>
-        <p className="tcard-status">
-          <Loader2 size={13} className="composer-spin" aria-hidden />
-          {t("presentations:importing")}
-        </p>
+      <div className="tcard-caption">
+        <h4>{name}</h4>
+        <span className="tcard-badge">PPTX</span>
       </div>
+      <p className="tcard-status">
+        <Loader2 size={13} className="composer-spin" aria-hidden />
+        {t("presentations:importing")}
+      </p>
     </article>
   );
 }

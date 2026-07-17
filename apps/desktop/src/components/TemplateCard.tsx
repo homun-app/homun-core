@@ -4,11 +4,17 @@ import { FileText, Presentation, Trash2 } from "lucide-react";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
 import { brandPreviewOverride, DARK_SURFACE_THEMES, templateDisplayName } from "./presentationsShared";
 
-/** Full-bleed editorial card for the template gallery grid (S1b relayout): the
- *  pack's real preview fills the whole card, title + kind badge sit in a bottom
- *  scrim, and Use/Remove reveal on hover — the grid reads as a visual gallery
- *  instead of a form-like list. Secondary metadata (source, selection rationale,
- *  theme tags) stays in TemplateDetailModal, which this card opens on click. */
+/** Minimal card for the template gallery grid (S1c: Fabio's direct feedback on
+ *  the S1b full-bleed relayout — "toglierei il contenitore intorno alle
+ *  schede"). No card container box: `.tcard` is a transparent flex column.
+ *  `.tcard-frame` is the only bordered surface left, a lightly-framed rounded
+ *  thumbnail (Z.ai-style); the title + kind badge live in a plain caption
+ *  BELOW it, always visible; Use/Remove reveal as a light hover overlay
+ *  instead of the old heavy dark scrim. `.tcard-open` (the click-to-open
+ *  trigger) and `.tcard-hover-actions` (Use/Remove) are SIBLINGS inside the
+ *  frame, not nested — a <button> can't contain another <button>. Secondary
+ *  metadata (source, selection rationale, theme tags) stays in
+ *  TemplateDetailModal, which this card opens on click. */
 export function TemplateCard({
   entry,
   brandKit,
@@ -35,22 +41,18 @@ export function TemplateCard({
   const { t, i18n } = useTranslation();
   return (
     <article className={`tcard${entry.kind === "document" ? " doc" : ""}`}>
-      <button
-        type="button"
-        className="tcard-preview"
-        onClick={onOpen}
-        aria-label={t("presentations:openTemplateDetails", {
-          name: templateDisplayName(entry, i18n.language),
-        })}
-      >
-        <TemplateCardPreview entry={entry} brandKit={brandKit} />
-      </button>
-      <div className="tcard-scrim">
-        <div className="tcard-title-row">
-          <h4>{templateDisplayName(entry, i18n.language)}</h4>
-          <span className="tcard-badge">{entry.kind === "presentation" ? "PPTX" : "DOCX"}</span>
-        </div>
-        <div className="tcard-actions">
+      <div className="tcard-frame">
+        <button
+          type="button"
+          className="tcard-open"
+          onClick={onOpen}
+          aria-label={t("presentations:openTemplateDetails", {
+            name: templateDisplayName(entry, i18n.language),
+          })}
+        >
+          <TemplateCardPreview entry={entry} brandKit={brandKit} />
+        </button>
+        <div className="tcard-hover-actions">
           <button
             type="button"
             onClick={onUse}
@@ -73,6 +75,10 @@ export function TemplateCard({
             </button>
           )}
         </div>
+      </div>
+      <div className="tcard-caption">
+        <h4>{templateDisplayName(entry, i18n.language)}</h4>
+        <span className="tcard-badge">{entry.kind === "presentation" ? "PPTX" : "DOCX"}</span>
       </div>
     </article>
   );
