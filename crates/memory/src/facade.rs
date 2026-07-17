@@ -1830,17 +1830,18 @@ impl MemoryFacade {
         if source.sensitivity == DataSensitivity::Secret {
             return Err(MemoryError::policy("secret_never_shareable"));
         }
+        if is_published_alias(source) || self.get_publication_link(&source.reference)?.is_some() {
+            return Err(MemoryError::policy("publication_already_published"));
+        }
+        let metadata = publication_user_metadata_for_secret_scan(source)?;
         let payload = serde_json::json!({
             "text": source.text,
             "aliases": source.aliases,
             "language_hints": source.language_hints,
-            "metadata": source.metadata,
+            "metadata": metadata,
         });
         if contains_secret(&payload) {
             return Err(MemoryError::policy("vault_payload_never_shareable"));
-        }
-        if is_published_alias(source) || self.get_publication_link(&source.reference)?.is_some() {
-            return Err(MemoryError::policy("publication_already_published"));
         }
         Ok(())
     }
@@ -2195,6 +2196,78 @@ impl MemoryFacade {
 
 const PUBLICATION_SEMANTIC_VALUE_MAX: usize = 256;
 
+fn publication_system_ref(value: &serde_json::Value, user_id: &UserId) -> MemoryResult<MemoryRef> {
+    let reference = serde_json::from_value::<MemoryRef>(value.clone())
+        .map_err(|_| MemoryError::policy("publication_provenance_invalid"))?;
+    if reference.kind != MemoryRefKind::Memory
+        || reference.user_id != *user_id
+        || reference.workspace_id.as_str() == THREADS_WORKSPACE
+    {
+        return Err(MemoryError::policy("publication_provenance_invalid"));
+    }
+    Ok(reference)
+}
+
+fn publication_user_metadata_for_secret_scan(
+    record: &MemoryRecord,
+) -> MemoryResult<serde_json::Value> {
+    let Some(object) = record.metadata.as_object() else {
+        return Ok(record.metadata.clone());
+    };
+    let mut user = object.clone();
+    if let Some(value) = object.get("publication_link") {
+        let encoded = value
+            .as_str()
+            .ok_or_else(|| MemoryError::policy("publication_provenance_invalid"))?;
+        let reference: MemoryRef = serde_json::from_str(encoded)
+            .map_err(|_| MemoryError::policy("publication_provenance_invalid"))?;
+        if reference.kind != MemoryRefKind::Memory || reference.user_id != record.user_id {
+            return Err(MemoryError::policy("publication_provenance_invalid"));
+        }
+        user.remove("publication_link");
+    }
+    if let Some(value) = object.get("publication_source_ref") {
+        publication_system_ref(value, &record.user_id)?;
+        user.remove("publication_source_ref");
+    }
+    if let Some(value) = object.get("publication_source_refs") {
+        let values = value
+            .as_array()
+            .ok_or_else(|| MemoryError::policy("publication_provenance_invalid"))?;
+        if values.is_empty() {
+            return Err(MemoryError::policy("publication_provenance_invalid"));
+        }
+        for value in values {
+            publication_system_ref(value, &record.user_id)?;
+        }
+        user.remove("publication_source_refs");
+    }
+    if let Some(value) = object.get("publication") {
+        let nested = value
+            .as_object()
+            .ok_or_else(|| MemoryError::policy("publication_provenance_invalid"))?;
+        if let Some(reference) = nested.get("source_ref") {
+            publication_system_ref(reference, &record.user_id)?;
+        }
+        if let Some(reference) = nested.get("destination_ref") {
+            publication_system_ref(reference, &record.user_id)?;
+        }
+        if nested
+            .get("proposal_id")
+            .and_then(serde_json::Value::as_str)
+            .is_none()
+            || nested
+                .get("published_at")
+                .and_then(serde_json::Value::as_str)
+                .is_none()
+        {
+            return Err(MemoryError::policy("publication_provenance_invalid"));
+        }
+        user.remove("publication");
+    }
+    Ok(serde_json::Value::Object(user))
+}
+
 fn publication_semantic_metadata(
     record: &MemoryRecord,
 ) -> MemoryResult<serde_json::Map<String, serde_json::Value>> {
@@ -2331,12 +2404,14 @@ fn publication_candidate_is_eligible(memory: &MemoryRecord) -> bool {
         )
         && memory.sensitivity != DataSensitivity::Secret
         && !is_published_alias(memory)
-        && !contains_secret(&serde_json::json!({
-            "text": memory.text,
-            "aliases": memory.aliases,
-            "language_hints": memory.language_hints,
-            "metadata": memory.metadata,
-        }))
+        && publication_user_metadata_for_secret_scan(memory).is_ok_and(|metadata| {
+            !contains_secret(&serde_json::json!({
+                "text": memory.text,
+                "aliases": memory.aliases,
+                "language_hints": memory.language_hints,
+                "metadata": metadata,
+            }))
+        })
 }
 
 fn publication_subject_key(memory: &MemoryRecord) -> Option<&str> {

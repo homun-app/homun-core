@@ -1030,3 +1030,61 @@ fn update_existing_keeps_all_structural_provenance_and_stable_recall_link() {
         first_result.destination.reference
     );
 }
+
+#[test]
+fn validated_structural_provenance_is_not_secret_scanned_but_malformed_fields_fail_closed() {
+    let fixture = PublicationFixture::new();
+    let mut first = fixture.insert_source_preference("Prefers Italian");
+    first.reference = MemoryRef::new(
+        MemoryRefKind::Memory,
+        fixture.owner.clone(),
+        fixture.project.clone(),
+        "AKIAIOSFODNN7EXAMPLE",
+    );
+    fixture.facade.upsert_memory(&first).unwrap();
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&first, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    choose_create_new(&fixture.facade, &proposal.id);
+    let destination = fixture
+        .facade
+        .approve_publication(&proposal.id, OWNER)
+        .unwrap()
+        .destination;
+    assert_eq!(
+        fixture
+            .facade
+            .create_publication_proposal(&first, &fixture.personal_destination(), OWNER)
+            .unwrap_err()
+            .as_str(),
+        "publication_already_published"
+    );
+    let second = fixture.insert_source_preference("Prefers Italian");
+    let duplicate = fixture
+        .facade
+        .create_publication_proposal(&second, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    assert_eq!(
+        duplicate.reason_code,
+        MemoryPublicationReasonCode::PublicationDuplicateCompatible
+    );
+    assert_eq!(
+        duplicate.candidate,
+        Some(MemoryPublicationCandidate::CompatibleDuplicate {
+            destination_ref: destination.reference
+        })
+    );
+
+    let mut malformed = fixture.insert_source_preference("Other preference");
+    malformed.metadata = serde_json::json!({"publication_link": "not-a-memory-ref"});
+    fixture.facade.upsert_memory(&malformed).unwrap();
+    assert_eq!(
+        fixture
+            .facade
+            .create_publication_proposal(&malformed, &fixture.personal_destination(), OWNER)
+            .unwrap_err()
+            .as_str(),
+        "publication_provenance_invalid"
+    );
+}
