@@ -90,7 +90,11 @@ export function BrandDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="brand-drawer-title"
-        aria-hidden={!open}
+        // The drawer stays mounted and is only slid off-screen via translateX, so
+        // when closed its inputs would still be tab-reachable and AT-exposed.
+        // `inert` (React 19 passes it straight to the DOM) removes focusability AND
+        // AT exposure together — the real fix, superseding a manual aria-hidden.
+        inert={!open}
       >
         <header className="brand-drawer-header">
           <h2 id="brand-drawer-title">{t("presentations:eyebrow")}</h2>
