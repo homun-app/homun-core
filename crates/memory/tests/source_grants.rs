@@ -2,7 +2,9 @@ use local_first_memory::{
     DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryGrantOverrideEffect, MemoryRef,
     MemoryRefKind, MemorySourceGrant, SQLiteMemoryStore, UserId, WorkspaceId,
 };
+use rusqlite::Connection;
 use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 
 fn facade() -> MemoryFacade {
     MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap())
@@ -56,6 +58,40 @@ fn grant() -> MemorySourceGrant {
     }
 }
 
+fn unique_db_path(label: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "local-first-memory-source-grants-{label}-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ))
+}
+
+fn remove_sqlite_files(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+}
+
+fn assert_corrupt_grant_is_rejected(label: &str, corrupt: impl FnOnce(&Connection)) {
+    let path = unique_db_path(label);
+    let persisted = grant();
+    {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+        facade.upsert_memory_source_grant(&persisted).unwrap();
+    }
+    {
+        let connection = Connection::open(&path).unwrap();
+        corrupt(&connection);
+    }
+    {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+        assert!(
+            facade.get_memory_source_grant(&persisted.id).is_err(),
+            "corrupt {label} must fail closed"
+        );
+    }
+    remove_sqlite_files(&path);
+}
+
 #[test]
 fn grants_round_trip_by_consumer_and_id_without_lossy_refs() {
     let facade = facade();
@@ -81,6 +117,38 @@ fn grants_round_trip_by_consumer_and_id_without_lossy_refs() {
     assert_eq!(
         facade.get_memory_source_grant("grant-1").unwrap(),
         Some(grant)
+    );
+    assert!(
+        facade
+            .list_memory_source_grants(&owner, &WorkspaceId::new("project-b"))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn grants_list_in_id_order_within_the_consumer_scope() {
+    let facade = facade();
+    let owner = UserId::new("owner");
+    let project_a = WorkspaceId::new("project-a");
+
+    let mut later = grant();
+    later.id = "grant-z".to_string();
+    let mut earlier = grant();
+    earlier.id = "grant-a".to_string();
+
+    facade.upsert_memory_source_grant(&later).unwrap();
+    facade.upsert_memory_source_grant(&earlier).unwrap();
+
+    let listed = facade
+        .list_memory_source_grants(&owner, &project_a)
+        .unwrap();
+    assert_eq!(
+        listed
+            .iter()
+            .map(|grant| grant.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["grant-a", "grant-z"]
     );
     assert!(
         facade
@@ -121,18 +189,86 @@ fn upsert_atomically_replaces_mutable_policy_and_child_rows() {
 #[test]
 fn revoke_is_durable_and_idempotently_increments_policy_once() {
     let facade = facade();
-    let original = grant();
+    let mut original = grant();
+    original.updated_at = "fixed-before-revoke".to_string();
     facade.upsert_memory_source_grant(&original).unwrap();
 
     facade.revoke_memory_source_grant("grant-1", 20).unwrap();
     let revoked = facade.get_memory_source_grant("grant-1").unwrap().unwrap();
     assert_eq!(revoked.revoked_at, Some(20));
     assert_eq!(revoked.policy_version, original.policy_version + 1);
+    assert_ne!(revoked.updated_at, original.updated_at);
+    let revoked_updated_at = revoked.updated_at;
 
     facade.revoke_memory_source_grant("grant-1", 30).unwrap();
     let repeated = facade.get_memory_source_grant("grant-1").unwrap().unwrap();
     assert_eq!(repeated.revoked_at, Some(20));
     assert_eq!(repeated.policy_version, original.policy_version + 1);
+    assert_eq!(repeated.updated_at, revoked_updated_at);
+}
+
+#[test]
+fn invalid_persisted_max_sensitivity_fails_closed() {
+    assert_corrupt_grant_is_rejected("sensitivity", |connection| {
+        connection
+            .execute(
+                "update memory_source_grants set max_sensitivity = 'not-a-sensitivity'
+                 where id = 'grant-1'",
+                [],
+            )
+            .unwrap();
+    });
+}
+
+#[test]
+fn invalid_persisted_collection_key_fails_closed() {
+    assert_corrupt_grant_is_rejected("collection", |connection| {
+        connection
+            .execute(
+                "update memory_source_grant_collections set collection_key = 'not-a-collection'
+                 where grant_id = 'grant-1' and collection_key = 'preferences'",
+                [],
+            )
+            .unwrap();
+    });
+}
+
+#[test]
+fn invalid_persisted_override_reference_json_fails_closed() {
+    assert_corrupt_grant_is_rejected("override-ref", |connection| {
+        connection
+            .execute(
+                "update memory_source_grant_overrides set memory_ref = '{not-json'
+                 where grant_id = 'grant-1' and effect = 'allow'",
+                [],
+            )
+            .unwrap();
+    });
+}
+
+#[test]
+fn invalid_persisted_override_effect_fails_closed() {
+    assert_corrupt_grant_is_rejected("override-effect", |connection| {
+        connection
+            .execute_batch("pragma ignore_check_constraints = on;")
+            .unwrap();
+        connection
+            .execute(
+                "update memory_source_grant_overrides set effect = 'not-an-effect'
+                 where grant_id = 'grant-1' and effect = 'allow'",
+                [],
+            )
+            .unwrap();
+        let corrupted: String = connection
+            .query_row(
+                "select effect from memory_source_grant_overrides
+                 where grant_id = 'grant-1' and effect = 'not-an-effect'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(corrupted, "not-an-effect");
+    });
 }
 
 #[test]
