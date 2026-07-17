@@ -80,6 +80,22 @@ export function TemplateCatalogGallery({
     "all",
     ...TEMPLATE_CATEGORY_ORDER.filter((category) => presentCategories.has(category)),
   ];
+  // Stable dependency for the reset effect below: a Set is a new object every
+  // render, so depend on its sorted member list instead (only changes when the
+  // actual set of present categories changes, e.g. the only pack of the active
+  // tab got deleted).
+  const presentCategoriesKey = Array.from(presentCategories).sort().join(",");
+
+  // If the active tab's last remaining pack is deleted (or the catalog reloads
+  // without it), the tab silently disappears from categoryTabs while
+  // activeCategory still points at it, filtering `visible` to nothing with no
+  // active tab highlighted — fall back to "all".
+  useEffect(() => {
+    if (activeCategory !== "all" && !presentCategories.has(activeCategory)) {
+      setActiveCategory("all");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presentCategoriesKey, activeCategory]);
 
   const visible = templates.filter((entry) => {
     const matchesCategory = activeCategory === "all" || entry.category === activeCategory;
@@ -264,6 +280,7 @@ export function TemplateCatalogGallery({
           brandKit={brandKit}
           busy={startingTemplateId === selectedTemplate.id}
           deleting={deletingTemplateId === selectedTemplate.id}
+          busyGlobal={anyBusy}
           onClose={() => setSelectedTemplate(null)}
           onUse={() => void useTemplate(selectedTemplate)}
           onDelete={() => void deleteTemplate(selectedTemplate)}
@@ -341,6 +358,7 @@ function TemplateDetailModal({
   brandKit,
   busy,
   deleting,
+  busyGlobal,
   onClose,
   onUse,
   onDelete,
@@ -349,6 +367,11 @@ function TemplateDetailModal({
   brandKit: BrandKit;
   busy: boolean;
   deleting: boolean;
+  // Global in-flight guard (see `anyBusy` in TemplateCatalogGallery / TemplateCard):
+  // without this the modal's own Use/Remove stay enabled while a DIFFERENT card's
+  // startTemplateWorkflow is in flight, letting two concurrent calls clobber
+  // startingTemplateId.
+  busyGlobal: boolean;
   onClose: () => void;
   onUse: () => void;
   onDelete: () => void;
@@ -407,7 +430,7 @@ function TemplateDetailModal({
             type="button"
             className="primary-btn template-detail-use"
             onClick={onUse}
-            disabled={busy || deleting}
+            disabled={busy || deleting || busyGlobal}
           >
             {busy ? t("presentations:starting") : t("presentations:useTemplate")}
           </button>
@@ -416,7 +439,7 @@ function TemplateDetailModal({
               type="button"
               className="auto-btn template-detail-remove"
               onClick={onDelete}
-              disabled={busy || deleting}
+              disabled={busy || deleting || busyGlobal}
             >
               <Trash2 size={14} aria-hidden />
               {deleting ? t("presentations:removing") : t("presentations:removeTemplate")}

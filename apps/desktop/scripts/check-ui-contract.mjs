@@ -324,6 +324,7 @@ assertNotContains("src/components/BrandKitPanel.tsx", "templateThemeClass", "the
 assertNotContains("src/components/TemplateCard.tsx", "builtin:template-preview/", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
 assertNotContains("src/components/TemplateGallery.tsx", "builtin:template-preview/", "the synthetic CSS-preview branch was retired by the live renderer previews — it must not come back");
 assertContains("src/components/presentationsShared.ts", "brandPreviewOverride", "the brand kit must recolor catalog previews live");
+assertContains("src/components/TemplateCard.tsx", "brandPreviewOverride", "template cards must apply the live brand recolor");
 // S1b-T4: dark editorial surfaces (editorial_noir/editorial_bold) own their palette —
 // the live recolor only swaps --brand/--accent, not --surface, so it must be skipped there.
 assertContains("src/components/TemplateCard.tsx", "DARK_SURFACE_THEMES", "live brand recolor must be guarded against dark editorial surfaces");

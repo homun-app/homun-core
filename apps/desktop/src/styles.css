@@ -12450,6 +12450,10 @@ body.resizing-drawer {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
+  /* Rows default to stretch, which overrides each card's own aspect-ratio
+     (16/9 deck vs 3/2 doc) whenever a shorter card shares a row with a taller
+     one — start keeps every card at its intrinsic aspect ratio. */
+  align-items: start;
 }
 /* Full-bleed card (S1b): the preview fills the whole card (aspect-ratio per
    kind), title/badge/actions live in a bottom scrim overlay instead of a
@@ -12532,9 +12536,6 @@ body.resizing-drawer {
   background: linear-gradient(to top, rgba(9, 11, 15, 0.88) 0%, rgba(9, 11, 15, 0.55) 60%, transparent 100%);
   pointer-events: none;
 }
-.tcard-scrim > * {
-  pointer-events: auto;
-}
 .tcard-title-row {
   display: flex;
   align-items: flex-start;
@@ -12566,7 +12567,12 @@ body.resizing-drawer {
   color: rgba(255, 255, 255, 0.85);
   font-size: 11px;
 }
+/* Only the actions (Use/Remove) re-enable clicks; the title/badge row above
+   stays pointer-events: none so clicks over the always-visible scrim fall
+   through to the preview <button> beneath instead of being eaten by a dead
+   zone (was `.tcard-scrim > *`, which caught the title row too). */
 .tcard-actions {
+  pointer-events: auto;
   display: flex;
   gap: 6px;
   max-height: 0;
