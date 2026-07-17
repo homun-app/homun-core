@@ -823,16 +823,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ADR 0022 — Tappa 1: se il flag è ON, costruisci il service memoria che
     // incapsula brief/recall/learn. Costruito dopo il letterale perché
     // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
-    if memory_service_enabled() {
-        let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
-            Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
-        let llm: Arc<dyn local_first_memory::LlmClient> =
-            Arc::new(GatewayLlmClient { http: state.http.clone() });
-        state.memory_service = Some(
-            Arc::new(InProcessMemoryRecallService::new(state.clone(), embedding, llm))
-                as Arc<dyn MemoryRecallService>,
-        );
-    }
+    let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
+        Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+    let llm: Arc<dyn local_first_memory::LlmClient> =
+        Arc::new(GatewayLlmClient { http: state.http.clone() });
+    install_memory_service_if_enabled(&mut state, embedding, llm);
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
     if let Ok(dir) = gateway_data_dir() {
@@ -2767,11 +2762,82 @@ fn memory_briefing_source_fingerprint(
     u64::from_be_bytes(digest[..8].try_into().expect("SHA-256 prefix is 8 bytes"))
 }
 
-/// Reads confirmed memories for the PERSONAL scope and the active PROJECT scope,
-/// to inject as the always-on profile. Sensitivity is capped at `Private`
-/// (explicit user saves) — Confidential/Secret (e.g. a codice fiscale) are NEVER
-/// auto-injected here; they surface only via on-demand recall (M3). Returns
-/// `(personal, project)` summaries. Best-effort: any failure yields empties.
+fn revalidated_cached_briefing<F>(
+    state: &AppState,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    scope_key: &str,
+    generation: u64,
+    source_fingerprint: u64,
+    prompt_fingerprint: u64,
+    before_revalidation: F,
+) -> Option<BriefingPack>
+where
+    F: FnOnce(),
+{
+    let cached = briefing_cache().get(
+        scope_key,
+        generation,
+        source_fingerprint,
+        prompt_fingerprint,
+    )?;
+    before_revalidation();
+    let current_generation = memory_facade(state).briefing_generation(user, workspace);
+    let current_source_fingerprint = memory_briefing_source_fingerprint(
+        state,
+        user,
+        workspace,
+        i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+    );
+    (current_generation == generation && current_source_fingerprint == source_fingerprint)
+        .then_some(cached)
+}
+
+fn briefing_items_for_authorized_source(
+    facade: &MemoryFacade,
+    source: &local_first_memory::AuthorizedMemorySource,
+    preferences_only: bool,
+) -> Vec<String> {
+    let mut records = facade
+        .list_memories_for_ui(&source.source_user_id, &source.source_workspace_id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|memory| memory.status == MemoryStatus::Confirmed)
+        // The personal linked tier is deliberately Preferences-only. An
+        // individual Allow can authorize on-demand recall, but cannot promote a
+        // record from another collection into the always-on briefing.
+        .filter(|memory| {
+            !preferences_only || MemoryCollectionKey::Preferences.matches(memory)
+        })
+        .filter_map(|memory| {
+            facade
+                .get_authorized_memory_for_source(source, &memory.reference)
+                .ok()
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| {
+        right
+            .confidence
+            .partial_cmp(&left.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    records
+        .into_iter()
+        .filter(|memory| {
+            let low = memory.text.to_lowercase();
+            !(low.starts_with("runtime plan step")
+                || low.starts_with("runtime plan state")
+                || low.starts_with("validation test:"))
+        })
+        .map(|memory| memory.text)
+        .collect()
+}
+
+/// Reads confirmed memories for the PERSONAL scope and the active PROJECT scope.
+/// Every item crosses the same authorized-source policy used by recall; linked
+/// Personal additionally remains a strict Preferences-only always-on tier.
+/// Returns `(personal, project)` summaries. Best-effort: failures yield empties.
 fn gather_profile_memory_for_prompt(
     state: &AppState,
     user_message: &str,
@@ -2793,86 +2859,38 @@ fn gather_profile_memory_with_options(
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
-    let read = |workspace: MemoryWorkspaceId, preferences_only: bool| -> Vec<String> {
-        let request = MemoryAccessRequest {
-            actor_id: "desktop-chat".to_string(),
-            user_id: user.clone(),
-            workspace_id: workspace,
-            purpose: "chat_context".to_string(),
-            allowed_domains: vec![
-                PrivacyDomain::new("personal"),
-                PrivacyDomain::new("work"),
-                PrivacyDomain::new("general"),
-            ],
-            max_sensitivity: MemoryDataSensitivity::Private,
-            allow_raw_payload: false,
-            allow_export: true,
-            broad_query: false,
-        };
-        facade
-            .context_pack(&request)
-            .map(|pack| {
-                let mut items = pack.items;
-                // Sort by confidence DESC: high-confidence facts (e.g. "works as
-                // senior developer", conf 1.0) must survive the budget cut. Without
-                // this, the briefing is filled with low-confidence noise first and
-                // the key facts fall off the 4000-char tail.
-                items.sort_by(|a, b| {
-                    b.confidence
-                        .partial_cmp(&a.confidence)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-                items
-                    .into_iter()
-                    // `preferences_only` keeps just the always-relevant tier (how the
-                    // user likes to be treated), dropping episodic facts.
-                    .filter(|item| !preferences_only || item.memory_type == "preference")
-                    // Anti-noise: scarta fact di tracking del runtime ("Runtime plan
-                    // step/state: …") che saturano il briefing budget e spingono fuori
-                    // i fatti reali. Prevenuti alla fonte in persist_learn_extraction,
-                    // ma i dati legacy vanno comunque filtrati qui.
-                    .filter(|item| {
-                        let low = item.summary.to_lowercase();
-                        !(low.starts_with("runtime plan step")
-                            || low.starts_with("runtime plan state")
-                            || low.starts_with("validation test:"))
-                    })
-                    .map(|item| item.summary)
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
     let in_project = active.as_str() != PERSONAL_WORKSPACE;
+    let sources = briefing_authorized_sources(
+        facade,
+        &user,
+        &active,
+        i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+    );
     // Relevance-gated personal memory: in a PROJECT, the personal scope contributes only
     // the always-relevant tier (preferences) to the always-on profile — episodic personal
     // facts are NOT dumped here, they reach the project on-demand via query-gated RAG
     // (relevant_memory_for_prompt) or explicit recall. Outside a project, the full
     // personal profile is the point, so inject it all.
-    let personal = if !in_project
-        || briefing_authorized_sources(
-            facade,
-            &user,
-            &active,
-            i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
-        )
+    let personal = sources
         .iter()
-        .any(|source| {
-            source.grant_id.is_some()
-                && source.source_workspace_id.as_str() == PERSONAL_WORKSPACE
+        .find(|source| source.source_workspace_id.as_str() == PERSONAL_WORKSPACE)
+        .map(|source| {
+            briefing_items_for_authorized_source(
+                facade,
+                source,
+                in_project || personal_preferences_only_override,
+            )
         })
-    {
-        read(
-            MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-            in_project || personal_preferences_only_override,
-        )
-    } else {
-        Vec::new()
-    };
-    let project = if in_project {
-        read(active, false)
-    } else {
-        Vec::new()
-    };
+        .unwrap_or_default();
+    let project = in_project
+        .then(|| {
+            sources
+                .iter()
+                .find(|source| source.grant_id.is_none())
+                .map(|source| briefing_items_for_authorized_source(facade, source, false))
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
     (personal, project)
 }
 
@@ -5039,6 +5057,20 @@ impl InProcessMemoryRecallService {
     }
 }
 
+fn install_memory_service_if_enabled(
+    state: &mut AppState,
+    embedding: Arc<dyn local_first_memory::EmbeddingClient>,
+    llm: Arc<dyn local_first_memory::LlmClient>,
+) {
+    state.memory_service = memory_service_enabled().then(|| {
+        Arc::new(InProcessMemoryRecallService::new(
+            state.clone(),
+            embedding,
+            llm,
+        )) as Arc<dyn MemoryRecallService>
+    });
+}
+
 fn recall_pack_on_facade(
     facade: &MemoryFacade,
     user: &MemoryUserId,
@@ -5171,71 +5203,92 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         // Hit solo se generation AND prompt_fingerprint combaciano.
         let user = gateway_memory_user_id();
         let workspace = gateway_memory_workspace_id();
-        let generation = memory_facade(&self.state).briefing_generation(&user, &workspace);
-        let source_fingerprint = memory_briefing_source_fingerprint(
-            &self.state,
-            &user,
-            &workspace,
-            i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
-        );
         let fingerprint = prompt_fingerprint(user_message);
         let scope_key = format!("{}|{}", user.as_str(), workspace.as_str());
+        for attempt in 0..=1 {
+            let generation = memory_facade(&self.state).briefing_generation(&user, &workspace);
+            let source_fingerprint = memory_briefing_source_fingerprint(
+                &self.state,
+                &user,
+                &workspace,
+                i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+            );
+            if let Some(cached) = revalidated_cached_briefing(
+                &self.state,
+                &user,
+                &workspace,
+                &scope_key,
+                generation,
+                source_fingerprint,
+                fingerprint,
+                || {},
+            ) {
+                return BriefingPack {
+                    profile_block: cached.profile_block,
+                    objective: cached.objective,
+                    brief: cached.brief,
+                    recent_work,
+                };
+            }
 
-        if let Some(cached) =
-            briefing_cache().get(&scope_key, generation, source_fingerprint, fingerprint)
-        {
-            // Cache hit: riutilizzo i 3 blocchi cached + recent_work fresco.
+            let (memory_personal, memory_project) =
+                gather_profile_memory_for_prompt(&self.state, user_message);
+            let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
+                gather_open_loops(&self.state, 6)
+            } else {
+                Vec::new()
+            };
+            let profile_block = format_memory_block(
+                &memory_open_loops,
+                &memory_personal,
+                &memory_project,
+                CHAT_MEMORY_BUDGET_CHARS,
+            );
+            let objective = project_objective_block(&self.state);
+            let brief = project_brief_block(&self.state);
+            let current_generation =
+                memory_facade(&self.state).briefing_generation(&user, &workspace);
+            let current_source_fingerprint = memory_briefing_source_fingerprint(
+                &self.state,
+                &user,
+                &workspace,
+                i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+            );
+            if current_generation != generation || current_source_fingerprint != source_fingerprint
+            {
+                if attempt == 0 {
+                    continue;
+                }
+                return BriefingPack {
+                    profile_block: None,
+                    objective,
+                    brief,
+                    recent_work,
+                };
+            }
+
+            briefing_cache().put(
+                scope_key.clone(),
+                CachedBriefing {
+                    generation,
+                    source_fingerprint,
+                    prompt_fingerprint: fingerprint,
+                    pack_sans_recent_work: BriefingPack {
+                        profile_block: profile_block.clone(),
+                        objective: objective.clone(),
+                        brief: brief.clone(),
+                        recent_work: None,
+                    },
+                },
+            );
             return BriefingPack {
-                profile_block: cached.profile_block,
-                objective: cached.objective,
-                brief: cached.brief,
+                profile_block,
+                objective,
+                brief,
                 recent_work,
             };
         }
-
-        // Cache miss: rebuild dei 3 blocchi memory-backed (parità con l'inline,
-        // main.rs:19476-19509). I predicati should_inject_* sono prompt-dipendenti:
-        // per questo il trait porta `user_message` e la cache key include la fingerprint.
-        let (memory_personal, memory_project) =
-            gather_profile_memory_for_prompt(&self.state, user_message);
-        let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
-            gather_open_loops(&self.state, 6)
-        } else {
-            Vec::new()
-        };
-        let profile_block = format_memory_block(
-            &memory_open_loops,
-            &memory_personal,
-            &memory_project,
-            CHAT_MEMORY_BUDGET_CHARS,
-        );
-        // objective/brief ritornano già None per PERSONAL_WORKSPACE, quindi la shape
-        // è intrinsecamente snella per MemoryScope::Personal (invariant P1).
-        let objective = project_objective_block(&self.state);
-        let brief = project_brief_block(&self.state);
-
-        // Salva in cache per i turni successivi (stessa generation + fingerprint).
-        briefing_cache().put(
-            scope_key,
-            CachedBriefing {
-                generation,
-                source_fingerprint,
-                prompt_fingerprint: fingerprint,
-                pack_sans_recent_work: BriefingPack {
-                    profile_block: profile_block.clone(),
-                    objective: objective.clone(),
-                    brief: brief.clone(),
-                    recent_work: None, // non cached
-                },
-            },
-        );
-
-        BriefingPack {
-            profile_block,
-            objective,
-            brief,
-            recent_work,
-        }
+        unreachable!("bounded briefing rebuild loop always returns")
     }
 
     fn recall<'a>(
@@ -61820,6 +61873,45 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             .unwrap();
     }
 
+    fn insert_briefing_memory_with_sensitivity(
+        facade: &super::MemoryFacade,
+        user: &local_first_memory::UserId,
+        workspace: &local_first_memory::WorkspaceId,
+        key: &str,
+        text: &str,
+        sensitivity: local_first_memory::DataSensitivity,
+    ) -> local_first_memory::MemoryRef {
+        let reference = local_first_memory::MemoryRef::new(
+            local_first_memory::MemoryRefKind::Memory,
+            user.clone(),
+            workspace.clone(),
+            key,
+        );
+        facade
+            .upsert_memory(&local_first_memory::MemoryRecord {
+                reference: reference.clone(),
+                user_id: user.clone(),
+                workspace_id: workspace.clone(),
+                memory_type: "preference".to_string(),
+                text: text.to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                status: local_first_memory::MemoryStatus::Confirmed,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity,
+                metadata: serde_json::json!({}),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+                last_seen_at: None,
+                supersedes: Vec::new(),
+                superseded_by: None,
+                correction_of: None,
+            })
+            .unwrap();
+        reference
+    }
+
     fn insert_preferences_grant(
         facade: &super::MemoryFacade,
         user: &local_first_memory::UserId,
@@ -61931,6 +62023,121 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     }
 
     #[test]
+    fn project_briefing_enforces_compiled_personal_source_policy() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-policy-user"); }
+        super::set_memory_workspace("project-a");
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-policy-user");
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        let personal = local_first_memory::WorkspaceId::new(super::PERSONAL_WORKSPACE);
+        let denied_ref = insert_briefing_memory_with_sensitivity(
+            &facade,
+            &user,
+            &personal,
+            "denied-pref",
+            "Never include this denied preference",
+            local_first_memory::DataSensitivity::Public,
+        );
+        insert_briefing_memory_with_sensitivity(
+            &facade,
+            &user,
+            &personal,
+            "private-pref",
+            "Never include this private preference",
+            local_first_memory::DataSensitivity::Private,
+        );
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: "strict-preferences".to_string(),
+                consumer_user_id: user.clone(),
+                consumer_workspace_id: project.clone(),
+                source_user_id: user.clone(),
+                source_workspace_id: personal.clone(),
+                collections: [local_first_memory::MemoryCollectionKey::Preferences]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Public,
+                overrides: [(denied_ref, local_first_memory::MemoryGrantOverrideEffect::Deny)]
+                    .into_iter()
+                    .collect(),
+                expires_at: None,
+                revoked_at: None,
+                policy_version: 1,
+                created_by: user.as_str().to_string(),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+            })
+            .unwrap();
+        let state = test_app_state_for_brief(facade);
+        let (personal_items, _) = super::gather_profile_memory_with_options(&state, true);
+        assert!(personal_items.is_empty());
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    #[test]
+    fn project_briefing_does_not_promote_individual_allow_outside_preferences_collection() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-allow-user"); }
+        super::set_memory_workspace("project-a");
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-allow-user");
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        let personal = local_first_memory::WorkspaceId::new(super::PERSONAL_WORKSPACE);
+        let preference_ref = insert_briefing_memory_with_sensitivity(
+            &facade,
+            &user,
+            &personal,
+            "allowed-pref",
+            "Do not promote through individual allow",
+            local_first_memory::DataSensitivity::Public,
+        );
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: "knowledge-with-allow".to_string(),
+                consumer_user_id: user.clone(),
+                consumer_workspace_id: project,
+                source_user_id: user.clone(),
+                source_workspace_id: personal,
+                collections: [local_first_memory::MemoryCollectionKey::Knowledge]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Public,
+                overrides: [(preference_ref, local_first_memory::MemoryGrantOverrideEffect::Allow)]
+                    .into_iter()
+                    .collect(),
+                expires_at: None,
+                revoked_at: None,
+                policy_version: 1,
+                created_by: user.as_str().to_string(),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+            })
+            .unwrap();
+        let state = test_app_state_for_brief(facade);
+        let (personal_items, _) = super::gather_profile_memory_with_options(&state, true);
+        assert!(personal_items.is_empty());
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    #[test]
     fn revoking_grant_changes_briefing_fingerprint() {
         let _flag = TestMemorySourcesFlag::set(Some("on"));
         let previous_user = std::env::var("HOMUN_USER_ID").ok();
@@ -62034,6 +62241,66 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     }
 
     #[test]
+    fn cached_briefing_is_rejected_when_grant_is_revoked_after_lookup() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-toctou-user"); }
+        super::set_memory_workspace("project-a");
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-toctou-user");
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        insert_preferences_grant(&facade, &user, &project, "toctou-grant");
+        let state = test_app_state_for_brief(facade);
+        let generation = super::memory_facade(&state).briefing_generation(&user, &project);
+        let source_fingerprint = super::memory_briefing_source_fingerprint(
+            &state,
+            &user,
+            &project,
+            i64::try_from(super::now_epoch_secs()).unwrap_or(i64::MAX),
+        );
+        let prompt_fingerprint = local_first_memory::prompt_fingerprint("same prompt");
+        let scope_key = "briefing-toctou-user|project-a|quality-review";
+        local_first_memory::briefing_cache().put(
+            scope_key.to_string(),
+            local_first_memory::CachedBriefing {
+                generation,
+                source_fingerprint,
+                prompt_fingerprint,
+                pack_sans_recent_work: local_first_memory::BriefingPack {
+                    profile_block: Some("Personal:\n- must not leak".to_string()),
+                    objective: None,
+                    brief: None,
+                    recent_work: None,
+                },
+            },
+        );
+
+        let cached = super::revalidated_cached_briefing(
+            &state,
+            &user,
+            &project,
+            scope_key,
+            generation,
+            source_fingerprint,
+            prompt_fingerprint,
+            || {
+                super::memory_facade(&state)
+                    .revoke_memory_source_grant(&user, &project, "toctou-grant", 2)
+                    .unwrap();
+            },
+        );
+        assert!(cached.is_none());
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    #[test]
     fn contact_memory_deny_cannot_use_linked_sources() {
         assert!(!super::memory_perimeter_allows_recall(
             false, true, false, true
@@ -62054,12 +62321,12 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
 
     #[tokio::test]
     async fn memory_service_on_and_off_use_same_linked_source_coordinator() {
-        use super::MemoryRecallService;
-
         let _flag = TestMemorySourcesFlag::set(Some("on"));
         let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        let previous_service = std::env::var("HOMUN_MEMORY_SERVICE").ok();
         unsafe {
             std::env::set_var("HOMUN_USER_ID", "recall-parity-user");
+            std::env::set_var("HOMUN_MEMORY_SERVICE", "on");
         }
         super::set_memory_workspace("project-a");
 
@@ -62085,20 +62352,31 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             "decision-grant",
             local_first_memory::MemoryCollectionKey::Decisions,
         );
-        let state = test_app_state_for_brief(facade);
-        let service = super::InProcessMemoryRecallService::new(
-            state.clone(),
+        let mut state = test_app_state_for_brief(facade);
+        super::install_memory_service_if_enabled(
+            &mut state,
             std::sync::Arc::new(NoopEmbeddingClient),
             std::sync::Arc::new(NoopLlmClient),
         );
-        let service_pack = service
+        let service_pack = state
+            .memory_service
+            .as_ref()
+            .expect("HOMUN_MEMORY_SERVICE=on installs the runtime service")
             .recall(
                 "When do we launch?",
                 &local_first_memory::MemoryScope::Project(consumer.clone()),
             )
             .await;
+        unsafe { std::env::set_var("HOMUN_MEMORY_SERVICE", "off"); }
+        let mut inline_state = state.clone();
+        super::install_memory_service_if_enabled(
+            &mut inline_state,
+            std::sync::Arc::new(NoopEmbeddingClient),
+            std::sync::Arc::new(NoopLlmClient),
+        );
+        assert!(inline_state.memory_service.is_none());
         let inline_pack = super::recall_pack_on_facade(
-            super::memory_facade(&state),
+            super::memory_facade(&inline_state),
             &user,
             &consumer,
             "When do we launch?",
@@ -62131,6 +62409,10 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             None => unsafe {
                 std::env::remove_var("HOMUN_USER_ID");
             },
+        }
+        match previous_service {
+            Some(value) => unsafe { std::env::set_var("HOMUN_MEMORY_SERVICE", value); },
+            None => unsafe { std::env::remove_var("HOMUN_MEMORY_SERVICE"); },
         }
     }
 
