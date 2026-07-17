@@ -12,8 +12,17 @@ doc.json schema:
   "title": "...",
   "theme": {"name": "clean_corporate", "primary": "#..", "secondary": "#..",
              "accent": "#..", "heading_font": "..", "body_font": "..",
-             "logo": "logo.png|data:..."},
-  "blocks": [ {"type": "<one of the 16 registered block types>", ...fields} ]
+             "logo": "logo.png|data:...",
+             # "name" also resolves surface/ink/muted/hairline/on_brand from
+             # design_tokens.THEMES (e.g. "editorial_warm"); explicit fields win.
+             },
+  "blocks": [ {"type": "<one of the 16 registered block types>", ...fields},
+              # section_cover accepts two optional editorial fields, mirroring
+              # deck_render's cover layout:
+              {"type": "section_cover", "title": "...", "subtitle": "...",
+               "eyebrow": "CASE STUDY",       # small-caps kicker above the title
+               "hero_art": "grid"},           # procedural SVG accent: grid|rings|gradient|none
+            ]
 }
 
 Usage: python doc_render.py doc.json [--prefix out] [--self-test]
@@ -64,11 +73,39 @@ def _bullets(items):
     return '<ul class="bullets">' + "".join(f"<li>{esc(b)}</li>" for b in items) + "</ul>"
 
 
-def render_block(block, base_dir, logo):
+def _eyebrow(text):
+    return f'<div class="eyebrow">{esc(text)}</div>' if text else ""
+
+
+def _hero_art(kind, seq):
+    # Procedural editorial art — inline SVG, zero external images (license-clean,
+    # local). Uses currentColor so it inherits the accent set on the cover.
+    # `seq` makes the pattern id call-unique: a fixed "g" id collided when two
+    # grid blocks landed in the same document (duplicate DOM ids, invalid
+    # markup — mirrors the fix in deck_render._hero_art).
+    if kind == "rings":
+        return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden><g fill="none" '
+                'stroke="currentColor" stroke-width="1.5" opacity=".5">'
+                + "".join(f'<circle cx="300" cy="90" r="{r}"/>' for r in (40, 80, 120, 170))
+                + "</g></svg>")
+    if kind == "grid":
+        gid = f"g{seq}"
+        return (f'<svg class="hero-art" viewBox="0 0 400 400" aria-hidden>'
+                f'<defs><pattern id="{gid}" width="26" height="26" patternUnits="userSpaceOnUse">'
+                f'<path d="M26 0H0V26" fill="none" stroke="currentColor" stroke-width="1" '
+                f'opacity=".35"/></pattern></defs><rect width="400" height="400" fill="url(#{gid})"/></svg>')
+    if kind == "gradient":
+        return '<div class="hero-art hero-grad" aria-hidden></div>'
+    return ""
+
+
+def render_block(block, base_dir, logo, seq=0):
     kind = block.get("type", "text_section")
     title = esc(block.get("title", ""))
     if kind == "section_cover":
         return (f'<section class="block cover">{_logo(logo)}'
+                f'{_hero_art(block.get("hero_art", ""), seq)}'
+                f'{_eyebrow(block.get("eyebrow", ""))}'
                 f'<h1>{title}</h1><div class="sub">{esc(block.get("subtitle", ""))}</div>'
                 f'<div class="rule"></div></section>')
     if kind == "letterhead":
@@ -190,7 +227,8 @@ def render_html(doc, base_dir):
     else:
         theme = {**DEFAULT_THEME, **{k: v for k, v in raw_theme.items() if v}}
     logo = data_url(theme.get("logo", ""), base_dir)
-    body = "".join(render_block(b, base_dir, logo) for b in doc.get("blocks", []))
+    # enumerate() gives _hero_art a call-unique seq per block (see _hero_art docstring).
+    body = "".join(render_block(b, base_dir, logo, seq) for seq, b in enumerate(doc.get("blocks", [])))
     tokens = _css_tokens(theme)
     title = esc(doc.get("title", "Document"))
     return ("<!doctype html><html><head><meta charset='utf-8'>"
@@ -204,18 +242,21 @@ def _css_tokens(theme):
     # the raw _CSS_BODY constant below.
     return (f":root{{--brand:{theme['primary']};--brand2:{theme['secondary']};"
             f"--accent:{theme['accent']};--head:'{theme['heading_font']}';"
-            f"--body:'{theme['body_font']}';--doc-width:794px;}}")
+            f"--body:'{theme['body_font']}';--doc-width:794px;"
+            f"--surface:{theme.get('surface', '#ffffff')};--ink:{theme.get('ink', '#16202b')};"
+            f"--muted:{theme.get('muted', '#5a6675')};--hairline:{theme.get('hairline', '#e4e9ef')};"
+            f"--on-brand:{theme.get('on_brand', '#ffffff')};}}")
 
 
 _CSS_BODY = """
 @page{size:A4;margin:0}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--body),-apple-system,'Segoe UI',sans-serif;color:#16202b;background:#fff}
+body{font-family:var(--body),-apple-system,'Segoe UI',sans-serif;background:var(--surface);color:var(--ink)}
 .doc{width:var(--doc-width);margin:0 auto}
 .block{padding:28px 44px;overflow-wrap:anywhere}
 h1,h2,h3,strong{font-family:var(--head),sans-serif}
 .muted{color:#5a6675}
-.cover{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;
+.cover{background:var(--surface);color:var(--ink);
   padding:96px 44px 72px;page-break-after:always;min-height:280px}
 .cover h1{font-size:2.6rem;letter-spacing:-.02em}
 .cover .sub{margin-top:.6rem;opacity:.92;font-size:1.1rem}
@@ -237,7 +278,7 @@ h1,h2,h3,strong{font-family:var(--head),sans-serif}
 .contact-header{display:flex;gap:20px;align-items:center;border-bottom:4px solid var(--brand);
   padding-bottom:22px}
 .contact-header .avatar{width:72px;height:72px;border-radius:50%;background:var(--brand);
-  color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;
+  color:var(--on-brand);display:flex;align-items:center;justify-content:center;font-weight:800;
   font-size:1.5rem;flex:none}
 .contact-header h1{font-size:1.7rem;letter-spacing:-.01em}
 .contact-header .headline{color:var(--brand);font-weight:600;margin-top:.15rem}
@@ -251,15 +292,15 @@ h1,h2,h3,strong{font-family:var(--head),sans-serif}
 .edu{display:grid;grid-template-columns:110px 1fr auto;gap:14px;margin:.45rem 0;align-items:baseline}
 .tag-group{margin:.4rem 0}
 .tag-label{font-weight:700;margin-right:.6rem;color:var(--brand2)}
-.tag{display:inline-block;background:#eef1f5;border-radius:999px;padding:.18rem .7rem;
+.tag{display:inline-block;background:var(--hairline);border-radius:999px;padding:.18rem .7rem;
   margin:.15rem .25rem;font-style:normal;font-size:.88rem;color:#2a3542}
 table.tbl{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.95rem}
-table.tbl th{text-align:left;background:var(--brand);color:#fff;padding:.55rem .8rem}
-table.tbl td{padding:.5rem .8rem;color:#2a3542;border-bottom:1px solid #e4e9ef}
-table.tbl tr:nth-child(even) td{background:#f6f8fa}
+table.tbl th{text-align:left;background:var(--brand);color:var(--on-brand);padding:.55rem .8rem}
+table.tbl td{padding:.5rem .8rem;color:#2a3542;border-bottom:1px solid var(--hairline)}
+table.tbl tr:nth-child(even) td{background:var(--hairline)}
 .note{margin-top:.5rem;font-size:.88rem}
 .products{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:.7rem}
-.product{border:1px solid #e4e9ef;border-radius:10px;padding:14px}
+.product{border:1px solid var(--hairline);border-radius:10px;padding:14px}
 /* Badge sits in a flex header NEXT TO the name (not position:absolute over it):
    a long badge label (e.g. "BESTSELLER") used to overlap/clip a short product
    name — flex-wrap lets it drop to its own line instead of covering the text. */
@@ -268,13 +309,22 @@ table.tbl tr:nth-child(even) td{background:#f6f8fa}
 .product .badge{background:var(--accent);color:#fff;flex:none;
   font-style:normal;font-size:.7rem;font-weight:800;border-radius:6px;padding:.15rem .45rem}
 .product .price{color:var(--brand);font-weight:800;margin-top:.4rem;display:block}
-.kpis{background:#f6f8fa;border-top:3px solid var(--accent)}
+.kpis{background:var(--hairline);border-top:3px solid var(--accent)}
 .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;
   margin-top:.5rem}
 .kpi-item strong{font-size:1.8rem;color:var(--brand);display:block;letter-spacing:-.02em}
 .kpi-item span{color:#5a6675;font-size:.9rem}
 .quote blockquote{font-size:1.3rem;font-weight:700;line-height:1.4;color:#16202b}
 .quote blockquote::first-letter{color:var(--accent)}
+.eyebrow{text-transform:uppercase;letter-spacing:.26em;font-size:.8rem;font-weight:700;
+  color:var(--accent);margin-bottom:.7rem}
+.cover h1{font-size:3.2rem;letter-spacing:-.02em}
+.cover .sub{color:var(--muted)}
+.hero-art{position:absolute;right:0;top:0;width:38%;height:100%;color:var(--accent);
+  opacity:.85;pointer-events:none}
+.hero-art.hero-grad{background:radial-gradient(120% 120% at 90% 0%,
+  color-mix(in srgb,var(--accent) 38%,transparent),transparent 62%)}
+.cover{position:relative;overflow:hidden}
 """
 
 

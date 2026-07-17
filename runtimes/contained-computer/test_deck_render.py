@@ -2,6 +2,7 @@
 PPTX tests skip when python-pptx is absent (it lives in the contained computer)."""
 import importlib.util
 import os
+import re
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -73,6 +74,21 @@ class EditorialCover(unittest.TestCase):
              "slides": [{"layout": "cover", "title": "X"}]}, HERE)
         self.assertIn("--surface:#0b0b0d", html)
         self.assertIn("--ink:#f4f1ea", html)
+
+    def test_hero_art_grid_ids_are_unique_across_slides(self):
+        # Review gotcha: _hero_art("grid") used a FIXED pattern id — two grid
+        # slides (e.g. cover + section) in one deck produced duplicate DOM
+        # ids. Each call must mint its own id.
+        html = deck_render.render_html(
+            {"title": "T", "slides": [
+                {"layout": "cover", "title": "A", "hero_art": "grid"},
+                {"layout": "section", "title": "B", "hero_art": "grid"},
+            ]}, HERE)
+        pattern_ids = re.findall(r'<pattern id="(g[^"]*)"', html)
+        self.assertEqual(len(pattern_ids), 2)
+        self.assertEqual(len(pattern_ids), len(set(pattern_ids)))
+        for pid in pattern_ids:
+            self.assertIn(f'url(#{pid})', html)
 
 
 @unittest.skipUnless(

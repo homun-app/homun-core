@@ -5,6 +5,7 @@ title — titles render for every block, so a title-substring probe is vacuous.
 Probe strings below exist ONLY inside block-specific content."""
 import importlib.util
 import os
+import re
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -120,6 +121,34 @@ class RenderHtmlCommerceBlocks(unittest.TestCase):
         self.assertIn('<table class="tbl">', html)
         self.assertIn('class="product"', html)
         self.assertIn('class="kpi-item"', html)
+
+
+class DocEditorialCover(unittest.TestCase):
+    def test_section_cover_eyebrow_and_hero_and_surface(self):
+        html = doc_render.render_html(
+            {"title": "T", "theme": {"name": "editorial_warm"},
+             "blocks": [{"type": "section_cover", "title": "Case", "subtitle": "S",
+                         "eyebrow": "EyebrowDocProbe", "hero_art": "grid"}]}, HERE)
+        self.assertIn("EyebrowDocProbe", html)
+        self.assertIn("hero-art", html)
+        self.assertIn("--surface:#f4f1ea", html)
+        self.assertIn("--ink:#241c15", html)
+
+    def test_hero_art_grid_ids_are_unique_across_blocks(self):
+        # F1a-T2 review gotcha: _hero_art("grid") used a FIXED pattern id — two
+        # grid blocks in one document produced duplicate DOM ids (invalid
+        # markup, and the second <rect fill="url(#g)"> could resolve to either
+        # <pattern>). Each call must mint its own id.
+        html = doc_render.render_html(
+            {"title": "T", "blocks": [
+                {"type": "section_cover", "title": "A", "hero_art": "grid"},
+                {"type": "section_cover", "title": "B", "hero_art": "grid"},
+            ]}, HERE)
+        pattern_ids = re.findall(r'<pattern id="(g[^"]*)"', html)
+        self.assertEqual(len(pattern_ids), 2)
+        self.assertEqual(len(pattern_ids), len(set(pattern_ids)))
+        for pid in pattern_ids:
+            self.assertIn(f'url(#{pid})', html)
 
 
 class DesignTokens(unittest.TestCase):

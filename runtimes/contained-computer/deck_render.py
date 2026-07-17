@@ -121,8 +121,9 @@ def render_html(deck, base_dir):
         theme = {**DEFAULT_THEME, **{k: v for k, v in raw_theme.items() if v}}
     logo = data_url(theme.get("logo", ""), base_dir)
     slides_html = []
-    for s in deck.get("slides", []):
-        slides_html.append(_html_slide(s, base_dir, logo))
+    # enumerate() gives _hero_art a call-unique seq per slide (see _hero_art docstring).
+    for seq, s in enumerate(deck.get("slides", [])):
+        slides_html.append(_html_slide(s, base_dir, logo, seq))
     css = _HTML_CSS.format(
         primary=theme["primary"],
         secondary=theme["secondary"],
@@ -154,19 +155,23 @@ def _eyebrow(text):
     return f'<div class="eyebrow">{html_escape(text)}</div>' if text else ""
 
 
-def _hero_art(kind):
+def _hero_art(kind, seq):
     # Procedural editorial art — inline SVG, zero external images (license-clean,
     # local). Uses currentColor so it inherits the accent set on the cover.
+    # `seq` makes the pattern id call-unique: a fixed "g" id collided when two
+    # grid slides (e.g. cover + section) landed in the same deck (duplicate
+    # DOM ids, invalid markup — found in review, fixed here and in doc_render).
     if kind == "rings":
         return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden><g fill="none" '
                 'stroke="currentColor" stroke-width="1.5" opacity=".5">'
                 + "".join(f'<circle cx="300" cy="90" r="{r}"/>' for r in (40, 80, 120, 170))
                 + "</g></svg>")
     if kind == "grid":
-        return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden>'
-                '<defs><pattern id="g" width="26" height="26" patternUnits="userSpaceOnUse">'
-                '<path d="M26 0H0V26" fill="none" stroke="currentColor" stroke-width="1" '
-                'opacity=".35"/></pattern></defs><rect width="400" height="400" fill="url(#g)"/></svg>')
+        gid = f"g{seq}"
+        return (f'<svg class="hero-art" viewBox="0 0 400 400" aria-hidden>'
+                f'<defs><pattern id="{gid}" width="26" height="26" patternUnits="userSpaceOnUse">'
+                f'<path d="M26 0H0V26" fill="none" stroke="currentColor" stroke-width="1" '
+                f'opacity=".35"/></pattern></defs><rect width="400" height="400" fill="url(#{gid})"/></svg>')
     if kind == "gradient":
         return '<div class="hero-art hero-grad" aria-hidden></div>'
     return ""
@@ -178,14 +183,14 @@ def _initials(name):
     return "".join(p[0].upper() for p in parts[:2])
 
 
-def _html_slide(s, base_dir, logo):
+def _html_slide(s, base_dir, logo, seq=0):
     layout = s.get("layout", "bullets")
     title = html_escape(s.get("title", ""))
     img = data_url(s.get("image", ""), base_dir)
     if layout == "cover":
         return (
             f'<section class="slide cover">{_logo_html(logo)}'
-            f'{_hero_art(s.get("hero_art", ""))}'
+            f'{_hero_art(s.get("hero_art", ""), seq)}'
             f'{_eyebrow(s.get("eyebrow", ""))}'
             f"<h1>{title}</h1>"
             f'<div class="sub">{html_escape(s.get("subtitle",""))}</div>'
@@ -194,7 +199,7 @@ def _html_slide(s, base_dir, logo):
     if layout == "section":
         return (
             f'<section class="slide section">{_logo_html(logo)}'
-            f'{_hero_art(s.get("hero_art", ""))}'
+            f'{_hero_art(s.get("hero_art", ""), seq)}'
             f'{_eyebrow(s.get("eyebrow", ""))}'
             f"<h1>{title}</h1><div class=\"accent-bar\"></div></section>"
         )
