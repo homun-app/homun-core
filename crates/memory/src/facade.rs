@@ -1528,6 +1528,10 @@ impl MemoryFacade {
             .ok_or_else(|| MemoryError::validation("publication_collection_unknown"))?;
         let candidate =
             self.find_publication_candidate(&proposed, destination, proposed_collection)?;
+        let source_evidence = self
+            .store
+            .evidence_for(&source.reference, &source.user_id, &source.workspace_id)
+            .map_err(MemoryError::Store)?;
         let now = current_timestamp();
         let proposal = MemoryPublicationProposal {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1542,7 +1546,7 @@ impl MemoryFacade {
             proposed_collection,
             proposed_privacy_domain: proposed.privacy_domain,
             proposed_sensitivity: proposed.sensitivity,
-            source_revision: publication_source_revision(&source)?,
+            source_revision: publication_source_revision(&source, &source_evidence)?,
             reason_code: publication_pending_reason(candidate.as_ref()),
             candidate,
             resolution: None,
@@ -1621,7 +1625,11 @@ impl MemoryFacade {
             self.mark_publication_failed_if_pending(id, actor, expected_version, error.as_str());
             return Err(error);
         }
-        if publication_source_revision(&source)? != proposal.source_revision {
+        let source_evidence = self
+            .store
+            .evidence_for(&source.reference, &source.user_id, &source.workspace_id)
+            .map_err(MemoryError::Store)?;
+        if publication_source_revision(&source, &source_evidence)? != proposal.source_revision {
             self.mark_publication_failed_if_pending(
                 id,
                 actor,
@@ -1830,7 +1838,11 @@ impl MemoryFacade {
             );
             return Err(error);
         }
-        if publication_source_revision(&source)? != proposal.source_revision {
+        let source_evidence = self
+            .store
+            .evidence_for(&source.reference, &source.user_id, &source.workspace_id)
+            .map_err(MemoryError::Store)?;
+        if publication_source_revision(&source, &source_evidence)? != proposal.source_revision {
             self.mark_publication_failed_if_pending(
                 &proposal.id,
                 actor,
@@ -1846,11 +1858,14 @@ impl MemoryFacade {
         );
         self.validate_publication_destination(&source, &destination_scope)?;
         validate_publication_proposed_payload(&proposal)?;
-        let candidate = self.find_publication_candidate(
+        let destination_snapshot = self
+            .store
+            .list_memories(&destination_scope.user_id, &destination_scope.workspace_id)?;
+        let candidate = Self::find_publication_candidate_in(
+            &destination_snapshot,
             &publication_candidate_record(&source, &proposal),
-            &destination_scope,
             proposal.proposed_collection,
-        )?;
+        );
         if candidate != proposal.candidate {
             // The first approver may have committed atomically after this turn
             // loaded the pending proposal but before candidate revalidation.
@@ -1899,7 +1914,15 @@ impl MemoryFacade {
         };
         match self
             .store
-            .commit_publication(&proposal, &destination, &source_with_alias, &link)
+            .commit_publication(
+                &proposal,
+                &destination,
+                &source_with_alias,
+                &link,
+                &source,
+                &source_evidence,
+                &destination_snapshot,
+            )
             .map_err(memory_publication_error)
         {
             Ok(approved) => {
@@ -2036,6 +2059,18 @@ impl MemoryFacade {
         let candidates = self
             .store
             .list_memories(&destination.user_id, &destination.workspace_id)?;
+        Ok(Self::find_publication_candidate_in(
+            &candidates,
+            source,
+            collection,
+        ))
+    }
+
+    fn find_publication_candidate_in(
+        candidates: &[MemoryRecord],
+        source: &MemoryRecord,
+        collection: MemoryCollectionKey,
+    ) -> Option<MemoryPublicationCandidate> {
         if let Some(candidate) = candidates.iter().find(|candidate| {
             publication_candidate_is_eligible(candidate)
                 && !is_published_alias(candidate)
@@ -2044,14 +2079,14 @@ impl MemoryFacade {
                 && candidate.privacy_domain == source.privacy_domain
                 && candidate.sensitivity == source.sensitivity
         }) {
-            return Ok(Some(MemoryPublicationCandidate::CompatibleDuplicate {
+            return Some(MemoryPublicationCandidate::CompatibleDuplicate {
                 destination_ref: candidate.reference.clone(),
-            }));
+            });
         }
         let source_subject = publication_subject_key(source);
-        Ok(source_subject.and_then(|subject| {
+        source_subject.and_then(|subject| {
             candidates
-                .into_iter()
+                .iter()
                 .filter(|candidate| {
                     publication_candidate_is_eligible(candidate)
                         && !is_published_alias(candidate)
@@ -2061,9 +2096,9 @@ impl MemoryFacade {
                 })
                 .min_by(|left, right| left.reference.to_string().cmp(&right.reference.to_string()))
                 .map(|candidate| MemoryPublicationCandidate::Conflict {
-                    destination_ref: candidate.reference,
+                    destination_ref: candidate.reference.clone(),
                 })
-        }))
+        })
     }
 
     fn publication_destination_record(
@@ -2484,16 +2519,13 @@ fn publication_candidate_record(
     candidate
 }
 
-fn publication_source_revision(source: &MemoryRecord) -> MemoryResult<String> {
+fn publication_source_revision(
+    source: &MemoryRecord,
+    evidence: &[MemoryEvidence],
+) -> MemoryResult<String> {
     let payload = serde_json::json!({
-        "reference": &source.reference,
-        "memory_type": &source.memory_type,
-        "text": &source.text,
-        "privacy_domain": source.privacy_domain.as_str(),
-        "sensitivity": source.sensitivity,
-        "status": source.status,
-        "updated_at": &source.updated_at,
-        "semantic_metadata": publication_semantic_metadata(source)?,
+        "record": source,
+        "evidence": evidence,
     });
     let encoded = serde_json::to_vec(&payload).map_err(|_| {
         MemoryError::Store("publication source revision serialization failed".to_string())

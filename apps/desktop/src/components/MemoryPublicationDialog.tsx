@@ -107,6 +107,59 @@ export function MemoryPublicationDialog({
     onClose();
   }
 
+  // Closing the review is local-only. Rejecting is a distinct, explicit
+  // mutation: Escape, the close affordance, and the backdrop must never turn a
+  // harmless dismissal into a stale server request.
+  function dismissDialog() {
+    closeDialog();
+  }
+
+  async function reconcilePublicationConflict(
+    proposalId: string,
+    generation: number,
+  ) {
+    try {
+      const latest = await coreBridge.memoryPublication(proposalId);
+      if (!active.current || requestGeneration.current !== generation) return;
+      if (latest.status !== "pending") {
+        // A terminal proposal must never leave the dialog stranded merely
+        // because a best-effort parent refresh failed.
+        try {
+          await onPublished();
+        } catch {
+          // Closing is still correct: the next opener will load server state.
+        }
+        if (!active.current || requestGeneration.current !== generation) return;
+        closeDialog();
+        return;
+      }
+      hydrateFromServer(latest);
+      setSaving(false);
+      setError(t("memoryPublication.errors.publication_conflict"));
+    } catch (refreshError) {
+      if (active.current && requestGeneration.current === generation) {
+        setSaving(false);
+        setError(localizeError(refreshError));
+      }
+    }
+  }
+
+  async function handlePublicationMutationFailure(
+    err: unknown,
+    pendingProposal: MemoryPublicationProposal | null,
+    generation: number,
+  ) {
+    const code = err instanceof Error ? err.message.trim() : "";
+    if (pendingProposal && (code === "publication_conflict" || code === "publication_source_changed")) {
+      await reconcilePublicationConflict(pendingProposal.id, generation);
+      return;
+    }
+    if (active.current && requestGeneration.current === generation) {
+      setSaving(false);
+      setError(localizeError(err));
+    }
+  }
+
   useEffect(() => {
     active.current = true;
     const generation = ++requestGeneration.current;
@@ -133,7 +186,7 @@ export function MemoryPublicationDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opener]);
 
-  async function rejectAndClose() {
+  async function rejectProposal() {
     const pendingProposal = proposal;
     const generation = ++requestGeneration.current;
     setSaving(true);
@@ -146,12 +199,15 @@ export function MemoryPublicationDialog({
         );
       }
       if (!active.current || requestGeneration.current !== generation) return;
+      try {
+        await onPublished();
+      } catch {
+        // Reject is terminal even if the surrounding view refresh is retried later.
+      }
+      if (!active.current || requestGeneration.current !== generation) return;
       closeDialog();
     } catch (err) {
-      if (active.current && requestGeneration.current === generation) {
-        setSaving(false);
-        setError(localizeError(err));
-      }
+      await handlePublicationMutationFailure(err, pendingProposal, generation);
     }
   }
 
@@ -159,7 +215,7 @@ export function MemoryPublicationDialog({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !saving) {
         event.preventDefault();
-        void rejectAndClose();
+        dismissDialog();
         return;
       }
       if (event.key !== "Tab" || !dialogRef.current) return;
@@ -203,10 +259,7 @@ export function MemoryPublicationDialog({
       hydrateFromServer(next);
       setSaving(false);
     } catch (err) {
-      if (active.current && requestGeneration.current === generation) {
-        setSaving(false);
-        setError(localizeError(err));
-      }
+      await handlePublicationMutationFailure(err, proposal, generation);
     }
   }
 
@@ -237,10 +290,7 @@ export function MemoryPublicationDialog({
       hydrateFromServer(next);
       setSaving(false);
     } catch (err) {
-      if (active.current && requestGeneration.current === generation) {
-        setSaving(false);
-        setError(localizeError(err));
-      }
+      await handlePublicationMutationFailure(err, proposal, generation);
     }
   }
 
@@ -256,14 +306,15 @@ export function MemoryPublicationDialog({
         resolution,
       );
       if (!active.current || requestGeneration.current !== generation) return;
-      await onPublished();
+      try {
+        await onPublished();
+      } catch {
+        // Approval has committed; closing avoids trapping a terminal dialog.
+      }
       if (!active.current || requestGeneration.current !== generation) return;
       closeDialog();
     } catch (err) {
-      if (active.current && requestGeneration.current === generation) {
-        setSaving(false);
-        setError(localizeError(err));
-      }
+      await handlePublicationMutationFailure(err, proposal, generation);
     }
   }
 
@@ -271,11 +322,13 @@ export function MemoryPublicationDialog({
   const conflict = proposal?.candidate?.kind === "conflict";
 
   return (
-    <div className="memory-publication-backdrop" role="presentation">
+    <div className="memory-publication-backdrop" role="presentation" onMouseDown={(event) => {
+      if (!saving && event.target === event.currentTarget) dismissDialog();
+    }}>
       <section ref={dialogRef} className="memory-publication-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-publication-title" tabIndex={-1}>
         <header className="memory-publication-header">
           <div><p className="eyebrow">{t("memoryPublication.title")}</p><h2 id="memory-publication-title">{t("memoryPublication.title")}</h2></div>
-          <button ref={closeButtonRef} type="button" className="small-icon-button" onClick={() => void rejectAndClose()} disabled={saving} aria-label={t("common.close", { defaultValue: "Close" })}>×</button>
+          <button ref={closeButtonRef} type="button" className="small-icon-button" onClick={dismissDialog} disabled={saving} aria-label={t("common.close", { defaultValue: "Close" })}>×</button>
         </header>
         {loading ? <p className="memory-publication-status">{t("memoryPublication.loading")}</p> : null}
         {error ? <p className="memory-publication-error" role="alert">{error}</p> : null}
@@ -322,7 +375,7 @@ export function MemoryPublicationDialog({
           <label className="memory-publication-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} disabled={saving || hasEdits} /><span>{t("memoryPublication.canonicalConfirmation")}</span></label>
         </> : null}
         <footer className="memory-publication-actions">
-          <button type="button" className="secondary-button" onClick={() => void rejectAndClose()} disabled={saving}>{t("memoryPublication.reject")}</button>
+          <button type="button" className="secondary-button" onClick={() => void rejectProposal()} disabled={saving}>{t("memoryPublication.reject")}</button>
           {!proposal ? <button type="button" className="primary-button" onClick={() => void prepareProposal()} disabled={saving || loading || !destinationWorkspaceId}>{saving ? t("memoryPublication.saving") : t("memoryPublication.review")}</button> : hasEdits ? <button type="button" className="primary-button" onClick={() => void reviewEdits()} disabled={saving}>{saving ? t("memoryPublication.saving") : t("memoryPublication.review")}</button> : <button type="button" className="primary-button" onClick={() => void approve()} disabled={saving || !confirmed || !resolution}>{saving ? t("memoryPublication.saving") : t("memoryPublication.approve")}</button>}
         </footer>
       </section>

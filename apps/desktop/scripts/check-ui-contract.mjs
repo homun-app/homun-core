@@ -185,6 +185,12 @@ assertContains("src/components/MemoryPublicationDialog.tsx", "destination_worksp
 assertNotContains("src/components/MemoryPublicationDialog.tsx", "initialText", "publication preview must not seed a client-side recall payload");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.approveMemoryPublication", "publication must require explicit approval");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.rejectMemoryPublication", "publication must support rejection without writes");
+assertContains("src/components/MemoryPublicationDialog.tsx", "function dismissDialog()", "publication dismissal must be a local-only action");
+assertContains("src/components/MemoryPublicationDialog.tsx", "function rejectProposal()", "publication rejection must remain an explicit action");
+assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.memoryPublication", "publication conflicts must reconcile against the latest server proposal");
+assertContains("src/components/MemoryPublicationDialog.tsx", "reconcilePublicationConflict", "stale publication mutations must refresh or close safely");
+assertContains("src/components/MemoryPublicationDialog.tsx", "event.target === event.currentTarget", "publication backdrop dismissal must not submit a rejection");
+assertNotContains("src/components/MemoryPublicationDialog.tsx", "rejectAndClose", "local dialog exits must never invoke a stale reject request");
 assertContains("src/components/MemoryUsagePopover.tsx", "hit.source_workspace_id === consumerWorkspaceId", "publication must be limited to the current consumer workspace");
 assertContains("src/components/MemoryUsagePopover.tsx", "hit.grant_id === null", "publication must never be offered for linked or legacy sources");
 assertContains("src/components/ChatView.tsx", "onPublicationApproved={refreshAfterChatSubmit}", "successful publication must refresh persisted task data");

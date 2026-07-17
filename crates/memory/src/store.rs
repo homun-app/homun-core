@@ -1231,6 +1231,9 @@ impl SQLiteMemoryStore {
         destination: &MemoryRecord,
         source_with_alias: &MemoryRecord,
         link: &MemoryPublicationLink,
+        expected_source: &MemoryRecord,
+        expected_source_evidence: &[MemoryEvidence],
+        expected_destination_scope: &[MemoryRecord],
     ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
         let mut conn = self.write_conn();
         let transaction = conn
@@ -1254,6 +1257,41 @@ impl SQLiteMemoryStore {
         {
             return Err(MemoryPublicationStoreError::validation(
                 "publication transaction scope mismatch",
+            ));
+        }
+
+        // The facade's policy/candidate check happens before this writer lock is
+        // acquired. Re-read its complete inputs under the same IMMEDIATE
+        // transaction that owns the writes, so a source mutation, tombstone, or
+        // destination conflict cannot slip between validation and commit.
+        let source = visible_memory_exact_on(
+            &transaction,
+            &proposal.source_ref,
+            &proposal.source_user_id,
+            &proposal.source_workspace_id,
+        )
+        .map_err(MemoryPublicationStoreError::store)?;
+        if source.as_ref() != Some(expected_source) {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_source_changed",
+            ));
+        }
+        let source_evidence = evidence_for_on(&transaction, &proposal.source_ref)
+            .map_err(MemoryPublicationStoreError::store)?;
+        if source_evidence != expected_source_evidence {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_source_changed",
+            ));
+        }
+        let destination_scope = visible_memories_in_scope_on(
+            &transaction,
+            &proposal.destination_user_id,
+            &proposal.destination_workspace_id,
+        )
+        .map_err(MemoryPublicationStoreError::store)?;
+        if destination_scope != expected_destination_scope {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
             ));
         }
 
@@ -3625,6 +3663,99 @@ where
         Some(row) => mapper(row).map(Some),
         None => Ok(None),
     }
+}
+
+/// Exact record visibility check on an already-owned connection. Publication
+/// commit uses this after taking its IMMEDIATE transaction, avoiding a second
+/// mutex acquisition and keeping the tombstone check in the same snapshot.
+fn visible_memory_exact_on(
+    conn: &Connection,
+    reference: &MemoryRef,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) -> Result<Option<MemoryRecord>, String> {
+    query_optional(
+        conn,
+        "select m.ref, m.user_id, m.workspace_id, m.memory_type, m.text, m.aliases_json,
+                m.language_hints_json, m.confidence, m.status, m.privacy_domain,
+                m.sensitivity, m.metadata_json, m.created_at, m.updated_at,
+                m.last_seen_at, m.supersedes_json, m.superseded_by, m.correction_of
+         from memories m
+         where m.ref = ?1 and m.user_id = ?2 and m.workspace_id = ?3
+           and not exists (
+               select 1 from tombstones t
+               where t.ref = m.ref
+                 and t.user_id = m.user_id
+                 and t.workspace_id = m.workspace_id
+           )",
+        (
+            reference.to_string(),
+            user_id.as_str().to_string(),
+            workspace_id.as_str().to_string(),
+        ),
+        memory_from_row,
+    )
+}
+
+/// A deterministic, full-scope destination snapshot. This intentionally
+/// compares more than the selected candidate: any concurrent insert, update,
+/// or tombstone in the destination scope invalidates the approval preview.
+fn visible_memories_in_scope_on(
+    conn: &Connection,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) -> Result<Vec<MemoryRecord>, String> {
+    let mut statement = conn
+        .prepare(
+            "select m.ref, m.user_id, m.workspace_id, m.memory_type, m.text, m.aliases_json,
+                    m.language_hints_json, m.confidence, m.status, m.privacy_domain,
+                    m.sensitivity, m.metadata_json, m.created_at, m.updated_at,
+                    m.last_seen_at, m.supersedes_json, m.superseded_by, m.correction_of
+             from memories m
+             where m.user_id = ?1 and m.workspace_id = ?2
+               and not exists (
+                   select 1 from tombstones t
+                   where t.ref = m.ref
+                     and t.user_id = m.user_id
+                     and t.workspace_id = m.workspace_id
+               )
+             order by m.ref",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query((user_id.as_str(), workspace_id.as_str()))
+        .map_err(|error| error.to_string())?;
+    let mut memories = Vec::new();
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        memories.push(memory_from_row(row)?);
+    }
+    Ok(memories)
+}
+
+fn evidence_for_on(
+    conn: &Connection,
+    memory_ref: &MemoryRef,
+) -> Result<Vec<MemoryEvidence>, String> {
+    let mut statement = conn
+        .prepare(
+            "select memory_ref, evidence_ref, note
+             from memory_evidence
+             where memory_ref = ?1
+             order by evidence_ref",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query([memory_ref.to_string()])
+        .map_err(|error| error.to_string())?;
+    let mut evidence = Vec::new();
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        evidence.push(MemoryEvidence {
+            memory_ref: parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?,
+            evidence_ref: parse_ref(row.get::<_, String>(1).map_err(|error| error.to_string())?)?,
+            note: row.get(2).map_err(|error| error.to_string())?,
+        });
+    }
+    Ok(evidence)
 }
 
 /// Writes a memory through an already-open SQLite connection. Callers that own a

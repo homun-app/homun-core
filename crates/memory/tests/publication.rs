@@ -1,9 +1,10 @@
 use local_first_memory::{
-    AuthorizedMemorySource, DataSensitivity, MemoryCollectionKey, MemoryFacade,
+    AuthorizedMemorySource, DataSensitivity, MemoryCollectionKey, MemoryEvidence, MemoryFacade,
     MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationEditInput,
-    MemoryPublicationReasonCode, MemoryPublicationResolution, MemoryPublicationStatus,
-    MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus,
-    PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
+    MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
+    MemoryPublicationResolution, MemoryPublicationStatus, MemoryPublicationStoreError,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId,
+    WorkspaceId, recall_source_on_facade,
 };
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -126,6 +127,56 @@ fn edited_publication_persists_only_validated_safe_payload_and_source_revision()
         MemoryCollectionKey::Preferences
     );
     assert!(!proposal.source_revision.is_empty());
+}
+
+#[test]
+fn source_revision_hashes_full_record_and_ordered_evidence() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+
+    let mut changed = fixture.get_source(&source.reference);
+    changed.aliases.push("Italian reply preference".to_string());
+    changed.language_hints.push("en".to_string());
+    changed.confidence = 0.85;
+    changed.metadata = serde_json::json!({"subject": "style", "priority": "high"});
+    changed.last_seen_at = Some("unix:2.000000000".to_string());
+    changed.updated_at = "unix:2.000000000".to_string();
+    fixture.facade.upsert_memory(&changed).unwrap();
+    fixture
+        .facade
+        .link_evidence(&MemoryEvidence {
+            memory_ref: source.reference.clone(),
+            evidence_ref: MemoryRef::generated(
+                MemoryRefKind::Memory,
+                fixture.owner.clone(),
+                fixture.project.clone(),
+            ),
+            note: "Captured after preview".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        fixture
+            .facade
+            .update_publication_proposal_at_version(
+                &proposal.id,
+                OWNER,
+                proposal.proposal_version,
+                &MemoryPublicationEditInput {
+                    proposed_text: Some("Prefers concise Italian replies".to_string()),
+                    proposed_memory_type: None,
+                    proposed_privacy_domain: None,
+                    proposed_sensitivity: None,
+                },
+            )
+            .unwrap_err()
+            .as_str(),
+        "publication_source_changed"
+    );
 }
 
 #[test]
@@ -819,6 +870,218 @@ fn approval_revalidates_source_and_rejection_is_terminal() {
             .as_str(),
         "publication_not_pending"
     );
+}
+
+#[test]
+fn commit_transaction_rejects_source_snapshot_changed_after_facade_revalidation() {
+    let store = SQLiteMemoryStore::open_in_memory().unwrap();
+    let owner = UserId::new(OWNER);
+    let project = WorkspaceId::new(PROJECT);
+    let personal = WorkspaceId::new("__personal__");
+    let source = memory(&owner, &project, "preference", "Prefers Italian");
+    store.upsert_memory(&source).unwrap();
+    let proposal = pending_store_proposal(&source, &owner, &personal);
+    store.create_memory_publication_proposal(&proposal).unwrap();
+    let destination_snapshot = store.list_memories(&owner, &personal).unwrap();
+
+    // This is the deterministic interleaving point: the facade has already
+    // captured its source and destination preview, then another writer changes
+    // a committed source field before the approval transaction begins.
+    let mut changed = source.clone();
+    changed.language_hints.push("en".to_string());
+    changed.aliases.push("English preference".to_string());
+    changed.confidence = 0.8;
+    changed.metadata = serde_json::json!({"subject": "style", "changed": true});
+    changed.updated_at = "unix:2.000000000".to_string();
+    store.upsert_memory(&changed).unwrap();
+
+    let destination = memory(&owner, &personal, "preference", "Prefers Italian");
+    let link = MemoryPublicationLink {
+        source_ref: source.reference.clone(),
+        destination_ref: destination.reference.clone(),
+        approved_by: OWNER.to_string(),
+        created_at: "unix:3.000000000".to_string(),
+    };
+    let error = store
+        .commit_publication(
+            &proposal,
+            &destination,
+            &source,
+            &link,
+            &source,
+            &[],
+            &destination_snapshot,
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        MemoryPublicationStoreError::Conflict("publication_source_changed".to_string())
+    );
+    assert!(store.list_memories(&owner, &personal).unwrap().is_empty());
+    assert!(
+        store
+            .get_memory_publication_link(&source.reference)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .get_memory_publication_proposal(&proposal.id)
+            .unwrap()
+            .unwrap()
+            .status
+            == MemoryPublicationStatus::Pending
+    );
+}
+
+#[test]
+fn commit_transaction_rejects_new_destination_conflict_after_candidate_revalidation() {
+    let store = SQLiteMemoryStore::open_in_memory().unwrap();
+    let owner = UserId::new(OWNER);
+    let project = WorkspaceId::new(PROJECT);
+    let personal = WorkspaceId::new("__personal__");
+    let source = memory(&owner, &project, "preference", "Prefers Italian");
+    store.upsert_memory(&source).unwrap();
+    let proposal = pending_store_proposal(&source, &owner, &personal);
+    store.create_memory_publication_proposal(&proposal).unwrap();
+    let destination_snapshot = store.list_memories(&owner, &personal).unwrap();
+
+    // A new same-subject record arrives after candidate revalidation. The full
+    // destination-scope snapshot makes this a conflict before alias/link writes.
+    let competing = memory(&owner, &personal, "preference", "Prefers Italian");
+    store.upsert_memory(&competing).unwrap();
+    let destination = memory(&owner, &personal, "preference", "Prefers Italian");
+    let link = MemoryPublicationLink {
+        source_ref: source.reference.clone(),
+        destination_ref: destination.reference.clone(),
+        approved_by: OWNER.to_string(),
+        created_at: "unix:3.000000000".to_string(),
+    };
+    let error = store
+        .commit_publication(
+            &proposal,
+            &destination,
+            &source,
+            &link,
+            &source,
+            &[],
+            &destination_snapshot,
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        MemoryPublicationStoreError::Conflict("publication_conflict".to_string())
+    );
+    assert_eq!(
+        store.list_memories(&owner, &personal).unwrap(),
+        vec![competing]
+    );
+    assert!(
+        store
+            .get_memory_publication_link(&source.reference)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn commit_transaction_rejects_update_existing_target_changed_after_snapshot() {
+    let store = SQLiteMemoryStore::open_in_memory().unwrap();
+    let owner = UserId::new(OWNER);
+    let project = WorkspaceId::new(PROJECT);
+    let personal = WorkspaceId::new("__personal__");
+    let source = memory(&owner, &project, "preference", "Prefers Italian");
+    let existing = memory(&owner, &personal, "preference", "Prefers Italian");
+    store.upsert_memory(&source).unwrap();
+    store.upsert_memory(&existing).unwrap();
+    let mut proposal = pending_store_proposal(&source, &owner, &personal);
+    proposal.candidate = Some(MemoryPublicationCandidate::CompatibleDuplicate {
+        destination_ref: existing.reference.clone(),
+    });
+    proposal.resolution = Some(MemoryPublicationResolution::UpdateExisting {
+        destination_ref: existing.reference.clone(),
+    });
+    proposal.reason_code = MemoryPublicationReasonCode::PublicationDuplicateCompatible;
+    store.create_memory_publication_proposal(&proposal).unwrap();
+    let destination_snapshot = store.list_memories(&owner, &personal).unwrap();
+
+    // The exact update target changes after the facade captured the candidate
+    // and snapshot. The transaction must reject it before any alias/link write.
+    let mut changed_target = existing.clone();
+    changed_target.text = "Changed by another approval".to_string();
+    changed_target.updated_at = "unix:2.000000000".to_string();
+    store.upsert_memory(&changed_target).unwrap();
+    let link = MemoryPublicationLink {
+        source_ref: source.reference.clone(),
+        destination_ref: existing.reference.clone(),
+        approved_by: OWNER.to_string(),
+        created_at: "unix:3.000000000".to_string(),
+    };
+    let error = store
+        .commit_publication(
+            &proposal,
+            &existing,
+            &source,
+            &link,
+            &source,
+            &[],
+            &destination_snapshot,
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        MemoryPublicationStoreError::Conflict("publication_conflict".to_string())
+    );
+    assert_eq!(
+        store.list_memories(&owner, &personal).unwrap(),
+        vec![changed_target]
+    );
+    assert!(
+        store
+            .get_memory_publication_link(&source.reference)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        store
+            .get_memory(&source.reference, &owner, &project)
+            .unwrap()
+            .unwrap()
+            .metadata
+            .get("published_alias")
+            .is_none()
+    );
+}
+
+fn pending_store_proposal(
+    source: &MemoryRecord,
+    owner: &UserId,
+    destination_workspace: &WorkspaceId,
+) -> MemoryPublicationProposal {
+    MemoryPublicationProposal {
+        id: uuid::Uuid::new_v4().to_string(),
+        proposal_version: 1,
+        source_ref: source.reference.clone(),
+        source_user_id: source.user_id.clone(),
+        source_workspace_id: source.workspace_id.clone(),
+        destination_user_id: owner.clone(),
+        destination_workspace_id: destination_workspace.clone(),
+        proposed_text: source.text.clone(),
+        proposed_memory_type: source.memory_type.clone(),
+        proposed_collection: MemoryCollectionKey::Preferences,
+        proposed_privacy_domain: source.privacy_domain.clone(),
+        proposed_sensitivity: source.sensitivity,
+        source_revision: "sha256:test".to_string(),
+        candidate: None,
+        resolution: Some(MemoryPublicationResolution::CreateNew),
+        status: MemoryPublicationStatus::Pending,
+        reason_code: MemoryPublicationReasonCode::Pending,
+        failure_reason: None,
+        proposed_by: OWNER.to_string(),
+        decided_by: None,
+        created_at: "unix:1.000000000".to_string(),
+        updated_at: "unix:1.000000000".to_string(),
+    }
 }
 
 #[test]
