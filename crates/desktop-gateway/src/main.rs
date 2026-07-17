@@ -21223,6 +21223,29 @@ Use the text snapshot."
         }
 }
 
+/// S2 T4 (retry-safety): did the templated render GENUINELY deliver? True ONLY on the exact
+/// full-success condition `templated_document_outcome` uses for its "The document is DONE"
+/// message — `qa_failure.is_none()` AND all three of {html, pdf, docx} landed. A QA failure,
+/// a container-side render that dropped html/pdf, or a container-unreachable DOCX-only degrade
+/// are all `false`: the outcome message tells the user to RETRY, so the thread's routing
+/// binding must SURVIVE (a retry stays forced onto the same template instead of falling back
+/// to BM25 — the very regression S2 closes). Mirrors the make_deck gate
+/// (`produced has deck.pptx && rendered_deck_qa_failure.is_none()`). Pure seam so the
+/// clear-on-delivery decision is unit-testable without a live sandbox, and shares ONE success
+/// definition with `templated_document_outcome` (test `..._agrees_with_outcome_success` pins
+/// the two together so they can't drift).
+fn templated_document_delivered(produced: &[String], stem: &str, qa_failure: Option<&str>) -> bool {
+    if qa_failure.is_some() {
+        return false;
+    }
+    let html_name = format!("{stem}.html");
+    let pdf_name = format!("{stem}.pdf");
+    let docx_name = format!("{stem}.docx");
+    produced.iter().any(|name| name == &html_name)
+        && produced.iter().any(|name| name == &pdf_name)
+        && produced.iter().any(|name| name == &docx_name)
+}
+
 /// Pure decision for `make_templated_document`'s post-render outcome
 /// message, given which of {html, pdf, docx} actually landed on disk
 /// (`produced`, already filtered to existing non-zero-byte files by
@@ -21298,11 +21321,16 @@ fn templated_document_outcome(
 /// than inline in the `execute_chat_tool` dispatch match — so honest-failure
 /// early returns don't force a pyramid of nested match/if-let in the
 /// dispatch loop (the dispatch site just calls this and awaits).
-/// Returns `(result, delivered)`: `delivered` is `true` once the primary artifact actually
-/// landed (DOCX at minimum — the container-unreachable and QA-degraded outcomes still count,
-/// since a real file exists), `false` only on the early-return content/write failures below.
-/// S2 T4 uses `delivered` to clear the thread's routing binding without string-sniffing
-/// `result` (the message text is user-facing prose, not a status contract).
+/// Returns `(result, delivered)`: `delivered` is `true` ONLY on a genuine full delivery — the
+/// designed render produced html+pdf+docx AND passed QA (`templated_document_delivered`, the
+/// same condition the "The document is DONE" message uses). Every degraded/failed outcome —
+/// content/write early-returns, container-unreachable DOCX-only, a container-side render that
+/// dropped html/pdf, or a QA failure — is `false`, because each of those tells the user to
+/// retry and the retry must stay forced onto the same template (S2 T4 uses `delivered` to
+/// decide whether to clear the thread's routing binding; clearing on a failed render would
+/// drop the binding and let the retry fall back to BM25 — the regression S2 closes). Chosen
+/// over string-sniffing `result` (the message text is user-facing prose, not a status
+/// contract).
 async fn make_templated_document(
     ctx: &ChatToolCtx<'_>,
     append_output: &mut Vec<String>,
@@ -21448,9 +21476,12 @@ async fn make_templated_document(
             )
             .await;
             append_output.push(doc_out);
+            // Container unreachable → only the host-written DOCX exists, no designed render.
+            // `delivered = false`: the message tells the user to start the local computer and
+            // RETRY, so the routing binding must survive for that retry (retry-safety).
             (
                 "Document created (DOCX). Designed HTML/PDF need the local computer (start it and retry for the full render).".to_string(),
-                true,
+                false,
             )
         }
         Ok(render_out) => {
@@ -21472,15 +21503,21 @@ async fn make_templated_document(
             )
             .await;
             append_output.push(doc_out);
+            // The container ran, but `Ok` ≠ success — QA may have failed or html/pdf may not
+            // have landed (see `templated_document_outcome`'s degrade branches). Clear the
+            // binding ONLY on a genuine full delivery, computed from the SAME condition the
+            // outcome message uses, so a failed/incomplete render keeps the binding for retry.
+            let qa_failure = rendered_deck_qa_failure(&render_out);
+            let delivered = templated_document_delivered(&produced, &stem, qa_failure.as_deref());
             (
                 templated_document_outcome(
                     &produced,
                     &stem,
                     workflow_id,
-                    rendered_deck_qa_failure(&render_out).as_deref(),
+                    qa_failure.as_deref(),
                     &render_out,
                 ),
-                true,
+                delivered,
             )
         }
     }
@@ -57626,6 +57663,78 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::templated_document_outcome(&produced, "cv-elena", "wf_1", None, &long_output);
         assert!(message.contains("END_MARKER"), "{message}");
         assert!(message.len() < long_output.len(), "{message}");
+    }
+
+    #[test]
+    fn templated_document_delivered_is_false_on_qa_failure() {
+        // A full render (html+pdf+docx all landed) that FAILED QA is NOT a delivery — the
+        // outcome tells the user to fix and retry, so the routing binding must survive (no
+        // clear_routing_binding). Reuses the fixture shape from
+        // `templated_document_outcome_reports_qa_failure_even_with_full_render`.
+        let produced = vec![
+            "cv-elena.html".to_string(),
+            "cv-elena.pdf".to_string(),
+            "cv-elena.docx".to_string(),
+        ];
+        assert!(
+            !super::templated_document_delivered(
+                &produced,
+                "cv-elena",
+                Some("low_contrast: p contrast ratio 2.1 is below 4.5"),
+            ),
+            "a QA-failed render must not count as delivered (binding must survive for retry)"
+        );
+    }
+
+    #[test]
+    fn templated_document_delivered_is_false_when_html_or_pdf_missing() {
+        // Container-side render dropped html/pdf (only the host-written DOCX exists) — degraded,
+        // retry-safe → not delivered.
+        let produced = vec!["cv-elena.docx".to_string()];
+        assert!(
+            !super::templated_document_delivered(&produced, "cv-elena", None),
+            "a DOCX-only render must not count as delivered"
+        );
+    }
+
+    #[test]
+    fn templated_document_delivered_true_only_on_full_success() {
+        let produced = vec![
+            "cv-elena.html".to_string(),
+            "cv-elena.pdf".to_string(),
+            "cv-elena.docx".to_string(),
+        ];
+        assert!(super::templated_document_delivered(
+            &produced, "cv-elena", None
+        ));
+    }
+
+    #[test]
+    fn templated_document_delivered_agrees_with_outcome_success() {
+        // Pins the pure delivered-seam to `templated_document_outcome`'s success definition so
+        // the two can never drift: delivered == true IFF the outcome is the "DONE" message.
+        let full = vec![
+            "cv-elena.html".to_string(),
+            "cv-elena.pdf".to_string(),
+            "cv-elena.docx".to_string(),
+        ];
+        let docx_only = vec!["cv-elena.docx".to_string()];
+        let cases: &[(&[String], Option<&str>)] = &[
+            (&full, None),                            // full success
+            (&full, Some("low_contrast: 2.1 < 4.5")), // QA failure
+            (&docx_only, None),                       // html/pdf missing
+            (&[], None),                              // nothing produced
+        ];
+        for (produced, qa) in cases {
+            let delivered = super::templated_document_delivered(produced, "cv-elena", *qa);
+            let outcome =
+                super::templated_document_outcome(produced, "cv-elena", "wf_1", *qa, "output");
+            let outcome_is_success = outcome.contains("The document is DONE");
+            assert_eq!(
+                delivered, outcome_is_success,
+                "delivered ({delivered}) must match outcome success ({outcome_is_success}) for {produced:?} qa={qa:?}"
+            );
+        }
     }
 
     #[test]
