@@ -235,6 +235,7 @@ function ProjectsNav({
   const [projectModal, setProjectModal] = useState<ProjectModalState | null>(null);
   const [accessProject, setAccessProject] = useState<WorkspaceRecord | null>(null);
   const [memorySourcesProject, setMemorySourcesProject] = useState<WorkspaceRecord | null>(null);
+  const memorySourcesOpenerRef = useRef<HTMLElement | null>(null);
   const [projectMenu, setProjectMenu] = useState<{
     project: WorkspaceRecord;
     x: number;
@@ -395,7 +396,8 @@ function ProjectsNav({
     setAccessProject(project);
   }
 
-  function openMemorySources(project: WorkspaceRecord) {
+  function openMemorySources(project: WorkspaceRecord, opener: HTMLElement) {
+    memorySourcesOpenerRef.current = opener;
     setProjectMenu(null);
     setMemorySourcesProject(project);
   }
@@ -778,7 +780,7 @@ function ProjectsNav({
             <Shield size={15} />
             <span>Manage access</span>
           </button>
-          <button type="button" role="menuitem" onClick={() => openMemorySources(projectMenu.project)}>
+          <button type="button" role="menuitem" onClick={(event) => openMemorySources(projectMenu.project, event.currentTarget)}>
             <Brain size={15} />
             <span>{t("memorySources.title")}</span>
           </button>
@@ -833,6 +835,7 @@ function ProjectsNav({
       <MemorySourcesDialog
         workspace={memorySourcesProject}
         projects={projects}
+        opener={memorySourcesOpenerRef.current}
         onClose={() => setMemorySourcesProject(null)}
       />
 

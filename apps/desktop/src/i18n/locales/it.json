@@ -38,6 +38,10 @@
     },
     "expires": "Scade",
     "lastUsed": "Ultima consultazione",
+    "neverConsulted": "Mai consultata",
+    "modify": "Rivedi autorizzazione",
+    "revokeConfirmTitle": "Revocare l'accesso?",
+    "revokeConfirmBody": "I richiami futuri, il briefing e la cache di questo progetto saranno bloccati e invalidati subito. Le risposte già inviate non cambiano, la memoria nella fonte resta intatta e i record già pubblicati restano nella destinazione.",
     "wizardProgress": "Configurazione della fonte di memoria",
     "steps": {
       "source": "Fonte",

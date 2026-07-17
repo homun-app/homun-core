@@ -50339,6 +50339,13 @@ struct MemorySourceGrantView {
     revoked_at: Option<i64>,
     policy_version: u64,
     last_used_at: Option<i64>,
+    overrides: Vec<MemorySourceGrantOverrideView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemorySourceGrantOverrideView {
+    memory_ref: String,
+    effect: MemoryGrantOverrideEffect,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -50659,6 +50666,18 @@ fn memory_source_grant_views(
                 revoked_at: grant.revoked_at,
                 policy_version: grant.policy_version,
                 last_used_at: None,
+                overrides: {
+                    let mut overrides = grant
+                        .overrides
+                        .into_iter()
+                        .map(|(memory_ref, effect)| MemorySourceGrantOverrideView {
+                            memory_ref: memory_ref.to_string(),
+                            effect,
+                        })
+                        .collect::<Vec<_>>();
+                    overrides.sort_by(|left, right| left.memory_ref.cmp(&right.memory_ref));
+                    overrides
+                },
             }
         })
         .collect::<Vec<_>>();
@@ -50685,6 +50704,7 @@ fn memory_source_grant_views(
         revoked_at: None,
         policy_version: 0,
         last_used_at: None,
+        overrides: Vec::new(),
     });
     views.extend(linked);
     views
@@ -52502,7 +52522,8 @@ mod tests {
     #[test]
     fn memory_source_grant_views_keep_local_first_and_deleted_sources_revocable() {
         use local_first_memory::{
-            DataSensitivity, MemoryCollectionKey, MemorySourceGrant, UserId, WorkspaceId,
+            DataSensitivity, MemoryCollectionKey, MemoryGrantOverrideEffect, MemoryRef,
+            MemoryRefKind, MemorySourceGrant, UserId, WorkspaceId,
         };
         let consumer = memory_source_test_workspace("project-a", "Alpha");
         let workspaces = vec![consumer.clone()];
@@ -52514,7 +52535,15 @@ mod tests {
             source_workspace_id: WorkspaceId::new("deleted-project"),
             collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
             max_sensitivity: DataSensitivity::Private,
-            overrides: HashMap::new(),
+            overrides: HashMap::from([(
+                MemoryRef::new(
+                    MemoryRefKind::Memory,
+                    UserId::new("owner"),
+                    WorkspaceId::new("deleted-project"),
+                    "explicit-deny",
+                ),
+                MemoryGrantOverrideEffect::Deny,
+            )]),
             expires_at: None,
             revoked_at: None,
             policy_version: 1,
@@ -52529,6 +52558,9 @@ mod tests {
         assert!(!views[1].source_available);
         assert!(views[1].read_only);
         let json = serde_json::to_string(&views).unwrap();
+        assert!(json.contains(
+            "\"overrides\":[{\"memory_ref\":\"memory:local:owner:deleted-project:explicit-deny\",\"effect\":\"deny\"}]"
+        ));
         assert!(!json.contains("memory_text"));
         assert!(!json.contains("metadata"));
     }
@@ -53033,6 +53065,94 @@ mod tests {
         assert_eq!(body.as_array().unwrap().len(), 1);
         assert_eq!(body[0]["source_workspace_id"], "project-a");
         assert_eq!(body[0]["local"], true);
+        assert_eq!(body[0]["overrides"], serde_json::json!([]));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_list_route_roundtrips_typed_allow_and_deny_overrides() {
+        use axum::{body::Body, http::Request};
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemoryGrantOverrideEffect, MemoryRef,
+            MemoryRefKind, MemorySourceGrant, UserId, WorkspaceId,
+        };
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-list-overrides");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let grant = MemorySourceGrant {
+            id: "typed-overrides".to_string(),
+            consumer_user_id: owner.clone(),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: owner.clone(),
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::from([
+                (
+                    MemoryRef::new(
+                        MemoryRefKind::Memory,
+                        UserId::new(owner.as_str()),
+                        WorkspaceId::new("project-b"),
+                        "allow-record",
+                    ),
+                    MemoryGrantOverrideEffect::Allow,
+                ),
+                (
+                    MemoryRef::new(
+                        MemoryRefKind::Memory,
+                        UserId::new(owner.as_str()),
+                        WorkspaceId::new("project-b"),
+                        "deny-record",
+                    ),
+                    MemoryGrantOverrideEffect::Deny,
+                ),
+            ]),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: owner.as_str().to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        super::memory_facade(&state)
+            .upsert_memory_source_grant(&grant)
+            .unwrap();
+        let app = memory_source_route_test_app(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, listed) = memory_source_response_json(response).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let linked = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|view| view["id"] == "typed-overrides")
+            .unwrap();
+        assert_eq!(linked["overrides"], serde_json::json!([
+            {
+                "memory_ref": format!("memory:local:{}:project-b:allow-record", owner.as_str()),
+                "effect": "allow"
+            },
+            {
+                "memory_ref": format!("memory:local:{}:project-b:deny-record", owner.as_str()),
+                "effect": "deny"
+            }
+        ]));
+        assert!(serde_json::to_string(linked).unwrap().contains("memory_ref"));
+        assert!(!serde_json::to_string(linked).unwrap().contains("metadata"));
         std::fs::remove_dir_all(dir).ok();
     }
 

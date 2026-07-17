@@ -38,6 +38,10 @@
     },
     "expires": "Expires",
     "lastUsed": "Last consulted",
+    "neverConsulted": "Never consulted",
+    "modify": "Review access",
+    "revokeConfirmTitle": "Revoke access?",
+    "revokeConfirmBody": "Future recall, the briefing, and this project's cache are blocked and invalidated immediately. Past answers do not change, source memories stay intact, and already published records remain at their destination.",
     "wizardProgress": "Memory source setup",
     "steps": {
       "source": "Source",

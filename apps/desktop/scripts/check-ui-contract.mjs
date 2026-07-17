@@ -176,6 +176,11 @@ assertContains("src/components/Sidebar.tsx", "MemorySourcesDialog", "project men
 assertContains("src/components/MemorySourcesDialog.tsx", "Read only", "linked sources must state read-only access");
 assertContains("src/components/MemorySourcesDialog.tsx", "coreBridge.upsertMemorySource", "memory source grants must persist through the typed bridge");
 assertContains("src/components/MemorySourcesDialog.tsx", "coreBridge.revokeMemorySource", "memory sources must support immediate revocation");
+assertContains("src/components/MemorySourcesDialog.tsx", "openModifyGrant", "available linked sources must support reviewing their authorization");
+assertContains("src/components/MemorySourcesDialog.tsx", "revokeConfirmation", "revocation must require an explicit confirmation state");
+assertContains("src/components/MemorySourcesDialog.tsx", "closeDialog", "all dialog exits must reset transient source-management state");
+assertContains("src/components/MemorySourcesDialog.tsx", "Never consulted", "missing last-access timestamps must be disclosed clearly");
+assertContains("src/components/MemorySourcesDialog.tsx", "focusTrap", "memory source dialog must retain keyboard focus until closed");
 assertNotContains("src/components/ProjectAccessDialog.tsx", "MemorySourcesDialog", "contact access must not own source grants");
 assertContains("src/components/Sidebar.tsx", "data-nav-section={section}", "sidebar nav rows must expose registry-driven operational sections");
 assertContains("src/components/Sidebar.tsx", "data-promoted={item.promoted === true ? \"true\" : \"false\"}", "sidebar must preserve promoted addon metadata");

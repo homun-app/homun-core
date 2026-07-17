@@ -2050,6 +2050,7 @@ body.resizing-drawer {
 }
 
 .memory-sources-dialog {
+  position: relative;
   width: min(760px, calc(100vw - 48px));
   max-height: min(760px, calc(100vh - 48px));
   overflow: auto;
@@ -2145,6 +2146,7 @@ body.resizing-drawer {
 }
 
 .memory-sources-revoke,
+.memory-sources-review-action,
 .memory-sources-back,
 .memory-sources-suggestion,
 .memory-sources-override-actions button {
@@ -2168,6 +2170,20 @@ body.resizing-drawer {
   color: var(--danger);
 }
 
+.memory-sources-card-actions {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.memory-sources-review-action {
+  min-height: 30px;
+  padding: 0 9px;
+  color: var(--brand);
+}
+
 .memory-sources-back,
 .memory-sources-suggestion {
   justify-self: start;
@@ -2180,6 +2196,7 @@ body.resizing-drawer {
 }
 
 .memory-sources-revoke:hover,
+.memory-sources-review-action:hover,
 .memory-sources-back:hover,
 .memory-sources-suggestion:hover,
 .memory-sources-override-actions button:hover {
@@ -2338,6 +2355,32 @@ body.resizing-drawer {
   margin: 12px 0 0;
   color: var(--danger);
   font-size: 13px;
+}
+
+.memory-sources-revoke-confirmation {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  z-index: 2;
+  width: min(440px, calc(100% - 32px));
+  transform: translate(-50%, -50%);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.memory-sources-revoke-confirmation h3,
+.memory-sources-revoke-confirmation p {
+  margin: 0;
+}
+
+.memory-sources-revoke-confirmation p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 @media (max-width: 560px) {

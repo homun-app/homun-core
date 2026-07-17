@@ -1,5 +1,5 @@
 import { Brain, ChevronLeft, Database, Link2, LoaderCircle, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   coreBridge,
@@ -13,6 +13,7 @@ import {
 type MemorySourcesDialogProps = {
   workspace: WorkspaceRecord | null;
   projects: WorkspaceRecord[];
+  opener?: HTMLElement | null;
   onClose: () => void;
 };
 
@@ -21,6 +22,7 @@ type WizardStep = "source" | "collections" | "advanced" | "review";
 const PERSONAL_SOURCE_ID = "__personal__";
 const CANDIDATE_PAGE_SIZE = 40;
 // The English UI copy is "Read only" (localized through memorySources.readOnly).
+// Missing timestamps are disclosed as "Never consulted" through memorySources.neverConsulted.
 const COLLECTIONS: MemoryCollectionKey[] = [
   "preferences",
   "profile",
@@ -56,7 +58,7 @@ function summaryForGrant(grant: MemorySourceGrantView, locale: string) {
  * sources. It intentionally does not reuse ProjectAccessDialog: contacts may
  * restrict a capability, but never create a cross-memory source grant.
  */
-export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySourcesDialogProps) {
+export function MemorySourcesDialog({ workspace, projects, opener, onClose }: MemorySourcesDialogProps) {
   const { t, i18n } = useTranslation();
   const [grants, setGrants] = useState<MemorySourceGrantView[]>([]);
   const [loading, setLoading] = useState(false);
@@ -72,12 +74,18 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
   const [candidateOffset, setCandidateOffset] = useState(0);
   const [candidateHasMore, setCandidateHasMore] = useState(false);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
+  const [editingGrant, setEditingGrant] = useState<MemorySourceGrantView | null>(null);
+  const [revokeConfirmation, setRevokeConfirmation] = useState<MemorySourceGrantView | null>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const revokeConfirmRef = useRef<HTMLElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   const sourceOptions = useMemo(
     () => projects.filter((project) => project.id !== workspace?.id),
     [projects, workspace?.id],
   );
-  const linkedGrants = grants.filter((grant) => !grant.local);
+  const linkedGrants = grants.filter((grant) => !grant.local && !grant.revoked_at);
 
   async function loadGrants() {
     if (!workspace) return;
@@ -99,16 +107,62 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace?.id]);
 
+  const workspaceId = workspace?.id ?? "";
+
+  function closeDialog() {
+    resetWizard();
+    setRevokeConfirmation(null);
+    setEditingGrant(null);
+    setError(null);
+    onClose();
+    window.setTimeout(() => openerRef.current?.focus(), 0);
+  }
+
+  function focusTrap(event: KeyboardEvent) {
+    if (event.key !== "Tab") return;
+    const root = revokeConfirmation ? revokeConfirmRef.current : dialogRef.current;
+    if (!root) return;
+    const focusable = Array.from(root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter((element) => !element.hasAttribute("hidden"));
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable.at(-1)!;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   useEffect(() => {
     if (!workspace) return;
+    if (!openerRef.current) {
+      openerRef.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    }
+    const initialFocus = window.setTimeout(() => {
+      const nestedFirstAction = revokeConfirmRef.current?.querySelector<HTMLElement>("button:not([disabled])");
+      (nestedFirstAction ?? closeButtonRef.current)?.focus();
+    }, 0);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !saving) onClose();
+      focusTrap(event);
+      if (event.key === "Escape" && !saving) {
+        event.preventDefault();
+        if (revokeConfirmation) setRevokeConfirmation(null);
+        else closeDialog();
+      }
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose, saving, workspace]);
+    return () => {
+      window.clearTimeout(initialFocus);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  // closeDialog is intentionally recreated with current dialog state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.id, opener, saving, revokeConfirmation]);
 
-  const workspaceId = workspace?.id ?? "";
   if (!workspace || !workspaceId) return null;
 
   function resetWizard() {
@@ -121,7 +175,24 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
     setCandidates([]);
     setCandidateOffset(0);
     setCandidateHasMore(false);
+    setEditingGrant(null);
     setError(null);
+  }
+
+  function openModifyGrant(grant: MemorySourceGrantView) {
+    if (!grant.source_available) return;
+    setEditingGrant(grant);
+    setSourceWorkspaceId(grant.source_workspace_id);
+    setCollections(grant.collections);
+    setMaxSensitivity(grant.max_sensitivity);
+    setExpiresAt(grant.expires_at ?? null);
+    setOverrides(grant.overrides);
+    setCandidates([]);
+    setCandidateOffset(0);
+    setCandidateHasMore(false);
+    setError(null);
+    // Changes remain pending until the review screen and explicit confirmation.
+    setStep("collections");
   }
 
   function chooseSource(value: string) {
@@ -133,6 +204,7 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
     setCandidates([]);
     setCandidateOffset(0);
     setCandidateHasMore(false);
+    setEditingGrant(null);
     setError(null);
   }
 
@@ -207,7 +279,7 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
     }
   }
 
-  async function revokeGrant(grant: MemorySourceGrantView) {
+  async function confirmRevokeGrant(grant: MemorySourceGrantView) {
     if (!grant.id) return;
     setSaving(true);
     setError(null);
@@ -215,6 +287,7 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
       // The API revokes immediately; replacing our list with its response keeps the
       // UI from showing a source that can no longer be consulted.
       setGrants(await coreBridge.revokeMemorySource(workspaceId, grant.id));
+      setRevokeConfirmation(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -227,8 +300,9 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
     : sourceOptions.find((project) => project.id === sourceWorkspaceId)?.name ?? sourceWorkspaceId;
 
   return (
-    <div className="memory-sources-backdrop" role="presentation" onMouseDown={() => !saving && onClose()}>
+    <div className="memory-sources-backdrop" role="presentation" onMouseDown={() => !saving && closeDialog()}>
       <section
+        ref={dialogRef}
         className="memory-sources-dialog"
         role="dialog"
         aria-modal="true"
@@ -240,7 +314,7 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
             <p className="eyebrow">{t("memorySources.title")}</p>
             <h2>{workspace.name}</h2>
           </div>
-          <button className="icon-button" type="button" onClick={onClose} disabled={saving} aria-label={t("common.close")}>
+          <button ref={closeButtonRef} className="icon-button" type="button" onClick={closeDialog} disabled={saving} aria-label={t("common.close")}>
             <X size={16} />
           </button>
         </header>
@@ -275,27 +349,23 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
                         <p>{grant.collections.map((collection) => t(`memoryCollections.${collection}`)).join(" · ")}</p>
                         <small>{t("memorySources.sensitivity")}: {t(`memorySources.sensitivityValues.${grant.max_sensitivity}`)}</small>
                         {expires ? <small>{t("memorySources.expires")}: {expires}</small> : null}
-                        {used ? <small>{t("memorySources.lastUsed")}: {used}</small> : null}
+                        <small>{used ? `${t("memorySources.lastUsed")}: ${used}` : t("memorySources.neverConsulted")}</small>
                       </>
                     ) : (
                       <p>{t("memorySources.unavailableHint")}</p>
                     )}
                   </div>
-                  {grant.id ? (
-                    <button
-                      className="memory-sources-revoke"
-                      type="button"
-                      disabled={saving}
-                      onClick={() => void revokeGrant(grant)}
-                    >
+                  {grant.id ? <div className="memory-sources-card-actions">
+                    {grant.source_available ? <button className="memory-sources-review-action" type="button" disabled={saving} onClick={() => openModifyGrant(grant)}>{t("memorySources.modify")}</button> : null}
+                    <button className="memory-sources-revoke" type="button" disabled={saving} onClick={() => setRevokeConfirmation(grant)}>
                       <Trash2 size={14} /> {t("memorySources.revoke")}
                     </button>
-                  ) : null}
+                  </div> : null}
                 </article>
               );
             })}
             <p className="memory-sources-revoke-warning">{t("memorySources.revokeWarning")}</p>
-            <button className="primary-button" type="button" disabled={loading || saving} onClick={() => setStep("source")}>
+            <button className="primary-button" type="button" disabled={loading || saving} onClick={() => { resetWizard(); setStep("source"); }}>
               <Link2 size={15} /> {t("memorySources.connect")}
             </button>
           </div>
@@ -328,7 +398,7 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
             {step === "collections" ? (
               <>
                 <button className="memory-sources-back" type="button" onClick={() => setStep("source")}><ChevronLeft size={15} /> {t("common.back")}</button>
-                <h3>{t("memorySources.chooseCollections")}</h3>
+                <h3>{editingGrant ? t("memorySources.modify") : t("memorySources.chooseCollections")}</h3>
                 {sourceWorkspaceId === PERSONAL_SOURCE_ID ? (
                   <button className="memory-sources-suggestion" type="button" onClick={choosePersonalPreferences}>
                     {t("memorySources.addPersonalPreferences")}
@@ -410,6 +480,16 @@ export function MemorySourcesDialog({ workspace, projects, onClose }: MemorySour
             ) : null}
           </div>
         )}
+        {revokeConfirmation ? (
+          <section ref={revokeConfirmRef} className="memory-sources-revoke-confirmation" role="alertdialog" aria-modal="true" aria-label={t("memorySources.revokeConfirmTitle")}>
+            <h3>{t("memorySources.revokeConfirmTitle")}</h3>
+            <p>{t("memorySources.revokeConfirmBody")}</p>
+            <div className="memory-sources-actions">
+              <button className="secondary-button" type="button" disabled={saving} onClick={() => setRevokeConfirmation(null)}>{t("common.cancel")}</button>
+              <button className="memory-sources-revoke" type="button" disabled={saving} onClick={() => void confirmRevokeGrant(revokeConfirmation)}>{saving ? t("memorySources.saving") : t("memorySources.revoke")}</button>
+            </div>
+          </section>
+        ) : null}
         {error ? <p className="memory-sources-error" role="alert">{error}</p> : null}
       </section>
     </div>

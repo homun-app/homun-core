@@ -509,6 +509,7 @@ export interface MemorySourceGrantView {
   revoked_at?: number | null;
   policy_version: number;
   last_used_at?: number | null;
+  overrides: Array<{ memory_ref: string; effect: "allow" | "deny" }>;
 }
 
 export interface MemorySourceUpsertInput {
