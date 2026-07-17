@@ -33024,6 +33024,23 @@ async fn enqueue_turn(
         source,
         approval,
     };
+    // S2: persist a plugin-owned routing binding THREAD-scoped, before the turn runs.
+    // Root cause this closes: per-turn BM25 routing from the prompt alone loses the
+    // route on "Use template" intake follow-ups ("mio", "1 Senior developer…") that
+    // don't match the original route_text, falling through to the general AgentLoop
+    // (no tool pruning). Writing it here — once, at the turn that sets it — means the
+    // router (S2-T3) can read it on this turn AND every later turn of the thread that
+    // doesn't re-send it. Absent on ordinary turns: fail-open, no behavior change.
+    if let Some(binding) = &req.routing_binding {
+        let binding_json = serde_json::to_string(binding).map_err(|e| GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "routing_binding_invalid",
+            message: format!("routing_binding serialize: {e}"),
+        })?;
+        lock_store(&state)?
+            .set_thread_routing_binding(&req.thread_id, &binding_json)
+            .map_err(GatewayError::store)?;
+    }
     match enqueue_chat_turn_core(&state, &input) {
         Ok(enqueued) => {
             let turn_id = enqueued.task_id.as_str().to_string();

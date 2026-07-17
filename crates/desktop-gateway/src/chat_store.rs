@@ -298,6 +298,11 @@ pub const CHAT_STORE_MEMORY_BOUNDARY_AUDIT: &[ChatStoreMemoryBoundaryAudit] = &[
         canonical_policy: "conversation attachment cache; produced deliverables are artifacts in MemoryFacade",
     },
     ChatStoreMemoryBoundaryAudit {
+        table: "thread_routing_bindings",
+        graph_like: false,
+        canonical_policy: "UX/ops-only: plugin-owned deterministic routing pin (S2), read by the router; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
         table: "tool_runs",
         graph_like: false,
         canonical_policy: "connector execution telemetry; durable outcomes are explicit MemoryFacade records",
@@ -1446,6 +1451,54 @@ impl ChatStore {
         )
     }
 
+    // ── S2 plugin-owned deterministic routing: thread-scoped binding ───────────
+    // Storage-agnostic: this layer persists/returns the RAW JSON blob (the
+    // RoutingBinding shape lives in lib.rs) so chat_store.rs doesn't need to know
+    // or depend on that type — the caller (main.rs enqueue path / router) owns
+    // (de)serialization. One binding per thread: `on conflict` upsert keeps a later
+    // template pick replacing an earlier one instead of erroring or duplicating.
+
+    /// Persist (or replace) the routing binding for a thread. Called once, at
+    /// "Use template" enqueue — BEFORE the turn runs — so the binding is already
+    /// there for the router to read on this and every later turn of the thread.
+    pub fn set_thread_routing_binding(
+        &self,
+        thread_id: &str,
+        binding_json: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert into thread_routing_bindings (thread_id, binding_json, created_at)
+             values (?1, ?2, ?3)
+             on conflict(thread_id) do update set
+                binding_json = excluded.binding_json,
+                created_at = excluded.created_at",
+            params![thread_id, binding_json, Self::now_secs()],
+        )?;
+        Ok(())
+    }
+
+    /// The thread's routing binding, if any, as raw JSON. `None` (not an error) is
+    /// the common case — most threads never bind a route — so callers fail-open.
+    pub fn thread_routing_binding(&self, thread_id: &str) -> rusqlite::Result<Option<String>> {
+        self.conn
+            .query_row(
+                "select binding_json from thread_routing_bindings where thread_id = ?1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
+    /// Drop the thread's binding (e.g. once the bound deliverable is produced —
+    /// S2-T4). Idempotent: clearing an unbound thread is a no-op, not an error.
+    pub fn clear_thread_routing_binding(&self, thread_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "delete from thread_routing_bindings where thread_id = ?1",
+            params![thread_id],
+        )?;
+        Ok(())
+    }
+
     pub fn contact_id_by_identity(
         &self,
         channel: &str,
@@ -2403,6 +2456,20 @@ impl ChatStore {
                 on tag_assignments(entity_type, entity_id);
             create index if not exists idx_tag_assignments_tag
                 on tag_assignments(tag_id);
+
+            -- S2 plugin-owned deterministic routing: a THREAD-scoped binding to a
+            -- WorkflowRouting (capabilities::workflow_routing), set once when the user
+            -- picks a template/route (e.g. 'Use template') and read at EVERY turn of the
+            -- thread. Per-turn BM25 routing from the prompt alone breaks on intake
+            -- follow-ups ('mio', '1 Senior developer…') that don't match the original
+            -- route_text — this survives those turns because it isn't re-derived per turn.
+            -- One binding per thread (primary key), storage-agnostic JSON blob (the schema
+            -- lives in RoutingBinding, lib.rs) so this layer doesn't need to know its shape.
+            create table if not exists thread_routing_bindings (
+                thread_id text primary key,
+                binding_json text not null,
+                created_at integer not null
+            );
 
             ",
         )?;
@@ -3616,6 +3683,52 @@ mod tests {
         store.delete_tag("t_blue").unwrap();
         assert_eq!(store.list_tags().unwrap().len(), 1);
         assert!(store.entities_for_tag("t_blue").unwrap().is_empty());
+    }
+
+    #[test]
+    fn thread_routing_binding_round_trips_and_clears() {
+        let store = ChatStore::in_memory().unwrap();
+
+        // Unbound thread: None, not an error (fail-open is the default state).
+        assert!(store.thread_routing_binding("t1").unwrap().is_none());
+
+        // set → read: the exact JSON blob round-trips byte-for-byte.
+        let binding_json = serde_json::json!({
+            "plugin_id": "presentations",
+            "route_id": "presentations.template_document",
+            "args": {"template_ref": "homun/cv-professional-01"},
+        })
+        .to_string();
+        store
+            .set_thread_routing_binding("t1", &binding_json)
+            .unwrap();
+        let read_back = store.thread_routing_binding("t1").unwrap().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&read_back).unwrap();
+        assert_eq!(parsed["route_id"], "presentations.template_document");
+        assert_eq!(parsed["plugin_id"], "presentations");
+
+        // A second bind on the SAME thread replaces (upsert), not duplicates.
+        let replacement = serde_json::json!({
+            "plugin_id": "presentations",
+            "route_id": "presentations.template_deck",
+            "args": {},
+        })
+        .to_string();
+        store
+            .set_thread_routing_binding("t1", &replacement)
+            .unwrap();
+        let replaced: serde_json::Value =
+            serde_json::from_str(&store.thread_routing_binding("t1").unwrap().unwrap()).unwrap();
+        assert_eq!(replaced["route_id"], "presentations.template_deck");
+
+        // A different thread is unaffected (primary key is per-thread).
+        assert!(store.thread_routing_binding("t2").unwrap().is_none());
+
+        // clear removes it; clearing again (or an unbound thread) is a no-op, not an error.
+        store.clear_thread_routing_binding("t1").unwrap();
+        assert!(store.thread_routing_binding("t1").unwrap().is_none());
+        store.clear_thread_routing_binding("t1").unwrap();
+        store.clear_thread_routing_binding("never_bound").unwrap();
     }
 
     #[test]

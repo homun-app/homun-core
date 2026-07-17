@@ -105,6 +105,23 @@ pub struct ChatGenerateStreamRequest {
     pub mode: Option<String>,
 }
 
+/// A plugin-owned deterministic routing binding (S2), pinned to a THREAD rather than
+/// re-derived per-turn from the prompt via BM25. Root cause this fixes: "Use template"
+/// intake follow-up turns ("mio", "1 Senior developer…") don't BM25-match the original
+/// route text, so per-turn routing falls through to the general AgentLoop (no tool
+/// pruning) and a weak model wanders into skills/shell. Set once when the user picks a
+/// template/route; read at EVERY turn of the thread so it survives those intake turns.
+/// Mirrors `capabilities::workflow_routing::WorkflowRouting`'s `plugin_id`/`route_id`
+/// naming so the two line up when the router (S2-T3) resolves this binding back to a
+/// registered `WorkflowRouting`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingBinding {
+    pub plugin_id: String,
+    pub route_id: String,
+    #[serde(default)]
+    pub args: serde_json::Value,
+}
+
 /// Body for POST /api/chat/turns. The new broker entry point.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EnqueueTurnRequest {
@@ -130,6 +147,13 @@ pub struct EnqueueTurnRequest {
     /// "interactive" | "automation" | "channel" | "connector". Defaults to "interactive".
     #[serde(default)]
     pub source: Option<String>,
+    /// Set on the turn that picks a plugin template/route (e.g. "Use template"). When
+    /// present it is persisted thread-scoped (see `chat_store::ChatStore::
+    /// set_thread_routing_binding`) BEFORE the turn runs, so the binding outlives this
+    /// one request and keeps steering every later turn of the thread. Absent on
+    /// ordinary turns — fail-open, no behavior change.
+    #[serde(default)]
+    pub routing_binding: Option<RoutingBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
