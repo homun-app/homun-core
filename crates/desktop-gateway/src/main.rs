@@ -25437,10 +25437,19 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
     // template" prompt + at least one intake reply) by the time generation runs here — the
     // broker inserts the CURRENT turn's user message atomically at enqueue, before the worker
     // ever calls in (see `enqueue_chat_turn_core`), so a plain count already includes it.
-    let forced_tool: Option<String> = forced_tool_for_turn(
-        resolved_workflow_routing.as_ref(),
-        thread_user_message_count_fail_open(state, request.thread_id.as_deref()),
-    );
+    // Final-review fix (I3): only compute the user-message count when a binding actually
+    // resolved — `thread_user_message_count_fail_open` loads the WHOLE thread message history
+    // + takes a store lock, and `forced_tool_for_turn` returns `None` unconditionally when
+    // `routing` is `None` anyway, so an ordinary turn (no binding) previously paid for that
+    // load and threw the result away. Gating here skips the messages() load entirely for the
+    // overwhelming majority of turns; behavior is identical when a binding IS present.
+    let forced_tool: Option<String> = match resolved_workflow_routing.as_ref() {
+        Some(routing) => forced_tool_for_turn(
+            Some(routing),
+            thread_user_message_count_fail_open(state, request.thread_id.as_deref()),
+        ),
+        None => None,
+    };
     let system = match capability_router_instruction_for_decision(&capability_route) {
         Some(instruction) => format!("{system}\n\n{instruction}"),
         None => system,

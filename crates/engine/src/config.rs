@@ -32,13 +32,21 @@ pub struct TurnConfig {
     pub step_verification: bool,
     /// Dev-time verbose logging gate.
     pub verbose: bool,
-    /// S2 T5 (plugin-owned deterministic routing): the routed tool to FORCE `tool_choice` onto
-    /// for the turn's main per-round model call — belt-and-suspenders on top of the hard-prune
-    /// (S2 T4), which already narrows the offered toolset to the routed tool alone. Resolved
-    /// gateway-side ONCE per turn from (the active `RoutingBinding`, its `Forcing::Specific`, and
-    /// the thread's user-message count). `None` on the workflow's FIRST turn — the model must
-    /// stay free to ask intake questions instead of being railroaded into an immediate, likely
-    /// under-specified tool call — and for every turn without an active deterministic binding
-    /// (ordinary chats, browse sub-turns): unchanged "auto" behavior.
+    /// S2 T5 (plugin-owned deterministic routing): the routed tool to FORCE `tool_choice` onto —
+    /// belt-and-suspenders on top of the hard-prune (S2 T4), which already narrows the offered
+    /// toolset to the routed tool alone. Resolved gateway-side ONCE per turn from (the active
+    /// `RoutingBinding`, its `Forcing::Specific`, and the thread's user-message count). `None` on
+    /// the workflow's FIRST turn — the model must stay free to ask intake questions instead of
+    /// being railroaded into an immediate, likely under-specified tool call — and for every turn
+    /// without an active deterministic binding (ordinary chats, browse sub-turns): unchanged
+    /// "auto" behavior.
+    ///
+    /// Final-review fix (C1): this value is a per-TURN constant, but the loop only ever applies
+    /// it to round 0 of that turn (`agent_loop::run_turn`'s call site gates on `round == 0`) —
+    /// forcing is one-shot, never repeated on later rounds within the same turn. A forced
+    /// `tool_choice` contractually MUST come back with a tool call, so re-forcing on every round
+    /// would never let the loop terminate: after a successful delivery, the very next round would
+    /// force ANOTHER call to the same tool (a duplicate render, and by then the routing binding is
+    /// already cleared so it would go through generic/unbound).
     pub forced_tool: Option<String>,
 }

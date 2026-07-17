@@ -587,6 +587,11 @@ impl ChatStore {
             "delete from task_thread_links where thread_id = ?1",
             params![thread_id],
         )?;
+        // Final-review fix (M1): a deleted "Use template" thread must not leak its routing
+        // binding row — otherwise a NEW thread that later reuses the same thread_id (or a
+        // stale read of the table) could resurrect a forced tool_choice for a thread the user
+        // believes gone. Idempotent (clear_thread_routing_binding no-ops when unbound).
+        self.clear_thread_routing_binding(thread_id)?;
         // Drop any tag assignments on this thread (the entity side has no FK).
         self.remove_entity_assignments(TagEntity::Thread, thread_id)?;
         self.conn.execute(
@@ -4817,6 +4822,42 @@ mod tests {
                 .thread_by_task_id("orchestrator_req_s1")
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    // Final-review fix (M1): delete_thread must purge `thread_routing_bindings` for the
+    // thread too — before this fix, deleting a "Use template" thread left its binding row
+    // behind, a leak that could resurrect a forced tool_choice.
+    #[test]
+    fn delete_thread_clears_its_routing_binding() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+
+        let binding_json = serde_json::json!({
+            "plugin_id": "presentations",
+            "route_id": "presentations.template_document",
+            "args": {"template_ref": "homun/cv-professional-01"},
+        })
+        .to_string();
+        store
+            .set_thread_routing_binding(&thread.thread_id, &binding_json)
+            .unwrap();
+        assert!(
+            store
+                .thread_routing_binding(&thread.thread_id)
+                .unwrap()
+                .is_some(),
+            "binding should be set before delete"
+        );
+
+        store.delete_thread(&thread.thread_id).unwrap();
+
+        assert!(
+            store
+                .thread_routing_binding(&thread.thread_id)
+                .unwrap()
+                .is_none(),
+            "delete_thread must clear the thread's routing binding row"
         );
     }
 }

@@ -271,7 +271,14 @@ missing, give what you have and note the gap in one short line.",
                     is_final_round,
                     // S2 T5: the ONLY call site that forces a tool — resolved once, gateway-side,
                     // into `cfg` (see `TurnConfig::forced_tool` for the intake-turn / binding gate).
-                    forced_tool: cfg.forced_tool.as_deref(),
+                    // Final-review fix (C1, one-shot forcing): `cfg.forced_tool` is immutable for the
+                    // whole turn, but a forced `tool_choice` contractually MUST return a tool call —
+                    // re-forcing on every round would make round 1 force a SECOND make_document call
+                    // right after a successful delivery (the binding is already cleared by then, so
+                    // the duplicate would render GENERIC instead of from the template). Force only on
+                    // round 0 (the post-intake generation call); every later round falls back to auto
+                    // so the model can emit its text summary and the turn terminates cleanly.
+                    forced_tool: if round == 0 { cfg.forced_tool.as_deref() } else { None },
                 },
                 &|_tok| {},
             )
@@ -1162,5 +1169,175 @@ mod tests {
             sink.0.lock().unwrap().iter().any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
             "expected a Done event"
         );
+    }
+
+    // Round-0-only mock: returns a `make_document` tool call on the FIRST `generate` invocation,
+    // then plain text (no tool_calls) on every subsequent one. Records the `forced_tool` it was
+    // called with on each round so the test can assert forcing was applied ONCE, not every round.
+    #[derive(Default)]
+    struct ToolThenAnswerModel {
+        calls: std::sync::atomic::AtomicUsize,
+        forced_tool_seen: Mutex<Vec<Option<String>>>,
+    }
+    impl ModelClient for ToolThenAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            self.forced_tool_seen
+                .lock()
+                .unwrap()
+                .push(call.forced_tool.map(str::to_string));
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            let n = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if n == 0 {
+                // Round 0: the provider-forced call — MUST return a tool call (that's the
+                // contract of a forced tool_choice).
+                Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": { "name": "make_document", "arguments": "{}" },
+                        }],
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                })
+            } else {
+                // Round ≥1: the delivery already happened — a real model, back on "auto",
+                // summarizes and stops. If forcing were still active here (the C1 bug), this
+                // branch would never be reached: the provider would be compelled to emit
+                // another tool call instead of text.
+                on_delta("Document delivered.");
+                Ok(ModelRoundOutput {
+                    message: json!({ "role": "assistant", "content": "Document delivered." }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+        }
+    }
+
+    // Counts how many times each tool name was dispatched, so the test can assert the forced
+    // tool ran exactly once (not once per round, which was the C1 bug: force-looping the same
+    // tool_choice every round meant a successful delivery was immediately followed by a SECOND,
+    // now-unbound/generic call to the same tool).
+    #[derive(Default)]
+    struct CountingTool {
+        make_document_calls: std::sync::atomic::AtomicUsize,
+    }
+    impl CapabilityExecutor for CountingTool {
+        async fn execute_tool(
+            &self,
+            name: &str,
+            _a: &str,
+            _c: &str,
+            _s: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            if name == "make_document" {
+                self.make_document_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            Ok(ToolOutcome { result: format!("ran {name}"), effects: ToolEffects::default() })
+        }
+    }
+
+    // ⭐ Final-review fix C1 (CRITICAL): forcing `tool_choice` must be ONE-SHOT within the turn.
+    // Before the fix, `cfg.forced_tool` was passed on EVERY round's model call — since a forced
+    // tool_choice contractually MUST come back with a tool call, the loop could never terminate
+    // after a successful delivery: round 1 would force `make_document` AGAIN (a duplicate render,
+    // by then unbound/generic since the routing binding had already cleared). This test drives a
+    // turn with `forced_tool = Some("make_document")` and a mock model that returns the tool call
+    // on round 0 and plain text on round 1+, and asserts the tool executed exactly ONCE and the
+    // turn ends with the model's own text summary — not a second forced tool call.
+    #[tokio::test(flavor = "current_thread")]
+    async fn forced_tool_applies_only_to_round_zero_then_terminates_on_model_text() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "make me the quarterly report" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let mut browser = NoBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+
+        let model = ToolThenAnswerModel::default();
+        let tool = CountingTool::default();
+
+        let mut turn_cfg = cfg();
+        turn_cfg.forced_tool = Some("make_document".to_string());
+        // Give the loop enough round budget to reach round 1 (the post-delivery round) so the
+        // fix's "later rounds fall back to auto" behavior is actually exercised.
+        turn_cfg.hard_round_ceiling = 4;
+        turn_cfg.max_rounds = 4;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "make me the quarterly report".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // The tool ran exactly once — no duplicate render on round 1.
+        assert_eq!(
+            tool.make_document_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "make_document must execute exactly once, not once per round"
+        );
+        // Forcing was applied on round 0 only; round 1 (and any later round) saw `None` (auto).
+        let seen = model.forced_tool_seen.lock().unwrap().clone();
+        assert_eq!(
+            seen.first().and_then(|f| f.as_deref()),
+            Some("make_document"),
+            "round 0 must be forced: {seen:?}"
+        );
+        assert!(
+            seen.iter().skip(1).all(|f| f.is_none()),
+            "every round after the first must be auto (None), got: {seen:?}"
+        );
+        // The turn ended with the model's own text summary, not a second forced tool call.
+        assert!(
+            outcome.memory_answer.contains("Document delivered"),
+            "expected the model's post-delivery text summary, got: {:?}",
+            outcome.memory_answer
+        );
+        // Exactly one Done event — the loop terminated cleanly instead of force-looping.
+        let done_count = sink
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, GenerateStreamEvent::Done { .. }))
+            .count();
+        assert_eq!(done_count, 1, "expected exactly one Done event (clean termination)");
     }
 }

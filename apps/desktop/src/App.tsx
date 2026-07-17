@@ -1004,15 +1004,20 @@ export default function App() {
               .join(" ")}`,
           ]
         : []),
-      `Then propose a concise plan and wait for confirmation before using ${makeTool}.`,
+      // Final-review fix (I1): this used to say "propose a concise plan and wait for
+      // confirmation before using ${makeTool}" — but the harness now forces the
+      // tool_choice to `makeTool` on the FIRST post-intake reply (S2 T5), so a
+      // plan-confirmation step is impossible/contradictory for a bound flow. Reworded to
+      // match reality: go straight from the intake answers to the call, no ceremony.
+      `Once you have the answers above, call ${makeTool} directly — no plan and no confirmation step needed.`,
     ].join("\n");
     // S2 (plugin-owned deterministic routing): weak local managers used to wander to
     // generic skills + shell file-writing (observed: a model hand-wrote a .md via `cat`
     // heredoc through a "Create Documents" skill, bypassing the template entirely). The
     // fix used to be pleading in the prompt (IMPORTANT/MUST text); that's now enforced
     // deterministically by the gateway off this binding (S2 T3-T5: forces tool_choice to
-    // makeTool and denies skill/shell tools once intake is past its first round), so the
-    // operative prompt above stays brief + intake only.
+    // the routed make tool and denies skill/shell tools once intake is past its first
+    // round), so the operative prompt above stays brief + intake only.
     const routingBinding: RoutingBindingInput = {
       plugin_id: "presentations",
       route_id: isDocument ? "presentations.template_document" : "presentations.template_deck",
