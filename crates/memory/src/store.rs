@@ -3106,79 +3106,79 @@ impl SQLiteMemoryStore {
         // I sub-helper (ensure_column, rebuild) ricevono questa stessa connection
         // (lock unico su writer) — evita di riprendere il Mutex e fare deadlock.
         Self::install_memory_source_active_index_on(&mut conn)?;
-        let conn_ref: &Connection = &conn;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "created_at",
             "alter table memories add column created_at text not null default ''",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "updated_at",
             "alter table memories add column updated_at text not null default ''",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "last_seen_at",
             "alter table memories add column last_seen_at text",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "supersedes_json",
             "alter table memories add column supersedes_json text not null default '[]'",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "superseded_by",
             "alter table memories add column superseded_by text",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "correction_of",
             "alter table memories add column correction_of text",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memory_publication_proposals",
             "proposed_collection",
             "alter table memory_publication_proposals add column proposed_collection text not null default 'knowledge'",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memory_publication_proposals",
             "candidate_json",
             "alter table memory_publication_proposals add column candidate_json text",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memory_publication_proposals",
             "resolution_json",
             "alter table memory_publication_proposals add column resolution_json text",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memory_publication_proposals",
             "reason_code",
             "alter table memory_publication_proposals add column reason_code text not null default 'pending'",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memory_publication_proposals",
             "failure_reason",
             "alter table memory_publication_proposals add column failure_reason text",
         )?;
+        Self::backfill_legacy_publication_proposals_on(&mut conn)?;
         conn.execute(
             "insert or replace into schema_metadata (key, value) values ('schema_version', ?1)",
             [SCHEMA_VERSION.to_string()],
         )
         .map_err(|error| error.to_string())?;
-        self.rebuild_memory_search_index_on(conn_ref)?;
+        self.rebuild_memory_search_index_on(&conn)?;
         Ok(())
     }
 
@@ -3240,6 +3240,116 @@ impl SQLiteMemoryStore {
         conn.execute(alter_sql, [])
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    fn table_has_column_on(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+        let mut statement = conn
+            .prepare(&format!("pragma table_info({table})"))
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            if row.get::<_, String>(1).map_err(|error| error.to_string())? == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Old v4 publication tables did not persist typed candidate/resolution or
+    /// terminal reason fields. Migrate them exactly once; malformed legacy refs
+    /// are deliberately preserved as malformed candidate JSON so later reads
+    /// fail closed instead of silently widening publication behavior.
+    fn backfill_legacy_publication_proposals_on(conn: &mut Connection) -> Result<(), String> {
+        let already_backfilled = conn
+            .query_row(
+                "select exists(
+                    select 1 from schema_metadata
+                    where key = 'memory_publication_proposal_backfill_v2'
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if already_backfilled {
+            return Ok(());
+        }
+        let has_legacy_duplicate =
+            Self::table_has_column_on(conn, "memory_publication_proposals", "duplicate_ref_json")?;
+        if !has_legacy_duplicate {
+            conn.execute(
+                "insert into schema_metadata(key, value)
+                 values ('memory_publication_proposal_backfill_v2', 'not_needed')",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let rows = {
+            let mut statement = transaction
+                .prepare(
+                    "select id, status, duplicate_ref_json
+                     from memory_publication_proposals order by id",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+            let mut values = Vec::new();
+            while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+                values.push((
+                    row.get::<_, String>(0).map_err(|error| error.to_string())?,
+                    row.get::<_, String>(1).map_err(|error| error.to_string())?,
+                    row.get::<_, Option<String>>(2)
+                        .map_err(|error| error.to_string())?,
+                ));
+            }
+            values
+        };
+        for (id, status, duplicate_ref_json) in rows {
+            let (candidate_json, reason_code, failure_reason) = match status.as_str() {
+                "approved" => (None, "approved", None),
+                "rejected" => (None, "rejected", None),
+                "failed" => (None, "publication_failed", Some("legacy_failure")),
+                "pending" => match duplicate_ref_json {
+                    Some(raw) => match serde_json::from_str::<MemoryRef>(&raw) {
+                        Ok(destination_ref) => (
+                            Some(
+                                serde_json::to_string(
+                                    &MemoryPublicationCandidate::CompatibleDuplicate {
+                                        destination_ref,
+                                    },
+                                )
+                                .map_err(|error| error.to_string())?,
+                            ),
+                            "publication_duplicate_compatible",
+                            None,
+                        ),
+                        Err(_) => (Some(raw), "publication_duplicate_compatible", None),
+                    },
+                    None => (None, "pending", None),
+                },
+                _ => (None, "pending", None),
+            };
+            transaction
+                .execute(
+                    "update memory_publication_proposals
+                     set candidate_json = ?2, resolution_json = null, reason_code = ?3,
+                         failure_reason = ?4
+                     where id = ?1",
+                    params![id, candidate_json, reason_code, failure_reason],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        transaction
+            .execute(
+                "insert into schema_metadata(key, value)
+                 values ('memory_publication_proposal_backfill_v2', 'complete')",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())
     }
 
     fn count_table(&self, table: &str) -> Result<u64, String> {

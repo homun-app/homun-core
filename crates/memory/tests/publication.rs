@@ -1,8 +1,8 @@
 use local_first_memory::{
-    AuthorizedMemorySource, DataSensitivity, MemoryFacade, MemoryPublicationDestination,
-    MemoryPublicationReasonCode, MemoryPublicationResolution, MemoryPublicationStatus,
-    MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus,
-    PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
+    AuthorizedMemorySource, DataSensitivity, MemoryFacade, MemoryPublicationCandidate,
+    MemoryPublicationDestination, MemoryPublicationReasonCode, MemoryPublicationResolution,
+    MemoryPublicationStatus, MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
 };
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -639,4 +639,168 @@ fn store_rejects_cross_owner_or_thread_publication_proposals() {
         store.create_memory_publication_proposal(&thread_destination),
         Err(MemoryPublicationStoreError::Validation(_))
     ));
+}
+
+#[test]
+fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
+    let path = unique_db_path("legacy-publications");
+    let owner = UserId::new(OWNER);
+    let source = MemoryRef::generated(
+        MemoryRefKind::Memory,
+        owner.clone(),
+        WorkspaceId::new(PROJECT),
+    );
+    let duplicate = MemoryRef::generated(
+        MemoryRefKind::Memory,
+        owner.clone(),
+        WorkspaceId::new("__personal__"),
+    );
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "create table memory_publication_proposals (
+                id text primary key,
+                source_ref_json text not null,
+                source_user_id text not null,
+                source_workspace_id text not null,
+                destination_user_id text not null,
+                destination_workspace_id text not null,
+                proposed_text text not null,
+                proposed_memory_type text not null,
+                proposed_privacy_domain text not null,
+                proposed_sensitivity text not null,
+                duplicate_ref_json text,
+                status text not null,
+                proposed_by text not null,
+                decided_by text,
+                created_at text not null,
+                updated_at text not null
+            );
+            create table memory_publication_links (
+                source_ref_json text primary key,
+                destination_ref_json text not null,
+                approved_by text not null,
+                created_at text not null
+            );",
+        )
+        .unwrap();
+    for (id, status, decided_by, duplicate_ref) in [
+        ("approved", "approved", Some(OWNER), None),
+        ("rejected", "rejected", Some(OWNER), None),
+        ("failed", "failed", Some(OWNER), None),
+        (
+            "pending-duplicate",
+            "pending",
+            None,
+            Some(duplicate.clone()),
+        ),
+        ("pending", "pending", None, None),
+    ] {
+        connection
+            .execute(
+                "insert into memory_publication_proposals(
+                    id, source_ref_json, source_user_id, source_workspace_id,
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_privacy_domain, proposed_sensitivity,
+                    duplicate_ref_json, status, proposed_by, decided_by, created_at, updated_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                rusqlite::params![
+                    id,
+                    serde_json::to_string(&source).unwrap(),
+                    OWNER,
+                    PROJECT,
+                    OWNER,
+                    "__personal__",
+                    "Prefers Italian",
+                    "fact",
+                    "personal",
+                    "private",
+                    duplicate_ref.map(|reference| serde_json::to_string(&reference).unwrap()),
+                    status,
+                    OWNER,
+                    decided_by,
+                    "unix:1.000000000",
+                    "unix:1.000000000",
+                ],
+            )
+            .unwrap();
+    }
+    connection
+        .execute(
+            "insert into memory_publication_proposals(
+                id, source_ref_json, source_user_id, source_workspace_id,
+                destination_user_id, destination_workspace_id, proposed_text,
+                proposed_memory_type, proposed_privacy_domain, proposed_sensitivity,
+                duplicate_ref_json, status, proposed_by, decided_by, created_at, updated_at
+             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            rusqlite::params![
+                "pending-corrupt",
+                serde_json::to_string(&source).unwrap(),
+                OWNER,
+                PROJECT,
+                OWNER,
+                "__personal__",
+                "Prefers Italian",
+                "fact",
+                "personal",
+                "private",
+                "{corrupt-legacy-ref",
+                "pending",
+                OWNER,
+                Option::<&str>::None,
+                "unix:1.000000000",
+                "unix:1.000000000",
+            ],
+        )
+        .unwrap();
+    drop(connection);
+
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+    assert_eq!(
+        facade
+            .get_publication_proposal("approved")
+            .unwrap()
+            .unwrap()
+            .reason_code,
+        MemoryPublicationReasonCode::Approved
+    );
+    assert_eq!(
+        facade
+            .get_publication_proposal("rejected")
+            .unwrap()
+            .unwrap()
+            .reason_code,
+        MemoryPublicationReasonCode::Rejected
+    );
+    let failed = facade.get_publication_proposal("failed").unwrap().unwrap();
+    assert_eq!(
+        failed.reason_code,
+        MemoryPublicationReasonCode::PublicationFailed
+    );
+    assert_eq!(failed.failure_reason.as_deref(), Some("legacy_failure"));
+    let pending_duplicate = facade
+        .get_publication_proposal("pending-duplicate")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        pending_duplicate.candidate,
+        Some(MemoryPublicationCandidate::CompatibleDuplicate {
+            destination_ref: duplicate,
+        })
+    );
+    assert_eq!(
+        pending_duplicate.reason_code,
+        MemoryPublicationReasonCode::PublicationDuplicateCompatible
+    );
+    assert_eq!(
+        facade
+            .get_publication_proposal("pending")
+            .unwrap()
+            .unwrap()
+            .reason_code,
+        MemoryPublicationReasonCode::Pending
+    );
+    assert!(facade.get_publication_proposal("pending-corrupt").is_err());
+    drop(facade);
+    remove_sqlite_files(&path);
 }
