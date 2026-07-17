@@ -16598,7 +16598,7 @@ fn make_deck_tool_schema() -> serde_json::Value {
                     "slides": { "type": "integer", "description": "Desired number of slides (3-12). Default 6." },
                     "template_ref": { "type": "string", "description": "Optional template catalog reference selected from capability discovery, e.g. homun/startup-pitch-clean-01. It is resolved by the harness into design_* defaults; explicit design_* args override or extend it." },
                     "design_template": deliverable_design_template_schema(),
-                    "design_theme": deliverable_design_theme_schema(),
+                    "design_theme": deliverable_design_theme_schema("deck"),
                     "design_profile": deliverable_design_profile_schema(),
                     "design_components": deliverable_design_components_schema()
                 },
@@ -16640,7 +16640,7 @@ fn make_document_tool_schema() -> serde_json::Value {
                         "enum": ["standard", "one_page", "executive_brief", "detailed_report", "proposal"]
                     },
                     "design_template": deliverable_design_template_schema(),
-                    "design_theme": deliverable_design_theme_schema(),
+                    "design_theme": deliverable_design_theme_schema("document"),
                     "design_profile": deliverable_design_profile_schema(),
                     "design_components": deliverable_design_components_schema(),
                     "sections": {
@@ -16677,11 +16677,21 @@ fn deliverable_design_template_schema() -> serde_json::Value {
     })
 }
 
-fn deliverable_design_theme_schema() -> serde_json::Value {
+/// `medium` is "deck" or "document" — documents exclude the dark-surface
+/// editorial themes (see `DARK_EDITORIAL_THEMES`) since doc_render's body
+/// text/tables still assume a light surface; decks keep the full palette.
+/// Filters the one shared list rather than maintaining a second enum, so the
+/// two media can never silently drift apart on the other 8 theme names.
+fn deliverable_design_theme_schema(medium: &str) -> serde_json::Value {
+    let enum_values: Vec<&str> = DELIVERABLE_DESIGN_THEMES
+        .iter()
+        .copied()
+        .filter(|theme| medium != "document" || !DARK_EDITORIAL_THEMES.contains(theme))
+        .collect();
     serde_json::json!({
         "type": "string",
         "description": "Shared visual theme token explicitly requested by the user. Applies across presentations and documents. Preserve explicit intent; omit when unspecified.",
-        "enum": DELIVERABLE_DESIGN_THEMES
+        "enum": enum_values
     })
 }
 
@@ -16731,6 +16741,15 @@ const DELIVERABLE_DESIGN_THEMES: &[&str] = &[
     "editorial_ivory",
     "editorial_slate",
 ];
+
+/// The 2 editorial themes whose SURFACE is dark (design_tokens.py THEMES:
+/// editorial_noir/editorial_bold paint the page itself near-black/deep-teal).
+/// They read as dramatic on a fixed-canvas DECK slide but doc_render still
+/// assumes a light surface for body text/tables, so a document rendered in
+/// either is unreadable — restrict them out of the document-facing theme
+/// enum/resolution (deck keeps all 5 editorial themes) rather than duplicate
+/// the enum with a hand-maintained "document themes" list.
+const DARK_EDITORIAL_THEMES: &[&str] = &["editorial_noir", "editorial_bold"];
 
 const DELIVERABLE_DESIGN_COMPONENTS: &[&str] = &[
     "kpi_grid",
@@ -16956,6 +16975,26 @@ fn deliverable_design_theme_directive(theme: Option<&str>, medium: &str) -> Opti
         }
         (Some("soft_gradient"), "document") => {
             "Design theme: soft_gradient. Use a modern soft hierarchy, clear section grouping and concise visual tables."
+        }
+        // S1a editorial themes (final-review fix: these had no directive arms at
+        // all, so shipped packs using them generated with no theme prose guidance).
+        // One directive per theme regardless of medium — deck and document already
+        // diverge on WHICH of these 5 are selectable (see DARK_EDITORIAL_THEMES /
+        // deliverable_design_theme_schema); the prose itself doesn't need to.
+        (Some("editorial_noir"), _) => {
+            "Design theme: editorial_noir. Near-black surface, cream serif display type, a single warm-metal accent — dramatic and premium."
+        }
+        (Some("editorial_warm"), _) => {
+            "Design theme: editorial_warm. Warm cream surface, deep terracotta accent and serif display type — inviting, tactile, human editorial warmth."
+        }
+        (Some("editorial_bold"), _) => {
+            "Design theme: editorial_bold. Deep teal surface, crisp light serif display type and a golden accent — bold, confident, high-impact editorial energy."
+        }
+        (Some("editorial_ivory"), _) => {
+            "Design theme: editorial_ivory. Soft ivory surface, forest-green accent and serif display type — refined, understated, quietly premium editorial calm."
+        }
+        (Some("editorial_slate"), _) => {
+            "Design theme: editorial_slate. Pale slate-blue surface, cool blue accent and serif display type — crisp, professional, modern editorial restraint."
         }
         _ => return None,
     };
@@ -17907,11 +17946,19 @@ fn document_generation_options(parsed: &serde_json::Value) -> DocumentGeneration
             .as_ref()
             .map(|entry| entry.design_template.clone())
     });
-    let design_theme = deliverable_design_theme(parsed).or_else(|| {
-        catalog_template
-            .as_ref()
-            .and_then(|entry| entry.design_theme.clone())
-    });
+    let design_theme = deliverable_design_theme(parsed)
+        .or_else(|| {
+            catalog_template
+                .as_ref()
+                .and_then(|entry| entry.design_theme.clone())
+        })
+        // Belt-and-suspenders: the make_document tool schema already excludes
+        // the dark editorial themes (see `deliverable_design_theme_schema`),
+        // but a dark theme could still arrive via template_ref resolution or
+        // a client that doesn't honour the enum — drop to no theme (the
+        // pack's/renderer's light default) rather than render an unreadable
+        // dark-surface document.
+        .filter(|theme| !DARK_EDITORIAL_THEMES.contains(&theme.as_str()));
     let design_profile = deliverable_design_profile(parsed)
         .or_else(|| {
             catalog_template
@@ -28450,7 +28497,7 @@ struct ArtifactDestination {
 /// The user's BRAND KIT — the persistent identity the Presentations plugin (and the
 /// future on-brand deck generator) apply to every deliverable: colours, fonts, logo,
 /// organization name. Stored as one JSON in the data dir.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct BrandKit {
     #[serde(default)]
     organization: String,
@@ -32261,20 +32308,39 @@ fn write_artifact_bytes(
 /// `brand.json` (theme: colours/fonts/org, logo→"logo.png") + `logo.png` (decoded). This
 /// lets the model OMIT the large logo data URL from deck.json — which it can't reliably
 /// emit through a shell — and have `deck-render` apply the brand itself. Best-effort.
+/// True when `kit` has any field customized away from `BrandKit::default()`.
+/// Pure predicate (no fs/thread-dir side effects) so it is unit-testable in
+/// isolation from `materialize_brand_kit`'s artifact-writing plumbing.
+///
+/// The UNCONFIGURED default kit (#2b6cb0/#1a202c/#ed8936, Inter/Inter, no
+/// logo) must never be materialized to brand.json: deck_render/doc_render's
+/// `{**brand, **theme}` merge treats every present brand.json field as an
+/// explicit, truthy override, so even the unconfigured default clobbers a
+/// pack's curated editorial theme tokens (surface/ink/colours) at REAL
+/// generation time — while the preview (built straight from the pack's
+/// example.json, no brand.json in the loop) shows the correct curated look.
+/// Mirrors the UI's own guard (`brandPreviewOverride` in BrandKitPanel.tsx
+/// returns null for the default kit) so generation and preview agree.
+fn should_materialize_brand_kit(kit: &BrandKit) -> bool {
+    *kit != BrandKit::default()
+}
+
 fn materialize_brand_kit(thread_slug: &str) {
     let kit = load_brand_kit();
     let has_logo = !kit.logo_data_url.trim().is_empty();
-    let theme = serde_json::json!({
-        "organization": kit.organization,
-        "primary": kit.primary_color,
-        "secondary": kit.secondary_color,
-        "accent": kit.accent_color,
-        "heading_font": kit.heading_font,
-        "body_font": kit.body_font,
-        "logo": if has_logo { "logo.png" } else { "" },
-    });
-    if let Ok(bytes) = serde_json::to_vec_pretty(&theme) {
-        let _ = write_artifact_bytes(thread_slug, "brand.json", &bytes);
+    if should_materialize_brand_kit(&kit) {
+        let theme = serde_json::json!({
+            "organization": kit.organization,
+            "primary": kit.primary_color,
+            "secondary": kit.secondary_color,
+            "accent": kit.accent_color,
+            "heading_font": kit.heading_font,
+            "body_font": kit.body_font,
+            "logo": if has_logo { "logo.png" } else { "" },
+        });
+        if let Ok(bytes) = serde_json::to_vec_pretty(&theme) {
+            let _ = write_artifact_bytes(thread_slug, "brand.json", &bytes);
+        }
     }
     if has_logo {
         if let Some(comma) = kit.logo_data_url.find(',') {
@@ -56636,10 +56702,43 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn deliverable_design_theme_schema_is_shared_by_deck_and_document() {
+    fn default_brand_kit_is_not_materialized() {
+        // S1a final-review fix: the UNCONFIGURED default kit must never be
+        // materialized to brand.json — deck_render/doc_render's `{**brand,
+        // **theme}` merge treats every present field as a truthy override, so
+        // even default-blue/orange/Inter clobbers a pack's curated editorial
+        // theme (e.g. editorial_ivory's green/Georgia) at real generation
+        // time, though the committed preview (no brand.json in that loop)
+        // shows the correct curated look. Mirrors the UI's own guard
+        // (BrandKitPanel.tsx's brandPreviewOverride returns null for the
+        // default kit).
+        assert!(!super::should_materialize_brand_kit(&super::BrandKit::default()));
+    }
+
+    #[test]
+    fn customized_brand_kit_is_materialized() {
+        // Any single field diverging from the default must still flip the
+        // decision to "materialize" — this is the surgical counterpart to
+        // the test above, guarding against an over-broad "always skip".
+        let mut kit = super::BrandKit::default();
+        kit.primary_color = "#ff0000".to_string();
+        assert!(super::should_materialize_brand_kit(&kit));
+
+        let mut only_org = super::BrandKit::default();
+        only_org.organization = "Acme".to_string();
+        assert!(super::should_materialize_brand_kit(&only_org));
+    }
+
+    #[test]
+    fn deliverable_design_theme_schema_is_medium_aware() {
+        // S1a final-review fix: decks and documents share ONE theme name list,
+        // but documents must exclude the 2 dark-surface editorial themes
+        // (editorial_noir/editorial_bold) — doc_render's body text/tables
+        // still assume a light surface, so a dark theme there is unreadable,
+        // even though it reads as dramatic on a fixed-canvas deck slide.
         let deck_schema = super::make_deck_tool_schema();
         let document_schema = super::make_document_tool_schema();
-        let expected = Some(vec![
+        let deck_expected = Some(vec![
             "clean_corporate",
             "high_contrast",
             "warm_editorial",
@@ -56650,6 +56749,17 @@ prs.save(Path({path:?}))
             "editorial_noir",
             "editorial_warm",
             "editorial_bold",
+            "editorial_ivory",
+            "editorial_slate",
+        ]);
+        let document_expected = Some(vec![
+            "clean_corporate",
+            "high_contrast",
+            "warm_editorial",
+            "minimal_mono",
+            "soft_gradient",
+            // NOT editorial_noir/editorial_bold — dark-surface, deck-only.
+            "editorial_warm",
             "editorial_ivory",
             "editorial_slate",
         ]);
@@ -56672,8 +56782,46 @@ prs.save(Path({path:?}))
                     .collect::<Vec<_>>()
             });
 
-        assert_eq!(deck_themes, expected);
-        assert_eq!(document_themes, expected);
+        assert_eq!(deck_themes, deck_expected);
+        assert_eq!(document_themes, document_expected);
+        assert!(!document_themes.unwrap().contains(&"editorial_noir"));
+    }
+
+    #[test]
+    fn document_generation_options_drops_dark_editorial_theme() {
+        // Belt-and-suspenders enforcement at resolution time (not just the
+        // schema enum): a dark editorial theme reaching document generation
+        // by any other path (template_ref, older client) must be dropped
+        // rather than rendered unreadable.
+        let parsed = serde_json::json!({ "design_theme": "editorial_noir" });
+        let options = super::document_generation_options(&parsed);
+        assert_eq!(options.design_theme, None);
+
+        let parsed_light = serde_json::json!({ "design_theme": "editorial_ivory" });
+        let options_light = super::document_generation_options(&parsed_light);
+        assert_eq!(options_light.design_theme.as_deref(), Some("editorial_ivory"));
+    }
+
+    #[test]
+    fn deliverable_design_theme_directive_covers_all_editorial_themes() {
+        // Final-review fix: these 5 arms did not exist at all, so shipped
+        // editorial packs generated with no theme prose directive.
+        for name in [
+            "editorial_noir",
+            "editorial_warm",
+            "editorial_bold",
+            "editorial_ivory",
+            "editorial_slate",
+        ] {
+            assert!(
+                super::deliverable_design_theme_directive(Some(name), "deck").is_some(),
+                "missing deck directive for {name}"
+            );
+            assert!(
+                super::deliverable_design_theme_directive(Some(name), "document").is_some(),
+                "missing document directive for {name}"
+            );
+        }
     }
 
     #[test]
@@ -57544,12 +57692,26 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         // with NO explicit theme the catalog entry's own theme degrades in —
         // so doc.json's `theme.name` always matches what the content
         // directives told the model.
+        //
+        // S1a final-review Fix 3: `executive-update-board-01` is a DECK pack
+        // (kind=presentation) whose editorial default is the DARK
+        // editorial_noir — using it here (a document-generation test) now
+        // doubles as the catalog-degrade-in path for the dark-theme guard:
+        // even reached via a mismatched template_ref's catalog default, a
+        // dark editorial theme must still be dropped for a document (never
+        // just relies on the schema enum, which a template_ref bypasses).
         let fallback = super::document_generation_options(&serde_json::json!({
             "template_ref": "homun/executive-update-board-01",
         }));
-        // S1a-T5: executive-update-board-01's editorial default is editorial_noir
-        // (dark, boardroom-appropriate), not the old high_contrast.
-        assert_eq!(fallback.design_theme.as_deref(), Some("editorial_noir"));
+        assert_eq!(fallback.design_theme, None);
+
+        // The still-valid form of the same "catalog theme degrades in"
+        // mechanic: a DOCUMENT pack's own (light) editorial theme must still
+        // flow through untouched.
+        let doc_fallback = super::document_generation_options(&serde_json::json!({
+            "template_ref": "homun/cv-professional-01",
+        }));
+        assert_eq!(doc_fallback.design_theme.as_deref(), Some("editorial_ivory"));
     }
 
     #[test]

@@ -154,6 +154,11 @@ class DocEditorialCover(unittest.TestCase):
         self.assertIn("hero-art", html)
         self.assertIn("--surface:#f4f1ea", html)
         self.assertIn("--ink:#241c15", html)
+        # S1a final-review Fix 5: aria-hidden must be a valid boolean attribute,
+        # not the bare/invalid `aria-hidden` HTML shorthand.
+        self.assertIn('aria-hidden="true"', html)
+        self.assertNotIn("aria-hidden>", html)
+        self.assertNotIn("aria-hidden ", html)
 
     def test_hero_art_grid_ids_are_unique_across_blocks(self):
         # F1a-T2 review gotcha: _hero_art("grid") used a FIXED pattern id — two

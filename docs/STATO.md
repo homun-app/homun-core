@@ -29,16 +29,29 @@ brand/accent, e le card catalogo passano da corporate-pulito a **editoriale dram
 - **Whitelist parity** (`b8686102`, CRITICO): i nomi editoriali sono entrati in
   `DELIVERABLE_DESIGN_THEMES` + name-passthrough in `design_theme_tokens` — senza, il deliverable
   generato dal modello avrebbe usato un tema diverso da quello mostrato in preview (preview≠verità).
-  Con questa correzione **generato == preview** per tutti gli 8 pack.
 - **8 pack re-tematizzati editorialmente** (`b8686102`): deck su temi scuri, documenti su temi
   chiari; preview **rigenerate audaci** dal renderer reale (non asset a mano) e confermate via QA
   visiva (non solo test).
+- **Fix-before-ship della review finale S1a** (S1a-T6, questo commit — dettagli/verifica in
+  `.superpowers/sdd/s1a-task-6-report.md`): la review whole-branch ha trovato un SECONDO modo in
+  cui generato poteva divergere dalla preview, non coperto dalla whitelist parity sopra — il brand
+  kit di DEFAULT (non configurato) veniva comunque sempre materializzato in `brand.json`, e il
+  merge `{**brand, **theme}` di `deck_render`/`doc_render` tratta ogni campo presente come override
+  esplicito, quindi clobberava sempre i colori/font curati del tema editoriale. Fix: `materialize_brand_kit`
+  ora salta la scrittura quando il kit == default (predicato puro `should_materialize_brand_kit`,
+  specchio della guardia già usata in UI da `brandPreviewOverride`). Insieme a 4 fix minori
+  (copertina PPTX illeggibile sui temi editoriali scuri, temi scuri selezionabili anche per
+  documenti, direttive di tema mancanti per i 5 editoriali, `aria-hidden` non valido).
+  **Claim corretta:** con ENTRAMBI i fix (whitelist parity + questo), **generato == preview vale
+  per i TOKEN di tema** (surface/ink/colori/font) su tutti gli 8 pack — non è (ancora) un'invariante
+  generale su ogni aspetto del rendering (vedi backlog sotto).
 
-**Gate finali (tutti verdi, in ordine, sessione 2026-07-17):**
+**Gate finali (tutti verdi, in ordine, sessione 2026-07-17 — aggiornati dopo il fix-before-ship
+S1a-T6):**
 | Gate | Esito |
 | --- | --- |
-| `cargo test -p local-first-desktop-gateway` | 595 passed, 0 failed, 5 ignored |
-| `python3 -m unittest … test_deck_render.py` | 6 ok + 1 skip (pptx assente sull'host, atteso) |
+| `cargo test -p local-first-desktop-gateway` | 599 passed, 0 failed, 5 ignored (+6 test nuovi/aggiornati sui 5 fix) |
+| `python3 -m unittest … test_deck_render.py` | 9 ok + 4 skip (pptx assente sull'host); **verificati 13/13 ok** installando `python-pptx` in un venv scratch (i 4 pptx skippati includono i 2 nuovi test cover fill/text del Fix 2) |
 | `python3 -m unittest … test_doc_render.py` | 16 ok |
 | `npm run build` (desktop) | OK, tsc pulito |
 | `npm run test:ui-contract` | OK |
@@ -47,8 +60,14 @@ brand/accent, e le card catalogo passano da corporate-pulito a **editoriale dram
 
 **Cosa resta:**
 - **S1b** (piano separato, non iniziato): relayout galleria — brand chip + drawer, tab per scopo,
-  card full-bleed, split di `BrandKitPanel`.
-- **S2**: brief operativo ottimizzato. **S3**: font picker.
+  card full-bleed, split di `BrandKitPanel`; **include anche** l'interazione F3 brand-recolor-live ×
+  superfici scure editoriali (`brandPreviewOverride`/CSS override pensati per un `--surface` chiaro
+  — mai validati visivamente su un tema `editorial_noir`/`editorial_bold` in preview) — spostato qui
+  dalla review finale S1a invece di bloccare la chiusura di S1a.
+- **S2**: brief operativo ottimizzato; **include anche** portare `eyebrow`/`hero_art` fino alla
+  GENERAZIONE reale — oggi il modello di contenuto non li valorizza (solo gli `example.json` dei
+  pack committati li hanno), quindi restano un fatto di preview, non un'invariante generato==preview
+  come i token di tema sopra — spostato qui dalla review finale S1a. **S3**: font picker.
 - **Validazione live in-app**: Fabio a schermo sul binario nuovo — il container
   `contained-computer` è stato **già rebuildato in questa sessione**, ma va **riavviata l'app**
   per caricare il binario nuovo prima di validare visivamente.

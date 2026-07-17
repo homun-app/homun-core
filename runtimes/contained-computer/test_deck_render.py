@@ -67,6 +67,11 @@ class EditorialCover(unittest.TestCase):
         self.assertIn("EyebrowProbe", html)
         self.assertIn("hero-art", html)          # procedural svg wrapper class
         self.assertIn("--surface:#0f3d3e", html)  # theme surface reaches :root
+        # S1a final-review Fix 5: aria-hidden must be a valid boolean attribute,
+        # not the bare/invalid `aria-hidden` HTML shorthand.
+        self.assertIn('aria-hidden="true"', html)
+        self.assertNotIn("aria-hidden>", html)
+        self.assertNotIn("aria-hidden ", html)
 
     def test_surface_ink_reach_root_for_all_themes(self):
         html = deck_render.render_html(
@@ -130,6 +135,79 @@ class RenderPptxLayouts(unittest.TestCase):
             self.assertTrue(any(getattr(shape, "has_table", False)
                                 for shape in slides[2].shapes))     # a real table shape exists
             self.assertIn("ER", self._slide_texts(slides[3]))       # team_grid initials avatar
+
+    @staticmethod
+    def _cover_fill_and_text_hex(prs):
+        """Locate the cover's full-bleed background shape (fill hex) and the
+        title run's font colour (text hex), independent of shape order."""
+        slide = prs.slides[0]
+        bg = [s for s in slide.shapes
+              if getattr(s, "width", None) == prs.slide_width
+              and getattr(s, "height", None) == prs.slide_height]
+        title = next(
+            s for s in slide.shapes
+            if getattr(s, "has_text_frame", False) and s.text_frame.text.startswith("Kite")
+        )
+        run = title.text_frame.paragraphs[0].runs[0]
+        return str(bg[0].fill.fore_color.rgb), str(run.font.color.rgb)
+
+    def test_editorial_cover_uses_secondary_fill_and_ink_text(self):
+        # S1a final-review Fix 2: fill=primary + hardcoded white text made
+        # editorial_noir's gold-on-gold cover illegible and diverged from the
+        # HTML/PDF preview (near-black surface, cream text). The pptx cover
+        # must now match render_html's --surface/--ink for editorial themes.
+        import tempfile
+        from pptx import Presentation
+        deck = {
+            "title": "T",
+            "theme": {"name": "editorial_noir", "primary": "#c9a54e", "secondary": "#1a1a1e",
+                      "accent": "#c9a54e", "heading_font": "Georgia", "body_font": "Inter"},
+            "slides": [{"layout": "cover", "title": "Kite", "subtitle": "Sub"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "deck.pptx")
+            deck_render.render_pptx(deck, tmp, out)
+            fill_hex, text_hex = self._cover_fill_and_text_hex(Presentation(out))
+        self.assertEqual(fill_hex, "1A1A1E")  # theme secondary (dark)
+        self.assertEqual(text_hex, "F4F1EA")  # theme ink (cream) — NOT hardcoded white
+
+    def test_editorial_light_theme_cover_keeps_dark_ink_text(self):
+        # The other half of the same fix: a LIGHT editorial theme (surface AND
+        # secondary are light) must NOT get hardcoded white text — that would
+        # be as illegible as the noir bug this fix closes, just inverted.
+        import tempfile
+        from pptx import Presentation
+        deck = {
+            "title": "T",
+            "theme": {"name": "editorial_ivory", "primary": "#1f4d3f", "secondary": "#e9e3d6",
+                      "accent": "#1f4d3f", "heading_font": "Georgia", "body_font": "Inter"},
+            "slides": [{"layout": "cover", "title": "Kite", "subtitle": "Sub"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "deck.pptx")
+            deck_render.render_pptx(deck, tmp, out)
+            fill_hex, text_hex = self._cover_fill_and_text_hex(Presentation(out))
+        self.assertEqual(fill_hex, "E9E3D6")  # theme secondary (light)
+        self.assertEqual(text_hex, "1C1B18")  # theme ink (dark) — NOT hardcoded white
+
+    def test_legacy_theme_cover_unchanged_fill_primary_text_white(self):
+        # Legacy (non-editorial) themes must NOT be touched by Fix 2: their
+        # `ink` is tuned for a white `surface`, not for their own (also dark)
+        # `secondary` — reusing it here would print dark-on-dark.
+        import tempfile
+        from pptx import Presentation
+        deck = {
+            "title": "T",
+            "theme": {"name": "high_contrast", "primary": "#111827", "secondary": "#000000",
+                      "accent": "#f59e0b", "heading_font": "Inter", "body_font": "Inter"},
+            "slides": [{"layout": "cover", "title": "Kite", "subtitle": "Sub"}],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "deck.pptx")
+            deck_render.render_pptx(deck, tmp, out)
+            fill_hex, text_hex = self._cover_fill_and_text_hex(Presentation(out))
+        self.assertEqual(fill_hex, "111827")  # theme primary, unchanged
+        self.assertEqual(text_hex, "FFFFFF")  # hardcoded white, unchanged
 
 
 if __name__ == "__main__":

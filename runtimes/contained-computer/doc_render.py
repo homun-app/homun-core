@@ -90,18 +90,18 @@ def _hero_art(kind, seq):
     # grid blocks landed in the same document (duplicate DOM ids, invalid
     # markup — mirrors the fix in deck_render._hero_art).
     if kind == "rings":
-        return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden><g fill="none" '
+        return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden="true"><g fill="none" '
                 'stroke="currentColor" stroke-width="1.5" opacity=".5">'
                 + "".join(f'<circle cx="300" cy="90" r="{r}"/>' for r in (40, 80, 120, 170))
                 + "</g></svg>")
     if kind == "grid":
         gid = f"g{seq}"
-        return (f'<svg class="hero-art" viewBox="0 0 400 400" aria-hidden>'
+        return (f'<svg class="hero-art" viewBox="0 0 400 400" aria-hidden="true">'
                 f'<defs><pattern id="{gid}" width="26" height="26" patternUnits="userSpaceOnUse">'
                 f'<path d="M26 0H0V26" fill="none" stroke="currentColor" stroke-width="1" '
                 f'opacity=".35"/></pattern></defs><rect width="400" height="400" fill="url(#{gid})"/></svg>')
     if kind == "gradient":
-        return '<div class="hero-art hero-grad" aria-hidden></div>'
+        return '<div class="hero-art hero-grad" aria-hidden="true"></div>'
     return ""
 
 

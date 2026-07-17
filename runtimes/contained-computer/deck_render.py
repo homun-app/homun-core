@@ -162,18 +162,18 @@ def _hero_art(kind, seq):
     # grid slides (e.g. cover + section) landed in the same deck (duplicate
     # DOM ids, invalid markup — found in review, fixed here and in doc_render).
     if kind == "rings":
-        return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden><g fill="none" '
+        return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden="true"><g fill="none" '
                 'stroke="currentColor" stroke-width="1.5" opacity=".5">'
                 + "".join(f'<circle cx="300" cy="90" r="{r}"/>' for r in (40, 80, 120, 170))
                 + "</g></svg>")
     if kind == "grid":
         gid = f"g{seq}"
-        return (f'<svg class="hero-art" viewBox="0 0 400 400" aria-hidden>'
+        return (f'<svg class="hero-art" viewBox="0 0 400 400" aria-hidden="true">'
                 f'<defs><pattern id="{gid}" width="26" height="26" patternUnits="userSpaceOnUse">'
                 f'<path d="M26 0H0V26" fill="none" stroke="currentColor" stroke-width="1" '
                 f'opacity=".35"/></pattern></defs><rect width="400" height="400" fill="url(#{gid})"/></svg>')
     if kind == "gradient":
-        return '<div class="hero-art hero-grad" aria-hidden></div>'
+        return '<div class="hero-art hero-grad" aria-hidden="true"></div>'
     return ""
 
 
@@ -573,15 +573,33 @@ def render_pptx(deck, base_dir, out_path):
         sys.stderr.write(f"deck_render: python-pptx unavailable ({exc}); skipping .pptx\n")
         return False
 
-    theme = {**DEFAULT_THEME, **(deck.get("theme") or {})}
+    raw_theme = deck.get("theme") or {}
+    theme_name = raw_theme.get("name")
+    # Mirrors render_html's theme resolution (S1a): a NAMED theme brings its full
+    # surface/ink/muted/hairline/on_brand token set along via design_tokens.THEMES
+    # — needed below to fix the editorial cover legibility bug (fill=primary +
+    # hardcoded white text was illegible on light-gold/gold-on-gold editorial
+    # covers; the pptx render silently diverged from the HTML/PDF preview, which
+    # already used --surface/--ink). No name → legacy behaviour unchanged.
+    if theme_name:
+        theme = {**DEFAULT_THEME, **theme_values(theme_name, raw_theme)}
+    else:
+        theme = {**DEFAULT_THEME, **{k: v for k, v in raw_theme.items() if v}}
     brand = RGBColor(*hexrgb(theme["primary"]))
     brand2 = RGBColor(*hexrgb(theme["secondary"], (26, 32, 44)))
     accent = RGBColor(*hexrgb(theme["accent"], (237, 137, 54)))
-    ink = RGBColor(0x1A, 0x20, 0x2C)
+    ink = RGBColor(*hexrgb(theme.get("ink", "#1a202c"), (0x1A, 0x20, 0x2C)))
     muted = RGBColor(0x4A, 0x55, 0x68)
     white = RGBColor(0xFF, 0xFF, 0xFF)
     head_font = theme["heading_font"] or "Inter"
     body_font = theme["body_font"] or "Inter"
+    # Only the 5 editorial_* themes get the surface-aware cover below: their
+    # `secondary`/`ink` pair is always tonally consistent (both dark for
+    # editorial_noir/editorial_bold, both light for editorial_warm/ivory/slate).
+    # The 5 legacy themes' `ink` is tuned for a WHITE `surface`, not for their
+    # (also dark) `secondary` — reusing it there would print dark-on-dark and
+    # regress covers that look correct today, so they keep fill=primary/white.
+    is_editorial_theme = bool(theme_name) and theme_name.startswith("editorial_")
 
     # python-pptx needs real files; accept either a path or a data: URL (the brand-kit
     # logo arrives as a data URL). Materialised temp files are cleaned up after save.
@@ -726,10 +744,14 @@ def render_pptx(deck, base_dir, out_path):
         title = s.get("title", "")
 
         if layout in ("cover", "section"):
-            fill_bg(slide, brand)
-            runs = [(title, 46 if layout == "cover" else 40, white, head_font, True, False)]
+            # editorial covers: fill=secondary + text=ink (matches the HTML/PDF
+            # preview's --surface/--ink); legacy covers: unchanged fill=primary/white.
+            cover_fill = brand2 if is_editorial_theme else brand
+            cover_text = ink if is_editorial_theme else white
+            fill_bg(slide, cover_fill)
+            runs = [(title, 46 if layout == "cover" else 40, cover_text, head_font, True, False)]
             if s.get("subtitle"):
-                runs.append((s["subtitle"], 20, white, body_font, False, False))
+                runs.append((s["subtitle"], 20, cover_text, body_font, False, False))
             textbox(slide, Inches(0.9), Inches(2.4), Inches(11.5), Inches(2.6), runs,
                     anchor=MSO_ANCHOR.MIDDLE)
             # accent rule under the title block
