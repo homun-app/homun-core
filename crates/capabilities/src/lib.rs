@@ -11,6 +11,7 @@ pub mod search;
 mod skill_plugin;
 mod task_runtime_bridge;
 mod types;
+mod workflow_routing;
 
 pub use audit::{CapabilityAuditEvent, InMemoryCapabilityAudit};
 // browser_provider module retired (F1.d cleanup): the dot-named `BrowserCapabilityProvider`
@@ -38,3 +39,4 @@ pub use registry::*;
 pub use skill_plugin::*;
 pub use task_runtime_bridge::*;
 pub use types::*;
+pub use workflow_routing::{Forcing, WorkflowRouting, WorkflowRoutingRegistry, tool_matches_deny};
