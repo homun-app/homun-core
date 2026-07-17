@@ -8108,6 +8108,35 @@ fn route_capability_with_binding(
     route_capability(prompt)
 }
 
+/// S2 T4: read the thread's active deterministic `RoutingBinding`, if any. Single fail-open
+/// helper (no thread_id / no store lock / no persisted binding / malformed JSON → `None`,
+/// ordinary unbound behaviour) shared by the router seam and the `make_deck`/`make_document`
+/// dispatch arms, which both need the SAME binding read (previously only the router read it —
+/// duplicating the lock-and-parse there and in the two tool-exec arms was the alternative).
+fn active_routing_binding(state: &AppState, thread_id: Option<&str>) -> Option<RoutingBinding> {
+    thread_id
+        .and_then(|tid| {
+            lock_store(state)
+                .ok()
+                .and_then(|store| store.thread_routing_binding(tid).ok().flatten())
+        })
+        .and_then(|json| serde_json::from_str::<RoutingBinding>(&json).ok())
+}
+
+/// S2 T4: resolve an active binding back to its registered `WorkflowRouting` (for
+/// `deny_tools`/`tool_name`). Mirrors the lookup inside `route_capability_with_binding`, which
+/// only needs to know THAT a match exists to force the route; the hard-prune call site needs
+/// the full routing (its `deny_tools`), hence the separate accessor.
+fn resolve_workflow_routing(
+    binding: &RoutingBinding,
+) -> Option<local_first_capabilities::WorkflowRouting> {
+    WorkflowRoutingRegistry::system()
+        .routings(&|_| true)
+        .into_iter()
+        .find(|routing| routing.deterministic && routing.route_id == binding.route_id)
+        .cloned()
+}
+
 fn atomic_pdf_operation_reason(prompt: &str) -> Option<String> {
     let tokens: std::collections::BTreeSet<String> = cap_tokenize(prompt).into_iter().collect();
     let mentions_pdf = tokens.contains("pdf");
@@ -8236,6 +8265,47 @@ fn prune_tools_for_workflow_route(
     }
 }
 
+/// S2 T4: hard prune for a deterministic plugin routing — retains ONLY `route_tool` and
+/// explicitly denies anything matching the resolved `WorkflowRouting`'s `deny_tools`
+/// (`local_first_capabilities::tool_matches_deny`: `skill:*`, `run_command`, `shell`, the
+/// sibling `make_*`). The deny check is evaluated first so a hard-denied name can never slip
+/// through even if it happened to equal `route_tool` — belt-and-suspenders against a
+/// misconfigured registry entry. Functionally this retains the same single tool
+/// `prune_tools_for_workflow_route` does today (kept unchanged as the plain wrapper for the
+/// non-plugin-routed case); this variant exists so the registry's `deny_tools` — not ad hoc
+/// gateway logic — is what a plugin route can rely on to starve every other tool, including
+/// ones a later stage of tool assembly (MCP/Composio) might reintroduce by name.
+fn prune_tools_for_route_and_deny(
+    tools: &mut Vec<serde_json::Value>,
+    route_tool: &str,
+    deny: &[String],
+) {
+    tools.retain(|schema| {
+        let name = schema
+            .pointer("/function/name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        !local_first_capabilities::tool_matches_deny(deny, name) && name == route_tool
+    });
+}
+
+/// S2 T4: single call-site dispatcher for the two prune call sites in the tool-assembly
+/// pipeline — plain retain-only-route-tool (`deny_tools` empty, i.e. no deterministic
+/// binding survived plan-precedence) or the hard deny-aware prune (binding active).
+fn prune_tools_for_route(
+    tools: &mut Vec<serde_json::Value>,
+    route: &WorkflowRouteDecision,
+    deny_tools: &[String],
+) {
+    if deny_tools.is_empty() {
+        prune_tools_for_workflow_route(tools, route);
+        return;
+    }
+    if let WorkflowRouteDecision::Workflow { tool_name, .. } = route {
+        prune_tools_for_route_and_deny(tools, tool_name, deny_tools);
+    }
+}
+
 fn workflow_route_blocked_tool_message(
     route: &CapabilityRouteDecision,
     tool_name: &str,
@@ -8283,6 +8353,29 @@ fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> 
         .unwrap_or_default()
         .iter()
         .any(|memory| runtime_plan_memory_matches(memory, &thread_key))
+}
+
+/// S2 T4 (critical demotion guard, flagged by T3 review): true when the plan-precedence
+/// doors (bare continuation/approval, an active runtime plan, or a first-turn plan/research
+/// prompt — see the call site) should demote a forced Workflow route back to AgentLoop. A
+/// deterministic routing binding is an explicit, thread-scoped user choice — once active it
+/// OWNS control flow for its workflow tool and is NEVER demoted, even when the prompt itself
+/// looks like a bare continuation (e.g. a "Use template" intake reply of just "1" to a
+/// numbered menu — `is_plan_continuation_message` treats any all-digit prompt up to 16
+/// chars as a bare continuation/approval, tripping door (a)). Extracted as its own function
+/// (rather than left inline) so it is unit-testable against a real `AppState` without
+/// re-deriving the condition by hand in the test. `routing_binding.is_none()` is checked
+/// FIRST, same as the inline `&&`-chain it replaces, so the (comparatively) expensive memory
+/// lookup in `thread_has_active_runtime_plan` still only runs when actually needed.
+fn plan_precedence_demotes_workflow_route(
+    state: &AppState,
+    thread_id: Option<&str>,
+    prompt: &str,
+    routing_binding: Option<&RoutingBinding>,
+) -> bool {
+    routing_binding.is_none()
+        && (prompt_forces_plan_precedence(prompt)
+            || thread_has_active_runtime_plan(state, thread_id))
 }
 
 /// Load the thread's CANONICAL plan steps from the durable runtime-plan store (the same
@@ -16823,6 +16916,21 @@ fn deliverable_template_ref(parsed: &serde_json::Value) -> Option<String> {
         .map(|value| value.chars().take(160).collect())
 }
 
+/// S2 T4: force the tool-call args' `template_ref` to the deterministic binding's — the
+/// binding WINS, always. The user already picked this exact template via "Use template";
+/// the model's own `template_ref` (correct, absent, or drifted onto a different pack across
+/// the multi-turn intake) is not authoritative once a binding is active. Called BEFORE
+/// `deliverable_template_ref`/`document_generation_options` parse `args` in the
+/// `make_deck`/`make_document` dispatch arms, so every downstream read sees the bound ref.
+/// `args` is coerced to an object if the model sent something else (defensive; tool-call
+/// args are schema-validated JSON objects in practice).
+fn merge_bound_template_ref(args: &mut serde_json::Value, template_ref: &str) {
+    if !args.is_object() {
+        *args = serde_json::json!({});
+    }
+    args["template_ref"] = serde_json::Value::String(template_ref.to_string());
+}
+
 fn deliverable_design_theme(parsed: &serde_json::Value) -> Option<String> {
     parsed
         .get("design_theme")
@@ -21190,6 +21298,11 @@ fn templated_document_outcome(
 /// than inline in the `execute_chat_tool` dispatch match — so honest-failure
 /// early returns don't force a pyramid of nested match/if-let in the
 /// dispatch loop (the dispatch site just calls this and awaits).
+/// Returns `(result, delivered)`: `delivered` is `true` once the primary artifact actually
+/// landed (DOCX at minimum — the container-unreachable and QA-degraded outcomes still count,
+/// since a real file exists), `false` only on the early-return content/write failures below.
+/// S2 T4 uses `delivered` to clear the thread's routing binding without string-sniffing
+/// `result` (the message text is user-facing prose, not a status contract).
 async fn make_templated_document(
     ctx: &ChatToolCtx<'_>,
     append_output: &mut Vec<String>,
@@ -21200,7 +21313,7 @@ async fn make_templated_document(
     brief: &str,
     language: &str,
     entry: TemplateCatalogEntry,
-) -> String {
+) -> (String, bool) {
     let _ = emit_stream_event(
         ctx.tx,
         GenerateStreamEvent::Delta {
@@ -21224,7 +21337,12 @@ async fn make_templated_document(
             .unwrap_or_else(|error| Err(format!("join error: {error}")));
     let example = match example {
         Ok(example) => example,
-        Err(error) => return format!("Could not load template pack «{}»: {error}", entry.id),
+        Err(error) => {
+            return (
+                format!("Could not load template pack «{}»: {error}", entry.id),
+                false,
+            );
+        }
     };
     let skeleton = document_content::document_block_skeleton(&example);
     let directives = document_generation_directives(document_options);
@@ -21250,7 +21368,12 @@ async fn make_templated_document(
     .await
     {
         Ok(doc) => doc,
-        Err(error) => return format!("Could not generate document content: {error}"),
+        Err(error) => {
+            return (
+                format!("Could not generate document content: {error}"),
+                false,
+            );
+        }
     };
 
     // 4) name the render theme from the RESOLVED design_theme (explicit arg
@@ -21276,7 +21399,7 @@ async fn make_templated_document(
     .await
     .unwrap_or_else(|error| Err(format!("join error: {error}")));
     if let Err(error) = write_json {
-        return format!("Could not write {json_name}: {error}");
+        return (format!("Could not write {json_name}: {error}"), false);
     }
 
     let docx_name = format!("{stem}.docx");
@@ -21289,7 +21412,7 @@ async fn make_templated_document(
     .await
     .unwrap_or_else(|error| Err(format!("join error: {error}")));
     if let Err(error) = write_docx {
-        return format!("Could not write {docx_name}: {error}");
+        return (format!("Could not write {docx_name}: {error}"), false);
     }
 
     // 6) render in the sandbox (no model shell) — same command shape as
@@ -21325,7 +21448,10 @@ async fn make_templated_document(
             )
             .await;
             append_output.push(doc_out);
-            "Document created (DOCX). Designed HTML/PDF need the local computer (start it and retry for the full render).".to_string()
+            (
+                "Document created (DOCX). Designed HTML/PDF need the local computer (start it and retry for the full render).".to_string(),
+                true,
+            )
         }
         Ok(render_out) => {
             sandbox_end(render_out.clone());
@@ -21346,12 +21472,15 @@ async fn make_templated_document(
             )
             .await;
             append_output.push(doc_out);
-            templated_document_outcome(
-                &produced,
-                &stem,
-                workflow_id,
-                rendered_deck_qa_failure(&render_out).as_deref(),
-                &render_out,
+            (
+                templated_document_outcome(
+                    &produced,
+                    &stem,
+                    workflow_id,
+                    rendered_deck_qa_failure(&render_out).as_deref(),
+                    &render_out,
+                ),
+                true,
             )
         }
     }
@@ -21942,8 +22071,16 @@ available tools (for data from the web use the browser: browser_navigate on the 
         // (brand → schema-enforced content → images → render). No
         // model-driven planning, file I/O or shell → nothing for a
         // weak model to get wrong beyond filling the brief slot.
-        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+        let mut parsed = serde_json::from_str::<serde_json::Value>(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
+        // S2 T4: the thread's deterministic routing binding (if any) OWNS `template_ref` —
+        // merge it into the tool-call args before anything downstream reads them, so the
+        // model can't lose or override the user's "Use template" choice.
+        if let Some(binding) = active_routing_binding(ctx.state, ctx.thread_id) {
+            if let Some(template_ref) = binding.args.get("template_ref").and_then(|v| v.as_str()) {
+                merge_bound_template_ref(&mut parsed, template_ref);
+            }
+        }
         let brief = parsed
             .get("brief")
             .and_then(|v| v.as_str())
@@ -22283,6 +22420,10 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             )
                         } else {
                             if produced.iter().any(|fname| fname == "deck.pptx") {
+                                // S2 T4: the deck was DELIVERED — clear the thread's
+                                // routing binding so later turns aren't stuck forcing
+                                // make_deck (the gateway executor clears the store).
+                                effects.clear_routing_binding = true;
                                 format!(
                                     "Deck created via workflow {}: {} ({slide_count} slides, {made} images). The .pptx is editable; .html/.pdf are previews. The deck is DONE — give the user a one-line summary.",
                                     workflow_plan
@@ -22310,8 +22451,16 @@ available tools (for data from the web use the browser: browser_navigate on the 
             }
         }
     } else if name == "make_document" {
-        let parsed = serde_json::from_str::<serde_json::Value>(args_raw)
+        let mut parsed = serde_json::from_str::<serde_json::Value>(args_raw)
             .unwrap_or_else(|_| serde_json::json!({}));
+        // S2 T4: same deterministic-binding merge as make_deck above — the bound
+        // `template_ref` wins over whatever the model put (or omitted) in `args`, and
+        // `document_generation_options` below reads it via `deliverable_template_ref`.
+        if let Some(binding) = active_routing_binding(ctx.state, ctx.thread_id) {
+            if let Some(template_ref) = binding.args.get("template_ref").and_then(|v| v.as_str()) {
+                merge_bound_template_ref(&mut parsed, template_ref);
+            }
+        }
         let brief = parsed
             .get("brief")
             .and_then(|v| v.as_str())
@@ -22530,6 +22679,9 @@ available tools (for data from the web use the browser: browser_navigate on the 
                             if let Some(error) = artifact_error {
                                 error
                             } else {
+                                // S2 T4: the document was DELIVERED — clear the thread's
+                                // routing binding (mirrors the make_deck success arm).
+                                effects.clear_routing_binding = true;
                                 format!(
                                     "Document created via workflow {}: {}. The document is DONE — give the user a one-line summary.",
                                     workflow_plan
@@ -22555,7 +22707,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         .and_then(|value| value.as_str())
                         .unwrap_or("make_document")
                         .to_string();
-                    make_templated_document(
+                    let (result, delivered) = make_templated_document(
                         ctx,
                         &mut effects.append_output,
                         &thread_slug,
@@ -22566,7 +22718,13 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         &language,
                         entry,
                     )
-                    .await
+                    .await;
+                    // S2 T4: the templated document was DELIVERED — clear the thread's
+                    // routing binding (mirrors the make_deck / markdown-path arms).
+                    if delivered {
+                        effects.clear_routing_binding = true;
+                    }
+                    result
                 }
             }
         }
@@ -23964,6 +24122,17 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             active_sensitive,
         };
         let (result, effects) = execute_chat_tool(&ctx, name, &args_raw, call_id).await;
+        // S2 T4: `effects.clear_routing_binding` is a gateway-side signal the engine-safe
+        // `LoopState::apply_effects` can't act on (it has no `ChatStore` access) — this is
+        // the gateway seam that DOES, right after the call that set it, before the flag
+        // travels any further. Fail-open: no thread_id → nothing to clear.
+        if effects.clear_routing_binding {
+            if let Some(thread_id) = self.thread_id {
+                if let Ok(store) = lock_store(self.state) {
+                    let _ = store.clear_thread_routing_binding(thread_id);
+                }
+            }
+        }
         Ok(local_first_engine::ToolOutcome { result, effects })
     }
 }
@@ -25088,19 +25257,12 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
     // S2 (plugin-owned deterministic routing): an active thread-scoped RoutingBinding
     // (set once at "Use template" intake — EnqueueTurnRequest::routing_binding /
     // ChatStore::thread_routing_binding) decides the route BEFORE per-turn BM25 runs at
-    // all — see route_capability_with_binding. Lock is taken and dropped inline here
-    // (mirrors the workspace_for_thread read above); never held across generation.
-    // Missing thread_id, no persisted binding, or malformed JSON all fail open to
-    // ordinary BM25 routing, same as today.
-    let routing_binding: Option<RoutingBinding> = request
-        .thread_id
-        .as_deref()
-        .and_then(|tid| {
-            lock_store(state)
-                .ok()
-                .and_then(|store| store.thread_routing_binding(tid).ok().flatten())
-        })
-        .and_then(|json| serde_json::from_str::<RoutingBinding>(&json).ok());
+    // all — see route_capability_with_binding. Lock is taken and dropped inline inside
+    // `active_routing_binding` (mirrors the workspace_for_thread read above); never held
+    // across generation. Missing thread_id, no persisted binding, or malformed JSON all
+    // fail open to ordinary BM25 routing, same as today.
+    let routing_binding: Option<RoutingBinding> =
+        active_routing_binding(state, request.thread_id.as_deref());
     let routed = route_capability_with_binding(&request.prompt, routing_binding.as_ref());
     let was_workflow = matches!(routed, CapabilityRouteDecision::Workflow { .. });
     // Adaptive floor (ADR 0018), Fase 2: for a CAPABLE model, relax a Workflow
@@ -25130,11 +25292,23 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
     // an active runtime plan, (c) a FIRST-turn prompt that is itself a plan/research
     // request (prompt_forces_plan_precedence) — the door the continuation-only guard
     // left open (a plan/research prompt that also matches a workflow's keywords, e.g.
-    // "documento", could never get off the ground: chicken-and-egg). The prompt-only
-    // checks are cheap and short-circuit the memory lookup.
+    // "documento", could never get off the ground: chicken-and-egg).
+    //
+    // S2 T4 (critical, flagged by T3 review): a deterministic routing binding must NOT be
+    // demoted by any of these doors. Without this guard, a "Use template" intake reply
+    // that's a bare numeric answer (e.g. just "1" to a numbered menu) hits door (a),
+    // demotes the forced workflow route back to AgentLoop, skips the hard prune below, and
+    // a weak model wanders into skills/shell: exactly the bug S2 exists to close. The
+    // binding is an explicit, thread-scoped user choice (not a per-turn BM25 guess or an
+    // inferred continuation) — once active it OWNS control flow for its workflow tool, full
+    // stop.
     if matches!(capability_route, CapabilityRouteDecision::Workflow { .. })
-        && (prompt_forces_plan_precedence(&request.prompt)
-            || thread_has_active_runtime_plan(state, request.thread_id.as_deref()))
+        && plan_precedence_demotes_workflow_route(
+            state,
+            request.thread_id.as_deref(),
+            &request.prompt,
+            routing_binding.as_ref(),
+        )
     {
         eprintln!(
             "plan-precedence: active plan/continuation → workflow route kept on the agent loop"
@@ -25144,6 +25318,15 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
         };
     }
     let workflow_route = workflow_route_from_capability(&capability_route);
+    // S2 T4: when the binding survived plan-precedence and still resolves to a registered
+    // WorkflowRouting, carry its `deny_tools` to the prune call sites below — hard-prune
+    // removes skill:*/run_command/shell/the-sibling-make_* explicitly, not just by omission.
+    let workflow_deny_tools: Vec<String> = routing_binding
+        .as_ref()
+        .filter(|_| matches!(workflow_route, WorkflowRouteDecision::Workflow { .. }))
+        .and_then(resolve_workflow_routing)
+        .map(|routing| routing.deny_tools)
+        .unwrap_or_default();
     let system = match capability_router_instruction_for_decision(&capability_route) {
         Some(instruction) => format!("{system}\n\n{instruction}"),
         None => system,
@@ -25308,7 +25491,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
-    prune_tools_for_workflow_route(&mut base_tools, &workflow_route);
+    prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
     // Tool Search (Anthropic pattern): split the full toolset into a SMALL always-loaded
     // CORE + a DEFERRED registry the model discovers via `find_capability`. Keeps the
     // upfront tool count low (selection accuracy + context budget) as tools grow, and makes
@@ -25374,7 +25557,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             }
         }
     }
-    prune_tools_for_workflow_route(&mut base_tools, &workflow_route);
+    prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
     // Unified capability corpus for `find_capability`: deferred native tools + installed
     // skills + connected connector tools, all in one BM25-searchable list. One discovery
     // path instead of three (find_capability subsumes find_connected_tools).
@@ -58102,6 +58285,74 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             })
             .collect();
         assert_eq!(names, vec!["make_document"]);
+    }
+
+    #[test]
+    fn bound_template_ref_is_injected_when_model_omits_it() {
+        let mut args = serde_json::json!({"brief":"x"});
+        super::merge_bound_template_ref(&mut args, "homun/cv-professional-01");
+        assert_eq!(args["template_ref"], "homun/cv-professional-01");
+    }
+
+    #[test]
+    fn bound_template_ref_wins_over_a_different_model_supplied_ref() {
+        // Deterministic: the SELECTED template is authoritative even if a weak/drifting
+        // model put a different (or stale) template_ref of its own into the args.
+        let mut args = serde_json::json!({"brief":"x", "template_ref":"homun/other-pack-02"});
+        super::merge_bound_template_ref(&mut args, "homun/cv-professional-01");
+        assert_eq!(args["template_ref"], "homun/cv-professional-01");
+    }
+
+    #[test]
+    fn prune_removes_denied_tools_not_just_retains_route_tool() {
+        let mut tools = vec![
+            serde_json::json!({"function":{"name":"make_document"}}),
+            serde_json::json!({"function":{"name":"skill:create_documents"}}),
+            serde_json::json!({"function":{"name":"run_command"}}),
+        ];
+        super::prune_tools_for_route_and_deny(
+            &mut tools,
+            "make_document",
+            &["skill:*".into(), "run_command".into()],
+        );
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.pointer("/function/name").and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(names, vec!["make_document"]);
+    }
+
+    #[test]
+    fn routing_binding_overrides_plan_precedence_demotion() {
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let state = test_app_state_for_brief(facade);
+        let binding = super::RoutingBinding {
+            plugin_id: "presentations".into(),
+            route_id: "presentations.template_document".into(),
+            args: serde_json::json!({"template_ref":"homun/cv-professional-01"}),
+        };
+        // "Use template" intake reply — a bare numeric answer to a menu, e.g. picking
+        // option "1". `is_plan_continuation_message` treats any all-digit prompt up to 16
+        // chars as a bare continuation/approval (door (a)), so WITHOUT a binding this
+        // demotes the forced workflow route straight back to AgentLoop (the exact
+        // dead-end this guard exists to close for the "Use template" flow).
+        let intake_reply = "1";
+        assert!(
+            super::plan_precedence_demotes_workflow_route(&state, Some("t1"), intake_reply, None),
+            "sanity: an unbound bare-numeric intake reply demotes via plan precedence"
+        );
+        // WITH an active binding the template workflow OWNS control flow — no demotion.
+        assert!(
+            !super::plan_precedence_demotes_workflow_route(
+                &state,
+                Some("t1"),
+                intake_reply,
+                Some(&binding)
+            ),
+            "a deterministic routing binding must not be demoted by plan precedence"
+        );
     }
 
     #[test]

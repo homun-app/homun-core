@@ -124,6 +124,15 @@ pub struct ToolEffects {
     /// Real progress happened → reset the stall guards (F1): anchor the round, zero the repeat
     /// counter, clear the last-round signature.
     pub reset_stall_guards: bool,
+    /// S2 T4 (plugin-owned deterministic routing): a `make_deck`/`make_document` call just
+    /// delivered its artifact successfully → the thread's `RoutingBinding` (gateway-typed,
+    /// stored in `ChatStore`) should be cleared so later turns route freely again. A bare
+    /// `bool` (not the binding itself, which is gateway-typed and can't live in the
+    /// engine-safe `LoopState`) — the gateway's `CapabilityExecutor` impl reads this flag
+    /// off the returned `ToolEffects` and does the actual store clear itself, same pattern
+    /// as `request_confirm`/`reset_stall_guards` signaling an action the loop-state alone
+    /// can't perform.
+    pub clear_routing_binding: bool,
 }
 
 /// One tool execution's output: the result text (pushed into the conversation as the tool message)
