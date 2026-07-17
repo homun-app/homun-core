@@ -531,6 +531,7 @@ struct TemplateCatalogEntryResponse {
     id: String,
     name: String,
     kind: String,
+    category: String,
     description: String,
     name_it: Option<String>,
     description_it: Option<String>,
@@ -6762,6 +6763,10 @@ struct TemplateCatalogEntry {
     id: String,
     name: String,
     kind: String,
+    // Use-case bucket for gallery filtering (whitelist + "other" fallback, mirrors
+    // the kind/design_template parsing pattern below — never trust manifest authors
+    // to stick to the list).
+    category: String,
     description: String,
     // Flat locale overrides (name_it/description_it in the manifest): the catalog is
     // EN-canonical, Italian is the one extra locale the product ships today. A map
@@ -6970,6 +6975,7 @@ fn template_catalog_entry(
         id: id.to_string(),
         name: name.to_string(),
         kind: kind.to_string(),
+        category: "other".to_string(),
         description: description.to_string(),
         name_it: None,
         description_it: None,
@@ -7254,6 +7260,18 @@ fn parse_file_template_catalog_entry(
         .filter(|kind| matches!(*kind, "presentation" | "document"))
         .ok_or_else(|| "template kind is invalid".to_string())?
         .to_string();
+    let category = value
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|c| {
+            matches!(
+                *c,
+                "pitch_sales" | "cv_career" | "report_update" | "catalog_marketing"
+            )
+        })
+        .unwrap_or("other")
+        .to_string();
     let description = clean_template_catalog_text(value.get("description"), 240)
         .ok_or_else(|| "template missing description".to_string())?;
     let design_template = value
@@ -7286,6 +7304,7 @@ fn parse_file_template_catalog_entry(
         id,
         name,
         kind,
+        category,
         description,
         name_it: clean_template_catalog_text(value.get("name_it"), 80),
         description_it: clean_template_catalog_text(value.get("description_it"), 240),
@@ -7721,6 +7740,7 @@ fn template_catalog_response_from_entries(
                     id: entry.id,
                     name: entry.name,
                     kind: entry.kind,
+                    category: entry.category,
                     description: entry.description,
                     name_it: entry.name_it,
                     description_it: entry.description_it,
@@ -55736,6 +55756,7 @@ prs.save(Path({path:?}))
             id: "local/sales-kickoff".to_string(),
             name: "Sales Kickoff".to_string(),
             kind: "presentation".to_string(),
+            category: "other".to_string(),
             description: "Imported template".to_string(),
             name_it: None,
             description_it: None,
@@ -55983,6 +56004,21 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn file_template_catalog_entry_parses_category_with_fallback() {
+        let manifest = serde_json::json!({"provider_id": "acme", "templates": [
+            {"id": "acme/a", "kind": "document", "name": "A", "description": "d",
+             "design_template": "sales_proposal", "route_text": "r", "category": "cv_career"},
+            {"id": "acme/b", "kind": "document", "name": "B", "description": "d",
+             "design_template": "sales_proposal", "route_text": "r", "category": "bogus"},
+            {"id": "acme/c", "kind": "document", "name": "C", "description": "d",
+             "design_template": "sales_proposal", "route_text": "r"}]});
+        let p = super::FileTemplateCatalogProvider::from_json_str(manifest.to_string().as_str()).unwrap();
+        assert_eq!(p.entries[0].category, "cv_career");
+        assert_eq!(p.entries[1].category, "other"); // bogus → fallback
+        assert_eq!(p.entries[2].category, "other"); // absent → fallback
+    }
+
+    #[test]
     fn bundled_entries_do_not_report_as_imported() {
         let manifest = serde_json::json!({
             "provider_id": "acme",
@@ -56043,6 +56079,7 @@ prs.save(Path({path:?}))
                 id: "external/gallery-template-01".to_string(),
                 name: "Gallery Template".to_string(),
                 kind: "presentation".to_string(),
+                category: "other".to_string(),
                 description: "Template prepared for gallery preview.".to_string(),
                 name_it: None,
                 description_it: None,
@@ -56756,6 +56793,7 @@ prs.save(Path({path:?}))
             id: "slidescarnival/pitch-clean".to_string(),
             name: "Pitch Clean".to_string(),
             kind: "presentation".to_string(),
+            category: "other".to_string(),
             description: "Imported template.".to_string(),
             name_it: None,
             description_it: None,
