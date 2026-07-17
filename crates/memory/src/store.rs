@@ -1,15 +1,15 @@
 use crate::{
     AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AutomationCandidateRecord, AutomationCandidateStatus,
     DataSensitivity, EncryptedJson, KeyProvider, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
-    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity, MemoryEvent,
-    MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryPublicationCandidate,
-    MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
-    MemoryPublicationResolution, MemoryPublicationStatus, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, MemoryRestoreMode, MemorySourceAccessEvent, MemorySourceAccessOutcome,
-    MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantValidationError,
-    PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId,
-    contains_secret, current_timestamp, decrypt_json, encrypt_json,
-    validate_memory_source_grant_intrinsic,
+    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
+    MemoryEntity, MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport,
+    MemoryPublicationCandidate, MemoryPublicationLink, MemoryPublicationProposal,
+    MemoryPublicationReasonCode, MemoryPublicationResolution, MemoryPublicationStatus,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryRestoreMode,
+    MemorySourceAccessEvent, MemorySourceAccessOutcome, MemorySourceCandidateProjection,
+    MemorySourceGrant, MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord,
+    THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId, contains_secret,
+    current_timestamp, decrypt_json, encrypt_json, validate_memory_source_grant_intrinsic,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -3106,6 +3106,11 @@ impl SQLiteMemoryStore {
         // I sub-helper (ensure_column, rebuild) ricevono questa stessa connection
         // (lock unico su writer) — evita di riprendere il Mutex e fare deadlock.
         Self::install_memory_source_active_index_on(&mut conn)?;
+        let legacy_publication_collection_missing = !Self::table_has_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "proposed_collection",
+        )?;
         self.ensure_column_on(
             &conn,
             "memories",
@@ -3172,7 +3177,10 @@ impl SQLiteMemoryStore {
             "failure_reason",
             "alter table memory_publication_proposals add column failure_reason text",
         )?;
-        Self::backfill_legacy_publication_proposals_on(&mut conn)?;
+        Self::backfill_legacy_publication_proposals_on(
+            &mut conn,
+            legacy_publication_collection_missing,
+        )?;
         conn.execute(
             "insert or replace into schema_metadata (key, value) values ('schema_version', ?1)",
             [SCHEMA_VERSION.to_string()],
@@ -3259,7 +3267,10 @@ impl SQLiteMemoryStore {
     /// terminal reason fields. Migrate them exactly once; malformed legacy refs
     /// are deliberately preserved as malformed candidate JSON so later reads
     /// fail closed instead of silently widening publication behavior.
-    fn backfill_legacy_publication_proposals_on(conn: &mut Connection) -> Result<(), String> {
+    fn backfill_legacy_publication_proposals_on(
+        conn: &mut Connection,
+        legacy_publication_collection_missing: bool,
+    ) -> Result<(), String> {
         let already_backfilled = conn
             .query_row(
                 "select exists(
@@ -3291,7 +3302,7 @@ impl SQLiteMemoryStore {
         let rows = {
             let mut statement = transaction
                 .prepare(
-                    "select id, status, duplicate_ref_json
+                    "select id, status, proposed_memory_type, duplicate_ref_json
                      from memory_publication_proposals order by id",
                 )
                 .map_err(|error| error.to_string())?;
@@ -3301,13 +3312,21 @@ impl SQLiteMemoryStore {
                 values.push((
                     row.get::<_, String>(0).map_err(|error| error.to_string())?,
                     row.get::<_, String>(1).map_err(|error| error.to_string())?,
-                    row.get::<_, Option<String>>(2)
+                    row.get::<_, String>(2).map_err(|error| error.to_string())?,
+                    row.get::<_, Option<String>>(3)
                         .map_err(|error| error.to_string())?,
                 ));
             }
             values
         };
-        for (id, status, duplicate_ref_json) in rows {
+        for (id, status, proposed_memory_type, duplicate_ref_json) in rows {
+            let proposed_collection = legacy_publication_collection_missing.then(|| {
+                MemoryCollectionKey::from_memory_type(&proposed_memory_type)
+                    .and_then(|collection| enum_name(&collection).ok())
+                    // Unknown legacy types must make this row unreadable instead of
+                    // silently treating it as generic knowledge.
+                    .unwrap_or_else(|| "legacy_unknown".to_string())
+            });
             let (candidate_json, reason_code, failure_reason) = match status.as_str() {
                 "approved" => (None, "approved", None),
                 "rejected" => (None, "rejected", None),
@@ -3335,10 +3354,18 @@ impl SQLiteMemoryStore {
             transaction
                 .execute(
                     "update memory_publication_proposals
-                     set candidate_json = ?2, resolution_json = null, reason_code = ?3,
-                         failure_reason = ?4
+                     set proposed_collection = case when ?2 then ?3 else proposed_collection end,
+                         candidate_json = ?4, resolution_json = null, reason_code = ?5,
+                         failure_reason = ?6
                      where id = ?1",
-                    params![id, candidate_json, reason_code, failure_reason],
+                    params![
+                        id,
+                        legacy_publication_collection_missing,
+                        proposed_collection,
+                        candidate_json,
+                        reason_code,
+                        failure_reason
+                    ],
                 )
                 .map_err(|error| error.to_string())?;
         }

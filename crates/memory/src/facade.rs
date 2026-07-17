@@ -1511,7 +1511,7 @@ impl MemoryFacade {
         let source =
             self.load_publication_source(&source.reference, &source.user_id, &source.workspace_id)?;
         self.validate_publication_source(&source)?;
-        let proposed_collection = publication_collection_for_record(&source)
+        let proposed_collection = MemoryCollectionKey::for_memory(&source)
             .ok_or_else(|| MemoryError::validation("publication_collection_unknown"))?;
         let candidate =
             self.find_publication_candidate(&source, destination, proposed_collection)?;
@@ -1676,6 +1676,15 @@ impl MemoryFacade {
             proposal.proposed_collection,
         )?;
         if candidate != proposal.candidate {
+            // The first approver may have committed atomically after this turn
+            // loaded the pending proposal but before candidate revalidation.
+            // Only an already durable approval is idempotent; every other
+            // candidate change remains a fail-closed conflict.
+            if let Some(latest) = self.get_publication_proposal(id)? {
+                if latest.status == MemoryPublicationStatus::Approved {
+                    return self.approved_publication_result(latest);
+                }
+            }
             return Err(MemoryError::policy("publication_conflict"));
         }
         let now = current_timestamp();
@@ -2198,20 +2207,6 @@ fn is_published_alias(memory: &MemoryRecord) -> bool {
         .get("published_alias")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
-}
-
-fn publication_collection_for_record(memory: &MemoryRecord) -> Option<MemoryCollectionKey> {
-    [
-        MemoryCollectionKey::Preferences,
-        MemoryCollectionKey::Profile,
-        MemoryCollectionKey::Knowledge,
-        MemoryCollectionKey::Decisions,
-        MemoryCollectionKey::Goals,
-        MemoryCollectionKey::Artifacts,
-        MemoryCollectionKey::Episodes,
-    ]
-    .into_iter()
-    .find(|collection| collection.matches(memory))
 }
 
 fn publication_subject_key(memory: &MemoryRecord) -> Option<&str> {

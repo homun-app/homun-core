@@ -1,8 +1,9 @@
 use local_first_memory::{
-    AuthorizedMemorySource, DataSensitivity, MemoryFacade, MemoryPublicationCandidate,
-    MemoryPublicationDestination, MemoryPublicationReasonCode, MemoryPublicationResolution,
-    MemoryPublicationStatus, MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
+    AuthorizedMemorySource, DataSensitivity, MemoryCollectionKey, MemoryFacade,
+    MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationReasonCode,
+    MemoryPublicationResolution, MemoryPublicationStatus, MemoryPublicationStoreError,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId,
+    WorkspaceId, recall_source_on_facade,
 };
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -684,17 +685,29 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
             );",
         )
         .unwrap();
-    for (id, status, decided_by, duplicate_ref) in [
-        ("approved", "approved", Some(OWNER), None),
-        ("rejected", "rejected", Some(OWNER), None),
-        ("failed", "failed", Some(OWNER), None),
+    for (id, status, decided_by, memory_type, duplicate_ref) in [
+        ("approved", "approved", Some(OWNER), "fact", None),
+        ("rejected", "rejected", Some(OWNER), "fact", None),
+        ("failed", "failed", Some(OWNER), "fact", None),
         (
             "pending-duplicate",
             "pending",
             None,
+            "fact",
             Some(duplicate.clone()),
         ),
-        ("pending", "pending", None, None),
+        ("pending", "pending", None, "fact", None),
+        ("pending-preference", "pending", None, "preference", None),
+        ("pending-goal", "pending", None, "goal", None),
+        ("pending-artifact", "pending", None, "artifact", None),
+        ("pending-episode", "pending", None, "episode", None),
+        (
+            "pending-unknown",
+            "pending",
+            None,
+            "unknown_legacy_type",
+            None,
+        ),
     ] {
         connection
             .execute(
@@ -712,7 +725,7 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
                     OWNER,
                     "__personal__",
                     "Prefers Italian",
-                    "fact",
+                    memory_type,
                     "personal",
                     "private",
                     duplicate_ref.map(|reference| serde_json::to_string(&reference).unwrap()),
@@ -801,6 +814,61 @@ fn legacy_publication_rows_are_backfilled_to_valid_typed_states() {
         MemoryPublicationReasonCode::Pending
     );
     assert!(facade.get_publication_proposal("pending-corrupt").is_err());
+    assert!(facade.get_publication_proposal("pending-unknown").is_err());
+    for (id, expected_collection) in [
+        ("pending-preference", MemoryCollectionKey::Preferences),
+        ("pending-goal", MemoryCollectionKey::Goals),
+        ("pending-artifact", MemoryCollectionKey::Artifacts),
+        ("pending-episode", MemoryCollectionKey::Episodes),
+    ] {
+        assert_eq!(
+            facade
+                .get_publication_proposal(id)
+                .unwrap()
+                .unwrap()
+                .proposed_collection,
+            expected_collection,
+        );
+    }
+
+    let mut conflict_source = memory(
+        &owner,
+        &WorkspaceId::new(PROJECT),
+        "preference",
+        "Prefers Italian",
+    );
+    conflict_source.metadata = serde_json::json!({"subject_key": "reply_language"});
+    facade.upsert_memory(&conflict_source).unwrap();
+    let mut conflicting_destination = memory(
+        &owner,
+        &WorkspaceId::new("__personal__"),
+        "preference",
+        "Prefers English",
+    );
+    conflicting_destination.metadata = serde_json::json!({"subject_key": "reply_language"});
+    facade.upsert_memory(&conflicting_destination).unwrap();
+    let conflict = facade
+        .create_publication_proposal(
+            &conflict_source,
+            &MemoryPublicationDestination::personal(owner.clone()),
+            OWNER,
+        )
+        .unwrap();
+    assert_eq!(
+        conflict.reason_code,
+        MemoryPublicationReasonCode::PublicationConflict
+    );
+    assert_eq!(
+        facade
+            .approve_publication(&conflict.id, OWNER)
+            .unwrap_err()
+            .as_str(),
+        "publication_conflict"
+    );
+    facade
+        .set_publication_resolution(&conflict.id, OWNER, MemoryPublicationResolution::CreateNew)
+        .unwrap();
+    facade.approve_publication(&conflict.id, OWNER).unwrap();
     drop(facade);
     remove_sqlite_files(&path);
 }

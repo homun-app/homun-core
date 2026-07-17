@@ -19,16 +19,42 @@ pub enum MemoryCollectionKey {
 }
 
 impl MemoryCollectionKey {
+    pub fn for_memory(memory: &MemoryRecord) -> Option<Self> {
+        Self::from_memory_type_and_metadata(&memory.memory_type, &memory.metadata)
+    }
+
+    /// Returns the sole source-policy collection for a persisted candidate.
+    /// The ordering keeps personal-profile facts distinct from ordinary facts.
+    pub fn from_memory_type_and_metadata(
+        memory_type: &str,
+        metadata: &serde_json::Value,
+    ) -> Option<Self> {
+        [
+            Self::Preferences,
+            Self::Profile,
+            Self::Knowledge,
+            Self::Decisions,
+            Self::Goals,
+            Self::Artifacts,
+            Self::Episodes,
+        ]
+        .into_iter()
+        .find(|collection| collection.matches_candidate(memory_type, metadata))
+    }
+
+    /// Legacy publication rows only persisted the type, never the metadata.
+    /// A type with no unambiguous source-policy collection returns `None`.
+    pub fn from_memory_type(memory_type: &str) -> Option<Self> {
+        Self::from_memory_type_and_metadata(memory_type, &serde_json::Value::Null)
+    }
+
     pub fn matches(&self, memory: &MemoryRecord) -> bool {
         self.matches_candidate(&memory.memory_type, &memory.metadata)
     }
 
     pub fn matches_candidate(&self, memory_type: &str, metadata: &serde_json::Value) -> bool {
         let is_personal_profile = memory_type == "fact"
-            && metadata
-                .get("scope")
-                .and_then(serde_json::Value::as_str)
-                == Some("personal");
+            && metadata.get("scope").and_then(serde_json::Value::as_str) == Some("personal");
 
         match self {
             Self::Preferences => memory_type == "preference",
@@ -37,10 +63,7 @@ impl MemoryCollectionKey {
                 memory_type == "note" || (memory_type == "fact" && !is_personal_profile)
             }
             Self::Decisions => memory_type == "decision",
-            Self::Goals => matches!(
-                memory_type,
-                "goal" | "objective" | "open_loop"
-            ),
+            Self::Goals => matches!(memory_type, "goal" | "objective" | "open_loop"),
             Self::Artifacts => memory_type == "artifact",
             Self::Episodes => memory_type == "episode",
         }
