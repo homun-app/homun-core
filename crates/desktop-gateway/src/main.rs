@@ -5148,7 +5148,21 @@ fn recall_pack_on_facade(
     >,
 ) -> RecallPack {
     if memory_sources_enabled() && workspace.as_str() != PERSONAL_WORKSPACE {
-        let pack = local_first_memory::recall_authorized_sources_on_facade(
+        // Project lifecycle belongs to the gateway registry, not to the
+        // memory store. Re-read the snapshot whenever the coordinator resolves
+        // or revalidates sources so a deleted project is excluded before its
+        // records are queried or its grant is audited.
+        let source_allowed = |source: &local_first_memory::AuthorizedMemorySource| {
+            if source.grant_id.is_none() {
+                return source.source_user_id == *user && source.source_workspace_id == *workspace;
+            }
+            source.source_workspace_id.as_str() == PERSONAL_WORKSPACE
+                || load_workspaces_file()
+                    .workspaces
+                    .into_iter()
+                    .any(|candidate| candidate.id == source.source_workspace_id.as_str())
+        };
+        return local_first_memory::recall_authorized_sources_on_facade_with_source_filter(
             facade,
             user,
             workspace,
@@ -5156,6 +5170,7 @@ fn recall_pack_on_facade(
             query_vec,
             i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
             graph_context,
+            &source_allowed,
         )
         .unwrap_or_else(|_| {
             RecallPack::from_hits(
@@ -5164,7 +5179,6 @@ fn recall_pack_on_facade(
                 Vec::new(),
             )
         });
-        return exclude_removed_project_sources_from_recall(pack, user, workspace);
     }
     local_first_memory::recall_single_scope_pack(
         facade,
@@ -5174,52 +5188,6 @@ fn recall_pack_on_facade(
         query_vec,
         graph_context,
     )
-}
-
-/// Project identity is owned by the gateway's workspace registry, while grant
-/// persistence intentionally lives in the memory store. A deleted project can
-/// therefore leave a historical (revocable) grant and residual memory rows in
-/// SQLite. Before any recall pack reaches the prompt/UI boundary, discard such
-/// linked hits against the current registry snapshot. Personal and the implicit
-/// local source remain available by construction.
-fn exclude_removed_project_sources_from_recall(
-    pack: RecallPack,
-    user: &MemoryUserId,
-    consumer_workspace: &MemoryWorkspaceId,
-) -> RecallPack {
-    let available_projects = load_workspaces_file()
-        .workspaces
-        .into_iter()
-        .map(|workspace| workspace.id)
-        .collect::<HashSet<_>>();
-    let mut unavailable = BTreeSet::<String>::new();
-    let hits = pack
-        .hits
-        .into_iter()
-        .filter(|hit| {
-            if hit.grant_id.is_none() {
-                return hit.source_user_id == *user
-                    && hit.source_workspace_id == *consumer_workspace;
-            }
-            if hit.source_workspace_id.as_str() == PERSONAL_WORKSPACE {
-                return true;
-            }
-            let available = available_projects.contains(hit.source_workspace_id.as_str());
-            if !available {
-                unavailable.insert(hit.source_workspace_id.as_str().to_string());
-            }
-            available
-        })
-        .collect::<Vec<_>>();
-    let mut degraded_sources = pack.degraded_sources;
-    degraded_sources.extend(unavailable.into_iter().map(|workspace_id| {
-        (MemoryWorkspaceId::new(workspace_id), "source_unavailable".to_string())
-    }));
-    degraded_sources.sort_by(|left, right| {
-        (left.0.as_str(), left.1.as_str()).cmp(&(right.0.as_str(), right.1.as_str()))
-    });
-    degraded_sources.dedup();
-    RecallPack::from_hits_and_degraded(pack.query, pack.scope, hits, degraded_sources)
 }
 
 /// ADR 0022 (Tappa 4) — impl gateway del capability `EmbeddingClient`. Wrappa
@@ -63494,6 +63462,28 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
                 &local_first_memory::MemoryScope::Project(consumer.clone()),
             )
             .await;
+        let last_available_access = super::memory_facade(&state)
+            .last_memory_source_access("decision-grant")
+            .unwrap()
+            .expect("available source is audited");
+        std::fs::write(
+            dir.join("workspaces.json"),
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces: vec![memory_source_test_workspace("project-a", "Alpha")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let removed_service_pack = state
+            .memory_service
+            .as_ref()
+            .expect("runtime service remains installed")
+            .recall(
+                "When do we launch?",
+                &local_first_memory::MemoryScope::Project(consumer.clone()),
+            )
+            .await;
         unsafe { std::env::set_var("HOMUN_MEMORY_SERVICE", "off"); }
         let mut inline_state = state.clone();
         super::install_memory_service_if_enabled(
@@ -63510,9 +63500,9 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             &[],
             None,
         );
-        assert_eq!(service_pack.block, inline_pack.block);
+        assert_eq!(removed_service_pack.block, inline_pack.block);
         assert_eq!(
-            service_pack
+            removed_service_pack
                 .hits
                 .iter()
                 .map(|hit| hit.memory_ref.as_str())
@@ -63527,6 +63517,19 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             .block
             .as_deref()
             .is_some_and(|block| block.contains("Launch in September")));
+        assert!(removed_service_pack.hits.is_empty());
+        assert!(removed_service_pack.degraded_sources.iter().any(|(workspace, reason)| {
+            workspace.as_str() == "project-b" && reason == "source_unavailable"
+        }));
+        assert_eq!(removed_service_pack.degraded_sources, inline_pack.degraded_sources);
+        assert_eq!(
+            super::memory_facade(&state)
+                .last_memory_source_access("decision-grant")
+                .unwrap()
+                .expect("removed source must not write a fresh audit")
+                .id,
+            last_available_access.id
+        );
 
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match previous_user {
@@ -63669,6 +63672,56 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert!(removed.degraded_sources.iter().any(|(workspace, reason)| {
             workspace.as_str() == "project-b" && reason == "source_unavailable"
         }));
+    }
+
+    #[test]
+    fn removed_source_is_degraded_before_intent_filter_without_an_access_event() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("recall-removed-source-no-candidates");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("removed-source-empty-user");
+        let consumer = local_first_memory::WorkspaceId::new("project-a");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        insert_test_source_grant(
+            &facade,
+            &user,
+            &consumer,
+            &source,
+            "removed-source-empty-grant",
+            local_first_memory::MemoryCollectionKey::Preferences,
+        );
+        std::fs::write(
+            dir.join("workspaces.json"),
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces: vec![memory_source_test_workspace("project-a", "Alpha")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let pack = super::recall_pack_on_facade(
+            &facade,
+            &user,
+            &consumer,
+            "What launch date did we decide?",
+            &[],
+            None,
+        );
+
+        assert!(pack.hits.is_empty());
+        assert!(pack.degraded_sources.iter().any(|(workspace, reason)| {
+            workspace.as_str() == "project-b" && reason == "source_unavailable"
+        }));
+        assert!(facade
+            .last_memory_source_access("removed-source-empty-grant")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

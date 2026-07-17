@@ -393,11 +393,62 @@ pub fn revalidate_recall_hits_before_injection(
     now_unix: i64,
     limit: usize,
 ) -> MemoryResult<(Vec<RecallHit>, Vec<(WorkspaceId, String)>)> {
+    revalidate_recall_hits_before_injection_with_source_filter(
+        facade,
+        user,
+        consumer_workspace,
+        initial_sources,
+        hits,
+        now_unix,
+        limit,
+        &|_| true,
+    )
+}
+
+fn resolve_recall_sources_with_filter(
+    facade: &MemoryFacade,
+    user: &UserId,
+    consumer_workspace: &WorkspaceId,
+    now_unix: i64,
+    source_allowed: &(dyn Fn(&AuthorizedMemorySource) -> bool + Sync),
+) -> MemoryResult<(Vec<AuthorizedMemorySource>, Vec<(WorkspaceId, String)>)> {
+    let sources = facade.resolve_memory_sources(user, consumer_workspace, now_unix)?;
+    let mut unavailable = Vec::new();
+    let mut allowed = Vec::new();
+    for source in sources {
+        if source_allowed(&source) {
+            allowed.push(source);
+        } else if source.grant_id.is_some() {
+            unavailable.push((
+                source.source_workspace_id.clone(),
+                "source_unavailable".to_string(),
+            ));
+        }
+    }
+    Ok((allowed, unavailable))
+}
+
+fn revalidate_recall_hits_before_injection_with_source_filter(
+    facade: &MemoryFacade,
+    user: &UserId,
+    consumer_workspace: &WorkspaceId,
+    initial_sources: &[AuthorizedMemorySource],
+    hits: Vec<RecallHit>,
+    now_unix: i64,
+    limit: usize,
+    source_allowed: &(dyn Fn(&AuthorizedMemorySource) -> bool + Sync),
+) -> MemoryResult<(Vec<RecallHit>, Vec<(WorkspaceId, String)>)> {
     let initial_fingerprint = crate::memory_source_policy_fingerprint(initial_sources);
-    let current_sources = facade.resolve_memory_sources(user, consumer_workspace, now_unix);
+    let current_sources = resolve_recall_sources_with_filter(
+        facade,
+        user,
+        consumer_workspace,
+        now_unix,
+        source_allowed,
+    );
     let policy_unchanged = current_sources
         .as_ref()
-        .map(|sources| crate::memory_source_policy_fingerprint(sources) == initial_fingerprint)
+        .map(|(sources, _)| crate::memory_source_policy_fingerprint(sources) == initial_fingerprint)
         .unwrap_or(false);
     if policy_unchanged {
         return Ok((
@@ -414,6 +465,10 @@ pub fn revalidate_recall_hits_before_injection(
                 && hit.source_workspace_id == *consumer_workspace
         })
         .collect();
+    let unavailable = current_sources
+        .as_ref()
+        .map(|(_, unavailable)| unavailable)
+        .ok();
     let reason = if current_sources.is_ok() {
         "policy_changed"
     } else {
@@ -422,7 +477,17 @@ pub fn revalidate_recall_hits_before_injection(
     let degraded = initial_sources
         .iter()
         .filter(|source| source.grant_id.is_some())
-        .map(|source| (source.source_workspace_id.clone(), reason.to_string()))
+        .map(|source| {
+            let reason = unavailable
+                .is_some_and(|unavailable| {
+                    unavailable
+                        .iter()
+                        .any(|(workspace, _)| workspace == &source.source_workspace_id)
+                })
+                .then_some("source_unavailable")
+                .unwrap_or(reason);
+            (source.source_workspace_id.clone(), reason.to_string())
+        })
         .collect();
     Ok((
         merge_recall_hits(consumer_workspace.clone(), local_hits, limit),
@@ -441,10 +506,44 @@ pub fn recall_authorized_sources_on_facade(
         &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
     >,
 ) -> MemoryResult<RecallPack> {
-    let sources = facade.resolve_memory_sources(user, consumer_workspace, now_unix)?;
+    recall_authorized_sources_on_facade_with_source_filter(
+        facade,
+        user,
+        consumer_workspace,
+        query,
+        query_vec,
+        now_unix,
+        graph_context,
+        &|_| true,
+    )
+}
+
+/// Coordinates recall only across sources the caller currently authorizes.
+/// The memory crate does not own project lifecycle; callers can therefore
+/// provide a fail-closed predicate while the compatibility API remains
+/// allow-all for existing integrations.
+pub fn recall_authorized_sources_on_facade_with_source_filter(
+    facade: &MemoryFacade,
+    user: &UserId,
+    consumer_workspace: &WorkspaceId,
+    query: &str,
+    query_vec: &[f32],
+    now_unix: i64,
+    graph_context: Option<
+        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
+    >,
+    source_allowed: &(dyn Fn(&AuthorizedMemorySource) -> bool + Sync),
+) -> MemoryResult<RecallPack> {
+    let (sources, initially_unavailable) = resolve_recall_sources_with_filter(
+        facade,
+        user,
+        consumer_workspace,
+        now_unix,
+        source_allowed,
+    )?;
     let intent = memory_recall_intent(query);
     let mut hits = Vec::new();
-    let mut degraded_sources = Vec::new();
+    let mut degraded_sources = initially_unavailable;
     let mut source_audits = Vec::new();
     for source in &sources {
         let effective_source = match source.policy.as_ref() {
@@ -503,7 +602,7 @@ pub fn recall_authorized_sources_on_facade(
             Err(error) => return Err(error),
         }
     }
-    let (hits, policy_degraded) = revalidate_recall_hits_before_injection(
+    let (hits, policy_degraded) = revalidate_recall_hits_before_injection_with_source_filter(
         facade,
         user,
         consumer_workspace,
@@ -511,6 +610,7 @@ pub fn recall_authorized_sources_on_facade(
         hits,
         now_unix,
         10,
+        source_allowed,
     )?;
     for (workspace, reason) in &policy_degraded {
         if let Some((_, outcome, audit_reason, _)) = source_audits
@@ -557,7 +657,7 @@ pub fn recall_authorized_sources_on_facade(
     // Audit is deliberately non-authoritative. Re-resolve once more after its
     // I/O so a revoke concurrent with audit cannot leave linked text in the
     // prompt assembled immediately below.
-    let (hits, final_policy_degraded) = revalidate_recall_hits_before_injection(
+    let (hits, final_policy_degraded) = revalidate_recall_hits_before_injection_with_source_filter(
         facade,
         user,
         consumer_workspace,
@@ -565,6 +665,7 @@ pub fn recall_authorized_sources_on_facade(
         hits,
         now_unix,
         10,
+        source_allowed,
     )?;
     if !policy_was_already_changed && !final_policy_degraded.is_empty() {
         for (workspace, reason) in &final_policy_degraded {
