@@ -184,6 +184,10 @@ assertContains("src/components/MemorySourcesDialog.tsx", "focusTrap", "memory so
 assertContains("src/components/Sidebar.tsx", "projectMenuTriggerRef", "memory source dialog must retain a stable project-row opener, not a transient menu item");
 assertContains("src/components/Sidebar.tsx", "data-project-menu-trigger", "stable project menu triggers must be addressable for focus restoration");
 assertContains("src/components/MemorySourcesDialog.tsx", "isConnected", "memory source dialog must restore focus only to a mounted opener and use a stable fallback");
+assertContains("src/components/MemorySourcesDialog.tsx", "sourceRequestGenerationRef", "source loading must reject stale workspace responses");
+assertContains("src/components/MemorySourcesDialog.tsx", "candidateRequestGenerationRef", "candidate loading must reject stale source responses");
+assertContains("src/components/MemorySourcesDialog.tsx", "aria-pressed={selected?.effect === \"allow\"}", "allow override state must be exposed to assistive technology");
+assertContains("src/components/MemorySourcesDialog.tsx", "aria-pressed={selected?.effect === \"deny\"}", "deny override state must be exposed to assistive technology");
 assertNotContains("src/components/ProjectAccessDialog.tsx", "MemorySourcesDialog", "contact access must not own source grants");
 assertContains("src/components/Sidebar.tsx", "data-nav-section={section}", "sidebar nav rows must expose registry-driven operational sections");
 assertContains("src/components/Sidebar.tsx", "data-promoted={item.promoted === true ? \"true\" : \"false\"}", "sidebar must preserve promoted addon metadata");

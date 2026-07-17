@@ -50632,14 +50632,21 @@ fn memory_source_workspace_label(workspace: &WorkspaceRecord) -> String {
     }
 }
 
-fn memory_source_grant_views(
+fn memory_source_grant_views<F>(
     consumer: &WorkspaceRecord,
     workspaces: &[WorkspaceRecord],
     grants: Vec<MemorySourceGrant>,
-) -> Vec<MemorySourceGrantView> {
+    last_access_at: F,
+) -> Vec<MemorySourceGrantView>
+where
+    F: Fn(&MemorySourceGrant) -> Option<i64>,
+{
     let mut linked = grants
         .into_iter()
         .map(|grant| {
+            // The grant list is already owner+consumer scoped. Audit lookup remains
+            // non-authoritative: unavailable/corrupt audit data never blocks listing.
+            let last_used_at = last_access_at(&grant);
             let (source_label, source_available) =
                 if grant.source_workspace_id.as_str() == PERSONAL_WORKSPACE {
                     ("Personal".to_string(), true)
@@ -50665,7 +50672,7 @@ fn memory_source_grant_views(
                 expires_at: grant.expires_at,
                 revoked_at: grant.revoked_at,
                 policy_version: grant.policy_version,
-                last_used_at: None,
+                last_used_at,
                 overrides: {
                     let mut overrides = grant
                         .overrides
@@ -51323,10 +51330,18 @@ async fn memory_sources_list(
     } else {
         Vec::new()
     };
+    let facade = memory_facade(&state);
     Ok(Json(memory_source_grant_views(
         &consumer,
         &snapshot.workspaces,
         grants,
+        |grant| {
+            facade
+                .last_memory_source_access(&grant.id)
+                .ok()
+                .flatten()
+                .map(|event| event.created_at)
+        },
     )))
 }
 
@@ -51395,6 +51410,13 @@ async fn memory_source_upsert(
         &source_context.consumer,
         &snapshot.workspaces,
         grants,
+        |grant| {
+            facade
+                .last_memory_source_access(&grant.id)
+                .ok()
+                .flatten()
+                .map(|event| event.created_at)
+        },
     )))
 }
 
@@ -51429,6 +51451,13 @@ async fn memory_source_revoke(
         &consumer,
         &snapshot.workspaces,
         grants,
+        |grant| {
+            facade
+                .last_memory_source_access(&grant.id)
+                .ok()
+                .flatten()
+                .map(|event| event.created_at)
+        },
     )))
 }
 
@@ -52551,7 +52580,7 @@ mod tests {
             created_at: "unix:1.000000000".to_string(),
             updated_at: "unix:1.000000000".to_string(),
         };
-        let views = memory_source_grant_views(&consumer, &workspaces, vec![grant]);
+        let views = memory_source_grant_views(&consumer, &workspaces, vec![grant], |_| None);
         assert_eq!(views[0].source_workspace_id, "project-a");
         assert!(views[0].local);
         assert_eq!(views[1].id.as_deref(), Some("grant-deleted"));
@@ -52592,13 +52621,19 @@ mod tests {
             &consumer,
             &[consumer.clone(), source.clone()],
             vec![grant.clone()],
+            |_| None,
         );
         assert_eq!(views[0].source_label, "project-a");
         assert_eq!(views[1].source_label, "project-b");
 
         consumer.name = "  Alpha  ".to_string();
         source.name = "  Beta  ".to_string();
-        let views = memory_source_grant_views(&consumer, &[consumer.clone(), source], vec![grant]);
+        let views = memory_source_grant_views(
+            &consumer,
+            &[consumer.clone(), source],
+            vec![grant],
+            |_| None,
+        );
         assert_eq!(views[0].source_label, "Alpha");
         assert_eq!(views[1].source_label, "Beta");
     }
@@ -53153,6 +53188,93 @@ mod tests {
         ]));
         assert!(serde_json::to_string(linked).unwrap().contains("memory_ref"));
         assert!(!serde_json::to_string(linked).unwrap().contains("metadata"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_list_route_exposes_last_scoped_access_timestamp_when_present() {
+        use axum::{body::Body, http::Request};
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemorySourceAccessEvent,
+            MemorySourceAccessOutcome, MemorySourceGrant, WorkspaceId,
+        };
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-last-access");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let grant = MemorySourceGrant {
+            id: "last-access-grant".to_string(),
+            consumer_user_id: owner.clone(),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: owner.clone(),
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: owner.as_str().to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        super::memory_facade(&state)
+            .upsert_memory_source_grant(&grant)
+            .unwrap();
+        let app = memory_source_route_test_app(state.clone());
+        let listed_before = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, listed_before) = memory_source_response_json(listed_before).await;
+        assert_eq!(
+            listed_before.as_array().unwrap().iter()
+                .find(|view| view["id"] == "last-access-grant").unwrap()["last_used_at"],
+            serde_json::Value::Null,
+        );
+
+        super::memory_facade(&state)
+            .record_memory_source_access(&MemorySourceAccessEvent {
+                id: uuid::Uuid::new_v4().to_string(),
+                consumer_user_id: owner.clone(),
+                consumer_workspace_id: WorkspaceId::new("project-a"),
+                source_workspace_id: WorkspaceId::new("project-b"),
+                grant_id: Some(grant.id.clone()),
+                policy_version: 1,
+                turn_id: Some("turn-1".to_string()),
+                outcome: MemorySourceAccessOutcome::Allow,
+                reason: "allowed".to_string(),
+                candidate_count: 1,
+                injected_refs: Vec::new(),
+                created_at: 1_700_000_001,
+            })
+            .unwrap();
+        let listed_after = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, listed_after) = memory_source_response_json(listed_after).await;
+        assert_eq!(
+            listed_after.as_array().unwrap().iter()
+                .find(|view| view["id"] == "last-access-grant").unwrap()["last_used_at"],
+            serde_json::json!(1_700_000_001),
+        );
         std::fs::remove_dir_all(dir).ok();
     }
 

@@ -61,6 +61,7 @@ function summaryForGrant(grant: MemorySourceGrantView, locale: string) {
 export function MemorySourcesDialog({ workspace, projects, opener, onClose }: MemorySourcesDialogProps) {
   const { t, i18n } = useTranslation();
   const [grants, setGrants] = useState<MemorySourceGrantView[]>([]);
+  const [grantsWorkspaceKey, setGrantsWorkspaceKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +72,7 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [overrides, setOverrides] = useState<MemorySourceUpsertInput["overrides"]>([]);
   const [candidates, setCandidates] = useState<MemorySourceCandidateView[]>([]);
+  const [candidatesRequestKey, setCandidatesRequestKey] = useState<string | null>(null);
   const [candidateOffset, setCandidateOffset] = useState(0);
   const [candidateHasMore, setCandidateHasMore] = useState(false);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
@@ -80,36 +82,85 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const revokeConfirmRef = useRef<HTMLElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  const sourceRequestGenerationRef = useRef(0);
+  const sourceRequestKeyRef = useRef<string | null>(null);
+  const candidateRequestGenerationRef = useRef(0);
+  const candidateRequestKeyRef = useRef<string | null>(null);
+  const activeWorkspaceIdRef = useRef(workspace?.id ?? "");
+  const activeSourceWorkspaceIdRef = useRef(sourceWorkspaceId);
+  activeWorkspaceIdRef.current = workspace?.id ?? "";
+  activeSourceWorkspaceIdRef.current = sourceWorkspaceId;
 
   const sourceOptions = useMemo(
     () => projects.filter((project) => project.id !== workspace?.id),
     [projects, workspace?.id],
   );
-  const linkedGrants = grants.filter((grant) => !grant.local && !grant.revoked_at);
+  const workspaceId = workspace?.id ?? "";
+  const candidateScopeKey = `${workspaceId}\u0000${sourceWorkspaceId}`;
+  const scopedGrants = grantsWorkspaceKey === workspaceId ? grants : [];
+  const visibleCandidates = candidatesRequestKey === candidateScopeKey ? candidates : [];
+  const visibleCandidateHasMore = candidatesRequestKey === candidateScopeKey && candidateHasMore;
+  const linkedGrants = scopedGrants.filter((grant) => !grant.local && !grant.revoked_at);
 
-  async function loadGrants() {
-    if (!workspace) return;
+  function invalidateSourceRequests() {
+    sourceRequestGenerationRef.current += 1;
+    sourceRequestKeyRef.current = null;
+  }
+
+  function invalidateCandidateRequests() {
+    candidateRequestGenerationRef.current += 1;
+    candidateRequestKeyRef.current = null;
+  }
+
+  function sourceRequestIsCurrent(generation: number, workspaceKey: string) {
+    return sourceRequestGenerationRef.current === generation
+      && sourceRequestKeyRef.current === workspaceKey
+      && activeWorkspaceIdRef.current === workspaceKey;
+  }
+
+  function candidateRequestIsCurrent(generation: number, requestKey: string) {
+    return candidateRequestGenerationRef.current === generation
+      && candidateRequestKeyRef.current === requestKey
+      && `${activeWorkspaceIdRef.current}\u0000${activeSourceWorkspaceIdRef.current}` === requestKey;
+  }
+
+  async function loadGrants(workspaceKey: string) {
+    const generation = sourceRequestGenerationRef.current + 1;
+    sourceRequestGenerationRef.current = generation;
+    sourceRequestKeyRef.current = workspaceKey;
     setLoading(true);
     setError(null);
+    setGrantsWorkspaceKey(null);
+    setGrants([]);
     try {
-      setGrants(await coreBridge.memorySources(workspace.id));
+      const next = await coreBridge.memorySources(workspaceKey);
+      if (!sourceRequestIsCurrent(generation, workspaceKey)) return;
+      setGrants(next);
+      setGrantsWorkspaceKey(workspaceKey);
     } catch (err) {
+      if (!sourceRequestIsCurrent(generation, workspaceKey)) return;
       setError((err as Error).message);
     } finally {
+      if (!sourceRequestIsCurrent(generation, workspaceKey)) return;
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (!workspace) return;
-    void loadGrants();
-    // A new project must always display its own grant list.
+    invalidateSourceRequests();
+    invalidateCandidateRequests();
+    if (!workspace?.id) return;
+    void loadGrants(workspace.id);
+    return () => {
+      invalidateSourceRequests();
+      invalidateCandidateRequests();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace?.id]);
 
-  const workspaceId = workspace?.id ?? "";
-
   function closeDialog() {
+    invalidateSourceRequests();
+    invalidateCandidateRequests();
     resetWizard();
     setRevokeConfirmation(null);
     setEditingGrant(null);
@@ -182,6 +233,7 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
   if (!workspace || !workspaceId) return null;
 
   function resetWizard() {
+    invalidateCandidateRequests();
     setStep(null);
     setSourceWorkspaceId("");
     setCollections([]);
@@ -189,6 +241,7 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
     setExpiresAt(null);
     setOverrides([]);
     setCandidates([]);
+    setCandidatesRequestKey(null);
     setCandidateOffset(0);
     setCandidateHasMore(false);
     setEditingGrant(null);
@@ -197,6 +250,7 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
 
   function openModifyGrant(grant: MemorySourceGrantView) {
     if (!grant.source_available) return;
+    invalidateCandidateRequests();
     setEditingGrant(grant);
     setSourceWorkspaceId(grant.source_workspace_id);
     setCollections(grant.collections);
@@ -204,6 +258,7 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
     setExpiresAt(grant.expires_at ?? null);
     setOverrides(grant.overrides);
     setCandidates([]);
+    setCandidatesRequestKey(null);
     setCandidateOffset(0);
     setCandidateHasMore(false);
     setError(null);
@@ -212,12 +267,14 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
   }
 
   function chooseSource(value: string) {
+    invalidateCandidateRequests();
     setSourceWorkspaceId(value);
     // No collection crosses the boundary merely by choosing a source. Personal
     // preferences are offered as a convenience only after a second explicit click.
     setCollections([]);
     setOverrides([]);
     setCandidates([]);
+    setCandidatesRequestKey(null);
     setCandidateOffset(0);
     setCandidateHasMore(false);
     setEditingGrant(null);
@@ -239,28 +296,55 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
     );
   }
 
-  async function loadCandidates(offset: number, append = false) {
-    if (!sourceWorkspaceId) return;
+  async function loadCandidates(
+    workspaceKey: string,
+    sourceKey: string,
+    offset: number,
+    append = false,
+  ) {
+    if (!sourceKey) return;
+    const requestKey = `${workspaceKey}\u0000${sourceKey}`;
+    const generation = candidateRequestGenerationRef.current + 1;
+    candidateRequestGenerationRef.current = generation;
+    candidateRequestKeyRef.current = requestKey;
     setLoadingCandidates(true);
     setError(null);
+    if (!append) {
+      setCandidates([]);
+      setCandidatesRequestKey(null);
+    }
     try {
-      const next = await coreBridge.memorySourceCandidates(workspaceId, sourceWorkspaceId, {
+      const next = await coreBridge.memorySourceCandidates(workspaceKey, sourceKey, {
         offset,
         limit: CANDIDATE_PAGE_SIZE,
       });
+      if (!candidateRequestIsCurrent(generation, requestKey)) return;
       setCandidates((current) => (append ? [...current, ...next] : next));
+      setCandidatesRequestKey(requestKey);
       setCandidateOffset(offset + next.length);
       setCandidateHasMore(next.length === CANDIDATE_PAGE_SIZE);
     } catch (err) {
+      if (!candidateRequestIsCurrent(generation, requestKey)) return;
       setError((err as Error).message);
     } finally {
+      if (!candidateRequestIsCurrent(generation, requestKey)) return;
       setLoadingCandidates(false);
     }
   }
 
   async function enterAdvanced() {
     setStep("advanced");
-    await loadCandidates(0);
+    await loadCandidates(workspaceId, sourceWorkspaceId, 0);
+  }
+
+  function backToCollections() {
+    invalidateCandidateRequests();
+    setStep("collections");
+  }
+
+  function openReview() {
+    invalidateCandidateRequests();
+    setStep("review");
   }
 
   function setOverride(candidate: MemorySourceCandidateView, effect: "allow" | "deny") {
@@ -287,6 +371,7 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
         overrides,
       });
       setGrants(next);
+      setGrantsWorkspaceKey(workspaceId);
       resetWizard();
     } catch (err) {
       setError((err as Error).message);
@@ -303,6 +388,7 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
       // The API revokes immediately; replacing our list with its response keeps the
       // UI from showing a source that can no longer be consulted.
       setGrants(await coreBridge.revokeMemorySource(workspaceId, grant.id));
+      setGrantsWorkspaceKey(workspaceId);
       setRevokeConfirmation(null);
     } catch (err) {
       setError((err as Error).message);
@@ -443,41 +529,41 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
                 <div className="memory-sources-actions">
                   <button className="secondary-button" type="button" onClick={() => setStep("source")}>{t("common.back")}</button>
                   <button className="secondary-button" type="button" disabled={!collections.length} onClick={() => void enterAdvanced()}>{t("memorySources.advanced")}</button>
-                  <button className="primary-button" type="button" disabled={!collections.length} onClick={() => setStep("review")}>{t("memorySources.review")}</button>
+                  <button className="primary-button" type="button" disabled={!collections.length} onClick={openReview}>{t("memorySources.review")}</button>
                 </div>
               </>
             ) : null}
 
             {step === "advanced" ? (
               <>
-                <button className="memory-sources-back" type="button" onClick={() => setStep("collections")}><ChevronLeft size={15} /> {t("common.back")}</button>
+                <button className="memory-sources-back" type="button" onClick={backToCollections}><ChevronLeft size={15} /> {t("common.back")}</button>
                 <h3>{t("memorySources.advanced")}</h3>
                 <p>{t("memorySources.advancedHint")}</p>
                 <div className="memory-sources-candidates">
-                  {candidates.map((candidate) => {
+                  {visibleCandidates.map((candidate) => {
                     const selected = overrides.find((item) => item.memory_ref === candidate.ref);
                     return <article key={candidate.ref}>
                       <div><strong>{candidate.summary}</strong><small>{t(`memoryCollections.${candidate.collection}`)} · {t(`memorySources.sensitivityValues.${candidate.sensitivity}`)}</small></div>
                       <div className="memory-sources-override-actions">
-                        <button type="button" className={selected?.effect === "allow" ? "active" : ""} onClick={() => setOverride(candidate, "allow")}>{t("memorySources.allow")}</button>
-                        <button type="button" className={selected?.effect === "deny" ? "active" : ""} onClick={() => setOverride(candidate, "deny")}>{t("memorySources.deny")}</button>
+                        <button type="button" className={selected?.effect === "allow" ? "active" : ""} aria-pressed={selected?.effect === "allow"} onClick={() => setOverride(candidate, "allow")}>{t("memorySources.allow")}</button>
+                        <button type="button" className={selected?.effect === "deny" ? "active" : ""} aria-pressed={selected?.effect === "deny"} onClick={() => setOverride(candidate, "deny")}>{t("memorySources.deny")}</button>
                         {selected ? <button type="button" onClick={() => removeOverride(candidate)}>{t("common.clear")}</button> : null}
                       </div>
                     </article>;
                   })}
                 </div>
                 {loadingCandidates ? <p className="memory-sources-status"><LoaderCircle size={15} className="spin" /> {t("memorySources.loading")}</p> : null}
-                {candidateHasMore ? <button className="secondary-button" type="button" disabled={loadingCandidates} onClick={() => void loadCandidates(candidateOffset, true)}>{t("memorySources.loadMore")}</button> : null}
+                {visibleCandidateHasMore ? <button className="secondary-button" type="button" disabled={loadingCandidates} onClick={() => void loadCandidates(workspaceId, sourceWorkspaceId, candidateOffset, true)}>{t("memorySources.loadMore")}</button> : null}
                 <div className="memory-sources-actions">
-                  <button className="secondary-button" type="button" onClick={() => setStep("collections")}>{t("common.back")}</button>
-                  <button className="primary-button" type="button" onClick={() => setStep("review")}>{t("memorySources.review")}</button>
+                  <button className="secondary-button" type="button" onClick={backToCollections}>{t("common.back")}</button>
+                  <button className="primary-button" type="button" onClick={openReview}>{t("memorySources.review")}</button>
                 </div>
               </>
             ) : null}
 
             {step === "review" ? (
               <>
-                <button className="memory-sources-back" type="button" onClick={() => setStep("collections")}><ChevronLeft size={15} /> {t("common.back")}</button>
+                <button className="memory-sources-back" type="button" onClick={backToCollections}><ChevronLeft size={15} /> {t("common.back")}</button>
                 <h3>{t("memorySources.review")}</h3>
                 <article className="memory-sources-review">
                   <strong>{currentSourceLabel}</strong>
@@ -489,7 +575,7 @@ export function MemorySourcesDialog({ workspace, projects, opener, onClose }: Me
                 </article>
                 <p className="memory-sources-confirm-copy">{t("memorySources.confirmCopy")}</p>
                 <div className="memory-sources-actions">
-                  <button className="secondary-button" type="button" onClick={() => setStep("collections")}>{t("common.back")}</button>
+                  <button className="secondary-button" type="button" onClick={backToCollections}>{t("common.back")}</button>
                   <button className="primary-button" type="button" disabled={saving} onClick={() => void confirmGrant()}>{saving ? t("memorySources.saving") : t("memorySources.confirm")}</button>
                 </div>
               </>
