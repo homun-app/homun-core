@@ -517,6 +517,11 @@ export interface MemorySourceCandidateView {
   sensitivity: MemorySourceGrantView["max_sensitivity"];
 }
 
+export interface MemorySourceCandidatePagination {
+  offset?: number;
+  limit?: number;
+}
+
 export interface ComposioConnectResult {
   provider_id: string;
   tools_cached: number;
@@ -1921,9 +1926,13 @@ async function electronMemorySources(
 async function electronMemorySourceCandidates(
   workspaceId: string,
   sourceWorkspaceId: string,
+  pagination: MemorySourceCandidatePagination = {},
 ): Promise<MemorySourceCandidateView[]> {
+  const params = new URLSearchParams({ source_workspace_id: sourceWorkspaceId });
+  if (pagination.offset !== undefined) params.set("offset", String(pagination.offset));
+  if (pagination.limit !== undefined) params.set("limit", String(pagination.limit));
   return gatewayGetJson<MemorySourceCandidateView[]>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources/candidates?source_workspace_id=${encodeURIComponent(sourceWorkspaceId)}`,
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources/candidates?${params.toString()}`,
   );
 }
 
@@ -2967,8 +2976,11 @@ export const coreBridge = {
   removeProjectAccess: (workspaceId: string, contactReference: string, channel: string) =>
     electronRemoveProjectAccess(workspaceId, contactReference, channel),
   memorySources: (workspaceId: string) => electronMemorySources(workspaceId),
-  memorySourceCandidates: (workspaceId: string, sourceWorkspaceId: string) =>
-    electronMemorySourceCandidates(workspaceId, sourceWorkspaceId),
+  memorySourceCandidates: (
+    workspaceId: string,
+    sourceWorkspaceId: string,
+    pagination?: MemorySourceCandidatePagination,
+  ) => electronMemorySourceCandidates(workspaceId, sourceWorkspaceId, pagination),
   upsertMemorySource: (workspaceId: string, input: MemorySourceUpsertInput) =>
     electronUpsertMemorySource(workspaceId, input),
   revokeMemorySource: (workspaceId: string, grantId: string) =>
