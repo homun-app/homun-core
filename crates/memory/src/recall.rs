@@ -547,7 +547,7 @@ pub fn recall_authorized_sources_on_facade(
             injected_refs,
             created_at: now_unix,
         };
-        if facade.record_memory_source_access(&event).is_err() {
+        if facade.record_memory_source_access(&event).is_err() && source.grant_id.is_some() {
             degraded_sources.push((
                 source.source_workspace_id.clone(),
                 "audit_unavailable".to_string(),

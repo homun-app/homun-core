@@ -1317,10 +1317,73 @@ fn audit_failure_degrades_with_redacted_reason_without_expanding_access() {
     assert!(pack.degraded_sources.iter().any(|(source, reason)| {
         source.as_str() == "project-b" && reason == "audit_unavailable"
     }));
+    assert!(pack.degraded_sources.iter().all(|(source, reason)| {
+        source.as_str() != "project-a" || reason != "audit_unavailable"
+    }));
     assert!(!format!("{:?}", pack.degraded_sources).contains("technical audit detail"));
 
     drop(connection);
     drop(fixture);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn last_source_access_fails_closed_on_corrupt_persisted_reason_and_ref() {
+    let path = std::env::temp_dir().join(format!(
+        "homun-multi-source-corrupt-audit-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).expect("store"));
+    let connection = rusqlite::Connection::open(&path).expect("audit sqlite");
+    let corrupt_reason_id = uuid::Uuid::new_v4().to_string();
+    connection
+        .execute(
+            "insert into memory_source_access_events (
+                id, consumer_user_id, consumer_workspace_id, source_workspace_id,
+                grant_id, policy_version, turn_id, outcome, reason, candidate_count,
+                injected_refs_json, created_at
+             ) values (?1, 'multi-user', 'project-a', 'project-b', 'grant-corrupt-reason',
+                       1, null, 'allow', 'raw query leaked into reason', 0, '[]', 1800000000)",
+            [&corrupt_reason_id],
+        )
+        .expect("insert corrupt reason");
+
+    assert!(
+        facade
+            .last_memory_source_access("grant-corrupt-reason")
+            .is_err()
+    );
+
+    let corrupt_ref_id = uuid::Uuid::new_v4().to_string();
+    let outside_ref = MemoryRef::new(
+        MemoryRefKind::Memory,
+        UserId::new("multi-user"),
+        WorkspaceId::new("project-c"),
+        "outside-source",
+    );
+    connection
+        .execute(
+            "insert into memory_source_access_events (
+                id, consumer_user_id, consumer_workspace_id, source_workspace_id,
+                grant_id, policy_version, turn_id, outcome, reason, candidate_count,
+                injected_refs_json, created_at
+             ) values (?1, 'multi-user', 'project-a', 'project-b', 'grant-corrupt-ref',
+                       1, null, 'allow', 'allowed', 1, ?2, 1800000000)",
+            rusqlite::params![
+                corrupt_ref_id,
+                serde_json::to_string(&vec![outside_ref.to_string()]).expect("refs json")
+            ],
+        )
+        .expect("insert corrupt ref");
+
+    assert!(
+        facade
+            .last_memory_source_access("grant-corrupt-ref")
+            .is_err()
+    );
+
+    drop(connection);
+    drop(facade);
     let _ = std::fs::remove_file(path);
 }
 

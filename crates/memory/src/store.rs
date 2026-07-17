@@ -831,7 +831,7 @@ impl SQLiteMemoryStore {
             return Err("memory source access grant id cannot be empty".to_string());
         }
         let conn = self.read_conn();
-        query_optional(
+        let event = query_optional(
             &conn,
             "select id, consumer_user_id, consumer_workspace_id, source_workspace_id,
                     grant_id, policy_version, turn_id, outcome, reason, candidate_count,
@@ -842,7 +842,11 @@ impl SQLiteMemoryStore {
              limit 1",
             [grant_id],
             memory_source_access_from_row,
-        )
+        )?;
+        if let Some(event) = &event {
+            validate_memory_source_access_event(event)?;
+        }
+        Ok(event)
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<MemoryBackupReport, String> {
