@@ -50698,9 +50698,9 @@ struct MemorySourceCandidatesQuery {
 }
 
 fn memory_sources_flag(value: Option<&str>) -> bool {
-    matches!(
-        value.map(str::trim),
-        Some("1") | Some("on") | Some("ON") | Some("On")
+    !matches!(
+        value.map(|value| value.trim().to_ascii_lowercase()),
+        Some(value) if value == "0" || value == "off"
     )
 }
 
@@ -52549,33 +52549,27 @@ mod tests {
     }
 
     #[test]
-    fn memory_source_flag_accepts_only_documented_on_values() {
-        for enabled in ["1", "on", "ON", "On", " on ", "ON ", " 1 "] {
-            assert!(
-                memory_sources_flag(Some(enabled)),
-                "expected enabled: {enabled:?}"
-            );
-        }
-        for disabled in [
+    fn memory_source_flag_defaults_on_and_only_off_variants_disable() {
+        for enabled in [
             None,
             Some(""),
             Some("   "),
-            Some("off"),
-            Some("oN"),
+            Some("1"),
+            Some("on"),
             Some("true"),
+            Some("unknown"),
         ] {
+            assert!(
+                memory_sources_flag(enabled),
+                "expected enabled: {enabled:?}"
+            );
+        }
+        for disabled in [Some("0"), Some(" 0 "), Some("off"), Some("OFF"), Some("Off")] {
             assert!(
                 !memory_sources_flag(disabled),
                 "expected disabled: {disabled:?}"
             );
         }
-    }
-
-    #[test]
-    fn memory_sources_flag_defaults_off_until_live_gate() {
-        assert!(!memory_sources_flag(None));
-        assert!(memory_sources_flag(Some("on")));
-        assert!(!memory_sources_flag(Some("off")));
     }
 
     #[test]
@@ -53643,7 +53637,7 @@ mod tests {
         use axum::{body::Body, http::Request};
         use tower::ServiceExt;
 
-        let _flag = TestMemorySourcesFlag::set(None);
+        let _flag = TestMemorySourcesFlag::set(Some("off"));
         let app = memory_source_route_test_app(super::AppState::for_tests());
         let malformed_body = app
             .clone()

@@ -1433,6 +1433,25 @@ prodotto: avvicinarsi a **Manus** per le PMI (deliverable reali), restando
   **publish solo su comando utente**, **niente trailer Co-Authored-By** ([[homun-no-claude-coauthor]]).
 - **Sfondo:** Motore cross-modello Fase 1 ✅ v1041 (deck verificato vero-locale, gemma4:latest).
 
+## 2026-07-17 — rollout locale fonti memoria autorizzate
+
+Schema memoria v7: i grant diretti collegano un progetto consumatore a fonti personali
+o di progetto dello stesso utente, con collection allow-list e override `Allow`/`Deny`.
+Nessuna transitività; revoca e fonte non disponibile falliscono chiuse. Il pre-filtro
+richiede il registry persistito `workspaces.json`: assente, illeggibile, corrotto o vuoto
+esclude la fonte prima di recall, audit e last-used. Il perimetro contatti resta isolato.
+
+Il rollout è abilitato di default. L'escape hatch locale è esclusivamente
+`HOMUN_MEMORY_SOURCES=0` oppure `HOMUN_MEMORY_SOURCES=off`. I candidati autorizzati sono
+input del recall/indice, non l'Advanced picker; la pubblicazione non è parte di questo
+percorso e conserva le proprie verifiche. Smoke locale verificato il 2026-07-17
+Europe/Rome; nessun deploy/pubblicazione è stato eseguito.
+
+Verifiche minime per il comportamento del flag e per il gate:
+
+- `cargo test -p local-first-desktop-gateway memory_source_flag_defaults_on_and_only_off_variants_disable -- --nocapture`
+- `python3 scripts/pre_release_gate.py`
+
 ## Diagrammi dettagliati (si aggiornano "man mano")
 
 - [architecture/agent-loop.md](architecture/agent-loop.md) — il motore / agent loop (cross-modello).
