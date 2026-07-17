@@ -4,10 +4,12 @@ use local_first_memory::{
     MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySourceAccessEvent,
     MemorySourceAccessOutcome, MemorySourceGrant, MemorySourcePolicy, MemoryStatus, PrivacyDomain,
     RecallHit, SQLiteMemoryStore, UserId, WorkspaceId, memory_recall_intent, merge_recall_hits,
-    recall_authorized_sources_on_facade, recall_source_on_facade,
+    recall_authorized_sources_on_facade, recall_authorized_sources_on_facade_with_source_filter,
+    recall_source_on_facade,
     revalidate_recall_hits_before_injection,
 };
 use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn hit(
     workspace: &str,
@@ -517,6 +519,47 @@ fn coordinator_queries_local_always_and_linked_only_on_intent_or_individual_allo
             .iter()
             .any(|item| item.source_workspace_id.as_str() == "project-b")
     );
+}
+
+#[test]
+fn coordinator_loads_one_source_authorization_snapshot_per_resolution_pass() {
+    let fixture = MultiSourceFixture::new();
+    fixture.insert(
+        "project-b",
+        "linked-decision",
+        "decision",
+        "Linked decision is in September",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    fixture.grant(
+        "grant-b",
+        "project-b",
+        [MemoryCollectionKey::Decisions],
+        HashMap::new(),
+    );
+    let snapshots = AtomicUsize::new(0);
+
+    let pack = recall_authorized_sources_on_facade_with_source_filter(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "Which decision did we make?",
+        &[1.0, 0.0],
+        1_800_000_000,
+        None,
+        &|sources| {
+            snapshots.fetch_add(1, Ordering::SeqCst);
+            vec![true; sources.len()]
+        },
+    )
+    .expect("recall with source snapshots");
+
+    assert!(pack
+        .hits
+        .iter()
+        .any(|hit| hit.source_workspace_id.as_str() == "project-b"));
+    assert_eq!(snapshots.load(Ordering::SeqCst), 3);
 }
 
 #[test]

@@ -401,7 +401,7 @@ pub fn revalidate_recall_hits_before_injection(
         hits,
         now_unix,
         limit,
-        &|_| true,
+        &|sources| vec![true; sources.len()],
     )
 }
 
@@ -410,13 +410,14 @@ fn resolve_recall_sources_with_filter(
     user: &UserId,
     consumer_workspace: &WorkspaceId,
     now_unix: i64,
-    source_allowed: &(dyn Fn(&AuthorizedMemorySource) -> bool + Sync),
+    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
 ) -> MemoryResult<(Vec<AuthorizedMemorySource>, Vec<(WorkspaceId, String)>)> {
     let sources = facade.resolve_memory_sources(user, consumer_workspace, now_unix)?;
+    let allowed_by_source = source_allowed(&sources);
     let mut unavailable = Vec::new();
     let mut allowed = Vec::new();
-    for source in sources {
-        if source_allowed(&source) {
+    for (index, source) in sources.into_iter().enumerate() {
+        if allowed_by_source.get(index).copied().unwrap_or(false) {
             allowed.push(source);
         } else if source.grant_id.is_some() {
             unavailable.push((
@@ -436,7 +437,7 @@ fn revalidate_recall_hits_before_injection_with_source_filter(
     hits: Vec<RecallHit>,
     now_unix: i64,
     limit: usize,
-    source_allowed: &(dyn Fn(&AuthorizedMemorySource) -> bool + Sync),
+    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
 ) -> MemoryResult<(Vec<RecallHit>, Vec<(WorkspaceId, String)>)> {
     let initial_fingerprint = crate::memory_source_policy_fingerprint(initial_sources);
     let current_sources = resolve_recall_sources_with_filter(
@@ -514,7 +515,7 @@ pub fn recall_authorized_sources_on_facade(
         query_vec,
         now_unix,
         graph_context,
-        &|_| true,
+        &|sources| vec![true; sources.len()],
     )
 }
 
@@ -532,7 +533,7 @@ pub fn recall_authorized_sources_on_facade_with_source_filter(
     graph_context: Option<
         &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
     >,
-    source_allowed: &(dyn Fn(&AuthorizedMemorySource) -> bool + Sync),
+    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
 ) -> MemoryResult<RecallPack> {
     let (sources, initially_unavailable) = resolve_recall_sources_with_filter(
         facade,

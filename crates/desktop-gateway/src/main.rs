@@ -5149,18 +5149,23 @@ fn recall_pack_on_facade(
 ) -> RecallPack {
     if memory_sources_enabled() && workspace.as_str() != PERSONAL_WORKSPACE {
         // Project lifecycle belongs to the gateway registry, not to the
-        // memory store. Re-read the snapshot whenever the coordinator resolves
-        // or revalidates sources so a deleted project is excluded before its
-        // records are queried or its grant is audited.
-        let source_allowed = |source: &local_first_memory::AuthorizedMemorySource| {
-            if source.grant_id.is_none() {
-                return source.source_user_id == *user && source.source_workspace_id == *workspace;
-            }
-            source.source_workspace_id.as_str() == PERSONAL_WORKSPACE
-                || load_workspaces_file()
-                    .workspaces
-                    .into_iter()
-                    .any(|candidate| candidate.id == source.source_workspace_id.as_str())
+        // memory store. The coordinator requests one authorization snapshot
+        // per resolve/revalidation pass, so a deleted project is excluded
+        // before its records are queried or its grant is audited.
+        let source_allowed = |sources: &[local_first_memory::AuthorizedMemorySource]| {
+            let available_projects = load_persisted_memory_source_workspace_ids();
+            sources
+                .iter()
+                .map(|source| {
+                    (source.grant_id.is_none()
+                        && source.source_user_id == *user
+                        && source.source_workspace_id == *workspace)
+                        || source.source_workspace_id.as_str() == PERSONAL_WORKSPACE
+                        || available_projects.as_ref().is_some_and(|projects| {
+                            projects.contains(source.source_workspace_id.as_str())
+                        })
+                })
+                .collect::<Vec<_>>()
         };
         return local_first_memory::recall_authorized_sources_on_facade_with_source_filter(
             facade,
@@ -51330,6 +51335,22 @@ fn load_workspaces_file() -> WorkspacesFile {
         })
 }
 
+/// Strict registry read used exclusively at the linked-memory authorization
+/// boundary. Unlike the convenience loader above, this must never synthesize a
+/// default workspace: absent, unreadable, malformed, or empty persistence
+/// means no project source can be authorized for recall.
+fn load_persisted_memory_source_workspace_ids() -> Option<HashSet<String>> {
+    let path = gateway_workspaces_path().ok()?;
+    let raw = fs::read_to_string(path).ok()?;
+    let file = serde_json::from_str::<WorkspacesFile>(&raw).ok()?;
+    (!file.workspaces.is_empty()).then(|| {
+        file.workspaces
+            .into_iter()
+            .map(|workspace| workspace.id)
+            .collect()
+    })
+}
+
 /// The active project's root folder, if one is set.
 fn active_workspace_folder() -> Option<String> {
     let active = active_workspace_id();
@@ -63722,6 +63743,100 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             .last_memory_source_access("removed-source-empty-grant")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn missing_workspace_registry_never_authorizes_the_default_project_source() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_workspace = std::env::var("HOMUN_WORKSPACE_ID").ok();
+        // SAFETY: TestMemorySourcesFlag holds TEST_ENV_LOCK for this test.
+        unsafe { std::env::set_var("HOMUN_WORKSPACE_ID", "project-b"); }
+        let dir = isolated_gateway_test_dir("recall-missing-workspace-registry");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("missing-registry-user");
+        let consumer = local_first_memory::WorkspaceId::new("project-a");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &source,
+            "default-source-record",
+            "decision",
+            "Default project source must not be recalled",
+        );
+        insert_test_source_grant(
+            &facade,
+            &user,
+            &consumer,
+            &source,
+            "missing-registry-grant",
+            local_first_memory::MemoryCollectionKey::Decisions,
+        );
+
+        let pack = super::recall_pack_on_facade(
+            &facade,
+            &user,
+            &consumer,
+            "What launch date did we decide?",
+            &[],
+            None,
+        );
+
+        assert!(pack.hits.is_empty());
+        assert!(pack.degraded_sources.iter().any(|(workspace, reason)| {
+            workspace.as_str() == "project-b" && reason == "source_unavailable"
+        }));
+        assert!(facade
+            .last_memory_source_access("missing-registry-grant")
+            .unwrap()
+            .is_none());
+        // SAFETY: restore process-global test state before TestMemorySourcesFlag releases its lock.
+        unsafe {
+            match previous_workspace {
+                Some(value) => std::env::set_var("HOMUN_WORKSPACE_ID", value),
+                None => std::env::remove_var("HOMUN_WORKSPACE_ID"),
+            }
+        }
+    }
+
+    #[test]
+    fn memory_source_authorization_registry_requires_a_nonempty_parseable_file() {
+        let dir = isolated_gateway_test_dir("memory-source-strict-registry");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        let path = dir.join("workspaces.json");
+
+        assert!(super::load_persisted_memory_source_workspace_ids().is_none());
+        std::fs::write(&path, "not json").unwrap();
+        assert!(super::load_persisted_memory_source_workspace_ids().is_none());
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&WorkspacesFile {
+                active: String::new(),
+                workspaces: Vec::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(super::load_persisted_memory_source_workspace_ids().is_none());
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces: vec![memory_source_test_workspace("project-b", "Beta")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(super::load_persisted_memory_source_workspace_ids()
+            .is_some_and(|workspaces| workspaces.contains("project-b")));
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(super::load_persisted_memory_source_workspace_ids().is_none());
     }
 
     #[test]
