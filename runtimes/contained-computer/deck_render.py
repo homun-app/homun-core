@@ -21,19 +21,24 @@ deck.json schema (all fields optional unless noted):
 {
   "title": "Deck title",            "subtitle": "...", "date": "...",
   "theme": {                         # falls back to brand-kit-ish defaults
+    "name": "editorial_bold",         # optional: resolves surface/ink/muted/hairline/
+                                       # on_brand from design_tokens.THEMES; explicit
+                                       # fields below still override the named theme
     "primary": "#2b6cb0", "secondary": "#1a202c", "accent": "#ed8936",
     "heading_font": "Inter", "body_font": "Inter",
     "logo": "logo.png"               # path (rel to deck.json) or data: URL
   },
   "slides": [                        # REQUIRED
-    {"layout": "cover",   "title": "...", "subtitle": "..."},
+    {"layout": "cover",   "title": "...", "subtitle": "...",
+     "eyebrow": "SEED ROUND",         # optional small-caps kicker above the title
+     "hero_art": "rings"},            # optional procedural SVG accent: rings|grid|gradient|none
     {"layout": "bullets", "title": "...", "bullets": ["a","b"], "notes": "..."},
     {"layout": "image_right", "title": "...", "bullets": [...], "image": "s2.png"},
     {"layout": "kpi",     "title": "...", "kpi": "42%", "kpi_label": "growth"},
     {"layout": "two_column", "title": "...", "columns": [{"title":"L","bullets":[]},
                                                           {"title":"R","bullets":[]}]},
     {"layout": "quote",   "quote": "...", "author": "..."},
-    {"layout": "section", "title": "..."},
+    {"layout": "section", "title": "...", "eyebrow": "...", "hero_art": "grid"},
     {"layout": "timeline", "title": "...", "items": [{"label":"Q1","title":"...","text":"..."}]},
     {"layout": "comparison", "title": "...", "headers": ["A","B"], "rows": [["x","y"]]},
     {"layout": "team_grid", "title": "...", "members": [{"name":"...","role":"..."}]},
@@ -50,6 +55,8 @@ import mimetypes
 import os
 import re
 import sys
+
+from design_tokens import theme_values
 
 DEFAULT_THEME = {
     "primary": "#2b6cb0",
@@ -101,7 +108,17 @@ def html_escape(s):
 
 
 def render_html(deck, base_dir):
-    theme = {**DEFAULT_THEME, **(deck.get("theme") or {})}
+    raw_theme = deck.get("theme") or {}
+    name = raw_theme.get("name")
+    # Mirrors doc_render.render_html: a NAMED theme resolves through design_tokens
+    # (bringing surface/ink/muted/hairline/on_brand along), explicit fields still
+    # win. With no name, keep the legacy behaviour — only DEFAULT_THEME + explicit
+    # overrides — so old brand-kit-only decks don't silently inherit
+    # clean_corporate's tokens (theme_values() defaults nameless lookups there).
+    if name:
+        theme = {**DEFAULT_THEME, **theme_values(name, raw_theme)}
+    else:
+        theme = {**DEFAULT_THEME, **{k: v for k, v in raw_theme.items() if v}}
     logo = data_url(theme.get("logo", ""), base_dir)
     slides_html = []
     for s in deck.get("slides", []):
@@ -112,6 +129,11 @@ def render_html(deck, base_dir):
         accent=theme["accent"],
         heading=theme["heading_font"],
         body=theme["body_font"],
+        surface=theme.get("surface", "#ffffff"),
+        ink=theme.get("ink", "#16202b"),
+        muted=theme.get("muted", "#5a6675"),
+        hairline=theme.get("hairline", "#e4e9ef"),
+        on_brand=theme.get("on_brand", "#ffffff"),
     )
     title = html_escape(deck.get("title", "Presentation"))
     return _HTML_SHELL.format(title=title, css=css, body="\n".join(slides_html))
@@ -128,6 +150,28 @@ def _logo_html(logo):
     return f'<img class="logo" src="{logo}">' if logo else ""
 
 
+def _eyebrow(text):
+    return f'<div class="eyebrow">{html_escape(text)}</div>' if text else ""
+
+
+def _hero_art(kind):
+    # Procedural editorial art — inline SVG, zero external images (license-clean,
+    # local). Uses currentColor so it inherits the accent set on the cover.
+    if kind == "rings":
+        return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden><g fill="none" '
+                'stroke="currentColor" stroke-width="1.5" opacity=".5">'
+                + "".join(f'<circle cx="300" cy="90" r="{r}"/>' for r in (40, 80, 120, 170))
+                + "</g></svg>")
+    if kind == "grid":
+        return ('<svg class="hero-art" viewBox="0 0 400 400" aria-hidden>'
+                '<defs><pattern id="g" width="26" height="26" patternUnits="userSpaceOnUse">'
+                '<path d="M26 0H0V26" fill="none" stroke="currentColor" stroke-width="1" '
+                'opacity=".35"/></pattern></defs><rect width="400" height="400" fill="url(#g)"/></svg>')
+    if kind == "gradient":
+        return '<div class="hero-art hero-grad" aria-hidden></div>'
+    return ""
+
+
 def _initials(name):
     """First letter of up to 2 words → avatar glyph when no headshot is provided."""
     parts = [p for p in str(name or "").split() if p]
@@ -141,14 +185,17 @@ def _html_slide(s, base_dir, logo):
     if layout == "cover":
         return (
             f'<section class="slide cover">{_logo_html(logo)}'
+            f'{_hero_art(s.get("hero_art", ""))}'
+            f'{_eyebrow(s.get("eyebrow", ""))}'
             f"<h1>{title}</h1>"
             f'<div class="sub">{html_escape(s.get("subtitle",""))}</div>'
-            f'<div class="rule"></div>'
-            f'<div class="accent-bar"></div></section>'
+            f'<div class="rule"></div></section>'
         )
     if layout == "section":
         return (
             f'<section class="slide section">{_logo_html(logo)}'
+            f'{_hero_art(s.get("hero_art", ""))}'
+            f'{_eyebrow(s.get("eyebrow", ""))}'
             f"<h1>{title}</h1><div class=\"accent-bar\"></div></section>"
         )
     if layout == "kpi":
@@ -246,13 +293,13 @@ def _html_slide(s, base_dir, logo):
 _HTML_CSS = """
 :root{{--brand:{primary};--brand2:{secondary};--accent:{accent};
   --head:'{heading}';--body:'{body}';
-  --ink:#16202b;--muted:#5a6675;--paper:#ffffff;}}
+  --ink:{ink};--muted:{muted};--surface:{surface};--hairline:{hairline};--on-brand:{on_brand};}}
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
   color:var(--ink);-webkit-font-smoothing:antialiased}}
 .slide{{width:100%;min-height:100vh;padding:9vh 9vw;display:flex;flex-direction:column;
   justify-content:center;position:relative;page-break-after:always;overflow:hidden;
-  background:var(--paper)}}
+  background:var(--surface)}}
 .slide h1{{font-size:4rem;line-height:1.04;font-weight:800;letter-spacing:-.02em}}
 .slide h2{{font-size:2.7rem;line-height:1.1;font-weight:800;letter-spacing:-.01em;
   color:var(--ink);margin-bottom:.7em;padding-bottom:.32em;
@@ -273,16 +320,12 @@ body{{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sa
 .accent-bar{{position:absolute;left:0;bottom:0;height:8px;width:100%;
   background:linear-gradient(90deg,var(--brand),var(--accent))}}
 .logo{{position:absolute;top:6vh;right:9vw;max-height:46px}}
-.cover,.section{{background:linear-gradient(135deg,var(--brand) 0%,var(--brand2) 100%);color:#fff}}
-.cover::after,.section::after{{content:"";position:absolute;right:-10vw;top:-12vw;width:46vw;
-  height:46vw;border-radius:50%;background:rgba(255,255,255,.06)}}
-.cover h1,.section h1{{color:#fff;max-width:82%;position:relative}}
 .cover .sub{{font-size:1.5rem;opacity:.92;margin-top:1.3rem;font-weight:400;position:relative}}
 .cover .rule{{width:96px;height:6px;background:var(--accent);margin-top:2rem;position:relative}}
 .img-led{{display:grid;grid-template-columns:1fr 1fr;gap:5vw;align-items:center}}
 .img-led .led{{width:100%;border-radius:16px;object-fit:cover;max-height:64vh;
   box-shadow:0 14px 44px rgba(0,0,0,.16)}}
-.img-led .ph{{background:#eef1f5;min-height:42vh;border-radius:16px}}
+.img-led .ph{{background:var(--hairline);min-height:42vh;border-radius:16px}}
 .inline-img{{margin-top:1.4rem;max-height:44vh;border-radius:14px;object-fit:cover;
   box-shadow:0 10px 30px rgba(0,0,0,.12)}}
 .two-col .cols{{display:grid;grid-template-columns:1fr 1fr;gap:5vw;margin-top:1.2rem}}
@@ -297,18 +340,27 @@ body{{font-family:var(--head),-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sa
 .tl-item{{display:grid;grid-template-columns:92px 18px 1fr;align-items:start;gap:1.1rem}}
 .tl-label{{font-weight:800;color:var(--brand);font-size:1.15rem;text-align:right}}
 .tl-dot{{width:14px;height:14px;border-radius:50%;background:var(--accent);margin-top:.28rem;position:relative}}
-.tl-item:not(:last-child) .tl-dot::after{{content:"";position:absolute;left:6px;top:17px;width:2px;height:2.6rem;background:#dfe5ec}}
+.tl-item:not(:last-child) .tl-dot::after{{content:"";position:absolute;left:6px;top:17px;width:2px;height:2.6rem;background:var(--hairline)}}
 .tl-text strong{{font-size:1.25rem}}
 .tl-text span{{display:block;color:var(--muted);font-size:1.05rem;margin-top:.18rem}}
 table.cmp{{width:100%;border-collapse:collapse;margin-top:1.3rem;font-size:1.15rem}}
-table.cmp th{{text-align:left;background:var(--brand);color:#fff;padding:.7rem .95rem;font-weight:700}}
-table.cmp td{{padding:.68rem .95rem;color:var(--muted);border-bottom:1px solid #e4e9ef}}
-table.cmp tr:nth-child(even) td{{background:#f6f8fa}}
+table.cmp th{{text-align:left;background:var(--brand);color:var(--on-brand);padding:.7rem .95rem;font-weight:700}}
+table.cmp td{{padding:.68rem .95rem;color:var(--muted);border-bottom:1px solid var(--hairline)}}
+table.cmp tr:nth-child(even) td{{background:color-mix(in srgb,var(--hairline) 40%,transparent)}}
 .team-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1.7rem;margin-top:1.5rem}}
 .member{{display:flex;flex-direction:column;align-items:flex-start;gap:.4rem}}
-.member .avatar{{width:64px;height:64px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.3rem}}
+.member .avatar{{width:64px;height:64px;border-radius:50%;background:var(--brand);color:var(--on-brand);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.3rem}}
 .member strong{{font-size:1.2rem}}
 .member span{{color:var(--muted);font-size:1rem}}
+.eyebrow{{text-transform:uppercase;letter-spacing:.28em;font-size:.95rem;font-weight:700;
+  color:var(--accent);margin-bottom:1.1rem;position:relative}}
+.cover,.section{{background:var(--surface);color:var(--ink)}}
+.cover h1,.section h1{{color:var(--ink);font-size:5rem;max-width:88%;position:relative}}
+.cover .sub{{color:var(--muted)}}
+.hero-art{{position:absolute;right:-4vw;top:-4vw;width:44vw;height:44vw;color:var(--accent);
+  opacity:.9;pointer-events:none}}
+.hero-art.hero-grad{{background:radial-gradient(120% 120% at 80% 0%,
+  color-mix(in srgb,var(--accent) 40%,transparent),transparent 60%)}}
 """
 
 _HTML_SHELL = """<!doctype html><html lang="en"><head><meta charset="utf-8">

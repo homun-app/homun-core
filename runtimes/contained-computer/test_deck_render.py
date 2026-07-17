@@ -57,6 +57,24 @@ class RenderHtmlLayouts(unittest.TestCase):
         self.assertIn("var(--body)", html)
 
 
+class EditorialCover(unittest.TestCase):
+    def test_cover_renders_eyebrow_and_hero_art(self):
+        html = deck_render.render_html(
+            {"title": "T", "theme": {"name": "editorial_bold"},
+             "slides": [{"layout": "cover", "title": "Kite", "subtitle": "S",
+                         "eyebrow": "EyebrowProbe", "hero_art": "rings"}]}, HERE)
+        self.assertIn("EyebrowProbe", html)
+        self.assertIn("hero-art", html)          # procedural svg wrapper class
+        self.assertIn("--surface:#0f3d3e", html)  # theme surface reaches :root
+
+    def test_surface_ink_reach_root_for_all_themes(self):
+        html = deck_render.render_html(
+            {"title": "T", "theme": {"name": "editorial_noir"},
+             "slides": [{"layout": "cover", "title": "X"}]}, HERE)
+        self.assertIn("--surface:#0b0b0d", html)
+        self.assertIn("--ink:#f4f1ea", html)
+
+
 @unittest.skipUnless(
     importlib.util.find_spec("pptx"), "python-pptx not installed on this host"
 )
