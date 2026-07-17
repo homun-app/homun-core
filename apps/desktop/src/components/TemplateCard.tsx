@@ -2,7 +2,7 @@ import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Presentation, Trash2 } from "lucide-react";
 import { coreBridge, type BrandKit, type TemplateCatalogEntry } from "../lib/coreBridge";
-import { brandPreviewOverride, templateDisplayName } from "./presentationsShared";
+import { brandPreviewOverride, DARK_SURFACE_THEMES, templateDisplayName } from "./presentationsShared";
 
 /** Full-bleed editorial card for the template gallery grid (S1b relayout): the
  *  pack's real preview fills the whole card, title + kind badge sit in a bottom
@@ -162,7 +162,10 @@ export function TemplateLivePreview({
   // instant recolor, zero network. Both renderers emit literal `</head>`/`<body>` anchors
   // (deck_render _HTML_SHELL, doc_render render_html); if either is missing the replace
   // is a no-op and `html` passes through untouched (fail-open, never a broken srcDoc).
-  const override = brandKit ? brandPreviewOverride(brandKit) : null;
+  // Dark editorial surfaces own their palette; the recolor only swaps --brand/--accent
+  // (not --surface), so a dark user brand would make accents vanish. Skip recolor there.
+  const allowRecolor = !(entry.design_theme && DARK_SURFACE_THEMES.has(entry.design_theme));
+  const override = brandKit && allowRecolor ? brandPreviewOverride(brandKit) : null;
   const srcDoc = override
     ? html
         .replace("</head>", `${override.style}</head>`)
