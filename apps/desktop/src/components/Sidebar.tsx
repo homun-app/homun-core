@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   Archive,
   ArchiveRestore,
+  Brain,
   ChevronDown,
   ChevronRight,
   FolderOpen,
@@ -59,6 +60,7 @@ import {
   threadSourceKey,
 } from "../lib/threadFilter";
 import { ProjectAccessDialog } from "./ProjectAccessDialog";
+import { MemorySourcesDialog } from "./MemorySourcesDialog";
 
 // The base personal workspace ("Predefinito"): always present, never a "project".
 const PERSONAL_WORKSPACE_ID = "local-workspace";
@@ -232,6 +234,7 @@ function ProjectsNav({
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<string>>(new Set());
   const [projectModal, setProjectModal] = useState<ProjectModalState | null>(null);
   const [accessProject, setAccessProject] = useState<WorkspaceRecord | null>(null);
+  const [memorySourcesProject, setMemorySourcesProject] = useState<WorkspaceRecord | null>(null);
   const [projectMenu, setProjectMenu] = useState<{
     project: WorkspaceRecord;
     x: number;
@@ -390,6 +393,11 @@ function ProjectsNav({
   function openProjectAccess(project: WorkspaceRecord) {
     setProjectMenu(null);
     setAccessProject(project);
+  }
+
+  function openMemorySources(project: WorkspaceRecord) {
+    setProjectMenu(null);
+    setMemorySourcesProject(project);
   }
 
   async function createProjectChat(projectId: string) {
@@ -770,6 +778,10 @@ function ProjectsNav({
             <Shield size={15} />
             <span>Manage access</span>
           </button>
+          <button type="button" role="menuitem" onClick={() => openMemorySources(projectMenu.project)}>
+            <Brain size={15} />
+            <span>{t("memorySources.title")}</span>
+          </button>
           {projectMenu.project.folder && (
             <button
               type="button"
@@ -818,6 +830,11 @@ function ProjectsNav({
       )}
 
       <ProjectAccessDialog workspace={accessProject} onClose={() => setAccessProject(null)} />
+      <MemorySourcesDialog
+        workspace={memorySourcesProject}
+        projects={projects}
+        onClose={() => setMemorySourcesProject(null)}
+      />
 
       {projectModal && (
         <div

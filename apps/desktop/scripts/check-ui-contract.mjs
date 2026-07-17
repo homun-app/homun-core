@@ -172,6 +172,11 @@ assertNotContains("src/components/Sidebar.tsx", "presentation?: \"pinned\" | \"f
 assertNotContains("src/styles.css", ".nav-drawer.floating-island", "floating drawer styling should not remain without the hover-open mode");
 assertNotContains("src/components/Shell.tsx", "<NavigationRail", "closed sidebar must not render a persistent icon rail");
 assertContains("src/components/Sidebar.tsx", "linear-sidebar-nav", "expanded sidebar must use grouped Linear-style workspace navigation");
+assertContains("src/components/Sidebar.tsx", "MemorySourcesDialog", "project menu must open memory sources separately from Project Access");
+assertContains("src/components/MemorySourcesDialog.tsx", "Read only", "linked sources must state read-only access");
+assertContains("src/components/MemorySourcesDialog.tsx", "coreBridge.upsertMemorySource", "memory source grants must persist through the typed bridge");
+assertContains("src/components/MemorySourcesDialog.tsx", "coreBridge.revokeMemorySource", "memory sources must support immediate revocation");
+assertNotContains("src/components/ProjectAccessDialog.tsx", "MemorySourcesDialog", "contact access must not own source grants");
 assertContains("src/components/Sidebar.tsx", "data-nav-section={section}", "sidebar nav rows must expose registry-driven operational sections");
 assertContains("src/components/Sidebar.tsx", "data-promoted={item.promoted === true ? \"true\" : \"false\"}", "sidebar must preserve promoted addon metadata");
 assertContains("src/components/Sidebar.tsx", "data-project-tree=\"personal\"", "sidebar must expose Personal as a first-class chat category");
