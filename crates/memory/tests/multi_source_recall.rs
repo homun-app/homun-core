@@ -135,6 +135,38 @@ fn merge_prefers_local_decision_and_personal_preference_without_hiding_conflict(
 }
 
 #[test]
+fn merge_prefers_personal_profile_over_higher_scored_project_profile() {
+    let mut project_profile = hit(
+        "project-a",
+        None,
+        "fact",
+        "Works as an engineer",
+        0.99,
+        Some("professional_identity"),
+    );
+    project_profile.collection = MemoryCollectionKey::Profile;
+    let mut personal_profile = hit(
+        "__personal__",
+        Some("grant-personal"),
+        "fact",
+        "Works as a product founder",
+        0.10,
+        Some("professional_identity"),
+    );
+    personal_profile.collection = MemoryCollectionKey::Profile;
+
+    let merged = merge_recall_hits(
+        WorkspaceId::new("project-a"),
+        vec![project_profile, personal_profile],
+        10,
+    );
+
+    assert_eq!(merged[0].source_workspace_id.as_str(), "__personal__");
+    assert_eq!(merged[0].text, "Works as a product founder");
+    assert!(merged.iter().all(|item| item.conflict));
+}
+
+#[test]
 fn merge_does_not_invent_conflict_without_explicit_shared_subject() {
     let merged = merge_recall_hits(
         WorkspaceId::new("project-a"),
@@ -484,6 +516,121 @@ fn coordinator_queries_local_always_and_linked_only_on_intent_or_individual_allo
             .hits
             .iter()
             .any(|item| item.source_workspace_id.as_str() == "project-b")
+    );
+}
+
+#[test]
+fn linked_recall_intersects_grant_collections_with_query_intent() {
+    let fixture = MultiSourceFixture::new();
+    fixture.insert(
+        "project-b",
+        "linked-preference",
+        "preference",
+        "Language preference shared intent marker",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    fixture.insert(
+        "project-b",
+        "linked-goal",
+        "goal",
+        "Language preference shared intent marker goal",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    fixture.grant(
+        "grant-b",
+        "project-b",
+        [MemoryCollectionKey::Preferences, MemoryCollectionKey::Goals],
+        HashMap::new(),
+    );
+    let pack = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "language preference shared intent marker",
+        &[],
+        1_800_000_000,
+        None,
+    )
+    .expect("recall");
+    let linked = pack
+        .hits
+        .iter()
+        .filter(|item| item.source_workspace_id.as_str() == "project-b")
+        .collect::<Vec<_>>();
+
+    assert_eq!(linked.len(), 1);
+    assert_eq!(linked[0].collection, MemoryCollectionKey::Preferences);
+}
+
+#[test]
+fn individual_allow_outside_intent_does_not_reopen_other_granted_collections() {
+    let fixture = MultiSourceFixture::new();
+    fixture.insert(
+        "project-b",
+        "linked-preference",
+        "preference",
+        "Language preference override intent marker",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    fixture.insert(
+        "project-b",
+        "linked-goal",
+        "goal",
+        "Language preference override intent marker goal",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    let individually_allowed = fixture.insert(
+        "project-b",
+        "linked-artifact",
+        "artifact",
+        "Language preference override intent marker artifact",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    fixture.grant(
+        "grant-b",
+        "project-b",
+        [MemoryCollectionKey::Preferences, MemoryCollectionKey::Goals],
+        HashMap::from([(
+            individually_allowed.clone(),
+            MemoryGrantOverrideEffect::Allow,
+        )]),
+    );
+
+    let pack = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "language preference override intent marker",
+        &[],
+        1_800_000_000,
+        None,
+    )
+    .expect("recall");
+    let linked = pack
+        .hits
+        .iter()
+        .filter(|item| item.source_workspace_id.as_str() == "project-b")
+        .collect::<Vec<_>>();
+
+    assert!(
+        linked
+            .iter()
+            .any(|item| item.collection == MemoryCollectionKey::Preferences)
+    );
+    assert!(
+        linked
+            .iter()
+            .any(|item| item.memory_ref == individually_allowed.to_string())
+    );
+    assert!(
+        linked
+            .iter()
+            .all(|item| item.collection != MemoryCollectionKey::Goals)
     );
 }
 

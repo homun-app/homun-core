@@ -283,13 +283,11 @@ fn normalized_recall_text(text: &str) -> String {
 
 fn semantic_rank(hit: &RecallHit, consumer_workspace: &WorkspaceId) -> u8 {
     let is_local = hit.source_workspace_id == *consumer_workspace && hit.grant_id.is_none();
-    match (
-        hit.kind.as_str(),
-        is_local,
-        hit.source_workspace_id.as_str() == PERSONAL_WORKSPACE,
-    ) {
+    let is_personal = hit.source_workspace_id.as_str() == PERSONAL_WORKSPACE;
+    match (hit.kind.as_str(), is_local, is_personal) {
         ("decision", true, _) => 0,
         ("preference", _, true) => 1,
+        _ if is_personal && hit.collection == MemoryCollectionKey::Profile => 1,
         ("preference", true, _) => 2,
         ("decision", false, _) => 3,
         _ => 4,
@@ -449,22 +447,37 @@ pub fn recall_authorized_sources_on_facade(
     let mut degraded_sources = Vec::new();
     let mut source_audits = Vec::new();
     for source in &sources {
-        if let Some(policy) = &source.policy {
-            let has_individual_allow = policy
-                .overrides
-                .values()
-                .any(|effect| *effect == MemoryGrantOverrideEffect::Allow);
-            if policy.collections.is_disjoint(&intent.collections) && !has_individual_allow {
-                source_audits.push((
-                    source.clone(),
-                    MemorySourceAccessOutcome::Deny,
-                    "intent_not_selected".to_string(),
-                    0,
-                ));
-                continue;
+        let effective_source = match source.policy.as_ref() {
+            None => source.clone(),
+            Some(policy) => {
+                let has_individual_allow = policy
+                    .overrides
+                    .values()
+                    .any(|effect| *effect == MemoryGrantOverrideEffect::Allow);
+                let collections = policy
+                    .collections
+                    .intersection(&intent.collections)
+                    .copied()
+                    .collect::<BTreeSet<_>>();
+                if collections.is_empty() && !has_individual_allow {
+                    source_audits.push((
+                        source.clone(),
+                        MemorySourceAccessOutcome::Deny,
+                        "intent_not_selected".to_string(),
+                        0,
+                    ));
+                    continue;
+                }
+                let mut effective = source.clone();
+                effective.policy = Some(crate::MemorySourcePolicy {
+                    collections,
+                    max_sensitivity: policy.max_sensitivity,
+                    overrides: policy.overrides.clone(),
+                });
+                effective
             }
-        }
-        match recall_source_on_facade(facade, source, query, query_vec, graph_context) {
+        };
+        match recall_source_on_facade(facade, &effective_source, query, query_vec, graph_context) {
             Ok(pack) => {
                 let candidate_count = pack.hits.len();
                 hits.extend(pack.hits);
