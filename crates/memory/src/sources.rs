@@ -57,6 +57,7 @@ pub struct MemorySourceGrant {
     pub source_workspace_id: WorkspaceId,
     pub collections: BTreeSet<MemoryCollectionKey>,
     pub max_sensitivity: DataSensitivity,
+    #[serde(with = "memory_ref_override_map")]
     pub overrides: HashMap<MemoryRef, MemoryGrantOverrideEffect>,
     pub expires_at: Option<i64>,
     pub revoked_at: Option<i64>,
@@ -100,6 +101,7 @@ impl MemorySourceDecision {
 pub struct MemorySourcePolicy {
     pub collections: BTreeSet<MemoryCollectionKey>,
     pub max_sensitivity: DataSensitivity,
+    #[serde(with = "memory_ref_override_map")]
     pub overrides: HashMap<MemoryRef, MemoryGrantOverrideEffect>,
 }
 
@@ -151,5 +153,58 @@ impl MemorySourcePolicy {
         }
 
         MemorySourceDecision::deny("collection_not_allowed")
+    }
+}
+
+mod memory_ref_override_map {
+    use super::{MemoryGrantOverrideEffect, MemoryRef};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
+    use std::{collections::HashMap, str::FromStr};
+
+    #[derive(Serialize, Deserialize)]
+    struct OverrideEntry {
+        memory_ref: String,
+        effect: MemoryGrantOverrideEffect,
+    }
+
+    pub(super) fn serialize<S>(
+        overrides: &HashMap<MemoryRef, MemoryGrantOverrideEffect>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut entries = overrides
+            .iter()
+            .map(|(reference, effect)| OverrideEntry {
+                memory_ref: reference.to_string(),
+                effect: *effect,
+            })
+            .collect::<Vec<_>>();
+        entries.sort_unstable_by(|left, right| left.memory_ref.cmp(&right.memory_ref));
+        entries.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<HashMap<MemoryRef, MemoryGrantOverrideEffect>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let entries = Vec::<OverrideEntry>::deserialize(deserializer)?;
+        let mut overrides = HashMap::with_capacity(entries.len());
+
+        for entry in entries {
+            let reference = MemoryRef::from_str(&entry.memory_ref).map_err(D::Error::custom)?;
+            if overrides.contains_key(&reference) {
+                return Err(D::Error::custom(format!(
+                    "duplicate memory_ref {}",
+                    entry.memory_ref
+                )));
+            }
+            overrides.insert(reference, entry.effect);
+        }
+
+        Ok(overrides)
     }
 }
