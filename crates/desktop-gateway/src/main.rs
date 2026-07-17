@@ -8137,6 +8137,46 @@ fn resolve_workflow_routing(
         .cloned()
 }
 
+/// S2 T5: the forced-`tool_choice` decision for THIS turn, pure and independent of the store —
+/// given the turn's resolved routing (if any) and how many user messages the thread already
+/// carries. `Specific` forcing pins the model to `tool_name`, but only once the intake exchange
+/// is past its first round (see the call site for the exact turn-index rationale); every other
+/// combination (no routing, non-`Specific` forcing, still on turn 1) stays `None` = "auto".
+fn forced_tool_for_turn(
+    routing: Option<&local_first_capabilities::WorkflowRouting>,
+    user_message_count: usize,
+) -> Option<String> {
+    let routing = routing?;
+    if routing.forcing != local_first_capabilities::Forcing::Specific {
+        return None;
+    }
+    if user_message_count < 2 {
+        return None;
+    }
+    Some(routing.tool_name.clone())
+}
+
+/// S2 T5: how many USER messages a thread has, from an already-loaded snapshot. Pure (no store),
+/// so the turn-index heuristic is trivially testable independent of `ChatStore`/`AppState`.
+fn thread_user_message_count(snapshot: &ChatMessagesSnapshot) -> usize {
+    snapshot
+        .messages
+        .iter()
+        .filter(|message| message.role == "user")
+        .count()
+}
+
+/// S2 T5: fail-open wrapper reading the thread's message count off the real store. No thread_id /
+/// no store lock / no rows → 0 — the safe default, since `forced_tool_for_turn` treats a count
+/// below 2 as "still the first turn" and keeps `tool_choice` on "auto". Mirrors the fail-open
+/// shape of `active_routing_binding` just above.
+fn thread_user_message_count_fail_open(state: &AppState, thread_id: Option<&str>) -> usize {
+    thread_id
+        .and_then(|tid| lock_store(state).ok().and_then(|store| store.messages(tid).ok()))
+        .map(|snapshot| thread_user_message_count(&snapshot))
+        .unwrap_or(0)
+}
+
 fn atomic_pdf_operation_reason(prompt: &str) -> Option<String> {
     let tokens: std::collections::BTreeSet<String> = cap_tokenize(prompt).into_iter().collect();
     let mentions_pdf = tokens.contains("pdf");
@@ -15919,6 +15959,14 @@ pub(crate) async fn collect_ollama_native_stream(
 /// Ollama native (`/api/chat`: `options.num_predict`, native messages) vs OpenAI
 /// (`/v1`: `max_tokens`, `tool_choice`). Rebuilt on fallback so switching provider
 /// type mid-turn (e.g. Ollama → Z.ai) sends the correct shape.
+///
+/// `forced_tool` (S2 T5, LAST param): `Some(name)` pins the OpenAI-compat `tool_choice` to that
+/// exact function instead of `"auto"` — belt-and-suspenders on top of the S2 T4 hard-prune, for
+/// the turns where the caller has already decided the model MUST call this one tool. Deliberately
+/// NOT applied on the Ollama-native branch: that provider is boxed by the hard-prune alone (the
+/// pruned toolset already has nothing else to call), and Ollama's OpenAI-compat `/v1` layer is
+/// what drops tool_calls under streaming (see the comment below) — native has no `tool_choice`
+/// concept the collector relies on, so there is nothing to gain and a needless 400-risk to add.
 pub(crate) fn build_chat_payload(
     model: &str,
     base_url: &str,
@@ -15926,6 +15974,7 @@ pub(crate) fn build_chat_payload(
     tools: &[serde_json::Value],
     temperature: f64,
     is_final_round: bool,
+    forced_tool: Option<&str>,
 ) -> serde_json::Value {
     let max_tokens = chat_payload_max_tokens(
         is_final_round,
@@ -15980,7 +16029,15 @@ pub(crate) fn build_chat_payload(
         }
         if !is_final_round && !tools.is_empty() {
             payload["tools"] = serde_json::Value::Array(tools.to_vec());
-            payload["tool_choice"] = serde_json::Value::String("auto".to_string());
+            // S2 T5: pin tool_choice to the routed tool when the caller decided this round must
+            // call it (post-intake deterministic routing) — "auto" otherwise, unchanged.
+            payload["tool_choice"] = match forced_tool {
+                Some(name) => serde_json::json!({
+                    "type": "function",
+                    "function": { "name": name },
+                }),
+                None => serde_json::Value::String("auto".to_string()),
+            };
         }
         payload
     }
@@ -24438,6 +24495,10 @@ impl GatewayBrowseExecutor<'_> {
             autoadvance_from_evidence: false,
             step_verification: false,
             verbose: verbose_debug(),
+            // The browse sub-turn only ever offers the 6 browser tools (BrowseOnlyCapabilityExecutor
+            // above) — a deterministic plugin routing (S2) never targets one of those, so forcing is
+            // never applicable here.
+            forced_tool: None,
         };
 
         let outcome = local_first_engine::agent_loop::run_turn(
@@ -25355,15 +25416,31 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
         };
     }
     let workflow_route = workflow_route_from_capability(&capability_route);
-    // S2 T4: when the binding survived plan-precedence and still resolves to a registered
-    // WorkflowRouting, carry its `deny_tools` to the prune call sites below — hard-prune
-    // removes skill:*/run_command/shell/the-sibling-make_* explicitly, not just by omission.
-    let workflow_deny_tools: Vec<String> = routing_binding
+    // S2 T4/T5: resolve the binding's WorkflowRouting ONCE — when it survived plan-precedence
+    // AND still resolves to a registered routing — so the hard-prune's `deny_tools` (T4) and the
+    // forced `tool_choice` gate (T5) both read off the SAME resolution.
+    let resolved_workflow_routing = routing_binding
         .as_ref()
         .filter(|_| matches!(workflow_route, WorkflowRouteDecision::Workflow { .. }))
-        .and_then(resolve_workflow_routing)
-        .map(|routing| routing.deny_tools)
+        .and_then(resolve_workflow_routing);
+    // S2 T4: carry its `deny_tools` to the prune call sites below — hard-prune removes
+    // skill:*/run_command/shell/the-sibling-make_* explicitly, not just by omission.
+    let workflow_deny_tools: Vec<String> = resolved_workflow_routing
+        .as_ref()
+        .map(|routing| routing.deny_tools.clone())
         .unwrap_or_default();
+    // S2 T5: force `tool_choice` to the routed tool — belt-and-suspenders on top of the hard-
+    // prune above — but ONLY once the intake exchange is done. On the workflow's FIRST turn
+    // (right after "Use template") the model must stay free to ask clarifying questions
+    // ("auto"); forcing immediately would railroad an empty/guessed brief into the tool call.
+    // Turn-index heuristic: the thread already carries >=2 user messages (the seed "Use
+    // template" prompt + at least one intake reply) by the time generation runs here — the
+    // broker inserts the CURRENT turn's user message atomically at enqueue, before the worker
+    // ever calls in (see `enqueue_chat_turn_core`), so a plain count already includes it.
+    let forced_tool: Option<String> = forced_tool_for_turn(
+        resolved_workflow_routing.as_ref(),
+        thread_user_message_count_fail_open(state, request.thread_id.as_deref()),
+    );
     let system = match capability_router_instruction_for_decision(&capability_route) {
         Some(instruction) => format!("{system}\n\n{instruction}"),
         None => system,
@@ -26080,6 +26157,8 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             autoadvance_from_evidence: plan_autoadvance_from_evidence_enabled(),
             step_verification: step_verification_enabled(),
             verbose: verbose_debug(),
+            // S2 T5: resolved above from (routing_binding, Forcing::Specific, turn-index).
+            forced_tool: forced_tool.clone(),
         };
         // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern, so it
         // runs HERE after the engine turn returns. Snapshot what it needs before the turn consumes the
@@ -58550,6 +58629,159 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             super::workflow_route_blocked_tool_message(&generic, "mcp__filesystem__create")
                 .is_none(),
             "generic agent-loop turns keep normal tools"
+        );
+    }
+
+    #[test]
+    fn build_chat_payload_forces_tool_choice_when_requested() {
+        let tools = vec![serde_json::json!({"function":{"name":"make_document"}})];
+        let messages = vec![serde_json::json!({"role":"user","content":"hi"})];
+        let forced = super::build_chat_payload(
+            "gpt-test",
+            "https://api.example.com",
+            &messages,
+            &tools,
+            0.4,
+            false,
+            Some("make_document"),
+        );
+        assert_eq!(forced["tool_choice"]["type"], "function");
+        assert_eq!(forced["tool_choice"]["function"]["name"], "make_document");
+
+        // Behavior-preserving: `None` (every call site except the loop's main round call, S2 T5)
+        // keeps today's plain "auto".
+        let auto = super::build_chat_payload(
+            "gpt-test",
+            "https://api.example.com",
+            &messages,
+            &tools,
+            0.4,
+            false,
+            None,
+        );
+        assert_eq!(auto["tool_choice"], "auto");
+    }
+
+    #[test]
+    fn build_chat_payload_forced_tool_has_no_effect_without_an_offered_toolset() {
+        // No tools offered at all → no `tools`/`tool_choice` field, forced or not.
+        let no_tools = super::build_chat_payload(
+            "gpt-test",
+            "https://api.example.com",
+            &[],
+            &[],
+            0.4,
+            false,
+            Some("make_document"),
+        );
+        assert!(no_tools.get("tool_choice").is_none());
+
+        // Final round omits tools entirely (the model must synthesize text) — forcing must not
+        // resurrect a tool_choice field here either.
+        let tools = vec![serde_json::json!({"function":{"name":"make_document"}})];
+        let final_round = super::build_chat_payload(
+            "gpt-test",
+            "https://api.example.com",
+            &[],
+            &tools,
+            0.4,
+            true,
+            Some("make_document"),
+        );
+        assert!(final_round.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn forced_tool_for_turn_requires_specific_forcing_and_turn_index_two() {
+        let routing = local_first_capabilities::WorkflowRouting {
+            route_id: "presentations.template_document".into(),
+            plugin_id: "presentations".into(),
+            tool_name: "make_document".into(),
+            route_text: String::new(),
+            priority: 100,
+            deterministic: true,
+            deny_tools: vec![],
+            forcing: local_first_capabilities::Forcing::Specific,
+        };
+        // Turn 1 (just the "Use template" pick, 0 or 1 user messages so far) — stay "auto" so
+        // the model can ask intake questions instead of firing the tool on a guessed brief.
+        assert_eq!(super::forced_tool_for_turn(Some(&routing), 0), None);
+        assert_eq!(super::forced_tool_for_turn(Some(&routing), 1), None);
+        // Post-intake (>=2 user messages: seed prompt + at least one reply) — force it.
+        assert_eq!(
+            super::forced_tool_for_turn(Some(&routing), 2).as_deref(),
+            Some("make_document")
+        );
+        assert_eq!(
+            super::forced_tool_for_turn(Some(&routing), 5).as_deref(),
+            Some("make_document")
+        );
+        // No active binding → never forced, regardless of turn index.
+        assert_eq!(super::forced_tool_for_turn(None, 5), None);
+        // Non-`Specific` forcing (e.g. `Required`) never forces `tool_choice`, even post-intake —
+        // this belt-and-suspenders is scoped to the routes that opted into hard pinning.
+        let mut required = routing.clone();
+        required.forcing = local_first_capabilities::Forcing::Required;
+        assert_eq!(super::forced_tool_for_turn(Some(&required), 5), None);
+    }
+
+    #[test]
+    fn thread_user_message_count_counts_only_user_role() {
+        let snapshot = super::ChatMessagesSnapshot {
+            thread_id: "t1".into(),
+            messages: vec![
+                super::channel_chat_message("user", "Use template: CV professional"),
+                super::channel_chat_message("assistant", "Which fields should the CV cover?"),
+                super::channel_chat_message("user", "Mario Rossi, Senior Developer, 8 anni…"),
+            ],
+        };
+        assert_eq!(super::thread_user_message_count(&snapshot), 2);
+    }
+
+    #[test]
+    fn thread_user_message_count_fail_open_counts_committed_user_turns() {
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let state = test_app_state_for_brief(facade);
+        let thread = super::lock_store(&state).unwrap().create_thread("ws").unwrap();
+
+        // No thread_id at all → fail open to 0 (treated as "still turn 1").
+        assert_eq!(super::thread_user_message_count_fail_open(&state, None), 0);
+        // A fresh thread with no messages yet → 0.
+        assert_eq!(
+            super::thread_user_message_count_fail_open(&state, Some(&thread.thread_id)),
+            0
+        );
+
+        super::lock_store(&state)
+            .unwrap()
+            .commit_prompt_result(
+                &thread.thread_id,
+                &super::channel_chat_message("user", "Use template: CV professional"),
+                &super::channel_chat_message("assistant", "Which fields should the CV cover?"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            super::thread_user_message_count_fail_open(&state, Some(&thread.thread_id)),
+            1,
+            "the seed 'Use template' turn is turn 1 — forced_tool_for_turn must stay auto here"
+        );
+
+        super::lock_store(&state)
+            .unwrap()
+            .commit_prompt_result(
+                &thread.thread_id,
+                &super::channel_chat_message("user", "Mario Rossi, Senior Developer, 8 anni…"),
+                &super::channel_chat_message("assistant", "Here is your CV…"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            super::thread_user_message_count_fail_open(&state, Some(&thread.thread_id)),
+            2,
+            "the first intake reply crosses the >=2 threshold that forces tool_choice"
         );
     }
 

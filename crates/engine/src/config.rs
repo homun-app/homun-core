@@ -32,4 +32,13 @@ pub struct TurnConfig {
     pub step_verification: bool,
     /// Dev-time verbose logging gate.
     pub verbose: bool,
+    /// S2 T5 (plugin-owned deterministic routing): the routed tool to FORCE `tool_choice` onto
+    /// for the turn's main per-round model call — belt-and-suspenders on top of the hard-prune
+    /// (S2 T4), which already narrows the offered toolset to the routed tool alone. Resolved
+    /// gateway-side ONCE per turn from (the active `RoutingBinding`, its `Forcing::Specific`, and
+    /// the thread's user-message count). `None` on the workflow's FIRST turn — the model must
+    /// stay free to ask intake questions instead of being railroaded into an immediate, likely
+    /// under-specified tool call — and for every turn without an active deterministic binding
+    /// (ordinary chats, browse sub-turns): unchanged "auto" behavior.
+    pub forced_tool: Option<String>,
 }

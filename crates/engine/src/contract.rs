@@ -31,6 +31,10 @@ pub struct ModelCall<'a> {
     pub temperature: f64,
     /// Final round → no tools offered / synthesis budget (the gateway shapes the payload).
     pub is_final_round: bool,
+    /// S2 T5: force `tool_choice` to this specific tool name for THIS round (belt-and-suspenders
+    /// on top of the route's hard-prune, `TurnConfig::forced_tool`). `None` = "auto" — today's
+    /// behavior, kept during intake and whenever no deterministic routing binding is active.
+    pub forced_tool: Option<&'a str>,
 }
 
 /// The provider binding a round ran against. Returned so a mid-turn fallback (401/timeout/
@@ -386,6 +390,7 @@ mod tests {
                     tools: &[],
                     temperature: 0.0,
                     is_final_round: false,
+                    forced_tool: None,
                 },
                 &|d| streamed.lock().unwrap().push_str(d),
             )

@@ -269,6 +269,9 @@ missing, give what you have and note the gap in one short line.",
                     tools: &ls.tool_schemas,
                     temperature,
                     is_final_round,
+                    // S2 T5: the ONLY call site that forces a tool — resolved once, gateway-side,
+                    // into `cfg` (see `TurnConfig::forced_tool` for the intake-turn / binding gate).
+                    forced_tool: cfg.forced_tool.as_deref(),
                 },
                 &|_tok| {},
             )
@@ -930,6 +933,9 @@ to proceed."
                     tools: &[],
                     temperature,
                     is_final_round: true,
+                    // No tools offered on the forced-synthesis call, so forcing is moot — kept
+                    // `None` for consistency with every other non-main-round call site.
+                    forced_tool: None,
                 },
                 &|_tok| {},
             )
@@ -1098,6 +1104,7 @@ mod tests {
             autoadvance_from_evidence: true,
             step_verification: true,
             verbose: false,
+            forced_tool: None,
         }
     }
 

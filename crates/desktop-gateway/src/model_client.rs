@@ -62,6 +62,11 @@ impl ModelClient for GatewayModelClient<'_> {
         let mut endpoint = chat_endpoint(&base_url);
         let mut fallback_tried = false;
         let mut tool_compatibility_fallback_tried = false;
+        // S2 T5: whether this round's payload FORCES `tool_choice` onto a specific tool (belt-
+        // and-suspenders on top of the hard-prune). Mutable — cleared once, below, if the
+        // provider 400s specifically on the forcing shape. `None` everywhere but the loop's main
+        // per-round call (see `ModelCall::forced_tool`), so this is a no-op for every other turn.
+        let mut forced_tool_fallback_tried = false;
         // Alias the call fields under the names the lifted block uses (borrows, no clone).
         let messages = call.messages;
         let tool_schemas = call.tools;
@@ -73,6 +78,11 @@ impl ModelClient for GatewayModelClient<'_> {
         // shape is provider-specific; both stream from upstream so the governor is
         // INACTIVITY (idle timeout) not total time.
         let payload_has_tools = !is_final_round && !tool_schemas.is_empty();
+        // S2 T5: the ONLY forced value this fn ever sees — every rebuild below (401/timeout/
+        // tool-compat provider swaps) deliberately passes `None`, so a mid-round fallback to a
+        // DIFFERENT provider never inherits a forcing shape that provider hasn't been vetted
+        // against. Mutable so the dedicated 400-fallback below can clear it and retry same-provider.
+        let mut forced_tool = call.forced_tool;
         let mut payload = build_chat_payload(
             &model,
             &base_url,
@@ -80,6 +90,7 @@ impl ModelClient for GatewayModelClient<'_> {
             tool_schemas,
             temperature,
             is_final_round,
+            forced_tool,
         );
         // Two-layer timeout (2026-07-09 resilience fix): `request_timeout` is the total
         // per-request backstop (covers the whole streamed body; fires mid-stream per
@@ -145,6 +156,40 @@ tools={payload_has_tools} tool_count={} body={err_body}",
                                 .collect();
                             eprintln!("[model-error] shapes: {}", shapes.join(" | "));
                         }
+                        // S2 T5 (belt-and-suspenders forced routing) 400-fallback: some providers
+                        // reject a function-forced `tool_choice` outright even though they'd
+                        // happily accept the SAME tools with "auto". Try this specific, narrower
+                        // fix FIRST — same provider/model, forcing just dropped — before the
+                        // broader tool-compatibility swap below assumes the whole tools payload
+                        // is the problem. The hard-prune (S2 T4) already narrowed the toolset to
+                        // the routed tool, so "auto" still finds it: a graceful degrade, not a
+                        // dead end.
+                        if code.as_u16() == 400 && forced_tool.is_some() && !forced_tool_fallback_tried
+                        {
+                            forced_tool_fallback_tried = true;
+                            forced_tool = None;
+                            let _ = emit_stream_event(
+                                self.tx,
+                                GenerateStreamEvent::Delta {
+                                    text: format!(
+                                        "‹‹ACT››↩ «{model}» rejected the forced tool selection \
+(400); retrying without forcing…‹‹/ACT››"
+                                    ),
+                                },
+                            )
+                            .await;
+                            payload = build_chat_payload(
+                                &model,
+                                &base_url,
+                                messages,
+                                tool_schemas,
+                                temperature,
+                                is_final_round,
+                                forced_tool,
+                            );
+                            attempt = 0;
+                            continue;
+                        }
                         // A project can intentionally route Auto to its coding
                         // provider. If that provider rejects this actual TOOLS
                         // payload, do not print a generic 400 and then continue
@@ -174,6 +219,10 @@ retrying through «{fb_model}»…‹‹/ACT››"
                                 base_url = fb_base;
                                 endpoint = chat_endpoint(&base_url);
                                 api_key = fb_key;
+                                // S2 T5: hardcoded `None`, not `forced_tool` — a provider SWAP is a
+                                // bigger fallback than the narrower branch above, and the new
+                                // provider/model hasn't been vetted against a forced tool_choice
+                                // shape at all.
                                 payload = build_chat_payload(
                                     &model,
                                     &base_url,
@@ -181,6 +230,7 @@ retrying through «{fb_model}»…‹‹/ACT››"
                                     tool_schemas,
                                     temperature,
                                     is_final_round,
+                                    None,
                                 );
                                 attempt = 0;
                                 continue;
@@ -216,6 +266,8 @@ retrying through «{fb_model}»…‹‹/ACT››"
                                     base_url = fb_base;
                                     endpoint = chat_endpoint(&base_url);
                                     api_key = fb_key;
+                                    // S2 T5: `None`, same reasoning as the tool-compat swap above —
+                                    // the fallback provider hasn't been vetted against forcing.
                                     payload = build_chat_payload(
                                         &model,
                                         &base_url,
@@ -223,6 +275,7 @@ retrying through «{fb_model}»…‹‹/ACT››"
                                         tool_schemas,
                                         temperature,
                                         is_final_round,
+                                        None,
                                     );
                                     attempt = 0;
                                     continue;
@@ -347,6 +400,7 @@ check/update the key in Settings → Model & Runtime."
                                     base_url = fb_base;
                                     endpoint = chat_endpoint(&base_url);
                                     api_key = fb_key;
+                                    // S2 T5: `None` — same reasoning as the other provider swaps.
                                     payload = build_chat_payload(
                                         &model,
                                         &base_url,
@@ -354,6 +408,7 @@ check/update the key in Settings → Model & Runtime."
                                         tool_schemas,
                                         temperature,
                                         is_final_round,
+                                        None,
                                     );
                                     attempt = 0;
                                     continue;
