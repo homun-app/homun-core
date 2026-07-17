@@ -7,10 +7,10 @@ use crate::{
     MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
-    MemoryStatus, MemoryUpdatePatch, PrivacyDomain, RoutineInference, RoutineInferenceSummary,
-    RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, VectorHit, WikiCorrectionSyncReport,
-    WikiFileStore, WikiPage, WorkspaceId, current_timestamp, ensure_artifacts_inside_root,
-    ensure_transition, parse_wiki_markdown,
+    MemorySourceGrant, MemoryStatus, MemoryUpdatePatch, PrivacyDomain, RoutineInference,
+    RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, VectorHit,
+    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
+    ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -1071,6 +1071,28 @@ impl MemoryFacade {
 
     pub fn memory_health(&self) -> MemoryResult<MemoryHealth> {
         Ok(self.store.health()?)
+    }
+
+    pub fn upsert_memory_source_grant(&self, grant: &MemorySourceGrant) -> MemoryResult<()> {
+        Ok(self.store.upsert_memory_source_grant(grant)?)
+    }
+
+    pub fn list_memory_source_grants(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+    ) -> MemoryResult<Vec<MemorySourceGrant>> {
+        Ok(self
+            .store
+            .list_memory_source_grants(consumer_user_id, consumer_workspace_id)?)
+    }
+
+    pub fn get_memory_source_grant(&self, id: &str) -> MemoryResult<Option<MemorySourceGrant>> {
+        Ok(self.store.get_memory_source_grant(id)?)
+    }
+
+    pub fn revoke_memory_source_grant(&self, id: &str, revoked_at: i64) -> MemoryResult<()> {
+        Ok(self.store.revoke_memory_source_grant(id, revoked_at)?)
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> MemoryResult<MemoryBackupReport> {

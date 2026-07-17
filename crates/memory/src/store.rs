@@ -2,17 +2,19 @@ use crate::{
     AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, EncryptedJson,
     KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
     MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemoryRestoreMode, PrivacyDomain, RoutineRecord, UserId,
-    VectorHit, WikiPage, WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
+    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceGrant, PrivacyDomain,
+    RoutineRecord, UserId, VectorHit, WikiPage, WorkspaceId, current_timestamp, decrypt_json,
+    encrypt_json,
 };
 use rusqlite::{Connection, Row, params};
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 
 /// ADR 0022 (Tappa 2) — modello di connessione dello store.
 ///
@@ -45,6 +47,14 @@ enum ConnHandle<'a> {
 impl std::ops::Deref for ConnHandle<'_> {
     type Target = Connection;
     fn deref(&self) -> &Connection {
+        match self {
+            ConnHandle::Guarded(guard) => guard,
+        }
+    }
+}
+
+impl std::ops::DerefMut for ConnHandle<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
         match self {
             ConnHandle::Guarded(guard) => guard,
         }
@@ -267,6 +277,192 @@ impl SQLiteMemoryStore {
             total_wiki_pages: self.count_table("wiki_pages")?,
             access_audit_count: self.access_audit_count()?,
         })
+    }
+
+    pub fn upsert_memory_source_grant(&self, grant: &MemorySourceGrant) -> Result<(), String> {
+        let mut conn = self.write_conn();
+        let transaction = conn.transaction().map_err(|error| error.to_string())?;
+
+        let existing_identity = {
+            let mut statement = transaction
+                .prepare(
+                    "select consumer_user_id, consumer_workspace_id, source_user_id,
+                            source_workspace_id, created_by, created_at
+                     from memory_source_grants where id = ?1",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut rows = statement
+                .query([grant.id.as_str()])
+                .map_err(|error| error.to_string())?;
+            rows.next()
+                .map_err(|error| error.to_string())?
+                .map(|row| {
+                    Ok::<_, String>((
+                        row.get::<_, String>(0).map_err(|error| error.to_string())?,
+                        row.get::<_, String>(1).map_err(|error| error.to_string())?,
+                        row.get::<_, String>(2).map_err(|error| error.to_string())?,
+                        row.get::<_, String>(3).map_err(|error| error.to_string())?,
+                        row.get::<_, String>(4).map_err(|error| error.to_string())?,
+                        row.get::<_, String>(5).map_err(|error| error.to_string())?,
+                    ))
+                })
+                .transpose()?
+        };
+
+        if let Some((
+            consumer_user_id,
+            consumer_workspace_id,
+            source_user_id,
+            source_workspace_id,
+            created_by,
+            created_at,
+        )) = existing_identity
+        {
+            let identity_matches = consumer_user_id == grant.consumer_user_id.as_str()
+                && consumer_workspace_id == grant.consumer_workspace_id.as_str()
+                && source_user_id == grant.source_user_id.as_str()
+                && source_workspace_id == grant.source_workspace_id.as_str()
+                && created_by == grant.created_by
+                && created_at == grant.created_at;
+            if !identity_matches {
+                return Err(format!(
+                    "memory source grant {} immutable identity mismatch",
+                    grant.id
+                ));
+            }
+        }
+
+        transaction
+            .execute(
+                "insert into memory_source_grants (
+                    id, consumer_user_id, consumer_workspace_id, source_user_id,
+                    source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                    policy_version, created_by, created_at, updated_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 on conflict(id) do update set
+                    max_sensitivity = excluded.max_sensitivity,
+                    expires_at = excluded.expires_at,
+                    revoked_at = excluded.revoked_at,
+                    policy_version = excluded.policy_version,
+                    updated_at = excluded.updated_at",
+                params![
+                    grant.id,
+                    grant.consumer_user_id.as_str(),
+                    grant.consumer_workspace_id.as_str(),
+                    grant.source_user_id.as_str(),
+                    grant.source_workspace_id.as_str(),
+                    enum_name(&grant.max_sensitivity)?,
+                    grant.expires_at,
+                    grant.revoked_at,
+                    grant.policy_version,
+                    grant.created_by,
+                    grant.created_at,
+                    grant.updated_at,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "delete from memory_source_grant_collections where grant_id = ?1",
+                [grant.id.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "delete from memory_source_grant_overrides where grant_id = ?1",
+                [grant.id.as_str()],
+            )
+            .map_err(|error| error.to_string())?;
+
+        for collection in &grant.collections {
+            transaction
+                .execute(
+                    "insert into memory_source_grant_collections (grant_id, collection_key)
+                     values (?1, ?2)",
+                    (grant.id.as_str(), enum_name(collection)?),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        for (reference, effect) in &grant.overrides {
+            let reference_json =
+                serde_json::to_string(reference).map_err(|error| error.to_string())?;
+            transaction
+                .execute(
+                    "insert into memory_source_grant_overrides (grant_id, memory_ref, effect)
+                     values (?1, ?2, ?3)",
+                    (grant.id.as_str(), reference_json, enum_name(effect)?),
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
+        transaction.commit().map_err(|error| error.to_string())
+    }
+
+    pub fn list_memory_source_grants(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemorySourceGrant>, String> {
+        let conn = self.read_conn();
+        let mut grants = {
+            let mut statement = conn
+                .prepare(
+                    "select id, consumer_user_id, consumer_workspace_id, source_user_id,
+                            source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                            policy_version, created_by, created_at, updated_at
+                     from memory_source_grants
+                     where consumer_user_id = ?1 and consumer_workspace_id = ?2
+                     order by id",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut rows = statement
+                .query((consumer_user_id.as_str(), consumer_workspace_id.as_str()))
+                .map_err(|error| error.to_string())?;
+            let mut grants = Vec::new();
+            while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+                grants.push(memory_source_grant_base_from_row(row)?);
+            }
+            grants
+        };
+        for grant in &mut grants {
+            load_memory_source_grant_children(&conn, grant)?;
+        }
+        Ok(grants)
+    }
+
+    pub fn get_memory_source_grant(&self, id: &str) -> Result<Option<MemorySourceGrant>, String> {
+        let conn = self.read_conn();
+        let mut grant = {
+            let mut statement = conn
+                .prepare(
+                    "select id, consumer_user_id, consumer_workspace_id, source_user_id,
+                            source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                            policy_version, created_by, created_at, updated_at
+                     from memory_source_grants where id = ?1",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut rows = statement.query([id]).map_err(|error| error.to_string())?;
+            rows.next()
+                .map_err(|error| error.to_string())?
+                .map(memory_source_grant_base_from_row)
+                .transpose()?
+        };
+        if let Some(grant) = &mut grant {
+            load_memory_source_grant_children(&conn, grant)?;
+        }
+        Ok(grant)
+    }
+
+    pub fn revoke_memory_source_grant(&self, id: &str, revoked_at: i64) -> Result<(), String> {
+        let conn = self.write_conn();
+        conn.execute(
+            "update memory_source_grants
+             set revoked_at = ?2, policy_version = policy_version + 1, updated_at = ?3
+             where id = ?1 and revoked_at is null",
+            params![id, revoked_at, current_timestamp()],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<MemoryBackupReport, String> {
@@ -1778,6 +1974,36 @@ impl SQLiteMemoryStore {
                     workspace_id text not null,
                     reason text not null,
                     created_at text not null default current_timestamp
+                );
+
+                create table if not exists memory_source_grants (
+                    id text primary key,
+                    consumer_user_id text not null,
+                    consumer_workspace_id text not null,
+                    source_user_id text not null,
+                    source_workspace_id text not null,
+                    max_sensitivity text not null,
+                    expires_at integer,
+                    revoked_at integer,
+                    policy_version integer not null,
+                    created_by text not null,
+                    created_at text not null,
+                    updated_at text not null
+                );
+                create index if not exists idx_memory_source_grants_consumer
+                    on memory_source_grants(consumer_user_id, consumer_workspace_id, revoked_at);
+
+                create table if not exists memory_source_grant_collections (
+                    grant_id text not null references memory_source_grants(id) on delete cascade,
+                    collection_key text not null,
+                    primary key(grant_id, collection_key)
+                );
+
+                create table if not exists memory_source_grant_overrides (
+                    grant_id text not null references memory_source_grants(id) on delete cascade,
+                    memory_ref text not null,
+                    effect text not null check(effect in ('allow', 'deny')),
+                    primary key(grant_id, memory_ref)
                 );",
             )
             .map_err(|error| error.to_string())?;
@@ -2106,6 +2332,80 @@ fn parse_optional_ref(value: Option<String>) -> Result<Option<MemoryRef>, String
 
 fn parse_refs_json(value: String) -> Result<Vec<MemoryRef>, String> {
     serde_json::from_str(&value).map_err(|error| error.to_string())
+}
+
+fn memory_source_grant_base_from_row(row: &Row<'_>) -> Result<MemorySourceGrant, String> {
+    Ok(MemorySourceGrant {
+        id: row.get(0).map_err(|error| error.to_string())?,
+        consumer_user_id: UserId::new(row.get::<_, String>(1).map_err(|error| error.to_string())?),
+        consumer_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(2).map_err(|error| error.to_string())?,
+        ),
+        source_user_id: UserId::new(row.get::<_, String>(3).map_err(|error| error.to_string())?),
+        source_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(4).map_err(|error| error.to_string())?,
+        ),
+        collections: BTreeSet::new(),
+        max_sensitivity: enum_from_name(
+            row.get::<_, String>(5).map_err(|error| error.to_string())?,
+        )?,
+        overrides: HashMap::new(),
+        expires_at: row.get(6).map_err(|error| error.to_string())?,
+        revoked_at: row.get(7).map_err(|error| error.to_string())?,
+        policy_version: row.get(8).map_err(|error| error.to_string())?,
+        created_by: row.get(9).map_err(|error| error.to_string())?,
+        created_at: row.get(10).map_err(|error| error.to_string())?,
+        updated_at: row.get(11).map_err(|error| error.to_string())?,
+    })
+}
+
+fn load_memory_source_grant_children(
+    conn: &Connection,
+    grant: &mut MemorySourceGrant,
+) -> Result<(), String> {
+    let mut collection_statement = conn
+        .prepare(
+            "select collection_key from memory_source_grant_collections
+             where grant_id = ?1 order by collection_key",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut collection_rows = collection_statement
+        .query([grant.id.as_str()])
+        .map_err(|error| error.to_string())?;
+    while let Some(row) = collection_rows.next().map_err(|error| error.to_string())? {
+        let collection =
+            enum_from_name(row.get::<_, String>(0).map_err(|error| error.to_string())?)?;
+        if !grant.collections.insert(collection) {
+            return Err(format!(
+                "duplicate collection for memory source grant {}",
+                grant.id
+            ));
+        }
+    }
+    drop(collection_rows);
+    drop(collection_statement);
+
+    let mut override_statement = conn
+        .prepare(
+            "select memory_ref, effect from memory_source_grant_overrides
+             where grant_id = ?1 order by memory_ref",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut override_rows = override_statement
+        .query([grant.id.as_str()])
+        .map_err(|error| error.to_string())?;
+    while let Some(row) = override_rows.next().map_err(|error| error.to_string())? {
+        let reference_json: String = row.get(0).map_err(|error| error.to_string())?;
+        let reference = serde_json::from_str(&reference_json).map_err(|error| error.to_string())?;
+        let effect = enum_from_name(row.get::<_, String>(1).map_err(|error| error.to_string())?)?;
+        if grant.overrides.insert(reference, effect).is_some() {
+            return Err(format!(
+                "duplicate override reference for memory source grant {}",
+                grant.id
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn enum_name<T: serde::Serialize>(value: &T) -> Result<String, String> {
