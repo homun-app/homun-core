@@ -89,6 +89,19 @@ pub(crate) fn validate_memory_source_grant(grant: &MemorySourceGrant) -> Result<
     Ok(policy_version)
 }
 
+fn validate_persisted_memory_source_grant(
+    grant: &MemorySourceGrant,
+) -> MemorySourceGrantStoreResult<()> {
+    validate_memory_source_grant(grant)
+        .map(|_| ())
+        .map_err(|message| {
+            MemorySourceGrantStoreError::Store(format!(
+                "invalid persisted memory source grant {}: {message}",
+                grant.id
+            ))
+        })
+}
+
 /// ADR 0022 (Tappa 2) — modello di connessione dello store.
 ///
 /// - `Single`: una `Connection` dietro `Mutex` (path legacy, `HOMUN_MEMORY_POOL`
@@ -539,6 +552,7 @@ impl SQLiteMemoryStore {
         for grant in &mut grants {
             load_memory_source_grant_children(&transaction, grant)
                 .map_err(MemorySourceGrantStoreError::store)?;
+            validate_persisted_memory_source_grant(grant)?;
         }
         transaction
             .commit()
@@ -582,6 +596,7 @@ impl SQLiteMemoryStore {
         if let Some(grant) = &mut grant {
             load_memory_source_grant_children(&transaction, grant)
                 .map_err(MemorySourceGrantStoreError::store)?;
+            validate_persisted_memory_source_grant(grant)?;
         }
         transaction
             .commit()

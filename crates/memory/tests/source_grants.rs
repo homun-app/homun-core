@@ -109,6 +109,41 @@ fn assert_corrupt_grant_is_rejected(label: &str, corrupt: impl FnOnce(&Connectio
     remove_sqlite_files(&path);
 }
 
+fn assert_semantically_corrupt_grant_is_rejected(label: &str, corrupt: impl FnOnce(&Connection)) {
+    let path = unique_db_path(label);
+    let persisted = grant();
+    {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+        facade.upsert_memory_source_grant(&persisted).unwrap();
+    }
+    {
+        let connection = Connection::open(&path).unwrap();
+        corrupt(&connection);
+    }
+    {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+        let get_result = facade.get_memory_source_grant(
+            &persisted.consumer_user_id,
+            &persisted.consumer_workspace_id,
+            &persisted.id,
+        );
+        assert!(
+            matches!(get_result, Err(MemoryError::Store(_))),
+            "semantic corruption {label} must fail scoped get as Store, got {get_result:?}"
+        );
+
+        let list_result = facade.list_memory_source_grants(
+            &persisted.consumer_user_id,
+            &persisted.consumer_workspace_id,
+        );
+        assert!(
+            matches!(list_result, Err(MemoryError::Store(_))),
+            "semantic corruption {label} must fail list as Store, got {list_result:?}"
+        );
+    }
+    remove_sqlite_files(&path);
+}
+
 #[test]
 fn grants_round_trip_by_consumer_and_id_without_lossy_refs() {
     let facade = facade();
@@ -283,6 +318,75 @@ fn invalid_persisted_override_effect_fails_closed() {
 }
 
 #[test]
+fn persisted_cross_user_source_fails_closed_on_get_and_list() {
+    assert_semantically_corrupt_grant_is_rejected("semantic-source-user", |connection| {
+        connection
+            .execute(
+                "update memory_source_grants set source_user_id = 'other-user'
+                 where id = 'grant-1'",
+                [],
+            )
+            .unwrap();
+    });
+}
+
+#[test]
+fn persisted_reserved_or_self_source_workspace_fails_closed_on_get_and_list() {
+    for (label, source_workspace) in [
+        ("semantic-source-threads", "__threads__"),
+        ("semantic-source-self", "project-a"),
+    ] {
+        assert_semantically_corrupt_grant_is_rejected(label, |connection| {
+            connection
+                .execute(
+                    "update memory_source_grants set source_workspace_id = ?1
+                     where id = 'grant-1'",
+                    [source_workspace],
+                )
+                .unwrap();
+        });
+    }
+}
+
+#[test]
+fn persisted_override_with_wrong_kind_fails_closed_on_get_and_list() {
+    assert_semantically_corrupt_grant_is_rejected("semantic-override-kind", |connection| {
+        let invalid = MemoryRef::new(
+            MemoryRefKind::Entity,
+            UserId::new("owner"),
+            WorkspaceId::new("__personal__"),
+            "syntactically-valid-entity",
+        );
+        connection
+            .execute(
+                "update memory_source_grant_overrides set memory_ref = ?1
+                 where grant_id = 'grant-1' and effect = 'allow'",
+                [serde_json::to_string(&invalid).unwrap()],
+            )
+            .unwrap();
+    });
+}
+
+#[test]
+fn persisted_override_outside_source_fails_closed_on_get_and_list() {
+    assert_semantically_corrupt_grant_is_rejected("semantic-override-source", |connection| {
+        let invalid = MemoryRef::new(
+            MemoryRefKind::Memory,
+            UserId::new("other-user"),
+            WorkspaceId::new("other-workspace"),
+            "syntactically-valid-memory",
+        );
+        connection
+            .execute(
+                "update memory_source_grant_overrides set memory_ref = ?1
+                 where grant_id = 'grant-1' and effect = 'allow'",
+                [serde_json::to_string(&invalid).unwrap()],
+            )
+            .unwrap();
+    });
+}
+
+#[test]
 fn grant_identity_is_immutable_on_conflicting_upsert() {
     let facade = facade();
     let original = grant();
@@ -404,7 +508,7 @@ fn new_active_grant_policy_version_must_be_positive_representable_and_have_headr
 }
 
 #[test]
-fn revoke_overflow_is_atomic_and_keeps_the_grant_readable() {
+fn revoke_overflow_is_atomic_and_leaves_the_corrupt_row_unchanged() {
     let path = unique_db_path("revoke-overflow");
     let original = grant();
     {
@@ -426,9 +530,21 @@ fn revoke_overflow_is_atomic_and_keeps_the_grant_readable() {
     {
         let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
         assert_validation_error(revoke_grant(&facade, &original.id, 20));
-        let unchanged = get_grant(&facade, &original.id).unwrap().unwrap();
-        assert_eq!(unchanged.policy_version, i64::MAX as u64);
-        assert_eq!(unchanged.revoked_at, None);
+        assert!(matches!(
+            get_grant(&facade, &original.id),
+            Err(MemoryError::Store(_))
+        ));
+    }
+    {
+        let connection = Connection::open(&path).unwrap();
+        let unchanged: (i64, Option<i64>) = connection
+            .query_row(
+                "select policy_version, revoked_at from memory_source_grants where id = ?1",
+                [original.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(unchanged, (i64::MAX, None));
     }
     remove_sqlite_files(&path);
 }
