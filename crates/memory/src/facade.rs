@@ -7,10 +7,10 @@ use crate::{
     MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
     MemoryMaintenanceReport, MemoryPolicyEngine, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
-    MemorySourceGrant, MemoryStatus, MemoryUpdatePatch, PrivacyDomain, RoutineInference,
-    RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore, UserId, VectorHit,
-    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, current_timestamp,
-    ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
+    MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus, MemoryUpdatePatch, PrivacyDomain,
+    RoutineInference, RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore,
+    UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId,
+    current_timestamp, ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -32,6 +32,14 @@ pub struct MemoryFacade {
     /// index (`vector_index_scope_key`). `Mutex` perché le scritture sono da thread
     /// concorrenti (learn/consolidate/backfill).
     briefing_generations: Mutex<HashMap<String, u64>>,
+}
+
+fn memory_source_grant_error(error: MemorySourceGrantStoreError) -> MemoryError {
+    match error {
+        MemorySourceGrantStoreError::Validation(message) => MemoryError::validation(message),
+        MemorySourceGrantStoreError::NotFound(message) => MemoryError::not_found(message),
+        MemorySourceGrantStoreError::Store(message) => MemoryError::Store(message),
+    }
 }
 
 impl MemoryFacade {
@@ -1074,7 +1082,10 @@ impl MemoryFacade {
     }
 
     pub fn upsert_memory_source_grant(&self, grant: &MemorySourceGrant) -> MemoryResult<()> {
-        Ok(self.store.upsert_memory_source_grant(grant)?)
+        crate::store::validate_memory_source_grant(grant).map_err(MemoryError::validation)?;
+        self.store
+            .upsert_memory_source_grant(grant)
+            .map_err(memory_source_grant_error)
     }
 
     pub fn list_memory_source_grants(
@@ -1084,15 +1095,31 @@ impl MemoryFacade {
     ) -> MemoryResult<Vec<MemorySourceGrant>> {
         Ok(self
             .store
-            .list_memory_source_grants(consumer_user_id, consumer_workspace_id)?)
+            .list_memory_source_grants(consumer_user_id, consumer_workspace_id)
+            .map_err(memory_source_grant_error)?)
     }
 
-    pub fn get_memory_source_grant(&self, id: &str) -> MemoryResult<Option<MemorySourceGrant>> {
-        Ok(self.store.get_memory_source_grant(id)?)
+    pub fn get_memory_source_grant(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        id: &str,
+    ) -> MemoryResult<Option<MemorySourceGrant>> {
+        self.store
+            .get_memory_source_grant(consumer_user_id, consumer_workspace_id, id)
+            .map_err(memory_source_grant_error)
     }
 
-    pub fn revoke_memory_source_grant(&self, id: &str, revoked_at: i64) -> MemoryResult<()> {
-        Ok(self.store.revoke_memory_source_grant(id, revoked_at)?)
+    pub fn revoke_memory_source_grant(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        id: &str,
+        revoked_at: i64,
+    ) -> MemoryResult<()> {
+        self.store
+            .revoke_memory_source_grant(consumer_user_id, consumer_workspace_id, id, revoked_at)
+            .map_err(memory_source_grant_error)
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> MemoryResult<MemoryBackupReport> {

@@ -2,9 +2,9 @@ use crate::{
     AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, EncryptedJson,
     KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
     MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceGrant, PrivacyDomain,
-    RoutineRecord, UserId, VectorHit, WikiPage, WorkspaceId, current_timestamp, decrypt_json,
-    encrypt_json,
+    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceGrant, PERSONAL_WORKSPACE,
+    PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId,
+    current_timestamp, decrypt_json, encrypt_json,
 };
 use rusqlite::{Connection, Row, params};
 use std::collections::{BTreeSet, HashMap};
@@ -15,6 +15,79 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 const SCHEMA_VERSION: u32 = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemorySourceGrantStoreError {
+    Validation(String),
+    NotFound(String),
+    Store(String),
+}
+
+pub type MemorySourceGrantStoreResult<T> = Result<T, MemorySourceGrantStoreError>;
+
+impl MemorySourceGrantStoreError {
+    fn store(error: impl ToString) -> Self {
+        Self::Store(error.to_string())
+    }
+
+    fn validation(message: impl Into<String>) -> Self {
+        Self::Validation(message.into())
+    }
+}
+
+pub(crate) fn validate_memory_source_grant(grant: &MemorySourceGrant) -> Result<i64, String> {
+    let required_identities = [
+        ("grant id", grant.id.as_str()),
+        ("consumer user", grant.consumer_user_id.as_str()),
+        ("consumer workspace", grant.consumer_workspace_id.as_str()),
+        ("source user", grant.source_user_id.as_str()),
+        ("source workspace", grant.source_workspace_id.as_str()),
+        ("created by", grant.created_by.as_str()),
+    ];
+    for (label, value) in required_identities {
+        if value.trim().is_empty() {
+            return Err(format!("memory source grant {label} cannot be empty"));
+        }
+    }
+
+    let consumer_workspace = grant.consumer_workspace_id.as_str();
+    let source_workspace = grant.source_workspace_id.as_str();
+    if matches!(consumer_workspace, PERSONAL_WORKSPACE | THREADS_WORKSPACE) {
+        return Err("memory source grant consumer must be a project workspace".to_string());
+    }
+    if source_workspace == THREADS_WORKSPACE {
+        return Err("thread memory cannot be a linked source".to_string());
+    }
+    if consumer_workspace == source_workspace {
+        return Err("memory source grant cannot link a workspace to itself".to_string());
+    }
+    if grant.consumer_user_id != grant.source_user_id {
+        return Err("cross-user memory source grants are not supported".to_string());
+    }
+    if grant.collections.is_empty() && grant.overrides.is_empty() {
+        return Err("memory source grant must allow a collection or override".to_string());
+    }
+    for reference in grant.overrides.keys() {
+        if reference.kind != MemoryRefKind::Memory {
+            return Err("memory source grant overrides require memory refs".to_string());
+        }
+        if reference.user_id != grant.source_user_id
+            || reference.workspace_id != grant.source_workspace_id
+        {
+            return Err("memory source grant override is outside the declared source".to_string());
+        }
+    }
+
+    let policy_version = i64::try_from(grant.policy_version)
+        .map_err(|_| "memory source grant policy version exceeds SQLite i64".to_string())?;
+    if policy_version < 1 {
+        return Err("memory source grant policy version must be positive".to_string());
+    }
+    if grant.revoked_at.is_none() && policy_version == i64::MAX {
+        return Err("active memory source grant policy version has no revoke headroom".to_string());
+    }
+    Ok(policy_version)
+}
 
 /// ADR 0022 (Tappa 2) — modello di connessione dello store.
 ///
@@ -89,21 +162,22 @@ impl SQLiteMemoryStore {
             .unwrap_or(3)
     }
 
-    /// Applica i PRAGMA WAL a una connection (writer o reader). WAL è persistente
-    /// a livello di DB file, ma `synchronous`/`busy_timeout`/`foreign_keys` sono
-    /// per-connection: vanno settati su ognuna.
+    /// Applica i PRAGMA comuni a ogni connection, incluse Single e in-memory.
+    fn apply_common_pragmas(conn: &Connection) -> Result<(), String> {
+        conn.pragma_update(None, "busy_timeout", 5000)
+            .map_err(|e| e.to_string())?;
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Applica i soli PRAGMA specifici di WAL a writer e reader file-backed.
     fn apply_wal_pragmas(conn: &Connection) -> Result<(), String> {
         conn.pragma_update(None, "journal_mode", "WAL")
             .map_err(|e| e.to_string())?;
         // synchronous=NORMAL è sicuro in WAL (nessun corruption; al max si perde
         // l'ultima transazione su crash). FULL aggiunge fsync per-statement.
         conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| e.to_string())?;
-        // busy_timeout: se due writer competono (o un checkpoint), attende prima
-        // di restituire SQLITE_BUSY. 5000ms copre il consolidation LLM.
-        conn.pragma_update(None, "busy_timeout", 5000)
-            .map_err(|e| e.to_string())?;
-        conn.pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -147,14 +221,16 @@ impl SQLiteMemoryStore {
     }
 
     fn open_raw(in_memory: bool, path: &Option<PathBuf>) -> Result<Connection, String> {
-        if in_memory {
-            Connection::open_in_memory().map_err(|e| e.to_string())
+        let conn = if in_memory {
+            Connection::open_in_memory().map_err(|e| e.to_string())?
         } else {
             let path = path
                 .as_ref()
                 .ok_or_else(|| "pool requires a database path".to_string())?;
-            Connection::open(path).map_err(|e| e.to_string())
-        }
+            Connection::open(path).map_err(|e| e.to_string())?
+        };
+        Self::apply_common_pragmas(&conn)?;
+        Ok(conn)
     }
 
     /// Prende una connection per i READ. In Single mode è l'unica connection; in
@@ -279,56 +355,77 @@ impl SQLiteMemoryStore {
         })
     }
 
-    pub fn upsert_memory_source_grant(&self, grant: &MemorySourceGrant) -> Result<(), String> {
+    pub fn upsert_memory_source_grant(
+        &self,
+        grant: &MemorySourceGrant,
+    ) -> MemorySourceGrantStoreResult<()> {
+        let policy_version =
+            validate_memory_source_grant(grant).map_err(MemorySourceGrantStoreError::Validation)?;
         let mut conn = self.write_conn();
-        let transaction = conn.transaction().map_err(|error| error.to_string())?;
+        let transaction = conn
+            .transaction()
+            .map_err(MemorySourceGrantStoreError::store)?;
 
-        let existing_identity = {
+        let mut existing = {
             let mut statement = transaction
                 .prepare(
-                    "select consumer_user_id, consumer_workspace_id, source_user_id,
-                            source_workspace_id, created_by, created_at
+                    "select id, consumer_user_id, consumer_workspace_id, source_user_id,
+                            source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                            policy_version, created_by, created_at, updated_at
                      from memory_source_grants where id = ?1",
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(MemorySourceGrantStoreError::store)?;
             let mut rows = statement
                 .query([grant.id.as_str()])
-                .map_err(|error| error.to_string())?;
+                .map_err(MemorySourceGrantStoreError::store)?;
             rows.next()
-                .map_err(|error| error.to_string())?
-                .map(|row| {
-                    Ok::<_, String>((
-                        row.get::<_, String>(0).map_err(|error| error.to_string())?,
-                        row.get::<_, String>(1).map_err(|error| error.to_string())?,
-                        row.get::<_, String>(2).map_err(|error| error.to_string())?,
-                        row.get::<_, String>(3).map_err(|error| error.to_string())?,
-                        row.get::<_, String>(4).map_err(|error| error.to_string())?,
-                        row.get::<_, String>(5).map_err(|error| error.to_string())?,
-                    ))
-                })
-                .transpose()?
+                .map_err(MemorySourceGrantStoreError::store)?
+                .map(memory_source_grant_base_from_row)
+                .transpose()
+                .map_err(MemorySourceGrantStoreError::store)?
         };
 
-        if let Some((
-            consumer_user_id,
-            consumer_workspace_id,
-            source_user_id,
-            source_workspace_id,
-            created_by,
-            created_at,
-        )) = existing_identity
-        {
-            let identity_matches = consumer_user_id == grant.consumer_user_id.as_str()
-                && consumer_workspace_id == grant.consumer_workspace_id.as_str()
-                && source_user_id == grant.source_user_id.as_str()
-                && source_workspace_id == grant.source_workspace_id.as_str()
-                && created_by == grant.created_by
-                && created_at == grant.created_at;
+        if let Some(existing) = &mut existing {
+            load_memory_source_grant_children(&transaction, existing)
+                .map_err(MemorySourceGrantStoreError::store)?;
+            if existing == grant {
+                transaction
+                    .commit()
+                    .map_err(MemorySourceGrantStoreError::store)?;
+                return Ok(());
+            }
+
+            let identity_matches = existing.consumer_user_id == grant.consumer_user_id
+                && existing.consumer_workspace_id == grant.consumer_workspace_id
+                && existing.source_user_id == grant.source_user_id
+                && existing.source_workspace_id == grant.source_workspace_id
+                && existing.created_by == grant.created_by
+                && existing.created_at == grant.created_at;
             if !identity_matches {
-                return Err(format!(
+                return Err(MemorySourceGrantStoreError::validation(format!(
                     "memory source grant {} immutable identity mismatch",
                     grant.id
+                )));
+            }
+            if existing.revoked_at.is_some() {
+                return Err(MemorySourceGrantStoreError::validation(
+                    "revoked memory source grants are immutable; use a new grant id",
                 ));
+            }
+            if grant.revoked_at.is_some() {
+                return Err(MemorySourceGrantStoreError::validation(
+                    "memory source grants must be revoked through the scoped revoke operation",
+                ));
+            }
+            let expected_version = existing.policy_version.checked_add(1).ok_or_else(|| {
+                MemorySourceGrantStoreError::validation(
+                    "memory source grant policy version cannot advance",
+                )
+            })?;
+            if grant.policy_version != expected_version {
+                return Err(MemorySourceGrantStoreError::validation(format!(
+                    "memory source grant update requires policy version {expected_version}"
+                )));
             }
         }
 
@@ -342,7 +439,6 @@ impl SQLiteMemoryStore {
                  on conflict(id) do update set
                     max_sensitivity = excluded.max_sensitivity,
                     expires_at = excluded.expires_at,
-                    revoked_at = excluded.revoked_at,
                     policy_version = excluded.policy_version,
                     updated_at = excluded.updated_at",
                 params![
@@ -351,61 +447,74 @@ impl SQLiteMemoryStore {
                     grant.consumer_workspace_id.as_str(),
                     grant.source_user_id.as_str(),
                     grant.source_workspace_id.as_str(),
-                    enum_name(&grant.max_sensitivity)?,
+                    enum_name(&grant.max_sensitivity)
+                        .map_err(MemorySourceGrantStoreError::store)?,
                     grant.expires_at,
                     grant.revoked_at,
-                    grant.policy_version,
+                    policy_version,
                     grant.created_by,
                     grant.created_at,
                     grant.updated_at,
                 ],
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(MemorySourceGrantStoreError::store)?;
         transaction
             .execute(
                 "delete from memory_source_grant_collections where grant_id = ?1",
                 [grant.id.as_str()],
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(MemorySourceGrantStoreError::store)?;
         transaction
             .execute(
                 "delete from memory_source_grant_overrides where grant_id = ?1",
                 [grant.id.as_str()],
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(MemorySourceGrantStoreError::store)?;
 
         for collection in &grant.collections {
             transaction
                 .execute(
                     "insert into memory_source_grant_collections (grant_id, collection_key)
                      values (?1, ?2)",
-                    (grant.id.as_str(), enum_name(collection)?),
+                    (
+                        grant.id.as_str(),
+                        enum_name(collection).map_err(MemorySourceGrantStoreError::store)?,
+                    ),
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(MemorySourceGrantStoreError::store)?;
         }
         for (reference, effect) in &grant.overrides {
             let reference_json =
-                serde_json::to_string(reference).map_err(|error| error.to_string())?;
+                serde_json::to_string(reference).map_err(MemorySourceGrantStoreError::store)?;
             transaction
                 .execute(
                     "insert into memory_source_grant_overrides (grant_id, memory_ref, effect)
                      values (?1, ?2, ?3)",
-                    (grant.id.as_str(), reference_json, enum_name(effect)?),
+                    (
+                        grant.id.as_str(),
+                        reference_json,
+                        enum_name(effect).map_err(MemorySourceGrantStoreError::store)?,
+                    ),
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(MemorySourceGrantStoreError::store)?;
         }
 
-        transaction.commit().map_err(|error| error.to_string())
+        transaction
+            .commit()
+            .map_err(MemorySourceGrantStoreError::store)
     }
 
     pub fn list_memory_source_grants(
         &self,
         consumer_user_id: &UserId,
         consumer_workspace_id: &WorkspaceId,
-    ) -> Result<Vec<MemorySourceGrant>, String> {
+    ) -> MemorySourceGrantStoreResult<Vec<MemorySourceGrant>> {
         let conn = self.read_conn();
+        let transaction = conn
+            .unchecked_transaction()
+            .map_err(MemorySourceGrantStoreError::store)?;
         let mut grants = {
-            let mut statement = conn
+            let mut statement = transaction
                 .prepare(
                     "select id, consumer_user_id, consumer_workspace_id, source_user_id,
                             source_workspace_id, max_sensitivity, expires_at, revoked_at,
@@ -414,55 +523,161 @@ impl SQLiteMemoryStore {
                      where consumer_user_id = ?1 and consumer_workspace_id = ?2
                      order by id",
                 )
-                .map_err(|error| error.to_string())?;
+                .map_err(MemorySourceGrantStoreError::store)?;
             let mut rows = statement
                 .query((consumer_user_id.as_str(), consumer_workspace_id.as_str()))
-                .map_err(|error| error.to_string())?;
+                .map_err(MemorySourceGrantStoreError::store)?;
             let mut grants = Vec::new();
-            while let Some(row) = rows.next().map_err(|error| error.to_string())? {
-                grants.push(memory_source_grant_base_from_row(row)?);
+            while let Some(row) = rows.next().map_err(MemorySourceGrantStoreError::store)? {
+                grants.push(
+                    memory_source_grant_base_from_row(row)
+                        .map_err(MemorySourceGrantStoreError::store)?,
+                );
             }
             grants
         };
         for grant in &mut grants {
-            load_memory_source_grant_children(&conn, grant)?;
+            load_memory_source_grant_children(&transaction, grant)
+                .map_err(MemorySourceGrantStoreError::store)?;
         }
+        transaction
+            .commit()
+            .map_err(MemorySourceGrantStoreError::store)?;
         Ok(grants)
     }
 
-    pub fn get_memory_source_grant(&self, id: &str) -> Result<Option<MemorySourceGrant>, String> {
+    pub fn get_memory_source_grant(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        id: &str,
+    ) -> MemorySourceGrantStoreResult<Option<MemorySourceGrant>> {
         let conn = self.read_conn();
+        let transaction = conn
+            .unchecked_transaction()
+            .map_err(MemorySourceGrantStoreError::store)?;
         let mut grant = {
-            let mut statement = conn
+            let mut statement = transaction
                 .prepare(
                     "select id, consumer_user_id, consumer_workspace_id, source_user_id,
                             source_workspace_id, max_sensitivity, expires_at, revoked_at,
                             policy_version, created_by, created_at, updated_at
-                     from memory_source_grants where id = ?1",
+                     from memory_source_grants
+                     where consumer_user_id = ?1 and consumer_workspace_id = ?2 and id = ?3",
                 )
-                .map_err(|error| error.to_string())?;
-            let mut rows = statement.query([id]).map_err(|error| error.to_string())?;
+                .map_err(MemorySourceGrantStoreError::store)?;
+            let mut rows = statement
+                .query((
+                    consumer_user_id.as_str(),
+                    consumer_workspace_id.as_str(),
+                    id,
+                ))
+                .map_err(MemorySourceGrantStoreError::store)?;
             rows.next()
-                .map_err(|error| error.to_string())?
+                .map_err(MemorySourceGrantStoreError::store)?
                 .map(memory_source_grant_base_from_row)
-                .transpose()?
+                .transpose()
+                .map_err(MemorySourceGrantStoreError::store)?
         };
         if let Some(grant) = &mut grant {
-            load_memory_source_grant_children(&conn, grant)?;
+            load_memory_source_grant_children(&transaction, grant)
+                .map_err(MemorySourceGrantStoreError::store)?;
         }
+        transaction
+            .commit()
+            .map_err(MemorySourceGrantStoreError::store)?;
         Ok(grant)
     }
 
-    pub fn revoke_memory_source_grant(&self, id: &str, revoked_at: i64) -> Result<(), String> {
-        let conn = self.write_conn();
-        conn.execute(
-            "update memory_source_grants
-             set revoked_at = ?2, policy_version = policy_version + 1, updated_at = ?3
-             where id = ?1 and revoked_at is null",
-            params![id, revoked_at, current_timestamp()],
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(())
+    pub fn revoke_memory_source_grant(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        id: &str,
+        revoked_at: i64,
+    ) -> MemorySourceGrantStoreResult<()> {
+        if consumer_user_id.as_str().trim().is_empty()
+            || consumer_workspace_id.as_str().trim().is_empty()
+            || id.trim().is_empty()
+        {
+            return Err(MemorySourceGrantStoreError::validation(
+                "scoped memory source grant revoke requires consumer and grant id",
+            ));
+        }
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction()
+            .map_err(MemorySourceGrantStoreError::store)?;
+        let current = {
+            let mut statement = transaction
+                .prepare(
+                    "select policy_version, revoked_at from memory_source_grants
+                     where consumer_user_id = ?1 and consumer_workspace_id = ?2 and id = ?3",
+                )
+                .map_err(MemorySourceGrantStoreError::store)?;
+            let mut rows = statement
+                .query((
+                    consumer_user_id.as_str(),
+                    consumer_workspace_id.as_str(),
+                    id,
+                ))
+                .map_err(MemorySourceGrantStoreError::store)?;
+            rows.next()
+                .map_err(MemorySourceGrantStoreError::store)?
+                .map(|row| {
+                    Ok::<_, MemorySourceGrantStoreError>((
+                        row.get::<_, i64>(0)
+                            .map_err(MemorySourceGrantStoreError::store)?,
+                        row.get::<_, Option<i64>>(1)
+                            .map_err(MemorySourceGrantStoreError::store)?,
+                    ))
+                })
+                .transpose()?
+        }
+        .ok_or_else(|| {
+            MemorySourceGrantStoreError::NotFound(format!("memory source grant {id} not found"))
+        })?;
+        if current.1.is_some() {
+            transaction
+                .commit()
+                .map_err(MemorySourceGrantStoreError::store)?;
+            return Ok(());
+        }
+        let next_version = current.0.checked_add(1).ok_or_else(|| {
+            MemorySourceGrantStoreError::validation(
+                "memory source grant policy version cannot advance for revoke",
+            )
+        })?;
+        if current.0 < 1 {
+            return Err(MemorySourceGrantStoreError::store(
+                "persisted memory source grant policy version is invalid",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                "update memory_source_grants
+             set revoked_at = ?4, policy_version = ?5, updated_at = ?6
+             where consumer_user_id = ?1 and consumer_workspace_id = ?2 and id = ?3
+               and revoked_at is null and policy_version = ?7",
+                params![
+                    consumer_user_id.as_str(),
+                    consumer_workspace_id.as_str(),
+                    id,
+                    revoked_at,
+                    next_version,
+                    current_timestamp(),
+                    current.0,
+                ],
+            )
+            .map_err(MemorySourceGrantStoreError::store)?;
+        if changed != 1 {
+            return Err(MemorySourceGrantStoreError::validation(
+                "memory source grant changed concurrently during revoke",
+            ));
+        }
+        transaction
+            .commit()
+            .map_err(MemorySourceGrantStoreError::store)
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<MemoryBackupReport, String> {
@@ -1985,7 +2200,11 @@ impl SQLiteMemoryStore {
                     max_sensitivity text not null,
                     expires_at integer,
                     revoked_at integer,
-                    policy_version integer not null,
+                    policy_version integer not null check(
+                        typeof(policy_version) = 'integer'
+                        and policy_version >= 1
+                        and policy_version <= 9223372036854775807
+                    ),
                     created_by text not null,
                     created_at text not null,
                     updated_at text not null
@@ -2352,7 +2571,8 @@ fn memory_source_grant_base_from_row(row: &Row<'_>) -> Result<MemorySourceGrant,
         overrides: HashMap::new(),
         expires_at: row.get(6).map_err(|error| error.to_string())?,
         revoked_at: row.get(7).map_err(|error| error.to_string())?,
-        policy_version: row.get(8).map_err(|error| error.to_string())?,
+        policy_version: u64::try_from(row.get::<_, i64>(8).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?,
         created_by: row.get(9).map_err(|error| error.to_string())?,
         created_at: row.get(10).map_err(|error| error.to_string())?,
         updated_at: row.get(11).map_err(|error| error.to_string())?,
@@ -2448,5 +2668,60 @@ mod fts_query_tests {
         assert!(q.contains(" OR "), "not OR: {q}");
         assert!(!q.contains("\"of\""), "must not include token <3: {q}");
         assert_eq!(fts_or_query("?? !! a b"), "");
+    }
+}
+
+#[cfg(test)]
+mod connection_pragma_tests {
+    use super::{Connections, SQLiteMemoryStore};
+
+    fn assert_foreign_key_constraint_is_enforced(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            "create table fk_parent_for_test (id integer primary key);
+             create table fk_child_for_test (
+                parent_id integer not null references fk_parent_for_test(id)
+             );",
+        )
+        .unwrap();
+        assert!(
+            conn.execute("insert into fk_child_for_test (parent_id) values (999)", [],)
+                .is_err(),
+            "orphan child insert must be rejected"
+        );
+    }
+
+    #[test]
+    fn in_memory_single_connection_enforces_foreign_keys() {
+        let store = SQLiteMemoryStore::open_in_memory().unwrap();
+        assert!(matches!(&store.conns, Connections::Single(_)));
+        let conn = store.write_conn();
+        assert_foreign_key_constraint_is_enforced(&conn);
+    }
+
+    #[test]
+    fn file_backed_pooled_writer_and_reader_enforce_foreign_keys() {
+        let path = std::env::temp_dir().join(format!(
+            "local-first-memory-fk-pool-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let store = SQLiteMemoryStore::open(&path).unwrap();
+        assert!(matches!(&store.conns, Connections::Pooled { .. }));
+        {
+            let writer = store.write_conn();
+            assert_foreign_key_constraint_is_enforced(&writer);
+        }
+        {
+            let reader = store.read_conn();
+            assert_eq!(
+                reader
+                    .query_row("pragma foreign_keys", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        }
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", path.display()));
     }
 }
