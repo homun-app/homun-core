@@ -5,6 +5,72 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-17.**
 
+## ⭐⭐⭐⭐ CHECKPOINT 2026-07-17 (quater) — S2 plugin-owned deterministic routing SHIPPED
+
+Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `S2`; piano
+`docs/superpowers/plans/2026-07-17-s2-plugin-owned-deterministic-routing.md`): 7 task su `main`,
+commit `382de7da..89d44a2d` (+ questo checkpoint). Chiude S2 — e con esso **sia il 4° punto della
+critica editoriale originale di Fabio** (spec
+`docs/superpowers/specs/2026-07-17-presentations-studio-editorial-redesign-design.md` — "il prompt
+'Use template' è un compito in classe": muro "Template Analysis" + 4 domande numerate) **sia il bug
+di routing** osservato in validazione live a fine S1c ("Use template" sul CV instradato a un
+generatore generico invece del documento templatizzato). Con S1a (temi editoriali) + S1b (relayout
+galleria) + S1c (polish) + S2 (routing), tutti e 4 i punti della critica originale + il bug
+osservato sono chiusi.
+
+**Causa radice:** il routing "Use template" → `make_document(template_ref=…)` era affidato al
+**prompt operativo**, non al codice — e il routing per-turno via BM25 (+ adaptive-floor relax)
+**perde il contesto del workflow durante l'intake**: i turni di raccolta risposte (es. una reply
+che comincia con "1.") non contengono più le keyword del template iniziale, così un modello debole
+(`deepseek-v4-pro`) vagava a skill generiche («Create Documents») + shell invece del tool
+templatizzato, producendo un artifact markdown generico al posto del documento atteso.
+
+**La cura (7 task, plugin-owned e generalizzabile):**
+- **`WorkflowRouting` registry** (S2-T1, `382de7da`, `crates/capabilities`): Presentations
+  diventa il primo *system plugin* a dichiarare route deterministiche (deck/document); il
+  meccanismo è **generalizzabile a qualunque plugin esterno via `plugin_installs.enabled`**, non
+  hardcoded su Presentations.
+- **`RoutingBinding` thread-scoped** (S2-T2, `b25a6a9d`): persistito on-enqueue in `chat_store`
+  (tabella `thread_routing_bindings`), riletto a ogni turno — sopravvive al context-loss
+  dell'intake perché non dipende dal contenuto testuale del turno.
+- **Il binding FORZA la route** (S2-T3, `09241f51`): bypassa il BM25 per-turno e l'adaptive-floor
+  relax, e — fix chiave emerso in review — **vince anche sulla plan-precedence** (che altrimenti
+  degradava la route quando il prompt d'intake iniziava con "1", tipico di una risposta numerata).
+- **Bind `template_ref` deterministico + hard-prune** (S2-T4, `ff7ca08c`..`d1f73917`, 2 commit + 1
+  fix): il `template_ref` scelto viene legato al binding (non ridedotto ogni turno), i
+  `deny_tools` sono pruned duro dal set disponibile (skill/shell non sono nemmeno visibili al
+  modello), e il clear del binding avviene **solo su consegna genuina** — retry-safe: un
+  fallimento a metà turno non perde il binding.
+- **`tool_choice` forzato sul turno di generazione** (S2-T5, `b22a92b9`): `auto` durante l'intake,
+  poi forzato sul tool del workflow con euristica su turn-index; fallback automatico su risposta
+  400 (alcuni provider rifiutano un `tool_choice` forzato).
+- **UI allega il binding, supplica rimossa** (S2-T6, `89d44a2d`): il primo turno "Use template"
+  allega `routing_binding` invece di scaricare in chat il muro "Template Analysis" + 4 domande
+  numerate.
+- **Fail-open ovunque**: nessun binding attivo → comportamento **byte-identico** a prima di S2,
+  zero regressione sui turni non-workflow.
+
+**Gate finali (tutti verdi, in ordine, sessione 2026-07-17):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-capabilities` | 60 passed, 0 failed |
+| `cargo test -p local-first-desktop-gateway` | 614 passed, 0 failed, 5 ignored |
+| `cargo test -p local-first-engine` | 81 passed, 0 failed |
+| `npm run build` (desktop) | OK, tsc pulito |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN (capability/orchestrator/gateway/ui-contract/desktop-build/eval/deck/doc renderer tests) |
+
+**Cosa resta:**
+- **Validazione live a schermo (Fabio) — ancora da fare:** "Use template" sul CV deve ora
+  chiamare `make_document(template_ref=…)` — niente skill/shell — e produrre il documento
+  templatizzato; non ancora verificato a occhio sul binario rebuildato (richiede `up.sh`/rebuild
+  container).
+- **`eyebrow`/`hero_art` al generato** (slice a sé, ortogonale a S2): oggi solo gli
+  `example.json` dei pack committati li valorizzano, il modello di contenuto non li popola in
+  generazione reale.
+- **S3**: font picker.
+
 ## ⭐⭐⭐ CHECKPOINT 2026-07-17 (tris) — Presentations S1c (polish minimale) SHIPPED
 
 Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `S1c`): 2 task su `main`,
