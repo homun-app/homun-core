@@ -938,7 +938,7 @@ impl MemoryFacade {
         )?;
         let mut allowed = Vec::with_capacity(refs.len());
         for reference in refs {
-            let Some(memory) = self.store.get_memory(
+            let Some(memory) = self.store.get_visible_memory_exact(
                 &reference,
                 &request.access.user_id,
                 &request.access.workspace_id,
@@ -1004,7 +1004,7 @@ impl MemoryFacade {
         source: &AuthorizedMemorySource,
         reference: &MemoryRef,
     ) -> MemoryResult<Option<MemoryRecord>> {
-        let Some(memory) = self.store.get_memory(
+        let Some(memory) = self.store.get_visible_memory_exact(
             reference,
             &source.source_user_id,
             &source.source_workspace_id,
@@ -1037,7 +1037,7 @@ impl MemoryFacade {
             .map(|policy| policy.max_sensitivity)
             .unwrap_or(DataSensitivity::Private);
         let mut subject = None::<String>;
-        for relation in self.store.relations_for(
+        for relation in self.store.visible_relations_for_exact(
             reference,
             &source.source_user_id,
             &source.source_workspace_id,
@@ -1057,7 +1057,7 @@ impl MemoryFacade {
             {
                 continue;
             }
-            let Some(entity) = self.store.get_entity(
+            let Some(entity) = self.store.get_visible_entity_exact(
                 &relation.target_ref,
                 &source.source_user_id,
                 &source.source_workspace_id,

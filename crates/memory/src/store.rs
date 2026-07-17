@@ -905,6 +905,41 @@ impl SQLiteMemoryStore {
         )
     }
 
+    /// Linked-recall exact-ref read. Memory row and tombstone visibility are
+    /// evaluated by one SQL statement on one connection/snapshot.
+    pub(crate) fn get_visible_memory_exact(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<MemoryRecord>, String> {
+        if reference.user_id != *user_id || reference.workspace_id != *workspace_id {
+            return Ok(None);
+        }
+        let conn = self.read_conn();
+        query_optional(
+            &conn,
+            "select m.ref, m.user_id, m.workspace_id, m.memory_type, m.text, m.aliases_json,
+                    m.language_hints_json, m.confidence, m.status, m.privacy_domain,
+                    m.sensitivity, m.metadata_json, m.created_at, m.updated_at,
+                    m.last_seen_at, m.supersedes_json, m.superseded_by, m.correction_of
+             from memories m
+             where m.ref = ?1 and m.user_id = ?2 and m.workspace_id = ?3
+               and not exists (
+                   select 1 from tombstones t
+                   where t.ref = m.ref
+                     and t.user_id = m.user_id
+                     and t.workspace_id = m.workspace_id
+               )",
+            (
+                reference.to_string(),
+                user_id.as_str().to_string(),
+                workspace_id.as_str().to_string(),
+            ),
+            memory_from_row,
+        )
+    }
+
     pub fn list_memories(
         &self,
         user_id: &UserId,
@@ -1101,8 +1136,7 @@ impl SQLiteMemoryStore {
         conn.execute_batch(
             "create virtual table if not exists temp.authorized_memory_search_fts using fts5(
                  ref unindexed,
-                 text,
-                 aliases
+                 text
              );
              delete from temp.authorized_memory_search_fts;",
         )
@@ -1129,8 +1163,8 @@ impl SQLiteMemoryStore {
                 .map_err(|error| error.to_string())?;
             let mut insert_statement = conn
                 .prepare(
-                    "insert into temp.authorized_memory_search_fts (ref, text, aliases)
-                     values (?1, ?2, ?3)",
+                    "insert into temp.authorized_memory_search_fts (ref, text)
+                     values (?1, ?2)",
                 )
                 .map_err(|error| error.to_string())?;
             let mut rows = records_statement
@@ -1142,11 +1176,7 @@ impl SQLiteMemoryStore {
                     continue;
                 }
                 insert_statement
-                    .execute((
-                        memory.reference.to_string(),
-                        memory.text,
-                        memory.aliases.join(" "),
-                    ))
+                    .execute((memory.reference.to_string(), memory.text))
                     .map_err(|error| error.to_string())?;
             }
             drop(rows);
@@ -1536,6 +1566,38 @@ impl SQLiteMemoryStore {
         )
     }
 
+    pub(crate) fn get_visible_entity_exact(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<MemoryEntity>, String> {
+        if reference.user_id != *user_id || reference.workspace_id != *workspace_id {
+            return Ok(None);
+        }
+        let conn = self.read_conn();
+        query_optional(
+            &conn,
+            "select e.ref, e.user_id, e.workspace_id, e.entity_type, e.name,
+                    e.canonical_key, e.aliases_json, e.privacy_domain, e.sensitivity,
+                    e.metadata_json
+             from entities e
+             where e.ref = ?1 and e.user_id = ?2 and e.workspace_id = ?3
+               and not exists (
+                   select 1 from tombstones t
+                   where t.ref = e.ref
+                     and t.user_id = e.user_id
+                     and t.workspace_id = e.workspace_id
+               )",
+            (
+                reference.to_string(),
+                user_id.as_str().to_string(),
+                workspace_id.as_str().to_string(),
+            ),
+            entity_from_row,
+        )
+    }
+
     pub fn upsert_relation(&self, relation: &MemoryRelation) -> Result<(), String> {
         let conn = self.write_conn();
         self.upsert_relation_on(&conn, relation)
@@ -1605,6 +1667,48 @@ impl SQLiteMemoryStore {
                  from relations
                  where source_ref = ?1 and user_id = ?2 and workspace_id = ?3
                  order by ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((
+                source_ref.to_string(),
+                user_id.as_str().to_string(),
+                workspace_id.as_str().to_string(),
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut relations = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            relations.push(relation_from_row(row)?);
+        }
+        Ok(relations)
+    }
+
+    /// Linked-recall relation read with tombstone visibility in the same SQL
+    /// statement/snapshot as the relation rows.
+    pub(crate) fn visible_relations_for_exact(
+        &self,
+        source_ref: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemoryRelation>, String> {
+        if source_ref.user_id != *user_id || source_ref.workspace_id != *workspace_id {
+            return Ok(Vec::new());
+        }
+        let conn = self.read_conn();
+        let mut statement = conn
+            .prepare(
+                "select r.ref, r.user_id, r.workspace_id, r.source_ref, r.relation_type,
+                        r.target_ref, r.confidence, r.privacy_domain, r.sensitivity,
+                        r.evidence_json, r.metadata_json
+                 from relations r
+                 where r.source_ref = ?1 and r.user_id = ?2 and r.workspace_id = ?3
+                   and not exists (
+                       select 1 from tombstones t
+                       where t.ref = r.ref
+                         and t.user_id = r.user_id
+                         and t.workspace_id = r.workspace_id
+                   )
+                 order by r.ref",
             )
             .map_err(|error| error.to_string())?;
         let mut rows = statement

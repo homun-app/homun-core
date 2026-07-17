@@ -6,7 +6,7 @@ use local_first_memory::{
 };
 
 struct RecallFixture {
-    facade: MemoryFacade,
+    facade: std::sync::Arc<MemoryFacade>,
     user: UserId,
     source_workspace: WorkspaceId,
 }
@@ -14,7 +14,9 @@ struct RecallFixture {
 impl RecallFixture {
     fn new() -> Self {
         Self {
-            facade: MemoryFacade::new(SQLiteMemoryStore::open_in_memory().expect("store")),
+            facade: std::sync::Arc::new(MemoryFacade::new(
+                SQLiteMemoryStore::open_in_memory().expect("store"),
+            )),
             user: UserId::new("recall-user"),
             source_workspace: WorkspaceId::new("source"),
         }
@@ -28,6 +30,28 @@ impl RecallFixture {
         sensitivity: DataSensitivity,
         metadata: serde_json::Value,
         embedding: &[f32],
+    ) -> MemoryRef {
+        self.insert_with_aliases(
+            key,
+            memory_type,
+            text,
+            sensitivity,
+            metadata,
+            embedding,
+            vec![],
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn insert_with_aliases(
+        &self,
+        key: &str,
+        memory_type: &str,
+        text: &str,
+        sensitivity: DataSensitivity,
+        metadata: serde_json::Value,
+        embedding: &[f32],
+        aliases: Vec<String>,
     ) -> MemoryRef {
         let reference = MemoryRef::new(
             MemoryRefKind::Memory,
@@ -43,7 +67,7 @@ impl RecallFixture {
                 workspace_id: self.source_workspace.clone(),
                 memory_type: memory_type.to_string(),
                 text: text.to_string(),
-                aliases: vec![],
+                aliases,
                 language_hints: vec![],
                 confidence: 0.9,
                 status: MemoryStatus::Confirmed,
@@ -239,6 +263,36 @@ fn lexical_candidates_are_policy_filtered_before_the_recall_budget() {
 }
 
 #[test]
+fn authorized_lexical_search_never_indexes_alias_payloads() {
+    let fixture = RecallFixture::new();
+    fixture.insert_with_aliases(
+        "alias-only",
+        "preference",
+        "Safe visible preference",
+        DataSensitivity::Private,
+        serde_json::json!({}),
+        &[0.0, 1.0],
+        vec!["vault://private hiddenrankingtoken".to_string()],
+    );
+    let policy = MemorySourcePolicy::for_collections(
+        vec![MemoryCollectionKey::Preferences],
+        DataSensitivity::Private,
+    );
+
+    let pack = recall_source_on_facade(
+        &fixture.facade,
+        &fixture.source(policy),
+        "hiddenrankingtoken",
+        &[],
+        None,
+    )
+    .expect("alias-only recall");
+
+    assert!(pack.hits.is_empty());
+    assert_eq!(pack.block, None);
+}
+
+#[test]
 fn denied_corpus_cannot_change_authorized_lexical_ranking() {
     fn authorized_order(denied_alpha_records: usize) -> Vec<String> {
         let fixture = RecallFixture::new();
@@ -325,15 +379,16 @@ fn subject_key_uses_one_canonical_mentions_relation_and_fails_closed_on_ambiguit
             metadata: serde_json::json!({}),
         })
         .expect("entity");
+    let relation_ref = MemoryRef::new(
+        MemoryRefKind::Relation,
+        fixture.user.clone(),
+        fixture.source_workspace.clone(),
+        "mentions-release-notes",
+    );
     fixture
         .facade
         .upsert_relation(&MemoryRelation {
-            reference: MemoryRef::new(
-                MemoryRefKind::Relation,
-                fixture.user.clone(),
-                fixture.source_workspace.clone(),
-                "mentions-release-notes",
-            ),
+            reference: relation_ref.clone(),
             user_id: fixture.user.clone(),
             workspace_id: fixture.source_workspace.clone(),
             source_ref: memory_ref.clone(),
@@ -363,6 +418,29 @@ fn subject_key_uses_one_canonical_mentions_relation_and_fails_closed_on_ambiguit
         one_subject.hits[0].subject_key.as_deref(),
         Some("topic:release-notes")
     );
+
+    fixture
+        .facade
+        .tombstone_ref(
+            &relation_ref,
+            &fixture.user,
+            &fixture.source_workspace,
+            "test relation revoke",
+        )
+        .expect("tombstone relation");
+    let tombstoned = recall_source_on_facade(
+        &fixture.facade,
+        &fixture.source(policy.clone()),
+        "How should release notes be written?",
+        &[1.0, 0.0],
+        None,
+    )
+    .expect("recall");
+    assert_eq!(tombstoned.hits[0].subject_key, None);
+    fixture
+        .facade
+        .untombstone_entity(&relation_ref, &fixture.user, &fixture.source_workspace)
+        .expect("restore relation for ambiguity case");
 
     let second_entity_ref = MemoryRef::new(
         MemoryRefKind::Entity,
@@ -425,7 +503,9 @@ fn authorized_lexical_index_works_on_the_file_backed_reader_pool() {
         uuid::Uuid::new_v4()
     ));
     let fixture = RecallFixture {
-        facade: MemoryFacade::new(SQLiteMemoryStore::open(&path).expect("file-backed store")),
+        facade: std::sync::Arc::new(MemoryFacade::new(
+            SQLiteMemoryStore::open(&path).expect("file-backed store"),
+        )),
         user: UserId::new("pooled-recall-user"),
         source_workspace: WorkspaceId::new("pooled-source"),
     };
@@ -463,7 +543,101 @@ fn authorized_lexical_index_works_on_the_file_backed_reader_pool() {
 
     assert_eq!(pack.hits.len(), 1);
     assert_eq!(pack.hits[0].memory_ref, allowed.to_string());
+    fixture
+        .facade
+        .tombstone_ref(
+            &allowed,
+            &fixture.user,
+            &fixture.source_workspace,
+            "test pooled tombstone visibility",
+        )
+        .expect("tombstone pooled memory");
+    let after_tombstone = recall_source_on_facade(
+        &fixture.facade,
+        &fixture.source(MemorySourcePolicy::for_collections(
+            vec![MemoryCollectionKey::Preferences],
+            DataSensitivity::Private,
+        )),
+        "pooled lexical preference",
+        &[],
+        None,
+    )
+    .expect("recall after tombstone");
+    assert!(after_tombstone.hits.is_empty());
     drop(fixture);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn concurrent_authorized_temp_indexes_remain_isolated_by_source_scope() {
+    const THREADS: usize = 8;
+
+    let path = std::env::temp_dir().join(format!(
+        "homun-authorized-concurrent-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let facade = std::sync::Arc::new(MemoryFacade::new(
+        SQLiteMemoryStore::open(&path).expect("file-backed store"),
+    ));
+    let user = UserId::new("concurrent-recall-user");
+    let fixture_a = RecallFixture {
+        facade: facade.clone(),
+        user: user.clone(),
+        source_workspace: WorkspaceId::new("source-a"),
+    };
+    let fixture_b = RecallFixture {
+        facade: facade.clone(),
+        user,
+        source_workspace: WorkspaceId::new("source-b"),
+    };
+    fixture_a.insert(
+        "only-a",
+        "preference",
+        "sharedquery source alpha",
+        DataSensitivity::Private,
+        serde_json::json!({}),
+        &[0.0, 1.0],
+    );
+    fixture_b.insert(
+        "only-b",
+        "preference",
+        "sharedquery source beta",
+        DataSensitivity::Private,
+        serde_json::json!({}),
+        &[0.0, 1.0],
+    );
+    let policy = MemorySourcePolicy::for_collections(
+        vec![MemoryCollectionKey::Preferences],
+        DataSensitivity::Private,
+    );
+    let source_a = fixture_a.source(policy.clone());
+    let source_b = fixture_b.source(policy);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
+    let mut handles = Vec::new();
+    for index in 0..THREADS {
+        let facade = facade.clone();
+        let source = if index % 2 == 0 {
+            source_a.clone()
+        } else {
+            source_b.clone()
+        };
+        let expected_workspace = source.source_workspace_id.clone();
+        let barrier = barrier.clone();
+        handles.push(std::thread::spawn(move || {
+            barrier.wait();
+            let pack = recall_source_on_facade(&facade, &source, "sharedquery source", &[], None)
+                .expect("concurrent recall");
+            assert_eq!(pack.hits.len(), 1);
+            assert_eq!(pack.hits[0].source_workspace_id, expected_workspace);
+        }));
+    }
+    for handle in handles {
+        handle.join().expect("concurrent recall thread");
+    }
+
+    drop(fixture_a);
+    drop(fixture_b);
+    drop(facade);
     let _ = std::fs::remove_file(path);
 }
 
