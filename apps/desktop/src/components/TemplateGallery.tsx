@@ -104,6 +104,9 @@ export function TemplateCatalogGallery({
     return matchesCategory && (!needle || haystack.includes(needle));
   });
 
+  // Global in-flight guard shared across all cards (see TemplateCard `disabled`).
+  const anyBusy = Boolean(startingTemplateId) || Boolean(deletingTemplateId);
+
   async function refreshTemplates() {
     const catalog = await coreBridge.templateCatalog();
     setTemplates(catalog.templates);
@@ -244,6 +247,10 @@ export function TemplateCatalogGallery({
               brandKit={brandKit}
               starting={startingTemplateId === entry.id}
               deleting={deletingTemplateId === entry.id}
+              // Any in-flight use/delete disables Use/Remove on every card:
+              // the workflow starters aren't re-entrant, so this prevents two
+              // cards racing a startTemplateWorkflow into concurrent threads.
+              disabled={anyBusy}
               onOpen={() => setSelectedTemplate(entry)}
               onUse={() => void useTemplate(entry)}
               onDelete={() => void deleteTemplate(entry)}

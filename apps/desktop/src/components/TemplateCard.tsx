@@ -14,6 +14,7 @@ export function TemplateCard({
   brandKit,
   starting,
   deleting,
+  disabled,
   onOpen,
   onUse,
   onDelete,
@@ -22,6 +23,11 @@ export function TemplateCard({
   brandKit: BrandKit;
   starting: boolean;
   deleting: boolean;
+  // Global in-flight guard: true while ANY card is mid-use/delete. Neither
+  // useTemplate nor deleteTemplate is re-entrant, so without this a user could
+  // click Use on card A then card B and spawn two racing chat workflows.
+  // Per-card `starting`/`deleting` still drive this card's spinner/label.
+  disabled: boolean;
   onOpen: () => void;
   onUse: () => void;
   onDelete: () => void;
@@ -48,7 +54,7 @@ export function TemplateCard({
           <button
             type="button"
             onClick={onUse}
-            disabled={starting || deleting}
+            disabled={disabled || starting || deleting}
             title={t("presentations:useTemplate")}
           >
             <Presentation size={13} aria-hidden />
@@ -59,7 +65,7 @@ export function TemplateCard({
               type="button"
               className="tcard-remove"
               onClick={onDelete}
-              disabled={starting || deleting}
+              disabled={disabled || starting || deleting}
               title={t("presentations:removeTemplate")}
             >
               <Trash2 size={12} aria-hidden />

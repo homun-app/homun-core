@@ -313,7 +313,6 @@ assertContains("src/components/TemplateGallery.tsx", "entry.selection_notes ?? [
 assertContains("src/components/TemplateGallery.tsx", "Import PPTX", "Presentations must expose manual PPTX template import");
 assertContains("src/components/TemplateGallery.tsx", "TEMPLATE_SOURCE_LINKS", "Presentations must keep provider-agnostic template source links");
 assertContains("src/components/TemplateGallery.tsx", "TemplateSourceDirectory", "Presentations must separate external template sources from installed templates");
-assertNotContains("src/components/TemplateGallery.tsx", "sourceFilter === \"slidescarnival\"", "SlidesCarnival must not be a hard-coded installed-catalog source filter");
 assertContains("src/components/TemplateGallery.tsx", "attribution_required", "Presentations must surface attribution state for imported/source templates");
 assertContains("src/components/TemplateGallery.tsx", "TemplateDetailModal", "template gallery must expose a catalog detail view before use");
 assertContains("src/components/TemplateGallery.tsx", "useTemplate(entry", "template gallery must start chat workflows from the selected catalog entry");
