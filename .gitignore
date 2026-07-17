@@ -8,6 +8,7 @@ __pycache__/
 .ruff_cache/
 .playwright-mcp/
 .superpowers/
+.worktrees/
 reports/
 target/
 node_modules/
