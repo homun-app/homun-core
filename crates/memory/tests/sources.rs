@@ -47,40 +47,85 @@ fn individual_deny_wins_and_secret_never_becomes_shareable() {
 }
 
 #[test]
-fn collections_match_only_their_declared_memory_types() {
-    let cases = [
-        (MemoryCollectionKey::Profile, "fact", Some("personal"), true),
-        (MemoryCollectionKey::Profile, "fact", None, false),
-        (MemoryCollectionKey::Knowledge, "fact", None, true),
+fn collections_match_exactly_their_declared_memory_types() {
+    let mut profile = memory("profile", "fact", DataSensitivity::Private);
+    profile.metadata = serde_json::json!({"scope": "personal"});
+    let cases = vec![
         (
-            MemoryCollectionKey::Knowledge,
-            "fact",
-            Some("personal"),
-            false,
+            "preference",
+            memory("preference", "preference", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Preferences]),
         ),
-        (MemoryCollectionKey::Knowledge, "note", None, true),
-        (MemoryCollectionKey::Decisions, "decision", None, true),
-        (MemoryCollectionKey::Goals, "goal", None, true),
-        (MemoryCollectionKey::Goals, "objective", None, true),
-        (MemoryCollectionKey::Goals, "open_loop", None, true),
-        (MemoryCollectionKey::Artifacts, "artifact", None, true),
-        (MemoryCollectionKey::Episodes, "episode", None, true),
+        (
+            "personal profile fact",
+            profile,
+            BTreeSet::from([MemoryCollectionKey::Profile]),
+        ),
+        (
+            "ordinary fact",
+            memory("fact", "fact", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Knowledge]),
+        ),
+        (
+            "note",
+            memory("note", "note", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Knowledge]),
+        ),
+        (
+            "decision",
+            memory("decision", "decision", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Decisions]),
+        ),
+        (
+            "goal",
+            memory("goal", "goal", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Goals]),
+        ),
+        (
+            "objective",
+            memory("objective", "objective", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Goals]),
+        ),
+        (
+            "open loop",
+            memory("open_loop", "open_loop", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Goals]),
+        ),
+        (
+            "artifact",
+            memory("artifact", "artifact", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Artifacts]),
+        ),
+        (
+            "episode",
+            memory("episode", "episode", DataSensitivity::Private),
+            BTreeSet::from([MemoryCollectionKey::Episodes]),
+        ),
+        (
+            "unrelated",
+            memory("routine", "routine", DataSensitivity::Private),
+            BTreeSet::new(),
+        ),
+    ];
+    let collections = [
+        MemoryCollectionKey::Preferences,
+        MemoryCollectionKey::Profile,
+        MemoryCollectionKey::Knowledge,
+        MemoryCollectionKey::Decisions,
+        MemoryCollectionKey::Goals,
+        MemoryCollectionKey::Artifacts,
+        MemoryCollectionKey::Episodes,
     ];
 
-    for (index, (collection, memory_type, scope, expected)) in cases.into_iter().enumerate() {
-        let mut record = memory(
-            &format!("case_{index}"),
-            memory_type,
-            DataSensitivity::Private,
-        );
-        if let Some(scope) = scope {
-            record.metadata = serde_json::json!({"scope": scope});
-        }
-
+    for (label, record, expected) in cases {
+        let actual = collections
+            .iter()
+            .copied()
+            .filter(|collection| collection.matches(&record))
+            .collect::<BTreeSet<_>>();
         assert_eq!(
-            collection.matches(&record),
-            expected,
-            "unexpected match for {collection:?} and {memory_type}"
+            actual, expected,
+            "unexpected collection matches for {label}"
         );
     }
 }
@@ -182,13 +227,73 @@ fn policy_overrides_round_trip_as_a_deterministically_sorted_array() {
     assert_eq!(
         json["overrides"],
         serde_json::json!([
-            {"memory_ref": alpha.to_string(), "effect": "deny"},
-            {"memory_ref": zeta.to_string(), "effect": "allow"},
+            {
+                "memory_ref": {
+                    "kind": "memory",
+                    "scope": "local",
+                    "user_id": "source_user",
+                    "workspace_id": "source_workspace",
+                    "key": "alpha",
+                },
+                "effect": "deny",
+            },
+            {
+                "memory_ref": {
+                    "kind": "memory",
+                    "scope": "local",
+                    "user_id": "source_user",
+                    "workspace_id": "source_workspace",
+                    "key": "zeta",
+                },
+                "effect": "allow",
+            },
         ])
     );
     assert_eq!(
         serde_json::from_value::<MemorySourcePolicy>(json).expect("deserialize policy overrides"),
         policy
+    );
+}
+
+#[test]
+fn structured_override_refs_preserve_distinct_colon_bearing_fields() {
+    let colon_in_user = MemoryRef {
+        kind: MemoryRefKind::Memory,
+        scope: "local".to_string(),
+        user_id: UserId::new("a:b"),
+        workspace_id: WorkspaceId::new("c"),
+        key: "d".to_string(),
+    };
+    let colon_in_key = MemoryRef {
+        kind: MemoryRefKind::Memory,
+        scope: "local".to_string(),
+        user_id: UserId::new("a"),
+        workspace_id: WorkspaceId::new("b"),
+        key: "c:d".to_string(),
+    };
+    assert_ne!(colon_in_user, colon_in_key);
+    assert_eq!(colon_in_user.to_string(), colon_in_key.to_string());
+
+    let mut policy = MemorySourcePolicy::for_collections(
+        vec![MemoryCollectionKey::Knowledge],
+        DataSensitivity::Private,
+    );
+    policy.set_override(colon_in_user.clone(), MemoryGrantOverrideEffect::Allow);
+    policy.set_override(colon_in_key.clone(), MemoryGrantOverrideEffect::Deny);
+
+    let json = serde_json::to_value(&policy).expect("serialize colliding refs");
+    let round_trip =
+        serde_json::from_value::<MemorySourcePolicy>(json).expect("deserialize colliding refs");
+
+    assert_eq!(round_trip, policy);
+    assert_eq!(round_trip.overrides.len(), 2);
+    assert_eq!(
+        round_trip.overrides.get(&colon_in_user),
+        Some(&MemoryGrantOverrideEffect::Allow)
+    );
+    assert_eq!(
+        round_trip.overrides.get(&colon_in_key),
+        Some(&MemoryGrantOverrideEffect::Deny)
     );
 }
 
@@ -205,7 +310,16 @@ fn grant_with_non_empty_overrides_round_trips_through_json() {
     assert_eq!(
         json["overrides"],
         serde_json::json!([
-            {"memory_ref": reference.to_string(), "effect": "allow"}
+            {
+                "memory_ref": {
+                    "kind": "memory",
+                    "scope": "local",
+                    "user_id": "source_user",
+                    "workspace_id": "source_workspace",
+                    "key": "grant_memory",
+                },
+                "effect": "allow",
+            }
         ])
     );
     assert_eq!(
@@ -216,16 +330,55 @@ fn grant_with_non_empty_overrides_round_trips_through_json() {
 
 #[test]
 fn override_deserialization_rejects_malformed_and_duplicate_refs() {
-    let malformed = serde_json::json!({
-        "collections": ["preferences"],
-        "max_sensitivity": "private",
-        "overrides": [{"memory_ref": "not-a-memory-ref", "effect": "allow"}],
-    });
-    let malformed_error = serde_json::from_value::<MemorySourcePolicy>(malformed)
-        .expect_err("malformed refs must be rejected");
-    assert!(malformed_error.to_string().contains("invalid memory ref"));
+    let malformed_refs = [
+        (
+            "missing field",
+            serde_json::json!({
+                "kind": "memory",
+                "scope": "local",
+                "user_id": "source_user",
+                "workspace_id": "source_workspace",
+            }),
+            "missing field",
+        ),
+        (
+            "unknown kind",
+            serde_json::json!({
+                "kind": "unknown",
+                "scope": "local",
+                "user_id": "source_user",
+                "workspace_id": "source_workspace",
+                "key": "memory_1",
+            }),
+            "unknown variant",
+        ),
+        (
+            "wrong type",
+            serde_json::json!({
+                "kind": "memory",
+                "scope": "local",
+                "user_id": 42,
+                "workspace_id": "source_workspace",
+                "key": "memory_1",
+            }),
+            "invalid type",
+        ),
+    ];
+    for (label, memory_ref, expected_error) in malformed_refs {
+        let malformed = serde_json::json!({
+            "collections": ["preferences"],
+            "max_sensitivity": "private",
+            "overrides": [{"memory_ref": memory_ref, "effect": "allow"}],
+        });
+        let error = serde_json::from_value::<MemorySourcePolicy>(malformed)
+            .expect_err("malformed refs must be rejected");
+        assert!(
+            error.to_string().contains(expected_error),
+            "unexpected error for {label}: {error}"
+        );
+    }
 
-    let reference = memory_ref("duplicate").to_string();
+    let reference = serde_json::to_value(memory_ref("duplicate")).unwrap();
     let duplicate = serde_json::json!({
         "collections": ["preferences"],
         "max_sensitivity": "private",

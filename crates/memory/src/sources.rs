@@ -158,12 +158,13 @@ impl MemorySourcePolicy {
 
 mod memory_ref_override_map {
     use super::{MemoryGrantOverrideEffect, MemoryRef};
+    use crate::MemoryRefKind;
     use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
-    use std::{collections::HashMap, str::FromStr};
+    use std::collections::HashMap;
 
     #[derive(Serialize, Deserialize)]
     struct OverrideEntry {
-        memory_ref: String,
+        memory_ref: MemoryRef,
         effect: MemoryGrantOverrideEffect,
     }
 
@@ -177,11 +178,13 @@ mod memory_ref_override_map {
         let mut entries = overrides
             .iter()
             .map(|(reference, effect)| OverrideEntry {
-                memory_ref: reference.to_string(),
+                memory_ref: reference.clone(),
                 effect: *effect,
             })
             .collect::<Vec<_>>();
-        entries.sort_unstable_by(|left, right| left.memory_ref.cmp(&right.memory_ref));
+        entries.sort_unstable_by(|left, right| {
+            memory_ref_sort_key(&left.memory_ref).cmp(&memory_ref_sort_key(&right.memory_ref))
+        });
         entries.serialize(serializer)
     }
 
@@ -195,16 +198,37 @@ mod memory_ref_override_map {
         let mut overrides = HashMap::with_capacity(entries.len());
 
         for entry in entries {
-            let reference = MemoryRef::from_str(&entry.memory_ref).map_err(D::Error::custom)?;
+            let reference = entry.memory_ref;
             if overrides.contains_key(&reference) {
-                return Err(D::Error::custom(format!(
-                    "duplicate memory_ref {}",
-                    entry.memory_ref
-                )));
+                return Err(D::Error::custom("duplicate memory_ref entry"));
             }
             overrides.insert(reference, entry.effect);
         }
 
         Ok(overrides)
+    }
+
+    fn memory_ref_sort_key(reference: &MemoryRef) -> (&'static str, &str, &str, &str, &str) {
+        (
+            memory_ref_kind_name(reference.kind),
+            reference.scope.as_str(),
+            reference.user_id.as_str(),
+            reference.workspace_id.as_str(),
+            reference.key.as_str(),
+        )
+    }
+
+    fn memory_ref_kind_name(kind: MemoryRefKind) -> &'static str {
+        match kind {
+            MemoryRefKind::Event => "event",
+            MemoryRefKind::Memory => "memory",
+            MemoryRefKind::Entity => "entity",
+            MemoryRefKind::Relation => "relation",
+            MemoryRefKind::Wiki => "wiki",
+            MemoryRefKind::Graph => "graph",
+            MemoryRefKind::Routine => "routine",
+            MemoryRefKind::Automation => "automation",
+            MemoryRefKind::Audit => "audit",
+        }
     }
 }
