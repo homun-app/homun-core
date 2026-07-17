@@ -392,6 +392,8 @@
     "recallingHits": "Trovati {{count}} ricordi",
     "recallingNoHits": "Nessun ricordo trovato",
     "memoryBadge": "Ha richiamato {{count}} ricordi",
+    "memoryLinked": "fonte collegata",
+    "memoryConflict": "conflitto",
     "roleSystem": "Sistema",
     "roleAssistant": "Assistente",
     "metrics": "Prestazioni",

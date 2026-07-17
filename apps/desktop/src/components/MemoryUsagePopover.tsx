@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { RecallHitPayload } from "../lib/coreBridge";
 
 type SourceGroup = {
@@ -33,6 +34,7 @@ export function MemoryUsagePopover({
   hits: RecallHitPayload[];
   buttonLabel: string;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement>(null);
   const popoverId = useId().replace(/:/g, "");
@@ -91,8 +93,8 @@ export function MemoryUsagePopover({
                       <span>{hit.text}</span>
                       <small>
                         {hit.collection}
-                        {hit.grant_id ? " · linked" : ""}
-                        {hit.conflict ? " · conflict" : ""}
+                        {hit.grant_id ? ` · ${t("chat.memoryLinked")}` : ""}
+                        {hit.conflict ? ` · ${t("chat.memoryConflict")}` : ""}
                       </small>
                     </li>
                   ))}

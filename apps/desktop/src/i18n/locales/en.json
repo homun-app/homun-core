@@ -392,6 +392,8 @@
     "recallingHits": "Found {{count}} memories",
     "recallingNoHits": "No memories found",
     "memoryBadge": "Recalled {{count}} memories",
+    "memoryLinked": "linked source",
+    "memoryConflict": "conflict",
     "roleSystem": "System",
     "roleAssistant": "Assistant",
     "metrics": "Performance",

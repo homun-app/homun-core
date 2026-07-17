@@ -376,7 +376,7 @@ export interface RecallHitPayload {
   /** Human-readable source label resolved by the gateway for this turn. */
   source_label: string;
   /** System collection that classified/authorized the record. */
-  collection: string;
+  collection: MemoryCollectionKey;
   /** Direct grant used for a linked source; omitted for the local source. */
   grant_id?: string | null;
   /** The recall coordinator detected a semantic conflict for this hit. */
