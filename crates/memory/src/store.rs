@@ -2,8 +2,9 @@ use crate::{
     AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AutomationCandidateRecord, AutomationCandidateStatus,
     DataSensitivity, EncryptedJson, KeyProvider, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity, MemoryEvent,
-    MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryPublicationLink,
-    MemoryPublicationProposal, MemoryPublicationStatus, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryPublicationCandidate,
+    MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
+    MemoryPublicationResolution, MemoryPublicationStatus, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryRestoreMode, MemorySourceAccessEvent, MemorySourceAccessOutcome,
     MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantValidationError,
     PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId,
@@ -859,9 +860,10 @@ impl SQLiteMemoryStore {
                 "insert into memory_publication_proposals (
                     id, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
-                    proposed_memory_type, proposed_privacy_domain, proposed_sensitivity,
-                    duplicate_ref_json, status, proposed_by, decided_by, created_at, updated_at
-                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                    proposed_memory_type, proposed_collection, proposed_privacy_domain,
+                    proposed_sensitivity, candidate_json, resolution_json, status, reason_code,
+                    failure_reason, proposed_by, decided_by, created_at, updated_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                 params![
                     &proposal.id,
                     source_ref_json,
@@ -871,16 +873,26 @@ impl SQLiteMemoryStore {
                     proposal.destination_workspace_id.as_str(),
                     &proposal.proposed_text,
                     &proposal.proposed_memory_type,
+                    enum_name(&proposal.proposed_collection)
+                        .map_err(MemoryPublicationStoreError::store)?,
                     proposal.proposed_privacy_domain.as_str(),
                     enum_name(&proposal.proposed_sensitivity)
                         .map_err(MemoryPublicationStoreError::store)?,
                     proposal
-                        .duplicate_ref
+                        .candidate
                         .as_ref()
-                        .map(publication_ref_json)
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    proposal
+                        .resolution
+                        .as_ref()
+                        .map(serde_json::to_string)
                         .transpose()
                         .map_err(MemoryPublicationStoreError::store)?,
                     enum_name(&proposal.status).map_err(MemoryPublicationStoreError::store)?,
+                    enum_name(&proposal.reason_code).map_err(MemoryPublicationStoreError::store)?,
+                    proposal.failure_reason.as_deref(),
                     &proposal.proposed_by,
                     proposal.decided_by.as_deref(),
                     &proposal.created_at,
@@ -909,17 +921,23 @@ impl SQLiteMemoryStore {
             ));
         }
         let conn = self.read_conn();
-        query_optional(
+        let proposal = query_optional(
             &conn,
             "select id, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
-                    proposed_memory_type, proposed_privacy_domain, proposed_sensitivity,
-                    duplicate_ref_json, status, proposed_by, decided_by, created_at, updated_at
+                    proposed_memory_type, proposed_collection, proposed_privacy_domain,
+                    proposed_sensitivity, candidate_json, resolution_json, status, reason_code,
+                    failure_reason, proposed_by, decided_by, created_at, updated_at
              from memory_publication_proposals where id = ?1",
             [id],
             memory_publication_proposal_from_row,
         )
-        .map_err(MemoryPublicationStoreError::store)
+        .map_err(MemoryPublicationStoreError::store)?;
+        if let Some(proposal) = &proposal {
+            validate_persisted_memory_publication_proposal(proposal)
+                .map_err(MemoryPublicationStoreError::store)?;
+        }
+        Ok(proposal)
     }
 
     pub fn get_memory_publication_link(
@@ -937,6 +955,55 @@ impl SQLiteMemoryStore {
             memory_publication_link_from_row,
         )
         .map_err(MemoryPublicationStoreError::store)
+    }
+
+    pub fn set_memory_publication_resolution(
+        &self,
+        id: &str,
+        actor: &str,
+        resolution: &MemoryPublicationResolution,
+        updated_at: &str,
+    ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let proposal = load_memory_publication_proposal_on(&transaction, id)?
+            .ok_or_else(|| MemoryPublicationStoreError::not_found("publication_not_found"))?;
+        if actor != proposal.proposed_by || actor != proposal.source_user_id.as_str() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication_actor_mismatch",
+            ));
+        }
+        if proposal.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_not_pending",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set resolution_json = ?2, updated_at = ?3
+                 where id = ?1 and status = 'pending'",
+                params![
+                    id,
+                    serde_json::to_string(resolution)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    updated_at,
+                ],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let updated = load_memory_publication_proposal_on(&transaction, id)?
+            .ok_or_else(|| MemoryPublicationStoreError::store("publication disappeared"))?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(updated)
     }
 
     pub fn reject_memory_publication(
@@ -975,7 +1042,7 @@ impl SQLiteMemoryStore {
         let changed = transaction
             .execute(
                 "update memory_publication_proposals
-                 set status = 'rejected', decided_by = ?2, updated_at = ?3
+                 set status = 'rejected', reason_code = 'rejected', decided_by = ?2, updated_at = ?3
                  where id = ?1 and status = 'pending'",
                 params![id, actor, updated_at],
             )
@@ -997,6 +1064,7 @@ impl SQLiteMemoryStore {
         &self,
         id: &str,
         actor: &str,
+        failure_reason: &str,
         updated_at: &str,
     ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
         let mut conn = self.write_conn();
@@ -1006,9 +1074,15 @@ impl SQLiteMemoryStore {
         transaction
             .execute(
                 "update memory_publication_proposals
-                 set status = 'failed', decided_by = ?2, updated_at = ?3
+                 set status = 'failed', reason_code = 'publication_failed', failure_reason = ?3,
+                     decided_by = ?2, updated_at = ?4
                  where id = ?1 and status = 'pending'",
-                params![id, actor, updated_at],
+                params![
+                    id,
+                    actor,
+                    sanitize_publication_failure_reason(failure_reason),
+                    updated_at
+                ],
             )
             .map_err(MemoryPublicationStoreError::store)?;
         let result = load_memory_publication_proposal_on(&transaction, id)?;
@@ -1084,7 +1158,8 @@ impl SQLiteMemoryStore {
         let changed = transaction
             .execute(
                 "update memory_publication_proposals
-                 set status = 'approved', decided_by = ?2, updated_at = ?3
+                 set status = 'approved', reason_code = 'approved', failure_reason = null,
+                     decided_by = ?2, updated_at = ?3
                  where id = ?1 and status = 'pending'",
                 params![&proposal.id, &link.approved_by, &link.created_at],
             )
@@ -3002,10 +3077,14 @@ impl SQLiteMemoryStore {
                     destination_workspace_id text not null,
                     proposed_text text not null,
                     proposed_memory_type text not null,
+                    proposed_collection text not null,
                     proposed_privacy_domain text not null,
                     proposed_sensitivity text not null,
-                    duplicate_ref_json text,
+                    candidate_json text,
+                    resolution_json text,
                     status text not null check(status in ('pending', 'approved', 'rejected', 'failed')),
+                    reason_code text not null,
+                    failure_reason text,
                     proposed_by text not null,
                     decided_by text,
                     created_at text not null,
@@ -3063,6 +3142,36 @@ impl SQLiteMemoryStore {
             "memories",
             "correction_of",
             "alter table memories add column correction_of text",
+        )?;
+        self.ensure_column_on(
+            conn_ref,
+            "memory_publication_proposals",
+            "proposed_collection",
+            "alter table memory_publication_proposals add column proposed_collection text not null default 'knowledge'",
+        )?;
+        self.ensure_column_on(
+            conn_ref,
+            "memory_publication_proposals",
+            "candidate_json",
+            "alter table memory_publication_proposals add column candidate_json text",
+        )?;
+        self.ensure_column_on(
+            conn_ref,
+            "memory_publication_proposals",
+            "resolution_json",
+            "alter table memory_publication_proposals add column resolution_json text",
+        )?;
+        self.ensure_column_on(
+            conn_ref,
+            "memory_publication_proposals",
+            "reason_code",
+            "alter table memory_publication_proposals add column reason_code text not null default 'pending'",
+        )?;
+        self.ensure_column_on(
+            conn_ref,
+            "memory_publication_proposals",
+            "failure_reason",
+            "alter table memory_publication_proposals add column failure_reason text",
         )?;
         conn.execute(
             "insert or replace into schema_metadata (key, value) values ('schema_version', ?1)",
@@ -3510,15 +3619,129 @@ fn validate_memory_publication_proposal(
     {
         return Err("publication proposal contains a secret payload".to_string());
     }
-    if let Some(duplicate_ref) = &proposal.duplicate_ref {
-        if duplicate_ref.kind != MemoryRefKind::Memory
-            || duplicate_ref.user_id != proposal.destination_user_id
-            || duplicate_ref.workspace_id != proposal.destination_workspace_id
+    if proposal.failure_reason.is_some() {
+        return Err("new publication proposal cannot carry a failure reason".to_string());
+    }
+    validate_publication_candidate_and_resolution(proposal)?;
+    Ok(())
+}
+
+fn validate_publication_candidate_and_resolution(
+    proposal: &MemoryPublicationProposal,
+) -> Result<(), String> {
+    let candidate_ref = match &proposal.candidate {
+        Some(MemoryPublicationCandidate::CompatibleDuplicate { destination_ref })
+        | Some(MemoryPublicationCandidate::Conflict { destination_ref }) => Some(destination_ref),
+        None => None,
+    };
+    if let Some(reference) = candidate_ref {
+        if reference.kind != MemoryRefKind::Memory
+            || reference.user_id != proposal.destination_user_id
+            || reference.workspace_id != proposal.destination_workspace_id
         {
-            return Err("publication proposal duplicate ref is outside destination".to_string());
+            return Err("publication candidate is outside destination".to_string());
+        }
+    }
+    match (&proposal.resolution, candidate_ref) {
+        (None, _) => {}
+        (Some(MemoryPublicationResolution::CreateNew), Some(_)) => {}
+        (
+            Some(MemoryPublicationResolution::UpdateExisting { destination_ref }),
+            Some(candidate_ref),
+        ) if destination_ref == candidate_ref
+            && destination_ref.kind == MemoryRefKind::Memory
+            && destination_ref.user_id == proposal.destination_user_id
+            && destination_ref.workspace_id == proposal.destination_workspace_id => {}
+        _ => return Err("publication resolution does not match candidate".to_string()),
+    }
+    Ok(())
+}
+
+fn validate_persisted_memory_publication_proposal(
+    proposal: &MemoryPublicationProposal,
+) -> Result<(), String> {
+    let mut intrinsic = proposal.clone();
+    intrinsic.status = MemoryPublicationStatus::Pending;
+    intrinsic.decided_by = None;
+    intrinsic.failure_reason = None;
+    validate_memory_publication_proposal(&intrinsic)?;
+    match proposal.status {
+        MemoryPublicationStatus::Pending => {
+            if proposal.decided_by.is_some() || proposal.failure_reason.is_some() {
+                return Err("pending publication has a terminal state payload".to_string());
+            }
+            let expected = match proposal.candidate {
+                Some(MemoryPublicationCandidate::CompatibleDuplicate { .. }) => {
+                    MemoryPublicationReasonCode::PublicationDuplicateCompatible
+                }
+                Some(MemoryPublicationCandidate::Conflict { .. }) => {
+                    MemoryPublicationReasonCode::PublicationConflict
+                }
+                None => MemoryPublicationReasonCode::Pending,
+            };
+            if proposal.reason_code != expected {
+                return Err("pending publication has an invalid reason code".to_string());
+            }
+        }
+        MemoryPublicationStatus::Approved => {
+            if proposal
+                .decided_by
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+                || proposal.reason_code != MemoryPublicationReasonCode::Approved
+                || proposal.failure_reason.is_some()
+            {
+                return Err("approved publication has an invalid terminal state".to_string());
+            }
+        }
+        MemoryPublicationStatus::Rejected => {
+            if proposal
+                .decided_by
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+                || proposal.reason_code != MemoryPublicationReasonCode::Rejected
+                || proposal.failure_reason.is_some()
+            {
+                return Err("rejected publication has an invalid terminal state".to_string());
+            }
+        }
+        MemoryPublicationStatus::Failed => {
+            if proposal
+                .decided_by
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+                || proposal.reason_code != MemoryPublicationReasonCode::PublicationFailed
+                || proposal
+                    .failure_reason
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .is_empty()
+            {
+                return Err("failed publication has an invalid terminal state".to_string());
+            }
         }
     }
     Ok(())
+}
+
+fn sanitize_publication_failure_reason(reason: &str) -> &'static str {
+    match reason {
+        "publication_conflict" => "publication_conflict",
+        "publication_source_not_found" => "publication_source_not_found",
+        "publication_source_changed" => "publication_source_changed",
+        "publication_duplicate_changed" => "publication_duplicate_changed",
+        "secret_never_shareable" => "secret_never_shareable",
+        "vault_payload_never_shareable" => "vault_payload_never_shareable",
+        "publication_not_pending" => "publication_not_pending",
+        _ => "publication_failed",
+    }
 }
 
 fn memory_publication_proposal_from_row(
@@ -3539,25 +3762,39 @@ fn memory_publication_proposal_from_row(
         ),
         proposed_text: row.get(6).map_err(|error| error.to_string())?,
         proposed_memory_type: row.get(7).map_err(|error| error.to_string())?,
-        proposed_privacy_domain: PrivacyDomain::new(
+        proposed_collection: enum_from_name(
             row.get::<_, String>(8).map_err(|error| error.to_string())?,
+        )?,
+        proposed_privacy_domain: PrivacyDomain::new(
+            row.get::<_, String>(9).map_err(|error| error.to_string())?,
         ),
         proposed_sensitivity: enum_from_name(
-            row.get::<_, String>(9).map_err(|error| error.to_string())?,
-        )?,
-        duplicate_ref: row
-            .get::<_, Option<String>>(10)
-            .map_err(|error| error.to_string())?
-            .map(publication_ref_from_json)
-            .transpose()?,
-        status: enum_from_name(
-            row.get::<_, String>(11)
+            row.get::<_, String>(10)
                 .map_err(|error| error.to_string())?,
         )?,
-        proposed_by: row.get(12).map_err(|error| error.to_string())?,
-        decided_by: row.get(13).map_err(|error| error.to_string())?,
-        created_at: row.get(14).map_err(|error| error.to_string())?,
-        updated_at: row.get(15).map_err(|error| error.to_string())?,
+        candidate: row
+            .get::<_, Option<String>>(11)
+            .map_err(|error| error.to_string())?
+            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
+            .transpose()?,
+        resolution: row
+            .get::<_, Option<String>>(12)
+            .map_err(|error| error.to_string())?
+            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
+            .transpose()?,
+        status: enum_from_name(
+            row.get::<_, String>(13)
+                .map_err(|error| error.to_string())?,
+        )?,
+        reason_code: enum_from_name(
+            row.get::<_, String>(14)
+                .map_err(|error| error.to_string())?,
+        )?,
+        failure_reason: row.get(15).map_err(|error| error.to_string())?,
+        proposed_by: row.get(16).map_err(|error| error.to_string())?,
+        decided_by: row.get(17).map_err(|error| error.to_string())?,
+        created_at: row.get(18).map_err(|error| error.to_string())?,
+        updated_at: row.get(19).map_err(|error| error.to_string())?,
     })
 }
 
@@ -3574,17 +3811,23 @@ fn load_memory_publication_proposal_on(
     conn: &Connection,
     id: &str,
 ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
-    query_optional(
+    let proposal = query_optional(
         conn,
         "select id, source_ref_json, source_user_id, source_workspace_id,
-                destination_user_id, destination_workspace_id, proposed_text,
-                proposed_memory_type, proposed_privacy_domain, proposed_sensitivity,
-                duplicate_ref_json, status, proposed_by, decided_by, created_at, updated_at
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_collection, proposed_privacy_domain,
+                    proposed_sensitivity, candidate_json, resolution_json, status, reason_code,
+                    failure_reason, proposed_by, decided_by, created_at, updated_at
          from memory_publication_proposals where id = ?1",
         [id],
         memory_publication_proposal_from_row,
     )
-    .map_err(MemoryPublicationStoreError::store)
+    .map_err(MemoryPublicationStoreError::store)?;
+    if let Some(proposal) = &proposal {
+        validate_persisted_memory_publication_proposal(proposal)
+            .map_err(MemoryPublicationStoreError::store)?;
+    }
+    Ok(proposal)
 }
 
 fn memory_source_grant_base_from_row(row: &Row<'_>) -> Result<MemorySourceGrant, String> {

@@ -1,7 +1,8 @@
 use local_first_memory::{
-    DataSensitivity, MemoryFacade, MemoryPublicationDestination, MemoryPublicationStatus,
+    AuthorizedMemorySource, DataSensitivity, MemoryFacade, MemoryPublicationDestination,
+    MemoryPublicationReasonCode, MemoryPublicationResolution, MemoryPublicationStatus,
     MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus,
-    PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId,
+    PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
 };
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -99,6 +100,10 @@ fn approved_publication_creates_destination_and_marks_source_alias_atomically() 
         serde_json::to_value(&source.reference).unwrap()
     );
     assert_eq!(
+        result.destination.metadata["publication_source_ref"],
+        serde_json::to_value(&source.reference).unwrap()
+    );
+    assert_eq!(
         fixture.get_source(&source.reference).metadata["published_alias"],
         true
     );
@@ -110,6 +115,39 @@ fn approved_publication_creates_destination_and_marks_source_alias_atomically() 
             .unwrap()
             .destination_ref,
         result.destination.reference
+    );
+}
+
+#[test]
+fn published_destination_exposes_structural_publication_link_to_recall_dedup() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    let result = fixture
+        .facade
+        .approve_publication(&proposal.id, OWNER)
+        .unwrap();
+    let personal = AuthorizedMemorySource {
+        source_user_id: fixture.owner.clone(),
+        source_workspace_id: WorkspaceId::new("__personal__"),
+        source_label: "Personal memory".to_string(),
+        grant_id: None,
+        policy: None,
+        policy_version: 0,
+    };
+    let pack =
+        recall_source_on_facade(&fixture.facade, &personal, "Prefers Italian", &[], None).unwrap();
+    let hit = pack
+        .hits
+        .iter()
+        .find(|hit| hit.memory_ref == result.destination.reference.to_string())
+        .expect(&format!("missing destination hit: {:?}", pack.hits));
+    assert_eq!(
+        hit.publication_link,
+        Some(serde_json::to_string(&source.reference).unwrap())
     );
 }
 
@@ -184,7 +222,28 @@ fn compatible_destination_duplicate_is_reused_not_copied() {
         .facade
         .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
         .unwrap();
-    assert_eq!(proposal.duplicate_ref, Some(existing.reference.clone()));
+    assert_eq!(
+        proposal.reason_code,
+        MemoryPublicationReasonCode::PublicationDuplicateCompatible
+    );
+    assert_eq!(
+        fixture
+            .facade
+            .approve_publication(&proposal.id, OWNER)
+            .unwrap_err()
+            .as_str(),
+        "publication_conflict"
+    );
+    fixture
+        .facade
+        .set_publication_resolution(
+            &proposal.id,
+            OWNER,
+            MemoryPublicationResolution::UpdateExisting {
+                destination_ref: existing.reference.clone(),
+            },
+        )
+        .unwrap();
 
     let result = fixture
         .facade
@@ -192,6 +251,108 @@ fn compatible_destination_duplicate_is_reused_not_copied() {
         .unwrap();
     assert_eq!(result.destination.reference, existing.reference);
     assert_eq!(fixture.personal_memories().len(), 1);
+}
+
+#[test]
+fn incompatible_same_subject_requires_explicit_create_new_and_records_conflict() {
+    let fixture = PublicationFixture::new();
+    let mut existing = memory(
+        &fixture.owner,
+        &WorkspaceId::new("__personal__"),
+        "preference",
+        "Prefers terse replies",
+    );
+    existing.metadata = serde_json::json!({"subject_key": "reply_style"});
+    fixture.facade.upsert_memory(&existing).unwrap();
+    let mut source = fixture.insert_source_preference("Prefers Italian");
+    source.metadata = serde_json::json!({"subject_key": "reply_style"});
+    fixture.facade.upsert_memory(&source).unwrap();
+
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    assert_eq!(
+        proposal.reason_code,
+        MemoryPublicationReasonCode::PublicationConflict
+    );
+    assert_eq!(
+        fixture
+            .facade
+            .approve_publication(&proposal.id, OWNER)
+            .unwrap_err()
+            .as_str(),
+        "publication_conflict"
+    );
+
+    fixture
+        .facade
+        .set_publication_resolution(&proposal.id, OWNER, MemoryPublicationResolution::CreateNew)
+        .unwrap();
+    let result = fixture
+        .facade
+        .approve_publication(&proposal.id, OWNER)
+        .unwrap();
+    assert_ne!(result.destination.reference, existing.reference);
+    assert_eq!(fixture.personal_memories().len(), 2);
+}
+
+#[test]
+fn stale_or_invalid_update_existing_resolution_fails_closed() {
+    let fixture = PublicationFixture::new();
+    let existing = memory(
+        &fixture.owner,
+        &WorkspaceId::new("__personal__"),
+        "preference",
+        "Prefers Italian",
+    );
+    fixture.facade.upsert_memory(&existing).unwrap();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+
+    let wrong = MemoryRef::generated(
+        MemoryRefKind::Memory,
+        fixture.owner.clone(),
+        WorkspaceId::new("__personal__"),
+    );
+    assert_eq!(
+        fixture
+            .facade
+            .set_publication_resolution(
+                &proposal.id,
+                OWNER,
+                MemoryPublicationResolution::UpdateExisting {
+                    destination_ref: wrong,
+                },
+            )
+            .unwrap_err()
+            .as_str(),
+        "publication_conflict"
+    );
+    fixture
+        .facade
+        .set_publication_resolution(
+            &proposal.id,
+            OWNER,
+            MemoryPublicationResolution::UpdateExisting {
+                destination_ref: existing.reference.clone(),
+            },
+        )
+        .unwrap();
+    let mut changed = existing.clone();
+    changed.text = "Changed after selection".to_string();
+    fixture.facade.upsert_memory(&changed).unwrap();
+    assert_eq!(
+        fixture
+            .facade
+            .approve_publication(&proposal.id, OWNER)
+            .unwrap_err()
+            .as_str(),
+        "publication_conflict"
+    );
 }
 
 #[test]

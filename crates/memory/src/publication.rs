@@ -1,4 +1,7 @@
-use crate::{DataSensitivity, MemoryRecord, MemoryRef, PrivacyDomain, UserId, WorkspaceId};
+use crate::{
+    DataSensitivity, MemoryCollectionKey, MemoryRecord, MemoryRef, PrivacyDomain, UserId,
+    WorkspaceId,
+};
 use serde::{Deserialize, Serialize};
 
 /// A destination scope selected explicitly by the owner before a memory is published.
@@ -32,6 +35,31 @@ pub enum MemoryPublicationStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryPublicationReasonCode {
+    Pending,
+    PublicationDuplicateCompatible,
+    PublicationConflict,
+    Approved,
+    Rejected,
+    PublicationFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum MemoryPublicationResolution {
+    CreateNew,
+    UpdateExisting { destination_ref: MemoryRef },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum MemoryPublicationCandidate {
+    CompatibleDuplicate { destination_ref: MemoryRef },
+    Conflict { destination_ref: MemoryRef },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryPublicationProposal {
     pub id: String,
@@ -44,10 +72,15 @@ pub struct MemoryPublicationProposal {
     /// into this proposal or the destination canonical record.
     pub proposed_text: String,
     pub proposed_memory_type: String,
+    pub proposed_collection: MemoryCollectionKey,
     pub proposed_privacy_domain: PrivacyDomain,
     pub proposed_sensitivity: DataSensitivity,
-    pub duplicate_ref: Option<MemoryRef>,
+    pub candidate: Option<MemoryPublicationCandidate>,
+    pub resolution: Option<MemoryPublicationResolution>,
     pub status: MemoryPublicationStatus,
+    pub reason_code: MemoryPublicationReasonCode,
+    /// Stable, redacted-safe code recorded only after a failed approval.
+    pub failure_reason: Option<String>,
     pub proposed_by: String,
     pub decided_by: Option<String>,
     pub created_at: String,

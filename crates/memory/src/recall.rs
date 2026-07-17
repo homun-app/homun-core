@@ -192,9 +192,9 @@ pub const DEDUP_JACCARD: f32 = 0.55;
 
 use crate::{
     AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, MemoryAccessRequest,
-    MemoryCollectionKey, MemoryFacade, MemoryGrantOverrideEffect, MemoryRecord, MemoryResult,
-    MemoryScope, MemorySearchRequest, MemoryStatus, PERSONAL_WORKSPACE, PrivacyDomain, RecallHit,
-    RecallPack, UserId, WorkspaceId,
+    MemoryCollectionKey, MemoryFacade, MemoryGrantOverrideEffect, MemoryRecord, MemoryRef,
+    MemoryResult, MemoryScope, MemorySearchRequest, MemoryStatus, PERSONAL_WORKSPACE,
+    PrivacyDomain, RecallHit, RecallPack, UserId, WorkspaceId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -755,9 +755,16 @@ pub fn recall_source_on_facade(
             publication_link: record
                 .metadata
                 .get("publication_link")
-                .or_else(|| record.metadata.get("publication_source_ref"))
                 .and_then(serde_json::Value::as_str)
-                .map(str::to_string),
+                .map(str::to_string)
+                .or_else(|| {
+                    record
+                        .metadata
+                        .get("publication_source_ref")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value::<MemoryRef>(value).ok())
+                        .and_then(|reference| serde_json::to_string(&reference).ok())
+                }),
         });
     }
     hits.sort_by(|left, right| {

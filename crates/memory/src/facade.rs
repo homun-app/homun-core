@@ -3,19 +3,20 @@ use crate::{
     AuthorizedMemorySource, AutomationCandidateCreateRequest, AutomationCandidateRecord,
     AutomationCandidateStatus, DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
-    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
-    MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence,
-    MemoryExtraction, MemoryExtractionSummary, MemoryHealth, MemoryLifecycleRequest,
-    MemoryMaintenanceReport, MemoryPolicyEngine, MemoryPublicationDestination,
-    MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationResult,
-    MemoryPublicationStatus, MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind,
-    MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
-    MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus,
-    MemoryUpdatePatch, PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference,
-    RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore, THREADS_WORKSPACE,
-    UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId,
-    contains_secret, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
-    parse_wiki_markdown,
+    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
+    MemoryContextItem, MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError,
+    MemoryEvent, MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryHealth,
+    MemoryLifecycleRequest, MemoryMaintenanceReport, MemoryPolicyEngine,
+    MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationLink,
+    MemoryPublicationProposal, MemoryPublicationReasonCode, MemoryPublicationResolution,
+    MemoryPublicationResult, MemoryPublicationStatus, MemoryPublicationStoreError, MemoryRecord,
+    MemoryRef, MemoryRefKind, MemoryRelation, MemoryResult, MemorySearchPage, MemorySearchRequest,
+    MemorySearchResult, MemorySourceCandidateProjection, MemorySourceGrant,
+    MemorySourceGrantStoreError, MemoryStatus, MemoryUpdatePatch, PERSONAL_WORKSPACE,
+    PrivacyDomain, RoutineInference, RoutineInferenceSummary, RoutineRecord, RoutineStatus,
+    SQLiteMemoryStore, THREADS_WORKSPACE, UserId, VectorHit, WikiCorrectionSyncReport,
+    WikiFileStore, WikiPage, WorkspaceId, contains_secret, current_timestamp,
+    ensure_artifacts_inside_root, ensure_transition, parse_wiki_markdown,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -1510,6 +1511,10 @@ impl MemoryFacade {
         let source =
             self.load_publication_source(&source.reference, &source.user_id, &source.workspace_id)?;
         self.validate_publication_source(&source)?;
+        let proposed_collection = publication_collection_for_record(&source)
+            .ok_or_else(|| MemoryError::validation("publication_collection_unknown"))?;
+        let candidate =
+            self.find_publication_candidate(&source, destination, proposed_collection)?;
         let now = current_timestamp();
         let proposal = MemoryPublicationProposal {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1520,10 +1525,14 @@ impl MemoryFacade {
             destination_workspace_id: destination.workspace_id.clone(),
             proposed_text: source.text.clone(),
             proposed_memory_type: source.memory_type.clone(),
+            proposed_collection,
             proposed_privacy_domain: source.privacy_domain.clone(),
             proposed_sensitivity: source.sensitivity,
-            duplicate_ref: self.find_publication_duplicate(&source, destination)?,
+            reason_code: publication_pending_reason(candidate.as_ref()),
+            candidate,
+            resolution: None,
             status: MemoryPublicationStatus::Pending,
+            failure_reason: None,
             proposed_by: actor.to_string(),
             decided_by: None,
             created_at: now.clone(),
@@ -1550,6 +1559,41 @@ impl MemoryFacade {
     ) -> MemoryResult<Option<MemoryPublicationLink>> {
         self.store
             .get_memory_publication_link(source_ref)
+            .map_err(memory_publication_error)
+    }
+
+    pub fn set_publication_resolution(
+        &self,
+        id: &str,
+        actor: &str,
+        resolution: MemoryPublicationResolution,
+    ) -> MemoryResult<MemoryPublicationProposal> {
+        let proposal = self
+            .get_publication_proposal(id)?
+            .ok_or_else(|| MemoryError::not_found("publication_not_found"))?;
+        self.validate_publication_actor(&proposal, actor)?;
+        if proposal.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryError::policy("publication_not_pending"));
+        }
+        let source = self.load_publication_source(
+            &proposal.source_ref,
+            &proposal.source_user_id,
+            &proposal.source_workspace_id,
+        )?;
+        self.validate_publication_source(&source)?;
+        let destination = MemoryPublicationDestination::new(
+            proposal.destination_user_id.clone(),
+            proposal.destination_workspace_id.clone(),
+        );
+        let candidate =
+            self.find_publication_candidate(&source, &destination, proposal.proposed_collection)?;
+        if candidate != proposal.candidate
+            || !publication_resolution_matches_candidate(&resolution, candidate.as_ref())
+        {
+            return Err(MemoryError::policy("publication_conflict"));
+        }
+        self.store
+            .set_memory_publication_resolution(id, actor, &resolution, &current_timestamp())
             .map_err(memory_publication_error)
     }
 
@@ -1590,7 +1634,7 @@ impl MemoryFacade {
         ) {
             Ok(source) => source,
             Err(error) => {
-                self.mark_publication_failed_if_pending(&proposal.id, actor);
+                self.mark_publication_failed_if_pending(&proposal.id, actor, error.as_str());
                 return Err(error);
             }
         };
@@ -1605,7 +1649,7 @@ impl MemoryFacade {
                     }
                 }
             }
-            self.mark_publication_failed_if_pending(&proposal.id, actor);
+            self.mark_publication_failed_if_pending(&proposal.id, actor, error.as_str());
             return Err(error);
         }
         if source.text != proposal.proposed_text
@@ -1613,7 +1657,11 @@ impl MemoryFacade {
             || source.privacy_domain != proposal.proposed_privacy_domain
             || source.sensitivity != proposal.proposed_sensitivity
         {
-            self.mark_publication_failed_if_pending(&proposal.id, actor);
+            self.mark_publication_failed_if_pending(
+                &proposal.id,
+                actor,
+                "publication_source_changed",
+            );
             return Err(MemoryError::policy("publication_source_changed"));
         }
 
@@ -1622,18 +1670,38 @@ impl MemoryFacade {
             proposal.destination_workspace_id.clone(),
         );
         self.validate_publication_destination(&source, &destination_scope)?;
-        let duplicate = self.find_publication_duplicate(&source, &destination_scope)?;
+        let candidate = self.find_publication_candidate(
+            &source,
+            &destination_scope,
+            proposal.proposed_collection,
+        )?;
+        if candidate != proposal.candidate {
+            return Err(MemoryError::policy("publication_conflict"));
+        }
         let now = current_timestamp();
-        let destination = match duplicate {
-            Some(reference) => self
-                .store
-                .get_memory(
-                    &reference,
-                    &proposal.destination_user_id,
-                    &proposal.destination_workspace_id,
-                )?
-                .ok_or_else(|| MemoryError::policy("publication_duplicate_changed"))?,
-            None => self.publication_destination_record(&proposal, &source, &now),
+        let destination = match (&candidate, &proposal.resolution) {
+            (None, None | Some(MemoryPublicationResolution::CreateNew)) => {
+                self.publication_destination_record(&proposal, &source, None, &now)
+            }
+            (Some(_), None) => return Err(MemoryError::policy("publication_conflict")),
+            (Some(_), Some(MemoryPublicationResolution::CreateNew)) => {
+                self.publication_destination_record(&proposal, &source, None, &now)
+            }
+            (
+                Some(candidate),
+                Some(MemoryPublicationResolution::UpdateExisting { destination_ref }),
+            ) if publication_candidate_ref(candidate) == destination_ref => {
+                let existing = self
+                    .store
+                    .get_memory(
+                        destination_ref,
+                        &proposal.destination_user_id,
+                        &proposal.destination_workspace_id,
+                    )?
+                    .ok_or_else(|| MemoryError::policy("publication_conflict"))?;
+                self.publication_destination_record(&proposal, &source, Some(&existing), &now)
+            }
+            _ => return Err(MemoryError::policy("publication_conflict")),
         };
         let source_with_alias =
             self.publication_source_alias(&source, &proposal, &destination, &now)?;
@@ -1668,7 +1736,7 @@ impl MemoryFacade {
                 }
             }
             Err(error) => {
-                self.mark_publication_failed_if_pending(&proposal.id, actor);
+                self.mark_publication_failed_if_pending(&proposal.id, actor, error.as_str());
                 Err(error)
             }
         }
@@ -1761,39 +1829,64 @@ impl MemoryFacade {
         Ok(())
     }
 
-    fn find_publication_duplicate(
+    fn find_publication_candidate(
         &self,
         source: &MemoryRecord,
         destination: &MemoryPublicationDestination,
-    ) -> MemoryResult<Option<MemoryRef>> {
-        Ok(self
+        collection: MemoryCollectionKey,
+    ) -> MemoryResult<Option<MemoryPublicationCandidate>> {
+        let candidates = self
             .store
-            .list_memories(&destination.user_id, &destination.workspace_id)?
-            .into_iter()
-            .find(|candidate| {
-                candidate.reference.kind == MemoryRefKind::Memory
-                    && candidate.status != MemoryStatus::Deleted
-                    && !is_published_alias(candidate)
-                    && candidate.text == source.text
-                    && candidate.memory_type == source.memory_type
-                    && candidate.privacy_domain == source.privacy_domain
-                    && candidate.sensitivity == source.sensitivity
-            })
-            .map(|candidate| candidate.reference))
+            .list_memories(&destination.user_id, &destination.workspace_id)?;
+        if let Some(candidate) = candidates.iter().find(|candidate| {
+            candidate.reference.kind == MemoryRefKind::Memory
+                && candidate.status != MemoryStatus::Deleted
+                && !is_published_alias(candidate)
+                && candidate.text == source.text
+                && candidate.memory_type == source.memory_type
+                && candidate.privacy_domain == source.privacy_domain
+                && candidate.sensitivity == source.sensitivity
+        }) {
+            return Ok(Some(MemoryPublicationCandidate::CompatibleDuplicate {
+                destination_ref: candidate.reference.clone(),
+            }));
+        }
+        let source_subject = publication_subject_key(source);
+        Ok(source_subject.and_then(|subject| {
+            candidates
+                .into_iter()
+                .filter(|candidate| {
+                    candidate.reference.kind == MemoryRefKind::Memory
+                        && candidate.status != MemoryStatus::Deleted
+                        && !is_published_alias(candidate)
+                        && candidate.memory_type == source.memory_type
+                        && collection.matches(candidate)
+                        && publication_subject_key(candidate) == Some(subject)
+                })
+                .min_by(|left, right| left.reference.to_string().cmp(&right.reference.to_string()))
+                .map(|candidate| MemoryPublicationCandidate::Conflict {
+                    destination_ref: candidate.reference,
+                })
+        }))
     }
 
     fn publication_destination_record(
         &self,
         proposal: &MemoryPublicationProposal,
         source: &MemoryRecord,
+        existing: Option<&MemoryRecord>,
         now: &str,
     ) -> MemoryRecord {
         MemoryRecord {
-            reference: MemoryRef::generated(
-                MemoryRefKind::Memory,
-                proposal.destination_user_id.clone(),
-                proposal.destination_workspace_id.clone(),
-            ),
+            reference: existing
+                .map(|record| record.reference.clone())
+                .unwrap_or_else(|| {
+                    MemoryRef::generated(
+                        MemoryRefKind::Memory,
+                        proposal.destination_user_id.clone(),
+                        proposal.destination_workspace_id.clone(),
+                    )
+                }),
             user_id: proposal.destination_user_id.clone(),
             workspace_id: proposal.destination_workspace_id.clone(),
             memory_type: proposal.proposed_memory_type.clone(),
@@ -1805,13 +1898,16 @@ impl MemoryFacade {
             privacy_domain: proposal.proposed_privacy_domain.clone(),
             sensitivity: proposal.proposed_sensitivity,
             metadata: serde_json::json!({
+                "publication_source_ref": &source.reference,
                 "publication": {
                     "source_ref": &source.reference,
                     "proposal_id": &proposal.id,
                     "published_at": now,
                 }
             }),
-            created_at: now.to_string(),
+            created_at: existing
+                .map(|record| record.created_at.clone())
+                .unwrap_or_else(|| now.to_string()),
             updated_at: now.to_string(),
             last_seen_at: Some(now.to_string()),
             supersedes: vec![],
@@ -1873,10 +1969,10 @@ impl MemoryFacade {
         })
     }
 
-    fn mark_publication_failed_if_pending(&self, id: &str, actor: &str) {
+    fn mark_publication_failed_if_pending(&self, id: &str, actor: &str, reason: &str) {
         let _ = self
             .store
-            .mark_memory_publication_failed(id, actor, &current_timestamp());
+            .mark_memory_publication_failed(id, actor, reason, &current_timestamp());
     }
 
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> MemoryResult<MemoryBackupReport> {
@@ -2102,6 +2198,67 @@ fn is_published_alias(memory: &MemoryRecord) -> bool {
         .get("published_alias")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
+}
+
+fn publication_collection_for_record(memory: &MemoryRecord) -> Option<MemoryCollectionKey> {
+    [
+        MemoryCollectionKey::Preferences,
+        MemoryCollectionKey::Profile,
+        MemoryCollectionKey::Knowledge,
+        MemoryCollectionKey::Decisions,
+        MemoryCollectionKey::Goals,
+        MemoryCollectionKey::Artifacts,
+        MemoryCollectionKey::Episodes,
+    ]
+    .into_iter()
+    .find(|collection| collection.matches(memory))
+}
+
+fn publication_subject_key(memory: &MemoryRecord) -> Option<&str> {
+    ["subject_key", "canonical_key"]
+        .into_iter()
+        .find_map(|key| {
+            memory
+                .metadata
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+}
+
+fn publication_candidate_ref(candidate: &MemoryPublicationCandidate) -> &MemoryRef {
+    match candidate {
+        MemoryPublicationCandidate::CompatibleDuplicate { destination_ref }
+        | MemoryPublicationCandidate::Conflict { destination_ref } => destination_ref,
+    }
+}
+
+fn publication_pending_reason(
+    candidate: Option<&MemoryPublicationCandidate>,
+) -> MemoryPublicationReasonCode {
+    match candidate {
+        Some(MemoryPublicationCandidate::CompatibleDuplicate { .. }) => {
+            MemoryPublicationReasonCode::PublicationDuplicateCompatible
+        }
+        Some(MemoryPublicationCandidate::Conflict { .. }) => {
+            MemoryPublicationReasonCode::PublicationConflict
+        }
+        None => MemoryPublicationReasonCode::Pending,
+    }
+}
+
+fn publication_resolution_matches_candidate(
+    resolution: &MemoryPublicationResolution,
+    candidate: Option<&MemoryPublicationCandidate>,
+) -> bool {
+    match (resolution, candidate) {
+        (MemoryPublicationResolution::CreateNew, Some(_)) => true,
+        (MemoryPublicationResolution::UpdateExisting { destination_ref }, Some(candidate)) => {
+            publication_candidate_ref(candidate) == destination_ref
+        }
+        _ => false,
+    }
 }
 
 fn merge_entity_metadata(
