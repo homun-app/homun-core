@@ -19,7 +19,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-const SCHEMA_VERSION: u32 = 6;
+const SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemorySourceGrantStoreError {
@@ -861,9 +861,9 @@ impl SQLiteMemoryStore {
                     id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
-                    proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
+                    proposed_sensitivity, source_revision, destination_revision, candidate_json, resolution_json, status, reason_code,
                     failure_reason, proposed_by, decided_by, created_at, updated_at
-                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 params![
                     &proposal.id,
                     proposal.proposal_version,
@@ -880,6 +880,7 @@ impl SQLiteMemoryStore {
                     enum_name(&proposal.proposed_sensitivity)
                         .map_err(MemoryPublicationStoreError::store)?,
                     &proposal.source_revision,
+                    &proposal.destination_revision,
                     proposal
                         .candidate
                         .as_ref()
@@ -928,7 +929,7 @@ impl SQLiteMemoryStore {
             "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
-                    proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
+                    proposed_sensitivity, source_revision, destination_revision, candidate_json, resolution_json, status, reason_code,
                     failure_reason, proposed_by, decided_by, created_at, updated_at
              from memory_publication_proposals where id = ?1",
             [id],
@@ -956,7 +957,7 @@ impl SQLiteMemoryStore {
             "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
-                    proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
+                    proposed_sensitivity, source_revision, destination_revision, candidate_json, resolution_json, status, reason_code,
                     failure_reason, proposed_by, decided_by, created_at, updated_at
              from memory_publication_proposals
              where source_ref_json = ?1 and status = 'pending'
@@ -1027,9 +1028,9 @@ impl SQLiteMemoryStore {
             .execute(
                 "update memory_publication_proposals
                  set proposed_text = ?2, proposed_memory_type = ?3, proposed_collection = ?4,
-                     proposed_privacy_domain = ?5, proposed_sensitivity = ?6, candidate_json = ?7,
-                     resolution_json = null, reason_code = ?8, updated_at = ?9, proposal_version = ?10
-                 where id = ?1 and status = 'pending' and proposal_version = ?11",
+                     proposed_privacy_domain = ?5, proposed_sensitivity = ?6, destination_revision = ?7, candidate_json = ?8,
+                     resolution_json = null, reason_code = ?9, updated_at = ?10, proposal_version = ?11
+                 where id = ?1 and status = 'pending' and proposal_version = ?12",
                 params![
                     &proposal.id,
                     &proposal.proposed_text,
@@ -1039,6 +1040,7 @@ impl SQLiteMemoryStore {
                     proposal.proposed_privacy_domain.as_str(),
                     enum_name(&proposal.proposed_sensitivity)
                         .map_err(MemoryPublicationStoreError::store)?,
+                    &proposal.destination_revision,
                     proposal
                         .candidate
                         .as_ref()
@@ -3287,6 +3289,7 @@ impl SQLiteMemoryStore {
                     proposed_privacy_domain text not null,
                     proposed_sensitivity text not null,
                     source_revision text not null default 'legacy_unverifiable',
+                    destination_revision text not null default 'legacy_unverifiable',
                     candidate_json text,
                     resolution_json text,
                     status text not null check(status in ('pending', 'approved', 'rejected', 'failed')),
@@ -3389,6 +3392,12 @@ impl SQLiteMemoryStore {
             "memory_publication_proposals",
             "source_revision",
             "alter table memory_publication_proposals add column source_revision text not null default 'legacy_unverifiable'",
+        )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "destination_revision",
+            "alter table memory_publication_proposals add column destination_revision text not null default 'legacy_unverifiable'",
         )?;
         self.ensure_column_on(
             &conn,
@@ -4075,6 +4084,7 @@ fn validate_memory_publication_proposal(
         || proposal.proposed_text.trim().is_empty()
         || proposal.proposed_memory_type.trim().is_empty()
         || proposal.source_revision.trim().is_empty()
+        || proposal.destination_revision.trim().is_empty()
     {
         return Err("publication proposal has an empty required field".to_string());
     }
@@ -4150,6 +4160,9 @@ fn validate_persisted_memory_publication_proposal(
     // predates revision tracking.
     if intrinsic.source_revision == "legacy_unverifiable" {
         intrinsic.source_revision = "legacy_terminal".to_string();
+    }
+    if intrinsic.destination_revision == "legacy_unverifiable" {
+        intrinsic.destination_revision = "legacy_terminal".to_string();
     }
     validate_memory_publication_proposal(&intrinsic)?;
     match proposal.status {
@@ -4265,29 +4278,30 @@ fn memory_publication_proposal_from_row(
                 .map_err(|error| error.to_string())?,
         )?,
         source_revision: row.get(12).map_err(|error| error.to_string())?,
+        destination_revision: row.get(13).map_err(|error| error.to_string())?,
         candidate: row
-            .get::<_, Option<String>>(13)
-            .map_err(|error| error.to_string())?
-            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
-            .transpose()?,
-        resolution: row
             .get::<_, Option<String>>(14)
             .map_err(|error| error.to_string())?
             .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
             .transpose()?,
+        resolution: row
+            .get::<_, Option<String>>(15)
+            .map_err(|error| error.to_string())?
+            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
+            .transpose()?,
         status: enum_from_name(
-            row.get::<_, String>(15)
-                .map_err(|error| error.to_string())?,
-        )?,
-        reason_code: enum_from_name(
             row.get::<_, String>(16)
                 .map_err(|error| error.to_string())?,
         )?,
-        failure_reason: row.get(17).map_err(|error| error.to_string())?,
-        proposed_by: row.get(18).map_err(|error| error.to_string())?,
-        decided_by: row.get(19).map_err(|error| error.to_string())?,
-        created_at: row.get(20).map_err(|error| error.to_string())?,
-        updated_at: row.get(21).map_err(|error| error.to_string())?,
+        reason_code: enum_from_name(
+            row.get::<_, String>(17)
+                .map_err(|error| error.to_string())?,
+        )?,
+        failure_reason: row.get(18).map_err(|error| error.to_string())?,
+        proposed_by: row.get(19).map_err(|error| error.to_string())?,
+        decided_by: row.get(20).map_err(|error| error.to_string())?,
+        created_at: row.get(21).map_err(|error| error.to_string())?,
+        updated_at: row.get(22).map_err(|error| error.to_string())?,
     })
 }
 
@@ -4309,7 +4323,7 @@ fn load_memory_publication_proposal_on(
         "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
                     destination_user_id, destination_workspace_id, proposed_text,
                     proposed_memory_type, proposed_collection, proposed_privacy_domain,
-                    proposed_sensitivity, source_revision, candidate_json, resolution_json, status, reason_code,
+                    proposed_sensitivity, source_revision, destination_revision, candidate_json, resolution_json, status, reason_code,
                     failure_reason, proposed_by, decided_by, created_at, updated_at
          from memory_publication_proposals where id = ?1",
         [id],

@@ -98,6 +98,7 @@
       "publication_decision_required": "Explicitly choose how to handle the destination memory.",
       "publication_conflict": "The proposal is no longer valid. Review it and try again.",
       "publication_source_changed": "The source memory changed. Create a new proposal.",
+      "publication_preview_stale": "The destination changed. Review the updated proposal before continuing.",
       "publication_edit_invalid": "The edit does not meet publication requirements.",
       "memory_publication_invalid": "The publication request is invalid.",
       "publication_not_found": "The proposal is no longer available.",

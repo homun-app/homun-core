@@ -91,6 +91,9 @@ pub struct MemoryPublicationProposal {
     /// Fingerprint of the server-reloaded source when this preview was made.
     /// A pending legacy proposal without a verifiable revision is fail-closed.
     pub source_revision: String,
+    /// Fingerprint of the full visible destination scope when this preview was
+    /// derived. A pending legacy proposal without it is rebased before review.
+    pub destination_revision: String,
     pub candidate: Option<MemoryPublicationCandidate>,
     pub resolution: Option<MemoryPublicationResolution>,
     pub status: MemoryPublicationStatus,

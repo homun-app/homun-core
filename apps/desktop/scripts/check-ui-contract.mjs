@@ -190,6 +190,8 @@ assertContains("src/components/MemoryPublicationDialog.tsx", "function dismissDi
 assertContains("src/components/MemoryPublicationDialog.tsx", "function rejectProposal()", "publication rejection must remain an explicit action");
 assertContains("src/components/MemoryPublicationDialog.tsx", "coreBridge.memoryPublication", "publication conflicts must reconcile against the latest server proposal");
 assertContains("src/components/MemoryPublicationDialog.tsx", "reconcilePublicationConflict", "stale publication mutations must refresh or close safely");
+assertContains("src/components/MemoryPublicationDialog.tsx", "publication_preview_stale", "destination drift must refresh the latest publication review");
+assertContains("src/i18n/locales/it.json", "La destinazione è cambiata", "destination drift must explain that the refreshed review needs attention");
 assertContains("src/components/MemoryPublicationDialog.tsx", "event.target === event.currentTarget", "publication backdrop dismissal must not submit a rejection");
 assertNotContains("src/components/MemoryPublicationDialog.tsx", "rejectAndClose", "local dialog exits must never invoke a stale reject request");
 assertContains("src/components/MemoryUsagePopover.tsx", "hit.source_workspace_id === consumerWorkspaceId", "publication must be limited to the current consumer workspace");

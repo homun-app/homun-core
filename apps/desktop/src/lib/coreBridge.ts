@@ -573,6 +573,7 @@ export interface MemoryPublicationProposal {
   proposed_privacy_domain: "personal" | "work" | "general";
   proposed_sensitivity: MemoryPublicationSensitivity;
   source_revision: string;
+  destination_revision: string;
   candidate?: MemoryPublicationCandidate | null;
   resolution?: MemoryPublicationResolution | null;
   status: "pending" | "approved" | "rejected" | "failed";

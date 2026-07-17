@@ -98,6 +98,7 @@
       "publication_decision_required": "Scegli esplicitamente come gestire la memoria destinataria.",
       "publication_conflict": "La proposta non è più valida: rivedila e riprova.",
       "publication_source_changed": "La memoria sorgente è cambiata: crea una nuova proposta.",
+      "publication_preview_stale": "La destinazione è cambiata: rivedi la proposta aggiornata prima di continuare.",
       "publication_edit_invalid": "La modifica non rispetta i requisiti di pubblicazione.",
       "memory_publication_invalid": "La richiesta di pubblicazione non è valida.",
       "publication_not_found": "La proposta non è più disponibile.",

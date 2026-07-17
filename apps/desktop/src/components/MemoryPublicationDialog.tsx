@@ -26,6 +26,7 @@ const PUBLICATION_ERROR_CODES = new Set([
   "publication_decision_required",
   "publication_conflict",
   "publication_source_changed",
+  "publication_preview_stale",
   "publication_edit_invalid",
   "memory_publication_invalid",
   "publication_not_found",
@@ -117,6 +118,7 @@ export function MemoryPublicationDialog({
   async function reconcilePublicationConflict(
     proposalId: string,
     generation: number,
+    staleCode = "publication_conflict",
   ) {
     try {
       const latest = await coreBridge.memoryPublication(proposalId);
@@ -135,7 +137,7 @@ export function MemoryPublicationDialog({
       }
       hydrateFromServer(latest);
       setSaving(false);
-      setError(t("memoryPublication.errors.publication_conflict"));
+      setError(t(`memoryPublication.errors.${staleCode}`));
     } catch (refreshError) {
       if (active.current && requestGeneration.current === generation) {
         setSaving(false);
@@ -150,8 +152,8 @@ export function MemoryPublicationDialog({
     generation: number,
   ) {
     const code = err instanceof Error ? err.message.trim() : "";
-    if (pendingProposal && (code === "publication_conflict" || code === "publication_source_changed")) {
-      await reconcilePublicationConflict(pendingProposal.id, generation);
+    if (pendingProposal && (code === "publication_conflict" || code === "publication_source_changed" || code === "publication_preview_stale")) {
+      await reconcilePublicationConflict(pendingProposal.id, generation, code);
       return;
     }
     if (active.current && requestGeneration.current === generation) {

@@ -50366,6 +50366,9 @@ fn memory_publication_facade_error(error: MemoryError) -> GatewayError {
             "publication_source_changed" => {
                 (StatusCode::CONFLICT, "publication_source_changed")
             }
+            "publication_preview_stale" => {
+                (StatusCode::CONFLICT, "publication_preview_stale")
+            }
             "publication_conflict" | "publication_already_pending" | "publication_not_pending"
             | "publication_already_published"
             | "publication_source_inactive" | "publication_sensitivity_not_allowed" => {

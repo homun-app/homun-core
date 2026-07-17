@@ -309,6 +309,210 @@ fn reopening_after_source_change_fails_stale_pending_and_creates_a_fresh_preview
 }
 
 #[test]
+fn reopening_rebases_same_pending_preview_when_destination_gains_a_duplicate() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let first = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    let duplicate = memory(
+        &fixture.owner,
+        &WorkspaceId::new("__personal__"),
+        "preference",
+        "Prefers Italian",
+    );
+    fixture.facade.upsert_memory(&duplicate).unwrap();
+
+    let rebased = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    assert_eq!(rebased.id, first.id);
+    assert_eq!(rebased.proposal_version, first.proposal_version + 1);
+    assert_eq!(rebased.resolution, None);
+    assert_eq!(
+        rebased.candidate,
+        Some(MemoryPublicationCandidate::CompatibleDuplicate {
+            destination_ref: duplicate.reference,
+        })
+    );
+}
+
+#[test]
+fn reopening_rebases_when_the_previous_destination_candidate_disappears() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let duplicate = memory(
+        &fixture.owner,
+        &WorkspaceId::new("__personal__"),
+        "preference",
+        "Prefers Italian",
+    );
+    fixture.facade.upsert_memory(&duplicate).unwrap();
+    let first = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    assert!(first.candidate.is_some());
+    fixture
+        .facade
+        .tombstone_ref(
+            &duplicate.reference,
+            &fixture.owner,
+            &WorkspaceId::new("__personal__"),
+            "removed while closed",
+        )
+        .unwrap();
+
+    let rebased = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    assert_eq!(rebased.id, first.id);
+    assert_eq!(rebased.proposal_version, first.proposal_version + 1);
+    assert_eq!(rebased.candidate, None);
+}
+
+#[test]
+fn destination_drift_rebases_resolution_then_requires_the_new_preview_version() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Prefers Italian");
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&source, &fixture.personal_destination(), OWNER)
+        .unwrap();
+    let duplicate = memory(
+        &fixture.owner,
+        &WorkspaceId::new("__personal__"),
+        "preference",
+        "Prefers Italian",
+    );
+    fixture.facade.upsert_memory(&duplicate).unwrap();
+
+    assert_eq!(
+        fixture
+            .facade
+            .set_publication_resolution_at_version(
+                &proposal.id,
+                OWNER,
+                proposal.proposal_version,
+                MemoryPublicationResolution::CreateNew,
+            )
+            .unwrap_err()
+            .as_str(),
+        "publication_preview_stale"
+    );
+    let rebased = fixture
+        .facade
+        .get_publication_proposal(&proposal.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(rebased.proposal_version, proposal.proposal_version + 1);
+    assert_eq!(rebased.resolution, None);
+    fixture
+        .facade
+        .set_publication_resolution_at_version(
+            &rebased.id,
+            OWNER,
+            rebased.proposal_version,
+            MemoryPublicationResolution::UpdateExisting {
+                destination_ref: duplicate.reference,
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn concurrent_reopens_converge_on_one_destination_rebase() {
+    let facade = Arc::new(MemoryFacade::new(
+        SQLiteMemoryStore::open_in_memory().unwrap(),
+    ));
+    let owner = UserId::new(OWNER);
+    let project = WorkspaceId::new(PROJECT);
+    let source = memory(&owner, &project, "preference", "Prefers Italian");
+    facade.upsert_memory(&source).unwrap();
+    let first = facade
+        .create_publication_proposal(
+            &source,
+            &MemoryPublicationDestination::personal(owner.clone()),
+            OWNER,
+        )
+        .unwrap();
+    let duplicate = memory(
+        &owner,
+        &WorkspaceId::new("__personal__"),
+        "preference",
+        "Prefers Italian",
+    );
+    facade.upsert_memory(&duplicate).unwrap();
+    let barrier = Arc::new(Barrier::new(3));
+    let mut joins = Vec::new();
+    for _ in 0..2 {
+        let facade = Arc::clone(&facade);
+        let barrier = Arc::clone(&barrier);
+        let source = source.clone();
+        let owner = owner.clone();
+        joins.push(std::thread::spawn(move || {
+            barrier.wait();
+            facade.create_publication_proposal(
+                &source,
+                &MemoryPublicationDestination::personal(owner),
+                OWNER,
+            )
+        }));
+    }
+    barrier.wait();
+    let proposals = joins
+        .into_iter()
+        .map(|join| join.join().unwrap().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(proposals[0].id, first.id);
+    assert_eq!(proposals[0].id, proposals[1].id);
+    assert_eq!(proposals[0].proposal_version, first.proposal_version + 1);
+    assert_eq!(proposals[0].proposal_version, proposals[1].proposal_version);
+}
+
+#[test]
+fn legacy_pending_destination_revision_is_rebased_before_resume() {
+    let path = unique_db_path("destination-revision-v6");
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
+    let owner = UserId::new(OWNER);
+    let project = WorkspaceId::new(PROJECT);
+    let source = memory(&owner, &project, "preference", "Prefers Italian");
+    facade.upsert_memory(&source).unwrap();
+    let proposal = facade
+        .create_publication_proposal(
+            &source,
+            &MemoryPublicationDestination::personal(owner.clone()),
+            OWNER,
+        )
+        .unwrap();
+    Connection::open(&path)
+        .unwrap()
+        .execute(
+            "update memory_publication_proposals
+             set destination_revision = 'legacy_unverifiable'
+             where id = ?1",
+            [&proposal.id],
+        )
+        .unwrap();
+
+    let resumed = facade
+        .create_publication_proposal(
+            &source,
+            &MemoryPublicationDestination::personal(owner),
+            OWNER,
+        )
+        .unwrap();
+    assert_eq!(resumed.id, proposal.id);
+    assert_eq!(resumed.proposal_version, proposal.proposal_version + 1);
+    assert_ne!(resumed.destination_revision, "legacy_unverifiable");
+    drop(facade);
+    remove_sqlite_files(&path);
+}
+
+#[test]
 fn concurrent_server_first_creates_resume_one_pending_preview() {
     let facade = Arc::new(MemoryFacade::new(
         SQLiteMemoryStore::open_in_memory().unwrap(),
@@ -861,7 +1065,7 @@ fn stale_or_invalid_update_existing_resolution_fails_closed() {
             )
             .unwrap_err()
             .as_str(),
-        "publication_conflict"
+        "publication_preview_stale"
     );
 }
 
@@ -1195,6 +1399,7 @@ fn pending_store_proposal(
         proposed_privacy_domain: source.privacy_domain.clone(),
         proposed_sensitivity: source.sensitivity,
         source_revision: "sha256:test".to_string(),
+        destination_revision: "sha256:test-destination".to_string(),
         candidate: None,
         resolution: Some(MemoryPublicationResolution::CreateNew),
         status: MemoryPublicationStatus::Pending,
@@ -1332,13 +1537,13 @@ fn remove_sqlite_files(path: &Path) {
 }
 
 #[test]
-fn schema_v6_open_remains_compatible() {
+fn schema_v7_open_remains_compatible() {
     let path = unique_db_path("schema-v4");
     let store = SQLiteMemoryStore::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 6);
+    assert_eq!(store.schema_version().unwrap(), 7);
     drop(store);
     let reopened = SQLiteMemoryStore::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 6);
+    assert_eq!(reopened.schema_version().unwrap(), 7);
     remove_sqlite_files(&path);
 }
 

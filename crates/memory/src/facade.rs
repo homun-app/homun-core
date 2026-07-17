@@ -1528,6 +1528,8 @@ impl MemoryFacade {
             .evidence_for(&source.reference, &source.user_id, &source.workspace_id)
             .map_err(MemoryError::Store)?;
         let source_revision = publication_source_revision(&source, &source_evidence)?;
+        let (destination_snapshot, destination_revision) =
+            self.publication_destination_snapshot(destination)?;
 
         // Opening the publish UI again is a resume operation, not a second
         // request. Only the server-first/no-edit path may resume: it returns
@@ -1550,7 +1552,23 @@ impl MemoryFacade {
                     return Err(MemoryError::policy("publication_already_pending"));
                 }
                 if pending.source_revision == source_revision {
-                    return Ok(pending);
+                    if pending.destination_revision == destination_revision {
+                        return Ok(pending);
+                    }
+                    match self.rebase_publication_destination(
+                        &pending,
+                        &source,
+                        destination,
+                        &destination_snapshot,
+                        destination_revision.clone(),
+                        actor,
+                    ) {
+                        Ok(rebased) => return Ok(rebased),
+                        Err(MemoryError::Policy(message)) if message == "publication_conflict" => {
+                            continue;
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
                 match self.store.mark_memory_publication_failed(
                     &pending.id,
@@ -1569,8 +1587,11 @@ impl MemoryFacade {
         let proposed = publication_edited_payload(&source, edit)?;
         let proposed_collection = MemoryCollectionKey::for_memory(&proposed)
             .ok_or_else(|| MemoryError::validation("publication_collection_unknown"))?;
-        let candidate =
-            self.find_publication_candidate(&proposed, destination, proposed_collection)?;
+        let candidate = Self::find_publication_candidate_in(
+            &destination_snapshot,
+            &proposed,
+            proposed_collection,
+        );
         let now = current_timestamp();
         let proposal = MemoryPublicationProposal {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1586,6 +1607,7 @@ impl MemoryFacade {
             proposed_privacy_domain: proposed.privacy_domain,
             proposed_sensitivity: proposed.sensitivity,
             source_revision: source_revision.clone(),
+            destination_revision: destination_revision.clone(),
             reason_code: publication_pending_reason(candidate.as_ref()),
             candidate,
             resolution: None,
@@ -1614,12 +1636,25 @@ impl MemoryFacade {
                     && pending.source_workspace_id == source.workspace_id
                     && pending.destination_user_id == destination.user_id
                     && pending.destination_workspace_id == destination.workspace_id;
-                if same_owner_and_destination && pending.source_revision == source_revision {
+                if same_owner_and_destination
+                    && pending.source_revision == source_revision
+                    && pending.destination_revision == destination_revision
+                {
                     Ok(pending)
                 } else if same_owner_and_destination {
                     // The winner was built from a now-stale source. Terminally
                     // fail it by version and re-enter the normal resume/create
                     // path, which reloads whichever proposal wins next.
+                    if pending.source_revision == source_revision {
+                        return self.rebase_publication_destination(
+                            &pending,
+                            &source,
+                            destination,
+                            &destination_snapshot,
+                            destination_revision,
+                            actor,
+                        );
+                    }
                     match self.store.mark_memory_publication_failed(
                         &pending.id,
                         actor,
@@ -1726,8 +1761,13 @@ impl MemoryFacade {
             proposal.destination_user_id.clone(),
             proposal.destination_workspace_id.clone(),
         );
-        let candidate =
-            self.find_publication_candidate(&proposed, &destination, proposed_collection)?;
+        let (destination_snapshot, destination_revision) =
+            self.publication_destination_snapshot(&destination)?;
+        let candidate = Self::find_publication_candidate_in(
+            &destination_snapshot,
+            &proposed,
+            proposed_collection,
+        );
         let mut updated = proposal;
         updated.proposed_text = proposed.text;
         updated.proposed_memory_type = proposed.memory_type;
@@ -1735,6 +1775,7 @@ impl MemoryFacade {
         updated.proposed_privacy_domain = proposed.privacy_domain;
         updated.proposed_sensitivity = proposed.sensitivity;
         updated.candidate = candidate;
+        updated.destination_revision = destination_revision;
         updated.reason_code = publication_pending_reason(updated.candidate.as_ref());
         // Any prior decision is for the previous payload and must never carry
         // forward to a changed proposal.
@@ -1797,11 +1838,28 @@ impl MemoryFacade {
             proposal.destination_user_id.clone(),
             proposal.destination_workspace_id.clone(),
         );
-        let candidate = self.find_publication_candidate(
+        let (destination_snapshot, destination_revision) =
+            self.publication_destination_snapshot(&destination)?;
+        if proposal.destination_revision != destination_revision {
+            match self.rebase_publication_destination(
+                &proposal,
+                &source,
+                &destination,
+                &destination_snapshot,
+                destination_revision,
+                actor,
+            ) {
+                Ok(_) | Err(MemoryError::Policy(_)) => {
+                    return Err(MemoryError::policy("publication_preview_stale"));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        let candidate = Self::find_publication_candidate_in(
+            &destination_snapshot,
             &publication_candidate_record(&source, &proposal),
-            &destination,
             proposal.proposed_collection,
-        )?;
+        );
         if candidate != proposal.candidate
             || !publication_resolution_matches_candidate(&resolution, candidate.as_ref())
         {
@@ -1938,6 +1996,22 @@ impl MemoryFacade {
         let destination_snapshot = self
             .store
             .list_memories(&destination_scope.user_id, &destination_scope.workspace_id)?;
+        let destination_revision = publication_destination_revision(&destination_snapshot)?;
+        if proposal.destination_revision != destination_revision {
+            match self.rebase_publication_destination(
+                &proposal,
+                &source,
+                &destination_scope,
+                &destination_snapshot,
+                destination_revision,
+                actor,
+            ) {
+                Ok(_) | Err(MemoryError::Policy(_)) => {
+                    return Err(MemoryError::policy("publication_preview_stale"));
+                }
+                Err(error) => return Err(error),
+            }
+        }
         let candidate = Self::find_publication_candidate_in(
             &destination_snapshot,
             &publication_candidate_record(&source, &proposal),
@@ -2019,6 +2093,26 @@ impl MemoryFacade {
                     self.approved_publication_result(latest)
                 } else {
                     Err(error)
+                }
+            }
+            Err(error) if error.as_str() == "publication_conflict" => {
+                // A writer changed the destination after the facade snapshot
+                // but before commit. Keep the pending review resumable: rebase
+                // its candidate/version instead of terminally failing it.
+                let (snapshot, revision) =
+                    self.publication_destination_snapshot(&destination_scope)?;
+                match self.rebase_publication_destination(
+                    &proposal,
+                    &source,
+                    &destination_scope,
+                    &snapshot,
+                    revision,
+                    actor,
+                ) {
+                    Ok(_) | Err(MemoryError::Policy(_)) => {
+                        Err(MemoryError::policy("publication_preview_stale"))
+                    }
+                    Err(rebase_error) => Err(rebase_error),
                 }
             }
             Err(error) => {
@@ -2127,22 +2221,6 @@ impl MemoryFacade {
         Ok(())
     }
 
-    fn find_publication_candidate(
-        &self,
-        source: &MemoryRecord,
-        destination: &MemoryPublicationDestination,
-        collection: MemoryCollectionKey,
-    ) -> MemoryResult<Option<MemoryPublicationCandidate>> {
-        let candidates = self
-            .store
-            .list_memories(&destination.user_id, &destination.workspace_id)?;
-        Ok(Self::find_publication_candidate_in(
-            &candidates,
-            source,
-            collection,
-        ))
-    }
-
     fn find_publication_candidate_in(
         candidates: &[MemoryRecord],
         source: &MemoryRecord,
@@ -2176,6 +2254,55 @@ impl MemoryFacade {
                     destination_ref: candidate.reference.clone(),
                 })
         })
+    }
+
+    fn publication_destination_snapshot(
+        &self,
+        destination: &MemoryPublicationDestination,
+    ) -> MemoryResult<(Vec<MemoryRecord>, String)> {
+        let snapshot = self
+            .store
+            .list_memories(&destination.user_id, &destination.workspace_id)
+            .map_err(MemoryError::Store)?;
+        let revision = publication_destination_revision(&snapshot)?;
+        Ok((snapshot, revision))
+    }
+
+    /// Re-derives a pending review after destination drift. The store update is
+    /// a versioned IMMEDIATE transaction: concurrent rebases converge on one
+    /// durable candidate/version and callers simply reload it.
+    fn rebase_publication_destination(
+        &self,
+        proposal: &MemoryPublicationProposal,
+        source: &MemoryRecord,
+        destination: &MemoryPublicationDestination,
+        snapshot: &[MemoryRecord],
+        destination_revision: String,
+        actor: &str,
+    ) -> MemoryResult<MemoryPublicationProposal> {
+        let candidate = Self::find_publication_candidate_in(
+            snapshot,
+            &publication_candidate_record(source, proposal),
+            proposal.proposed_collection,
+        );
+        let mut rebased = proposal.clone();
+        rebased.candidate = candidate;
+        rebased.reason_code = publication_pending_reason(rebased.candidate.as_ref());
+        rebased.resolution = None;
+        rebased.destination_revision = destination_revision;
+        rebased.proposal_version = proposal
+            .proposal_version
+            .checked_add(1)
+            .ok_or_else(|| MemoryError::validation("publication_version_invalid"))?;
+        rebased.updated_at = current_timestamp();
+        if rebased.destination_user_id != destination.user_id
+            || rebased.destination_workspace_id != destination.workspace_id
+        {
+            return Err(MemoryError::policy("publication_conflict"));
+        }
+        self.store
+            .update_memory_publication_proposal(&rebased, actor, proposal.proposal_version)
+            .map_err(memory_publication_error)
     }
 
     fn publication_destination_record(
@@ -2606,6 +2733,16 @@ fn publication_source_revision(
     });
     let encoded = serde_json::to_vec(&payload).map_err(|_| {
         MemoryError::Store("publication source revision serialization failed".to_string())
+    })?;
+    Ok(format!("sha256:{:x}", Sha256::digest(encoded)))
+}
+
+fn publication_destination_revision(snapshot: &[MemoryRecord]) -> MemoryResult<String> {
+    // `list_memories` is ordered by ref and filters tombstoned rows. It is the
+    // exact visible-scope snapshot rechecked by commit, so the fingerprint
+    // changes for every active insert/update/removal without trusting timestamps.
+    let encoded = serde_json::to_vec(snapshot).map_err(|_| {
+        MemoryError::Store("publication destination revision serialization failed".to_string())
     })?;
     Ok(format!("sha256:{:x}", Sha256::digest(encoded)))
 }
