@@ -181,12 +181,35 @@ QA_JS = r"""
     const cr = container.getBoundingClientRect();
     // Fixed-canvas checks (overflow / out-of-bounds) only make sense for decks;
     // a document block is free to grow vertically across page breaks.
-    if (MODE === 'deck' && (container.scrollWidth > container.clientWidth + 2 || container.scrollHeight > container.clientHeight + 2)) {
-      issues.push({
-        severity: 'error',
-        code: 'slide_overflow',
-        message: `slide ${unitNo} overflows (${container.scrollWidth}x${container.scrollHeight} > ${container.clientWidth}x${container.clientHeight})`
+    if (MODE === 'deck') {
+      // scrollWidth/scrollHeight measure the UNCLIPPED content box, so they count
+      // decorative accent layers that bleed past the slide on purpose — e.g.
+      // `.hero-art { right:-4vw; width:44vw }` under `.slide{overflow:hidden}`,
+      // which is clipped visually but still adds ~51px of phantom scrollWidth at a
+      // 1280px canvas. That is a full-bleed design choice, not a defect, and would
+      // false-flag every cover/section using hero_art. Neutralize decorative
+      // layers (class `hero-art`, or any `pointer-events:none` overlay) before
+      // measuring, then restore them, so only genuine content overflow trips the
+      // check. `element_outside_slide` below already ignores these (it scans a
+      // content selector list), so this keeps the two checks consistent.
+      const decorative = Array.from(container.querySelectorAll('*')).filter((el) => {
+        if (el.classList && el.classList.contains('hero-art')) return true;
+        return getComputedStyle(el).pointerEvents === 'none';
       });
+      const restore = decorative.map((el) => [el, el.style.display]);
+      decorative.forEach((el) => { el.style.display = 'none'; });
+      const scrollW = container.scrollWidth;   // reading forces a synchronous reflow
+      const scrollH = container.scrollHeight;
+      const clientW = container.clientWidth;
+      const clientH = container.clientHeight;
+      restore.forEach(([el, prev]) => { el.style.display = prev; });
+      if (scrollW > clientW + 2 || scrollH > clientH + 2) {
+        issues.push({
+          severity: 'error',
+          code: 'slide_overflow',
+          message: `slide ${unitNo} overflows (${scrollW}x${scrollH} > ${clientW}x${clientH})`
+        });
+      }
     }
     const nodes = Array.from(container.querySelectorAll('h1,h2,h3,li,p,blockquote,.kpi,.sub,.col,img'));
     nodes.forEach((node) => {
@@ -334,6 +357,11 @@ def run_qa(path, chromium="chromium", mode="deck"):
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             proc.kill()
+        # Close the stderr pipe explicitly: the CLI path exits and the OS reaps it,
+        # but callers that invoke run_qa in-process (e.g. tests) would otherwise
+        # leak the fd until GC and emit a ResourceWarning.
+        if proc.stderr:
+            proc.stderr.close()
 
 
 def main():

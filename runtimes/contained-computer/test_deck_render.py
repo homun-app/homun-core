@@ -3,12 +3,42 @@ PPTX tests skip when python-pptx is absent (it lives in the contained computer).
 import importlib.util
 import os
 import re
+import shutil
+import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("deck_render", os.path.join(HERE, "deck_render.py"))
 deck_render = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(deck_render)
+
+_qa_spec = importlib.util.spec_from_file_location("deck_qa", os.path.join(HERE, "deck_qa.py"))
+deck_qa = importlib.util.module_from_spec(_qa_spec)
+_qa_spec.loader.exec_module(deck_qa)
+
+
+def _find_chromium():
+    """Locate a Chromium/Chrome binary so the rendered-QA tests can run where one
+    exists (dev macs, the contained computer) and skip cleanly where it does not
+    (headless CI without a browser). CHROMIUM env wins, then PATH, then the
+    standard macOS app bundles."""
+    env = os.environ.get("CHROMIUM")
+    if env and os.path.exists(env):
+        return env
+    for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome"):
+        found = shutil.which(name)
+        if found:
+            return found
+    for bundle in (
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ):
+        if os.path.exists(bundle):
+            return bundle
+    return None
+
+
+CHROMIUM = _find_chromium()
 
 ALL_LAYOUTS_DECK = {
     "title": "T",
@@ -208,6 +238,60 @@ class RenderPptxLayouts(unittest.TestCase):
             fill_hex, text_hex = self._cover_fill_and_text_hex(Presentation(out))
         self.assertEqual(fill_hex, "111827")  # theme primary, unchanged
         self.assertEqual(text_hex, "FFFFFF")  # hardcoded white, unchanged
+
+
+class DeckQaOverflow(unittest.TestCase):
+    """Guards deck_qa's slide_overflow check against the hero_art false positive:
+    a decorative accent (.hero-art: right:-4vw;width:44vw) intentionally bleeds
+    past the slide edge and is clipped by .slide{overflow:hidden}, but
+    scrollWidth still measures its unclipped box. The check must ignore such
+    intentionally-clipped decorative layers while still catching real overflow."""
+
+    def _run_qa_on_html(self, html):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "preview.html")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(html)
+            result = deck_qa.run_qa(path, CHROMIUM, mode="deck")
+        return [issue.get("code") for issue in result.get("issues", [])], result
+
+    def test_qa_js_excludes_decorative_layers_from_overflow(self):
+        # Browser-free canary: runs in CI even without Chromium. If a refactor
+        # drops the decorative-layer exclusion, scrollWidth would false-flag
+        # every hero_art cover/section again — catch it without a browser.
+        self.assertIn("hero-art", deck_qa.QA_JS)
+        self.assertIn("pointerEvents", deck_qa.QA_JS)
+
+    @unittest.skipUnless(CHROMIUM, "no chromium/chrome binary found")
+    def test_hero_art_bleed_not_flagged_as_overflow(self):
+        # End-to-end: the real renderer output for a hero_art cover must pass the
+        # overflow check. This is the exact scenario that regressed on every deck
+        # pack once hero_art got real values.
+        html = deck_render.render_html(
+            {"title": "T", "theme": {"name": "editorial_bold"},
+             "slides": [{"layout": "cover", "title": "Kite", "subtitle": "S",
+                         "eyebrow": "E", "hero_art": "rings"}]}, HERE)
+        codes, result = self._run_qa_on_html(html)
+        self.assertNotIn(
+            "slide_overflow", codes,
+            f"hero_art decorative bleed must not be flagged as overflow: {result.get('issues')}")
+
+    @unittest.skipUnless(CHROMIUM, "no chromium/chrome binary found")
+    def test_real_content_overflow_still_flagged(self):
+        # Guards against an over-broad fix: a genuinely too-wide, non-decorative
+        # element (default pointer-events, no hero-art class) must STILL trip the
+        # check — the exclusion is surgical to decorative layers only.
+        html = (
+            "<!doctype html><html><head><meta charset='utf-8'><style>"
+            ".slide{width:1280px;height:720px;position:relative;overflow:hidden;box-sizing:border-box}"
+            ".wide{width:1600px;height:40px;background:#333}"
+            "</style></head><body>"
+            "<section class='slide'><div class='wide'></div></section></body></html>"
+        )
+        codes, result = self._run_qa_on_html(html)
+        self.assertIn(
+            "slide_overflow", codes,
+            f"genuine content overflow must still be flagged: {result.get('issues')}")
 
 
 if __name__ == "__main__":
