@@ -2,9 +2,9 @@ use crate::{
     AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, EncryptedJson,
     KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
     MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceGrant, PERSONAL_WORKSPACE,
-    PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId,
-    current_timestamp, decrypt_json, encrypt_json,
+    MemoryRefKind, MemoryRelation, MemoryRestoreMode, MemorySourceGrant, PrivacyDomain,
+    RoutineRecord, UserId, VectorHit, WikiPage, WorkspaceId, current_timestamp, decrypt_json,
+    encrypt_json, validate_memory_source_grant_intrinsic,
 };
 use rusqlite::{Connection, Row, params};
 use std::collections::{BTreeSet, HashMap};
@@ -36,47 +36,41 @@ impl MemorySourceGrantStoreError {
 }
 
 pub(crate) fn validate_memory_source_grant(grant: &MemorySourceGrant) -> Result<i64, String> {
-    let required_identities = [
-        ("grant id", grant.id.as_str()),
-        ("consumer user", grant.consumer_user_id.as_str()),
-        ("consumer workspace", grant.consumer_workspace_id.as_str()),
-        ("source user", grant.source_user_id.as_str()),
-        ("source workspace", grant.source_workspace_id.as_str()),
-        ("created by", grant.created_by.as_str()),
-    ];
-    for (label, value) in required_identities {
-        if value.trim().is_empty() {
-            return Err(format!("memory source grant {label} cannot be empty"));
+    validate_memory_source_grant_intrinsic(grant).map_err(|error| match error.as_str() {
+        "empty_grant_id" => "memory source grant grant id cannot be empty".to_string(),
+        "empty_consumer_user" => "memory source grant consumer user cannot be empty".to_string(),
+        "empty_consumer_workspace" => {
+            "memory source grant consumer workspace cannot be empty".to_string()
         }
-    }
-
-    let consumer_workspace = grant.consumer_workspace_id.as_str();
-    let source_workspace = grant.source_workspace_id.as_str();
-    if matches!(consumer_workspace, PERSONAL_WORKSPACE | THREADS_WORKSPACE) {
-        return Err("memory source grant consumer must be a project workspace".to_string());
-    }
-    if source_workspace == THREADS_WORKSPACE {
-        return Err("thread memory cannot be a linked source".to_string());
-    }
-    if consumer_workspace == source_workspace {
-        return Err("memory source grant cannot link a workspace to itself".to_string());
-    }
-    if grant.consumer_user_id != grant.source_user_id {
-        return Err("cross-user memory source grants are not supported".to_string());
-    }
-    if grant.collections.is_empty() && grant.overrides.is_empty() {
-        return Err("memory source grant must allow a collection or override".to_string());
-    }
-    for reference in grant.overrides.keys() {
-        if reference.kind != MemoryRefKind::Memory {
-            return Err("memory source grant overrides require memory refs".to_string());
+        "empty_source_user" => "memory source grant source user cannot be empty".to_string(),
+        "empty_source_workspace" => {
+            "memory source grant source workspace cannot be empty".to_string()
         }
-        if reference.user_id != grant.source_user_id
-            || reference.workspace_id != grant.source_workspace_id
-        {
-            return Err("memory source grant override is outside the declared source".to_string());
+        "empty_created_by" => "memory source grant created by cannot be empty".to_string(),
+        "reserved_consumer_scope" => {
+            "memory source grant consumer must be a project workspace".to_string()
         }
-    }
+        "reserved_source_scope" => "thread memory cannot be a linked source".to_string(),
+        "source_equals_consumer" => {
+            "memory source grant cannot link a workspace to itself".to_string()
+        }
+        "cross_user_source_not_supported" => {
+            "cross-user memory source grants are not supported".to_string()
+        }
+        "empty_source_policy" => {
+            "memory source grant must allow a collection or override".to_string()
+        }
+        "invalid_override_kind" => {
+            "memory source grant overrides require memory refs".to_string()
+        }
+        "override_outside_source" => {
+            "memory source grant override is outside the declared source".to_string()
+        }
+        "invalid_policy_version" => {
+            "memory source grant policy version must be positive".to_string()
+        }
+        _ => error,
+    })?;
 
     let policy_version = i64::try_from(grant.policy_version)
         .map_err(|_| "memory source grant policy version exceeds SQLite i64".to_string())?;

@@ -1,6 +1,7 @@
 use crate::{
-    AccessDecisionKind, AutomationCandidateCreateRequest, AutomationCandidateRecord,
-    AutomationCandidateStatus, DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
+    AccessDecisionKind, AuthorizedMemorySource, AutomationCandidateCreateRequest,
+    AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, GraphifyArtifacts,
+    GraphifyCli, GraphifyImport,
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryContextItem,
     MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence,
@@ -1097,6 +1098,17 @@ impl MemoryFacade {
             .store
             .list_memory_source_grants(consumer_user_id, consumer_workspace_id)
             .map_err(memory_source_grant_error)?)
+    }
+
+    pub fn resolve_memory_sources(
+        &self,
+        user: &UserId,
+        workspace: &WorkspaceId,
+        now_unix: i64,
+    ) -> MemoryResult<Vec<AuthorizedMemorySource>> {
+        let grants = self.list_memory_source_grants(user, workspace)?;
+        crate::resolve_memory_sources(user, workspace, &grants, now_unix)
+            .map_err(MemoryError::validation)
     }
 
     pub fn get_memory_source_grant(

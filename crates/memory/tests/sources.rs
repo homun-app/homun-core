@@ -1,7 +1,8 @@
 use local_first_memory::{
-    DataSensitivity, MemoryCollectionKey, MemoryGrantOverrideEffect, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemorySourceGrant, MemorySourcePolicy, MemoryStatus, PrivacyDomain, UserId,
-    WorkspaceId,
+    AuthorizedMemorySource, DataSensitivity, MemoryCollectionKey, MemoryFacade,
+    MemoryGrantOverrideEffect, MemoryRecord, MemoryRef, MemoryRefKind, MemorySourceGrant,
+    MemorySourcePolicy, MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId,
+    memory_source_policy_fingerprint, resolve_memory_sources,
 };
 use std::collections::{BTreeSet, HashMap};
 
@@ -392,6 +393,406 @@ fn override_deserialization_rejects_malformed_and_duplicate_refs() {
     assert!(duplicate_error.to_string().contains("duplicate memory_ref"));
 }
 
+#[test]
+fn resolver_always_places_the_implicit_local_source_first() {
+    let consumer_user = UserId::new("owner");
+    let consumer_workspace = WorkspaceId::new("project-a");
+
+    let sources = resolve_memory_sources(&consumer_user, &consumer_workspace, &[], 100).unwrap();
+
+    assert_eq!(
+        sources,
+        vec![AuthorizedMemorySource {
+            source_user_id: consumer_user,
+            source_workspace_id: consumer_workspace.clone(),
+            source_label: consumer_workspace.as_str().to_string(),
+            grant_id: None,
+            policy: None,
+            policy_version: 0,
+        }]
+    );
+}
+
+#[test]
+fn resolver_returns_only_direct_grants_for_the_requested_consumer() {
+    let direct = resolver_grant("direct", "owner", "project-a", "owner", "project-b");
+    let transitive = resolver_grant("transitive", "owner", "project-b", "owner", "project-c");
+    let other_user = resolver_grant("other-user", "other", "project-a", "other", "project-d");
+    let other_workspace = resolver_grant(
+        "other-workspace",
+        "owner",
+        "project-z",
+        "owner",
+        "project-e",
+    );
+
+    let sources = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &[transitive, other_user, direct.clone(), other_workspace],
+        100,
+    )
+    .unwrap();
+
+    assert_eq!(sources.len(), 2);
+    assert_eq!(sources[1].source_workspace_id.as_str(), "project-b");
+    assert_eq!(sources[1].grant_id.as_deref(), Some("direct"));
+    assert_eq!(
+        sources[1].policy,
+        Some(MemorySourcePolicy {
+            collections: direct.collections,
+            max_sensitivity: direct.max_sensitivity,
+            overrides: direct.overrides,
+        })
+    );
+}
+
+#[test]
+fn resolver_excludes_revoked_and_expired_grants_at_the_exact_boundary() {
+    let mut revoked = resolver_grant("revoked", "owner", "project-a", "owner", "revoked");
+    revoked.revoked_at = Some(99);
+    let mut past = resolver_grant("past", "owner", "project-a", "owner", "past");
+    past.expires_at = Some(99);
+    let mut boundary = resolver_grant("boundary", "owner", "project-a", "owner", "boundary");
+    boundary.expires_at = Some(100);
+    let mut future = resolver_grant("future", "owner", "project-a", "owner", "future");
+    future.expires_at = Some(101);
+
+    let sources = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &[future, boundary, past, revoked],
+        100,
+    )
+    .unwrap();
+
+    assert_eq!(sources.len(), 2);
+    assert_eq!(sources[1].source_workspace_id.as_str(), "future");
+}
+
+#[test]
+fn resolver_labels_personal_and_project_sources_and_sorts_them_deterministically() {
+    let project_z = resolver_grant("z", "owner", "project-a", "owner", "project-z");
+    let personal = resolver_grant("personal", "owner", "project-a", "owner", "__personal__");
+    let project_b = resolver_grant("b", "owner", "project-a", "owner", "project-b");
+    let inputs = vec![project_z, personal, project_b];
+    let mut reversed = inputs.clone();
+    reversed.reverse();
+
+    let first = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &inputs,
+        100,
+    )
+    .unwrap();
+    let second = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &reversed,
+        100,
+    )
+    .unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(
+        first
+            .iter()
+            .map(|source| source.source_label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["project-a", "Personal", "project-b", "project-z"]
+    );
+}
+
+#[test]
+fn resolver_fails_closed_for_invalid_matching_grants() {
+    let mut cases = Vec::new();
+
+    let cross_user = resolver_grant("cross-user", "owner", "project-a", "other", "project-b");
+    cases.push((cross_user, "cross_user_source_not_supported"));
+
+    let self_source = resolver_grant("self", "owner", "project-a", "owner", "project-a");
+    cases.push((self_source, "source_equals_consumer"));
+
+    let threads = resolver_grant("threads", "owner", "project-a", "owner", "__threads__");
+    cases.push((threads, "reserved_source_scope"));
+
+    let mut empty_policy = resolver_grant("empty", "owner", "project-a", "owner", "project-b");
+    empty_policy.collections.clear();
+    cases.push((empty_policy, "empty_source_policy"));
+
+    let mut wrong_kind = resolver_grant("kind", "owner", "project-a", "owner", "project-b");
+    wrong_kind.overrides.insert(
+        MemoryRef::new(
+            MemoryRefKind::Entity,
+            UserId::new("owner"),
+            WorkspaceId::new("project-b"),
+            "entity",
+        ),
+        MemoryGrantOverrideEffect::Allow,
+    );
+    cases.push((wrong_kind, "invalid_override_kind"));
+
+    let mut wrong_source = resolver_grant("source", "owner", "project-a", "owner", "project-b");
+    wrong_source.overrides.insert(
+        MemoryRef::new(
+            MemoryRefKind::Memory,
+            UserId::new("owner"),
+            WorkspaceId::new("project-c"),
+            "memory",
+        ),
+        MemoryGrantOverrideEffect::Allow,
+    );
+    cases.push((wrong_source, "override_outside_source"));
+
+    for (grant, expected) in cases {
+        assert_eq!(
+            resolve_memory_sources(
+                &UserId::new("owner"),
+                &WorkspaceId::new("project-a"),
+                &[grant],
+                100,
+            )
+            .unwrap_err(),
+            expected
+        );
+    }
+
+    for reserved in ["__personal__", "__threads__"] {
+        assert_eq!(
+            resolve_memory_sources(&UserId::new("owner"), &WorkspaceId::new(reserved), &[], 100,)
+                .unwrap_err(),
+            "reserved_consumer_scope"
+        );
+    }
+    assert_eq!(
+        resolve_memory_sources(&UserId::new(""), &WorkspaceId::new("project-a"), &[], 100,)
+            .unwrap_err(),
+        "empty_consumer_user"
+    );
+    assert_eq!(
+        resolve_memory_sources(&UserId::new("owner"), &WorkspaceId::new(""), &[], 100,)
+            .unwrap_err(),
+        "empty_consumer_workspace"
+    );
+}
+
+#[test]
+fn resolver_rejects_duplicate_active_sources_but_ignores_inactive_duplicates() {
+    let first = resolver_grant("first", "owner", "project-a", "owner", "project-b");
+    let second = resolver_grant("second", "owner", "project-a", "owner", "project-b");
+
+    assert_eq!(
+        resolve_memory_sources(
+            &UserId::new("owner"),
+            &WorkspaceId::new("project-a"),
+            &[first.clone(), second.clone()],
+            100,
+        )
+        .unwrap_err(),
+        "duplicate_active_source"
+    );
+
+    let mut revoked = second.clone();
+    revoked.revoked_at = Some(90);
+    let mut expired = second;
+    expired.id = "expired".to_string();
+    expired.expires_at = Some(100);
+    let sources = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &[expired, first, revoked],
+        100,
+    )
+    .unwrap();
+    assert_eq!(sources.len(), 2);
+}
+
+#[test]
+fn policy_fingerprint_is_order_independent_and_ignores_display_labels() {
+    let grants = vec![
+        resolver_grant("b", "owner", "project-a", "owner", "project-b"),
+        resolver_grant("c", "owner", "project-a", "owner", "project-c"),
+    ];
+    let mut sources = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &grants,
+        100,
+    )
+    .unwrap();
+    let expected = memory_source_policy_fingerprint(&sources);
+    sources.reverse();
+    assert_eq!(memory_source_policy_fingerprint(&sources), expected);
+    sources[0].source_label = "Display-only rename".to_string();
+    assert_eq!(memory_source_policy_fingerprint(&sources), expected);
+
+    let independently_resolved = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &grants.into_iter().rev().collect::<Vec<_>>(),
+        100,
+    )
+    .unwrap();
+    assert_eq!(
+        memory_source_policy_fingerprint(&independently_resolved),
+        expected
+    );
+}
+
+#[test]
+fn policy_fingerprint_is_independent_of_override_insertion_order() {
+    let first_ref = MemoryRef::new(
+        MemoryRefKind::Memory,
+        UserId::new("owner"),
+        WorkspaceId::new("project-b"),
+        "first",
+    );
+    let second_ref = MemoryRef::new(
+        MemoryRefKind::Memory,
+        UserId::new("owner"),
+        WorkspaceId::new("project-b"),
+        "second",
+    );
+    let mut first = resolver_grant("grant", "owner", "project-a", "owner", "project-b");
+    first
+        .overrides
+        .insert(first_ref.clone(), MemoryGrantOverrideEffect::Allow);
+    first
+        .overrides
+        .insert(second_ref.clone(), MemoryGrantOverrideEffect::Deny);
+    let mut second = resolver_grant("grant", "owner", "project-a", "owner", "project-b");
+    second
+        .overrides
+        .insert(second_ref, MemoryGrantOverrideEffect::Deny);
+    second
+        .overrides
+        .insert(first_ref, MemoryGrantOverrideEffect::Allow);
+
+    let fingerprint = |grant| {
+        memory_source_policy_fingerprint(
+            &resolve_memory_sources(
+                &UserId::new("owner"),
+                &WorkspaceId::new("project-a"),
+                &[grant],
+                100,
+            )
+            .unwrap(),
+        )
+    };
+    assert_eq!(fingerprint(first), fingerprint(second));
+}
+
+#[test]
+fn policy_fingerprint_covers_every_effective_authorization_field() {
+    let base = resolver_grant("grant", "owner", "project-a", "owner", "project-b");
+    let fingerprint = |grant: MemorySourceGrant| {
+        memory_source_policy_fingerprint(
+            &resolve_memory_sources(
+                &UserId::new("owner"),
+                &WorkspaceId::new("project-a"),
+                &[grant],
+                100,
+            )
+            .unwrap(),
+        )
+    };
+    let baseline = fingerprint(base.clone());
+
+    let mut mutations = Vec::new();
+    let mut source_identity = base.clone();
+    source_identity.source_workspace_id = WorkspaceId::new("project-c");
+    mutations.push(source_identity);
+    let mut grant_id = base.clone();
+    grant_id.id = "other-grant".to_string();
+    mutations.push(grant_id);
+    let mut version = base.clone();
+    version.policy_version += 1;
+    mutations.push(version);
+    let mut collections = base.clone();
+    collections.collections.insert(MemoryCollectionKey::Goals);
+    mutations.push(collections);
+    let mut sensitivity = base.clone();
+    sensitivity.max_sensitivity = DataSensitivity::Confidential;
+    mutations.push(sensitivity);
+    let mut override_ref = base.clone();
+    override_ref.overrides.insert(
+        MemoryRef::new(
+            MemoryRefKind::Memory,
+            UserId::new("owner"),
+            WorkspaceId::new("project-b"),
+            "special",
+        ),
+        MemoryGrantOverrideEffect::Allow,
+    );
+    mutations.push(override_ref.clone());
+    let mut override_effect = override_ref;
+    *override_effect.overrides.values_mut().next().unwrap() = MemoryGrantOverrideEffect::Deny;
+    mutations.push(override_effect);
+
+    for mutation in mutations {
+        assert_ne!(fingerprint(mutation), baseline);
+    }
+}
+
+#[test]
+fn policy_fingerprint_changes_when_expiry_or_revocation_removes_a_source() {
+    let mut grant = resolver_grant("grant", "owner", "project-a", "owner", "project-b");
+    grant.expires_at = Some(101);
+    let active = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &[grant.clone()],
+        100,
+    )
+    .unwrap();
+    let expired = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &[grant.clone()],
+        101,
+    )
+    .unwrap();
+    assert_ne!(
+        memory_source_policy_fingerprint(&active),
+        memory_source_policy_fingerprint(&expired)
+    );
+
+    grant.revoked_at = Some(99);
+    let revoked = resolve_memory_sources(
+        &UserId::new("owner"),
+        &WorkspaceId::new("project-a"),
+        &[grant],
+        100,
+    )
+    .unwrap();
+    assert_eq!(
+        memory_source_policy_fingerprint(&expired),
+        memory_source_policy_fingerprint(&revoked)
+    );
+}
+
+#[test]
+fn facade_resolves_only_persisted_direct_grants_for_the_requested_consumer() {
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+    let direct = resolver_grant("direct", "owner", "project-a", "owner", "project-b");
+    let transitive = resolver_grant("transitive", "owner", "project-b", "owner", "project-c");
+    facade.upsert_memory_source_grant(&direct).unwrap();
+    facade.upsert_memory_source_grant(&transitive).unwrap();
+
+    let sources = facade
+        .resolve_memory_sources(&UserId::new("owner"), &WorkspaceId::new("project-a"), 100)
+        .unwrap();
+
+    assert_eq!(
+        sources
+            .iter()
+            .map(|source| source.source_workspace_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["project-a", "project-b"]
+    );
+}
+
 fn memory(key: &str, memory_type: &str, sensitivity: DataSensitivity) -> MemoryRecord {
     MemoryRecord {
         reference: MemoryRef::new(
@@ -443,6 +844,31 @@ fn source_grant(overrides: HashMap<MemoryRef, MemoryGrantOverrideEffect>) -> Mem
         revoked_at: None,
         policy_version: 1,
         created_by: "user".to_string(),
+        created_at: "2026-07-17T08:00:00Z".to_string(),
+        updated_at: "2026-07-17T08:00:00Z".to_string(),
+    }
+}
+
+fn resolver_grant(
+    id: &str,
+    consumer_user: &str,
+    consumer_workspace: &str,
+    source_user: &str,
+    source_workspace: &str,
+) -> MemorySourceGrant {
+    MemorySourceGrant {
+        id: id.to_string(),
+        consumer_user_id: UserId::new(consumer_user),
+        consumer_workspace_id: WorkspaceId::new(consumer_workspace),
+        source_user_id: UserId::new(source_user),
+        source_workspace_id: WorkspaceId::new(source_workspace),
+        collections: BTreeSet::from([MemoryCollectionKey::Knowledge]),
+        max_sensitivity: DataSensitivity::Private,
+        overrides: HashMap::new(),
+        expires_at: None,
+        revoked_at: None,
+        policy_version: 1,
+        created_by: consumer_user.to_string(),
         created_at: "2026-07-17T08:00:00Z".to_string(),
         updated_at: "2026-07-17T08:00:00Z".to_string(),
     }
