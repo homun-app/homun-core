@@ -3,7 +3,60 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-16.**
+> **Ultimo aggiornamento: 2026-07-17.**
+
+## ⭐ CHECKPOINT 2026-07-17 — Presentations S1a (renderer editoriale) SHIPPED
+
+Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `S1a`; piano
+`docs/superpowers/plans/2026-07-17-presentations-s1a-editorial-renderer.md`): 6 task su `main`,
+commit `07655973..b8686102` (+ questo checkpoint). Chiude S1a; segue S1b (relayout galleria, piano
+separato).
+
+**Cosa è cambiato:** i due renderer (`deck_render.py`, `doc_render.py`) condividono ora un unico
+**modello surface/ink** in `design_tokens` — ogni tema dichiara `surface`/`ink` oltre a
+brand/accent, e le card catalogo passano da corporate-pulito a **editoriale drammatico**.
+
+- **Temi editoriali** (`f64be511`): 3 scuri per deck (`noir`, 2 varianti `bold`) + 2 chiari per
+  documenti (`ivory`, `slate`) + `warm` — **regola di design imparata via QA visiva**: superfici
+  scure solo sui **deck** (leggibilità su schermo/proiezione), i **documenti** restano su
+  superfici **chiare** (leggibilità/stampabilità) — corretto in corsa (`c08f9857`) dopo che un tema
+  `noir` su documento risultava illeggibile in QA visiva.
+- **Cover editoriali procedurali**: `deck_render` (`2acf3c30`) e `doc_render`'s `section_cover`
+  (`f094c79d`) aggiungono `eyebrow` + `hero_art` (SVG procedurale, non un asset statico) guidati
+  dai token surface/ink del tema attivo — stesso meccanismo sui due renderer, nessun terzo path.
+- **`category` field** (`9571436b`) su `TemplateCatalogEntry`, a specchio di `intake_questions`
+  (stesso pattern di parsing/esposizione già usato in F2).
+- **Whitelist parity** (`b8686102`, CRITICO): i nomi editoriali sono entrati in
+  `DELIVERABLE_DESIGN_THEMES` + name-passthrough in `design_theme_tokens` — senza, il deliverable
+  generato dal modello avrebbe usato un tema diverso da quello mostrato in preview (preview≠verità).
+  Con questa correzione **generato == preview** per tutti gli 8 pack.
+- **8 pack re-tematizzati editorialmente** (`b8686102`): deck su temi scuri, documenti su temi
+  chiari; preview **rigenerate audaci** dal renderer reale (non asset a mano) e confermate via QA
+  visiva (non solo test).
+
+**Gate finali (tutti verdi, in ordine, sessione 2026-07-17):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-desktop-gateway` | 595 passed, 0 failed, 5 ignored |
+| `python3 -m unittest … test_deck_render.py` | 6 ok + 1 skip (pptx assente sull'host, atteso) |
+| `python3 -m unittest … test_doc_render.py` | 16 ok |
+| `npm run build` (desktop) | OK, tsc pulito |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN |
+
+**Cosa resta:**
+- **S1b** (piano separato, non iniziato): relayout galleria — brand chip + drawer, tab per scopo,
+  card full-bleed, split di `BrandKitPanel`.
+- **S2**: brief operativo ottimizzato. **S3**: font picker.
+- **Validazione live in-app**: Fabio a schermo sul binario nuovo — il container
+  `contained-computer` è stato **già rebuildato in questa sessione**, ma va **riavviata l'app**
+  per caricare il binario nuovo prima di validare visivamente.
+- **Backlog minori** (non bloccanti):
+  - `deck_qa` `slide_overflow` falso-positivo sul bleed di `hero_art` in copertina (spawnato come
+    task separato, `task_c04866fe`);
+  - `.cover .sub` / `.cover h1` duplicati in `_CSS_BODY` tra i due renderer — candidato a
+    convergenza/cleanup (stesso spirito della regola "converge, non duplicare").
 
 ## ⭐⭐ CHECKPOINT 2026-07-16 (tris) — Presentations F3 (wow layer) SHIPPED — arco COMPLETO
 
