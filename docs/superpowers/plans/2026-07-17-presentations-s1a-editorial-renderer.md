@@ -22,18 +22,26 @@
 - Le 4 categorie (valori `category` fissati): `pitch_sales`, `cv_career`, `report_update`, `catalog_marketing` (fallback `other`).
 - I 3 temi editoriali (valori `design_theme` fissati): `editorial_noir`, `editorial_warm`, `editorial_bold`.
 
-## Assegnazione tema/categoria per pack (fissata)
+## ⚠️ REVISIONE (2026-07-17, decisa da verifica visiva): surface scuri SOLO ai deck
 
-| Pack | category | design_theme (nuovo default) |
-| --- | --- | --- |
-| homun/startup-pitch-clean-01 | pitch_sales | editorial_bold |
-| homun/executive-update-board-01 | report_update | editorial_noir |
-| homun/cv-professional-01 | cv_career | editorial_noir |
-| homun/cover-letter-01 | cv_career | editorial_warm |
-| homun/product-catalog-01 | catalog_marketing | editorial_warm |
-| homun/sales-proposal-01 | pitch_sales | editorial_bold |
-| homun/company-one-pager-01 | pitch_sales | editorial_bold |
-| homun/customer-case-study-01 | report_update | editorial_warm |
+Verifica a schermo durante T2/T3: un **documento** (CV/proposta) su surface **scuro** (noir/bold)
+ha corpo testo e tag illeggibili — ed è sbagliato di prodotto (si stampa/legge). Regola fissata:
+**deck → surface scuri drammatici; documenti → surface chiari editoriali**. Servono 2 temi chiari
+in più (ivory/slate) per varietà, e va corretto `editorial_bold.on_brand` (= primary = invisibile
+sugli elementi a fondo-brand). Vedi Task 5 Step 0.
+
+## Assegnazione tema/categoria per pack (REVISIONATA)
+
+| Pack | kind | category | design_theme |
+| --- | --- | --- | --- |
+| homun/startup-pitch-clean-01 | deck | pitch_sales | editorial_bold (dark teal) |
+| homun/executive-update-board-01 | deck | report_update | editorial_noir (dark) |
+| homun/cv-professional-01 | doc | cv_career | editorial_ivory (light) |
+| homun/cover-letter-01 | doc | cv_career | editorial_ivory (light, coppia col CV) |
+| homun/product-catalog-01 | doc | catalog_marketing | editorial_warm (cream) |
+| homun/sales-proposal-01 | doc | pitch_sales | editorial_slate (light) |
+| homun/company-one-pager-01 | doc | pitch_sales | editorial_slate (light) |
+| homun/customer-case-study-01 | doc | report_update | editorial_warm (cream) |
 
 ---
 
@@ -365,6 +373,23 @@ git commit -m "feat(templates): use-case category field on catalog entries"
 - Generated (committare): `templates/*/preview.html` + `thumbnails/`
 
 **Interfaces:** consuma Task 1-3 (temi+cover) e Task 4 (category). Gli id NON cambiano.
+
+- [ ] **Step 0: design_tokens — 2 temi chiari + fix on_brand.** In `runtimes/contained-computer/design_tokens.py`:
+  (a) correggi `editorial_bold.on_brand` da `"#0f3d3e"` a `"#f3f6f4"` (era = primary = testo invisibile
+  su avatar/th a fondo brand); (b) aggiungi due temi chiari editoriali:
+
+```python
+    "editorial_ivory": {"primary": "#1f4d3f", "secondary": "#e9e3d6", "accent": "#1f4d3f",
+                        "surface": "#f6f3ec", "ink": "#1c1b18", "muted": "#6f6a5f",
+                        "hairline": "#e2dccf", "on_brand": "#f6f3ec",
+                        "heading_font": "Georgia", "body_font": "Inter"},
+    "editorial_slate": {"primary": "#1f4d6b", "secondary": "#e6ebf0", "accent": "#1f4d6b",
+                        "surface": "#f4f5f7", "ink": "#15181c", "muted": "#5b636e",
+                        "hairline": "#dde1e6", "on_brand": "#f4f5f7",
+                        "heading_font": "Georgia", "body_font": "Inter"},
+```
+  Estendi il test `test_editorial_themes_present` (o aggiungi uno) che asserisce ivory/slate presenti
+  e con surface CHIARO (`editorial_ivory.surface == "#f6f3ec"`); run `test_doc_render.py` → verde.
 
 - [ ] **Step 1: per OGNI pack** — nel manifest: aggiungi `"category": "<da tabella>"`, cambia `design_theme` al valore editoriale della tabella. Nell'example.json: cambia `theme` (se nominato per nome usa `{"name": "<design_theme>"}`, altrimenti i 5 token colore VERBATIM da `design_tokens.THEMES[design_theme]`), e sulla cover/section_cover aggiungi un `eyebrow` (maiuscoletto, es. pitch → `"SEED ROUND · 2026"`, case study → `"CUSTOMER STORY"`, CV → `"CURRICULUM VITAE"`) + `hero_art` coerente (`rings`/`grid`/`gradient`). ⚠️ Il tema mostrato DEVE == `design_theme` del manifest (preview=verità).
 
