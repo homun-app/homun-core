@@ -1,6 +1,6 @@
 use local_first_memory::{
     DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport, PrivacyDomain,
-    SQLiteMemoryStore, UserId, WorkspaceId,
+    SQLiteMemoryStore, UserId, WorkspaceId, normalize_graphify_value,
 };
 use std::fs;
 
@@ -100,6 +100,79 @@ fn graphify_cli_builds_query_first_commands_for_llm_context() {
             artifacts.graph_json_path.to_str().unwrap(),
         ]
     );
+}
+
+#[test]
+fn graphify_normalization_collapses_duplicates_and_reports_dangling_links() {
+    let normalized = normalize_graphify_value(
+        &duplicate_graphify_value(false),
+        &UserId::new("local-user"),
+        &WorkspaceId::new("project-a"),
+        PrivacyDomain::new("personal"),
+        DataSensitivity::Internal,
+    )
+    .unwrap();
+
+    assert_eq!(normalized.report.input_nodes, 3);
+    assert_eq!(normalized.report.unique_nodes, 2);
+    assert_eq!(normalized.report.duplicate_nodes, 1);
+    assert_eq!(normalized.report.malformed_nodes, 0);
+    assert_eq!(normalized.report.input_edges, 4);
+    assert_eq!(normalized.report.unique_edges, 1);
+    assert_eq!(normalized.report.duplicate_edges, 2);
+    assert_eq!(normalized.report.malformed_edges, 0);
+    assert_eq!(normalized.report.dangling_edges, 1);
+    assert_eq!(normalized.entities.len(), 2);
+    assert_eq!(normalized.relations.len(), 1);
+    assert_eq!(normalized.entities[0].canonical_key, "code:a");
+    assert_eq!(normalized.relations[0].relation_type, "calls");
+    assert!(normalized.entities[0].metadata.get("raw_payload").is_none());
+    assert!(
+        normalized.relations[0]
+            .metadata
+            .get("raw_payload")
+            .is_none()
+    );
+}
+
+#[test]
+fn graphify_checksum_and_refs_do_not_depend_on_input_order() {
+    let normalize = |reversed| {
+        normalize_graphify_value(
+            &duplicate_graphify_value(reversed),
+            &UserId::new("local-user"),
+            &WorkspaceId::new("project-a"),
+            PrivacyDomain::new("personal"),
+            DataSensitivity::Internal,
+        )
+        .unwrap()
+    };
+
+    let forward = normalize(false);
+    let reversed = normalize(true);
+
+    assert_eq!(forward.report.checksum, reversed.report.checksum);
+    assert_eq!(forward.entities, reversed.entities);
+    assert_eq!(forward.relations, reversed.relations);
+}
+
+fn duplicate_graphify_value(reversed: bool) -> serde_json::Value {
+    let mut nodes = vec![
+        serde_json::json!({"id":"a","label":"a()","source_file":"src/a.rs","raw_payload":"discard-me"}),
+        serde_json::json!({"id":"a","label":"a()","source_file":"src/a.rs","raw_payload":"discard-me"}),
+        serde_json::json!({"id":"b","label":"b()","source_file":"src/b.rs"}),
+    ];
+    let mut links = vec![
+        serde_json::json!({"source":"a","target":"b","relation":"calls","raw_payload":"discard-me"}),
+        serde_json::json!({"source":"a","target":"b","relation":"calls","raw_payload":"discard-me"}),
+        serde_json::json!({"source":"a","target":"b","relation":"calls","raw_payload":"discard-me"}),
+        serde_json::json!({"source":"a","target":"missing","relation":"calls"}),
+    ];
+    if reversed {
+        nodes.reverse();
+        links.reverse();
+    }
+    serde_json::json!({"nodes": nodes, "links": links})
 }
 
 fn graphify_fixture() -> std::path::PathBuf {
