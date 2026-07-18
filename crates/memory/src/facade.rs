@@ -16,9 +16,9 @@ use crate::{
     MemoryUpdatePatch, PERSONAL_WORKSPACE, PrivacyDomain, ProjectGraphImportError,
     ProjectGraphImportReport, RoutineInference, RoutineInferenceSummary, RoutineRecord,
     RoutineStatus, SQLiteMemoryStore, THREADS_WORKSPACE, UserId, VectorHit,
-    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, contains_secret,
-    current_timestamp, ensure_artifacts_inside_root, ensure_transition, normalize_graphify_value,
-    parse_wiki_markdown,
+    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, WorkspacePurgeReport,
+    contains_secret, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
+    normalize_graphify_value, parse_wiki_markdown,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -114,10 +114,20 @@ impl MemoryFacade {
         &self,
         user_id: &UserId,
         workspace_id: &WorkspaceId,
-    ) -> Result<usize, String> {
-        let count = self.store.purge_workspace(user_id, workspace_id)?;
+    ) -> Result<WorkspacePurgeReport, String> {
+        let report = self.store.purge_workspace(user_id, workspace_id)?;
+        let key = vector_index_scope_key(user_id, workspace_id);
+        if let Ok(mut indexes) = self.vector_indexes.lock() {
+            indexes.remove(&key);
+        }
+        if let Ok(mut indexes) = self.authorized_vector_indexes.lock() {
+            indexes.retain(|cache_key, _| {
+                cache_key.source_user_id != user_id.as_str()
+                    || cache_key.source_workspace_id != workspace_id.as_str()
+            });
+        }
         self.bump_briefing_generation(user_id, workspace_id);
-        Ok(count)
+        Ok(report)
     }
 
     /// Reclaims free space in the SQLite database file.

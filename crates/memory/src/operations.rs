@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,4 +31,11 @@ pub enum MemoryRestoreMode {
 pub struct MemoryMaintenanceReport {
     pub integrity_ok: bool,
     pub fts_rebuilt: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspacePurgeReport {
+    pub workspace_id: String,
+    pub rows_by_table: BTreeMap<String, usize>,
+    pub total_deleted: usize,
 }

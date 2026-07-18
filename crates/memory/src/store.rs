@@ -8,8 +8,9 @@ use crate::{
     MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryRestoreMode,
     MemorySourceAccessEvent, MemorySourceAccessOutcome, MemorySourceCandidateProjection,
     MemorySourceGrant, MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord,
-    THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId, contains_secret,
-    current_timestamp, decrypt_json, encrypt_json, validate_memory_source_grant_intrinsic,
+    THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId, WorkspacePurgeReport,
+    contains_secret, current_timestamp, decrypt_json, encrypt_json,
+    validate_memory_source_grant_intrinsic,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -2942,33 +2943,160 @@ impl SQLiteMemoryStore {
         &self,
         user_id: &UserId,
         workspace_id: &WorkspaceId,
-    ) -> Result<usize, String> {
+    ) -> Result<WorkspacePurgeReport, String> {
         let (uid, wid) = (user_id.as_str(), workspace_id.as_str());
-        let conn = self.write_conn();
-        // Count memories before deleting for the return value.
-        let count: u64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM memories WHERE user_id = ?1 AND workspace_id = ?2",
-                (uid, wid),
-                |row| row.get(0),
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let mut rows_by_table = std::collections::BTreeMap::new();
+
+        let evidence = transaction
+            .execute(
+                "delete from memory_evidence
+                 where memory_ref in (
+                    select ref from memories where user_id = ?1 and workspace_id = ?2
+                 ) or evidence_ref in (
+                    select ref from memory_events where user_id = ?1 and workspace_id = ?2
+                    union select ref from memories where user_id = ?1 and workspace_id = ?2
+                    union select ref from entities where user_id = ?1 and workspace_id = ?2
+                    union select ref from wiki_pages where user_id = ?1 and workspace_id = ?2
+                    union select ref from routines where user_id = ?1 and workspace_id = ?2
+                    union select ref from automation_candidates where user_id = ?1 and workspace_id = ?2
+                 )",
+                params![uid, wid],
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
+        rows_by_table.insert("memory_evidence".to_string(), evidence);
+
         for table in [
-            "memories",
-            "entities",
-            "relations",
-            "tombstones",
-            "embeddings",
-            "episodes",
-            "wiki_pages",
+            "memory_source_grant_collections",
+            "memory_source_grant_overrides",
         ] {
-            conn.execute(
-                &format!("DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"),
-                (uid, wid),
-            )
-            .map_err(|e| e.to_string())?;
+            let deleted = transaction
+                .execute(
+                    &format!(
+                        "delete from {table} where grant_id in (
+                            select id from memory_source_grants
+                            where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
+                               or (source_user_id = ?1 and source_workspace_id = ?2)
+                        )"
+                    ),
+                    params![uid, wid],
+                )
+                .map_err(|error| error.to_string())?;
+            rows_by_table.insert(table.to_string(), deleted);
         }
-        Ok(count as usize)
+        let access_events = transaction
+            .execute(
+                "delete from memory_source_access_events
+                 where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
+                    or source_workspace_id = ?2
+                    or grant_id in (
+                        select id from memory_source_grants
+                        where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
+                           or (source_user_id = ?1 and source_workspace_id = ?2)
+                    )",
+                params![uid, wid],
+            )
+            .map_err(|error| error.to_string())?;
+        rows_by_table.insert("memory_source_access_events".to_string(), access_events);
+        let grants = transaction
+            .execute(
+                "delete from memory_source_grants
+                 where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
+                    or (source_user_id = ?1 and source_workspace_id = ?2)",
+                params![uid, wid],
+            )
+            .map_err(|error| error.to_string())?;
+        rows_by_table.insert("memory_source_grants".to_string(), grants);
+
+        let publication_links = transaction
+            .execute(
+                "delete from memory_publication_links
+                 where json_extract(source_ref_json, '$.workspace_id') = ?1
+                    or json_extract(destination_ref_json, '$.workspace_id') = ?1",
+                params![wid],
+            )
+            .map_err(|error| error.to_string())?;
+        rows_by_table.insert("memory_publication_links".to_string(), publication_links);
+        let publication_proposals = transaction
+            .execute(
+                "delete from memory_publication_proposals
+                 where (source_user_id = ?1 and source_workspace_id = ?2)
+                    or (destination_user_id = ?1 and destination_workspace_id = ?2)",
+                params![uid, wid],
+            )
+            .map_err(|error| error.to_string())?;
+        rows_by_table.insert(
+            "memory_publication_proposals".to_string(),
+            publication_proposals,
+        );
+
+        let fts = transaction
+            .execute(
+                "delete from memory_search_fts where user_id = ?1 and workspace_id = ?2",
+                params![uid, wid],
+            )
+            .map_err(|error| error.to_string())?;
+        rows_by_table.insert("memory_search_fts".to_string(), fts);
+
+        for table in [
+            "memory_embeddings",
+            "relations",
+            "entities",
+            "wiki_pages",
+            "routines",
+            "automation_candidates",
+            "access_audit",
+            "tombstones",
+            "memory_events",
+            "memories",
+        ] {
+            let deleted = transaction
+                .execute(
+                    &format!("delete from {table} where user_id = ?1 and workspace_id = ?2"),
+                    params![uid, wid],
+                )
+                .map_err(|error| error.to_string())?;
+            rows_by_table.insert(table.to_string(), deleted);
+        }
+
+        for table in [
+            "memory_embeddings",
+            "relations",
+            "entities",
+            "wiki_pages",
+            "routines",
+            "automation_candidates",
+            "access_audit",
+            "tombstones",
+            "memory_events",
+            "memories",
+        ] {
+            let remaining: usize = transaction
+                .query_row(
+                    &format!(
+                        "select count(*) from {table} where user_id = ?1 and workspace_id = ?2"
+                    ),
+                    params![uid, wid],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            if remaining != 0 {
+                return Err(format!(
+                    "workspace purge verification failed for {table}: {remaining} rows remain"
+                ));
+            }
+        }
+
+        transaction.commit().map_err(|error| error.to_string())?;
+        let total_deleted = rows_by_table.values().sum();
+        Ok(WorkspacePurgeReport {
+            workspace_id: wid.to_string(),
+            rows_by_table,
+            total_deleted,
+        })
     }
 
     /// Reclaims free space. Call periodically, NOT on every delete.
