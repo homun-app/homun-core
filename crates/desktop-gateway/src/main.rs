@@ -17665,7 +17665,8 @@ fn deck_content_schema() -> serde_json::Value {
                         "title": { "type": "string" },
                         "bullets": { "type": "array", "items": { "type": "string" } },
                         "notes": { "type": "string" },
-                        "want_image": { "type": "boolean" }
+                        "want_image": { "type": "boolean" },
+                        "eyebrow": { "type": "string", "description": "Optional small-caps kicker above the COVER title only; refine the pack default to fit the brief (e.g. \"SERIES A · 2026\"). Leave \"\" on non-cover slides." }
                     }
                 }
             }
@@ -18290,6 +18291,7 @@ async fn generate_deck_content(
     design_theme: Option<&str>,
     design_profile: Option<&str>,
     design_components: &[String],
+    cover_eyebrow_default: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // Use the CURRENT turn's model (what the chat is actually running), NOT a
     // fresh orchestrator-role resolution. Hit the OpenAI-compat endpoint DIRECTLY
@@ -18322,11 +18324,21 @@ async fn generate_deck_content(
         deliverable_design_theme_directive(design_theme, "deck").unwrap_or_default();
     let component_directives =
         deliverable_design_component_directives(design_components, "deck").join(" ");
+    // The cover eyebrow is REFINABLE (unlike hero_art, which stays deterministic from
+    // the pack): tell the model the pack's curated default so it can adapt the label
+    // to the brief instead of inventing one from scratch or leaving it generic.
+    let eyebrow_directive = match cover_eyebrow_default {
+        Some(d) if !d.trim().is_empty() => format!(
+            " The cover slide's `eyebrow` defaults to «{}»; keep it unless the brief clearly implies a more specific label.",
+            d.trim()
+        ),
+        _ => String::new(),
+    };
     let system = format!(
         "You are a senior presentation designer. Output ONLY JSON matching the schema. \
 Design a tight, on-brand deck of about {slides} slides in {lang}. Rules: the FIRST slide layout \
 must be \"cover\" and the LAST \"closing\"; use \"section\" only as an occasional divider; every \
-other slide is \"bullets\". Headline titles of at most 6 words. At most 4 bullets per slide, \
+other slide is \"bullets\".{eyebrow_directive} Headline titles of at most 6 words. At most 4 bullets per slide, \
 numbers over adjectives, one idea per slide. Write speaker `notes` for the substantive slides. \
 Set want_image=true on the cover and on AT MOST two of the most visual slides (false on the rest). \
 {design_directive} \
@@ -22677,6 +22689,19 @@ available tools (for data from the web use the browser: browser_navigate on the 
             let brand = tokio::task::spawn_blocking(load_brand_kit)
                 .await
                 .unwrap_or_default();
+            // Seed the pack's cover eyebrow as a REFINABLE default (unlike hero_art,
+            // which apply_deck_template_chrome overlays deterministically): the model
+            // sees it in the prompt and can adapt it to the brief instead of the
+            // overlay silently clobbering whatever the model wrote.
+            let cover_eyebrow_default = deck_template_pack(catalog_template.as_ref())
+                .and_then(|pack| document_content::load_pack_example(pack).ok())
+                .and_then(|ex| {
+                    ex["slides"].as_array().and_then(|sl| {
+                        sl.iter()
+                            .find(|s| s.get("layout").and_then(|l| l.as_str()) == Some("cover"))
+                            .and_then(|c| c.get("eyebrow").and_then(|e| e.as_str()).map(String::from))
+                    })
+                });
             // 2) slide content — schema-enforced model call (the floor).
             match generate_deck_content(
                 &ctx.state.http,
@@ -22691,6 +22716,7 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 design_theme.as_deref(),
                 design_profile.as_deref(),
                 &design_components,
+                cover_eyebrow_default.as_deref(),
             )
             .await
             {
@@ -61285,6 +61311,16 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let mut deck2 = serde_json::json!({"slides": [{"layout": "cover", "title": "R"}]});
         super::apply_deck_template_chrome(&mut deck2, &serde_json::json!({}));
         assert!(deck2["slides"][0].get("hero_art").is_none());
+    }
+
+    #[test]
+    fn deck_content_schema_exposes_refinable_eyebrow() {
+        let schema = super::deck_content_schema();
+        let item = &schema["properties"]["slides"]["items"]["properties"];
+        assert!(item.get("eyebrow").is_some());
+        // eyebrow is NOT required (blank/omitted is fine; overlay supplies the default)
+        let req = schema["properties"]["slides"]["items"]["required"].as_array().unwrap();
+        assert!(!req.iter().any(|v| v == "eyebrow"));
     }
 
     #[test]
