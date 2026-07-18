@@ -57,6 +57,7 @@ import re
 import sys
 
 from design_tokens import theme_values
+from fonts_embed import font_face_css
 
 DEFAULT_THEME = {
     "primary": "#2b6cb0",
@@ -137,7 +138,13 @@ def render_html(deck, base_dir):
         on_brand=theme.get("on_brand", "#ffffff"),
     )
     title = html_escape(deck.get("title", "Presentation"))
-    return _HTML_SHELL.format(title=title, css=css, body="\n".join(slides_html))
+    # Embed the theme's @font-face before the CSS that references it, so the
+    # HTML is self-contained (renders identically in the container's chromium
+    # →PDF, the desktop preview iframe, and anywhere else the file is opened).
+    font_faces = font_face_css([theme.get("heading_font", ""), theme.get("body_font", "")])
+    return _HTML_SHELL.format(
+        title=title, css=css, body="\n".join(slides_html), font_faces=font_faces
+    )
 
 
 def _bullets_html(items):
@@ -369,7 +376,7 @@ table.cmp tr:nth-child(even) td{{background:color-mix(in srgb,var(--hairline) 40
 """
 
 _HTML_SHELL = """<!doctype html><html lang="en"><head><meta charset="utf-8">
-<title>{title}</title><style>{css}</style></head><body>
+<title>{title}</title><style>{font_faces}{css}</style></head><body>
 {body}
 </body></html>"""
 

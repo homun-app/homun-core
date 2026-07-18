@@ -63,7 +63,7 @@ class RenderHtmlStructuralBlocks(unittest.TestCase):
             {"title": "T", "theme": {"name": "warm_editorial", "accent": "#000000"},
              "blocks": []}, HERE)
         self.assertIn("--brand:#7c2d12", html)      # THEMES[warm_editorial] primary
-        self.assertIn("--head:'Georgia'", html)     # THEMES[warm_editorial] heading font
+        self.assertIn("--head:'Source Serif 4'", html)  # THEMES[warm_editorial] heading font (bundled serif, Task 3)
         self.assertIn("--accent:#000000", html)     # explicit override beats the theme
 
 

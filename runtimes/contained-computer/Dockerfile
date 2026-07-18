@@ -83,6 +83,14 @@ COPY design_tokens.py /opt/deck/design_tokens.py
 RUN printf '#!/bin/sh\nexec /opt/deck-venv/bin/python /opt/deck/doc_render.py "$@"\n' > /usr/local/bin/doc-render \
  && chmod +x /usr/local/bin/doc-render
 
+# Typography: font files + the embedding/manifest modules deck_render.py and
+# doc_render.py import at render time. Must land before those renderers run so
+# `import fonts_embed`/`import fonts_manifest` resolve and fonts_embed finds
+# /opt/deck/fonts on disk (not a fallback system font).
+COPY fonts_embed.py    /opt/deck/fonts_embed.py
+COPY fonts_manifest.py /opt/deck/fonts_manifest.py
+COPY fonts/            /opt/deck/fonts/
+
 # Non-root runtime user; the container boundary is the sandbox (ADR 0010).
 # `.cache` is pre-created and owned by agent so a named volume mounted there
 # inherits agent ownership on first init (persists the Whisper model download).

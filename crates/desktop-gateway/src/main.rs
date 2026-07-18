@@ -17904,14 +17904,14 @@ fn design_theme_tokens(theme: Option<&str>, brand: &BrandKit) -> serde_json::Val
     // THEMES dict (the canonical source deck_render.py resolves from) — keep the two in sync.
     let (primary, secondary, accent, heading_font, body_font) = match theme {
         Some("high_contrast") => ("#111827", "#000000", "#f59e0b", "Inter", "Inter"),
-        Some("warm_editorial") => ("#7c2d12", "#431407", "#f97316", "Georgia", "Inter"),
+        Some("warm_editorial") => ("#7c2d12", "#431407", "#f97316", "Source Serif 4", "Inter"),
         Some("minimal_mono") => ("#111827", "#374151", "#6b7280", "Inter", "Inter"),
         Some("soft_gradient") => ("#0f766e", "#164e63", "#14b8a6", "Inter", "Inter"),
-        Some("editorial_noir") => ("#c9a54e", "#1a1a1e", "#c9a54e", "Georgia", "Inter"),
-        Some("editorial_warm") => ("#8a3b1e", "#e7ddcb", "#c46a3a", "Georgia", "Inter"),
-        Some("editorial_bold") => ("#2f9d95", "#0a2a2b", "#f2c14e", "Georgia", "Inter"),
-        Some("editorial_ivory") => ("#1f4d3f", "#e9e3d6", "#1f4d3f", "Georgia", "Inter"),
-        Some("editorial_slate") => ("#1f4d6b", "#e6ebf0", "#1f4d6b", "Georgia", "Inter"),
+        Some("editorial_noir") => ("#c9a54e", "#1a1a1e", "#c9a54e", "Playfair Display", "Inter"),
+        Some("editorial_warm") => ("#8a3b1e", "#e7ddcb", "#c46a3a", "Source Serif 4", "Inter"),
+        Some("editorial_bold") => ("#2f9d95", "#0a2a2b", "#f2c14e", "Playfair Display", "Inter"),
+        Some("editorial_ivory") => ("#1f4d3f", "#e9e3d6", "#1f4d3f", "Source Serif 4", "Inter"),
+        Some("editorial_slate") => ("#1f4d6b", "#e6ebf0", "#1f4d6b", "Source Serif 4", "Inter"),
         Some("clean_corporate") | None | Some(_) => (
             brand.primary_color.as_str(),
             brand.secondary_color.as_str(),
@@ -60947,7 +60947,7 @@ prs.save(Path({path:?}))
         // materialized to brand.json — deck_render/doc_render's `{**brand,
         // **theme}` merge treats every present field as a truthy override, so
         // even default-blue/orange/Inter clobbers a pack's curated editorial
-        // theme (e.g. editorial_ivory's green/Georgia) at real generation
+        // theme (e.g. editorial_ivory's green/Source Serif 4) at real generation
         // time, though the committed preview (no brand.json in that loop)
         // shows the correct curated look. Mirrors the UI's own guard
         // (BrandKitPanel.tsx's brandPreviewOverride returns null for the
@@ -61383,8 +61383,26 @@ prs.save(Path({path:?}))
         );
         assert_eq!(
             deck.pointer("/theme/heading_font").and_then(|v| v.as_str()),
-            Some("Georgia")
+            Some("Source Serif 4")
         );
+    }
+
+    #[test]
+    fn editorial_themes_use_bundled_serif_not_georgia() {
+        // Task 1's curated font set is bundled (OFL, shipped in fonts_embed); the prior
+        // non-OFL, non-bundled default only survived via the container's font-fallback,
+        // which silently swapped the intended editorial look. Pin every editorial theme to
+        // a bundled serif so the declared token and the rendered output actually match.
+        let brand = super::BrandKit::default();
+        for theme in ["editorial_noir", "editorial_bold", "editorial_warm", "editorial_ivory", "editorial_slate"] {
+            let tokens = super::design_theme_tokens(Some(theme), &brand);
+            let head = tokens["heading_font"].as_str().unwrap_or("");
+            assert_ne!(head, "Georgia", "{theme} still uses non-bundled Georgia");
+            assert!(
+                head == "Playfair Display" || head == "Source Serif 4",
+                "{theme} heading_font `{head}` is not a bundled serif"
+            );
+        }
     }
 
     #[test]
