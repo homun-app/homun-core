@@ -292,12 +292,31 @@ pub(crate) fn document_content_schema(skeleton: &[DocBlockSlot]) -> Result<Value
         // the offending name (mirrors assemble_doc_json) instead of silently
         // skipping the slot, which would desync assemble_doc_json's strict
         // 1:1 slot↔block expectation.
-        let schema = document_block_schema(&slot.block_type).ok_or_else(|| {
+        let mut schema = document_block_schema(&slot.block_type).ok_or_else(|| {
             format!(
                 "unregistered document block type `{}` in pack skeleton (slot `{}`)",
                 slot.block_type, slot.slot_key
             )
         })?;
+        // Editorial eyebrow: a REFINABLE slot, pre-seeded with the pack default so the
+        // model can adapt it to the brief (e.g. "SEED ROUND" -> "SERIES A · 2026") while a
+        // blank answer falls back to the curated default (assemble_doc_json's guard).
+        if let Some(default) = slot.template_block.get("eyebrow").and_then(|v| v.as_str()) {
+            if !default.trim().is_empty() {
+                if let Some(obj) = schema.get_mut("properties").and_then(|p| p.as_object_mut()) {
+                    obj.insert(
+                        "eyebrow".to_string(),
+                        s(&format!(
+                            "Small-caps kicker above the title. Default: «{default}». Keep it unless the \
+brief clearly implies a more specific label; use \"\" to keep the default."
+                        )),
+                    );
+                }
+                if let Some(req) = schema.get_mut("required").and_then(|r| r.as_array_mut()) {
+                    req.push(Value::String("eyebrow".to_string()));
+                }
+            }
+        }
         slot_properties.insert(slot.slot_key.clone(), schema);
         slot_required.push(Value::String(slot.slot_key.clone()));
     }
@@ -339,6 +358,18 @@ pub(crate) fn assemble_doc_json(
         let mut block = slot.template_block.clone();
         for (k, v) in filled {
             block.insert(k.clone(), v.clone());
+        }
+        // A blank model eyebrow must not erase the curated default (the schema invites
+        // refinement, not deletion). Restore the skeleton's eyebrow when blank.
+        let model_eyebrow_blank = block
+            .get("eyebrow")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().is_empty())
+            .unwrap_or(false);
+        if model_eyebrow_blank {
+            if let Some(default) = slot.template_block.get("eyebrow") {
+                block.insert("eyebrow".to_string(), default.clone());
+            }
         }
         block.insert("type".to_string(), Value::String(slot.block_type.clone()));
         blocks.push(Value::Object(block));
@@ -617,5 +648,40 @@ mod tests {
         assert!(b[0].get("hero_art").is_none());
         // type preserved
         assert_eq!(b[0]["type"], "contact_header");
+    }
+
+    #[test]
+    fn schema_injects_eyebrow_slot_only_where_skeleton_has_one() {
+        let example = json!({"blocks": [
+            {"type": "section_cover", "title": "X", "subtitle": "y", "eyebrow": "CASE STUDY"},
+            {"type": "text_section", "title": "Z", "paragraphs": [], "bullets": []}
+        ]});
+        let skeleton = document_block_skeleton(&example);
+        let schema = document_content_schema(&skeleton).unwrap();
+        let props = &schema["properties"]["slots"]["properties"];
+        // cover slot gained an eyebrow property whose description carries the default
+        let cover = &props["slot_0_section_cover"];
+        assert!(cover["properties"].get("eyebrow").is_some());
+        assert!(cover["required"].as_array().unwrap().iter().any(|v| v == "eyebrow"));
+        assert!(cover["properties"]["eyebrow"]["description"].as_str().unwrap().contains("CASE STUDY"));
+        // text_section has no skeleton eyebrow → no eyebrow slot
+        assert!(props["slot_1_text_section"]["properties"].get("eyebrow").is_none());
+    }
+
+    #[test]
+    fn assemble_keeps_model_eyebrow_but_restores_default_when_blank() {
+        let example = json!({"blocks": [
+            {"type": "section_cover", "title": "X", "subtitle": "y", "eyebrow": "CASE STUDY"},
+            {"type": "section_cover", "title": "X2", "subtitle": "y2", "eyebrow": "CASE STUDY"}
+        ]});
+        let skeleton = document_block_skeleton(&example);
+        let model_output = json!({"title": "t", "slots": {
+            "slot_0_section_cover": {"title": "A", "subtitle": "b", "eyebrow": "SERIES A · 2026"},
+            "slot_1_section_cover": {"title": "A2", "subtitle": "b2", "eyebrow": "  "}
+        }});
+        let doc = assemble_doc_json("f", &skeleton, &model_output).unwrap();
+        let b = doc["blocks"].as_array().unwrap();
+        assert_eq!(b[0]["eyebrow"], "SERIES A · 2026");  // model refinement kept
+        assert_eq!(b[1]["eyebrow"], "CASE STUDY");        // blank → skeleton default restored
     }
 }
