@@ -824,7 +824,7 @@ impl ChatStore {
             params![workspace_id],
         )?;
         self.conn.execute(
-            "delete from chat_settings where key = ?1",
+            "delete from settings where key = ?1",
             params![active_thread_setting_key(workspace_id)],
         )?;
         // And the project's own tag assignments (a project is a taggable entity too).
@@ -3901,6 +3901,26 @@ mod tests {
             )],
             "graph-like read-model tables need explicit canonical memory convergence"
         );
+    }
+
+    #[test]
+    fn purge_workspace_removes_threads_settings_and_tags_and_is_idempotent() {
+        let store = ChatStore::in_memory().unwrap();
+        let workspace_id = "workspace-purge-test";
+        let thread = store.create_thread(workspace_id).unwrap();
+        store.create_tag("purge-tag", "Temporary", "#000000").unwrap();
+        store
+            .assign_tag("purge-tag", TagEntity::Thread, &thread.thread_id)
+            .unwrap();
+        store
+            .assign_tag("purge-tag", TagEntity::Project, workspace_id)
+            .unwrap();
+
+        assert_eq!(store.purge_workspace(workspace_id).unwrap(), 1);
+        assert!(store.setting(&active_thread_setting_key(workspace_id)).unwrap().is_none());
+        assert!(store.tags_for_entity(TagEntity::Thread, &thread.thread_id).unwrap().is_empty());
+        assert!(store.tags_for_entity(TagEntity::Project, workspace_id).unwrap().is_empty());
+        assert_eq!(store.purge_workspace(workspace_id).unwrap(), 0);
     }
 
     #[test]
