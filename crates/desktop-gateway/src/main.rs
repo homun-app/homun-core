@@ -64,7 +64,7 @@ use crate::tool_safety::{SafetyDecision, SandboxPolicy, assess_tool_safety};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path, Query, Request, State},
+    extract::{Path, Query, RawQuery, Request, State},
     http::{
         HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
         header::{AUTHORIZATION, CONTENT_TYPE},
@@ -135,12 +135,16 @@ use local_first_local_computer_session::{
 use local_first_local_computer_session::{LocalComputerReadModel, LocalComputerSessionStore};
 use local_first_memory::{
     BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
-    ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCreateRequest,
-    MemoryDashboard, MemoryEntity, MemoryExtraction, MemoryFacade, MemoryLifecycleRequest,
-    MemoryRecord, MemoryRecallService, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope,
-    MemorySearchRequest, MemoryStatus, MemoryUiReadModel, MemoryUpdatePatch, MemoryWikiProjection,
-    PERSONAL_WORKSPACE, PrivacyDomain, RecallPack, SQLiteMemoryStore, UserId as MemoryUserId,
-    WikiFileStore, WikiPage, WorkspaceId as MemoryWorkspaceId, briefing_cache, prompt_fingerprint,
+    ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
+    MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryError, MemoryExtraction,
+    MemoryFacade, MemoryGrantOverrideEffect, MemoryLifecycleRequest, MemoryRecallService,
+    MemoryPublicationDestination, MemoryPublicationEditInput, MemoryPublicationProposal,
+    MemoryPublicationResolution, MemoryPublicationResult, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
+    MemorySourceCandidateProjection, MemorySourceGrant, MemoryStatus, MemoryUiReadModel,
+    MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain, RecallPack,
+    SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
+    WorkspaceId as MemoryWorkspaceId, MEMORY_SOURCE_CANDIDATE_PAGE_MAX, briefing_cache,
+    contains_secret, prompt_fingerprint, redact_text as redact_memory_text,
 };
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
@@ -168,7 +172,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashMap, HashSet},
     env, fs,
     io::{Cursor, Write},
     net::SocketAddr,
@@ -820,16 +824,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ADR 0022 — Tappa 1: se il flag è ON, costruisci il service memoria che
     // incapsula brief/recall/learn. Costruito dopo il letterale perché
     // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
-    if memory_service_enabled() {
-        let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
-            Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
-        let llm: Arc<dyn local_first_memory::LlmClient> =
-            Arc::new(GatewayLlmClient { http: state.http.clone() });
-        state.memory_service = Some(
-            Arc::new(InProcessMemoryRecallService::new(state.clone(), embedding, llm))
-                as Arc<dyn MemoryRecallService>,
-        );
-    }
+    let embedding: Arc<dyn local_first_memory::EmbeddingClient> =
+        Arc::new(GatewayEmbeddingClient { http: state.http.clone() });
+    let llm: Arc<dyn local_first_memory::LlmClient> =
+        Arc::new(GatewayLlmClient { http: state.http.clone() });
+    install_memory_service_if_enabled(&mut state, embedding, llm);
     // Fix any pre-existing 0644 data files (created before the umask above was set):
     // the SQLite stores and the WhatsApp session are world-readable on old installs.
     if let Ok(dir) = gateway_data_dir() {
@@ -1315,6 +1314,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/workspaces/{workspace_id}/access/remove",
             post(project_access_remove),
         )
+        .route(
+            "/api/workspaces/{workspace_id}/memory-sources",
+            get(memory_sources_list),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/memory-sources/upsert",
+            post(memory_source_upsert),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/memory-sources/{grant_id}/revoke",
+            post(memory_source_revoke),
+        )
+        .route(
+            "/api/workspaces/{workspace_id}/memory-sources/candidates",
+            get(memory_source_candidates),
+        )
+        .route("/api/memory/publications", post(memory_publication_create))
+        .route("/api/memory/publications/{proposal_id}", get(memory_publication_get))
+        .route(
+            "/api/memory/publications/{proposal_id}/edit",
+            post(memory_publication_edit),
+        )
+        .route(
+            "/api/memory/publications/{proposal_id}/approve",
+            post(memory_publication_approve),
+        )
+        .route(
+            "/api/memory/publications/{proposal_id}/reject",
+            post(memory_publication_reject),
+        )
         .route("/api/capabilities/mcp/connect", post(connect_mcp))
         .route("/api/capabilities/mcp/execute", post(mcp_execute))
         .route("/api/capabilities/mcp/registry", get(mcp_registry_search))
@@ -1521,6 +1550,57 @@ fn scope_display_name(scope: &str) -> String {
             .find(|w| w.id == other)
             .map(|w| w.name.clone())
             .unwrap_or_else(|| other.to_string()),
+    }
+}
+
+/// Resolve provenance labels at emission time rather than trusting a label that
+/// travelled through recall. Renames are therefore visible immediately and the
+/// reserved personal space never leaks as an implementation id.
+fn recall_source_label(scope: &str) -> String {
+    if scope == PERSONAL_WORKSPACE {
+        return if effective_user_language() == "it" {
+            "Personale".to_string()
+        } else {
+            "Personal".to_string()
+        };
+    }
+    scope_display_name(scope)
+}
+
+fn recall_collection_token(collection: MemoryCollectionKey) -> &'static str {
+    match collection {
+        MemoryCollectionKey::Preferences => "preferences",
+        MemoryCollectionKey::Profile => "profile",
+        MemoryCollectionKey::Knowledge => "knowledge",
+        MemoryCollectionKey::Decisions => "decisions",
+        MemoryCollectionKey::Goals => "goals",
+        MemoryCollectionKey::Artifacts => "artifacts",
+        MemoryCollectionKey::Episodes => "episodes",
+    }
+}
+
+fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::RecallStreamPayload {
+    local_first_subagents::RecallStreamPayload {
+        query: pack.query.clone(),
+        hits: pack
+            .hits
+            .iter()
+            .map(|hit| local_first_subagents::RecallStreamHit {
+                r#ref: hit.memory_ref.clone(),
+                text: hit.text.clone(),
+                score: hit.score,
+                kind: hit.kind.clone(),
+                source_workspace_id: hit.source_workspace_id.as_str().to_string(),
+                source_label: recall_source_label(hit.source_workspace_id.as_str()),
+                collection: recall_collection_token(hit.collection).to_string(),
+                grant_id: hit.grant_id.clone(),
+                conflict: hit.conflict,
+            })
+            .collect(),
+        scope: match &pack.scope {
+            MemoryScope::Personal => "personal".to_string(),
+            MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
+        },
     }
 }
 
@@ -2691,11 +2771,139 @@ fn sanitize_wiki_filename(reference: &str) -> String {
 /// know" the project. Still bounded so it never dominates the prompt.
 const CHAT_MEMORY_BUDGET_CHARS: usize = 4000;
 
-/// Reads confirmed memories for the PERSONAL scope and the active PROJECT scope,
-/// to inject as the always-on profile. Sensitivity is capped at `Private`
-/// (explicit user saves) — Confidential/Secret (e.g. a codice fiscale) are NEVER
-/// auto-injected here; they surface only via on-demand recall (M3). Returns
-/// `(personal, project)` summaries. Best-effort: any failure yields empties.
+fn briefing_authorized_sources(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    now_unix: i64,
+) -> Vec<local_first_memory::AuthorizedMemorySource> {
+    let local_only = || {
+        local_first_memory::resolve_memory_sources(user, workspace, &[], now_unix)
+            .unwrap_or_default()
+    };
+    if workspace.as_str() == PERSONAL_WORKSPACE || !memory_sources_enabled() {
+        return local_only();
+    }
+    let Ok(sources) = facade.resolve_memory_sources(user, workspace, now_unix) else {
+        return local_only();
+    };
+    sources
+        .into_iter()
+        .filter(|source| {
+            source.grant_id.is_none()
+                || (source.source_workspace_id.as_str() == PERSONAL_WORKSPACE
+                    && source.policy.as_ref().is_some_and(|policy| {
+                        policy.collections.contains(&MemoryCollectionKey::Preferences)
+                    }))
+        })
+        .collect()
+}
+
+fn memory_briefing_source_fingerprint(
+    state: &AppState,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    now_unix: i64,
+) -> u64 {
+    let facade = memory_facade(state);
+    let sources = briefing_authorized_sources(facade, user, workspace, now_unix);
+    let mut hasher = Sha256::new();
+    hasher.update(b"homun-memory-briefing-sources-v1");
+    hasher.update(local_first_memory::memory_source_policy_fingerprint(&sources).to_be_bytes());
+    for source in &sources {
+        for field in [
+            source.source_user_id.as_str(),
+            source.source_workspace_id.as_str(),
+        ] {
+            hasher.update((field.len() as u64).to_be_bytes());
+            hasher.update(field.as_bytes());
+        }
+        hasher.update(
+            facade
+                .briefing_generation(&source.source_user_id, &source.source_workspace_id)
+                .to_be_bytes(),
+        );
+    }
+    let digest = hasher.finalize();
+    u64::from_be_bytes(digest[..8].try_into().expect("SHA-256 prefix is 8 bytes"))
+}
+
+fn revalidated_cached_briefing<F>(
+    state: &AppState,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    scope_key: &str,
+    generation: u64,
+    source_fingerprint: u64,
+    prompt_fingerprint: u64,
+    before_revalidation: F,
+) -> Option<BriefingPack>
+where
+    F: FnOnce(),
+{
+    let cached = briefing_cache().get(
+        scope_key,
+        generation,
+        source_fingerprint,
+        prompt_fingerprint,
+    )?;
+    before_revalidation();
+    let current_generation = memory_facade(state).briefing_generation(user, workspace);
+    let current_source_fingerprint = memory_briefing_source_fingerprint(
+        state,
+        user,
+        workspace,
+        i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+    );
+    (current_generation == generation && current_source_fingerprint == source_fingerprint)
+        .then_some(cached)
+}
+
+fn briefing_items_for_authorized_source(
+    facade: &MemoryFacade,
+    source: &local_first_memory::AuthorizedMemorySource,
+    preferences_only: bool,
+) -> Vec<String> {
+    let mut records = facade
+        .list_memories_for_ui(&source.source_user_id, &source.source_workspace_id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|memory| memory.status == MemoryStatus::Confirmed)
+        // The personal linked tier is deliberately Preferences-only. An
+        // individual Allow can authorize on-demand recall, but cannot promote a
+        // record from another collection into the always-on briefing.
+        .filter(|memory| {
+            !preferences_only || MemoryCollectionKey::Preferences.matches(memory)
+        })
+        .filter_map(|memory| {
+            facade
+                .get_authorized_memory_for_source(source, &memory.reference)
+                .ok()
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| {
+        right
+            .confidence
+            .partial_cmp(&left.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    records
+        .into_iter()
+        .filter(|memory| {
+            let low = memory.text.to_lowercase();
+            !(low.starts_with("runtime plan step")
+                || low.starts_with("runtime plan state")
+                || low.starts_with("validation test:"))
+        })
+        .map(|memory| memory.text)
+        .collect()
+}
+
+/// Reads confirmed memories for the PERSONAL scope and the active PROJECT scope.
+/// Every item crosses the same authorized-source policy used by recall; linked
+/// Personal additionally remains a strict Preferences-only always-on tier.
+/// Returns `(personal, project)` summaries. Best-effort: failures yield empties.
 fn gather_profile_memory_for_prompt(
     state: &AppState,
     user_message: &str,
@@ -2717,70 +2925,38 @@ fn gather_profile_memory_with_options(
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
-    let read = |workspace: MemoryWorkspaceId, preferences_only: bool| -> Vec<String> {
-        let request = MemoryAccessRequest {
-            actor_id: "desktop-chat".to_string(),
-            user_id: user.clone(),
-            workspace_id: workspace,
-            purpose: "chat_context".to_string(),
-            allowed_domains: vec![
-                PrivacyDomain::new("personal"),
-                PrivacyDomain::new("work"),
-                PrivacyDomain::new("general"),
-            ],
-            max_sensitivity: MemoryDataSensitivity::Private,
-            allow_raw_payload: false,
-            allow_export: true,
-            broad_query: false,
-        };
-        facade
-            .context_pack(&request)
-            .map(|pack| {
-                let mut items = pack.items;
-                // Sort by confidence DESC: high-confidence facts (e.g. "works as
-                // senior developer", conf 1.0) must survive the budget cut. Without
-                // this, the briefing is filled with low-confidence noise first and
-                // the key facts fall off the 4000-char tail.
-                items.sort_by(|a, b| {
-                    b.confidence
-                        .partial_cmp(&a.confidence)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-                items
-                    .into_iter()
-                    // `preferences_only` keeps just the always-relevant tier (how the
-                    // user likes to be treated), dropping episodic facts.
-                    .filter(|item| !preferences_only || item.memory_type == "preference")
-                    // Anti-noise: scarta fact di tracking del runtime ("Runtime plan
-                    // step/state: …") che saturano il briefing budget e spingono fuori
-                    // i fatti reali. Prevenuti alla fonte in persist_learn_extraction,
-                    // ma i dati legacy vanno comunque filtrati qui.
-                    .filter(|item| {
-                        let low = item.summary.to_lowercase();
-                        !(low.starts_with("runtime plan step")
-                            || low.starts_with("runtime plan state")
-                            || low.starts_with("validation test:"))
-                    })
-                    .map(|item| item.summary)
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
     let in_project = active.as_str() != PERSONAL_WORKSPACE;
+    let sources = briefing_authorized_sources(
+        facade,
+        &user,
+        &active,
+        i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+    );
     // Relevance-gated personal memory: in a PROJECT, the personal scope contributes only
     // the always-relevant tier (preferences) to the always-on profile — episodic personal
     // facts are NOT dumped here, they reach the project on-demand via query-gated RAG
     // (relevant_memory_for_prompt) or explicit recall. Outside a project, the full
     // personal profile is the point, so inject it all.
-    let personal = read(
-        MemoryWorkspaceId::new(PERSONAL_WORKSPACE),
-        in_project || personal_preferences_only_override,
-    );
-    let project = if in_project {
-        read(active, false)
-    } else {
-        Vec::new()
-    };
+    let personal = sources
+        .iter()
+        .find(|source| source.source_workspace_id.as_str() == PERSONAL_WORKSPACE)
+        .map(|source| {
+            briefing_items_for_authorized_source(
+                facade,
+                source,
+                in_project || personal_preferences_only_override,
+            )
+        })
+        .unwrap_or_default();
+    let project = in_project
+        .then(|| {
+            sources
+                .iter()
+                .find(|source| source.grant_id.is_none())
+                .map(|source| briefing_items_for_authorized_source(facade, source, false))
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
     (personal, project)
 }
 
@@ -4947,6 +5123,78 @@ impl InProcessMemoryRecallService {
     }
 }
 
+fn install_memory_service_if_enabled(
+    state: &mut AppState,
+    embedding: Arc<dyn local_first_memory::EmbeddingClient>,
+    llm: Arc<dyn local_first_memory::LlmClient>,
+) {
+    state.memory_service = memory_service_enabled().then(|| {
+        Arc::new(InProcessMemoryRecallService::new(
+            state.clone(),
+            embedding,
+            llm,
+        )) as Arc<dyn MemoryRecallService>
+    });
+}
+
+fn recall_pack_on_facade(
+    facade: &MemoryFacade,
+    user: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    query: &str,
+    query_vec: &[f32],
+    graph_context: Option<
+        &(dyn Fn(&MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
+    >,
+) -> RecallPack {
+    if memory_sources_enabled() && workspace.as_str() != PERSONAL_WORKSPACE {
+        // Project lifecycle belongs to the gateway registry, not to the
+        // memory store. The coordinator requests one authorization snapshot
+        // per resolve/revalidation pass, so a deleted project is excluded
+        // before its records are queried or its grant is audited.
+        let source_allowed = |sources: &[local_first_memory::AuthorizedMemorySource]| {
+            let available_projects = load_persisted_memory_source_workspace_ids();
+            sources
+                .iter()
+                .map(|source| {
+                    (source.grant_id.is_none()
+                        && source.source_user_id == *user
+                        && source.source_workspace_id == *workspace)
+                        || source.source_workspace_id.as_str() == PERSONAL_WORKSPACE
+                        || available_projects.as_ref().is_some_and(|projects| {
+                            projects.contains(source.source_workspace_id.as_str())
+                        })
+                })
+                .collect::<Vec<_>>()
+        };
+        return local_first_memory::recall_authorized_sources_on_facade_with_source_filter(
+            facade,
+            user,
+            workspace,
+            query,
+            query_vec,
+            i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+            graph_context,
+            &source_allowed,
+        )
+        .unwrap_or_else(|_| {
+            RecallPack::from_hits(
+                query.to_string(),
+                MemoryScope::Project(workspace.clone()),
+                Vec::new(),
+            )
+        });
+    }
+    local_first_memory::recall_single_scope_pack(
+        facade,
+        user,
+        workspace,
+        query,
+        query_vec,
+        graph_context,
+    )
+}
+
 /// ADR 0022 (Tappa 4) — impl gateway del capability `EmbeddingClient`. Wrappa
 /// `embed_query_for_memory_recall` (cache LRU+TTL + timeout + degradazione). Il
 /// recall orchestrato nel crate lo consuma senza conoscere HTTP.
@@ -5041,62 +5289,92 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         // Hit solo se generation AND prompt_fingerprint combaciano.
         let user = gateway_memory_user_id();
         let workspace = gateway_memory_workspace_id();
-        let generation = memory_facade(&self.state).briefing_generation(&user, &workspace);
         let fingerprint = prompt_fingerprint(user_message);
         let scope_key = format!("{}|{}", user.as_str(), workspace.as_str());
+        for attempt in 0..=1 {
+            let generation = memory_facade(&self.state).briefing_generation(&user, &workspace);
+            let source_fingerprint = memory_briefing_source_fingerprint(
+                &self.state,
+                &user,
+                &workspace,
+                i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+            );
+            if let Some(cached) = revalidated_cached_briefing(
+                &self.state,
+                &user,
+                &workspace,
+                &scope_key,
+                generation,
+                source_fingerprint,
+                fingerprint,
+                || {},
+            ) {
+                return BriefingPack {
+                    profile_block: cached.profile_block,
+                    objective: cached.objective,
+                    brief: cached.brief,
+                    recent_work,
+                };
+            }
 
-        if let Some(cached) = briefing_cache().get(&scope_key, generation, fingerprint) {
-            // Cache hit: riutilizzo i 3 blocchi cached + recent_work fresco.
+            let (memory_personal, memory_project) =
+                gather_profile_memory_for_prompt(&self.state, user_message);
+            let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
+                gather_open_loops(&self.state, 6)
+            } else {
+                Vec::new()
+            };
+            let profile_block = format_memory_block(
+                &memory_open_loops,
+                &memory_personal,
+                &memory_project,
+                CHAT_MEMORY_BUDGET_CHARS,
+            );
+            let objective = project_objective_block(&self.state);
+            let brief = project_brief_block(&self.state);
+            let current_generation =
+                memory_facade(&self.state).briefing_generation(&user, &workspace);
+            let current_source_fingerprint = memory_briefing_source_fingerprint(
+                &self.state,
+                &user,
+                &workspace,
+                i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+            );
+            if current_generation != generation || current_source_fingerprint != source_fingerprint
+            {
+                if attempt == 0 {
+                    continue;
+                }
+                return BriefingPack {
+                    profile_block: None,
+                    objective,
+                    brief,
+                    recent_work,
+                };
+            }
+
+            briefing_cache().put(
+                scope_key.clone(),
+                CachedBriefing {
+                    generation,
+                    source_fingerprint,
+                    prompt_fingerprint: fingerprint,
+                    pack_sans_recent_work: BriefingPack {
+                        profile_block: profile_block.clone(),
+                        objective: objective.clone(),
+                        brief: brief.clone(),
+                        recent_work: None,
+                    },
+                },
+            );
             return BriefingPack {
-                profile_block: cached.profile_block,
-                objective: cached.objective,
-                brief: cached.brief,
+                profile_block,
+                objective,
+                brief,
                 recent_work,
             };
         }
-
-        // Cache miss: rebuild dei 3 blocchi memory-backed (parità con l'inline,
-        // main.rs:19476-19509). I predicati should_inject_* sono prompt-dipendenti:
-        // per questo il trait porta `user_message` e la cache key include la fingerprint.
-        let (memory_personal, memory_project) =
-            gather_profile_memory_for_prompt(&self.state, user_message);
-        let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
-            gather_open_loops(&self.state, 6)
-        } else {
-            Vec::new()
-        };
-        let profile_block = format_memory_block(
-            &memory_open_loops,
-            &memory_personal,
-            &memory_project,
-            CHAT_MEMORY_BUDGET_CHARS,
-        );
-        // objective/brief ritornano già None per PERSONAL_WORKSPACE, quindi la shape
-        // è intrinsecamente snella per MemoryScope::Personal (invariant P1).
-        let objective = project_objective_block(&self.state);
-        let brief = project_brief_block(&self.state);
-
-        // Salva in cache per i turni successivi (stessa generation + fingerprint).
-        briefing_cache().put(
-            scope_key,
-            CachedBriefing {
-                generation,
-                prompt_fingerprint: fingerprint,
-                pack_sans_recent_work: BriefingPack {
-                    profile_block: profile_block.clone(),
-                    objective: objective.clone(),
-                    brief: brief.clone(),
-                    recent_work: None, // non cached
-                },
-            },
-        );
-
-        BriefingPack {
-            profile_block,
-            objective,
-            brief,
-            recent_work,
-        }
+        unreachable!("bounded briefing rebuild loop always returns")
     }
 
     fn recall<'a>(
@@ -5133,7 +5411,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                     }
                     artifact_provenance_context_for_query(facade, user, workspace, q)
                 });
-                local_first_memory::recall_search_on_facade(
+                recall_pack_on_facade(
                     &facade,
                     &user,
                     &workspace,
@@ -5142,7 +5420,9 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                     graph_context,
                 )
             };
-            RecallPack::from_block(query, scope_owned, block)
+            let mut pack = block;
+            pack.scope = scope_owned;
+            pack
         })
     }
 
@@ -13299,21 +13579,39 @@ fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
     ((now_secs - secs).max(0) as f32) / 86_400.0
 }
 
-/// Esito di `recall_memory`: la risposta testuale per il modello + i hits
-/// strutturati (per l'evento UI Recall) + lo scope. ADR 0022 (Piano UI A2/A3).
+/// Esito di `recall_memory`: la risposta testuale per il modello e il payload
+/// UI costruito dagli stessi hit autorizzati. ADR 0022 (Piano UI A2/A3).
 struct RecallOutcome {
     /// Risposta formattata per il modello (stringa tool result).
     response: String,
-    /// Hits strutturati per la UI (kind, text). Pari ai `lines` non-vault.
-    hits: Vec<(String, String)>,
-    /// Scope della recall ("personal" | "project").
-    scope: String,
+    /// Provenienza completa: non ricostruire mai gli hit nel trasporto del tool.
+    payload: local_first_subagents::RecallStreamPayload,
+}
+
+fn recall_stream_payload_from_outcome(
+    outcome: &RecallOutcome,
+    query: &str,
+) -> local_first_subagents::RecallStreamPayload {
+    let mut payload = outcome.payload.clone();
+    payload.query = if query.is_empty() {
+        "(query)".to_string()
+    } else {
+        query.to_string()
+    };
+    payload
 }
 
 fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     let query = query.trim();
     let empty = |msg: &str| -> RecallOutcome {
-        RecallOutcome { response: msg.to_string(), hits: Vec::new(), scope: "personal".to_string() }
+        RecallOutcome {
+            response: msg.to_string(),
+            payload: local_first_subagents::RecallStreamPayload {
+                query: query.to_string(),
+                hits: Vec::new(),
+                scope: "personal".to_string(),
+            },
+        }
     };
     if query.is_empty() {
         return empty("No query provided.");
@@ -13321,11 +13619,11 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
-    let search = |workspace: MemoryWorkspaceId| -> Vec<(String, String)> {
+    let search = |workspace: MemoryWorkspaceId| -> Vec<local_first_subagents::RecallStreamHit> {
         let access = MemoryAccessRequest {
             actor_id: "recall".to_string(),
             user_id: user.clone(),
-            workspace_id: workspace,
+            workspace_id: workspace.clone(),
             purpose: "recall".to_string(),
             allowed_domains: vec![
                 PrivacyDomain::new("personal"),
@@ -13350,10 +13648,29 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                 page.items
                     .into_iter()
                     .map(|item| {
-                        (
-                            item.memory_type,
-                            format_recall_entry(&item.summary, &item.metadata),
-                        )
+                        let collection = [
+                            MemoryCollectionKey::Preferences,
+                            MemoryCollectionKey::Profile,
+                            MemoryCollectionKey::Knowledge,
+                            MemoryCollectionKey::Decisions,
+                            MemoryCollectionKey::Goals,
+                            MemoryCollectionKey::Artifacts,
+                            MemoryCollectionKey::Episodes,
+                        ]
+                        .into_iter()
+                        .find(|collection| collection.matches_candidate(&item.memory_type, &item.metadata))
+                        .unwrap_or(MemoryCollectionKey::Knowledge);
+                        local_first_subagents::RecallStreamHit {
+                            r#ref: item.reference.to_string(),
+                            text: format_recall_entry(&item.summary, &item.metadata),
+                            score: 1.0 / item.rank.max(1) as f32,
+                            kind: item.memory_type,
+                            source_workspace_id: workspace.as_str().to_string(),
+                            source_label: recall_source_label(workspace.as_str()),
+                            collection: recall_collection_token(collection).to_string(),
+                            grant_id: None,
+                            conflict: false,
+                        }
                     })
                     .collect()
             })
@@ -13361,11 +13678,20 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     };
     let in_project = active.as_str() != PERSONAL_WORKSPACE;
     let mut lines = Vec::new();
-    // Hits strutturati per la UI: raccolgo (kind, text) man mano che costruisco lines.
-    let mut ui_hits: Vec<(String, String)> = Vec::new();
-    for (kind, text) in search(active.clone()) {
-        lines.push(format!("- [{kind}] {text}"));
-        ui_hits.push((kind.clone(), text.clone()));
+    // Keep the full structured hit alongside the text given to the model.
+    let mut ui_hits: Vec<local_first_subagents::RecallStreamHit> = Vec::new();
+    if memory_sources_enabled() && in_project {
+        let pack = recall_pack_on_facade(&facade, &user, &active, query, &[], None);
+        let payload = recall_stream_payload_from_pack(&pack);
+        for hit in pack.hits {
+            lines.push(format!("- [{}] {}", hit.kind, hit.text));
+        }
+        ui_hits.extend(payload.hits);
+    } else {
+        for hit in search(active.clone()) {
+            lines.push(format!("- [{}] {}", hit.kind, hit.text));
+            ui_hits.push(hit);
+        }
     }
     if let Some(workflow) = workflow_status_context_for_query(&facade, &user, &active, query) {
         lines.push(workflow);
@@ -13392,10 +13718,20 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
             .map(|m| format!("- [conversation] {}", m.text))
             .collect();
         hits.truncate(8);
-        // Episodi come hits UI (kind "conversation").
+        // Episodi come hits UI, nello stesso scope locale della recall.
         for h in &hits {
             if let Some(text) = h.strip_prefix("- [conversation] ") {
-                ui_hits.push(("conversation".to_string(), text.to_string()));
+                ui_hits.push(local_first_subagents::RecallStreamHit {
+                    r#ref: String::new(),
+                    text: text.to_string(),
+                    score: 0.0,
+                    kind: "conversation".to_string(),
+                    source_workspace_id: active.as_str().to_string(),
+                    source_label: recall_source_label(active.as_str()),
+                    collection: "episodes".to_string(),
+                    grant_id: None,
+                    conflict: false,
+                });
             }
         }
         lines.extend(hits);
@@ -13430,7 +13766,14 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
         Err(_) if in_project => format!("Memories relevant to THIS project:\n{}", lines.join("\n")),
         Err(_) => format!("Relevant memories from memory:\n{}", lines.join("\n")),
     };
-    RecallOutcome { response, hits: ui_hits, scope }
+    RecallOutcome {
+        response,
+        payload: local_first_subagents::RecallStreamPayload {
+            query: query.to_string(),
+            hits: ui_hits,
+            scope,
+        },
+    }
 }
 
 fn recall_memory_response_with_vault_fallback(
@@ -20025,6 +20368,7 @@ struct ChatToolCtx<'a> {
     contact_only: bool,
     can_see_contacts: bool,
     can_see_calendar: bool,
+    can_use_project_memory: bool,
     autonomous: bool,
     composio_writes: &'a std::collections::BTreeSet<String>,
     catalog_index: &'a [(String, String, serde_json::Value)],
@@ -22859,7 +23203,13 @@ available tools (for data from the web use the browser: browser_navigate on the 
         // contact): recall traverses the relationship graph, which IS the address
         // book — perimeter-blind recall has no way to strip other people out, so
         // fail-closed is to block it entirely.
-        if ctx.contact_only || !ctx.can_see_contacts {
+        let in_project = gateway_memory_workspace_id().as_str() != PERSONAL_WORKSPACE;
+        if !memory_perimeter_allows_recall(
+            ctx.contact_only,
+            ctx.can_see_contacts,
+            ctx.can_use_project_memory,
+            in_project,
+        ) {
             "Personal memory not accessible in a conversation with this \
 contact: use only the messages from this chat. Do NOT reveal personal data of the user or third parties."
                 .to_string()
@@ -22873,32 +23223,22 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
             // ADR 0022 (Piano UI A2/A3): emetti l'evento strutturato
             // `Recall` con i hits richiamati (visibile in UI: fase
             // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
-            let query_for_ui = if query.is_empty() { "(query)".to_string() } else { query.clone() };
             let st = ctx.state.clone();
-            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &query))
+            let recall_query = query.clone();
+            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &recall_query))
                 .await
                 .unwrap_or_else(|e| RecallOutcome {
                     response: format!("Execution error: {e}"),
-                    hits: Vec::new(),
-                    scope: "personal".to_string(),
+                    payload: local_first_subagents::RecallStreamPayload {
+                        query: "(query)".to_string(),
+                        hits: Vec::new(),
+                        scope: "personal".to_string(),
+                    },
                 });
             let _ = emit_stream_event(
                 ctx.tx,
                 GenerateStreamEvent::Recall {
-                    payload: local_first_subagents::RecallStreamPayload {
-                        query: query_for_ui,
-                        hits: outcome
-                            .hits
-                            .iter()
-                            .map(|(kind, text)| local_first_subagents::RecallStreamHit {
-                                r#ref: String::new(),
-                                text: text.clone(),
-                                score: 0.0,
-                                kind: kind.clone(),
-                            })
-                            .collect(),
-                        scope: outcome.scope.clone(),
-                    },
+                    payload: recall_stream_payload_from_outcome(&outcome, &query),
                 },
             )
             .await;
@@ -24130,6 +24470,7 @@ struct GatewayCapabilityExecutor<'a> {
     contact_only: bool,
     can_see_contacts: bool,
     can_see_calendar: bool,
+    can_use_project_memory: bool,
     autonomous: bool,
     composio_writes: &'a std::collections::BTreeSet<String>,
     catalog_index: &'a [(String, String, serde_json::Value)],
@@ -24204,6 +24545,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             contact_only: self.contact_only,
             can_see_contacts: self.can_see_contacts,
             can_see_calendar: self.can_see_calendar,
+            can_use_project_memory: self.can_use_project_memory,
             autonomous: self.autonomous,
             composio_writes: self.composio_writes,
             catalog_index: self.catalog_index,
@@ -25127,6 +25469,13 @@ save/export a file to a folder, call save_artifact(file, destination)."
         .as_ref()
         .map(|c| (c.perimeter.can_see_contacts, c.perimeter.can_see_calendar))
         .unwrap_or((true, true));
+    let can_use_project_memory = contact_ctx
+        .as_ref()
+        .map(|context| context.can_use_project_memory)
+        .unwrap_or(true);
+    // This is emitted as a structured stream event once the transport exists below.
+    // Keep it next to prompt assembly so UI provenance and actual RAG context cannot diverge.
+    let mut automatic_recall_payload = None;
     let system = if contact_only {
         let cx = contact_ctx
             .as_ref()
@@ -25151,6 +25500,13 @@ save/export a file to a folder, call save_artifact(file, destination)."
             }
             format!("{system}\n\n{block}")
         }
+    } else if !memory_perimeter_allows_recall(
+        contact_only,
+        can_see_contacts,
+        can_use_project_memory,
+        is_project,
+    ) {
+        system
     } else {
         // Always-on memory profile (M1): inject what we durably know about the user
         // (personal scope) and the active project, so the chat is continuous instead
@@ -25236,6 +25592,7 @@ normal answers."
             if let Some(service) = state.memory_service.as_ref() {
                 let scope = scope_from_active_workspace();
                 let pack = service.recall(&request.prompt, &scope).await;
+                automatic_recall_payload = Some(recall_stream_payload_from_pack(&pack));
                 match pack.block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
@@ -25260,7 +25617,7 @@ normal answers."
                         }
                         artifact_provenance_context_for_query(facade, user, workspace, q)
                     });
-                    local_first_memory::recall_search_on_facade(
+                    recall_pack_on_facade(
                         facade,
                         &user,
                         &workspace,
@@ -25269,7 +25626,8 @@ normal answers."
                         graph_context,
                     )
                 };
-                match block {
+                automatic_recall_payload = Some(recall_stream_payload_from_pack(&block));
+                match block.block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
                 }
@@ -26006,6 +26364,12 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     tokio::spawn(async move {
         let mut ls = local_first_engine::LoopState::new();
         ls.messages = messages;
+        // RAG completed before the loop starts. Publish the exact selected hits before any
+        // narration delta so a resumed client and the persisted assistant message agree on
+        // which memory sources informed this turn.
+        if let Some(payload) = automatic_recall_payload {
+            let _ = emit_stream_event(&tx, GenerateStreamEvent::Recall { payload }).await;
+        }
         // Phase 3 (per-project skill confirmations): seed the turn's force-confirm set with the
         // workspace's configured categories so an effectful action is gated even with NO
         // sensitive skill loaded. Fail-safe — this only ADDS to `active_sensitive`; the loop
@@ -26180,7 +26544,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, &turn_trace, vision_fallback_armed).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, &turn_trace, vision_fallback_armed).await;
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
         // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
@@ -26280,6 +26644,7 @@ async fn run_agent_rounds(
     contact_only: bool,
     can_see_contacts: bool,
     can_see_calendar: bool,
+    can_use_project_memory: bool,
     floor_acting: bool,
     memory_user_message: String,
     memory_answer: String,
@@ -26320,6 +26685,7 @@ async fn run_agent_rounds(
         contact_only,
         can_see_contacts,
         can_see_calendar,
+        can_use_project_memory,
         autonomous,
         composio_writes: &composio_writes,
         catalog_index: &catalog_index,
@@ -30504,6 +30870,9 @@ struct ContactTurnContext {
     persona_instructions: String,
     handles: Vec<String>,
     perimeter: chat_store::StoredPerimeter,
+    /// Intersection with Project Access for the currently active project.
+    /// Personal turns do not need a project grant.
+    can_use_project_memory: bool,
     /// Pre-formatted "Laura (moglie)" entries; populated ONLY when the perimeter
     /// allows mentioning other contacts.
     relationships: Vec<String>,
@@ -30570,6 +30939,19 @@ fn contact_turn_context(
     } else {
         Vec::new()
     };
+    let active_workspace = gateway_memory_workspace_id();
+    let can_use_project_memory = if active_workspace.as_str() == PERSONAL_WORKSPACE {
+        true
+    } else {
+        let policy = resolve_project_contact_policy(
+            active_workspace.as_str(),
+            &format!("contact_{id}"),
+            &channel,
+            &perimeter,
+            false,
+        );
+        policy.authorized && policy.can_use_project_memory
+    };
     (
         Some(ContactTurnContext {
             name: contact.name,
@@ -30577,6 +30959,7 @@ fn contact_turn_context(
             persona_instructions,
             handles,
             perimeter,
+            can_use_project_memory,
             relationships,
         }),
         false,
@@ -31290,6 +31673,7 @@ async fn drain_agent_stream_into_message(
     };
     for line in snapshot {
         let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        persist_recall_event_part(state, thread_id, assistant_message_id, &line);
         if streamed_text.len() != last_flushed_len
             && last_flush.elapsed() >= std::time::Duration::from_millis(200)
         {
@@ -31311,6 +31695,7 @@ async fn drain_agent_stream_into_message(
         match brx.recv().await {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                persist_recall_event_part(state, thread_id, assistant_message_id, &line);
                 if streamed_text.len() != last_flushed_len
                     && last_flush.elapsed() >= std::time::Duration::from_millis(200)
                 {
@@ -31341,23 +31726,14 @@ async fn drain_agent_stream_into_message(
     Some(final_text)
 }
 
-/// Maps a raw stream NDJSON line to a TurnEventKind + payload and emits it via
-/// the turn_executor fan-out (durable turn_events + live broadcast). Best-effort:
-/// unparseable lines or unknown types are silently skipped (they don't affect the
-/// assistant message accumulation either).
-fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
-    let line = line.trim();
-    if line.is_empty() {
-        return;
-    }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
-        return;
-    };
+/// Maps a raw stream value to a durable TurnEventKind and its transport payload.
+fn turn_event_from_stream_value(
+    value: &serde_json::Value,
+) -> Option<(local_first_task_runtime::TurnEventKind, serde_json::Value)> {
     let kind_str = match value.get("type").and_then(|t| t.as_str()) {
         Some(t) => t,
-        None => return,
+        None => return None,
     };
-    tracing::debug!(target: "broker::fanout", turn_id = %turn_id, kind = %kind_str, "stream event");
     let (kind, payload) = match kind_str {
         "delta" => (
             local_first_task_runtime::TurnEventKind::Delta,
@@ -31379,12 +31755,59 @@ fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
             local_first_task_runtime::TurnEventKind::Tool,
             value.clone(),
         ),
+        "recall" => (
+            local_first_task_runtime::TurnEventKind::Recall,
+            value.get("payload").cloned().unwrap_or(serde_json::Value::Null),
+        ),
         "error" => (
             local_first_task_runtime::TurnEventKind::Error,
             value.clone(),
         ),
         // unknown event types (e.g. choice_prompt, vault_propose) are not turn events
-        _ => return,
+        _ => return None,
+    };
+    Some((kind, payload))
+}
+
+/// Stores an emitted Recall part with the assistant message. This is deliberately
+/// idempotent because a stream snapshot and its broadcast tail can overlap.
+fn persist_recall_event_part(
+    state: &AppState,
+    thread_id: &str,
+    assistant_message_id: &str,
+    line: &str,
+) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+        return;
+    };
+    if value.get("type").and_then(|kind| kind.as_str()) != Some("recall") {
+        return;
+    }
+    let Some(payload) = value.get("payload") else {
+        return;
+    };
+    let part = serde_json::json!({ "type": "recall", "payload": payload });
+    if let Ok(store) = lock_store(state) {
+        let _ = store.append_assistant_event_part(thread_id, assistant_message_id, &part);
+    }
+}
+
+/// Maps a raw stream NDJSON line to a TurnEventKind + payload and emits it via
+/// the turn_executor fan-out (durable turn_events + live broadcast). Best-effort:
+/// unparseable lines or unknown types are silently skipped (they don't affect the
+/// assistant message accumulation either).
+fn fanout_turn_event(state: &AppState, turn_id: &str, line: &str) {
+    let line = line.trim();
+    if line.is_empty() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return;
+    };
+    let kind_str = value.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
+    tracing::debug!(target: "broker::fanout", turn_id = %turn_id, kind = %kind_str, "stream event");
+    let Some((kind, payload)) = turn_event_from_stream_value(&value) else {
+        return;
     };
     if let Ok(store) = state.task_store.lock() {
         let _ = crate::turn_executor::emit_turn_event(state, &store, turn_id, kind, payload);
@@ -31413,6 +31836,7 @@ async fn drain_agent_stream_into_message_with_fanout(
     };
     for line in snapshot {
         let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        persist_recall_event_part(state, thread_id, assistant_message_id, &line);
         fanout_turn_event(state, turn_id, &line);
         if streamed_text.len() != last_flushed_len
             && last_flush.elapsed() >= std::time::Duration::from_millis(200)
@@ -31435,6 +31859,7 @@ async fn drain_agent_stream_into_message_with_fanout(
         match brx.recv().await {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                persist_recall_event_part(state, thread_id, assistant_message_id, &line);
                 fanout_turn_event(state, turn_id, &line);
                 if streamed_text.len() != last_flushed_len
                     && last_flush.elapsed() >= std::time::Duration::from_millis(200)
@@ -50157,10 +50582,16 @@ fn gateway_memory_workspace_id() -> MemoryWorkspaceId {
     // "Predefinito" bucket distinct from "Personale". Only NAMED projects (their own
     // workspace ids) keep a project-scoped memory. NB: this is memory-only — chat
     // threads and capabilities still use the base workspace id.
-    if raw == base_workspace_id() {
-        return MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
+    canonical_memory_workspace_id(&raw)
+}
+
+fn canonical_memory_workspace_id(workspace_id: &str) -> MemoryWorkspaceId {
+    let workspace_id = workspace_id.trim();
+    if !workspace_id.is_empty() && workspace_id == base_workspace_id() {
+        MemoryWorkspaceId::new(PERSONAL_WORKSPACE)
+    } else {
+        MemoryWorkspaceId::new(workspace_id)
     }
-    MemoryWorkspaceId::new(raw)
 }
 
 fn gateway_capability_user_id() -> CapabilityUserId {
@@ -50288,6 +50719,851 @@ struct ProjectAccessUpsertRequest {
 struct ProjectAccessRemoveRequest {
     contact_reference: String,
     channel: String,
+}
+
+const MEMORY_PUBLICATION_BODY_MAX: usize = 64 * 1024;
+
+#[derive(Debug, Deserialize)]
+struct MemoryPublicationCreateRequest {
+    source_ref: String,
+    source_workspace_id: String,
+    destination_workspace_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryPublicationApproveRequest {
+    expected_version: u64,
+    resolution: MemoryPublicationResolution,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryPublicationEditRequest {
+    expected_version: u64,
+    edit: MemoryPublicationEditInput,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryPublicationRejectRequest {
+    expected_version: u64,
+}
+
+fn memory_publication_error(status: StatusCode, code: &'static str) -> GatewayError {
+    GatewayError {
+        status,
+        code,
+        message: code.to_string(),
+    }
+}
+
+fn memory_publication_facade_error(error: MemoryError) -> GatewayError {
+    let (status, code) = match error {
+        MemoryError::NotFound(message) => match message.as_str() {
+            "publication_not_found" => (StatusCode::NOT_FOUND, "publication_not_found"),
+            "publication_source_not_found" => {
+                (StatusCode::NOT_FOUND, "publication_source_not_found")
+            }
+            _ => (StatusCode::NOT_FOUND, "memory_publication_not_found"),
+        },
+        MemoryError::Policy(message) => match message.as_str() {
+            "secret_never_shareable" => (StatusCode::CONFLICT, "secret_never_shareable"),
+            "vault_payload_never_shareable" => {
+                (StatusCode::CONFLICT, "vault_payload_never_shareable")
+            }
+            "publication_actor_mismatch" => {
+                (StatusCode::CONFLICT, "publication_actor_mismatch")
+            }
+            "publication_decision_required" => {
+                (StatusCode::CONFLICT, "publication_decision_required")
+            }
+            "publication_source_changed" => {
+                (StatusCode::CONFLICT, "publication_source_changed")
+            }
+            "publication_preview_stale" => {
+                (StatusCode::CONFLICT, "publication_preview_stale")
+            }
+            "publication_conflict" | "publication_already_pending" | "publication_not_pending"
+            | "publication_already_published"
+            | "publication_source_inactive" | "publication_sensitivity_not_allowed" => {
+                (StatusCode::CONFLICT, "publication_conflict")
+            }
+            _ => (StatusCode::CONFLICT, "publication_conflict"),
+        },
+        MemoryError::Validation(message) => match message.as_str() {
+            "publication_text_invalid" | "publication_memory_type_invalid"
+            | "publication_privacy_domain_invalid" | "publication_collection_unknown" => {
+                (StatusCode::BAD_REQUEST, "publication_edit_invalid")
+            }
+            _ => (StatusCode::BAD_REQUEST, "memory_publication_invalid"),
+        },
+        MemoryError::Store(_) => (StatusCode::INTERNAL_SERVER_ERROR, "memory_publication_store_error"),
+    };
+    memory_publication_error(status, code)
+}
+
+fn publication_workspace_from_snapshot(
+    snapshot: &WorkspacesFile,
+    raw_workspace_id: &str,
+    allow_personal: bool,
+) -> Result<MemoryWorkspaceId, &'static str> {
+    let raw_workspace_id = raw_workspace_id.trim();
+    let workspace_id = canonical_memory_workspace_id(raw_workspace_id);
+    if workspace_id.as_str().is_empty() {
+        return Err("publication_workspace_invalid");
+    }
+    if workspace_id.as_str() == THREADS_WORKSPACE {
+        return Err("publication_workspace_invalid");
+    }
+    if workspace_id.as_str() == PERSONAL_WORKSPACE {
+        return allow_personal
+            .then_some(workspace_id)
+            .ok_or("publication_source_not_local");
+    }
+    snapshot
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == raw_workspace_id)
+        .then_some(workspace_id)
+        .ok_or("publication_workspace_not_found")
+}
+
+fn validate_publication_owner_scope(
+    proposal: &MemoryPublicationProposal,
+    owner: &MemoryUserId,
+    snapshot: &WorkspacesFile,
+) -> Result<(), GatewayError> {
+    if proposal.proposed_by != owner.as_str()
+        || proposal.source_user_id != *owner
+        || proposal.destination_user_id != *owner
+    {
+        return Err(memory_publication_error(
+            StatusCode::CONFLICT,
+            "publication_actor_mismatch",
+        ));
+    }
+    publication_workspace_from_snapshot(snapshot, proposal.source_workspace_id.as_str(), false)
+        .map_err(|code| memory_publication_error(StatusCode::NOT_FOUND, code))?;
+    publication_workspace_from_snapshot(snapshot, proposal.destination_workspace_id.as_str(), true)
+        .map_err(|code| memory_publication_error(StatusCode::NOT_FOUND, code))?;
+    Ok(())
+}
+
+fn parse_publication_reference(
+    raw_reference: &str,
+    owner: &MemoryUserId,
+    source_workspace_id: &MemoryWorkspaceId,
+) -> Result<MemoryRef, GatewayError> {
+    if raw_reference.trim() != raw_reference {
+        return Err(memory_publication_error(
+            StatusCode::BAD_REQUEST,
+            "memory_publication_invalid",
+        ));
+    }
+    let reference = raw_reference.parse::<MemoryRef>().map_err(|_| {
+        memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid")
+    })?;
+    if reference.to_string() != raw_reference
+        || reference.kind != MemoryRefKind::Memory
+        || reference.scope != "local"
+        || reference.user_id != *owner
+        || reference.workspace_id != *source_workspace_id
+    {
+        return Err(memory_publication_error(
+            StatusCode::BAD_REQUEST,
+            "memory_publication_invalid",
+        ));
+    }
+    Ok(reference)
+}
+
+async fn memory_publication_create(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
+        .await
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let request = serde_json::from_slice::<MemoryPublicationCreateRequest>(&body)
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let snapshot = load_workspaces_file();
+    let source_workspace_id = publication_workspace_from_snapshot(
+        &snapshot,
+        &request.source_workspace_id,
+        false,
+    )
+    .map_err(|code| memory_publication_error(StatusCode::BAD_REQUEST, code))?;
+    let destination_workspace_id = publication_workspace_from_snapshot(
+        &snapshot,
+        &request.destination_workspace_id,
+        true,
+    )
+    .map_err(|code| memory_publication_error(StatusCode::BAD_REQUEST, code))?;
+    let owner = gateway_memory_user_id();
+    let reference = parse_publication_reference(&request.source_ref, &owner, &source_workspace_id)?;
+    let facade = memory_facade(&state);
+    let source = facade
+        .get_memory_for_ui(&reference, &owner, &source_workspace_id)
+        .map_err(|_| {
+            memory_publication_error(StatusCode::INTERNAL_SERVER_ERROR, "memory_publication_store_error")
+        })?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_source_not_found"))?;
+    let proposal = facade
+        .create_publication_proposal(
+            &source,
+            &MemoryPublicationDestination::new(owner.clone(), destination_workspace_id),
+            owner.as_str(),
+        )
+        .map_err(memory_publication_facade_error)?;
+    Ok(Json(proposal))
+}
+
+async fn memory_publication_get(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<String>,
+) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let owner = gateway_memory_user_id();
+    let proposal = memory_facade(&state)
+        .get_publication_proposal(&proposal_id)
+        .map_err(memory_publication_facade_error)?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
+    validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
+    Ok(Json(proposal))
+}
+
+async fn memory_publication_edit(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<String>,
+    request: Request,
+) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
+        .await
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let request = serde_json::from_slice::<MemoryPublicationEditRequest>(&body)
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let owner = gateway_memory_user_id();
+    let facade = memory_facade(&state);
+    let proposal = facade
+        .get_publication_proposal(&proposal_id)
+        .map_err(memory_publication_facade_error)?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
+    validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
+    let updated = facade
+        .update_publication_proposal_at_version(
+            &proposal_id,
+            owner.as_str(),
+            request.expected_version,
+            &request.edit,
+        )
+        .map_err(memory_publication_facade_error)?;
+    Ok(Json(updated))
+}
+
+async fn memory_publication_approve(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<String>,
+    request: Request,
+) -> Result<Json<MemoryPublicationResult>, GatewayError> {
+    let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
+        .await
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let request = serde_json::from_slice::<MemoryPublicationApproveRequest>(&body)
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let owner = gateway_memory_user_id();
+    let facade = memory_facade(&state);
+    let proposal = facade
+        .get_publication_proposal(&proposal_id)
+        .map_err(memory_publication_facade_error)?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
+    validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
+    let resolved = facade
+        .set_publication_resolution_at_version(
+            &proposal_id,
+            owner.as_str(),
+            request.expected_version,
+            request.resolution,
+        )
+        .map_err(memory_publication_facade_error)?;
+    let result = facade
+        .approve_publication_at_version(
+            &proposal_id,
+            owner.as_str(),
+            resolved.proposal_version,
+        )
+        .map_err(memory_publication_facade_error)?;
+    Ok(Json(result))
+}
+
+async fn memory_publication_reject(
+    State(state): State<AppState>,
+    Path(proposal_id): Path<String>,
+    request: Request,
+) -> Result<Json<MemoryPublicationProposal>, GatewayError> {
+    let body = axum::body::to_bytes(request.into_body(), MEMORY_PUBLICATION_BODY_MAX)
+        .await
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let request = serde_json::from_slice::<MemoryPublicationRejectRequest>(&body)
+        .map_err(|_| memory_publication_error(StatusCode::BAD_REQUEST, "memory_publication_invalid"))?;
+    let owner = gateway_memory_user_id();
+    let facade = memory_facade(&state);
+    let proposal = facade
+        .get_publication_proposal(&proposal_id)
+        .map_err(memory_publication_facade_error)?
+        .ok_or_else(|| memory_publication_error(StatusCode::NOT_FOUND, "publication_not_found"))?;
+    validate_publication_owner_scope(&proposal, &owner, &load_workspaces_file())?;
+    let rejected = facade
+        .reject_publication_at_version(&proposal_id, owner.as_str(), request.expected_version)
+        .map_err(memory_publication_facade_error)?;
+    Ok(Json(rejected))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MemorySourceOverrideInput {
+    memory_ref: String,
+    effect: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MemorySourceUpsertRequest {
+    source_workspace_id: String,
+    collections: Vec<String>,
+    max_sensitivity: String,
+    expires_at: Option<i64>,
+    overrides: Vec<MemorySourceOverrideInput>,
+}
+
+#[derive(Debug, Clone)]
+struct ValidatedMemorySourceInput {
+    source_workspace_id: MemoryWorkspaceId,
+    collections: BTreeSet<MemoryCollectionKey>,
+    max_sensitivity: MemoryDataSensitivity,
+    expires_at: Option<i64>,
+    overrides: Vec<(MemoryRef, MemoryGrantOverrideEffect)>,
+}
+
+#[derive(Debug, Clone)]
+struct MemorySourceWorkspaceContext {
+    consumer: WorkspaceRecord,
+    source_workspace_id: MemoryWorkspaceId,
+    source_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemorySourceGrantView {
+    id: Option<String>,
+    source_workspace_id: String,
+    source_label: String,
+    source_available: bool,
+    local: bool,
+    read_only: bool,
+    collections: Vec<MemoryCollectionKey>,
+    max_sensitivity: MemoryDataSensitivity,
+    expires_at: Option<i64>,
+    revoked_at: Option<i64>,
+    policy_version: u64,
+    last_used_at: Option<i64>,
+    overrides: Vec<MemorySourceGrantOverrideView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemorySourceGrantOverrideView {
+    memory_ref: String,
+    effect: MemoryGrantOverrideEffect,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MemorySourceCandidateView {
+    #[serde(rename = "ref")]
+    reference: String,
+    summary: String,
+    #[serde(rename = "type")]
+    memory_type: String,
+    collection: MemoryCollectionKey,
+    sensitivity: MemoryDataSensitivity,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemorySourceCandidatesQuery {
+    source_workspace_id: String,
+    #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+fn memory_sources_flag(value: Option<&str>) -> bool {
+    !matches!(
+        value.map(|value| value.trim().to_ascii_lowercase()),
+        Some(value) if value == "0" || value == "off"
+    )
+}
+
+fn memory_sources_enabled() -> bool {
+    memory_sources_flag(env::var("HOMUN_MEMORY_SOURCES").ok().as_deref())
+}
+
+fn memory_perimeter_allows_recall(
+    contact_only: bool,
+    can_see_contacts: bool,
+    can_use_project_memory: bool,
+    in_project: bool,
+) -> bool {
+    !contact_only && can_see_contacts && (!in_project || can_use_project_memory)
+}
+
+fn parse_memory_collection(value: &str) -> Result<MemoryCollectionKey, &'static str> {
+    match value {
+        "preferences" => Ok(MemoryCollectionKey::Preferences),
+        "profile" => Ok(MemoryCollectionKey::Profile),
+        "knowledge" => Ok(MemoryCollectionKey::Knowledge),
+        "decisions" => Ok(MemoryCollectionKey::Decisions),
+        "goals" => Ok(MemoryCollectionKey::Goals),
+        "artifacts" => Ok(MemoryCollectionKey::Artifacts),
+        "episodes" => Ok(MemoryCollectionKey::Episodes),
+        _ => Err("collection_not_allowed"),
+    }
+}
+
+fn parse_grant_sensitivity(value: &str) -> Result<MemoryDataSensitivity, &'static str> {
+    match value {
+        "public" => Ok(MemoryDataSensitivity::Public),
+        "internal" => Ok(MemoryDataSensitivity::Internal),
+        "private" => Ok(MemoryDataSensitivity::Private),
+        "confidential" => Ok(MemoryDataSensitivity::Confidential),
+        _ => Err("sensitivity_not_allowed"),
+    }
+}
+
+fn validate_memory_source_input(
+    consumer_workspace_id: &str,
+    request: &MemorySourceUpsertRequest,
+) -> Result<ValidatedMemorySourceInput, &'static str> {
+    let consumer_workspace_id = canonical_memory_workspace_id(consumer_workspace_id);
+    if consumer_workspace_id.as_str().is_empty() {
+        return Err("empty_consumer_workspace");
+    }
+    if matches!(
+        consumer_workspace_id.as_str(),
+        PERSONAL_WORKSPACE | THREADS_WORKSPACE
+    ) {
+        return Err("reserved_consumer_scope");
+    }
+
+    let source_workspace_id = canonical_memory_workspace_id(&request.source_workspace_id);
+    if source_workspace_id.as_str().is_empty() {
+        return Err("empty_source_workspace");
+    }
+    if source_workspace_id.as_str() == THREADS_WORKSPACE {
+        return Err("reserved_source_scope");
+    }
+    if source_workspace_id == consumer_workspace_id {
+        return Err("source_equals_consumer");
+    }
+    if request.collections.is_empty() && request.overrides.is_empty() {
+        return Err("empty_source_policy");
+    }
+
+    let mut collections = BTreeSet::new();
+    for collection in &request.collections {
+        let collection = parse_memory_collection(collection)?;
+        if !collections.insert(collection) {
+            return Err("duplicate_collection");
+        }
+    }
+    let max_sensitivity = parse_grant_sensitivity(&request.max_sensitivity)?;
+
+    let mut seen_overrides = HashSet::new();
+    let mut overrides = Vec::with_capacity(request.overrides.len());
+    for override_input in &request.overrides {
+        let raw_reference = override_input.memory_ref.as_str();
+        if raw_reference.trim() != raw_reference {
+            return Err("noncanonical_memory_ref");
+        }
+        let reference = raw_reference
+            .parse::<MemoryRef>()
+            .map_err(|_| "invalid_memory_ref")?;
+        if reference.to_string() != raw_reference
+            || reference.scope != "local"
+            || reference.user_id.as_str().trim().is_empty()
+            || reference.workspace_id.as_str().trim().is_empty()
+            || reference.key.trim().is_empty()
+        {
+            return Err("noncanonical_memory_ref");
+        }
+        if reference.kind != MemoryRefKind::Memory {
+            return Err("invalid_override_kind");
+        }
+        if reference.workspace_id != source_workspace_id {
+            return Err("override_outside_source");
+        }
+        if !seen_overrides.insert(reference.to_string()) {
+            return Err("duplicate_override_ref");
+        }
+        let effect = match override_input.effect.as_str() {
+            "allow" => MemoryGrantOverrideEffect::Allow,
+            "deny" => MemoryGrantOverrideEffect::Deny,
+            _ => return Err("override_effect_not_allowed"),
+        };
+        overrides.push((reference, effect));
+    }
+
+    Ok(ValidatedMemorySourceInput {
+        source_workspace_id,
+        collections,
+        max_sensitivity,
+        expires_at: request.expires_at,
+        overrides,
+    })
+}
+
+fn validate_memory_source_workspaces(
+    snapshot: &WorkspacesFile,
+    consumer_workspace_id: &str,
+    source_workspace_id: &str,
+) -> Result<MemorySourceWorkspaceContext, &'static str> {
+    let raw_consumer_workspace_id = consumer_workspace_id.trim();
+    let consumer_memory_workspace_id = canonical_memory_workspace_id(raw_consumer_workspace_id);
+    if consumer_memory_workspace_id.as_str().is_empty() {
+        return Err("empty_consumer_workspace");
+    }
+    if matches!(
+        consumer_memory_workspace_id.as_str(),
+        PERSONAL_WORKSPACE | THREADS_WORKSPACE
+    ) {
+        return Err("reserved_consumer_scope");
+    }
+    let consumer = snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == raw_consumer_workspace_id)
+        .cloned()
+        .ok_or("consumer_workspace_not_found")?;
+
+    let source_workspace_id = canonical_memory_workspace_id(source_workspace_id);
+    if source_workspace_id.as_str().is_empty() {
+        return Err("empty_source_workspace");
+    }
+    if source_workspace_id.as_str() == THREADS_WORKSPACE {
+        return Err("reserved_source_scope");
+    }
+    if source_workspace_id == consumer_memory_workspace_id {
+        return Err("source_equals_consumer");
+    }
+    if source_workspace_id.as_str() == PERSONAL_WORKSPACE {
+        return Ok(MemorySourceWorkspaceContext {
+            consumer,
+            source_workspace_id,
+            source_available: true,
+        });
+    }
+    if !snapshot
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == source_workspace_id.as_str())
+    {
+        return Err("source_workspace_not_found");
+    }
+    Ok(MemorySourceWorkspaceContext {
+        consumer,
+        source_workspace_id,
+        source_available: true,
+    })
+}
+
+fn validate_memory_source_consumer(
+    snapshot: &WorkspacesFile,
+    consumer_workspace_id: &str,
+) -> Result<WorkspaceRecord, &'static str> {
+    let raw_consumer_workspace_id = consumer_workspace_id.trim();
+    let consumer_memory_workspace_id = canonical_memory_workspace_id(raw_consumer_workspace_id);
+    if consumer_memory_workspace_id.as_str().is_empty() {
+        return Err("empty_consumer_workspace");
+    }
+    if matches!(
+        consumer_memory_workspace_id.as_str(),
+        PERSONAL_WORKSPACE | THREADS_WORKSPACE
+    ) {
+        return Err("reserved_consumer_scope");
+    }
+    snapshot
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.id == raw_consumer_workspace_id)
+        .cloned()
+        .ok_or("consumer_workspace_not_found")
+}
+
+fn memory_source_bad_request(code: &'static str) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code,
+        message: code.to_string(),
+    }
+}
+
+fn memory_source_disabled_error() -> GatewayError {
+    GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "memory_sources_disabled",
+        message: "memory_sources_disabled".to_string(),
+    }
+}
+
+fn memory_source_facade_error(error: MemoryError) -> GatewayError {
+    match error {
+        MemoryError::NotFound(_) => GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "memory_source_grant_not_found",
+            message: "memory_source_grant_not_found".to_string(),
+        },
+        MemoryError::Policy(_) => GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "memory_source_conflict",
+            message: "memory_source_conflict".to_string(),
+        },
+        MemoryError::Validation(_) => GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "memory_source_invalid",
+            message: "memory_source_invalid".to_string(),
+        },
+        MemoryError::Store(_) => GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "memory_source_store_error",
+            message: "memory_source_store_error".to_string(),
+        },
+    }
+}
+
+fn all_memory_collections() -> Vec<MemoryCollectionKey> {
+    vec![
+        MemoryCollectionKey::Preferences,
+        MemoryCollectionKey::Profile,
+        MemoryCollectionKey::Knowledge,
+        MemoryCollectionKey::Decisions,
+        MemoryCollectionKey::Goals,
+        MemoryCollectionKey::Artifacts,
+        MemoryCollectionKey::Episodes,
+    ]
+}
+
+fn memory_source_workspace_label(workspace: &WorkspaceRecord) -> String {
+    let name = workspace.name.trim();
+    if name.is_empty() {
+        workspace.id.clone()
+    } else {
+        name.to_string()
+    }
+}
+
+fn memory_source_grant_views<F>(
+    consumer: &WorkspaceRecord,
+    workspaces: &[WorkspaceRecord],
+    grants: Vec<MemorySourceGrant>,
+    last_access_at: F,
+) -> Vec<MemorySourceGrantView>
+where
+    F: Fn(&MemorySourceGrant) -> Option<i64>,
+{
+    let mut linked = grants
+        .into_iter()
+        .map(|grant| {
+            // The grant list is already owner+consumer scoped. Audit lookup remains
+            // non-authoritative: unavailable/corrupt audit data never blocks listing.
+            let last_used_at = last_access_at(&grant);
+            let (source_label, source_available) =
+                if grant.source_workspace_id.as_str() == PERSONAL_WORKSPACE {
+                    ("Personal".to_string(), true)
+                } else if let Some(workspace) = workspaces
+                    .iter()
+                    .find(|workspace| workspace.id == grant.source_workspace_id.as_str())
+                {
+                    (memory_source_workspace_label(workspace), true)
+                } else {
+                    (grant.source_workspace_id.as_str().to_string(), false)
+                };
+            MemorySourceGrantView {
+                id: Some(grant.id),
+                source_workspace_id: grant.source_workspace_id.as_str().to_string(),
+                source_label,
+                source_available,
+                local: false,
+                read_only: true,
+                collections: grant.collections.into_iter().collect(),
+                max_sensitivity: grant
+                    .max_sensitivity
+                    .min(MemoryDataSensitivity::Confidential),
+                expires_at: grant.expires_at,
+                revoked_at: grant.revoked_at,
+                policy_version: grant.policy_version,
+                last_used_at,
+                overrides: {
+                    let mut overrides = grant
+                        .overrides
+                        .into_iter()
+                        .map(|(memory_ref, effect)| MemorySourceGrantOverrideView {
+                            memory_ref: memory_ref.to_string(),
+                            effect,
+                        })
+                        .collect::<Vec<_>>();
+                    overrides.sort_by(|left, right| left.memory_ref.cmp(&right.memory_ref));
+                    overrides
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    linked.sort_by(|left, right| {
+        left.revoked_at
+            .is_some()
+            .cmp(&right.revoked_at.is_some())
+            .then_with(|| left.source_label.cmp(&right.source_label))
+            .then_with(|| left.source_workspace_id.cmp(&right.source_workspace_id))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut views = Vec::with_capacity(linked.len() + 1);
+    views.push(MemorySourceGrantView {
+        id: None,
+        source_workspace_id: consumer.id.clone(),
+        source_label: memory_source_workspace_label(consumer),
+        source_available: true,
+        local: true,
+        read_only: false,
+        collections: all_memory_collections(),
+        max_sensitivity: MemoryDataSensitivity::Confidential,
+        expires_at: None,
+        revoked_at: None,
+        policy_version: 0,
+        last_used_at: None,
+        overrides: Vec::new(),
+    });
+    views.extend(linked);
+    views
+}
+
+fn memory_source_candidates_from_records(
+    records: &[MemorySourceCandidateProjection],
+) -> Vec<MemorySourceCandidateView> {
+    records
+        .iter()
+        .filter(|record| {
+            record.sensitivity != MemoryDataSensitivity::Secret
+                && !contains_secret(&serde_json::json!({
+                    "text": &record.text,
+                    "metadata": &record.metadata,
+                }))
+        })
+        .filter_map(|record| {
+            let collection = all_memory_collections()
+                .into_iter()
+                .find(|collection| {
+                    collection.matches_candidate(&record.memory_type, &record.metadata)
+                })?;
+            let normalized = redact_memory_text(&record.text)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            Some(MemorySourceCandidateView {
+                reference: record.reference.to_string(),
+                summary: truncate_chars(&normalized, 180),
+                memory_type: record.memory_type.clone(),
+                collection,
+                sensitivity: record.sensitivity,
+            })
+        })
+        .collect()
+}
+
+fn build_memory_source_grant(
+    owner: &MemoryUserId,
+    consumer_workspace: &MemoryWorkspaceId,
+    validated: ValidatedMemorySourceInput,
+    overrides: HashMap<MemoryRef, MemoryGrantOverrideEffect>,
+    existing: Option<MemorySourceGrant>,
+    now: i64,
+) -> Result<MemorySourceGrant, &'static str> {
+    let timestamp = format!("unix:{now}.000000000");
+    if let Some(existing) = existing {
+        return Ok(MemorySourceGrant {
+            id: existing.id,
+            consumer_user_id: existing.consumer_user_id,
+            consumer_workspace_id: existing.consumer_workspace_id,
+            source_user_id: existing.source_user_id,
+            source_workspace_id: existing.source_workspace_id,
+            collections: validated.collections,
+            max_sensitivity: validated.max_sensitivity,
+            overrides,
+            expires_at: validated.expires_at,
+            revoked_at: None,
+            policy_version: existing
+                .policy_version
+                .checked_add(1)
+                .ok_or("policy_version_overflow")?,
+            created_by: existing.created_by,
+            created_at: existing.created_at,
+            updated_at: timestamp,
+        });
+    }
+    Ok(MemorySourceGrant {
+        id: uuid::Uuid::new_v4().to_string(),
+        consumer_user_id: owner.clone(),
+        consumer_workspace_id: consumer_workspace.clone(),
+        source_user_id: owner.clone(),
+        source_workspace_id: validated.source_workspace_id,
+        collections: validated.collections,
+        max_sensitivity: validated.max_sensitivity,
+        overrides,
+        expires_at: validated.expires_at,
+        revoked_at: None,
+        policy_version: 1,
+        created_by: owner.as_str().to_string(),
+        created_at: timestamp.clone(),
+        updated_at: timestamp,
+    })
+}
+
+fn validate_memory_source_overrides(
+    facade: &MemoryFacade,
+    owner: &MemoryUserId,
+    validated: &ValidatedMemorySourceInput,
+) -> Result<HashMap<MemoryRef, MemoryGrantOverrideEffect>, GatewayError> {
+    let mut overrides = HashMap::with_capacity(validated.overrides.len());
+    for (reference, effect) in &validated.overrides {
+        if reference.user_id != *owner
+            || reference.workspace_id != validated.source_workspace_id
+            || reference.kind != MemoryRefKind::Memory
+        {
+            return Err(memory_source_bad_request("override_outside_source"));
+        }
+        let record = facade
+            .get_memory_for_ui(reference, owner, &validated.source_workspace_id)
+            .map_err(|_| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "memory_source_store_error",
+                message: "memory_source_store_error".to_string(),
+            })?
+            .ok_or_else(|| memory_source_bad_request("override_memory_not_found"))?;
+        if matches!(
+            record.status,
+            MemoryStatus::Rejected | MemoryStatus::Deleted
+        ) {
+            return Err(memory_source_bad_request("override_memory_not_found"));
+        }
+        if record.sensitivity == MemoryDataSensitivity::Secret
+            || contains_secret(&serde_json::json!({
+                "text": &record.text,
+                "metadata": &record.metadata,
+            }))
+        {
+            return Err(memory_source_bad_request("override_memory_not_shareable"));
+        }
+        if *effect == MemoryGrantOverrideEffect::Allow
+            && record.sensitivity > validated.max_sensitivity
+        {
+            return Err(memory_source_bad_request("override_above_max_sensitivity"));
+        }
+        if overrides.insert(reference.clone(), *effect).is_some() {
+            return Err(memory_source_bad_request("duplicate_override_ref"));
+        }
+    }
+    Ok(overrides)
 }
 
 fn gateway_workspaces_path() -> Result<PathBuf, std::io::Error> {
@@ -50449,6 +51725,22 @@ fn load_workspaces_file() -> WorkspacesFile {
                 skill_confirmations: None,
             }],
         })
+}
+
+/// Strict registry read used exclusively at the linked-memory authorization
+/// boundary. Unlike the convenience loader above, this must never synthesize a
+/// default workspace: absent, unreadable, malformed, or empty persistence
+/// means no project source can be authorized for recall.
+fn load_persisted_memory_source_workspace_ids() -> Option<HashSet<String>> {
+    let path = gateway_workspaces_path().ok()?;
+    let raw = fs::read_to_string(path).ok()?;
+    let file = serde_json::from_str::<WorkspacesFile>(&raw).ok()?;
+    (!file.workspaces.is_empty()).then(|| {
+        file.workspaces
+            .into_iter()
+            .map(|workspace| workspace.id)
+            .collect()
+    })
 }
 
 /// The active project's root folder, if one is set.
@@ -50756,6 +52048,194 @@ async fn project_access_remove(
         },
     )?;
     Ok(Json(list_project_access(&workspace_id)))
+}
+
+async fn memory_sources_list(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<Vec<MemorySourceGrantView>>, GatewayError> {
+    let snapshot = load_workspaces_file();
+    let consumer = validate_memory_source_consumer(&snapshot, &workspace_id)
+        .map_err(memory_source_bad_request)?;
+    let grants = if memory_sources_enabled() {
+        memory_facade(&state)
+            .list_memory_source_grants(
+                &gateway_memory_user_id(),
+                &MemoryWorkspaceId::new(consumer.id.clone()),
+            )
+            .map_err(memory_source_facade_error)?
+    } else {
+        Vec::new()
+    };
+    let facade = memory_facade(&state);
+    Ok(Json(memory_source_grant_views(
+        &consumer,
+        &snapshot.workspaces,
+        grants,
+        |grant| {
+            facade
+                .last_memory_source_access(&grant.id)
+                .ok()
+                .flatten()
+                .map(|event| event.created_at)
+        },
+    )))
+}
+
+async fn memory_source_upsert(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+    request: Request,
+) -> Result<Json<Vec<MemorySourceGrantView>>, GatewayError> {
+    if !memory_sources_enabled() {
+        return Err(memory_source_disabled_error());
+    }
+
+    let body = axum::body::to_bytes(request.into_body(), 64 * 1024)
+        .await
+        .map_err(|_| memory_source_bad_request("memory_source_invalid_json"))?;
+    let request = serde_json::from_slice::<MemorySourceUpsertRequest>(&body)
+        .map_err(|_| memory_source_bad_request("memory_source_invalid_json"))?;
+
+    let snapshot = load_workspaces_file();
+    let validated =
+        validate_memory_source_input(&workspace_id, &request).map_err(memory_source_bad_request)?;
+    let source_context = validate_memory_source_workspaces(
+        &snapshot,
+        &workspace_id,
+        validated.source_workspace_id.as_str(),
+    )
+    .map_err(memory_source_bad_request)?;
+    if !source_context.source_available {
+        return Err(memory_source_bad_request("source_workspace_not_found"));
+    }
+    let now = i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX);
+    if validated.expires_at.is_some_and(|expiry| expiry <= now) {
+        return Err(memory_source_bad_request("expiry_not_future"));
+    }
+
+    let owner = gateway_memory_user_id();
+    let consumer_workspace = MemoryWorkspaceId::new(source_context.consumer.id.clone());
+    let facade = memory_facade(&state);
+    let overrides = validate_memory_source_overrides(facade, &owner, &validated)?;
+
+    let existing = facade
+        .list_memory_source_grants(&owner, &consumer_workspace)
+        .map_err(memory_source_facade_error)?
+        .into_iter()
+        .find(|grant| {
+            grant.revoked_at.is_none()
+                && grant.source_user_id == owner
+                && grant.source_workspace_id == validated.source_workspace_id
+        });
+    let grant = build_memory_source_grant(
+        &owner,
+        &consumer_workspace,
+        validated,
+        overrides,
+        existing,
+        now,
+    )
+    .map_err(memory_source_bad_request)?;
+    facade
+        .upsert_memory_source_grant(&grant)
+        .map_err(memory_source_facade_error)?;
+    let grants = facade
+        .list_memory_source_grants(&owner, &consumer_workspace)
+        .map_err(memory_source_facade_error)?;
+    Ok(Json(memory_source_grant_views(
+        &source_context.consumer,
+        &snapshot.workspaces,
+        grants,
+        |grant| {
+            facade
+                .last_memory_source_access(&grant.id)
+                .ok()
+                .flatten()
+                .map(|event| event.created_at)
+        },
+    )))
+}
+
+async fn memory_source_revoke(
+    State(state): State<AppState>,
+    Path((workspace_id, grant_id)): Path<(String, String)>,
+) -> Result<Json<Vec<MemorySourceGrantView>>, GatewayError> {
+    if !memory_sources_enabled() {
+        return Err(memory_source_disabled_error());
+    }
+    let snapshot = load_workspaces_file();
+    let consumer = validate_memory_source_consumer(&snapshot, &workspace_id)
+        .map_err(memory_source_bad_request)?;
+    if grant_id.trim().is_empty() {
+        return Err(memory_source_bad_request("empty_grant_id"));
+    }
+    let owner = gateway_memory_user_id();
+    let consumer_workspace = MemoryWorkspaceId::new(consumer.id.clone());
+    let facade = memory_facade(&state);
+    facade
+        .revoke_memory_source_grant(
+            &owner,
+            &consumer_workspace,
+            &grant_id,
+            i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX),
+        )
+        .map_err(memory_source_facade_error)?;
+    let grants = facade
+        .list_memory_source_grants(&owner, &consumer_workspace)
+        .map_err(memory_source_facade_error)?;
+    Ok(Json(memory_source_grant_views(
+        &consumer,
+        &snapshot.workspaces,
+        grants,
+        |grant| {
+            facade
+                .last_memory_source_access(&grant.id)
+                .ok()
+                .flatten()
+                .map(|event| event.created_at)
+        },
+    )))
+}
+
+async fn memory_source_candidates(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+    RawQuery(raw_query): RawQuery,
+) -> Result<Json<Vec<MemorySourceCandidateView>>, GatewayError> {
+    if !memory_sources_enabled() {
+        return Err(memory_source_disabled_error());
+    }
+    let raw_query = raw_query
+        .ok_or_else(|| memory_source_bad_request("memory_source_query_invalid"))?;
+    let uri = format!("/?{raw_query}")
+        .parse::<axum::http::Uri>()
+        .map_err(|_| memory_source_bad_request("memory_source_query_invalid"))?;
+    let Query(query) = Query::<MemorySourceCandidatesQuery>::try_from_uri(&uri)
+        .map_err(|_| memory_source_bad_request("memory_source_query_invalid"))?;
+    let snapshot = load_workspaces_file();
+    let source_context =
+        validate_memory_source_workspaces(&snapshot, &workspace_id, &query.source_workspace_id)
+            .map_err(memory_source_bad_request)?;
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(50);
+    if limit == 0 || limit > MEMORY_SOURCE_CANDIDATE_PAGE_MAX {
+        return Err(memory_source_bad_request("memory_source_query_invalid"));
+    }
+    let owner = gateway_memory_user_id();
+    let records = memory_facade(&state)
+        .list_memory_source_candidates(
+            &owner,
+            &source_context.source_workspace_id,
+            offset,
+            limit,
+        )
+        .map_err(|_| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "memory_source_store_error",
+            message: "memory_source_store_error".to_string(),
+        })?;
+    Ok(Json(memory_source_candidates_from_records(&records)))
 }
 
 async fn create_workspace(
@@ -51329,12 +52809,13 @@ mod tests {
     use super::{
         ActiveModelInputs, ChannelSettings, ConnectorErrorKind, InboundAction, LegacyDirAction,
         MAX_PLAN_STALL_RESUMES, MemoryCandidate, MemoryDataSensitivity,
-        TASK_EXECUTOR_DEFAULT_WORKER_COUNT, active_llm_concurrency, adapt_skill_body,
-        aggregate_session_state_from_counts,
+        MemorySourceOverrideInput, MemorySourceUpsertRequest, TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
+        ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile, active_llm_concurrency,
+        adapt_skill_body, aggregate_session_state_from_counts,
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
         browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
-        build_plan_markdown,
+        build_memory_source_grant, build_plan_markdown,
         capability_call_completed_outcome, classify_connector_error,
         collect_member_counts, composio_tool_is_read, connector_error_hint,
         default_browser_headless_value, evaluate_simple_arithmetic, extract_source_urls,
@@ -51344,7 +52825,8 @@ mod tests {
         enforce_monotonic_plan_progress, legacy_dir_action,
         llm_concurrency_view, mcp_error_hint,
         mcp_provider_slug, mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata,
-        memory_age_days, merge_plan,
+        memory_age_days, memory_source_candidates_from_records, memory_source_grant_views,
+        memory_source_facade_error, memory_sources_flag, merge_plan,
         next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
@@ -51358,7 +52840,8 @@ mod tests {
         strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_executor_worker_count,
         task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
-        tool_touches_contacts, wiki_title_from_text, workspace_write_roots,
+        tool_touches_contacts, validate_memory_source_input, validate_memory_source_overrides,
+        validate_memory_source_workspaces, wiki_title_from_text, workspace_write_roots,
     };
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
@@ -51378,7 +52861,7 @@ mod tests {
         UserId, WorkspaceId,
     };
     use local_first_vault::VaultStore;
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
     use std::sync::{Mutex, MutexGuard};
 
     static GATEWAY_DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -51425,6 +52908,1841 @@ mod tests {
 
     fn isolated_gateway_test_dir(prefix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("homun-{prefix}-{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    #[test]
+    fn memory_source_input_rejects_self_source_and_unknown_collection() {
+        let request = MemorySourceUpsertRequest {
+            source_workspace_id: "project-a".to_string(),
+            collections: vec!["knowledge".to_string()],
+            max_sensitivity: "private".to_string(),
+            expires_at: None,
+            overrides: Vec::new(),
+        };
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "source_equals_consumer"
+        );
+
+        let request = MemorySourceUpsertRequest {
+            source_workspace_id: "project-b".to_string(),
+            collections: vec!["everything".to_string()],
+            max_sensitivity: "private".to_string(),
+            expires_at: None,
+            overrides: vec![MemorySourceOverrideInput {
+                memory_ref: "memory:local:owner:project-b:known".to_string(),
+                effect: "deny".to_string(),
+            }],
+        };
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "collection_not_allowed"
+        );
+    }
+
+    #[test]
+    fn memory_source_flag_defaults_on_and_only_off_variants_disable() {
+        for enabled in [
+            None,
+            Some(""),
+            Some("   "),
+            Some("1"),
+            Some("on"),
+            Some("true"),
+            Some("unknown"),
+        ] {
+            assert!(
+                memory_sources_flag(enabled),
+                "expected enabled: {enabled:?}"
+            );
+        }
+        for disabled in [Some("0"), Some(" 0 "), Some("off"), Some("OFF"), Some("Off")] {
+            assert!(
+                !memory_sources_flag(disabled),
+                "expected disabled: {disabled:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_grants_are_created_for_existing_projects() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory()
+                .expect("in-memory memory store"),
+        );
+        let grants = facade
+            .list_memory_source_grants(
+                &local_first_memory::UserId::new("owner"),
+                &local_first_memory::WorkspaceId::new("legacy-project"),
+            )
+            .expect("legacy project should be readable without a grant migration");
+        assert!(grants.is_empty());
+    }
+
+    #[test]
+    fn memory_source_input_rejects_empty_duplicate_and_unsafe_policy_values() {
+        let valid = || MemorySourceUpsertRequest {
+            source_workspace_id: "project-b".to_string(),
+            collections: vec!["knowledge".to_string()],
+            max_sensitivity: "private".to_string(),
+            expires_at: None,
+            overrides: Vec::new(),
+        };
+
+        let mut request = valid();
+        request.collections.clear();
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "empty_source_policy"
+        );
+
+        let mut request = valid();
+        request.collections.push("knowledge".to_string());
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "duplicate_collection"
+        );
+
+        let mut request = valid();
+        request.max_sensitivity = "secret".to_string();
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "sensitivity_not_allowed"
+        );
+
+        let mut request = valid();
+        request.overrides = vec![MemorySourceOverrideInput {
+            memory_ref: "memory:local:owner:project-b:item".to_string(),
+            effect: "maybe".to_string(),
+        }];
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "override_effect_not_allowed"
+        );
+
+        let mut request = valid();
+        request.overrides = vec![
+            MemorySourceOverrideInput {
+                memory_ref: "memory:local:owner:project-b:item".to_string(),
+                effect: "deny".to_string(),
+            },
+            MemorySourceOverrideInput {
+                memory_ref: "memory:local:owner:project-b:item".to_string(),
+                effect: "allow".to_string(),
+            },
+        ];
+        assert_eq!(
+            validate_memory_source_input("project-a", &request).unwrap_err(),
+            "duplicate_override_ref"
+        );
+    }
+
+    #[test]
+    fn memory_source_input_requires_exact_collection_sensitivity_and_effect_tokens() {
+        let request_for = |collection: &str, sensitivity: &str, effect: &str| {
+            MemorySourceUpsertRequest {
+                source_workspace_id: "project-b".to_string(),
+                collections: vec![collection.to_string()],
+                max_sensitivity: sensitivity.to_string(),
+                expires_at: None,
+                overrides: vec![MemorySourceOverrideInput {
+                    memory_ref: "memory:local:owner:project-b:item".to_string(),
+                    effect: effect.to_string(),
+                }],
+            }
+        };
+
+        for collection in [" knowledge", "knowledge ", "Knowledge"] {
+            assert_eq!(
+                validate_memory_source_input(
+                    "project-a",
+                    &request_for(collection, "private", "allow")
+                )
+                .unwrap_err(),
+                "collection_not_allowed"
+            );
+        }
+        for sensitivity in [" private", "private ", "Private"] {
+            assert_eq!(
+                validate_memory_source_input(
+                    "project-a",
+                    &request_for("knowledge", sensitivity, "allow")
+                )
+                .unwrap_err(),
+                "sensitivity_not_allowed"
+            );
+        }
+        for effect in [" allow", "allow ", "Allow"] {
+            assert_eq!(
+                validate_memory_source_input(
+                    "project-a",
+                    &request_for("knowledge", "private", effect)
+                )
+                .unwrap_err(),
+                "override_effect_not_allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn memory_source_input_rejects_malformed_noncanonical_and_wrong_source_refs() {
+        let request_for = |memory_ref: &str| MemorySourceUpsertRequest {
+            source_workspace_id: "project-b".to_string(),
+            collections: Vec::new(),
+            max_sensitivity: "private".to_string(),
+            expires_at: None,
+            overrides: vec![MemorySourceOverrideInput {
+                memory_ref: memory_ref.to_string(),
+                effect: "deny".to_string(),
+            }],
+        };
+        assert_eq!(
+            validate_memory_source_input("project-a", &request_for("not-a-ref")).unwrap_err(),
+            "invalid_memory_ref"
+        );
+        assert_eq!(
+            validate_memory_source_input(
+                "project-a",
+                &request_for("memory:local:owner:project-b:")
+            )
+            .unwrap_err(),
+            "noncanonical_memory_ref"
+        );
+        assert_eq!(
+            validate_memory_source_input(
+                "project-a",
+                &request_for("entity:local:owner:project-b:item")
+            )
+            .unwrap_err(),
+            "invalid_override_kind"
+        );
+        assert_eq!(
+            validate_memory_source_input(
+                "project-a",
+                &request_for("memory:local:owner:project-c:item")
+            )
+            .unwrap_err(),
+            "override_outside_source"
+        );
+        assert_eq!(
+            validate_memory_source_input(
+                "project-a",
+                &request_for("memory:local:owner:project-b:item ")
+            )
+            .unwrap_err(),
+            "noncanonical_memory_ref"
+        );
+    }
+
+    fn memory_source_test_workspace(id: &str, name: &str) -> WorkspaceRecord {
+        WorkspaceRecord {
+            id: id.to_string(),
+            name: name.to_string(),
+            folder: None,
+            sandbox_mode: None,
+            approval_policy: None,
+            writable_roots: None,
+            skill_confirmations: None,
+        }
+    }
+
+    #[test]
+    fn memory_source_workspace_validation_uses_snapshot_and_allows_personal_source() {
+        let file = WorkspacesFile {
+            active: "project-a".to_string(),
+            workspaces: vec![
+                memory_source_test_workspace("project-a", "Alpha"),
+                memory_source_test_workspace("project-b", "Beta"),
+            ],
+        };
+        let project = validate_memory_source_workspaces(&file, "project-a", "project-b").unwrap();
+        assert_eq!(project.consumer.name, "Alpha");
+        assert!(project.source_available);
+
+        let personal =
+            validate_memory_source_workspaces(&file, "project-a", "__personal__").unwrap();
+        assert!(personal.source_available);
+
+        assert_eq!(
+            validate_memory_source_workspaces(&file, "project-a", "deleted-project").unwrap_err(),
+            "source_workspace_not_found"
+        );
+        assert_eq!(
+            validate_memory_source_workspaces(&file, "__personal__", "project-b").unwrap_err(),
+            "reserved_consumer_scope"
+        );
+    }
+
+    #[test]
+    fn memory_source_workspace_validation_canonicalizes_the_base_workspace_as_personal() {
+        let base = super::base_workspace_id();
+        let file = WorkspacesFile {
+            active: "project-a".to_string(),
+            workspaces: vec![
+                memory_source_test_workspace(&base, "Predefinito"),
+                memory_source_test_workspace("project-a", "Alpha"),
+            ],
+        };
+
+        assert_eq!(
+            validate_memory_source_workspaces(&file, &base, "project-a").unwrap_err(),
+            "reserved_consumer_scope"
+        );
+        let context = validate_memory_source_workspaces(&file, "project-a", &base).unwrap();
+        assert_eq!(
+            context.source_workspace_id.as_str(),
+            local_first_memory::PERSONAL_WORKSPACE
+        );
+
+        let personal_ref = format!(
+            "memory:local:owner:{}:item",
+            local_first_memory::PERSONAL_WORKSPACE
+        );
+        let validated = validate_memory_source_input(
+            "project-a",
+            &MemorySourceUpsertRequest {
+                source_workspace_id: base,
+                collections: Vec::new(),
+                max_sensitivity: "private".to_string(),
+                expires_at: None,
+                overrides: vec![MemorySourceOverrideInput {
+                    memory_ref: personal_ref,
+                    effect: "allow".to_string(),
+                }],
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            validated.source_workspace_id.as_str(),
+            local_first_memory::PERSONAL_WORKSPACE
+        );
+    }
+
+    #[test]
+    fn memory_source_facade_conflicts_map_to_http_409() {
+        let conflict = memory_source_facade_error(local_first_memory::MemoryError::Policy(
+            "duplicate_active_source".to_string(),
+        ));
+        assert_eq!(conflict.status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(conflict.code, "memory_source_conflict");
+
+        let malformed = memory_source_facade_error(local_first_memory::MemoryError::Validation(
+            "invalid caller input".to_string(),
+        ));
+        assert_eq!(malformed.status, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(malformed.code, "memory_source_invalid");
+    }
+
+    fn memory_source_test_record(
+        key: &str,
+        memory_type: &str,
+        text: &str,
+        sensitivity: local_first_memory::DataSensitivity,
+        metadata: serde_json::Value,
+    ) -> local_first_memory::MemorySourceCandidateProjection {
+        let user = local_first_memory::UserId::new("owner");
+        let workspace_id = local_first_memory::WorkspaceId::new("project-b");
+        local_first_memory::MemorySourceCandidateProjection {
+            reference: local_first_memory::MemoryRef::new(
+                local_first_memory::MemoryRefKind::Memory,
+                user,
+                workspace_id,
+                key,
+            ),
+            memory_type: memory_type.to_string(),
+            text: text.to_string(),
+            sensitivity,
+            metadata,
+        }
+    }
+
+    #[test]
+    fn memory_source_candidates_are_redacted_mapped_and_never_secret() {
+        use local_first_memory::DataSensitivity;
+        let records = vec![
+            memory_source_test_record(
+                "note",
+                "note",
+                "  useful   context  ",
+                DataSensitivity::Internal,
+                serde_json::json!({}),
+            ),
+            memory_source_test_record(
+                "secret",
+                "note",
+                "hidden",
+                DataSensitivity::Secret,
+                serde_json::json!({}),
+            ),
+            memory_source_test_record(
+                "vault",
+                "note",
+                "visible",
+                DataSensitivity::Internal,
+                serde_json::json!({"password": "hidden"}),
+            ),
+            memory_source_test_record(
+                "unknown",
+                "custom",
+                "unmapped",
+                DataSensitivity::Internal,
+                serde_json::json!({}),
+            ),
+        ];
+        let candidates = memory_source_candidates_from_records(&records);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].summary, "useful context");
+        assert_eq!(
+            candidates[0].collection,
+            local_first_memory::MemoryCollectionKey::Knowledge
+        );
+        let json = serde_json::to_string(&candidates).unwrap();
+        assert!(!json.contains("hidden"));
+        assert!(!json.contains("metadata"));
+    }
+
+    #[test]
+    fn memory_source_grant_views_keep_local_first_and_deleted_sources_revocable() {
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemoryGrantOverrideEffect, MemoryRef,
+            MemoryRefKind, MemorySourceGrant, UserId, WorkspaceId,
+        };
+        let consumer = memory_source_test_workspace("project-a", "Alpha");
+        let workspaces = vec![consumer.clone()];
+        let grant = MemorySourceGrant {
+            id: "grant-deleted".to_string(),
+            consumer_user_id: UserId::new("owner"),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: UserId::new("owner"),
+            source_workspace_id: WorkspaceId::new("deleted-project"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::from([(
+                MemoryRef::new(
+                    MemoryRefKind::Memory,
+                    UserId::new("owner"),
+                    WorkspaceId::new("deleted-project"),
+                    "explicit-deny",
+                ),
+                MemoryGrantOverrideEffect::Deny,
+            )]),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: "owner".to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        let views = memory_source_grant_views(&consumer, &workspaces, vec![grant], |_| None);
+        assert_eq!(views[0].source_workspace_id, "project-a");
+        assert!(views[0].local);
+        assert_eq!(views[1].id.as_deref(), Some("grant-deleted"));
+        assert!(!views[1].source_available);
+        assert!(views[1].read_only);
+        let json = serde_json::to_string(&views).unwrap();
+        assert!(json.contains(
+            "\"overrides\":[{\"memory_ref\":\"memory:local:owner:deleted-project:explicit-deny\",\"effect\":\"deny\"}]"
+        ));
+        assert!(!json.contains("memory_text"));
+        assert!(!json.contains("metadata"));
+    }
+
+    #[test]
+    fn memory_source_grant_views_fall_back_to_workspace_ids_for_blank_labels() {
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemorySourceGrant, UserId, WorkspaceId,
+        };
+        let mut consumer = memory_source_test_workspace("project-a", "   ");
+        let mut source = memory_source_test_workspace("project-b", "");
+        let grant = MemorySourceGrant {
+            id: "grant-project-b".to_string(),
+            consumer_user_id: UserId::new("owner"),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: UserId::new("owner"),
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: "owner".to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        let views = memory_source_grant_views(
+            &consumer,
+            &[consumer.clone(), source.clone()],
+            vec![grant.clone()],
+            |_| None,
+        );
+        assert_eq!(views[0].source_label, "project-a");
+        assert_eq!(views[1].source_label, "project-b");
+
+        consumer.name = "  Alpha  ".to_string();
+        source.name = "  Beta  ".to_string();
+        let views = memory_source_grant_views(
+            &consumer,
+            &[consumer.clone(), source],
+            vec![grant],
+            |_| None,
+        );
+        assert_eq!(views[0].source_label, "Alpha");
+        assert_eq!(views[1].source_label, "Beta");
+    }
+
+    #[test]
+    fn memory_source_grant_builder_starts_at_one_and_preserves_identity_on_update() {
+        use local_first_memory::{MemoryCollectionKey, UserId, WorkspaceId};
+        let owner = UserId::new("owner");
+        let consumer = WorkspaceId::new("project-a");
+        let input = ValidatedMemorySourceInput {
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: local_first_memory::DataSensitivity::Private,
+            expires_at: None,
+            overrides: Vec::new(),
+        };
+        let new_grant =
+            build_memory_source_grant(&owner, &consumer, input.clone(), HashMap::new(), None, 100)
+                .unwrap();
+        assert_eq!(new_grant.policy_version, 1);
+        assert_eq!(new_grant.created_at, "unix:100.000000000");
+        assert_eq!(
+            uuid::Uuid::parse_str(&new_grant.id).unwrap().to_string(),
+            new_grant.id
+        );
+
+        let original_id = new_grant.id.clone();
+        let original_creator = new_grant.created_by.clone();
+        let original_created_at = new_grant.created_at.clone();
+        let updated = build_memory_source_grant(
+            &owner,
+            &consumer,
+            input,
+            HashMap::new(),
+            Some(new_grant),
+            200,
+        )
+        .unwrap();
+        assert_eq!(updated.id, original_id);
+        assert_eq!(updated.created_by, original_creator);
+        assert_eq!(updated.created_at, original_created_at);
+        assert_eq!(updated.updated_at, "unix:200.000000000");
+        assert_eq!(updated.policy_version, 2);
+    }
+
+    #[test]
+    fn memory_source_scoped_revoke_cannot_target_another_consumer() {
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemoryFacade, MemorySourceGrant,
+            SQLiteMemoryStore, UserId, WorkspaceId,
+        };
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let owner = UserId::new("owner");
+        let grant = MemorySourceGrant {
+            id: "scoped-grant".to_string(),
+            consumer_user_id: owner.clone(),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: owner.clone(),
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: "owner".to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        facade.upsert_memory_source_grant(&grant).unwrap();
+        let error = facade
+            .revoke_memory_source_grant(&owner, &WorkspaceId::new("project-c"), &grant.id, 2)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            local_first_memory::MemoryError::NotFound(_)
+        ));
+        assert!(
+            facade
+                .get_memory_source_grant(&owner, &WorkspaceId::new("project-a"), &grant.id)
+                .unwrap()
+                .unwrap()
+                .revoked_at
+                .is_none()
+        );
+    }
+
+    fn create_memory_source_override_record(
+        facade: &local_first_memory::MemoryFacade,
+        sensitivity: local_first_memory::DataSensitivity,
+        metadata: serde_json::Value,
+    ) -> local_first_memory::MemoryRecord {
+        let owner = local_first_memory::UserId::new("owner");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: local_first_memory::MemoryLifecycleRequest {
+                    actor_id: "test".to_string(),
+                    user_id: owner,
+                    workspace_id: source,
+                    purpose: "memory source override test".to_string(),
+                },
+                memory_type: "note".to_string(),
+                text: "shareable context".to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity,
+                evidence_refs: Vec::new(),
+                metadata,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn memory_source_override_validation_rejects_missing_wrong_owner_secret_and_vault() {
+        use local_first_memory::{
+            DataSensitivity, MemoryFacade, MemoryGrantOverrideEffect, MemoryRef, MemoryRefKind,
+            SQLiteMemoryStore, UserId, WorkspaceId,
+        };
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let owner = UserId::new("owner");
+        let source = WorkspaceId::new("project-b");
+        let validated_for = |reference: MemoryRef, effect| ValidatedMemorySourceInput {
+            source_workspace_id: source.clone(),
+            collections: BTreeSet::new(),
+            max_sensitivity: DataSensitivity::Private,
+            expires_at: None,
+            overrides: vec![(reference, effect)],
+        };
+
+        let missing = validated_for(
+            MemoryRef::new(
+                MemoryRefKind::Memory,
+                owner.clone(),
+                source.clone(),
+                "missing",
+            ),
+            MemoryGrantOverrideEffect::Deny,
+        );
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &missing)
+                .unwrap_err()
+                .code,
+            "override_memory_not_found"
+        );
+
+        let wrong_owner = validated_for(
+            MemoryRef::new(
+                MemoryRefKind::Memory,
+                UserId::new("other"),
+                source.clone(),
+                "missing",
+            ),
+            MemoryGrantOverrideEffect::Deny,
+        );
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &wrong_owner)
+                .unwrap_err()
+                .code,
+            "override_outside_source"
+        );
+
+        let secret = create_memory_source_override_record(
+            &facade,
+            DataSensitivity::Secret,
+            serde_json::json!({}),
+        );
+        let secret_input = validated_for(secret.reference, MemoryGrantOverrideEffect::Deny);
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &secret_input)
+                .unwrap_err()
+                .code,
+            "override_memory_not_shareable"
+        );
+
+        let vault = create_memory_source_override_record(
+            &facade,
+            DataSensitivity::Internal,
+            serde_json::json!({"password": "hidden"}),
+        );
+        let vault_input = validated_for(vault.reference, MemoryGrantOverrideEffect::Deny);
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &vault_input)
+                .unwrap_err()
+                .code,
+            "override_memory_not_shareable"
+        );
+
+        let confidential = create_memory_source_override_record(
+            &facade,
+            DataSensitivity::Confidential,
+            serde_json::json!({}),
+        );
+        let allow_input = validated_for(
+            confidential.reference.clone(),
+            MemoryGrantOverrideEffect::Allow,
+        );
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &allow_input)
+                .unwrap_err()
+                .code,
+            "override_above_max_sensitivity"
+        );
+        let deny_input = validated_for(confidential.reference, MemoryGrantOverrideEffect::Deny);
+        assert_eq!(
+            validate_memory_source_overrides(&facade, &owner, &deny_input)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    struct TestMemorySourcesFlag {
+        _lock: MutexGuard<'static, ()>,
+        restore: Option<String>,
+    }
+
+    impl TestMemorySourcesFlag {
+        fn set(value: Option<&str>) -> Self {
+            let lock = TEST_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let restore = std::env::var("HOMUN_MEMORY_SOURCES").ok();
+            // SAFETY: serialized by TEST_ENV_LOCK and restored in Drop.
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var("HOMUN_MEMORY_SOURCES", value),
+                    None => std::env::remove_var("HOMUN_MEMORY_SOURCES"),
+                }
+            }
+            Self {
+                _lock: lock,
+                restore,
+            }
+        }
+    }
+
+    impl Drop for TestMemorySourcesFlag {
+        fn drop(&mut self) {
+            // SAFETY: serialized by TEST_ENV_LOCK and restored before releasing it.
+            unsafe {
+                match &self.restore {
+                    Some(value) => std::env::set_var("HOMUN_MEMORY_SOURCES", value),
+                    None => std::env::remove_var("HOMUN_MEMORY_SOURCES"),
+                }
+            }
+        }
+    }
+
+    async fn memory_source_response_code(response: axum::response::Response) -> Option<String> {
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .ok()?;
+        serde_json::from_slice::<serde_json::Value>(&body)
+            .ok()?
+            .pointer("/error/code")?
+            .as_str()
+            .map(str::to_string)
+    }
+
+    fn memory_source_route_test_app(state: super::AppState) -> axum::Router {
+        axum::Router::new()
+            .route(
+                "/api/workspaces/{workspace_id}/memory-sources",
+                axum::routing::get(super::memory_sources_list),
+            )
+            .route(
+                "/api/workspaces/{workspace_id}/memory-sources/upsert",
+                axum::routing::post(super::memory_source_upsert),
+            )
+            .route(
+                "/api/workspaces/{workspace_id}/memory-sources/candidates",
+                axum::routing::get(super::memory_source_candidates),
+            )
+            .route(
+                "/api/workspaces/{workspace_id}/memory-sources/{grant_id}/revoke",
+                axum::routing::post(super::memory_source_revoke),
+            )
+            .with_state(state)
+    }
+
+    fn memory_publication_route_test_app(state: super::AppState) -> axum::Router {
+        axum::Router::new()
+            .route(
+                "/api/memory/publications",
+                axum::routing::post(super::memory_publication_create),
+            )
+            .route(
+                "/api/memory/publications/{proposal_id}",
+                axum::routing::get(super::memory_publication_get),
+            )
+            .route(
+                "/api/memory/publications/{proposal_id}/edit",
+                axum::routing::post(super::memory_publication_edit),
+            )
+            .route(
+                "/api/memory/publications/{proposal_id}/approve",
+                axum::routing::post(super::memory_publication_approve),
+            )
+            .route(
+                "/api/memory/publications/{proposal_id}/reject",
+                axum::routing::post(super::memory_publication_reject),
+            )
+            .with_state(state)
+    }
+
+    async fn memory_source_response_json(
+        response: axum::response::Response,
+    ) -> (axum::http::StatusCode, serde_json::Value) {
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 2 * 1024 * 1024)
+            .await
+            .unwrap();
+        let json = serde_json::from_slice(&body).unwrap_or_else(|error| {
+            panic!("memory source response must be JSON ({error}): {body:?}")
+        });
+        (status, json)
+    }
+
+    fn write_memory_source_workspaces(dir: &std::path::Path, include_base: bool) {
+        let mut workspaces = vec![
+            memory_source_test_workspace("project-a", "Alpha"),
+            memory_source_test_workspace("project-b", "Beta"),
+            memory_source_test_workspace("project-c", "Gamma"),
+        ];
+        if include_base {
+            workspaces.push(memory_source_test_workspace(
+                &super::base_workspace_id(),
+                "Predefinito",
+            ));
+        }
+        std::fs::write(
+            dir.join("workspaces.json"),
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn create_publication_route_memory(
+        facade: &local_first_memory::MemoryFacade,
+        owner: local_first_memory::UserId,
+        workspace: &str,
+        text: &str,
+        sensitivity: local_first_memory::DataSensitivity,
+    ) -> local_first_memory::MemoryRecord {
+        facade
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: local_first_memory::MemoryLifecycleRequest {
+                    actor_id: "test".to_string(),
+                    user_id: owner,
+                    workspace_id: local_first_memory::WorkspaceId::new(workspace),
+                    purpose: "publication route test".to_string(),
+                },
+                memory_type: "preference".to_string(),
+                text: text.to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({}),
+            })
+            .unwrap()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_publication_routes_reload_local_source_require_decision_and_reject_foreign_actor() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let dir = isolated_gateway_test_dir("memory-publication-routes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, true);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let facade = super::memory_facade(&state);
+        let secret = create_publication_route_memory(
+            facade,
+            owner.clone(),
+            "project-a",
+            "hidden",
+            local_first_memory::DataSensitivity::Secret,
+        );
+        let app = memory_publication_route_test_app(state.clone());
+        let base = super::base_workspace_id();
+        let secret_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": secret.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": base,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, secret_body) = memory_source_response_json(secret_response).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(secret_body["error"]["code"], "secret_never_shareable");
+
+        let source = create_publication_route_memory(
+            facade,
+            owner.clone(),
+            "project-a",
+            "Prefer Italian",
+            local_first_memory::DataSensitivity::Private,
+        );
+        let created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": source.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": base
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, proposal) = memory_source_response_json(created).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let proposal_id = proposal["id"].as_str().unwrap();
+        assert_eq!(proposal["proposed_text"], "Prefer Italian");
+        assert_eq!(proposal["proposed_memory_type"], "preference");
+
+        let edited = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/memory/publications/{proposal_id}/edit"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "expected_version": 1,
+                            "edit": {
+                                "proposed_text": "Prefer concise Italian",
+                                "proposed_memory_type": "note"
+                            }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, proposal) = memory_source_response_json(edited).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(proposal["proposed_text"], "Prefer concise Italian");
+        assert_eq!(proposal["proposed_memory_type"], "note");
+        assert_eq!(proposal["proposal_version"], 2);
+
+        // Reopening the publish surface uses the server-first create endpoint;
+        // it must resume the edited pending review instead of returning a
+        // conflict or generating a second draft.
+        let reopened = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": source.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": base,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, reopened) = memory_source_response_json(reopened).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(reopened["id"], proposal_id);
+        assert_eq!(reopened["proposal_version"], 2);
+        assert_eq!(reopened["proposed_text"], "Prefer concise Italian");
+
+        for (suffix, body) in [
+            ("edit", serde_json::json!({ "expected_version": 1, "edit": { "proposed_text": "stale" } })),
+            ("reject", serde_json::json!({ "expected_version": 1 })),
+            ("approve", serde_json::json!({ "expected_version": 1, "resolution": { "kind": "create_new" } })),
+        ] {
+            let stale = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/api/memory/publications/{proposal_id}/{suffix}"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let (status, stale) = memory_source_response_json(stale).await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT);
+            assert_eq!(stale["error"]["code"], "publication_conflict");
+        }
+
+        let missing_decision = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/memory/publications/{proposal_id}/approve"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, missing_decision) = memory_source_response_json(missing_decision).await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(missing_decision["error"]["code"], "memory_publication_invalid");
+
+        let approved = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/memory/publications/{proposal_id}/approve"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"expected_version":2,"resolution":{"kind":"create_new"}}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, approved) = memory_source_response_json(approved).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(approved["proposal"]["status"], "approved");
+
+        let rejected_source = create_publication_route_memory(
+            facade,
+            owner.clone(),
+            "project-a",
+            "Keep this local",
+            local_first_memory::DataSensitivity::Private,
+        );
+        let rejected_created = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": rejected_source.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": base,
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, rejected_proposal) = memory_source_response_json(rejected_created).await;
+        let rejected = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/memory/publications/{}/reject",
+                        rejected_proposal["id"].as_str().unwrap()
+                    ))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"expected_version":1}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, rejected) = memory_source_response_json(rejected).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(rejected["status"], "rejected");
+        assert!(facade
+            .get_publication_link(&rejected_source.reference)
+            .unwrap()
+            .is_none());
+
+        let foreign_owner = local_first_memory::UserId::new("other-owner");
+        let foreign_source = create_publication_route_memory(
+            facade,
+            foreign_owner.clone(),
+            "project-b",
+            "Foreign preference",
+            local_first_memory::DataSensitivity::Private,
+        );
+        let foreign = facade
+            .create_publication_proposal(
+                &foreign_source,
+                &local_first_memory::MemoryPublicationDestination::personal(foreign_owner),
+                "other-owner",
+            )
+            .unwrap();
+        let foreign_response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/memory/publications/{}", foreign.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, foreign_body) = memory_source_response_json(foreign_response).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(foreign_body["error"]["code"], "publication_actor_mismatch");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_return_disabled_before_body_or_query_parsing() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("off"));
+        let app = memory_source_route_test_app(super::AppState::for_tests());
+        let malformed_body = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces/project-a/memory-sources/upsert")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(malformed_body).await.as_deref(),
+            Some("memory_sources_disabled")
+        );
+
+        let missing_query = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources/candidates")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(missing_query).await.as_deref(),
+            Some("memory_sources_disabled")
+        );
+
+        let malformed_query = app
+            .oneshot(
+                Request::builder()
+                    .uri(concat!(
+                        "/api/workspaces/project-a/memory-sources/candidates?",
+                        "source_workspace_id=a&source_workspace_id=b"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            memory_source_response_code(malformed_query)
+                .await
+                .as_deref(),
+            Some("memory_sources_disabled")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_return_typed_input_errors_when_enabled() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let app = memory_source_route_test_app(super::AppState::for_tests());
+        let malformed_body = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces/project-a/memory-sources/upsert")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(malformed_body.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            memory_source_response_code(malformed_body).await.as_deref(),
+            Some("memory_source_invalid_json")
+        );
+
+        let missing_query = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources/candidates")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_query.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            memory_source_response_code(missing_query).await.as_deref(),
+            Some("memory_source_query_invalid")
+        );
+
+        let malformed_query = app
+            .oneshot(
+                Request::builder()
+                    .uri(concat!(
+                        "/api/workspaces/project-a/memory-sources/candidates?",
+                        "source_workspace_id=a&source_workspace_id=b"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(malformed_query.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            memory_source_response_code(malformed_query)
+                .await
+                .as_deref(),
+            Some("memory_source_query_invalid")
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_list_only_local_when_disabled() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(None);
+        let dir = isolated_gateway_test_dir("memory-source-disabled-list");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let app = memory_source_route_test_app(super::AppState::for_tests());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, body) = memory_source_response_json(response).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body.as_array().unwrap().len(), 1);
+        assert_eq!(body[0]["source_workspace_id"], "project-a");
+        assert_eq!(body[0]["local"], true);
+        assert_eq!(body[0]["overrides"], serde_json::json!([]));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_list_route_roundtrips_typed_allow_and_deny_overrides() {
+        use axum::{body::Body, http::Request};
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemoryGrantOverrideEffect, MemoryRef,
+            MemoryRefKind, MemorySourceGrant, UserId, WorkspaceId,
+        };
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-list-overrides");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let grant = MemorySourceGrant {
+            id: "typed-overrides".to_string(),
+            consumer_user_id: owner.clone(),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: owner.clone(),
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::from([
+                (
+                    MemoryRef::new(
+                        MemoryRefKind::Memory,
+                        UserId::new(owner.as_str()),
+                        WorkspaceId::new("project-b"),
+                        "allow-record",
+                    ),
+                    MemoryGrantOverrideEffect::Allow,
+                ),
+                (
+                    MemoryRef::new(
+                        MemoryRefKind::Memory,
+                        UserId::new(owner.as_str()),
+                        WorkspaceId::new("project-b"),
+                        "deny-record",
+                    ),
+                    MemoryGrantOverrideEffect::Deny,
+                ),
+            ]),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: owner.as_str().to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        super::memory_facade(&state)
+            .upsert_memory_source_grant(&grant)
+            .unwrap();
+        let app = memory_source_route_test_app(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, listed) = memory_source_response_json(response).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let linked = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|view| view["id"] == "typed-overrides")
+            .unwrap();
+        assert_eq!(linked["overrides"], serde_json::json!([
+            {
+                "memory_ref": format!("memory:local:{}:project-b:allow-record", owner.as_str()),
+                "effect": "allow"
+            },
+            {
+                "memory_ref": format!("memory:local:{}:project-b:deny-record", owner.as_str()),
+                "effect": "deny"
+            }
+        ]));
+        assert!(serde_json::to_string(linked).unwrap().contains("memory_ref"));
+        assert!(!serde_json::to_string(linked).unwrap().contains("metadata"));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_list_route_exposes_last_scoped_access_timestamp_when_present() {
+        use axum::{body::Body, http::Request};
+        use local_first_memory::{
+            DataSensitivity, MemoryCollectionKey, MemorySourceAccessEvent,
+            MemorySourceAccessOutcome, MemorySourceGrant, WorkspaceId,
+        };
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-last-access");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let grant = MemorySourceGrant {
+            id: "last-access-grant".to_string(),
+            consumer_user_id: owner.clone(),
+            consumer_workspace_id: WorkspaceId::new("project-a"),
+            source_user_id: owner.clone(),
+            source_workspace_id: WorkspaceId::new("project-b"),
+            collections: [MemoryCollectionKey::Knowledge].into_iter().collect(),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: owner.as_str().to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        super::memory_facade(&state)
+            .upsert_memory_source_grant(&grant)
+            .unwrap();
+        let app = memory_source_route_test_app(state.clone());
+        let listed_before = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, listed_before) = memory_source_response_json(listed_before).await;
+        assert_eq!(
+            listed_before.as_array().unwrap().iter()
+                .find(|view| view["id"] == "last-access-grant").unwrap()["last_used_at"],
+            serde_json::Value::Null,
+        );
+
+        super::memory_facade(&state)
+            .record_memory_source_access(&MemorySourceAccessEvent {
+                id: uuid::Uuid::new_v4().to_string(),
+                consumer_user_id: owner.clone(),
+                consumer_workspace_id: WorkspaceId::new("project-a"),
+                source_workspace_id: WorkspaceId::new("project-b"),
+                grant_id: Some(grant.id.clone()),
+                policy_version: 1,
+                turn_id: Some("turn-1".to_string()),
+                outcome: MemorySourceAccessOutcome::Allow,
+                reason: "allowed".to_string(),
+                candidate_count: 1,
+                injected_refs: Vec::new(),
+                created_at: 1_700_000_001,
+            })
+            .unwrap();
+        let listed_after = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, listed_after) = memory_source_response_json(listed_after).await;
+        assert_eq!(
+            listed_after.as_array().unwrap().iter()
+                .find(|view| view["id"] == "last-access-grant").unwrap()["last_used_at"],
+            serde_json::json!(1_700_000_001),
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_persist_upsert_list_and_revoke() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-route-lifecycle");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let state = super::AppState::for_tests();
+        let app = memory_source_route_test_app(state);
+
+        let upsert = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces/project-a/memory-sources/upsert")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"source_workspace_id":"project-b","collections":["knowledge"],"max_sensitivity":"private","expires_at":null,"overrides":[]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, upserted) = memory_source_response_json(upsert).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let grant_id = upserted
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|view| view["source_workspace_id"] == "project-b")
+            .unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let listed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, listed) = memory_source_response_json(listed).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(listed.as_array().unwrap().len(), 2);
+
+        let revoked = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/workspaces/project-a/memory-sources/{grant_id}/revoke"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, revoked) = memory_source_response_json(revoked).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let linked = revoked
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|view| view["id"] == grant_id)
+            .unwrap();
+        assert!(linked["revoked_at"].as_i64().is_some());
+        assert_eq!(linked["policy_version"], 2);
+
+        let listed_again = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, listed_again) = memory_source_response_json(listed_again).await;
+        assert!(
+            listed_again
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|view| view["id"] == grant_id && view["revoked_at"].as_i64().is_some())
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_scope_revoke_and_missing_revoke_are_not_found() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-revoke-scope");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let grant = local_first_memory::MemorySourceGrant {
+            id: "scoped-route-grant".to_string(),
+            consumer_user_id: owner.clone(),
+            consumer_workspace_id: local_first_memory::WorkspaceId::new("project-a"),
+            source_user_id: owner.clone(),
+            source_workspace_id: local_first_memory::WorkspaceId::new("project-b"),
+            collections: [local_first_memory::MemoryCollectionKey::Knowledge]
+                .into_iter()
+                .collect(),
+            max_sensitivity: local_first_memory::DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: None,
+            revoked_at: None,
+            policy_version: 1,
+            created_by: owner.as_str().to_string(),
+            created_at: "unix:1.000000000".to_string(),
+            updated_at: "unix:1.000000000".to_string(),
+        };
+        super::memory_facade(&state)
+            .upsert_memory_source_grant(&grant)
+            .unwrap();
+        let app = memory_source_route_test_app(state);
+
+        for uri in [
+            "/api/workspaces/project-c/memory-sources/scoped-route-grant/revoke",
+            "/api/workspaces/project-a/memory-sources/missing-grant/revoke",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let (status, body) = memory_source_response_json(response).await;
+            assert_eq!(status, axum::http::StatusCode::NOT_FOUND);
+            assert_eq!(body["error"]["code"], "memory_source_grant_not_found");
+        }
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_keep_unavailable_grants_listable_and_revocable() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-unavailable");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        super::memory_facade(&state)
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: "unavailable-grant".to_string(),
+                consumer_user_id: owner.clone(),
+                consumer_workspace_id: local_first_memory::WorkspaceId::new("project-a"),
+                source_user_id: owner.clone(),
+                source_workspace_id: local_first_memory::WorkspaceId::new("deleted-project"),
+                collections: [local_first_memory::MemoryCollectionKey::Knowledge]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Private,
+                overrides: HashMap::new(),
+                expires_at: None,
+                revoked_at: None,
+                policy_version: 1,
+                created_by: owner.as_str().to_string(),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+            })
+            .unwrap();
+        let app = memory_source_route_test_app(state);
+
+        let listed = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workspaces/project-a/memory-sources")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (_, listed) = memory_source_response_json(listed).await;
+        let unavailable = listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|view| view["id"] == "unavailable-grant")
+            .unwrap();
+        assert_eq!(unavailable["source_available"], false);
+
+        let revoked = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(concat!(
+                        "/api/workspaces/project-a/memory-sources/",
+                        "unavailable-grant/revoke"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, revoked) = memory_source_response_json(revoked).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert!(
+            revoked
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|view| view["id"] == "unavailable-grant"
+                    && view["revoked_at"].as_i64().is_some())
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_reject_oversized_enabled_body_and_invalid_pages() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-input-bounds");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let app = memory_source_route_test_app(super::AppState::for_tests());
+
+        let oversized = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces/project-a/memory-sources/upsert")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        "{{\"padding\":\"{}\"}}",
+                        "x".repeat(70 * 1024)
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, body) = memory_source_response_json(oversized).await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "memory_source_invalid_json");
+
+        for query in ["offset=-1", "limit=0", "limit=101"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!(
+                            "/api/workspaces/project-a/memory-sources/candidates?source_workspace_id=project-b&{query}"
+                        ))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let (status, body) = memory_source_response_json(response).await;
+            assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "query {query}");
+            assert_eq!(
+                body["error"]["code"],
+                "memory_source_query_invalid",
+                "query {query}"
+            );
+        }
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_source_routes_normalize_default_source_and_reject_default_consumer() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-source-default-scope");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, true);
+        let state = super::AppState::for_tests();
+        let personal = local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE);
+        let owner = super::gateway_memory_user_id();
+        let memory = super::memory_facade(&state)
+            .create_memory_candidate(local_first_memory::MemoryCreateRequest {
+                request: local_first_memory::MemoryLifecycleRequest {
+                    actor_id: "test".to_string(),
+                    user_id: owner.clone(),
+                    workspace_id: personal.clone(),
+                    purpose: "default source route test".to_string(),
+                },
+                memory_type: "note".to_string(),
+                text: "personal candidate".to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity: local_first_memory::DataSensitivity::Internal,
+                evidence_refs: Vec::new(),
+                metadata: serde_json::json!({}),
+            })
+            .unwrap();
+        let app = memory_source_route_test_app(state.clone());
+        let base = super::base_workspace_id();
+
+        let rejected_consumer = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/workspaces/{base}/memory-sources"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, body) = memory_source_response_json(rejected_consumer).await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"]["code"], "reserved_consumer_scope");
+
+        let upsert = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/workspaces/project-a/memory-sources/upsert")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_workspace_id": base,
+                            "collections": ["knowledge"],
+                            "max_sensitivity": "private",
+                            "expires_at": null,
+                            "overrides": [{
+                                "memory_ref": memory.reference.to_string(),
+                                "effect": "allow"
+                            }]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, upserted) = memory_source_response_json(upsert).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let linked = upserted
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|view| !view["local"].as_bool().unwrap())
+            .unwrap();
+        assert_eq!(linked["source_workspace_id"], local_first_memory::PERSONAL_WORKSPACE);
+        assert_eq!(linked["source_label"], "Personal");
+
+        let persisted = super::memory_facade(&state)
+            .list_memory_source_grants(&owner, &local_first_memory::WorkspaceId::new("project-a"))
+            .unwrap();
+        assert_eq!(persisted[0].source_workspace_id, personal);
+        assert!(persisted[0].overrides.contains_key(&memory.reference));
+
+        let candidates = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!(
+                        "/api/workspaces/project-a/memory-sources/candidates?source_workspace_id={base}&offset=0&limit=10"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, candidates) = memory_source_response_json(candidates).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(candidates.as_array().unwrap().len(), 1);
+        assert_eq!(candidates[0]["ref"], memory.reference.to_string());
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
@@ -59085,6 +62403,42 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     }
 
     #[test]
+    fn fanout_recall_preserves_the_payload_and_uses_recall_kind() {
+        let raw = serde_json::json!({
+            "type": "recall",
+            "payload": {
+                "query": "launch",
+                "hits": [{
+                    "ref": "memory:owner:project-a:1",
+                    "source_workspace_id": "project-a",
+                    "source_label": "Homun roadmap",
+                    "collection": "decisions",
+                    "grant_id": null,
+                    "conflict": false
+                }],
+                "scope": "project"
+            }
+        });
+        let (kind, payload) = super::turn_event_from_stream_value(&raw).expect("recall maps");
+        assert_eq!(kind, local_first_task_runtime::TurnEventKind::Recall);
+        assert_eq!(payload, raw["payload"]);
+    }
+
+    #[test]
+    fn automatic_recall_payload_keeps_an_empty_recall_visible_to_the_stream() {
+        let pack = local_first_memory::RecallPack::from_block(
+            "launch",
+            local_first_memory::MemoryScope::Personal,
+            None,
+        );
+
+        let payload = super::recall_stream_payload_from_pack(&pack);
+        assert_eq!(payload.query, "launch");
+        assert!(payload.hits.is_empty());
+        assert_eq!(payload.scope, "personal");
+    }
+
+    #[test]
     fn sandbox_terminal_owner_is_only_live_while_command_runs() {
         super::sandbox_clear(Some("thread-live-owner".to_string()));
         super::sandbox_begin(
@@ -60293,6 +63647,959 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             super::project_brief_block(state),
             super::recent_work_block(state),
         ]
+    }
+
+    fn insert_briefing_memory(
+        facade: &super::MemoryFacade,
+        user: &local_first_memory::UserId,
+        workspace: &local_first_memory::WorkspaceId,
+        key: &str,
+        memory_type: &str,
+        text: &str,
+    ) {
+        facade
+            .upsert_memory(&local_first_memory::MemoryRecord {
+                reference: local_first_memory::MemoryRef::new(
+                    local_first_memory::MemoryRefKind::Memory,
+                    user.clone(),
+                    workspace.clone(),
+                    key,
+                ),
+                user_id: user.clone(),
+                workspace_id: workspace.clone(),
+                memory_type: memory_type.to_string(),
+                text: text.to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                status: local_first_memory::MemoryStatus::Confirmed,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity: local_first_memory::DataSensitivity::Private,
+                metadata: serde_json::json!({}),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+                last_seen_at: None,
+                supersedes: Vec::new(),
+                superseded_by: None,
+                correction_of: None,
+            })
+            .unwrap();
+    }
+
+    fn insert_briefing_memory_with_sensitivity(
+        facade: &super::MemoryFacade,
+        user: &local_first_memory::UserId,
+        workspace: &local_first_memory::WorkspaceId,
+        key: &str,
+        text: &str,
+        sensitivity: local_first_memory::DataSensitivity,
+    ) -> local_first_memory::MemoryRef {
+        let reference = local_first_memory::MemoryRef::new(
+            local_first_memory::MemoryRefKind::Memory,
+            user.clone(),
+            workspace.clone(),
+            key,
+        );
+        facade
+            .upsert_memory(&local_first_memory::MemoryRecord {
+                reference: reference.clone(),
+                user_id: user.clone(),
+                workspace_id: workspace.clone(),
+                memory_type: "preference".to_string(),
+                text: text.to_string(),
+                aliases: Vec::new(),
+                language_hints: Vec::new(),
+                confidence: 1.0,
+                status: local_first_memory::MemoryStatus::Confirmed,
+                privacy_domain: local_first_memory::PrivacyDomain::new("personal"),
+                sensitivity,
+                metadata: serde_json::json!({}),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+                last_seen_at: None,
+                supersedes: Vec::new(),
+                superseded_by: None,
+                correction_of: None,
+            })
+            .unwrap();
+        reference
+    }
+
+    fn insert_preferences_grant(
+        facade: &super::MemoryFacade,
+        user: &local_first_memory::UserId,
+        consumer: &local_first_memory::WorkspaceId,
+        id: &str,
+    ) {
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: id.to_string(),
+                consumer_user_id: user.clone(),
+                consumer_workspace_id: consumer.clone(),
+                source_user_id: user.clone(),
+                source_workspace_id: local_first_memory::WorkspaceId::new(
+                    super::PERSONAL_WORKSPACE,
+                ),
+                collections: [local_first_memory::MemoryCollectionKey::Preferences]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Private,
+                overrides: std::collections::HashMap::new(),
+                expires_at: None,
+                revoked_at: None,
+                policy_version: 1,
+                created_by: user.as_str().to_string(),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+            })
+            .unwrap();
+    }
+
+    fn insert_test_source_grant(
+        facade: &super::MemoryFacade,
+        user: &local_first_memory::UserId,
+        consumer: &local_first_memory::WorkspaceId,
+        source: &local_first_memory::WorkspaceId,
+        id: &str,
+        collection: local_first_memory::MemoryCollectionKey,
+    ) {
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: id.to_string(),
+                consumer_user_id: user.clone(),
+                consumer_workspace_id: consumer.clone(),
+                source_user_id: user.clone(),
+                source_workspace_id: source.clone(),
+                collections: [collection].into_iter().collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Private,
+                overrides: std::collections::HashMap::new(),
+                expires_at: None,
+                revoked_at: None,
+                policy_version: 1,
+                created_by: user.as_str().to_string(),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn project_briefing_requires_personal_preferences_grant() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "briefing-grant-user");
+        }
+        super::set_memory_workspace("project-a");
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-grant-user");
+        let personal = local_first_memory::WorkspaceId::new(super::PERSONAL_WORKSPACE);
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &personal,
+            "pref",
+            "preference",
+            "Prefers Italian",
+        );
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &personal,
+            "profile",
+            "fact",
+            "Lives in Rome",
+        );
+        let state = test_app_state_for_brief(facade);
+
+        let (before, project_before) = super::gather_profile_memory_with_options(&state, true);
+        assert!(before.is_empty());
+        assert!(project_before.is_empty());
+
+        insert_preferences_grant(super::memory_facade(&state), &user, &project, "prefs-grant");
+        let (after, _) = super::gather_profile_memory_with_options(&state, true);
+        assert_eq!(after, vec!["Prefers Italian".to_string()]);
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
+        }
+    }
+
+    #[test]
+    fn project_briefing_enforces_compiled_personal_source_policy() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-policy-user"); }
+        super::set_memory_workspace("project-a");
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-policy-user");
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        let personal = local_first_memory::WorkspaceId::new(super::PERSONAL_WORKSPACE);
+        let denied_ref = insert_briefing_memory_with_sensitivity(
+            &facade,
+            &user,
+            &personal,
+            "denied-pref",
+            "Never include this denied preference",
+            local_first_memory::DataSensitivity::Public,
+        );
+        insert_briefing_memory_with_sensitivity(
+            &facade,
+            &user,
+            &personal,
+            "private-pref",
+            "Never include this private preference",
+            local_first_memory::DataSensitivity::Private,
+        );
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: "strict-preferences".to_string(),
+                consumer_user_id: user.clone(),
+                consumer_workspace_id: project.clone(),
+                source_user_id: user.clone(),
+                source_workspace_id: personal.clone(),
+                collections: [local_first_memory::MemoryCollectionKey::Preferences]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Public,
+                overrides: [(denied_ref, local_first_memory::MemoryGrantOverrideEffect::Deny)]
+                    .into_iter()
+                    .collect(),
+                expires_at: None,
+                revoked_at: None,
+                policy_version: 1,
+                created_by: user.as_str().to_string(),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+            })
+            .unwrap();
+        let state = test_app_state_for_brief(facade);
+        let (personal_items, _) = super::gather_profile_memory_with_options(&state, true);
+        assert!(personal_items.is_empty());
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    #[test]
+    fn project_briefing_does_not_promote_individual_allow_outside_preferences_collection() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-allow-user"); }
+        super::set_memory_workspace("project-a");
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-allow-user");
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        let personal = local_first_memory::WorkspaceId::new(super::PERSONAL_WORKSPACE);
+        let preference_ref = insert_briefing_memory_with_sensitivity(
+            &facade,
+            &user,
+            &personal,
+            "allowed-pref",
+            "Do not promote through individual allow",
+            local_first_memory::DataSensitivity::Public,
+        );
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: "knowledge-with-allow".to_string(),
+                consumer_user_id: user.clone(),
+                consumer_workspace_id: project,
+                source_user_id: user.clone(),
+                source_workspace_id: personal,
+                collections: [local_first_memory::MemoryCollectionKey::Knowledge]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Public,
+                overrides: [(preference_ref, local_first_memory::MemoryGrantOverrideEffect::Allow)]
+                    .into_iter()
+                    .collect(),
+                expires_at: None,
+                revoked_at: None,
+                policy_version: 1,
+                created_by: user.as_str().to_string(),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+            })
+            .unwrap();
+        let state = test_app_state_for_brief(facade);
+        let (personal_items, _) = super::gather_profile_memory_with_options(&state, true);
+        assert!(personal_items.is_empty());
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    #[test]
+    fn revoking_grant_changes_briefing_fingerprint() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "briefing-revoke-user");
+        }
+        super::set_memory_workspace("project-a");
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-revoke-user");
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        insert_preferences_grant(&facade, &user, &project, "revoke-grant");
+        let state = test_app_state_for_brief(facade);
+        let before = super::memory_briefing_source_fingerprint(&state, &user, &project, 10);
+        super::memory_facade(&state)
+            .revoke_memory_source_grant(&user, &project, "revoke-grant", 11)
+            .unwrap();
+        let after = super::memory_briefing_source_fingerprint(&state, &user, &project, 11);
+        assert_ne!(before, after);
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
+        }
+    }
+
+    #[test]
+    fn expiry_and_source_update_change_briefing_fingerprint() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "briefing-expiry-user");
+        }
+        super::set_memory_workspace("project-a");
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-expiry-user");
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        let personal = local_first_memory::WorkspaceId::new(super::PERSONAL_WORKSPACE);
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &personal,
+            "preference",
+            "preference",
+            "Prefers Italian",
+        );
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: "expiring-grant".to_string(),
+                consumer_user_id: user.clone(),
+                consumer_workspace_id: project.clone(),
+                source_user_id: user.clone(),
+                source_workspace_id: personal.clone(),
+                collections: [local_first_memory::MemoryCollectionKey::Preferences]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Private,
+                overrides: std::collections::HashMap::new(),
+                expires_at: Some(20),
+                revoked_at: None,
+                policy_version: 1,
+                created_by: user.as_str().to_string(),
+                created_at: "unix:1.000000000".to_string(),
+                updated_at: "unix:1.000000000".to_string(),
+            })
+            .unwrap();
+        let state = test_app_state_for_brief(facade);
+        let before_update = super::memory_briefing_source_fingerprint(&state, &user, &project, 10);
+        insert_briefing_memory(
+            super::memory_facade(&state),
+            &user,
+            &personal,
+            "preference-2",
+            "preference",
+            "Prefers concise answers",
+        );
+        let after_update = super::memory_briefing_source_fingerprint(&state, &user, &project, 10);
+        assert_ne!(before_update, after_update);
+        let after_expiry = super::memory_briefing_source_fingerprint(&state, &user, &project, 20);
+        assert_ne!(after_update, after_expiry);
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
+        }
+    }
+
+    #[test]
+    fn cached_briefing_is_rejected_when_grant_is_revoked_after_lookup() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe { std::env::set_var("HOMUN_USER_ID", "briefing-toctou-user"); }
+        super::set_memory_workspace("project-a");
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("briefing-toctou-user");
+        let project = local_first_memory::WorkspaceId::new("project-a");
+        insert_preferences_grant(&facade, &user, &project, "toctou-grant");
+        let state = test_app_state_for_brief(facade);
+        let generation = super::memory_facade(&state).briefing_generation(&user, &project);
+        let source_fingerprint = super::memory_briefing_source_fingerprint(
+            &state,
+            &user,
+            &project,
+            i64::try_from(super::now_epoch_secs()).unwrap_or(i64::MAX),
+        );
+        let prompt_fingerprint = local_first_memory::prompt_fingerprint("same prompt");
+        let scope_key = "briefing-toctou-user|project-a|quality-review";
+        local_first_memory::briefing_cache().put(
+            scope_key.to_string(),
+            local_first_memory::CachedBriefing {
+                generation,
+                source_fingerprint,
+                prompt_fingerprint,
+                pack_sans_recent_work: local_first_memory::BriefingPack {
+                    profile_block: Some("Personal:\n- must not leak".to_string()),
+                    objective: None,
+                    brief: None,
+                    recent_work: None,
+                },
+            },
+        );
+
+        let cached = super::revalidated_cached_briefing(
+            &state,
+            &user,
+            &project,
+            scope_key,
+            generation,
+            source_fingerprint,
+            prompt_fingerprint,
+            || {
+                super::memory_facade(&state)
+                    .revoke_memory_source_grant(&user, &project, "toctou-grant", 2)
+                    .unwrap();
+            },
+        );
+        assert!(cached.is_none());
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value); },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID"); },
+        }
+    }
+
+    #[test]
+    fn contact_memory_deny_cannot_use_linked_sources() {
+        assert!(!super::memory_perimeter_allows_recall(
+            false, true, false, true
+        ));
+        assert!(!super::memory_perimeter_allows_recall(
+            true, true, true, true
+        ));
+        assert!(!super::memory_perimeter_allows_recall(
+            false, false, true, true
+        ));
+        assert!(super::memory_perimeter_allows_recall(
+            false, true, true, true
+        ));
+        assert!(super::memory_perimeter_allows_recall(
+            false, true, false, false
+        ));
+    }
+
+    #[tokio::test]
+    async fn memory_service_on_and_off_use_same_linked_source_coordinator() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("memory-service-source-parity");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        let previous_service = std::env::var("HOMUN_MEMORY_SERVICE").ok();
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "recall-parity-user");
+            std::env::set_var("HOMUN_MEMORY_SERVICE", "on");
+        }
+        super::set_memory_workspace("project-a");
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("recall-parity-user");
+        let consumer = local_first_memory::WorkspaceId::new("project-a");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &source,
+            "launch",
+            "decision",
+            "Launch in September",
+        );
+        insert_test_source_grant(
+            &facade,
+            &user,
+            &consumer,
+            &source,
+            "decision-grant",
+            local_first_memory::MemoryCollectionKey::Decisions,
+        );
+        let mut state = test_app_state_for_brief(facade);
+        super::install_memory_service_if_enabled(
+            &mut state,
+            std::sync::Arc::new(NoopEmbeddingClient),
+            std::sync::Arc::new(NoopLlmClient),
+        );
+        let service_pack = state
+            .memory_service
+            .as_ref()
+            .expect("HOMUN_MEMORY_SERVICE=on installs the runtime service")
+            .recall(
+                "When do we launch?",
+                &local_first_memory::MemoryScope::Project(consumer.clone()),
+            )
+            .await;
+        let last_available_access = super::memory_facade(&state)
+            .last_memory_source_access("decision-grant")
+            .unwrap()
+            .expect("available source is audited");
+        std::fs::write(
+            dir.join("workspaces.json"),
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces: vec![memory_source_test_workspace("project-a", "Alpha")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let removed_service_pack = state
+            .memory_service
+            .as_ref()
+            .expect("runtime service remains installed")
+            .recall(
+                "When do we launch?",
+                &local_first_memory::MemoryScope::Project(consumer.clone()),
+            )
+            .await;
+        unsafe { std::env::set_var("HOMUN_MEMORY_SERVICE", "off"); }
+        let mut inline_state = state.clone();
+        super::install_memory_service_if_enabled(
+            &mut inline_state,
+            std::sync::Arc::new(NoopEmbeddingClient),
+            std::sync::Arc::new(NoopLlmClient),
+        );
+        assert!(inline_state.memory_service.is_none());
+        let inline_pack = super::recall_pack_on_facade(
+            super::memory_facade(&inline_state),
+            &user,
+            &consumer,
+            "When do we launch?",
+            &[],
+            None,
+        );
+        assert_eq!(removed_service_pack.block, inline_pack.block);
+        assert_eq!(
+            removed_service_pack
+                .hits
+                .iter()
+                .map(|hit| hit.memory_ref.as_str())
+                .collect::<Vec<_>>(),
+            inline_pack
+                .hits
+                .iter()
+                .map(|hit| hit.memory_ref.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert!(service_pack
+            .block
+            .as_deref()
+            .is_some_and(|block| block.contains("Launch in September")));
+        assert!(removed_service_pack.hits.is_empty());
+        assert!(removed_service_pack.degraded_sources.iter().any(|(workspace, reason)| {
+            workspace.as_str() == "project-b" && reason == "source_unavailable"
+        }));
+        assert_eq!(removed_service_pack.degraded_sources, inline_pack.degraded_sources);
+        assert_eq!(
+            super::memory_facade(&state)
+                .last_memory_source_access("decision-grant")
+                .unwrap()
+                .expect("removed source must not write a fresh audit")
+                .id,
+            last_available_access.id
+        );
+
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        match previous_user {
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
+        }
+        match previous_service {
+            Some(value) => unsafe { std::env::set_var("HOMUN_MEMORY_SERVICE", value); },
+            None => unsafe { std::env::remove_var("HOMUN_MEMORY_SERVICE"); },
+        }
+    }
+
+    #[test]
+    fn memory_service_flag_off_keeps_single_scope_recall() {
+        let _flag = TestMemorySourcesFlag::set(Some("off"));
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("single-scope-user");
+        let consumer = local_first_memory::WorkspaceId::new("project-a");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &source,
+            "launch",
+            "decision",
+            "Launch in September",
+        );
+        insert_test_source_grant(
+            &facade,
+            &user,
+            &consumer,
+            &source,
+            "disabled-grant",
+            local_first_memory::MemoryCollectionKey::Decisions,
+        );
+        let pack = super::recall_pack_on_facade(
+            &facade,
+            &user,
+            &consumer,
+            "When do we launch?",
+            &[],
+            None,
+        );
+        assert!(pack.hits.is_empty());
+        assert!(pack.block.is_none());
+    }
+
+    #[test]
+    fn recall_excludes_removed_project_sources_but_keeps_local_and_available_sources() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("recall-removed-source");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("removed-source-user");
+        let consumer = local_first_memory::WorkspaceId::new("project-a");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &consumer,
+            "local-launch",
+            "decision",
+            "Local launch in September",
+        );
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &source,
+            "removed-launch",
+            "decision",
+            "Removed project launch in June",
+        );
+        insert_test_source_grant(
+            &facade,
+            &user,
+            &consumer,
+            &source,
+            "removed-source-grant",
+            local_first_memory::MemoryCollectionKey::Decisions,
+        );
+
+        let available = super::recall_pack_on_facade(
+            &facade,
+            &user,
+            &consumer,
+            "What launch date did we decide?",
+            &[],
+            None,
+        );
+        assert!(available
+            .hits
+            .iter()
+            .any(|hit| hit.text.contains("Local launch in September")));
+        assert!(available
+            .hits
+            .iter()
+            .any(|hit| hit.text.contains("Removed project launch in June")));
+
+        std::fs::write(
+            dir.join("workspaces.json"),
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces: vec![memory_source_test_workspace("project-a", "Alpha")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let removed = super::recall_pack_on_facade(
+            &facade,
+            &user,
+            &consumer,
+            "What launch date did we decide?",
+            &[],
+            None,
+        );
+        assert!(removed
+            .hits
+            .iter()
+            .any(|hit| hit.text.contains("Local launch in September")));
+        assert!(!removed
+            .hits
+            .iter()
+            .any(|hit| hit.text.contains("Removed project launch in June")));
+        assert!(!removed
+            .block
+            .as_deref()
+            .is_some_and(|block| block.contains("Removed project launch in June")));
+        assert!(removed.degraded_sources.iter().any(|(workspace, reason)| {
+            workspace.as_str() == "project-b" && reason == "source_unavailable"
+        }));
+    }
+
+    #[test]
+    fn removed_source_is_degraded_before_intent_filter_without_an_access_event() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("recall-removed-source-no-candidates");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("removed-source-empty-user");
+        let consumer = local_first_memory::WorkspaceId::new("project-a");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        insert_test_source_grant(
+            &facade,
+            &user,
+            &consumer,
+            &source,
+            "removed-source-empty-grant",
+            local_first_memory::MemoryCollectionKey::Preferences,
+        );
+        std::fs::write(
+            dir.join("workspaces.json"),
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces: vec![memory_source_test_workspace("project-a", "Alpha")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let pack = super::recall_pack_on_facade(
+            &facade,
+            &user,
+            &consumer,
+            "What launch date did we decide?",
+            &[],
+            None,
+        );
+
+        assert!(pack.hits.is_empty());
+        assert!(pack.degraded_sources.iter().any(|(workspace, reason)| {
+            workspace.as_str() == "project-b" && reason == "source_unavailable"
+        }));
+        assert!(facade
+            .last_memory_source_access("removed-source-empty-grant")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn missing_workspace_registry_never_authorizes_the_default_project_source() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let previous_workspace = std::env::var("HOMUN_WORKSPACE_ID").ok();
+        // SAFETY: TestMemorySourcesFlag holds TEST_ENV_LOCK for this test.
+        unsafe { std::env::set_var("HOMUN_WORKSPACE_ID", "project-b"); }
+        let dir = isolated_gateway_test_dir("recall-missing-workspace-registry");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("missing-registry-user");
+        let consumer = local_first_memory::WorkspaceId::new("project-a");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &source,
+            "default-source-record",
+            "decision",
+            "Default project source must not be recalled",
+        );
+        insert_test_source_grant(
+            &facade,
+            &user,
+            &consumer,
+            &source,
+            "missing-registry-grant",
+            local_first_memory::MemoryCollectionKey::Decisions,
+        );
+
+        let pack = super::recall_pack_on_facade(
+            &facade,
+            &user,
+            &consumer,
+            "What launch date did we decide?",
+            &[],
+            None,
+        );
+
+        assert!(pack.hits.is_empty());
+        assert!(pack.degraded_sources.iter().any(|(workspace, reason)| {
+            workspace.as_str() == "project-b" && reason == "source_unavailable"
+        }));
+        assert!(facade
+            .last_memory_source_access("missing-registry-grant")
+            .unwrap()
+            .is_none());
+        // SAFETY: restore process-global test state before TestMemorySourcesFlag releases its lock.
+        unsafe {
+            match previous_workspace {
+                Some(value) => std::env::set_var("HOMUN_WORKSPACE_ID", value),
+                None => std::env::remove_var("HOMUN_WORKSPACE_ID"),
+            }
+        }
+    }
+
+    #[test]
+    fn memory_source_authorization_registry_requires_a_nonempty_parseable_file() {
+        let dir = isolated_gateway_test_dir("memory-source-strict-registry");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        let path = dir.join("workspaces.json");
+
+        assert!(super::load_persisted_memory_source_workspace_ids().is_none());
+        std::fs::write(&path, "not json").unwrap();
+        assert!(super::load_persisted_memory_source_workspace_ids().is_none());
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&WorkspacesFile {
+                active: String::new(),
+                workspaces: Vec::new(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(super::load_persisted_memory_source_workspace_ids().is_none());
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces: vec![memory_source_test_workspace("project-b", "Beta")],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(super::load_persisted_memory_source_workspace_ids()
+            .is_some_and(|workspaces| workspaces.contains("project-b")));
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(super::load_persisted_memory_source_workspace_ids().is_none());
+    }
+
+    #[test]
+    fn recall_memory_tool_uses_linked_sources_only_from_projects() {
+        let _flag = TestMemorySourcesFlag::set(Some("on"));
+        let dir = isolated_gateway_test_dir("recall-memory-tool-sources");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, false);
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "tool-source-user");
+        }
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("tool-source-user");
+        let consumer = local_first_memory::WorkspaceId::new("project-a");
+        let source = local_first_memory::WorkspaceId::new("project-b");
+        insert_briefing_memory(
+            &facade,
+            &user,
+            &source,
+            "launch",
+            "decision",
+            "Launch in September",
+        );
+        insert_test_source_grant(
+            &facade,
+            &user,
+            &consumer,
+            &source,
+            "tool-grant",
+            local_first_memory::MemoryCollectionKey::Decisions,
+        );
+        let state = test_app_state_for_brief(facade);
+
+        super::set_memory_workspace("project-a");
+        let project = super::recall_memory(&state, "When do we launch?");
+        assert!(project.response.contains("Launch in September"));
+        let payload = super::recall_stream_payload_from_outcome(&project, "When do we launch?");
+        let hit = payload.hits.first().expect("linked source hit is surfaced to UI");
+        assert_eq!(hit.source_workspace_id, "project-b");
+        assert_eq!(hit.source_label, "Beta");
+        assert_eq!(hit.collection, "decisions");
+        assert_eq!(hit.grant_id.as_deref(), Some("tool-grant"));
+        assert!(!hit.conflict);
+        assert!(hit.score > 0.0);
+        assert!(!hit.r#ref.is_empty());
+        assert_eq!(hit.kind, "decision");
+        super::set_memory_workspace(super::PERSONAL_WORKSPACE);
+        let personal = super::recall_memory(&state, "When do we launch?");
+        assert!(!personal.response.contains("Launch in September"));
+
+        match previous_user {
+            Some(value) => unsafe {
+                std::env::set_var("HOMUN_USER_ID", value);
+            },
+            None => unsafe {
+                std::env::remove_var("HOMUN_USER_ID");
+            },
+        }
     }
 
     /// ADR 0022 — Tappa 1: TEST DI PARITÀ RUNTIME (DoD).

@@ -38,6 +38,26 @@ Il test mentale è semplice: in una chat nuova Homun deve poter rispondere a:
 6. I loop aperti restano visibili finché non sono chiusi con prove.
 7. I deliverable hanno ciclo di vita proprio: non sono appendici della chat.
 
+## Fonti memoria collegate autorizzate
+
+Dal 2026-07-17 (schema v7) un progetto può richiamare memoria personale o di un altro
+progetto solo dopo un grant esplicito e diretto dello stesso utente. Il grant dichiara
+collection consentite e può avere eccezioni puntuali `Allow`/`Deny`; non si propaga da
+una fonte a un'altra. L'isolamento personale/progetto resta quindi il default del
+modello di autorizzazione, non una convenzione del prompt.
+
+La funzione è attiva di default. Per un rollback locale si può impostare soltanto
+`HOMUN_MEMORY_SOURCES=0` o `HOMUN_MEMORY_SOURCES=off`. Revocare un grant interrompe
+subito il richiamo; una fonte progetto non presente nel registry persistito, o con
+registry assente/illeggibile/corrotto/vuoto, è esclusa prima di recall, audit e
+aggiornamenti last-used. Il richiamo non pubblica né duplica memoria: la pubblicazione
+mantiene il proprio flusso governato. I candidati filtrati servono a recall e indice;
+non coincidono con l'Advanced picker, che gestisce le fonti non-segrete selezionabili.
+
+Smoke verificato in Europe/Rome il 2026-07-17: isolamento, grant/collection/override,
+revoca, filtro delle fonti mancanti e perimetro contatti. Nessun deploy è implicato da
+questa verifica locale.
+
 ## Tre facce della stessa memoria
 
 | Faccia | Ruolo | Stato |

@@ -1,18 +1,198 @@
 use crate::{
-    AutomationCandidateRecord, AutomationCandidateStatus, DataSensitivity, EncryptedJson,
-    KeyProvider, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryEntity,
-    MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport, MemoryRecord, MemoryRef,
-    MemoryRefKind, MemoryRelation, MemoryRestoreMode, PrivacyDomain, RoutineRecord, UserId,
-    VectorHit, WikiPage, WorkspaceId, current_timestamp, decrypt_json, encrypt_json,
+    AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AutomationCandidateRecord, AutomationCandidateStatus,
+    DataSensitivity, EncryptedJson, KeyProvider, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
+    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
+    MemoryEntity, MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport,
+    MemoryPublicationCandidate, MemoryPublicationLink, MemoryPublicationProposal,
+    MemoryPublicationReasonCode, MemoryPublicationResolution, MemoryPublicationStatus,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryRestoreMode,
+    MemorySourceAccessEvent, MemorySourceAccessOutcome, MemorySourceCandidateProjection,
+    MemorySourceGrant, MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord,
+    THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId, contains_secret,
+    current_timestamp, decrypt_json, encrypt_json, validate_memory_source_grant_intrinsic,
 };
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 7;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemorySourceGrantStoreError {
+    Validation(String),
+    Conflict(String),
+    NotFound(String),
+    Store(String),
+}
+
+pub type MemorySourceGrantStoreResult<T> = Result<T, MemorySourceGrantStoreError>;
+
+impl MemorySourceGrantStoreError {
+    fn store(error: impl ToString) -> Self {
+        Self::Store(error.to_string())
+    }
+
+    fn validation(message: impl Into<String>) -> Self {
+        Self::Validation(message.into())
+    }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self::Conflict(message.into())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryPublicationStoreError {
+    Validation(String),
+    Conflict(String),
+    NotFound(String),
+    Store(String),
+}
+
+pub type MemoryPublicationStoreResult<T> = Result<T, MemoryPublicationStoreError>;
+
+impl MemoryPublicationStoreError {
+    fn validation(message: impl Into<String>) -> Self {
+        Self::Validation(message.into())
+    }
+
+    fn conflict(message: impl Into<String>) -> Self {
+        Self::Conflict(message.into())
+    }
+
+    fn not_found(message: impl Into<String>) -> Self {
+        Self::NotFound(message.into())
+    }
+
+    fn store(error: impl ToString) -> Self {
+        Self::Store(error.to_string())
+    }
+}
+
+pub(crate) fn validate_memory_source_grant(grant: &MemorySourceGrant) -> Result<i64, String> {
+    validate_memory_source_grant_intrinsic(grant).map_err(|error| match error {
+        MemorySourceGrantValidationError::EmptyGrantId => {
+            "memory source grant grant id cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::EmptyConsumerUser => {
+            "memory source grant consumer user cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::EmptyConsumerWorkspace => {
+            "memory source grant consumer workspace cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::EmptySourceUser => {
+            "memory source grant source user cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::EmptySourceWorkspace => {
+            "memory source grant source workspace cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::EmptyCreatedBy => {
+            "memory source grant created by cannot be empty".to_string()
+        }
+        MemorySourceGrantValidationError::ReservedConsumerScope => {
+            "memory source grant consumer must be a project workspace".to_string()
+        }
+        MemorySourceGrantValidationError::ReservedSourceScope => {
+            "thread memory cannot be a linked source".to_string()
+        }
+        MemorySourceGrantValidationError::SourceEqualsConsumer => {
+            "memory source grant cannot link a workspace to itself".to_string()
+        }
+        MemorySourceGrantValidationError::CrossUserSourceNotSupported => {
+            "cross-user memory source grants are not supported".to_string()
+        }
+        MemorySourceGrantValidationError::EmptySourcePolicy => {
+            "memory source grant must allow a collection or override".to_string()
+        }
+        MemorySourceGrantValidationError::InvalidOverrideKind => {
+            "memory source grant overrides require memory refs".to_string()
+        }
+        MemorySourceGrantValidationError::OverrideOutsideSource => {
+            "memory source grant override is outside the declared source".to_string()
+        }
+        MemorySourceGrantValidationError::InvalidPolicyVersion => {
+            "memory source grant policy version must be positive".to_string()
+        }
+    })?;
+
+    let policy_version = i64::try_from(grant.policy_version)
+        .map_err(|_| "memory source grant policy version exceeds SQLite i64".to_string())?;
+    if policy_version < 1 {
+        return Err("memory source grant policy version must be positive".to_string());
+    }
+    if grant.revoked_at.is_none() && policy_version == i64::MAX {
+        return Err("active memory source grant policy version has no revoke headroom".to_string());
+    }
+    Ok(policy_version)
+}
+
+fn validate_persisted_memory_source_grant(
+    grant: &MemorySourceGrant,
+) -> MemorySourceGrantStoreResult<()> {
+    validate_memory_source_grant(grant)
+        .map(|_| ())
+        .map_err(|message| {
+            MemorySourceGrantStoreError::Store(format!(
+                "invalid persisted memory source grant {}: {message}",
+                grant.id
+            ))
+        })
+}
+
+fn validate_memory_source_access_event(event: &MemorySourceAccessEvent) -> Result<(), String> {
+    if uuid::Uuid::parse_str(event.id.trim()).is_err()
+        || event.consumer_user_id.as_str().trim().is_empty()
+        || event.consumer_workspace_id.as_str().trim().is_empty()
+        || event.source_workspace_id.as_str().trim().is_empty()
+    {
+        return Err("invalid memory source access event identity".to_string());
+    }
+    match event.grant_id.as_deref() {
+        None if event.policy_version != 0 => {
+            return Err("local memory source access must use policy version zero".to_string());
+        }
+        Some(grant_id) if grant_id.trim().is_empty() || event.policy_version == 0 => {
+            return Err(
+                "linked memory source access requires grant and policy version".to_string(),
+            );
+        }
+        _ => {}
+    }
+    let reason_allowed = match event.outcome {
+        MemorySourceAccessOutcome::Allow => event.reason == "allowed",
+        MemorySourceAccessOutcome::Deny => event.reason == "intent_not_selected",
+        MemorySourceAccessOutcome::Degraded => matches!(
+            event.reason.as_str(),
+            "source_unavailable"
+                | "policy_changed"
+                | "policy_revalidation_failed"
+                | "audit_unavailable"
+        ),
+    };
+    if !reason_allowed {
+        return Err("invalid memory source access reason code".to_string());
+    }
+    if event.injected_refs.len() > event.candidate_count {
+        return Err("memory source access injected refs exceed candidates".to_string());
+    }
+    let mut unique_refs = HashSet::new();
+    for value in &event.injected_refs {
+        let reference = MemoryRef::from_str(value)
+            .map_err(|_| "memory source access payload must contain refs only".to_string())?;
+        if reference.kind != MemoryRefKind::Memory
+            || reference.user_id != event.consumer_user_id
+            || reference.workspace_id != event.source_workspace_id
+            || !unique_refs.insert(reference)
+        {
+            return Err("memory source access injected ref is outside source".to_string());
+        }
+    }
+    Ok(())
+}
 
 /// ADR 0022 (Tappa 2) — modello di connessione dello store.
 ///
@@ -51,6 +231,14 @@ impl std::ops::Deref for ConnHandle<'_> {
     }
 }
 
+impl std::ops::DerefMut for ConnHandle<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        match self {
+            ConnHandle::Guarded(guard) => guard,
+        }
+    }
+}
+
 pub struct SQLiteMemoryStore {
     conns: Connections,
     key_provider: Option<Box<dyn KeyProvider>>,
@@ -79,18 +267,8 @@ impl SQLiteMemoryStore {
             .unwrap_or(3)
     }
 
-    /// Applica i PRAGMA WAL a una connection (writer o reader). WAL è persistente
-    /// a livello di DB file, ma `synchronous`/`busy_timeout`/`foreign_keys` sono
-    /// per-connection: vanno settati su ognuna.
-    fn apply_wal_pragmas(conn: &Connection) -> Result<(), String> {
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| e.to_string())?;
-        // synchronous=NORMAL è sicuro in WAL (nessun corruption; al max si perde
-        // l'ultima transazione su crash). FULL aggiunge fsync per-statement.
-        conn.pragma_update(None, "synchronous", "NORMAL")
-            .map_err(|e| e.to_string())?;
-        // busy_timeout: se due writer competono (o un checkpoint), attende prima
-        // di restituire SQLITE_BUSY. 5000ms copre il consolidation LLM.
+    /// Applica i PRAGMA comuni a ogni connection, incluse Single e in-memory.
+    fn apply_common_pragmas(conn: &Connection) -> Result<(), String> {
         conn.pragma_update(None, "busy_timeout", 5000)
             .map_err(|e| e.to_string())?;
         conn.pragma_update(None, "foreign_keys", "ON")
@@ -98,12 +276,20 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    /// Applica i soli PRAGMA specifici di WAL a writer e reader file-backed.
+    fn apply_wal_pragmas(conn: &Connection) -> Result<(), String> {
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .map_err(|e| e.to_string())?;
+        // synchronous=NORMAL è sicuro in WAL (nessun corruption; al max si perde
+        // l'ultima transazione su crash). FULL aggiunge fsync per-statement.
+        conn.pragma_update(None, "synchronous", "NORMAL")
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// Costruisce il modello di connessione in base al flag. In Single mode una
     /// sola connection (legacy). In Pooled mode apre writer + N reader WAL.
-    fn build_connections(
-        in_memory: bool,
-        path: &Option<PathBuf>,
-    ) -> Result<Connections, String> {
+    fn build_connections(in_memory: bool, path: &Option<PathBuf>) -> Result<Connections, String> {
         if !Self::pool_enabled() {
             let conn = Self::open_raw(in_memory, path)?;
             return Ok(Connections::Single(Mutex::new(conn)));
@@ -137,14 +323,16 @@ impl SQLiteMemoryStore {
     }
 
     fn open_raw(in_memory: bool, path: &Option<PathBuf>) -> Result<Connection, String> {
-        if in_memory {
-            Connection::open_in_memory().map_err(|e| e.to_string())
+        let conn = if in_memory {
+            Connection::open_in_memory().map_err(|e| e.to_string())?
         } else {
             let path = path
                 .as_ref()
                 .ok_or_else(|| "pool requires a database path".to_string())?;
-            Connection::open(path).map_err(|e| e.to_string())
-        }
+            Connection::open(path).map_err(|e| e.to_string())?
+        };
+        Self::apply_common_pragmas(&conn)?;
+        Ok(conn)
     }
 
     /// Prende una connection per i READ. In Single mode è l'unica connection; in
@@ -156,7 +344,11 @@ impl SQLiteMemoryStore {
                     .map_err(|_| "memory single connection poisoned".to_string())
                     .expect("memory single connection poisoned"),
             ),
-            Connections::Pooled { readers, reader_idx, .. } => {
+            Connections::Pooled {
+                readers,
+                reader_idx,
+                ..
+            } => {
                 // Round-robin: ogni read prende la reader successiva. Se quella
                 // specifica è occupata (altro read in corso su di essa), attende.
                 let len = readers.len().max(1);
@@ -269,6 +461,995 @@ impl SQLiteMemoryStore {
         })
     }
 
+    pub fn upsert_memory_source_grant(
+        &self,
+        grant: &MemorySourceGrant,
+    ) -> MemorySourceGrantStoreResult<()> {
+        let policy_version =
+            validate_memory_source_grant(grant).map_err(MemorySourceGrantStoreError::Validation)?;
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemorySourceGrantStoreError::store)?;
+
+        let mut existing = {
+            let mut statement = transaction
+                .prepare(
+                    "select id, consumer_user_id, consumer_workspace_id, source_user_id,
+                            source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                            policy_version, created_by, created_at, updated_at
+                     from memory_source_grants where id = ?1",
+                )
+                .map_err(MemorySourceGrantStoreError::store)?;
+            let mut rows = statement
+                .query([grant.id.as_str()])
+                .map_err(MemorySourceGrantStoreError::store)?;
+            rows.next()
+                .map_err(MemorySourceGrantStoreError::store)?
+                .map(memory_source_grant_base_from_row)
+                .transpose()
+                .map_err(MemorySourceGrantStoreError::store)?
+        };
+
+        if let Some(existing) = &mut existing {
+            load_memory_source_grant_children(&transaction, existing)
+                .map_err(MemorySourceGrantStoreError::store)?;
+            if existing == grant {
+                transaction
+                    .commit()
+                    .map_err(MemorySourceGrantStoreError::store)?;
+                return Ok(());
+            }
+
+            let identity_matches = existing.consumer_user_id == grant.consumer_user_id
+                && existing.consumer_workspace_id == grant.consumer_workspace_id
+                && existing.source_user_id == grant.source_user_id
+                && existing.source_workspace_id == grant.source_workspace_id
+                && existing.created_by == grant.created_by
+                && existing.created_at == grant.created_at;
+            if !identity_matches {
+                return Err(MemorySourceGrantStoreError::validation(format!(
+                    "memory source grant {} immutable identity mismatch",
+                    grant.id
+                )));
+            }
+            if existing.revoked_at.is_some() {
+                return Err(MemorySourceGrantStoreError::validation(
+                    "revoked memory source grants are immutable; use a new grant id",
+                ));
+            }
+            if grant.revoked_at.is_some() {
+                return Err(MemorySourceGrantStoreError::validation(
+                    "memory source grants must be revoked through the scoped revoke operation",
+                ));
+            }
+            let expected_version = existing.policy_version.checked_add(1).ok_or_else(|| {
+                MemorySourceGrantStoreError::validation(
+                    "memory source grant policy version cannot advance",
+                )
+            })?;
+            if grant.policy_version != expected_version {
+                return Err(MemorySourceGrantStoreError::conflict(format!(
+                    "memory source grant update requires policy version {expected_version}"
+                )));
+            }
+        }
+
+        if grant.revoked_at.is_none() {
+            let duplicate_id = transaction
+                .query_row(
+                    "select id from memory_source_grants
+                     where consumer_user_id = ?1 and consumer_workspace_id = ?2
+                       and source_user_id = ?3 and source_workspace_id = ?4
+                       and revoked_at is null and id <> ?5
+                     limit 1",
+                    params![
+                        grant.consumer_user_id.as_str(),
+                        grant.consumer_workspace_id.as_str(),
+                        grant.source_user_id.as_str(),
+                        grant.source_workspace_id.as_str(),
+                        grant.id.as_str(),
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(MemorySourceGrantStoreError::store)?;
+            if duplicate_id.is_some() {
+                return Err(MemorySourceGrantStoreError::conflict(
+                    "duplicate_active_source",
+                ));
+            }
+        }
+
+        transaction
+            .execute(
+                "insert into memory_source_grants (
+                    id, consumer_user_id, consumer_workspace_id, source_user_id,
+                    source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                    policy_version, created_by, created_at, updated_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 on conflict(id) do update set
+                    max_sensitivity = excluded.max_sensitivity,
+                    expires_at = excluded.expires_at,
+                    policy_version = excluded.policy_version,
+                    updated_at = excluded.updated_at",
+                params![
+                    grant.id,
+                    grant.consumer_user_id.as_str(),
+                    grant.consumer_workspace_id.as_str(),
+                    grant.source_user_id.as_str(),
+                    grant.source_workspace_id.as_str(),
+                    enum_name(&grant.max_sensitivity)
+                        .map_err(MemorySourceGrantStoreError::store)?,
+                    grant.expires_at,
+                    grant.revoked_at,
+                    policy_version,
+                    grant.created_by,
+                    grant.created_at,
+                    grant.updated_at,
+                ],
+            )
+            .map_err(MemorySourceGrantStoreError::store)?;
+        transaction
+            .execute(
+                "delete from memory_source_grant_collections where grant_id = ?1",
+                [grant.id.as_str()],
+            )
+            .map_err(MemorySourceGrantStoreError::store)?;
+        transaction
+            .execute(
+                "delete from memory_source_grant_overrides where grant_id = ?1",
+                [grant.id.as_str()],
+            )
+            .map_err(MemorySourceGrantStoreError::store)?;
+
+        for collection in &grant.collections {
+            transaction
+                .execute(
+                    "insert into memory_source_grant_collections (grant_id, collection_key)
+                     values (?1, ?2)",
+                    (
+                        grant.id.as_str(),
+                        enum_name(collection).map_err(MemorySourceGrantStoreError::store)?,
+                    ),
+                )
+                .map_err(MemorySourceGrantStoreError::store)?;
+        }
+        for (reference, effect) in &grant.overrides {
+            let reference_json =
+                serde_json::to_string(reference).map_err(MemorySourceGrantStoreError::store)?;
+            transaction
+                .execute(
+                    "insert into memory_source_grant_overrides (grant_id, memory_ref, effect)
+                     values (?1, ?2, ?3)",
+                    (
+                        grant.id.as_str(),
+                        reference_json,
+                        enum_name(effect).map_err(MemorySourceGrantStoreError::store)?,
+                    ),
+                )
+                .map_err(MemorySourceGrantStoreError::store)?;
+        }
+
+        transaction
+            .commit()
+            .map_err(MemorySourceGrantStoreError::store)
+    }
+
+    pub fn list_memory_source_grants(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+    ) -> MemorySourceGrantStoreResult<Vec<MemorySourceGrant>> {
+        let conn = self.read_conn();
+        let transaction = conn
+            .unchecked_transaction()
+            .map_err(MemorySourceGrantStoreError::store)?;
+        let mut grants = {
+            let mut statement = transaction
+                .prepare(
+                    "select id, consumer_user_id, consumer_workspace_id, source_user_id,
+                            source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                            policy_version, created_by, created_at, updated_at
+                     from memory_source_grants
+                     where consumer_user_id = ?1 and consumer_workspace_id = ?2
+                     order by id",
+                )
+                .map_err(MemorySourceGrantStoreError::store)?;
+            let mut rows = statement
+                .query((consumer_user_id.as_str(), consumer_workspace_id.as_str()))
+                .map_err(MemorySourceGrantStoreError::store)?;
+            let mut grants = Vec::new();
+            while let Some(row) = rows.next().map_err(MemorySourceGrantStoreError::store)? {
+                grants.push(
+                    memory_source_grant_base_from_row(row)
+                        .map_err(MemorySourceGrantStoreError::store)?,
+                );
+            }
+            grants
+        };
+        for grant in &mut grants {
+            load_memory_source_grant_children(&transaction, grant)
+                .map_err(MemorySourceGrantStoreError::store)?;
+            validate_persisted_memory_source_grant(grant)?;
+        }
+        transaction
+            .commit()
+            .map_err(MemorySourceGrantStoreError::store)?;
+        Ok(grants)
+    }
+
+    pub fn get_memory_source_grant(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        id: &str,
+    ) -> MemorySourceGrantStoreResult<Option<MemorySourceGrant>> {
+        let conn = self.read_conn();
+        let transaction = conn
+            .unchecked_transaction()
+            .map_err(MemorySourceGrantStoreError::store)?;
+        let mut grant = {
+            let mut statement = transaction
+                .prepare(
+                    "select id, consumer_user_id, consumer_workspace_id, source_user_id,
+                            source_workspace_id, max_sensitivity, expires_at, revoked_at,
+                            policy_version, created_by, created_at, updated_at
+                     from memory_source_grants
+                     where consumer_user_id = ?1 and consumer_workspace_id = ?2 and id = ?3",
+                )
+                .map_err(MemorySourceGrantStoreError::store)?;
+            let mut rows = statement
+                .query((
+                    consumer_user_id.as_str(),
+                    consumer_workspace_id.as_str(),
+                    id,
+                ))
+                .map_err(MemorySourceGrantStoreError::store)?;
+            rows.next()
+                .map_err(MemorySourceGrantStoreError::store)?
+                .map(memory_source_grant_base_from_row)
+                .transpose()
+                .map_err(MemorySourceGrantStoreError::store)?
+        };
+        if let Some(grant) = &mut grant {
+            load_memory_source_grant_children(&transaction, grant)
+                .map_err(MemorySourceGrantStoreError::store)?;
+            validate_persisted_memory_source_grant(grant)?;
+        }
+        transaction
+            .commit()
+            .map_err(MemorySourceGrantStoreError::store)?;
+        Ok(grant)
+    }
+
+    pub fn revoke_memory_source_grant(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        id: &str,
+        revoked_at: i64,
+    ) -> MemorySourceGrantStoreResult<()> {
+        if consumer_user_id.as_str().trim().is_empty()
+            || consumer_workspace_id.as_str().trim().is_empty()
+            || id.trim().is_empty()
+        {
+            return Err(MemorySourceGrantStoreError::validation(
+                "scoped memory source grant revoke requires consumer and grant id",
+            ));
+        }
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction()
+            .map_err(MemorySourceGrantStoreError::store)?;
+        let current = {
+            let mut statement = transaction
+                .prepare(
+                    "select policy_version, revoked_at from memory_source_grants
+                     where consumer_user_id = ?1 and consumer_workspace_id = ?2 and id = ?3",
+                )
+                .map_err(MemorySourceGrantStoreError::store)?;
+            let mut rows = statement
+                .query((
+                    consumer_user_id.as_str(),
+                    consumer_workspace_id.as_str(),
+                    id,
+                ))
+                .map_err(MemorySourceGrantStoreError::store)?;
+            rows.next()
+                .map_err(MemorySourceGrantStoreError::store)?
+                .map(|row| {
+                    Ok::<_, MemorySourceGrantStoreError>((
+                        row.get::<_, i64>(0)
+                            .map_err(MemorySourceGrantStoreError::store)?,
+                        row.get::<_, Option<i64>>(1)
+                            .map_err(MemorySourceGrantStoreError::store)?,
+                    ))
+                })
+                .transpose()?
+        }
+        .ok_or_else(|| {
+            MemorySourceGrantStoreError::NotFound(format!("memory source grant {id} not found"))
+        })?;
+        if current.1.is_some() {
+            transaction
+                .commit()
+                .map_err(MemorySourceGrantStoreError::store)?;
+            return Ok(());
+        }
+        let next_version = current.0.checked_add(1).ok_or_else(|| {
+            MemorySourceGrantStoreError::validation(
+                "memory source grant policy version cannot advance for revoke",
+            )
+        })?;
+        if current.0 < 1 {
+            return Err(MemorySourceGrantStoreError::store(
+                "persisted memory source grant policy version is invalid",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                "update memory_source_grants
+             set revoked_at = ?4, policy_version = ?5, updated_at = ?6
+             where consumer_user_id = ?1 and consumer_workspace_id = ?2 and id = ?3
+               and revoked_at is null and policy_version = ?7",
+                params![
+                    consumer_user_id.as_str(),
+                    consumer_workspace_id.as_str(),
+                    id,
+                    revoked_at,
+                    next_version,
+                    current_timestamp(),
+                    current.0,
+                ],
+            )
+            .map_err(MemorySourceGrantStoreError::store)?;
+        if changed != 1 {
+            return Err(MemorySourceGrantStoreError::conflict(
+                "memory source grant changed concurrently during revoke",
+            ));
+        }
+        transaction
+            .commit()
+            .map_err(MemorySourceGrantStoreError::store)
+    }
+
+    pub fn create_memory_publication_proposal(
+        &self,
+        proposal: &MemoryPublicationProposal,
+    ) -> MemoryPublicationStoreResult<()> {
+        validate_memory_publication_proposal(proposal)
+            .map_err(MemoryPublicationStoreError::validation)?;
+        let source_ref_json = publication_ref_json(&proposal.source_ref)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+
+        let already_linked = transaction
+            .query_row(
+                "select exists(select 1 from memory_publication_links where source_ref_json = ?1)",
+                [&source_ref_json],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if already_linked {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_already_published",
+            ));
+        }
+        let already_pending = transaction
+            .query_row(
+                "select exists(
+                    select 1 from memory_publication_proposals
+                    where source_ref_json = ?1 and status = 'pending'
+                 )",
+                [&source_ref_json],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if already_pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_already_pending",
+            ));
+        }
+
+        transaction
+            .execute(
+                "insert into memory_publication_proposals (
+                    id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_collection, proposed_privacy_domain,
+                    proposed_sensitivity, source_revision, destination_revision, candidate_json, resolution_json, status, reason_code,
+                    failure_reason, proposed_by, decided_by, created_at, updated_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                params![
+                    &proposal.id,
+                    proposal.proposal_version,
+                    source_ref_json,
+                    proposal.source_user_id.as_str(),
+                    proposal.source_workspace_id.as_str(),
+                    proposal.destination_user_id.as_str(),
+                    proposal.destination_workspace_id.as_str(),
+                    &proposal.proposed_text,
+                    &proposal.proposed_memory_type,
+                    enum_name(&proposal.proposed_collection)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    proposal.proposed_privacy_domain.as_str(),
+                    enum_name(&proposal.proposed_sensitivity)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    &proposal.source_revision,
+                    &proposal.destination_revision,
+                    proposal
+                        .candidate
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    proposal
+                        .resolution
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    enum_name(&proposal.status).map_err(MemoryPublicationStoreError::store)?,
+                    enum_name(&proposal.reason_code).map_err(MemoryPublicationStoreError::store)?,
+                    proposal.failure_reason.as_deref(),
+                    &proposal.proposed_by,
+                    proposal.decided_by.as_deref(),
+                    &proposal.created_at,
+                    &proposal.updated_at,
+                ],
+            )
+            .map_err(|error| {
+                if error.to_string().contains("UNIQUE constraint failed") {
+                    MemoryPublicationStoreError::conflict("publication_already_exists")
+                } else {
+                    MemoryPublicationStoreError::store(error)
+                }
+            })?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)
+    }
+
+    pub fn get_memory_publication_proposal(
+        &self,
+        id: &str,
+    ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
+        if id.trim().is_empty() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication proposal id cannot be empty",
+            ));
+        }
+        let conn = self.read_conn();
+        let proposal = query_optional(
+            &conn,
+            "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_collection, proposed_privacy_domain,
+                    proposed_sensitivity, source_revision, destination_revision, candidate_json, resolution_json, status, reason_code,
+                    failure_reason, proposed_by, decided_by, created_at, updated_at
+             from memory_publication_proposals where id = ?1",
+            [id],
+            memory_publication_proposal_from_row,
+        )
+        .map_err(MemoryPublicationStoreError::store)?;
+        if let Some(proposal) = &proposal {
+            validate_persisted_memory_publication_proposal(proposal)
+                .map_err(MemoryPublicationStoreError::store)?;
+        }
+        Ok(proposal)
+    }
+
+    /// Returns the one pending publication that currently owns a source ref.
+    /// Publication creation takes the writer transaction before inserting, so
+    /// this read is only a resumability hint; callers still handle a concurrent
+    /// insert by reloading the winner after `publication_already_pending`.
+    pub fn pending_memory_publication_for_source(
+        &self,
+        source_ref: &MemoryRef,
+    ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
+        let conn = self.read_conn();
+        let proposal = query_optional(
+            &conn,
+            "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_collection, proposed_privacy_domain,
+                    proposed_sensitivity, source_revision, destination_revision, candidate_json, resolution_json, status, reason_code,
+                    failure_reason, proposed_by, decided_by, created_at, updated_at
+             from memory_publication_proposals
+             where source_ref_json = ?1 and status = 'pending'
+             order by created_at, id
+             limit 1",
+            [publication_ref_json(source_ref).map_err(MemoryPublicationStoreError::store)?],
+            memory_publication_proposal_from_row,
+        )
+        .map_err(MemoryPublicationStoreError::store)?;
+        proposal
+            .as_ref()
+            .map(validate_persisted_memory_publication_proposal)
+            .transpose()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(proposal)
+    }
+
+    /// Updates only a pending proposal. The caller supplies an already
+    /// revalidated proposal from the facade; this transaction still protects
+    /// against ownership, state, and identity changes between read and write.
+    pub fn update_memory_publication_proposal(
+        &self,
+        proposal: &MemoryPublicationProposal,
+        actor: &str,
+        expected_version: u64,
+    ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
+        validate_memory_publication_proposal(proposal)
+            .map_err(MemoryPublicationStoreError::validation)?;
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let stored = load_memory_publication_proposal_on(&transaction, &proposal.id)?
+            .ok_or_else(|| MemoryPublicationStoreError::not_found("publication_not_found"))?;
+        if actor != stored.proposed_by || actor != stored.source_user_id.as_str() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication_actor_mismatch",
+            ));
+        }
+        if stored.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_not_pending",
+            ));
+        }
+        let next_version = expected_version.checked_add(1).ok_or_else(|| {
+            MemoryPublicationStoreError::validation("publication_version_invalid")
+        })?;
+        if stored.proposal_version != expected_version || proposal.proposal_version != next_version
+        {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
+            ));
+        }
+        if stored.source_ref != proposal.source_ref
+            || stored.source_user_id != proposal.source_user_id
+            || stored.source_workspace_id != proposal.source_workspace_id
+            || stored.destination_user_id != proposal.destination_user_id
+            || stored.destination_workspace_id != proposal.destination_workspace_id
+            || stored.source_revision != proposal.source_revision
+            || stored.proposed_by != proposal.proposed_by
+            || stored.created_at != proposal.created_at
+        {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set proposed_text = ?2, proposed_memory_type = ?3, proposed_collection = ?4,
+                     proposed_privacy_domain = ?5, proposed_sensitivity = ?6, destination_revision = ?7, candidate_json = ?8,
+                     resolution_json = null, reason_code = ?9, updated_at = ?10, proposal_version = ?11
+                 where id = ?1 and status = 'pending' and proposal_version = ?12",
+                params![
+                    &proposal.id,
+                    &proposal.proposed_text,
+                    &proposal.proposed_memory_type,
+                    enum_name(&proposal.proposed_collection)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    proposal.proposed_privacy_domain.as_str(),
+                    enum_name(&proposal.proposed_sensitivity)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    &proposal.destination_revision,
+                    proposal
+                        .candidate
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    enum_name(&proposal.reason_code).map_err(MemoryPublicationStoreError::store)?,
+                    &proposal.updated_at,
+                    proposal.proposal_version,
+                    expected_version,
+                ],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let updated = load_memory_publication_proposal_on(&transaction, &proposal.id)?
+            .ok_or_else(|| MemoryPublicationStoreError::store("publication disappeared"))?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(updated)
+    }
+
+    pub fn get_memory_publication_link(
+        &self,
+        source_ref: &MemoryRef,
+    ) -> MemoryPublicationStoreResult<Option<MemoryPublicationLink>> {
+        let source_ref_json =
+            publication_ref_json(source_ref).map_err(MemoryPublicationStoreError::store)?;
+        let conn = self.read_conn();
+        query_optional(
+            &conn,
+            "select source_ref_json, destination_ref_json, approved_by, created_at
+             from memory_publication_links where source_ref_json = ?1",
+            [&source_ref_json],
+            memory_publication_link_from_row,
+        )
+        .map_err(MemoryPublicationStoreError::store)
+    }
+
+    pub fn set_memory_publication_resolution(
+        &self,
+        id: &str,
+        actor: &str,
+        expected_version: u64,
+        resolution: &MemoryPublicationResolution,
+        updated_at: &str,
+    ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let proposal = load_memory_publication_proposal_on(&transaction, id)?
+            .ok_or_else(|| MemoryPublicationStoreError::not_found("publication_not_found"))?;
+        if actor != proposal.proposed_by || actor != proposal.source_user_id.as_str() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication_actor_mismatch",
+            ));
+        }
+        if proposal.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_not_pending",
+            ));
+        }
+        let next_version = expected_version.checked_add(1).ok_or_else(|| {
+            MemoryPublicationStoreError::validation("publication_version_invalid")
+        })?;
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set resolution_json = ?2, updated_at = ?3, proposal_version = ?4
+                 where id = ?1 and status = 'pending' and proposal_version = ?5",
+                params![
+                    id,
+                    serde_json::to_string(resolution)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    updated_at,
+                    next_version,
+                    expected_version,
+                ],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let updated = load_memory_publication_proposal_on(&transaction, id)?
+            .ok_or_else(|| MemoryPublicationStoreError::store("publication disappeared"))?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(updated)
+    }
+
+    pub fn reject_memory_publication(
+        &self,
+        id: &str,
+        actor: &str,
+        expected_version: u64,
+        updated_at: &str,
+    ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
+        if actor.trim().is_empty() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication actor cannot be empty",
+            ));
+        }
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let proposal = load_memory_publication_proposal_on(&transaction, id)?
+            .ok_or_else(|| MemoryPublicationStoreError::not_found("publication_not_found"))?;
+        if actor != proposal.proposed_by || actor != proposal.source_user_id.as_str() {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication_actor_mismatch",
+            ));
+        }
+        if proposal.status == MemoryPublicationStatus::Rejected {
+            if proposal.proposal_version != expected_version {
+                return Err(MemoryPublicationStoreError::conflict(
+                    "publication_conflict",
+                ));
+            }
+            transaction
+                .commit()
+                .map_err(MemoryPublicationStoreError::store)?;
+            return Ok(proposal);
+        }
+        if proposal.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_not_pending",
+            ));
+        }
+        let next_version = expected_version.checked_add(1).ok_or_else(|| {
+            MemoryPublicationStoreError::validation("publication_version_invalid")
+        })?;
+        if proposal.proposal_version != expected_version {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
+            ));
+        }
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set status = 'rejected', reason_code = 'rejected', decided_by = ?2, updated_at = ?3,
+                     proposal_version = ?4
+                 where id = ?1 and status = 'pending' and proposal_version = ?5",
+                params![id, actor, updated_at, next_version, expected_version],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let rejected = load_memory_publication_proposal_on(&transaction, id)?
+            .ok_or_else(|| MemoryPublicationStoreError::store("publication disappeared"))?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(rejected)
+    }
+
+    pub fn mark_memory_publication_failed(
+        &self,
+        id: &str,
+        actor: &str,
+        expected_version: u64,
+        failure_reason: &str,
+        updated_at: &str,
+    ) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let next_version = expected_version.checked_add(1).ok_or_else(|| {
+            MemoryPublicationStoreError::validation("publication_version_invalid")
+        })?;
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set status = 'failed', reason_code = 'publication_failed', failure_reason = ?3,
+                     decided_by = ?2, updated_at = ?4, proposal_version = ?5
+                 where id = ?1 and status = 'pending' and proposal_version = ?6",
+                params![
+                    id,
+                    actor,
+                    sanitize_publication_failure_reason(failure_reason),
+                    updated_at,
+                    next_version,
+                    expected_version,
+                ],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
+            ));
+        }
+        let result = load_memory_publication_proposal_on(&transaction, id)?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(result)
+    }
+
+    /// Commits every visible side effect of publication in a single SQLite
+    /// transaction. A stale proposal state, duplicate link, or failed statement
+    /// rolls back the destination write and source alias together.
+    pub fn commit_publication(
+        &self,
+        proposal: &MemoryPublicationProposal,
+        destination: &MemoryRecord,
+        source_with_alias: &MemoryRecord,
+        link: &MemoryPublicationLink,
+        expected_source: &MemoryRecord,
+        expected_source_evidence: &[MemoryEvidence],
+        expected_destination_scope: &[MemoryRecord],
+    ) -> MemoryPublicationStoreResult<MemoryPublicationProposal> {
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(MemoryPublicationStoreError::store)?;
+        let stored = load_memory_publication_proposal_on(&transaction, &proposal.id)?
+            .ok_or_else(|| MemoryPublicationStoreError::not_found("publication_not_found"))?;
+        if stored != *proposal || stored.status != MemoryPublicationStatus::Pending {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_not_pending",
+            ));
+        }
+        if destination.user_id != proposal.destination_user_id
+            || destination.workspace_id != proposal.destination_workspace_id
+            || source_with_alias.reference != proposal.source_ref
+            || source_with_alias.user_id != proposal.source_user_id
+            || source_with_alias.workspace_id != proposal.source_workspace_id
+            || link.source_ref != proposal.source_ref
+            || link.destination_ref != destination.reference
+            || link.approved_by != proposal.proposed_by
+        {
+            return Err(MemoryPublicationStoreError::validation(
+                "publication transaction scope mismatch",
+            ));
+        }
+
+        // The facade's policy/candidate check happens before this writer lock is
+        // acquired. Re-read its complete inputs under the same IMMEDIATE
+        // transaction that owns the writes, so a source mutation, tombstone, or
+        // destination conflict cannot slip between validation and commit.
+        let source = visible_memory_exact_on(
+            &transaction,
+            &proposal.source_ref,
+            &proposal.source_user_id,
+            &proposal.source_workspace_id,
+        )
+        .map_err(MemoryPublicationStoreError::store)?;
+        if source.as_ref() != Some(expected_source) {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_source_changed",
+            ));
+        }
+        let source_evidence = evidence_for_on(&transaction, &proposal.source_ref)
+            .map_err(MemoryPublicationStoreError::store)?;
+        if source_evidence != expected_source_evidence {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_source_changed",
+            ));
+        }
+        let destination_scope = visible_memories_in_scope_on(
+            &transaction,
+            &proposal.destination_user_id,
+            &proposal.destination_workspace_id,
+        )
+        .map_err(MemoryPublicationStoreError::store)?;
+        if destination_scope != expected_destination_scope {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_conflict",
+            ));
+        }
+
+        upsert_memory_on(&transaction, destination).map_err(MemoryPublicationStoreError::store)?;
+        self.index_memory_on(&transaction, destination)
+            .map_err(MemoryPublicationStoreError::store)?;
+        upsert_memory_on(&transaction, source_with_alias)
+            .map_err(MemoryPublicationStoreError::store)?;
+        self.index_memory_on(&transaction, source_with_alias)
+            .map_err(MemoryPublicationStoreError::store)?;
+        transaction
+            .execute(
+                "insert into memory_publication_links(
+                    source_ref_json, destination_ref_json, approved_by, created_at
+                 ) values (?1, ?2, ?3, ?4)",
+                params![
+                    publication_ref_json(&link.source_ref)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    publication_ref_json(&link.destination_ref)
+                        .map_err(MemoryPublicationStoreError::store)?,
+                    &link.approved_by,
+                    &link.created_at,
+                ],
+            )
+            .map_err(|error| {
+                if error.to_string().contains("UNIQUE constraint failed") {
+                    MemoryPublicationStoreError::conflict("publication_already_published")
+                } else {
+                    MemoryPublicationStoreError::store(error)
+                }
+            })?;
+        let changed = transaction
+            .execute(
+                "update memory_publication_proposals
+                 set status = 'approved', reason_code = 'approved', failure_reason = null,
+                     decided_by = ?2, updated_at = ?3, proposal_version = proposal_version + 1
+                 where id = ?1 and status = 'pending' and proposal_version = ?4",
+                params![
+                    &proposal.id,
+                    &link.approved_by,
+                    &link.created_at,
+                    proposal.proposal_version,
+                ],
+            )
+            .map_err(MemoryPublicationStoreError::store)?;
+        if changed != 1 {
+            return Err(MemoryPublicationStoreError::conflict(
+                "publication_changed_concurrently",
+            ));
+        }
+        let approved = load_memory_publication_proposal_on(&transaction, &proposal.id)?
+            .ok_or_else(|| MemoryPublicationStoreError::store("publication disappeared"))?;
+        transaction
+            .commit()
+            .map_err(MemoryPublicationStoreError::store)?;
+        Ok(approved)
+    }
+
+    pub fn record_memory_source_access(
+        &self,
+        event: &MemorySourceAccessEvent,
+    ) -> Result<(), String> {
+        validate_memory_source_access_event(event)?;
+        let policy_version =
+            i64::try_from(event.policy_version).map_err(|error| error.to_string())?;
+        let candidate_count =
+            i64::try_from(event.candidate_count).map_err(|error| error.to_string())?;
+        let outcome = match event.outcome {
+            MemorySourceAccessOutcome::Allow => "allow",
+            MemorySourceAccessOutcome::Deny => "deny",
+            MemorySourceAccessOutcome::Degraded => "degraded",
+        };
+        let conn = self.write_conn();
+        conn.execute(
+            "insert into memory_source_access_events (
+                id, consumer_user_id, consumer_workspace_id, source_workspace_id,
+                grant_id, policy_version, turn_id, outcome, reason, candidate_count,
+                injected_refs_json, created_at
+             ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                &event.id,
+                event.consumer_user_id.as_str(),
+                event.consumer_workspace_id.as_str(),
+                event.source_workspace_id.as_str(),
+                event.grant_id.as_deref(),
+                policy_version,
+                event.turn_id.as_deref(),
+                outcome,
+                &event.reason,
+                candidate_count,
+                serde_json::to_string(&event.injected_refs).map_err(|error| error.to_string())?,
+                event.created_at,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn last_memory_source_access(
+        &self,
+        grant_id: &str,
+    ) -> Result<Option<MemorySourceAccessEvent>, String> {
+        if grant_id.trim().is_empty() {
+            return Err("memory source access grant id cannot be empty".to_string());
+        }
+        let conn = self.read_conn();
+        let event = query_optional(
+            &conn,
+            "select id, consumer_user_id, consumer_workspace_id, source_workspace_id,
+                    grant_id, policy_version, turn_id, outcome, reason, candidate_count,
+                    injected_refs_json, created_at
+             from memory_source_access_events
+             where grant_id = ?1
+             order by created_at desc, rowid desc
+             limit 1",
+            [grant_id],
+            memory_source_access_from_row,
+        )?;
+        if let Some(event) = &event {
+            validate_memory_source_access_event(event)?;
+        }
+        Ok(event)
+    }
+
     pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<MemoryBackupReport, String> {
         let Some(source_path) = &self.db_path else {
             return Err("memory backup requires file-backed store".to_string());
@@ -317,7 +1498,7 @@ impl SQLiteMemoryStore {
         let integrity: String = conn
             .query_row("pragma integrity_check", [], |row| row.get(0))
             .map_err(|error| error.to_string())?;
-        self.rebuild_memory_search_index()?;
+        self.rebuild_memory_search_index_on(&conn)?;
         Ok(MemoryMaintenanceReport {
             integrity_ok: integrity == "ok",
             fts_rebuilt: true,
@@ -379,39 +1560,7 @@ impl SQLiteMemoryStore {
 
     pub fn upsert_memory(&self, memory: &MemoryRecord) -> Result<(), String> {
         let conn = self.write_conn();
-        conn.execute(
-            "insert or replace into memories (
-                ref, user_id, workspace_id, memory_type, text, aliases_json,
-                language_hints_json, confidence, status, privacy_domain, sensitivity,
-                metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
-                superseded_by, correction_of
-            ) values (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                ?16, ?17, ?18
-            )",
-            params![
-                memory.reference.to_string(),
-                memory.user_id.as_str(),
-                memory.workspace_id.as_str(),
-                &memory.memory_type,
-                &memory.text,
-                serde_json::to_string(&memory.aliases).map_err(|error| error.to_string())?,
-                serde_json::to_string(&memory.language_hints)
-                    .map_err(|error| error.to_string())?,
-                memory.confidence,
-                enum_name(&memory.status)?,
-                memory.privacy_domain.as_str(),
-                enum_name(&memory.sensitivity)?,
-                serde_json::to_string(&memory.metadata).map_err(|error| error.to_string())?,
-                &memory.created_at,
-                &memory.updated_at,
-                memory.last_seen_at.as_deref(),
-                serde_json::to_string(&memory.supersedes).map_err(|error| error.to_string())?,
-                memory.superseded_by.as_ref().map(ToString::to_string),
-                memory.correction_of.as_ref().map(ToString::to_string),
-            ],
-        )
-        .map_err(|error| error.to_string())?;
+        upsert_memory_on(&conn, memory)?;
         self.index_memory_on(&conn, memory)?;
         Ok(())
     }
@@ -434,6 +1583,41 @@ impl SQLiteMemoryStore {
                     superseded_by, correction_of
              from memories
              where ref = ?1 and user_id = ?2 and workspace_id = ?3",
+            (
+                reference.to_string(),
+                user_id.as_str().to_string(),
+                workspace_id.as_str().to_string(),
+            ),
+            memory_from_row,
+        )
+    }
+
+    /// Linked-recall exact-ref read. Memory row and tombstone visibility are
+    /// evaluated by one SQL statement on one connection/snapshot.
+    pub(crate) fn get_visible_memory_exact(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<MemoryRecord>, String> {
+        if reference.user_id != *user_id || reference.workspace_id != *workspace_id {
+            return Ok(None);
+        }
+        let conn = self.read_conn();
+        query_optional(
+            &conn,
+            "select m.ref, m.user_id, m.workspace_id, m.memory_type, m.text, m.aliases_json,
+                    m.language_hints_json, m.confidence, m.status, m.privacy_domain,
+                    m.sensitivity, m.metadata_json, m.created_at, m.updated_at,
+                    m.last_seen_at, m.supersedes_json, m.superseded_by, m.correction_of
+             from memories m
+             where m.ref = ?1 and m.user_id = ?2 and m.workspace_id = ?3
+               and not exists (
+                   select 1 from tombstones t
+                   where t.ref = m.ref
+                     and t.user_id = m.user_id
+                     and t.workspace_id = m.workspace_id
+               )",
             (
                 reference.to_string(),
                 user_id.as_str().to_string(),
@@ -471,6 +1655,75 @@ impl SQLiteMemoryStore {
             }
         }
         Ok(memories)
+    }
+
+    /// Active source-picker memories for one exact owner/workspace scope.
+    ///
+    /// Candidate and Confirmed are the only picker-visible lifecycle states.
+    /// Secret, tombstoned, and oversized payloads are omitted in SQL before any
+    /// Rust materialization; callers still perform full payload secret scanning.
+    pub fn list_memory_source_candidates(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<MemorySourceCandidateProjection>, String> {
+        const TEXT_MAX_BYTES: i64 = 32 * 1024;
+        const METADATA_MAX_BYTES: i64 = 32 * 1024;
+
+        let limit = limit.min(MEMORY_SOURCE_CANDIDATE_PAGE_MAX);
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).map_err(|error| error.to_string())?;
+        let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+        let conn = self.read_conn();
+        let mut statement = conn
+            .prepare(
+                "select m.ref, m.memory_type, m.text, m.sensitivity, m.metadata_json
+                 from memories m
+                 where m.user_id = ?1 and m.workspace_id = ?2
+                   and m.status in ('candidate', 'confirmed')
+                   and m.sensitivity <> 'secret'
+                   and length(cast(m.text as blob)) <= ?3
+                   and length(cast(m.metadata_json as blob)) <= ?4
+                   and not exists (
+                       select 1 from tombstones t
+                       where t.ref = m.ref
+                         and t.user_id = m.user_id
+                         and t.workspace_id = m.workspace_id
+                   )
+                 order by m.ref
+                 limit ?5 offset ?6",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query(params![
+                user_id.as_str(),
+                workspace_id.as_str(),
+                TEXT_MAX_BYTES,
+                METADATA_MAX_BYTES,
+                limit,
+                offset,
+            ])
+            .map_err(|error| error.to_string())?;
+        let mut candidates = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            candidates.push(MemorySourceCandidateProjection {
+                reference: parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?,
+                memory_type: row.get(1).map_err(|error| error.to_string())?,
+                text: row.get(2).map_err(|error| error.to_string())?,
+                sensitivity: enum_from_name(
+                    row.get::<_, String>(3).map_err(|error| error.to_string())?,
+                )?,
+                metadata: serde_json::from_str(
+                    &row.get::<_, String>(4).map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?,
+            });
+        }
+        Ok(candidates)
     }
 
     /// Texts of memories the user FORGOT (status deleted/rejected) in a scope.
@@ -535,6 +1788,124 @@ impl SQLiteMemoryStore {
             )?);
         }
         Ok(refs)
+    }
+
+    /// Query-local lexical index populated only with records accepted by
+    /// `allows`. Records are streamed from SQLite into a TEMP FTS table on the
+    /// same guarded read connection, so denied records cannot affect BM25
+    /// statistics, ordering or the result limit. No ref list is materialized
+    /// in Rust and the returned page is hard-capped.
+    pub(crate) fn search_memory_refs_filtered<F>(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        query: &str,
+        limit: usize,
+        offset: usize,
+        mut allows: F,
+    ) -> Result<(Vec<MemoryRef>, usize), String>
+    where
+        F: FnMut(&MemoryRecord) -> bool,
+    {
+        let fts = fts_or_query(query);
+        let limit = limit.min(AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX);
+        if fts.is_empty() || limit == 0 {
+            return Ok((Vec::new(), 0));
+        }
+        let limit = i64::try_from(limit).map_err(|error| error.to_string())?;
+        let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+        let conn = self.read_conn();
+        conn.execute_batch(
+            "create virtual table if not exists temp.authorized_memory_search_fts using fts5(
+                 ref unindexed,
+                 text
+             );
+             delete from temp.authorized_memory_search_fts;",
+        )
+        .map_err(|error| error.to_string())?;
+
+        let mut run = || -> Result<(Vec<MemoryRef>, usize), String> {
+            let mut records_statement = conn
+                .prepare(
+                    "select m.ref, m.user_id, m.workspace_id, m.memory_type, m.text,
+                            m.aliases_json, m.language_hints_json, m.confidence, m.status,
+                            m.privacy_domain, m.sensitivity, m.metadata_json, m.created_at,
+                            m.updated_at, m.last_seen_at, m.supersedes_json,
+                            m.superseded_by, m.correction_of
+                     from memories m
+                     where m.user_id = ?1 and m.workspace_id = ?2
+                       and not exists (
+                           select 1 from tombstones t
+                           where t.ref = m.ref
+                             and t.user_id = m.user_id
+                             and t.workspace_id = m.workspace_id
+                       )
+                     order by m.ref",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut insert_statement = conn
+                .prepare(
+                    "insert into temp.authorized_memory_search_fts (ref, text)
+                     values (?1, ?2)",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut rows = records_statement
+                .query((user_id.as_str(), workspace_id.as_str()))
+                .map_err(|error| error.to_string())?;
+            while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+                let memory = memory_from_row(row)?;
+                if !allows(&memory) {
+                    continue;
+                }
+                insert_statement
+                    .execute((memory.reference.to_string(), memory.text))
+                    .map_err(|error| error.to_string())?;
+            }
+            drop(rows);
+            drop(insert_statement);
+            drop(records_statement);
+
+            let total = conn
+                .query_row(
+                    "select count(*)
+                     from temp.authorized_memory_search_fts
+                     where authorized_memory_search_fts match ?1",
+                    [fts.as_str()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())?;
+            let total = usize::try_from(total).map_err(|error| error.to_string())?;
+            let mut search_statement = conn
+                .prepare(
+                    "select ref
+                     from temp.authorized_memory_search_fts
+                     where authorized_memory_search_fts match ?1
+                     order by bm25(authorized_memory_search_fts), text, ref
+                     limit ?2 offset ?3",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut search_rows = search_statement
+                .query((fts.as_str(), limit, offset))
+                .map_err(|error| error.to_string())?;
+            let mut refs = Vec::new();
+            while let Some(row) = search_rows.next().map_err(|error| error.to_string())? {
+                refs.push(parse_ref(
+                    row.get::<_, String>(0).map_err(|error| error.to_string())?,
+                )?);
+            }
+            Ok((refs, total))
+        };
+
+        let result = run();
+        let cleanup = conn
+            .execute("delete from temp.authorized_memory_search_fts", [])
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+        match (result, cleanup) {
+            (Ok(page), Ok(())) => Ok(page),
+            (Err(error), _) => Err(error),
+            (Ok(_), Err(error)) => Err(error),
+        }
     }
 
     pub fn rebuild_memory_search_index(&self) -> Result<(), String> {
@@ -625,18 +1996,18 @@ impl SQLiteMemoryStore {
         let conn = self.write_conn();
         for col in ["source_ref", "target_ref"] {
             conn.execute(
-                    &format!(
-                        "update relations set {col} = ?1
+                &format!(
+                    "update relations set {col} = ?1
                          where {col} = ?2 and user_id = ?3 and workspace_id = ?4"
-                    ),
-                    params![
-                        to_ref.to_string(),
-                        from_ref.to_string(),
-                        user_id.as_str(),
-                        workspace_id.as_str(),
-                    ],
-                )
-                .map_err(|error| error.to_string())?;
+                ),
+                params![
+                    to_ref.to_string(),
+                    from_ref.to_string(),
+                    user_id.as_str(),
+                    workspace_id.as_str(),
+                ],
+            )
+            .map_err(|error| error.to_string())?;
         }
         Ok(())
     }
@@ -653,16 +2024,16 @@ impl SQLiteMemoryStore {
     ) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "update memories set memory_type = ?1, updated_at = current_timestamp \
+            "update memories set memory_type = ?1, updated_at = current_timestamp \
                  where ref = ?2 and user_id = ?3 and workspace_id = ?4",
-                params![
-                    new_type,
-                    reference.to_string(),
-                    user_id.as_str(),
-                    workspace_id.as_str()
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                new_type,
+                reference.to_string(),
+                user_id.as_str(),
+                workspace_id.as_str()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -688,17 +2059,17 @@ impl SQLiteMemoryStore {
         workspace_id: &WorkspaceId,
     ) -> Result<(), String> {
         conn.execute(
-                "delete from relations where user_id = ?1 and workspace_id = ?2
+            "delete from relations where user_id = ?1 and workspace_id = ?2
                  and json_extract(metadata_json, '$.source') = 'graphify'",
-                params![user_id.as_str(), workspace_id.as_str()],
-            )
-            .map_err(|error| error.to_string())?;
+            params![user_id.as_str(), workspace_id.as_str()],
+        )
+        .map_err(|error| error.to_string())?;
         conn.execute(
-                "delete from entities where user_id = ?1 and workspace_id = ?2
+            "delete from entities where user_id = ?1 and workspace_id = ?2
                  and json_extract(metadata_json, '$.source') = 'graphify'",
-                params![user_id.as_str(), workspace_id.as_str()],
-            )
-            .map_err(|error| error.to_string())?;
+            params![user_id.as_str(), workspace_id.as_str()],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -807,14 +2178,14 @@ impl SQLiteMemoryStore {
     ) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "delete from tombstones where ref = ?1 and user_id = ?2 and workspace_id = ?3",
-                params![
-                    reference.to_string(),
-                    user_id.as_str(),
-                    workspace_id.as_str()
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            "delete from tombstones where ref = ?1 and user_id = ?2 and workspace_id = ?3",
+            params![
+                reference.to_string(),
+                user_id.as_str(),
+                workspace_id.as_str()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -825,30 +2196,26 @@ impl SQLiteMemoryStore {
 
     /// `upsert_entity` su una `&Connection` data. Usato da `import_graphify_batch`
     /// (vedi `clear_graphify_on`) per non riprendere il lock writer dentro la tx.
-    fn upsert_entity_on(
-        &self,
-        conn: &Connection,
-        entity: &MemoryEntity,
-    ) -> Result<(), String> {
+    fn upsert_entity_on(&self, conn: &Connection, entity: &MemoryEntity) -> Result<(), String> {
         conn.execute(
-                "insert or replace into entities (
+            "insert or replace into entities (
                     ref, user_id, workspace_id, entity_type, name, canonical_key,
                     aliases_json, privacy_domain, sensitivity, metadata_json
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                (
-                    entity.reference.to_string(),
-                    entity.user_id.as_str(),
-                    entity.workspace_id.as_str(),
-                    &entity.entity_type,
-                    &entity.name,
-                    &entity.canonical_key,
-                    serde_json::to_string(&entity.aliases).map_err(|error| error.to_string())?,
-                    entity.privacy_domain.as_str(),
-                    enum_name(&entity.sensitivity)?,
-                    serde_json::to_string(&entity.metadata).map_err(|error| error.to_string())?,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                entity.reference.to_string(),
+                entity.user_id.as_str(),
+                entity.workspace_id.as_str(),
+                &entity.entity_type,
+                &entity.name,
+                &entity.canonical_key,
+                serde_json::to_string(&entity.aliases).map_err(|error| error.to_string())?,
+                entity.privacy_domain.as_str(),
+                enum_name(&entity.sensitivity)?,
+                serde_json::to_string(&entity.metadata).map_err(|error| error.to_string())?,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -877,6 +2244,38 @@ impl SQLiteMemoryStore {
         )
     }
 
+    pub(crate) fn get_visible_entity_exact(
+        &self,
+        reference: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Option<MemoryEntity>, String> {
+        if reference.user_id != *user_id || reference.workspace_id != *workspace_id {
+            return Ok(None);
+        }
+        let conn = self.read_conn();
+        query_optional(
+            &conn,
+            "select e.ref, e.user_id, e.workspace_id, e.entity_type, e.name,
+                    e.canonical_key, e.aliases_json, e.privacy_domain, e.sensitivity,
+                    e.metadata_json
+             from entities e
+             where e.ref = ?1 and e.user_id = ?2 and e.workspace_id = ?3
+               and not exists (
+                   select 1 from tombstones t
+                   where t.ref = e.ref
+                     and t.user_id = e.user_id
+                     and t.workspace_id = e.workspace_id
+               )",
+            (
+                reference.to_string(),
+                user_id.as_str().to_string(),
+                workspace_id.as_str().to_string(),
+            ),
+            entity_from_row,
+        )
+    }
+
     pub fn upsert_relation(&self, relation: &MemoryRelation) -> Result<(), String> {
         let conn = self.write_conn();
         self.upsert_relation_on(&conn, relation)
@@ -890,25 +2289,25 @@ impl SQLiteMemoryStore {
         relation: &MemoryRelation,
     ) -> Result<(), String> {
         conn.execute(
-                "insert or replace into relations (
+            "insert or replace into relations (
                     ref, user_id, workspace_id, source_ref, relation_type, target_ref,
                     confidence, privacy_domain, sensitivity, evidence_json, metadata_json
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                (
-                    relation.reference.to_string(),
-                    relation.user_id.as_str(),
-                    relation.workspace_id.as_str(),
-                    relation.source_ref.to_string(),
-                    &relation.relation_type,
-                    relation.target_ref.to_string(),
-                    relation.confidence,
-                    relation.privacy_domain.as_str(),
-                    enum_name(&relation.sensitivity)?,
-                    serde_json::to_string(&relation.evidence).map_err(|error| error.to_string())?,
-                    serde_json::to_string(&relation.metadata).map_err(|error| error.to_string())?,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                relation.reference.to_string(),
+                relation.user_id.as_str(),
+                relation.workspace_id.as_str(),
+                relation.source_ref.to_string(),
+                &relation.relation_type,
+                relation.target_ref.to_string(),
+                relation.confidence,
+                relation.privacy_domain.as_str(),
+                enum_name(&relation.sensitivity)?,
+                serde_json::to_string(&relation.evidence).map_err(|error| error.to_string())?,
+                serde_json::to_string(&relation.metadata).map_err(|error| error.to_string())?,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -924,12 +2323,12 @@ impl SQLiteMemoryStore {
     ) -> Result<usize, String> {
         let conn = self.write_conn();
         conn.execute(
-                "delete from relations
+            "delete from relations
                  where user_id = ?1 and workspace_id = ?2 and relation_type = 'mentions'
                    and json_extract(metadata_json, '$.source') = 'mention-linker'",
-                params![user_id.as_str(), workspace_id.as_str()],
-            )
-            .map_err(|error| error.to_string())
+            params![user_id.as_str(), workspace_id.as_str()],
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn relations_for(
@@ -946,6 +2345,48 @@ impl SQLiteMemoryStore {
                  from relations
                  where source_ref = ?1 and user_id = ?2 and workspace_id = ?3
                  order by ref",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((
+                source_ref.to_string(),
+                user_id.as_str().to_string(),
+                workspace_id.as_str().to_string(),
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut relations = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            relations.push(relation_from_row(row)?);
+        }
+        Ok(relations)
+    }
+
+    /// Linked-recall relation read with tombstone visibility in the same SQL
+    /// statement/snapshot as the relation rows.
+    pub(crate) fn visible_relations_for_exact(
+        &self,
+        source_ref: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<MemoryRelation>, String> {
+        if source_ref.user_id != *user_id || source_ref.workspace_id != *workspace_id {
+            return Ok(Vec::new());
+        }
+        let conn = self.read_conn();
+        let mut statement = conn
+            .prepare(
+                "select r.ref, r.user_id, r.workspace_id, r.source_ref, r.relation_type,
+                        r.target_ref, r.confidence, r.privacy_domain, r.sensitivity,
+                        r.evidence_json, r.metadata_json
+                 from relations r
+                 where r.source_ref = ?1 and r.user_id = ?2 and r.workspace_id = ?3
+                   and not exists (
+                       select 1 from tombstones t
+                       where t.ref = r.ref
+                         and t.user_id = r.user_id
+                         and t.workspace_id = r.workspace_id
+                   )
+                 order by r.ref",
             )
             .map_err(|error| error.to_string())?;
         let mut rows = statement
@@ -993,15 +2434,15 @@ impl SQLiteMemoryStore {
     pub fn link_evidence(&self, evidence: &MemoryEvidence) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "insert or replace into memory_evidence (memory_ref, evidence_ref, note)
+            "insert or replace into memory_evidence (memory_ref, evidence_ref, note)
                  values (?1, ?2, ?3)",
-                (
-                    evidence.memory_ref.to_string(),
-                    evidence.evidence_ref.to_string(),
-                    &evidence.note,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                evidence.memory_ref.to_string(),
+                evidence.evidence_ref.to_string(),
+                &evidence.note,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1145,23 +2586,23 @@ impl SQLiteMemoryStore {
     pub fn record_wiki_page(&self, page: &WikiPage) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "insert or replace into wiki_pages (
+            "insert or replace into wiki_pages (
                     ref, user_id, workspace_id, path, title, body, linked_refs_json,
                     privacy_domain, sensitivity
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                (
-                    page.reference.to_string(),
-                    page.user_id.as_str(),
-                    page.workspace_id.as_str(),
-                    &page.path,
-                    &page.title,
-                    &page.body,
-                    serde_json::to_string(&page.linked_refs).map_err(|error| error.to_string())?,
-                    page.privacy_domain.as_str(),
-                    enum_name(&page.sensitivity)?,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                page.reference.to_string(),
+                page.user_id.as_str(),
+                page.workspace_id.as_str(),
+                &page.path,
+                &page.title,
+                &page.body,
+                serde_json::to_string(&page.linked_refs).map_err(|error| error.to_string())?,
+                page.privacy_domain.as_str(),
+                enum_name(&page.sensitivity)?,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1253,30 +2694,29 @@ impl SQLiteMemoryStore {
     pub fn upsert_routine(&self, routine: &RoutineRecord) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "insert or replace into routines (
+            "insert or replace into routines (
                     ref, user_id, workspace_id, name, intent, confidence, status,
                     schedule_hint_json, privacy_domain, sensitivity, evidence_json,
                     metadata_json, created_at, updated_at
                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
-                (
-                    routine.reference.to_string(),
-                    routine.user_id.as_str(),
-                    routine.workspace_id.as_str(),
-                    &routine.name,
-                    &routine.intent,
-                    routine.confidence,
-                    enum_name(&routine.status)?,
-                    serde_json::to_string(&routine.schedule_hint)
-                        .map_err(|error| error.to_string())?,
-                    routine.privacy_domain.as_str(),
-                    enum_name(&routine.sensitivity)?,
-                    serde_json::to_string(&routine.evidence).map_err(|error| error.to_string())?,
-                    serde_json::to_string(&routine.metadata).map_err(|error| error.to_string())?,
-                    &routine.created_at,
-                    &routine.updated_at,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                routine.reference.to_string(),
+                routine.user_id.as_str(),
+                routine.workspace_id.as_str(),
+                &routine.name,
+                &routine.intent,
+                routine.confidence,
+                enum_name(&routine.status)?,
+                serde_json::to_string(&routine.schedule_hint).map_err(|error| error.to_string())?,
+                routine.privacy_domain.as_str(),
+                enum_name(&routine.sensitivity)?,
+                serde_json::to_string(&routine.evidence).map_err(|error| error.to_string())?,
+                serde_json::to_string(&routine.metadata).map_err(|error| error.to_string())?,
+                &routine.created_at,
+                &routine.updated_at,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1346,17 +2786,17 @@ impl SQLiteMemoryStore {
     ) -> Result<(), String> {
         let conn = self.write_conn();
         conn.execute(
-                "update automation_candidates set status = ?1, updated_at = ?2
+            "update automation_candidates set status = ?1, updated_at = ?2
                  where ref = ?3 and user_id = ?4 and workspace_id = ?5",
-                params![
-                    enum_name(status)?,
-                    current_timestamp(),
-                    reference.to_string(),
-                    user_id.as_str(),
-                    workspace_id.as_str(),
-                ],
-            )
-            .map_err(|error| error.to_string())?;
+            params![
+                enum_name(status)?,
+                current_timestamp(),
+                reference.to_string(),
+                user_id.as_str(),
+                workspace_id.as_str(),
+            ],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1436,31 +2876,31 @@ impl SQLiteMemoryStore {
         }
         let conn = self.write_conn();
         conn.execute(
-                "insert or replace into tombstones (ref, user_id, workspace_id, reason)
+            "insert or replace into tombstones (ref, user_id, workspace_id, reason)
                  values (?1, ?2, ?3, ?4)",
-                (
-                    reference.to_string(),
-                    user_id.as_str(),
-                    workspace_id.as_str(),
-                    reason,
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                reference.to_string(),
+                user_id.as_str(),
+                workspace_id.as_str(),
+                reason,
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         // Cascade: a dead ref must not keep edges in the graph — drop every
         // relation touching it (memory→entity "mentions", entity↔entity links).
         // Both delete paths (delete_memory and tombstone_entity) funnel through
         // here, so this single seam keeps the relations table free of danglers.
         conn.execute(
-                "delete from relations
+            "delete from relations
                  where user_id = ?1 and workspace_id = ?2
                    and (source_ref = ?3 or target_ref = ?3)",
-                (
-                    user_id.as_str(),
-                    workspace_id.as_str(),
-                    reference.to_string(),
-                ),
-            )
-            .map_err(|error| error.to_string())?;
+            (
+                user_id.as_str(),
+                workspace_id.as_str(),
+                reference.to_string(),
+            ),
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1492,10 +2932,10 @@ impl SQLiteMemoryStore {
             "wiki_pages",
         ] {
             conn.execute(
-                    &format!("DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"),
-                    (uid, wid),
-                )
-                .map_err(|e| e.to_string())?;
+                &format!("DELETE FROM {table} WHERE user_id = ?1 AND workspace_id = ?2"),
+                (uid, wid),
+            )
+            .map_err(|e| e.to_string())?;
         }
         Ok(count as usize)
     }
@@ -1609,7 +3049,7 @@ impl SQLiteMemoryStore {
     fn init(&self) -> Result<(), String> {
         // init() crea lo schema + rebuild FTS: gira sulla writer (in pooled mode
         // i reader vedranno lo schema via WAL; init idempotente su reader è harmless).
-        let conn = self.write_conn();
+        let mut conn = self.write_conn();
         conn
             .execute_batch(
                 "create table if not exists schema_metadata (
@@ -1778,55 +3218,250 @@ impl SQLiteMemoryStore {
                     workspace_id text not null,
                     reason text not null,
                     created_at text not null default current_timestamp
-                );",
+                );
+
+                create table if not exists memory_source_grants (
+                    id text primary key,
+                    consumer_user_id text not null,
+                    consumer_workspace_id text not null,
+                    source_user_id text not null,
+                    source_workspace_id text not null,
+                    max_sensitivity text not null,
+                    expires_at integer,
+                    revoked_at integer,
+                    policy_version integer not null check(
+                        typeof(policy_version) = 'integer'
+                        and policy_version >= 1
+                        and policy_version <= 9223372036854775807
+                    ),
+                    created_by text not null,
+                    created_at text not null,
+                    updated_at text not null
+                );
+                create index if not exists idx_memory_source_grants_consumer
+                    on memory_source_grants(consumer_user_id, consumer_workspace_id, revoked_at);
+
+                create table if not exists memory_source_grant_collections (
+                    grant_id text not null references memory_source_grants(id) on delete cascade,
+                    collection_key text not null,
+                    primary key(grant_id, collection_key)
+                );
+
+                create table if not exists memory_source_grant_overrides (
+                    grant_id text not null references memory_source_grants(id) on delete cascade,
+                    memory_ref text not null,
+                    effect text not null check(effect in ('allow', 'deny')),
+                    primary key(grant_id, memory_ref)
+                );
+
+                create table if not exists memory_source_access_events (
+                    id text primary key,
+                    consumer_user_id text not null,
+                    consumer_workspace_id text not null,
+                    source_workspace_id text not null,
+                    grant_id text,
+                    policy_version integer not null,
+                    turn_id text,
+                    outcome text not null check(outcome in ('allow', 'deny', 'degraded')),
+                    reason text not null,
+                    candidate_count integer not null check(candidate_count >= 0),
+                    injected_refs_json text not null,
+                    created_at integer not null
+                );
+                create index if not exists idx_memory_source_access_consumer
+                    on memory_source_access_events(
+                        consumer_user_id, consumer_workspace_id, created_at
+                    );
+                create index if not exists idx_memory_source_access_grant
+                    on memory_source_access_events(grant_id, created_at);
+
+                create table if not exists memory_publication_proposals (
+                    id text primary key,
+                    proposal_version integer not null default 1 check(proposal_version >= 1),
+                    source_ref_json text not null,
+                    source_user_id text not null,
+                    source_workspace_id text not null,
+                    destination_user_id text not null,
+                    destination_workspace_id text not null,
+                    proposed_text text not null,
+                    proposed_memory_type text not null,
+                    proposed_collection text not null,
+                    proposed_privacy_domain text not null,
+                    proposed_sensitivity text not null,
+                    source_revision text not null default 'legacy_unverifiable',
+                    destination_revision text not null default 'legacy_unverifiable',
+                    candidate_json text,
+                    resolution_json text,
+                    status text not null check(status in ('pending', 'approved', 'rejected', 'failed')),
+                    reason_code text not null,
+                    failure_reason text,
+                    proposed_by text not null,
+                    decided_by text,
+                    created_at text not null,
+                    updated_at text not null
+                );
+                create index if not exists idx_memory_publication_proposals_source
+                    on memory_publication_proposals(source_ref_json, status);
+
+                create table if not exists memory_publication_links (
+                    source_ref_json text primary key,
+                    destination_ref_json text not null,
+                    approved_by text not null,
+                    created_at text not null
+                );
+                create unique index if not exists idx_memory_publication_links_destination_source
+                    on memory_publication_links(destination_ref_json, source_ref_json);",
             )
             .map_err(|error| error.to_string())?;
         // I sub-helper (ensure_column, rebuild) ricevono questa stessa connection
         // (lock unico su writer) — evita di riprendere il Mutex e fare deadlock.
-        let conn_ref: &Connection = &conn;
+        Self::install_memory_source_active_index_on(&mut conn)?;
+        let legacy_publication_collection_missing = !Self::table_has_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "proposed_collection",
+        )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "created_at",
             "alter table memories add column created_at text not null default ''",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "updated_at",
             "alter table memories add column updated_at text not null default ''",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "last_seen_at",
             "alter table memories add column last_seen_at text",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "supersedes_json",
             "alter table memories add column supersedes_json text not null default '[]'",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "superseded_by",
             "alter table memories add column superseded_by text",
         )?;
         self.ensure_column_on(
-            conn_ref,
+            &conn,
             "memories",
             "correction_of",
             "alter table memories add column correction_of text",
         )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "proposed_collection",
+            "alter table memory_publication_proposals add column proposed_collection text not null default 'knowledge'",
+        )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "candidate_json",
+            "alter table memory_publication_proposals add column candidate_json text",
+        )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "resolution_json",
+            "alter table memory_publication_proposals add column resolution_json text",
+        )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "reason_code",
+            "alter table memory_publication_proposals add column reason_code text not null default 'pending'",
+        )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "failure_reason",
+            "alter table memory_publication_proposals add column failure_reason text",
+        )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "source_revision",
+            "alter table memory_publication_proposals add column source_revision text not null default 'legacy_unverifiable'",
+        )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "destination_revision",
+            "alter table memory_publication_proposals add column destination_revision text not null default 'legacy_unverifiable'",
+        )?;
+        self.ensure_column_on(
+            &conn,
+            "memory_publication_proposals",
+            "proposal_version",
+            "alter table memory_publication_proposals add column proposal_version integer not null default 1",
+        )?;
+        conn.execute(
+            "update memory_publication_proposals
+             set proposal_version = 1
+             where proposal_version is null or proposal_version < 1",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+        Self::backfill_legacy_publication_proposals_on(
+            &mut conn,
+            legacy_publication_collection_missing,
+        )?;
+        Self::fail_closed_legacy_pending_publications_on(&mut conn)?;
         conn.execute(
             "insert or replace into schema_metadata (key, value) values ('schema_version', ?1)",
             [SCHEMA_VERSION.to_string()],
         )
         .map_err(|error| error.to_string())?;
-        self.rebuild_memory_search_index_on(conn_ref)?;
+        self.rebuild_memory_search_index_on(&conn)?;
         Ok(())
+    }
+
+    fn install_memory_source_active_index_on(conn: &mut Connection) -> Result<(), String> {
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let has_legacy_duplicates = transaction
+            .query_row(
+                "select exists(
+                    select 1 from memory_source_grants
+                    where revoked_at is null
+                    group by consumer_user_id, consumer_workspace_id,
+                             source_user_id, source_workspace_id
+                    having count(*) > 1
+                    limit 1
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| error.to_string())?;
+
+        // Pre-index v4 databases may contain ambiguous links. Preserve their
+        // history and defer the index until a scoped revoke resolves the conflict;
+        // the resolver remains fail-closed while duplicates exist.
+        if !has_legacy_duplicates {
+            transaction
+                .execute(
+                    "create unique index if not exists idx_memory_source_grants_active_source
+                     on memory_source_grants(
+                         consumer_user_id, consumer_workspace_id,
+                         source_user_id, source_workspace_id
+                     ) where revoked_at is null",
+                    [],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+
+        transaction.commit().map_err(|error| error.to_string())
     }
 
     fn ensure_column_on(
@@ -1848,6 +3483,157 @@ impl SQLiteMemoryStore {
         }
         conn.execute(alter_sql, [])
             .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    fn table_has_column_on(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+        let mut statement = conn
+            .prepare(&format!("pragma table_info({table})"))
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            if row.get::<_, String>(1).map_err(|error| error.to_string())? == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Old v4 publication tables did not persist typed candidate/resolution or
+    /// terminal reason fields. Migrate them exactly once; malformed legacy refs
+    /// are deliberately preserved as malformed candidate JSON so later reads
+    /// fail closed instead of silently widening publication behavior.
+    fn backfill_legacy_publication_proposals_on(
+        conn: &mut Connection,
+        legacy_publication_collection_missing: bool,
+    ) -> Result<(), String> {
+        let already_backfilled = conn
+            .query_row(
+                "select exists(
+                    select 1 from schema_metadata
+                    where key = 'memory_publication_proposal_backfill_v2'
+                 )",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if already_backfilled {
+            return Ok(());
+        }
+        let has_legacy_duplicate =
+            Self::table_has_column_on(conn, "memory_publication_proposals", "duplicate_ref_json")?;
+        if !has_legacy_duplicate {
+            conn.execute(
+                "insert into schema_metadata(key, value)
+                 values ('memory_publication_proposal_backfill_v2', 'not_needed')",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        let rows = {
+            let mut statement = transaction
+                .prepare(
+                    "select id, status, proposed_memory_type, duplicate_ref_json
+                     from memory_publication_proposals order by id",
+                )
+                .map_err(|error| error.to_string())?;
+            let mut rows = statement.query([]).map_err(|error| error.to_string())?;
+            let mut values = Vec::new();
+            while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+                values.push((
+                    row.get::<_, String>(0).map_err(|error| error.to_string())?,
+                    row.get::<_, String>(1).map_err(|error| error.to_string())?,
+                    row.get::<_, String>(2).map_err(|error| error.to_string())?,
+                    row.get::<_, Option<String>>(3)
+                        .map_err(|error| error.to_string())?,
+                ));
+            }
+            values
+        };
+        for (id, status, proposed_memory_type, duplicate_ref_json) in rows {
+            let proposed_collection = legacy_publication_collection_missing.then(|| {
+                MemoryCollectionKey::from_legacy_memory_type(&proposed_memory_type)
+                    .and_then(|collection| enum_name(&collection).ok())
+                    .unwrap_or_else(|| match proposed_memory_type.as_str() {
+                        // A legacy fact has no metadata to distinguish Profile
+                        // from Knowledge, so it must not be guessed.
+                        "fact" => "legacy_ambiguous_collection".to_string(),
+                        // Unknown legacy types must make this row unreadable
+                        // instead of silently treating it as generic knowledge.
+                        _ => "legacy_unknown".to_string(),
+                    })
+            });
+            let (candidate_json, reason_code, failure_reason) = match status.as_str() {
+                "approved" => (None, "approved", None),
+                "rejected" => (None, "rejected", None),
+                "failed" => (None, "publication_failed", Some("legacy_failure")),
+                "pending" => match duplicate_ref_json {
+                    Some(raw) => match serde_json::from_str::<MemoryRef>(&raw) {
+                        Ok(destination_ref) => (
+                            Some(
+                                serde_json::to_string(
+                                    &MemoryPublicationCandidate::CompatibleDuplicate {
+                                        destination_ref,
+                                    },
+                                )
+                                .map_err(|error| error.to_string())?,
+                            ),
+                            "publication_duplicate_compatible",
+                            None,
+                        ),
+                        Err(_) => (Some(raw), "publication_duplicate_compatible", None),
+                    },
+                    None => (None, "pending", None),
+                },
+                _ => (None, "pending", None),
+            };
+            transaction
+                .execute(
+                    "update memory_publication_proposals
+                     set proposed_collection = case when ?2 then ?3 else proposed_collection end,
+                         candidate_json = ?4, resolution_json = null, reason_code = ?5,
+                         failure_reason = ?6
+                     where id = ?1",
+                    params![
+                        id,
+                        legacy_publication_collection_missing,
+                        proposed_collection,
+                        candidate_json,
+                        reason_code,
+                        failure_reason
+                    ],
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        transaction
+            .execute(
+                "insert into schema_metadata(key, value)
+                 values ('memory_publication_proposal_backfill_v2', 'complete')",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())
+    }
+
+    /// A pre-revision pending proposal cannot prove that the source seen in its
+    /// preview is still the source approved later. Preserve it for audit, but
+    /// require the user to create a fresh proposal instead of guessing.
+    fn fail_closed_legacy_pending_publications_on(conn: &mut Connection) -> Result<(), String> {
+        conn.execute(
+            "update memory_publication_proposals
+             set status = 'failed', reason_code = 'publication_failed',
+                 failure_reason = 'publication_source_changed',
+                 decided_by = coalesce(decided_by, proposed_by),
+                 updated_at = updated_at
+             where status = 'pending' and source_revision = 'legacy_unverifiable'",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -1918,6 +3704,138 @@ where
         Some(row) => mapper(row).map(Some),
         None => Ok(None),
     }
+}
+
+/// Exact record visibility check on an already-owned connection. Publication
+/// commit uses this after taking its IMMEDIATE transaction, avoiding a second
+/// mutex acquisition and keeping the tombstone check in the same snapshot.
+fn visible_memory_exact_on(
+    conn: &Connection,
+    reference: &MemoryRef,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) -> Result<Option<MemoryRecord>, String> {
+    query_optional(
+        conn,
+        "select m.ref, m.user_id, m.workspace_id, m.memory_type, m.text, m.aliases_json,
+                m.language_hints_json, m.confidence, m.status, m.privacy_domain,
+                m.sensitivity, m.metadata_json, m.created_at, m.updated_at,
+                m.last_seen_at, m.supersedes_json, m.superseded_by, m.correction_of
+         from memories m
+         where m.ref = ?1 and m.user_id = ?2 and m.workspace_id = ?3
+           and not exists (
+               select 1 from tombstones t
+               where t.ref = m.ref
+                 and t.user_id = m.user_id
+                 and t.workspace_id = m.workspace_id
+           )",
+        (
+            reference.to_string(),
+            user_id.as_str().to_string(),
+            workspace_id.as_str().to_string(),
+        ),
+        memory_from_row,
+    )
+}
+
+/// A deterministic, full-scope destination snapshot. This intentionally
+/// compares more than the selected candidate: any concurrent insert, update,
+/// or tombstone in the destination scope invalidates the approval preview.
+fn visible_memories_in_scope_on(
+    conn: &Connection,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) -> Result<Vec<MemoryRecord>, String> {
+    let mut statement = conn
+        .prepare(
+            "select m.ref, m.user_id, m.workspace_id, m.memory_type, m.text, m.aliases_json,
+                    m.language_hints_json, m.confidence, m.status, m.privacy_domain,
+                    m.sensitivity, m.metadata_json, m.created_at, m.updated_at,
+                    m.last_seen_at, m.supersedes_json, m.superseded_by, m.correction_of
+             from memories m
+             where m.user_id = ?1 and m.workspace_id = ?2
+               and not exists (
+                   select 1 from tombstones t
+                   where t.ref = m.ref
+                     and t.user_id = m.user_id
+                     and t.workspace_id = m.workspace_id
+               )
+             order by m.ref",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query((user_id.as_str(), workspace_id.as_str()))
+        .map_err(|error| error.to_string())?;
+    let mut memories = Vec::new();
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        memories.push(memory_from_row(row)?);
+    }
+    Ok(memories)
+}
+
+fn evidence_for_on(
+    conn: &Connection,
+    memory_ref: &MemoryRef,
+) -> Result<Vec<MemoryEvidence>, String> {
+    let mut statement = conn
+        .prepare(
+            "select memory_ref, evidence_ref, note
+             from memory_evidence
+             where memory_ref = ?1
+             order by evidence_ref",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut rows = statement
+        .query([memory_ref.to_string()])
+        .map_err(|error| error.to_string())?;
+    let mut evidence = Vec::new();
+    while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+        evidence.push(MemoryEvidence {
+            memory_ref: parse_ref(row.get::<_, String>(0).map_err(|error| error.to_string())?)?,
+            evidence_ref: parse_ref(row.get::<_, String>(1).map_err(|error| error.to_string())?)?,
+            note: row.get(2).map_err(|error| error.to_string())?,
+        });
+    }
+    Ok(evidence)
+}
+
+/// Writes a memory through an already-open SQLite connection. Callers that own a
+/// transaction (publication) use this instead of re-entering `upsert_memory` and
+/// taking the writer mutex recursively.
+fn upsert_memory_on(conn: &Connection, memory: &MemoryRecord) -> Result<(), String> {
+    conn.execute(
+        "insert or replace into memories (
+            ref, user_id, workspace_id, memory_type, text, aliases_json,
+            language_hints_json, confidence, status, privacy_domain, sensitivity,
+            metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
+            superseded_by, correction_of
+        ) values (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+            ?16, ?17, ?18
+        )",
+        params![
+            memory.reference.to_string(),
+            memory.user_id.as_str(),
+            memory.workspace_id.as_str(),
+            &memory.memory_type,
+            &memory.text,
+            serde_json::to_string(&memory.aliases).map_err(|error| error.to_string())?,
+            serde_json::to_string(&memory.language_hints).map_err(|error| error.to_string())?,
+            memory.confidence,
+            enum_name(&memory.status)?,
+            memory.privacy_domain.as_str(),
+            enum_name(&memory.sensitivity)?,
+            serde_json::to_string(&memory.metadata).map_err(|error| error.to_string())?,
+            &memory.created_at,
+            &memory.updated_at,
+            memory.last_seen_at.as_deref(),
+            serde_json::to_string(&memory.supersedes).map_err(|error| error.to_string())?,
+            memory.superseded_by.as_ref().map(ToString::to_string),
+            memory.correction_of.as_ref().map(ToString::to_string),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn memory_from_row(row: &Row<'_>) -> Result<MemoryRecord, String> {
@@ -2108,6 +4026,392 @@ fn parse_refs_json(value: String) -> Result<Vec<MemoryRef>, String> {
     serde_json::from_str(&value).map_err(|error| error.to_string())
 }
 
+fn memory_source_access_from_row(row: &Row<'_>) -> Result<MemorySourceAccessEvent, String> {
+    let outcome = match row
+        .get::<_, String>(7)
+        .map_err(|error| error.to_string())?
+        .as_str()
+    {
+        "allow" => MemorySourceAccessOutcome::Allow,
+        "deny" => MemorySourceAccessOutcome::Deny,
+        "degraded" => MemorySourceAccessOutcome::Degraded,
+        value => return Err(format!("unknown memory source access outcome: {value}")),
+    };
+    Ok(MemorySourceAccessEvent {
+        id: row.get(0).map_err(|error| error.to_string())?,
+        consumer_user_id: UserId::new(row.get::<_, String>(1).map_err(|error| error.to_string())?),
+        consumer_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(2).map_err(|error| error.to_string())?,
+        ),
+        source_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(3).map_err(|error| error.to_string())?,
+        ),
+        grant_id: row.get(4).map_err(|error| error.to_string())?,
+        policy_version: u64::try_from(row.get::<_, i64>(5).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?,
+        turn_id: row.get(6).map_err(|error| error.to_string())?,
+        outcome,
+        reason: row.get(8).map_err(|error| error.to_string())?,
+        candidate_count: usize::try_from(row.get::<_, i64>(9).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?,
+        injected_refs: serde_json::from_str(
+            &row.get::<_, String>(10)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?,
+        created_at: row.get(11).map_err(|error| error.to_string())?,
+    })
+}
+
+fn publication_ref_json(reference: &MemoryRef) -> Result<String, String> {
+    serde_json::to_string(reference).map_err(|error| error.to_string())
+}
+
+fn publication_ref_from_json(value: String) -> Result<MemoryRef, String> {
+    serde_json::from_str(&value).map_err(|error| error.to_string())
+}
+
+fn validate_memory_publication_proposal(
+    proposal: &MemoryPublicationProposal,
+) -> Result<(), String> {
+    if proposal.id.trim().is_empty()
+        || proposal.proposal_version == 0
+        || proposal.proposed_by.trim().is_empty()
+        || proposal.source_user_id.as_str().trim().is_empty()
+        || proposal.source_workspace_id.as_str().trim().is_empty()
+        || proposal.destination_user_id.as_str().trim().is_empty()
+        || proposal.destination_workspace_id.as_str().trim().is_empty()
+        || proposal.proposed_text.trim().is_empty()
+        || proposal.proposed_memory_type.trim().is_empty()
+        || proposal.source_revision.trim().is_empty()
+        || proposal.destination_revision.trim().is_empty()
+    {
+        return Err("publication proposal has an empty required field".to_string());
+    }
+    if proposal.status != MemoryPublicationStatus::Pending || proposal.decided_by.is_some() {
+        return Err("new publication proposal must be pending and undecided".to_string());
+    }
+    if proposal.source_ref.kind != MemoryRefKind::Memory
+        || proposal.source_ref.user_id != proposal.source_user_id
+        || proposal.source_ref.workspace_id != proposal.source_workspace_id
+    {
+        return Err("publication proposal source ref does not match scope".to_string());
+    }
+    if proposal.proposed_by != proposal.source_user_id.as_str()
+        || proposal.source_user_id != proposal.destination_user_id
+        || proposal.source_workspace_id == proposal.destination_workspace_id
+        || proposal.source_workspace_id.as_str() == THREADS_WORKSPACE
+        || proposal.destination_workspace_id.as_str() == THREADS_WORKSPACE
+    {
+        return Err("publication proposal source and destination are not allowed".to_string());
+    }
+    if proposal.proposed_sensitivity == DataSensitivity::Secret
+        || contains_secret(&serde_json::json!({ "text": proposal.proposed_text }))
+    {
+        return Err("publication proposal contains a secret payload".to_string());
+    }
+    if proposal.failure_reason.is_some() {
+        return Err("new publication proposal cannot carry a failure reason".to_string());
+    }
+    validate_publication_candidate_and_resolution(proposal)?;
+    Ok(())
+}
+
+fn validate_publication_candidate_and_resolution(
+    proposal: &MemoryPublicationProposal,
+) -> Result<(), String> {
+    let candidate_ref = match &proposal.candidate {
+        Some(MemoryPublicationCandidate::CompatibleDuplicate { destination_ref })
+        | Some(MemoryPublicationCandidate::Conflict { destination_ref }) => Some(destination_ref),
+        None => None,
+    };
+    if let Some(reference) = candidate_ref {
+        if reference.kind != MemoryRefKind::Memory
+            || reference.user_id != proposal.destination_user_id
+            || reference.workspace_id != proposal.destination_workspace_id
+        {
+            return Err("publication candidate is outside destination".to_string());
+        }
+    }
+    match (&proposal.resolution, candidate_ref) {
+        (None, _) => {}
+        (Some(MemoryPublicationResolution::CreateNew), _) => {}
+        (
+            Some(MemoryPublicationResolution::UpdateExisting { destination_ref }),
+            Some(candidate_ref),
+        ) if destination_ref == candidate_ref
+            && destination_ref.kind == MemoryRefKind::Memory
+            && destination_ref.user_id == proposal.destination_user_id
+            && destination_ref.workspace_id == proposal.destination_workspace_id => {}
+        _ => return Err("publication resolution does not match candidate".to_string()),
+    }
+    Ok(())
+}
+
+fn validate_persisted_memory_publication_proposal(
+    proposal: &MemoryPublicationProposal,
+) -> Result<(), String> {
+    let mut intrinsic = proposal.clone();
+    intrinsic.status = MemoryPublicationStatus::Pending;
+    intrinsic.decided_by = None;
+    intrinsic.failure_reason = None;
+    // Legacy terminal rows are retained for audit, while legacy pending rows are
+    // migrated to Failed. Do not reject a terminal audit row merely because it
+    // predates revision tracking.
+    if intrinsic.source_revision == "legacy_unverifiable" {
+        intrinsic.source_revision = "legacy_terminal".to_string();
+    }
+    if intrinsic.destination_revision == "legacy_unverifiable" {
+        intrinsic.destination_revision = "legacy_terminal".to_string();
+    }
+    validate_memory_publication_proposal(&intrinsic)?;
+    match proposal.status {
+        MemoryPublicationStatus::Pending => {
+            if proposal.decided_by.is_some() || proposal.failure_reason.is_some() {
+                return Err("pending publication has a terminal state payload".to_string());
+            }
+            if proposal.source_revision == "legacy_unverifiable" {
+                return Err("pending publication source revision is unverifiable".to_string());
+            }
+            let expected = match proposal.candidate {
+                Some(MemoryPublicationCandidate::CompatibleDuplicate { .. }) => {
+                    MemoryPublicationReasonCode::PublicationDuplicateCompatible
+                }
+                Some(MemoryPublicationCandidate::Conflict { .. }) => {
+                    MemoryPublicationReasonCode::PublicationConflict
+                }
+                None => MemoryPublicationReasonCode::Pending,
+            };
+            if proposal.reason_code != expected {
+                return Err("pending publication has an invalid reason code".to_string());
+            }
+        }
+        MemoryPublicationStatus::Approved => {
+            if proposal
+                .decided_by
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+                || proposal.reason_code != MemoryPublicationReasonCode::Approved
+                || proposal.failure_reason.is_some()
+            {
+                return Err("approved publication has an invalid terminal state".to_string());
+            }
+        }
+        MemoryPublicationStatus::Rejected => {
+            if proposal
+                .decided_by
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+                || proposal.reason_code != MemoryPublicationReasonCode::Rejected
+                || proposal.failure_reason.is_some()
+            {
+                return Err("rejected publication has an invalid terminal state".to_string());
+            }
+        }
+        MemoryPublicationStatus::Failed => {
+            if proposal
+                .decided_by
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+                || proposal.reason_code != MemoryPublicationReasonCode::PublicationFailed
+                || proposal
+                    .failure_reason
+                    .as_deref()
+                    .unwrap_or_default()
+                    .trim()
+                    .is_empty()
+            {
+                return Err("failed publication has an invalid terminal state".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sanitize_publication_failure_reason(reason: &str) -> &'static str {
+    match reason {
+        "publication_conflict" => "publication_conflict",
+        "publication_source_not_found" => "publication_source_not_found",
+        "publication_source_changed" => "publication_source_changed",
+        "publication_duplicate_changed" => "publication_duplicate_changed",
+        "secret_never_shareable" => "secret_never_shareable",
+        "vault_payload_never_shareable" => "vault_payload_never_shareable",
+        "publication_not_pending" => "publication_not_pending",
+        _ => "publication_failed",
+    }
+}
+
+fn memory_publication_proposal_from_row(
+    row: &Row<'_>,
+) -> Result<MemoryPublicationProposal, String> {
+    Ok(MemoryPublicationProposal {
+        id: row.get(0).map_err(|error| error.to_string())?,
+        proposal_version: row.get(1).map_err(|error| error.to_string())?,
+        source_ref: publication_ref_from_json(row.get(2).map_err(|error| error.to_string())?)?,
+        source_user_id: UserId::new(row.get::<_, String>(3).map_err(|error| error.to_string())?),
+        source_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(4).map_err(|error| error.to_string())?,
+        ),
+        destination_user_id: UserId::new(
+            row.get::<_, String>(5).map_err(|error| error.to_string())?,
+        ),
+        destination_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(6).map_err(|error| error.to_string())?,
+        ),
+        proposed_text: row.get(7).map_err(|error| error.to_string())?,
+        proposed_memory_type: row.get(8).map_err(|error| error.to_string())?,
+        proposed_collection: enum_from_name(
+            row.get::<_, String>(9).map_err(|error| error.to_string())?,
+        )?,
+        proposed_privacy_domain: PrivacyDomain::new(
+            row.get::<_, String>(10)
+                .map_err(|error| error.to_string())?,
+        ),
+        proposed_sensitivity: enum_from_name(
+            row.get::<_, String>(11)
+                .map_err(|error| error.to_string())?,
+        )?,
+        source_revision: row.get(12).map_err(|error| error.to_string())?,
+        destination_revision: row.get(13).map_err(|error| error.to_string())?,
+        candidate: row
+            .get::<_, Option<String>>(14)
+            .map_err(|error| error.to_string())?
+            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
+            .transpose()?,
+        resolution: row
+            .get::<_, Option<String>>(15)
+            .map_err(|error| error.to_string())?
+            .map(|value| serde_json::from_str(&value).map_err(|error| error.to_string()))
+            .transpose()?,
+        status: enum_from_name(
+            row.get::<_, String>(16)
+                .map_err(|error| error.to_string())?,
+        )?,
+        reason_code: enum_from_name(
+            row.get::<_, String>(17)
+                .map_err(|error| error.to_string())?,
+        )?,
+        failure_reason: row.get(18).map_err(|error| error.to_string())?,
+        proposed_by: row.get(19).map_err(|error| error.to_string())?,
+        decided_by: row.get(20).map_err(|error| error.to_string())?,
+        created_at: row.get(21).map_err(|error| error.to_string())?,
+        updated_at: row.get(22).map_err(|error| error.to_string())?,
+    })
+}
+
+fn memory_publication_link_from_row(row: &Row<'_>) -> Result<MemoryPublicationLink, String> {
+    Ok(MemoryPublicationLink {
+        source_ref: publication_ref_from_json(row.get(0).map_err(|error| error.to_string())?)?,
+        destination_ref: publication_ref_from_json(row.get(1).map_err(|error| error.to_string())?)?,
+        approved_by: row.get(2).map_err(|error| error.to_string())?,
+        created_at: row.get(3).map_err(|error| error.to_string())?,
+    })
+}
+
+fn load_memory_publication_proposal_on(
+    conn: &Connection,
+    id: &str,
+) -> MemoryPublicationStoreResult<Option<MemoryPublicationProposal>> {
+    let proposal = query_optional(
+        conn,
+        "select id, proposal_version, source_ref_json, source_user_id, source_workspace_id,
+                    destination_user_id, destination_workspace_id, proposed_text,
+                    proposed_memory_type, proposed_collection, proposed_privacy_domain,
+                    proposed_sensitivity, source_revision, destination_revision, candidate_json, resolution_json, status, reason_code,
+                    failure_reason, proposed_by, decided_by, created_at, updated_at
+         from memory_publication_proposals where id = ?1",
+        [id],
+        memory_publication_proposal_from_row,
+    )
+    .map_err(MemoryPublicationStoreError::store)?;
+    if let Some(proposal) = &proposal {
+        validate_persisted_memory_publication_proposal(proposal)
+            .map_err(MemoryPublicationStoreError::store)?;
+    }
+    Ok(proposal)
+}
+
+fn memory_source_grant_base_from_row(row: &Row<'_>) -> Result<MemorySourceGrant, String> {
+    Ok(MemorySourceGrant {
+        id: row.get(0).map_err(|error| error.to_string())?,
+        consumer_user_id: UserId::new(row.get::<_, String>(1).map_err(|error| error.to_string())?),
+        consumer_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(2).map_err(|error| error.to_string())?,
+        ),
+        source_user_id: UserId::new(row.get::<_, String>(3).map_err(|error| error.to_string())?),
+        source_workspace_id: WorkspaceId::new(
+            row.get::<_, String>(4).map_err(|error| error.to_string())?,
+        ),
+        collections: BTreeSet::new(),
+        max_sensitivity: enum_from_name(
+            row.get::<_, String>(5).map_err(|error| error.to_string())?,
+        )?,
+        overrides: HashMap::new(),
+        expires_at: row.get(6).map_err(|error| error.to_string())?,
+        revoked_at: row.get(7).map_err(|error| error.to_string())?,
+        policy_version: u64::try_from(row.get::<_, i64>(8).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?,
+        created_by: row.get(9).map_err(|error| error.to_string())?,
+        created_at: row.get(10).map_err(|error| error.to_string())?,
+        updated_at: row.get(11).map_err(|error| error.to_string())?,
+    })
+}
+
+fn load_memory_source_grant_children(
+    conn: &Connection,
+    grant: &mut MemorySourceGrant,
+) -> Result<(), String> {
+    let mut collection_statement = conn
+        .prepare(
+            "select collection_key from memory_source_grant_collections
+             where grant_id = ?1 order by collection_key",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut collection_rows = collection_statement
+        .query([grant.id.as_str()])
+        .map_err(|error| error.to_string())?;
+    while let Some(row) = collection_rows.next().map_err(|error| error.to_string())? {
+        let collection =
+            enum_from_name(row.get::<_, String>(0).map_err(|error| error.to_string())?)?;
+        if !grant.collections.insert(collection) {
+            return Err(format!(
+                "duplicate collection for memory source grant {}",
+                grant.id
+            ));
+        }
+    }
+    drop(collection_rows);
+    drop(collection_statement);
+
+    let mut override_statement = conn
+        .prepare(
+            "select memory_ref, effect from memory_source_grant_overrides
+             where grant_id = ?1 order by memory_ref",
+        )
+        .map_err(|error| error.to_string())?;
+    let mut override_rows = override_statement
+        .query([grant.id.as_str()])
+        .map_err(|error| error.to_string())?;
+    while let Some(row) = override_rows.next().map_err(|error| error.to_string())? {
+        let reference_json: String = row.get(0).map_err(|error| error.to_string())?;
+        let reference = serde_json::from_str(&reference_json).map_err(|error| error.to_string())?;
+        let effect = enum_from_name(row.get::<_, String>(1).map_err(|error| error.to_string())?)?;
+        if grant.overrides.insert(reference, effect).is_some() {
+            return Err(format!(
+                "duplicate override reference for memory source grant {}",
+                grant.id
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn enum_name<T: serde::Serialize>(value: &T) -> Result<String, String> {
     serde_json::to_value(value)
         .map_err(|error| error.to_string())?
@@ -2148,5 +4452,60 @@ mod fts_query_tests {
         assert!(q.contains(" OR "), "not OR: {q}");
         assert!(!q.contains("\"of\""), "must not include token <3: {q}");
         assert_eq!(fts_or_query("?? !! a b"), "");
+    }
+}
+
+#[cfg(test)]
+mod connection_pragma_tests {
+    use super::{Connections, SQLiteMemoryStore};
+
+    fn assert_foreign_key_constraint_is_enforced(conn: &rusqlite::Connection) {
+        conn.execute_batch(
+            "create table fk_parent_for_test (id integer primary key);
+             create table fk_child_for_test (
+                parent_id integer not null references fk_parent_for_test(id)
+             );",
+        )
+        .unwrap();
+        assert!(
+            conn.execute("insert into fk_child_for_test (parent_id) values (999)", [],)
+                .is_err(),
+            "orphan child insert must be rejected"
+        );
+    }
+
+    #[test]
+    fn in_memory_single_connection_enforces_foreign_keys() {
+        let store = SQLiteMemoryStore::open_in_memory().unwrap();
+        assert!(matches!(&store.conns, Connections::Single(_)));
+        let conn = store.write_conn();
+        assert_foreign_key_constraint_is_enforced(&conn);
+    }
+
+    #[test]
+    fn file_backed_pooled_writer_and_reader_enforce_foreign_keys() {
+        let path = std::env::temp_dir().join(format!(
+            "local-first-memory-fk-pool-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let store = SQLiteMemoryStore::open(&path).unwrap();
+        assert!(matches!(&store.conns, Connections::Pooled { .. }));
+        {
+            let writer = store.write_conn();
+            assert_foreign_key_constraint_is_enforced(&writer);
+        }
+        {
+            let reader = store.read_conn();
+            assert_eq!(
+                reader
+                    .query_row("pragma foreign_keys", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        }
+        drop(store);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", path.display()));
     }
 }

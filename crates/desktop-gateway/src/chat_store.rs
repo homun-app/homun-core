@@ -1244,6 +1244,45 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Atomically append one structured event part to an assistant message. The
+    /// `(thread_id, message_id)` scope prevents a retried/background turn from
+    /// touching a similarly named message in another chat; equality dedup keeps
+    /// replay safe without replacing prior parts or the response text.
+    pub fn append_assistant_event_part(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+        part: &serde_json::Value,
+    ) -> rusqlite::Result<bool> {
+        let tx = self.conn.unchecked_transaction()?;
+        let existing: Option<String> = tx
+            .query_row(
+                "select event_parts_json from chat_messages
+                  where thread_id = ?1 and id = ?2 and role = 'assistant'",
+                params![thread_id, message_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(existing) = existing else {
+            tx.commit()?;
+            return Ok(false);
+        };
+        let mut parts = parse_optional_json_array(Some(existing.as_str()), "event_parts_json");
+        if parts.iter().any(|current| current == part) {
+            tx.commit()?;
+            return Ok(false);
+        }
+        parts.push(part.clone());
+        let encoded = serde_json::to_string(&parts).map_err(json_error)?;
+        tx.execute(
+            "update chat_messages set event_parts_json = ?1
+              where thread_id = ?2 and id = ?3 and role = 'assistant'",
+            params![encoded, thread_id, message_id],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     pub fn append_assistant_message(
         &self,
         thread_id: &str,
@@ -4079,6 +4118,52 @@ mod tests {
         assert_eq!(reloaded.text, "Choose one.");
         assert_eq!(reloaded.event_parts[0]["type"], "choice_prompt");
         assert_eq!(reloaded.event_parts[0]["payload"]["options"][0], "Yes");
+    }
+
+    #[test]
+    fn append_assistant_event_part_is_scoped_idempotent_and_preserves_existing_parts() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let other_thread = store.create_thread("other").unwrap();
+        let assistant = ChatMessage {
+            id: "assistant_recall_event".to_string(),
+            role: "assistant".to_string(),
+            text: "Answer".to_string(),
+            timestamp: current_timestamp_seconds(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+            event_parts: vec![serde_json::json!({ "type": "activity", "text": "Thinking" })],
+        };
+        store.append_assistant_message(&thread.thread_id, &assistant).unwrap();
+        let recall = serde_json::json!({
+            "type": "recall",
+            "payload": { "query": "launch", "hits": [], "scope": "project" }
+        });
+
+        assert!(store
+            .append_assistant_event_part(&other_thread.thread_id, &assistant.id, &recall)
+            .unwrap()
+            == false);
+        assert!(store
+            .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
+            .unwrap());
+        assert!(!store
+            .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
+            .unwrap());
+
+        let persisted = store
+            .message(&thread.thread_id, &assistant.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.text, "Answer");
+        assert_eq!(persisted.event_parts.len(), 2);
+        assert_eq!(persisted.event_parts[0]["type"], "activity");
+        assert_eq!(persisted.event_parts[1], recall);
     }
 
     #[test]

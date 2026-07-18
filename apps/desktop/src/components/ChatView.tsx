@@ -142,6 +142,7 @@ import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import { WorkspaceIsland } from "./WorkspaceIsland";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
+import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import type {
   ChatMessage,
   ChatMessageMetrics,
@@ -2533,26 +2534,21 @@ export function ChatView({
                         </span>
                       );
                     })()}
-                    {/* ADR 0022 (Piano UI A3): memory badge — quante memorie sono
-                        state richiamate per questa risposta. Derivato dalle
-                        eventParts recall (se l'evento Recall è stato emesso). */}
+                    {/* The button exposes message-scoped provenance on demand; recalled
+                        text is never copied into a hover tooltip. */}
                     {(() => {
-                      const recallCount =
-                        displayMessage.eventParts
-                          ?.filter((p) => p.type === "recall")
-                          .reduce((sum, p) => sum + (p.payload?.hits?.length ?? 0), 0) ?? 0;
-                      if (recallCount === 0) return null;
+                      const recallHits =
+                        displayMessage.eventParts?.flatMap((part) =>
+                          part.type === "recall" ? part.payload.hits : [],
+                        ) ?? [];
+                      if (recallHits.length === 0) return null;
                       return (
-                        <span
-                          className="memory-recall-badge"
-                          title={displayMessage.eventParts
-                            ?.filter((p) => p.type === "recall")
-                            .flatMap((p) => p.payload?.hits ?? [])
-                            .map((h) => `• ${h.text}`)
-                            .join("\n")}
-                        >
-                          📝 {t("chat.memoryBadge", { count: recallCount })}
-                        </span>
+                        <MemoryUsagePopover
+                          hits={recallHits}
+                          buttonLabel={t("chat.memoryBadge", { count: recallHits.length })}
+                          consumerWorkspaceId={thread.workspaceId}
+                          onPublicationApproved={refreshAfterChatSubmit}
+                        />
                       );
                     })()}
                   </>

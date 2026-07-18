@@ -17,6 +17,18 @@ pub struct RecallStreamHit {
     /// `memory_type` del record (decision/fact/goal/…).
     #[serde(rename = "type")]
     pub kind: String,
+    /// Workspace canonico della fonte realmente consultata.
+    pub source_workspace_id: String,
+    /// Etichetta della fonte risolta dal gateway al momento del turno.
+    pub source_label: String,
+    /// Raccolta di sistema che ha autorizzato/classificato il record.
+    pub collection: String,
+    /// Grant che ha autorizzato una fonte collegata; `null` denotes the local
+    /// source. Keeping the null explicit lets UI authorization fail closed for
+    /// legacy events that did not carry provenance.
+    pub grant_id: Option<String>,
+    /// Il coordinatore ha rilevato un conflitto semantico con un altro hit.
+    pub conflict: bool,
 }
 
 /// ADR 0022 (Piano UI A2/A3) — payload dell'evento `Recall` stream. Shape identica
@@ -122,5 +134,29 @@ impl TokenMetrics {
             peak_memory_gb: 0.0,
             elapsed_seconds: 0.0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RecallStreamHit;
+
+    #[test]
+    fn recall_stream_hit_serializes_source_provenance() {
+        let hit = RecallStreamHit {
+            r#ref: "memory:owner:project-a:1".to_string(),
+            text: "Launch in September".to_string(),
+            score: 0.91,
+            kind: "decision".to_string(),
+            source_workspace_id: "project-a".to_string(),
+            source_label: "Homun roadmap".to_string(),
+            collection: "decisions".to_string(),
+            grant_id: None,
+            conflict: false,
+        };
+        let value = serde_json::to_value(hit).expect("serialize recall hit");
+        assert_eq!(value["source_workspace_id"], "project-a");
+        assert_eq!(value["collection"], "decisions");
+        assert_eq!(value["grant_id"], serde_json::Value::Null);
     }
 }

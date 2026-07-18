@@ -9,8 +9,9 @@
 //!
 //! La funzione di orchestrazione `recall_on_facade` (Step 1) vive qui.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
+use serde::Deserialize;
 use serde::Serialize;
 
 use crate::BoxFuture;
@@ -190,9 +191,530 @@ pub const DEDUP_JACCARD: f32 = 0.55;
 // ──────────────────────────────────────────────────────────────────────────
 
 use crate::{
-    DataSensitivity, MemoryAccessRequest, MemoryFacade, MemoryRecord, MemorySearchRequest,
-    MemoryStatus, PrivacyDomain, UserId, WorkspaceId,
+    AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, MemoryAccessRequest,
+    MemoryCollectionKey, MemoryFacade, MemoryGrantOverrideEffect, MemoryRecord, MemoryRef,
+    MemoryResult, MemoryScope, MemorySearchRequest, MemoryStatus, PERSONAL_WORKSPACE,
+    PrivacyDomain, RecallHit, RecallPack, UserId, WorkspaceId,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryRecallIntent {
+    pub collections: BTreeSet<MemoryCollectionKey>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemorySourceAccessOutcome {
+    Allow,
+    Deny,
+    Degraded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemorySourceAccessEvent {
+    pub id: String,
+    pub consumer_user_id: UserId,
+    pub consumer_workspace_id: WorkspaceId,
+    pub source_workspace_id: WorkspaceId,
+    pub grant_id: Option<String>,
+    pub policy_version: u64,
+    pub turn_id: Option<String>,
+    pub outcome: MemorySourceAccessOutcome,
+    pub reason: String,
+    pub candidate_count: usize,
+    pub injected_refs: Vec<String>,
+    pub created_at: i64,
+}
+
+/// Deterministic query router. It sees only user text and the stable collection
+/// catalog; source contents never participate in routing.
+pub fn memory_recall_intent(query: &str) -> MemoryRecallIntent {
+    let lower = query.to_lowercase();
+    let mut collections = BTreeSet::from([
+        MemoryCollectionKey::Knowledge,
+        MemoryCollectionKey::Decisions,
+    ]);
+    if ["prefer", "stile", "lingua", "language", "tone", "come vuoi"]
+        .iter()
+        .any(|term| lower.contains(term))
+    {
+        collections.insert(MemoryCollectionKey::Preferences);
+    }
+    if ["chi sono", "profilo", "lavoro", "my ", "mio ", "mia "]
+        .iter()
+        .any(|term| lower.contains(term))
+    {
+        collections.insert(MemoryCollectionKey::Profile);
+    }
+    if ["obiettivo", "goal", "todo", "aperto", "manca"]
+        .iter()
+        .any(|term| lower.contains(term))
+    {
+        collections.insert(MemoryCollectionKey::Goals);
+    }
+    if [
+        "file",
+        "document",
+        "presentazione",
+        "artifact",
+        "deliverable",
+    ]
+    .iter()
+    .any(|term| lower.contains(term))
+    {
+        collections.insert(MemoryCollectionKey::Artifacts);
+    }
+    if ["prima", "scorsa", "discusso", "ricordi", "previous"]
+        .iter()
+        .any(|term| lower.contains(term))
+    {
+        collections.insert(MemoryCollectionKey::Episodes);
+    }
+    MemoryRecallIntent { collections }
+}
+
+fn normalized_recall_text(text: &str) -> String {
+    text.to_lowercase()
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn semantic_rank(hit: &RecallHit, consumer_workspace: &WorkspaceId) -> u8 {
+    let is_local = hit.source_workspace_id == *consumer_workspace && hit.grant_id.is_none();
+    let is_personal = hit.source_workspace_id.as_str() == PERSONAL_WORKSPACE;
+    match (hit.kind.as_str(), is_local, is_personal) {
+        ("decision", true, _) => 0,
+        ("preference", _, true) => 1,
+        _ if is_personal && hit.collection == MemoryCollectionKey::Profile => 1,
+        ("preference", true, _) => 2,
+        ("decision", false, _) => 3,
+        _ => 4,
+    }
+}
+
+fn recall_hit_order(
+    left: &RecallHit,
+    right: &RecallHit,
+    consumer_workspace: &WorkspaceId,
+) -> std::cmp::Ordering {
+    semantic_rank(left, consumer_workspace)
+        .cmp(&semantic_rank(right, consumer_workspace))
+        .then_with(|| {
+            let left_confirmed = left.status == MemoryStatus::Confirmed;
+            let right_confirmed = right.status == MemoryStatus::Confirmed;
+            right_confirmed.cmp(&left_confirmed)
+        })
+        .then_with(|| right.updated_at.cmp(&left.updated_at))
+        .then_with(|| right.score.total_cmp(&left.score))
+        .then_with(|| left.memory_ref.cmp(&right.memory_ref))
+}
+
+/// Merge deterministic across already-authorized source-local recall results.
+pub fn merge_recall_hits(
+    consumer_workspace: WorkspaceId,
+    mut hits: Vec<RecallHit>,
+    limit: usize,
+) -> Vec<RecallHit> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    hits.sort_by(|left, right| recall_hit_order(left, right, &consumer_workspace));
+
+    let mut refs = HashSet::new();
+    let mut texts = HashSet::new();
+    let mut publication_links = HashSet::new();
+    hits.retain(|hit| {
+        let normalized_text = normalized_recall_text(&hit.text);
+        if !refs.insert(hit.memory_ref.clone()) || !texts.insert(normalized_text) {
+            return false;
+        }
+        match hit.publication_link.as_ref() {
+            Some(link) if !publication_links.insert(link.clone()) => false,
+            _ => true,
+        }
+    });
+
+    let selected = if hits.len() <= limit {
+        hits
+    } else {
+        let local_indexes = hits
+            .iter()
+            .enumerate()
+            .filter_map(|(index, hit)| {
+                (hit.source_workspace_id == consumer_workspace && hit.grant_id.is_none())
+                    .then_some(index)
+            })
+            .take(limit.min(4))
+            .collect::<HashSet<_>>();
+        let mut selected_indexes = local_indexes;
+        for index in 0..hits.len() {
+            if selected_indexes.len() == limit {
+                break;
+            }
+            selected_indexes.insert(index);
+        }
+        hits.into_iter()
+            .enumerate()
+            .filter_map(|(index, hit)| selected_indexes.contains(&index).then_some(hit))
+            .collect()
+    };
+
+    let mut merged = selected;
+    for index in 0..merged.len() {
+        let Some(subject) = merged[index].subject_key.as_deref() else {
+            continue;
+        };
+        let normalized = normalized_recall_text(&merged[index].text);
+        if merged.iter().enumerate().any(|(other_index, other)| {
+            other_index != index
+                && other.kind == merged[index].kind
+                && other.subject_key.as_deref() == Some(subject)
+                && (other.source_user_id != merged[index].source_user_id
+                    || other.source_workspace_id != merged[index].source_workspace_id)
+                && normalized_recall_text(&other.text) != normalized
+        }) {
+            merged[index].conflict = true;
+        }
+    }
+    merged
+}
+
+/// Re-resolve effective grants at the last boundary before prompt formatting.
+/// A mismatch never tries to salvage linked hits: all of them are discarded and
+/// the local subset is merged again under its implicit policy.
+pub fn revalidate_recall_hits_before_injection(
+    facade: &MemoryFacade,
+    user: &UserId,
+    consumer_workspace: &WorkspaceId,
+    initial_sources: &[AuthorizedMemorySource],
+    hits: Vec<RecallHit>,
+    now_unix: i64,
+    limit: usize,
+) -> MemoryResult<(Vec<RecallHit>, Vec<(WorkspaceId, String)>)> {
+    revalidate_recall_hits_before_injection_with_source_filter(
+        facade,
+        user,
+        consumer_workspace,
+        initial_sources,
+        hits,
+        now_unix,
+        limit,
+        &|sources| vec![true; sources.len()],
+    )
+}
+
+fn resolve_recall_sources_with_filter(
+    facade: &MemoryFacade,
+    user: &UserId,
+    consumer_workspace: &WorkspaceId,
+    now_unix: i64,
+    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
+) -> MemoryResult<(Vec<AuthorizedMemorySource>, Vec<(WorkspaceId, String)>)> {
+    let sources = facade.resolve_memory_sources(user, consumer_workspace, now_unix)?;
+    let allowed_by_source = source_allowed(&sources);
+    let mut unavailable = Vec::new();
+    let mut allowed = Vec::new();
+    for (index, source) in sources.into_iter().enumerate() {
+        if allowed_by_source.get(index).copied().unwrap_or(false) {
+            allowed.push(source);
+        } else if source.grant_id.is_some() {
+            unavailable.push((
+                source.source_workspace_id.clone(),
+                "source_unavailable".to_string(),
+            ));
+        }
+    }
+    Ok((allowed, unavailable))
+}
+
+fn revalidate_recall_hits_before_injection_with_source_filter(
+    facade: &MemoryFacade,
+    user: &UserId,
+    consumer_workspace: &WorkspaceId,
+    initial_sources: &[AuthorizedMemorySource],
+    hits: Vec<RecallHit>,
+    now_unix: i64,
+    limit: usize,
+    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
+) -> MemoryResult<(Vec<RecallHit>, Vec<(WorkspaceId, String)>)> {
+    let initial_fingerprint = crate::memory_source_policy_fingerprint(initial_sources);
+    let current_sources = resolve_recall_sources_with_filter(
+        facade,
+        user,
+        consumer_workspace,
+        now_unix,
+        source_allowed,
+    );
+    let policy_unchanged = current_sources
+        .as_ref()
+        .map(|(sources, _)| crate::memory_source_policy_fingerprint(sources) == initial_fingerprint)
+        .unwrap_or(false);
+    if policy_unchanged {
+        return Ok((
+            merge_recall_hits(consumer_workspace.clone(), hits, limit),
+            Vec::new(),
+        ));
+    }
+
+    let local_hits = hits
+        .into_iter()
+        .filter(|hit| {
+            hit.grant_id.is_none()
+                && hit.source_user_id == *user
+                && hit.source_workspace_id == *consumer_workspace
+        })
+        .collect();
+    let unavailable = current_sources
+        .as_ref()
+        .map(|(_, unavailable)| unavailable)
+        .ok();
+    let reason = if current_sources.is_ok() {
+        "policy_changed"
+    } else {
+        "policy_revalidation_failed"
+    };
+    let degraded = initial_sources
+        .iter()
+        .filter(|source| source.grant_id.is_some())
+        .map(|source| {
+            let reason = unavailable
+                .is_some_and(|unavailable| {
+                    unavailable
+                        .iter()
+                        .any(|(workspace, _)| workspace == &source.source_workspace_id)
+                })
+                .then_some("source_unavailable")
+                .unwrap_or(reason);
+            (source.source_workspace_id.clone(), reason.to_string())
+        })
+        .collect();
+    Ok((
+        merge_recall_hits(consumer_workspace.clone(), local_hits, limit),
+        degraded,
+    ))
+}
+
+pub fn recall_authorized_sources_on_facade(
+    facade: &MemoryFacade,
+    user: &UserId,
+    consumer_workspace: &WorkspaceId,
+    query: &str,
+    query_vec: &[f32],
+    now_unix: i64,
+    graph_context: Option<
+        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
+    >,
+) -> MemoryResult<RecallPack> {
+    recall_authorized_sources_on_facade_with_source_filter(
+        facade,
+        user,
+        consumer_workspace,
+        query,
+        query_vec,
+        now_unix,
+        graph_context,
+        &|sources| vec![true; sources.len()],
+    )
+}
+
+/// Coordinates recall only across sources the caller currently authorizes.
+/// The memory crate does not own project lifecycle; callers can therefore
+/// provide a fail-closed predicate while the compatibility API remains
+/// allow-all for existing integrations.
+pub fn recall_authorized_sources_on_facade_with_source_filter(
+    facade: &MemoryFacade,
+    user: &UserId,
+    consumer_workspace: &WorkspaceId,
+    query: &str,
+    query_vec: &[f32],
+    now_unix: i64,
+    graph_context: Option<
+        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
+    >,
+    source_allowed: &(dyn Fn(&[AuthorizedMemorySource]) -> Vec<bool> + Sync),
+) -> MemoryResult<RecallPack> {
+    let (sources, initially_unavailable) = resolve_recall_sources_with_filter(
+        facade,
+        user,
+        consumer_workspace,
+        now_unix,
+        source_allowed,
+    )?;
+    let intent = memory_recall_intent(query);
+    let mut hits = Vec::new();
+    let mut degraded_sources = initially_unavailable;
+    let mut source_audits = Vec::new();
+    for source in &sources {
+        let effective_source = match source.policy.as_ref() {
+            None => source.clone(),
+            Some(policy) => {
+                let has_individual_allow = policy
+                    .overrides
+                    .values()
+                    .any(|effect| *effect == MemoryGrantOverrideEffect::Allow);
+                let collections = policy
+                    .collections
+                    .intersection(&intent.collections)
+                    .copied()
+                    .collect::<BTreeSet<_>>();
+                if collections.is_empty() && !has_individual_allow {
+                    source_audits.push((
+                        source.clone(),
+                        MemorySourceAccessOutcome::Deny,
+                        "intent_not_selected".to_string(),
+                        0,
+                    ));
+                    continue;
+                }
+                let mut effective = source.clone();
+                effective.policy = Some(crate::MemorySourcePolicy {
+                    collections,
+                    max_sensitivity: policy.max_sensitivity,
+                    overrides: policy.overrides.clone(),
+                });
+                effective
+            }
+        };
+        match recall_source_on_facade(facade, &effective_source, query, query_vec, graph_context) {
+            Ok(pack) => {
+                let candidate_count = pack.hits.len();
+                hits.extend(pack.hits);
+                source_audits.push((
+                    source.clone(),
+                    MemorySourceAccessOutcome::Allow,
+                    "allowed".to_string(),
+                    candidate_count,
+                ));
+            }
+            Err(_) if source.grant_id.is_some() => {
+                degraded_sources.push((
+                    source.source_workspace_id.clone(),
+                    "source_unavailable".to_string(),
+                ));
+                source_audits.push((
+                    source.clone(),
+                    MemorySourceAccessOutcome::Degraded,
+                    "source_unavailable".to_string(),
+                    0,
+                ));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let (hits, policy_degraded) = revalidate_recall_hits_before_injection_with_source_filter(
+        facade,
+        user,
+        consumer_workspace,
+        &sources,
+        hits,
+        now_unix,
+        10,
+        source_allowed,
+    )?;
+    for (workspace, reason) in &policy_degraded {
+        if let Some((_, outcome, audit_reason, _)) = source_audits
+            .iter_mut()
+            .find(|(source, _, _, _)| source.source_workspace_id == *workspace)
+        {
+            *outcome = MemorySourceAccessOutcome::Degraded;
+            *audit_reason = reason.clone();
+        }
+    }
+    let policy_was_already_changed = !policy_degraded.is_empty();
+    degraded_sources.extend(policy_degraded);
+    for (source, outcome, reason, candidate_count) in &source_audits {
+        let injected_refs = hits
+            .iter()
+            .filter(|hit| {
+                hit.source_user_id == source.source_user_id
+                    && hit.source_workspace_id == source.source_workspace_id
+                    && hit.grant_id == source.grant_id
+            })
+            .map(|hit| hit.memory_ref.clone())
+            .collect();
+        let event = MemorySourceAccessEvent {
+            id: uuid::Uuid::new_v4().to_string(),
+            consumer_user_id: user.clone(),
+            consumer_workspace_id: consumer_workspace.clone(),
+            source_workspace_id: source.source_workspace_id.clone(),
+            grant_id: source.grant_id.clone(),
+            policy_version: source.policy_version,
+            turn_id: None,
+            outcome: *outcome,
+            reason: reason.clone(),
+            candidate_count: *candidate_count,
+            injected_refs,
+            created_at: now_unix,
+        };
+        if facade.record_memory_source_access(&event).is_err() && source.grant_id.is_some() {
+            degraded_sources.push((
+                source.source_workspace_id.clone(),
+                "audit_unavailable".to_string(),
+            ));
+        }
+    }
+    // Audit is deliberately non-authoritative. Re-resolve once more after its
+    // I/O so a revoke concurrent with audit cannot leave linked text in the
+    // prompt assembled immediately below.
+    let (hits, final_policy_degraded) = revalidate_recall_hits_before_injection_with_source_filter(
+        facade,
+        user,
+        consumer_workspace,
+        &sources,
+        hits,
+        now_unix,
+        10,
+        source_allowed,
+    )?;
+    if !policy_was_already_changed && !final_policy_degraded.is_empty() {
+        for (workspace, reason) in &final_policy_degraded {
+            let Some((source, _, _, candidate_count)) = source_audits
+                .iter()
+                .find(|(source, _, _, _)| source.source_workspace_id == *workspace)
+            else {
+                continue;
+            };
+            let corrective = MemorySourceAccessEvent {
+                id: uuid::Uuid::new_v4().to_string(),
+                consumer_user_id: user.clone(),
+                consumer_workspace_id: consumer_workspace.clone(),
+                source_workspace_id: source.source_workspace_id.clone(),
+                grant_id: source.grant_id.clone(),
+                policy_version: source.policy_version,
+                turn_id: None,
+                outcome: MemorySourceAccessOutcome::Degraded,
+                reason: reason.clone(),
+                candidate_count: *candidate_count,
+                injected_refs: Vec::new(),
+                created_at: now_unix,
+            };
+            if facade.record_memory_source_access(&corrective).is_err() {
+                degraded_sources.push((
+                    source.source_workspace_id.clone(),
+                    "audit_unavailable".to_string(),
+                ));
+            }
+        }
+    }
+    degraded_sources.extend(final_policy_degraded);
+    degraded_sources.sort_by(|left, right| {
+        (left.0.as_str(), left.1.as_str()).cmp(&(right.0.as_str(), right.1.as_str()))
+    });
+    degraded_sources.dedup();
+    let scope = if consumer_workspace.as_str() == PERSONAL_WORKSPACE {
+        MemoryScope::Personal
+    } else {
+        MemoryScope::Project(consumer_workspace.clone())
+    };
+    Ok(RecallPack::from_hits_and_degraded(
+        query.to_string(),
+        scope,
+        hits,
+        degraded_sources,
+    ))
+}
 
 /// Soglia minima di lunghezza della query perché il recall parta (il gateway
 /// salta query < 8 char). Spostato fedelmente (`main.rs:13576`).
@@ -210,6 +732,181 @@ pub async fn embed_query(embedding: &dyn EmbeddingClient, query: &str) -> Vec<f3
     embedding.embed(query.trim()).await
 }
 
+/// Recall di una sola fonte già risolta/autorizzata. FTS e ricerca densa
+/// restano nello scope esatto della source; la policy della grant restringe
+/// ulteriormente i candidati senza allargare il `MemoryPolicyEngine`.
+pub fn recall_source_on_facade(
+    facade: &MemoryFacade,
+    source: &AuthorizedMemorySource,
+    query: &str,
+    query_vec: &[f32],
+    _graph_context: Option<
+        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
+    >,
+) -> MemoryResult<RecallPack> {
+    let query = query.trim();
+    let scope = if source.source_workspace_id.as_str() == PERSONAL_WORKSPACE {
+        MemoryScope::Personal
+    } else {
+        MemoryScope::Project(source.source_workspace_id.clone())
+    };
+    if query.chars().count() < RECALL_MIN_QUERY_CHARS {
+        return Ok(RecallPack::from_hits(query.to_string(), scope, Vec::new()));
+    }
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let access = MemoryAccessRequest {
+        actor_id: "chat_rag".to_string(),
+        user_id: source.source_user_id.clone(),
+        workspace_id: source.source_workspace_id.clone(),
+        purpose: "chat_context".to_string(),
+        allowed_domains: vec![
+            PrivacyDomain::new("personal"),
+            PrivacyDomain::new("work"),
+            PrivacyDomain::new("general"),
+        ],
+        max_sensitivity: source
+            .policy
+            .as_ref()
+            .map(|policy| policy.max_sensitivity)
+            .unwrap_or(DataSensitivity::Private),
+        allow_raw_payload: false,
+        allow_export: true,
+        broad_query: false,
+    };
+
+    let mut fts_rank = std::collections::HashMap::<String, usize>::new();
+    let lexical = facade.search_authorized_memories(AuthorizedMemorySearchRequest {
+        access,
+        source_policy: source.policy.clone(),
+        query: query.to_string(),
+        statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+        memory_types: Vec::new(),
+        limit: 8,
+        offset: 0,
+    })?;
+    for item in lexical.items {
+        fts_rank
+            .entry(item.reference.to_string())
+            .or_insert(item.rank);
+    }
+
+    let mut dense_rank = std::collections::HashMap::<String, usize>::new();
+    if !query_vec.is_empty() {
+        for (index, hit) in facade
+            .search_authorized_embeddings(source, query_vec, 32)?
+            .into_iter()
+            .filter(|hit| hit.score >= RECALL_DENSE_MIN_SCORE)
+            .take(8)
+            .enumerate()
+        {
+            dense_rank
+                .entry(hit.memory_ref.to_string())
+                .or_insert(index + 1);
+        }
+    }
+
+    let mut references = std::collections::HashSet::<String>::new();
+    references.extend(fts_rank.keys().cloned());
+    references.extend(dense_rank.keys().cloned());
+    let mut hits = Vec::<RecallHit>::new();
+    for reference in references {
+        let Ok(memory_ref) = reference.parse() else {
+            continue;
+        };
+        let Some(record) = facade.get_authorized_memory_for_source(source, &memory_ref)? else {
+            continue;
+        };
+        let Some(collection) = collection_for_record(&record) else {
+            continue;
+        };
+        let subject_key = match explicit_subject_key(&record.metadata) {
+            Some(subject_key) => Some(subject_key),
+            None => facade.canonical_subject_key_for_memory(source, &memory_ref)?,
+        };
+        let importance = record
+            .metadata
+            .get("importance")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.5) as f32;
+        let candidate = MemoryCandidate {
+            reference: reference.clone(),
+            fts_rank: fts_rank.get(&reference).copied(),
+            dense_rank: dense_rank.get(&reference).copied(),
+            importance,
+            age_days: memory_age_days(&record.created_at, now_secs),
+        };
+        hits.push(RecallHit {
+            memory_ref: reference,
+            text: format_recall_entry(&record.text, &record.metadata),
+            score: hybrid_memory_score(&candidate),
+            kind: record.memory_type,
+            source_user_id: source.source_user_id.clone(),
+            source_workspace_id: source.source_workspace_id.clone(),
+            source_label: source.source_label.clone(),
+            collection,
+            grant_id: source.grant_id.clone(),
+            sensitivity: record.sensitivity,
+            status: record.status,
+            updated_at: record.updated_at,
+            subject_key,
+            conflict: false,
+            publication_link: record
+                .metadata
+                .get("publication_link")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    record
+                        .metadata
+                        .get("publication_source_ref")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value::<MemoryRef>(value).ok())
+                        .and_then(|reference| serde_json::to_string(&reference).ok())
+                }),
+        });
+    }
+    hits.sort_by(|left, right| {
+        right
+            .score
+            .total_cmp(&left.score)
+            .then_with(|| left.memory_ref.cmp(&right.memory_ref))
+    });
+    hits.truncate(10);
+
+    Ok(RecallPack::from_hits(query.to_string(), scope, hits))
+}
+
+fn collection_for_record(record: &MemoryRecord) -> Option<MemoryCollectionKey> {
+    [
+        MemoryCollectionKey::Preferences,
+        MemoryCollectionKey::Profile,
+        MemoryCollectionKey::Knowledge,
+        MemoryCollectionKey::Decisions,
+        MemoryCollectionKey::Goals,
+        MemoryCollectionKey::Artifacts,
+        MemoryCollectionKey::Episodes,
+    ]
+    .into_iter()
+    .find(|collection| collection.matches(record))
+}
+
+fn explicit_subject_key(metadata: &serde_json::Value) -> Option<String> {
+    ["subject_key", "canonical_key"]
+        .into_iter()
+        .find_map(|key| {
+            metadata
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .map(str::to_string)
+}
+
 /// Recall RAG episodico — fase 2: FTS + vector search + fusione RRF + formatting,
 /// **sotto lock** (sync). Prende la `query_vec` già embedded (da [`embed_query`])
 /// e la facade già lockata dal chiamante. Spostato fedelmente dal corpo di
@@ -224,7 +921,9 @@ pub fn recall_search_on_facade(
     workspace: &WorkspaceId,
     query: &str,
     query_vec: &[f32],
-    graph_context: Option<&(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync)>,
+    graph_context: Option<
+        &(dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, &str) -> Option<String> + Sync),
+    >,
 ) -> Option<String> {
     let query = query.trim();
     if query.chars().count() < RECALL_MIN_QUERY_CHARS {
@@ -238,7 +937,11 @@ pub fn recall_search_on_facade(
     // All memories in scope, keyed by ref.
     let records: std::collections::HashMap<String, MemoryRecord> = facade
         .list_memories_for_ui(user, workspace)
-        .map(|ms| ms.into_iter().map(|m| (m.reference.to_string(), m)).collect())
+        .map(|ms| {
+            ms.into_iter()
+                .map(|m| (m.reference.to_string(), m))
+                .collect()
+        })
         .unwrap_or_default();
 
     // Lexical pass (FTS/bm25) → rank per reference.
@@ -379,7 +1082,10 @@ mod tests {
         let now = 1_800_000_000i64;
         // unix: prefix → giorni = (now - secs)/86400.
         let age = memory_age_days("unix:1799136000", now); // 864000s = 10 days before
-        assert!((age - 10.0).abs() < 0.01, "age should be ~10 days, got {age}");
+        assert!(
+            (age - 10.0).abs() < 0.01,
+            "age should be ~10 days, got {age}"
+        );
         // plain secs fallback.
         let age_plain = memory_age_days("1799136000", now);
         assert!((age_plain - 10.0).abs() < 0.01);

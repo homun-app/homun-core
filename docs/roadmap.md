@@ -9,6 +9,16 @@ per temi, layout, componenti, template e QA visuale. Non si aggiungono gallery o
 `make_*` isolati: `make_document`, `make_deck`/presentation e i futuri plugin
 consumano la stessa grammatica dal registry unico.
 
+## Nota di rilascio — fonti memoria autorizzate (2026-07-17)
+
+Completata localmente la slice schema v7 per collegare fonti di memoria autorizzate:
+grant diretti, collection allow-list, override `Allow`/`Deny`, revoca e pre-filtro delle
+fonti progetto dal registry persistito. L'isolamento personale/progetto e il perimetro
+contatti restano chiusi per default; non c'è transitività. Il richiamo è ora attivo per
+default, con escape hatch locale `HOMUN_MEMORY_SOURCES=0` o `HOMUN_MEMORY_SOURCES=off`.
+Lo smoke corretto del 2026-07-17 Europe/Rome copre questo perimetro; non include deploy,
+pubblicazione o trasformazione dei candidati autorizzati nell'Advanced picker.
+
 ## Fase corrente
 
 WS6 è chiusa localmente; WS2-3.1 è passata in runtime, WS2-3.2c/3.3 ha un

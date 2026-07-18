@@ -229,6 +229,7 @@ pub enum TurnEventKind {
     Activity,
     PlanUpdate,
     Tool,
+    Recall,
     Done,
     Error,
     Cancelled,
@@ -252,6 +253,7 @@ impl TurnEventKind {
             TurnEventKind::Activity => "activity",
             TurnEventKind::PlanUpdate => "plan_update",
             TurnEventKind::Tool => "tool",
+            TurnEventKind::Recall => "recall",
             TurnEventKind::Done => "done",
             TurnEventKind::Error => "error",
             TurnEventKind::Cancelled => "cancelled",
@@ -268,6 +270,7 @@ impl TurnEventKind {
             "activity" => Self::Activity,
             "plan_update" => Self::PlanUpdate,
             "tool" => Self::Tool,
+            "recall" => Self::Recall,
             "done" => Self::Done,
             "error" => Self::Error,
             "cancelled" => Self::Cancelled,
@@ -276,6 +279,17 @@ impl TurnEventKind {
             "queued" => Self::Queued,
             _ => return None,
         })
+    }
+}
+
+#[cfg(test)]
+mod turn_event_kind_tests {
+    use super::TurnEventKind;
+
+    #[test]
+    fn recall_round_trips_through_persisted_event_kind() {
+        assert_eq!(TurnEventKind::Recall.as_str(), "recall");
+        assert_eq!(TurnEventKind::parse("recall"), Some(TurnEventKind::Recall));
     }
 }
 

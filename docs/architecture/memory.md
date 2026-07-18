@@ -50,6 +50,24 @@ Verità = SQL + grafo; il markdown è **proiezione + superficie editabile + expo
 `crates/memory/src/schema.rs` è un **layer tipato** sopra le primitive generiche (la forma
 `Decision` col PERCHÉ), NON un secondo schema: una decisione resta un `MemoryRecord`.
 
+### Fonti memoria collegate autorizzate (schema v7, smoke 2026-07-17 Europe/Rome)
+
+Lo schema v7 aggiunge grant persistiti di fonte: un progetto consumatore può richiamare
+solo fonti personali o di altri progetti dello stesso utente tramite un grant diretto,
+una allow-list di collection e override puntuali `Allow`/`Deny`. Non esiste transitività:
+una fonte ricevuta non abilita a sua volta altre fonti. Il comportamento è attivo per
+default; per un rollback locale l'unico escape hatch è `HOMUN_MEMORY_SOURCES=0` oppure
+`HOMUN_MEMORY_SOURCES=off`.
+
+Lo smoke verificato copre isolamento personale/progetto, grant, collection e override,
+revoca, e il perimetro contatti. Ogni fonte progetto deve inoltre comparire nel registry
+persistito `workspaces.json`: fonte assente, illeggibile, corrotta o vuota viene filtrata
+come `source_unavailable` prima di candidati, recall, audit o aggiornamento last-used.
+Grant e policy restano persistiti e revocabili; il richiamo collegato non pubblica né
+copia record e i flussi di pubblicazione restano separati. I candidati qui sono elementi
+di recall/indice già filtrati dalla policy, non l'Advanced picker: quel picker gestisce
+la selezione di record non-segreti disponibili come fonte.
+
 - `MemoryRecord` (`types.rs`, `pub struct MemoryRecord`): `memory_type` (`fact | preference |
   decision | goal | episode | open_loop | artifact`), `text`, `confidence`, `status`,
   `privacy_domain` + `sensitivity`, `metadata`, `created/updated/last_seen`, e i campi di

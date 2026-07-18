@@ -372,6 +372,16 @@ export interface RecallHitPayload {
   text: string;
   score: number;
   type: string;
+  /** Canonical workspace that supplied this hit (including __personal__). */
+  source_workspace_id: string;
+  /** Human-readable source label resolved by the gateway for this turn. */
+  source_label: string;
+  /** System collection that classified/authorized the record. */
+  collection: MemoryCollectionKey;
+  /** Direct grant used for a linked source; null only for an explicitly local source. */
+  grant_id: string | null;
+  /** The recall coordinator detected a semantic conflict for this hit. */
+  conflict: boolean;
 }
 
 /** D3 (Piano UI): una modifica di codice proposta dal modello (diff inline). */
@@ -477,6 +487,139 @@ export interface ProjectAccessGrant {
 }
 
 export type ProjectAccessInput = Omit<ProjectAccessGrant, "workspace_id" | "updated_at">;
+
+export type MemoryCollectionKey =
+  | "preferences"
+  | "profile"
+  | "knowledge"
+  | "decisions"
+  | "goals"
+  | "artifacts"
+  | "episodes";
+
+export interface MemorySourceGrantView {
+  id: string | null;
+  source_workspace_id: string;
+  source_label: string;
+  source_available: boolean;
+  local: boolean;
+  read_only: boolean;
+  collections: MemoryCollectionKey[];
+  max_sensitivity: "public" | "internal" | "private" | "confidential";
+  expires_at?: number | null;
+  revoked_at?: number | null;
+  policy_version: number;
+  last_used_at?: number | null;
+  overrides: Array<{ memory_ref: string; effect: "allow" | "deny" }>;
+}
+
+export interface MemorySourceUpsertInput {
+  source_workspace_id: string;
+  collections: MemoryCollectionKey[];
+  max_sensitivity: MemorySourceGrantView["max_sensitivity"];
+  expires_at?: number | null;
+  overrides: Array<{ memory_ref: string; effect: "allow" | "deny" }>;
+}
+
+export interface MemorySourceCandidateView {
+  ref: string;
+  summary: string;
+  type: string;
+  collection: MemoryCollectionKey;
+  sensitivity: MemorySourceGrantView["max_sensitivity"];
+}
+
+export interface MemorySourceCandidatePagination {
+  offset?: number;
+  limit?: number;
+}
+
+export type MemoryPublicationSensitivity = "public" | "internal" | "private" | "confidential" | "secret";
+
+export interface MemoryPublicationRef {
+  kind: "memory";
+  scope: "local";
+  user_id: string;
+  workspace_id: string;
+  key: string;
+}
+
+export interface MemoryPublicationEditInput {
+  proposed_text?: string;
+  proposed_memory_type?: string;
+  proposed_privacy_domain?: "personal" | "work" | "general";
+  proposed_sensitivity?: MemoryPublicationSensitivity;
+}
+
+export type MemoryPublicationCandidate = {
+  kind: "compatible_duplicate" | "conflict";
+  destination_ref: MemoryPublicationRef;
+};
+
+export type MemoryPublicationResolution =
+  | { kind: "create_new" }
+  | { kind: "update_existing"; destination_ref: MemoryPublicationRef };
+
+export interface MemoryPublicationProposal {
+  id: string;
+  proposal_version: number;
+  source_ref: MemoryPublicationRef;
+  source_user_id: string;
+  source_workspace_id: string;
+  destination_user_id: string;
+  destination_workspace_id: string;
+  proposed_text: string;
+  proposed_memory_type: string;
+  proposed_collection: MemoryCollectionKey;
+  proposed_privacy_domain: "personal" | "work" | "general";
+  proposed_sensitivity: MemoryPublicationSensitivity;
+  source_revision: string;
+  destination_revision: string;
+  candidate?: MemoryPublicationCandidate | null;
+  resolution?: MemoryPublicationResolution | null;
+  status: "pending" | "approved" | "rejected" | "failed";
+  reason_code: string;
+  failure_reason?: string | null;
+  proposed_by: string;
+  decided_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryPublicationMemoryRecord {
+  reference: MemoryPublicationRef;
+  user_id: string;
+  workspace_id: string;
+  memory_type: string;
+  text: string;
+  aliases: string[];
+  language_hints: string[];
+  confidence: number;
+  status: "candidate" | "confirmed" | "rejected" | "stale" | "deleted";
+  privacy_domain: "personal" | "work" | "general";
+  sensitivity: MemoryPublicationSensitivity;
+  metadata: unknown;
+  created_at: string;
+  updated_at: string;
+  last_seen_at?: string | null;
+}
+
+export interface MemoryPublicationResult {
+  proposal: MemoryPublicationProposal;
+  destination: MemoryPublicationMemoryRecord;
+  link: {
+    source_ref: MemoryPublicationRef;
+    destination_ref: MemoryPublicationRef;
+    approved_by: string;
+    created_at: string;
+  };
+}
+
+export interface MemoryPublicationCreateInput {
+  source_ref: string;
+  source_workspace_id: string;
+  destination_workspace_id: string;
+}
 
 export interface ComposioConnectResult {
   provider_id: string;
@@ -1871,6 +2014,93 @@ async function electronRemoveProjectAccess(
   );
 }
 
+async function electronMemorySources(
+  workspaceId: string,
+): Promise<MemorySourceGrantView[]> {
+  return gatewayGetJson<MemorySourceGrantView[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources`,
+  );
+}
+
+async function electronMemorySourceCandidates(
+  workspaceId: string,
+  sourceWorkspaceId: string,
+  pagination: MemorySourceCandidatePagination = {},
+): Promise<MemorySourceCandidateView[]> {
+  const params = new URLSearchParams({ source_workspace_id: sourceWorkspaceId });
+  if (pagination.offset !== undefined) params.set("offset", String(pagination.offset));
+  if (pagination.limit !== undefined) params.set("limit", String(pagination.limit));
+  return gatewayGetJson<MemorySourceCandidateView[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources/candidates?${params.toString()}`,
+  );
+}
+
+async function electronUpsertMemorySource(
+  workspaceId: string,
+  input: MemorySourceUpsertInput,
+): Promise<MemorySourceGrantView[]> {
+  return gatewayPostJson<MemorySourceGrantView[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources/upsert`,
+    input,
+  );
+}
+
+async function electronRevokeMemorySource(
+  workspaceId: string,
+  grantId: string,
+): Promise<MemorySourceGrantView[]> {
+  return gatewayPostJson<MemorySourceGrantView[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/memory-sources/${encodeURIComponent(grantId)}/revoke`,
+    {},
+  );
+}
+
+async function electronCreateMemoryPublication(
+  input: MemoryPublicationCreateInput,
+): Promise<MemoryPublicationProposal> {
+  return gatewayPostJson<MemoryPublicationProposal>("/api/memory/publications", input);
+}
+
+async function electronMemoryPublication(
+  proposalId: string,
+): Promise<MemoryPublicationProposal> {
+  return gatewayGetJson<MemoryPublicationProposal>(
+    `/api/memory/publications/${encodeURIComponent(proposalId)}`,
+  );
+}
+
+async function electronUpdateMemoryPublication(
+  proposalId: string,
+  expectedVersion: number,
+  edit: MemoryPublicationEditInput,
+): Promise<MemoryPublicationProposal> {
+  return gatewayPostJson<MemoryPublicationProposal>(
+    `/api/memory/publications/${encodeURIComponent(proposalId)}/edit`,
+    { expected_version: expectedVersion, edit },
+  );
+}
+
+async function electronApproveMemoryPublication(
+  proposalId: string,
+  expectedVersion: number,
+  resolution: MemoryPublicationResolution,
+): Promise<MemoryPublicationResult> {
+  return gatewayPostJson<MemoryPublicationResult>(
+    `/api/memory/publications/${encodeURIComponent(proposalId)}/approve`,
+    { expected_version: expectedVersion, resolution },
+  );
+}
+
+async function electronRejectMemoryPublication(
+  proposalId: string,
+  expectedVersion: number,
+): Promise<MemoryPublicationProposal> {
+  return gatewayPostJson<MemoryPublicationProposal>(
+    `/api/memory/publications/${encodeURIComponent(proposalId)}/reject`,
+    { expected_version: expectedVersion },
+  );
+}
+
 /** A parameter (env var, argument, or HTTP header) a registry server needs. */
 export interface McpRegistryInput {
   key: string;
@@ -2893,6 +3123,25 @@ export const coreBridge = {
     electronUpsertProjectAccess(workspaceId, input),
   removeProjectAccess: (workspaceId: string, contactReference: string, channel: string) =>
     electronRemoveProjectAccess(workspaceId, contactReference, channel),
+  memorySources: (workspaceId: string) => electronMemorySources(workspaceId),
+  memorySourceCandidates: (
+    workspaceId: string,
+    sourceWorkspaceId: string,
+    pagination?: MemorySourceCandidatePagination,
+  ) => electronMemorySourceCandidates(workspaceId, sourceWorkspaceId, pagination),
+  upsertMemorySource: (workspaceId: string, input: MemorySourceUpsertInput) =>
+    electronUpsertMemorySource(workspaceId, input),
+  revokeMemorySource: (workspaceId: string, grantId: string) =>
+    electronRevokeMemorySource(workspaceId, grantId),
+  createMemoryPublication: (input: MemoryPublicationCreateInput) =>
+    electronCreateMemoryPublication(input),
+  memoryPublication: (proposalId: string) => electronMemoryPublication(proposalId),
+  updateMemoryPublication: (proposalId: string, expectedVersion: number, edit: MemoryPublicationEditInput) =>
+    electronUpdateMemoryPublication(proposalId, expectedVersion, edit),
+  approveMemoryPublication: (proposalId: string, expectedVersion: number, resolution: MemoryPublicationResolution) =>
+    electronApproveMemoryPublication(proposalId, expectedVersion, resolution),
+  rejectMemoryPublication: (proposalId: string, expectedVersion: number) =>
+    electronRejectMemoryPublication(proposalId, expectedVersion),
   mcpConnect: (input: {
     name: string;
     command?: string;
@@ -4501,6 +4750,7 @@ function parseBrowserStreamEvent(line: string) {
       | "vault_reveal"
       | "payment_approval"
       | "tool_result"
+      | "recall"
       | "done"
       | "error";
     text?: string;
@@ -4535,6 +4785,8 @@ function parseTurnStreamEventAsLegacy(line: string) {
       return { type: "plan_update" as const, markdown: String(payload.markdown ?? "") };
     case "tool":
       return { type: "tool_result" as const, payload: raw.payload };
+    case "recall":
+      return { type: "recall" as const, payload: raw.payload };
     case "error":
       return {
         type: "error" as const,
@@ -4577,6 +4829,7 @@ function browserStreamEventToCoreEvent(
     case "vault_reveal":
     case "payment_approval":
     case "tool_result":
+    case "recall":
       return {
         type: event.type,
         request_id: requestId,
