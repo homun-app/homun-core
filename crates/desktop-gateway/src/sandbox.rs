@@ -650,6 +650,9 @@ pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
         .args(["update"])
         .arg(&work)
         .arg("--no-cluster")
+        // Graphify writes auxiliary paths relative to its cwd. Keep those inside the
+        // managed mirror: a packaged gateway may otherwise mutate its signed app bundle.
+        .current_dir(&work)
         .env("PATH", &path)
         .output()
         .map_err(|e| format!("graphify: failed to start: {e}"))?;
