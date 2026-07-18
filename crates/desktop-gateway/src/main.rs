@@ -100,6 +100,12 @@ use local_first_desktop_gateway::{
     EnqueueTurnRequest, RoutingBinding, SetActiveLeafRequest, SetBranchLabelRequest,
     SetThreadPinnedRequest, build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
 };
+use local_first_desktop_gateway::integrity_api::{
+    GraphIntegrityStatus, IntegrityAuditResponse, IntegrityBackupSummary, IntegrityRepairAction,
+    IntegrityRepairApplyRequest, IntegrityRepairApplyResponse, IntegrityRepairEstimate,
+    IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse, canonical_integrity_actions,
+    gateway_approval_token, gateway_audit_checksum, inspect_registered_graph,
+};
 use local_first_desktop_gateway::project_graph_commit::{
     ProjectGraphCommitError, stage_project_graph_build,
 };
@@ -144,6 +150,7 @@ use local_first_memory::{
     ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
     MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryError, MemoryExtraction,
     MemoryFacade, MemoryGrantOverrideEffect, MemoryLifecycleRequest, MemoryRecallService,
+    MemoryIntegrityRepairRequest,
     MemoryPublicationDestination, MemoryPublicationEditInput, MemoryPublicationProposal,
     MemoryPublicationResolution, MemoryPublicationResult, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
     MemorySourceCandidateProjection, MemorySourceGrant, MemoryStatus, MemoryUiReadModel,
@@ -1391,6 +1398,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Turn broker HTTP surface — the only chat path. Registered before the token layer
     // is applied (below) so these routes are still bearer-gated like the rest of /api.
     let chat_routes = chat_routes
+        .route("/api/integrity/audit", get(integrity_audit))
+        .route(
+            "/api/integrity/repair/preview",
+            post(integrity_repair_preview),
+        )
+        .route(
+            "/api/integrity/repair/apply",
+            post(integrity_repair_apply),
+        )
         .route("/api/chat/turns", post(enqueue_turn))
         .route(
             "/api/chat/turns/{turn_id}",
@@ -45476,6 +45492,325 @@ fn graphify_out_dir(workspace_id: &str) -> std::path::PathBuf {
     base.join("graphify-out").join(workspace_id)
 }
 
+fn integrity_known_scopes() -> Vec<(MemoryUserId, MemoryWorkspaceId)> {
+    let user = gateway_memory_user_id();
+    let mut workspace_ids = BTreeSet::from([
+        PERSONAL_WORKSPACE.to_string(),
+        THREADS_WORKSPACE.to_string(),
+    ]);
+    for workspace in load_workspaces_file().workspaces {
+        workspace_ids.insert(
+            canonical_memory_workspace_id(&workspace.id)
+                .as_str()
+                .to_string(),
+        );
+    }
+    workspace_ids
+        .into_iter()
+        .map(|workspace_id| (user.clone(), MemoryWorkspaceId::new(workspace_id)))
+        .collect()
+}
+
+fn integrity_graph_statuses() -> Vec<GraphIntegrityStatus> {
+    let user = gateway_memory_user_id();
+    let mut workspaces = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .filter_map(|workspace| {
+            workspace
+                .folder
+                .filter(|folder| !folder.trim().is_empty())
+                .map(|folder| (workspace.id, folder))
+        })
+        .collect::<Vec<_>>();
+    workspaces.sort_by(|left, right| left.0.cmp(&right.0));
+    workspaces
+        .into_iter()
+        .map(|(workspace_id, folder)| {
+            let fingerprint = project_change_fingerprint(std::path::Path::new(&folder));
+            inspect_registered_graph(
+                &workspace_id,
+                &graphify_out_dir(&workspace_id),
+                &fingerprint,
+                &user,
+            )
+        })
+        .collect()
+}
+
+fn integrity_graph_status_for_workspace(
+    workspace_id: &MemoryWorkspaceId,
+) -> Result<GraphIntegrityStatus, GatewayError> {
+    let workspace_id = workspace_id.as_str();
+    let folder = load_workspaces_file()
+        .workspaces
+        .into_iter()
+        .find(|workspace| workspace.id == workspace_id)
+        .and_then(|workspace| workspace.folder)
+        .filter(|folder| !folder.trim().is_empty())
+        .ok_or_else(|| integrity_bad_request("integrity_refresh_workspace_invalid"))?;
+    let fingerprint = project_change_fingerprint(std::path::Path::new(&folder));
+    Ok(inspect_registered_graph(
+        workspace_id,
+        &graphify_out_dir(workspace_id),
+        &fingerprint,
+        &gateway_memory_user_id(),
+    ))
+}
+
+fn integrity_bad_request(code: &'static str) -> GatewayError {
+    GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code,
+        message: "integrity request is invalid".to_string(),
+    }
+}
+
+fn integrity_internal_error(code: &'static str, error: impl std::fmt::Display) -> GatewayError {
+    eprintln!("integrity API error ({code}): {error}");
+    GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code,
+        message: "integrity operation failed".to_string(),
+    }
+}
+
+fn integrity_preview_for_actions(
+    state: &AppState,
+    actions: Vec<IntegrityRepairAction>,
+) -> Result<IntegrityRepairPreviewResponse, GatewayError> {
+    let actions = canonical_integrity_actions(actions)
+        .map_err(|_| integrity_bad_request("integrity_preview_invalid"))?;
+    let known_scopes = integrity_known_scopes();
+    let mut graph_statuses = Vec::new();
+    let (memory_checksum, estimates) = if actions[0].is_graph_refresh() {
+        let memory = memory_facade(state)
+            .audit_integrity(&known_scopes)
+            .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+        let IntegrityRepairAction::RefreshProjectGraph { workspace_id } = &actions[0] else {
+            unreachable!("canonical graph-only action must be a refresh")
+        };
+        let status = integrity_graph_status_for_workspace(workspace_id)?;
+        let estimated_rows = status
+            .report
+            .as_ref()
+            .map(|report| report.unique_nodes.saturating_add(report.unique_edges) as u64)
+            .unwrap_or(0);
+        graph_statuses.push(status);
+        (
+            memory.checksum,
+            vec![IntegrityRepairEstimate {
+                action: actions[0].clone(),
+                estimated_rows,
+            }],
+        )
+    } else {
+        let memory_actions = actions
+            .iter()
+            .filter_map(IntegrityRepairAction::as_memory_action)
+            .collect::<Vec<_>>();
+        let preview = memory_facade(state)
+            .preview_integrity_repair(&known_scopes, memory_actions)
+            .map_err(|error| match error {
+                MemoryError::Validation(_) | MemoryError::Policy(_) | MemoryError::NotFound(_) => {
+                    integrity_bad_request("integrity_preview_invalid")
+                }
+                MemoryError::Store(_) => {
+                    integrity_internal_error("integrity_preview_failed", error)
+                }
+            })?;
+        (
+            preview.audit_checksum,
+            preview
+                .estimates
+                .into_iter()
+                .map(IntegrityRepairEstimate::from)
+                .collect(),
+        )
+    };
+    let audit_checksum = gateway_audit_checksum(&memory_checksum, &actions, &graph_statuses)
+        .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
+    let approval_token = gateway_approval_token(&audit_checksum, &actions)
+        .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
+    Ok(IntegrityRepairPreviewResponse {
+        audit_checksum,
+        actions,
+        estimates,
+        approval_token,
+    })
+}
+
+async fn integrity_audit(
+    State(state): State<AppState>,
+) -> Result<Json<IntegrityAuditResponse>, GatewayError> {
+    let known_scopes = integrity_known_scopes();
+    let memory = memory_facade(&state)
+        .audit_integrity(&known_scopes)
+        .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+    let vault = lock_vault_store(&state)?
+        .audit_integrity()
+        .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+    Ok(Json(IntegrityAuditResponse {
+        memory,
+        vault,
+        graphs: integrity_graph_statuses(),
+    }))
+}
+
+async fn integrity_repair_preview(
+    State(state): State<AppState>,
+    Json(request): Json<IntegrityRepairPreviewRequest>,
+) -> Result<Json<IntegrityRepairPreviewResponse>, GatewayError> {
+    Ok(Json(integrity_preview_for_actions(
+        &state,
+        request.actions,
+    )?))
+}
+
+fn next_integrity_backup_path() -> Result<PathBuf, GatewayError> {
+    let timestamp = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    let directory = gateway_data_dir()
+        .map_err(|error| integrity_internal_error("integrity_backup_failed", error))?
+        .join("backups")
+        .join("integrity")
+        .join(format!("{timestamp}-{}", uuid::Uuid::new_v4().simple()));
+    fs::create_dir_all(&directory)
+        .map_err(|error| integrity_internal_error("integrity_backup_failed", error))?;
+    Ok(directory.join("memory.sqlite"))
+}
+
+async fn integrity_repair_apply(
+    State(state): State<AppState>,
+    Json(request): Json<IntegrityRepairApplyRequest>,
+) -> Result<Json<IntegrityRepairApplyResponse>, GatewayError> {
+    if !request.confirm {
+        return Err(integrity_bad_request("integrity_confirmation_required"));
+    }
+    let current = integrity_preview_for_actions(&state, request.actions.clone())?;
+    if request.audit_checksum != current.audit_checksum
+        || request.approval_token != current.approval_token
+        || request.actions != current.actions
+    {
+        return Err(GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "integrity_preview_stale",
+            message: "integrity preview is stale".to_string(),
+        });
+    }
+
+    let known_scopes = integrity_known_scopes();
+    let backup_path = next_integrity_backup_path()?;
+    if current.actions[0].is_graph_refresh() {
+        let before = memory_facade(&state)
+            .audit_integrity(&known_scopes)
+            .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+        let backup = memory_facade(&state)
+            .backup_to(&backup_path)
+            .map_err(|error| integrity_internal_error("integrity_backup_failed", error))?;
+        let IntegrityRepairAction::RefreshProjectGraph { workspace_id } = &current.actions[0]
+        else {
+            unreachable!("canonical graph-only action must be a refresh")
+        };
+        let workspace_id = workspace_id.as_str().to_string();
+        let folder = load_workspaces_file()
+            .workspaces
+            .into_iter()
+            .find(|workspace| workspace.id == workspace_id)
+            .and_then(|workspace| workspace.folder)
+            .filter(|folder| !folder.trim().is_empty())
+            .ok_or_else(|| integrity_bad_request("integrity_refresh_workspace_invalid"))?;
+        let build_state = state.clone();
+        let build_workspace = workspace_id.clone();
+        tokio::task::spawn_blocking(move || {
+            build_project_graph(&build_state, &build_workspace, &folder, None)
+        })
+        .await
+        .map_err(|error| integrity_internal_error("integrity_graph_refresh_failed", error))?
+        .map_err(|error| integrity_internal_error("integrity_graph_refresh_failed", error))?;
+        let after = memory_facade(&state)
+            .audit_integrity(&known_scopes)
+            .map_err(|error| integrity_internal_error("integrity_audit_failed", error))?;
+        let graph_status =
+            integrity_graph_status_for_workspace(&MemoryWorkspaceId::new(workspace_id))?;
+        return Ok(Json(IntegrityRepairApplyResponse {
+            before,
+            after,
+            backup: IntegrityBackupSummary {
+                created: true,
+                bytes: backup.bytes_copied,
+            },
+            applied: current.estimates,
+            refreshed_graphs: vec![graph_status],
+        }));
+    }
+
+    let memory_actions = current
+        .actions
+        .iter()
+        .filter_map(IntegrityRepairAction::as_memory_action)
+        .collect::<Vec<_>>();
+    let memory_preview = memory_facade(&state)
+        .preview_integrity_repair(&known_scopes, memory_actions.clone())
+        .map_err(|error| match error {
+            MemoryError::Policy(_) | MemoryError::Validation(_) | MemoryError::NotFound(_) => {
+                GatewayError {
+                    status: StatusCode::CONFLICT,
+                    code: "integrity_preview_stale",
+                    message: "integrity preview is stale".to_string(),
+                }
+            }
+            MemoryError::Store(_) => integrity_internal_error("integrity_preview_failed", error),
+        })?;
+    let latest_gateway_checksum =
+        gateway_audit_checksum(&memory_preview.audit_checksum, &current.actions, &[])
+            .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
+    let latest_gateway_token = gateway_approval_token(&latest_gateway_checksum, &current.actions)
+        .map_err(|error| integrity_internal_error("integrity_preview_failed", error))?;
+    if request.audit_checksum != latest_gateway_checksum
+        || request.approval_token != latest_gateway_token
+    {
+        return Err(GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "integrity_preview_stale",
+            message: "integrity preview is stale".to_string(),
+        });
+    }
+    let result = memory_facade(&state)
+        .apply_integrity_repair(
+            &known_scopes,
+            MemoryIntegrityRepairRequest {
+                audit_checksum: memory_preview.audit_checksum,
+                actions: memory_actions,
+                approval_token: memory_preview.approval_token,
+                backup_path: Some(backup_path),
+            },
+        )
+        .map_err(|error| match error {
+            MemoryError::Policy(_) | MemoryError::Validation(_) => GatewayError {
+                status: StatusCode::CONFLICT,
+                code: "integrity_preview_stale",
+                message: "integrity preview is stale".to_string(),
+            },
+            MemoryError::Store(_) | MemoryError::NotFound(_) => {
+                integrity_internal_error("integrity_repair_failed", error)
+            }
+        })?;
+    Ok(Json(IntegrityRepairApplyResponse {
+        before: result.before,
+        after: result.after,
+        backup: IntegrityBackupSummary {
+            created: true,
+            bytes: result.backup.bytes_copied,
+        },
+        applied: result
+            .applied
+            .into_iter()
+            .map(IntegrityRepairEstimate::from)
+            .collect(),
+        refreshed_graphs: Vec::new(),
+    }))
+}
+
 /// Transparent "project map": (re)build a project's code graph via the isolated
 /// Graphify container and import it. Skips the rebuild when the project is unchanged
 /// since the last build (staleness via newest source mtime). Best-effort, blocking
@@ -68586,5 +68921,216 @@ Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
         );
         // Age helper: 86_400s == 1 day.
         assert!((memory_age_days("unix:999913600", 1_000_000_000) - 1.0).abs() < 0.01);
+    }
+
+    fn integrity_route_test_app(state: super::AppState) -> axum::Router {
+        axum::Router::new()
+            .route(
+                "/api/integrity/audit",
+                axum::routing::get(super::integrity_audit),
+            )
+            .route(
+                "/api/integrity/repair/preview",
+                axum::routing::post(super::integrity_repair_preview),
+            )
+            .route(
+                "/api/integrity/repair/apply",
+                axum::routing::post(super::integrity_repair_apply),
+            )
+            .with_state(state)
+    }
+
+    #[tokio::test]
+    async fn integrity_audit_returns_counts_and_graph_freshness_without_content() {
+        use tower::ServiceExt;
+
+        let dir = isolated_gateway_test_dir("integrity-audit");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data_dir = TestGatewayDataDir::new(&dir);
+        let project = dir.join("fixture-project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            dir.join("workspaces.json"),
+            serde_json::to_vec(&WorkspacesFile {
+                active: "project-a".to_string(),
+                workspaces: vec![WorkspaceRecord {
+                    id: "project-a".to_string(),
+                    name: "Alpha".to_string(),
+                    folder: Some(project.to_string_lossy().into_owned()),
+                    sandbox_mode: None,
+                    approval_policy: None,
+                    writable_roots: None,
+                    skill_confirmations: None,
+                }],
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let state = super::AppState::for_tests();
+        create_publication_route_memory(
+            &state.memory_facade,
+            super::gateway_memory_user_id(),
+            "project-a",
+            "PRIVATE_SENTINEL",
+            local_first_memory::DataSensitivity::Private,
+        );
+        let response = integrity_route_test_app(state)
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/api/integrity/audit")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let (status, body) = memory_source_response_json(response).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["memory"]["integrity_ok"], true);
+        assert_eq!(body["vault"]["integrity_ok"], true);
+        assert_eq!(body["graphs"][0]["status"], "missing");
+        assert!(!body.to_string().contains("PRIVATE_SENTINEL"));
+        assert!(!body.to_string().contains(project.to_string_lossy().as_ref()));
+
+        drop(_data_dir);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn integrity_repair_apply_requires_matching_preview_token_and_confirmation() {
+        use tower::ServiceExt;
+
+        let dir = isolated_gateway_test_dir("integrity-repair");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data_dir = TestGatewayDataDir::new(&dir);
+        let state = super::AppState::for_tests();
+        let app = integrity_route_test_app(state);
+        let preview_response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/integrity/repair/preview")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({
+                            "actions": [{ "type": "rebuild_fts" }]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (preview_status, preview) = memory_source_response_json(preview_response).await;
+        assert_eq!(preview_status, axum::http::StatusCode::OK);
+
+        let mut without_confirmation = preview.clone();
+        without_confirmation["confirm"] = serde_json::json!(false);
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/integrity/repair/apply")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(without_confirmation.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+
+        let mut stale = preview;
+        stale["confirm"] = serde_json::json!(true);
+        stale["approval_token"] = serde_json::json!("stale-token");
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/integrity/repair/apply")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(stale.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+
+        drop(_data_dir);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn integrity_repair_apply_creates_private_backup_without_exposing_paths() {
+        use tower::ServiceExt;
+
+        let dir = isolated_gateway_test_dir("integrity-repair-success");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data_dir = TestGatewayDataDir::new(&dir);
+        let memory_path = dir.join("memory.sqlite");
+        let mut state = super::AppState::for_tests();
+        state.memory_facade = std::sync::Arc::new(local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open(&memory_path).unwrap(),
+        ));
+        create_publication_route_memory(
+            &state.memory_facade,
+            super::gateway_memory_user_id(),
+            local_first_memory::PERSONAL_WORKSPACE,
+            "PRIVATE_SENTINEL",
+            local_first_memory::DataSensitivity::Private,
+        );
+        let app = integrity_route_test_app(state);
+        let preview_response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/integrity/repair/preview")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({
+                            "actions": [{ "type": "rebuild_fts" }]
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (preview_status, mut preview) = memory_source_response_json(preview_response).await;
+        assert_eq!(preview_status, axum::http::StatusCode::OK);
+        preview["confirm"] = serde_json::json!(true);
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/integrity/repair/apply")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(preview.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, body) = memory_source_response_json(response).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["backup"]["created"], true);
+        assert!(body["backup"]["bytes"].as_u64().unwrap() > 0);
+        let encoded = body.to_string();
+        assert!(!encoded.contains("PRIVATE_SENTINEL"));
+        assert!(!encoded.contains(memory_path.to_string_lossy().as_ref()));
+        assert!(!encoded.contains("destination_path"));
+        let backup_root = dir.join("backups").join("integrity");
+        let backup_directories = std::fs::read_dir(&backup_root)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(backup_directories.len(), 1);
+        assert!(backup_directories[0].path().join("memory.sqlite").is_file());
+
+        drop(_data_dir);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
