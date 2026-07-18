@@ -100,6 +100,9 @@ use local_first_desktop_gateway::{
     EnqueueTurnRequest, RoutingBinding, SetActiveLeafRequest, SetBranchLabelRequest,
     SetThreadPinnedRequest, build_chat_runtime_prompt, compact_thread_title, strip_display_markers,
 };
+use local_first_desktop_gateway::project_graph_commit::{
+    ProjectGraphCommitError, stage_project_graph_build,
+};
 // The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
 // Plan helpers still used by NON-loop gateway code (titling, plan projection, etc.); the loop's own
@@ -141,7 +144,8 @@ use local_first_memory::{
     MemoryPublicationDestination, MemoryPublicationEditInput, MemoryPublicationProposal,
     MemoryPublicationResolution, MemoryPublicationResult, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
     MemorySourceCandidateProjection, MemorySourceGrant, MemoryStatus, MemoryUiReadModel,
-    MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain, RecallPack,
+    MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain,
+    ProjectGraphImportReport, RecallPack,
     SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
     WorkspaceId as MemoryWorkspaceId, MEMORY_SOURCE_CANDIDATE_PAGE_MAX, briefing_cache,
     contains_secret, prompt_fingerprint, redact_text as redact_memory_text,
@@ -45283,111 +45287,18 @@ async fn memory_graphify_import(
     })?;
     let user = gateway_memory_user_id();
     let ws = MemoryWorkspaceId::new(&req.workspace_id);
-    let facade = memory_facade(&state);
-    let (entities, rels) = import_graphify_value(&facade, &user, &ws, &graph);
-    Ok(Json(
-        serde_json::json!({ "entities": entities, "relations": rels }),
-    ))
-}
-
-/// Shared import: a Graphify `graph.json` value → entities + entity↔entity relations
-/// in `ws`, tagged `metadata.source="graphify"`. Idempotent: clears the prior code
-/// graph for the scope first, so a rebuild replaces rather than accumulates.
-fn import_graphify_value(
-    facade: &MemoryFacade,
-    user: &MemoryUserId,
-    ws: &MemoryWorkspaceId,
-    graph: &serde_json::Value,
-) -> (usize, usize) {
-    let nodes = graph
-        .get("nodes")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let links = graph
-        .get("links")
-        .or_else(|| graph.get("edges"))
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    // Build entities + relations IN MEMORY first, then write them in ONE transaction.
-    // At scale (a whole repo = tens of thousands of records) per-row autocommit would
-    // take minutes; the batch is seconds.
-    let mut id_to_ref: std::collections::HashMap<String, MemoryRef> =
-        std::collections::HashMap::new();
-    let mut entities: Vec<MemoryEntity> = Vec::with_capacity(nodes.len());
-    for node in &nodes {
-        let Some(id) = node.get("id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let label = node.get("label").and_then(|v| v.as_str()).unwrap_or(id);
-        let file_type = node
-            .get("file_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("code");
-        // Type the code node by shape so the graph reads at a glance: functions/methods
-        // (label ends in "()") vs files (a filename) vs docs/rationale.
-        let entity_type = if label.trim_end().ends_with(')') {
-            "code_symbol"
-        } else if file_type == "document" {
-            "code_doc"
-        } else if file_type == "rationale" {
-            "code_rationale"
-        } else {
-            "code_file"
-        };
-        let reference = MemoryRef::generated(MemoryRefKind::Entity, user.clone(), ws.clone());
-        entities.push(MemoryEntity {
-            reference: reference.clone(),
-            user_id: user.clone(),
-            workspace_id: ws.clone(),
-            entity_type: entity_type.to_string(),
-            name: label.to_string(),
-            canonical_key: format!("code:{id}"),
-            aliases: vec![id.to_string()],
-            privacy_domain: PrivacyDomain::new("personal"),
-            sensitivity: MemoryDataSensitivity::Internal,
-            metadata: serde_json::json!({
-                "source": "graphify",
-                "source_file": node.get("source_file").and_then(|v| v.as_str()).unwrap_or(""),
-                "source_location": node.get("source_location").and_then(|v| v.as_str()).unwrap_or(""),
-            }),
-        });
-        id_to_ref.insert(id.to_string(), reference);
-    }
-    let mut relations: Vec<MemoryRelation> = Vec::with_capacity(links.len());
-    for link in &links {
-        let (Some(s), Some(t)) = (
-            link.get("source").and_then(|v| v.as_str()),
-            link.get("target").and_then(|v| v.as_str()),
-        ) else {
-            continue;
-        };
-        let (Some(src), Some(tgt)) = (id_to_ref.get(s), id_to_ref.get(t)) else {
-            continue;
-        };
-        relations.push(MemoryRelation {
-            reference: MemoryRef::generated(MemoryRefKind::Relation, user.clone(), ws.clone()),
-            user_id: user.clone(),
-            workspace_id: ws.clone(),
-            source_ref: src.clone(),
-            relation_type: link
-                .get("relation")
-                .and_then(|v| v.as_str())
-                .unwrap_or("connects")
-                .to_string(),
-            target_ref: tgt.clone(),
-            confidence: 0.9,
-            privacy_domain: PrivacyDomain::new("personal"),
-            sensitivity: MemoryDataSensitivity::Internal,
-            evidence: Vec::new(),
-            metadata: serde_json::json!({ "source": "graphify" }),
-        });
-    }
-    // One transaction: clear prior graphify data + bulk insert. Returns (entities, relations).
-    facade
-        .import_graphify_batch(user, ws, &entities, &relations)
-        .unwrap_or((0, 0))
+    let report = memory_facade(&state)
+        .import_graphify_value(&user, &ws, &graph)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "graphify_import_failed",
+            message: error.to_string(),
+        })?;
+    Ok(Json(serde_json::json!({
+        "entities": report.unique_nodes,
+        "relations": report.unique_edges,
+        "report": report,
+    })))
 }
 
 /// Directories that are vendored deps / build output / caches — never the user's
@@ -45588,10 +45499,62 @@ fn spawn_project_graph_refresh(state: &AppState, workspace_id: &str) {
     let Some(folder) = folder else { return };
     let st = state.clone();
     let ws = workspace_id.to_string();
-    tokio::task::spawn_blocking(move || build_project_graph(&st, &ws, &folder, None));
+    tokio::task::spawn_blocking(move || {
+        publish_project_graph_result(&ws, &build_project_graph(&st, &ws, &folder, None));
+    });
 }
 
-fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpath: Option<&str>) {
+fn project_graph_error_code(error: &ProjectGraphCommitError) -> &'static str {
+    match error {
+        ProjectGraphCommitError::Stage(_) => "stage_failed",
+        ProjectGraphCommitError::Build(_) => "extraction_failed",
+        ProjectGraphCommitError::MissingGraph => "graph_missing",
+        ProjectGraphCommitError::InvalidJson(_) => "graph_invalid",
+        ProjectGraphCommitError::Import(_) => "import_failed",
+        ProjectGraphCommitError::Publish(_) => "publish_failed",
+        ProjectGraphCommitError::Fingerprint(_) => "fingerprint_failed",
+    }
+}
+
+fn publish_project_graph_result(
+    workspace_id: &str,
+    result: &Result<Option<ProjectGraphImportReport>, ProjectGraphCommitError>,
+) {
+    match result {
+        Ok(Some(report)) => {
+            eprintln!(
+                "project-graph: {workspace_id} → {} nodi, {} archi",
+                report.unique_nodes, report.unique_edges
+            );
+            publish_app_event(serde_json::json!({
+                "type": "project_graph.ready",
+                "workspace": workspace_id,
+                "checksum": report.checksum,
+                "nodes": report.unique_nodes,
+                "edges": report.unique_edges,
+            }));
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!(
+                "project-graph: build failed for {workspace_id} at {}: {error}",
+                project_graph_error_code(error)
+            );
+            publish_app_event(serde_json::json!({
+                "type": "project_graph.failed",
+                "workspace": workspace_id,
+                "code": project_graph_error_code(error),
+            }));
+        }
+    }
+}
+
+fn build_project_graph(
+    state: &AppState,
+    workspace_id: &str,
+    folder: &str,
+    subpath: Option<&str>,
+) -> Result<Option<ProjectGraphImportReport>, ProjectGraphCommitError> {
     let mut root = std::path::PathBuf::from(folder);
     // Subfolder scoping: a huge repo (e.g. a scraper monorepo) maps just the subtree the
     // user points at. Sanitised (no absolute paths / `..`) so it stays under the project.
@@ -45603,7 +45566,9 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
         root = root.join(safe);
     }
     if !root.is_dir() {
-        return;
+        return Err(ProjectGraphCommitError::Build(
+            "project root is unavailable".to_string(),
+        ));
     }
     // Map the WHOLE project: the code graph is extracted on the host (fast) and queried
     // via SQL traversal, where node count is irrelevant. We no longer cap by file count
@@ -45621,31 +45586,24 @@ fn build_project_graph(state: &AppState, workspace_id: &str, folder: &str, subpa
     if graph_path.is_file() {
         if let Ok(prev) = std::fs::read_to_string(&fp_path) {
             if prev == current_fp {
-                return; // unchanged since last extraction
+                return Ok(None); // unchanged since last extraction
             }
         }
     }
-    if let Err(err) = crate::sandbox::run_graphify(&root, &out) {
-        eprintln!("project-graph: build failed for {workspace_id}: {err}");
-        return;
-    }
-    let Ok(raw) = std::fs::read_to_string(&graph_path) else {
-        return;
-    };
-    let Ok(graph) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return;
-    };
     let user = gateway_memory_user_id();
     let ws = MemoryWorkspaceId::new(workspace_id);
-    {
-        let facade = memory_facade(state);
-        let (n, e) = import_graphify_value(&facade, &user, &ws, &graph);
-        eprintln!("project-graph: {workspace_id} → {n} nodi, {e} archi");
-    }
-    let _ = std::fs::write(&fp_path, &current_fp); // remember what we just extracted
-    publish_app_event(
-        serde_json::json!({ "type": "project_graph.ready", "workspace": workspace_id }),
-    );
+    let facade = memory_facade(state);
+    let report = stage_project_graph_build(
+        &out,
+        &current_fp,
+        |staging| crate::sandbox::run_graphify(&root, staging),
+        |graph| {
+            facade
+                .import_graphify_value(&user, &ws, graph)
+                .map_err(|error| ProjectGraphCommitError::Import(error.to_string()))
+        },
+    )?;
+    Ok(Some(report))
 }
 
 #[derive(Deserialize)]
@@ -45683,7 +45641,8 @@ async fn project_graph_ensure(
         // protective .gitignore + baseline commit): versioning, history-back and the
         // git change-signal then work uniformly. Then (re)build the code graph.
         crate::sandbox::ensure_project_git(std::path::Path::new(&folder));
-        build_project_graph(&st, &ws, &folder, subpath.as_deref());
+        let graph_result = build_project_graph(&st, &ws, &folder, subpath.as_deref());
+        publish_project_graph_result(&ws, &graph_result);
         // Refresh the project BRIEF (goals + recent state) from current memory, so the
         // always-on injected briefing is fresh whenever the project is opened.
         {
