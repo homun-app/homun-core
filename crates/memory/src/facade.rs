@@ -13,10 +13,11 @@ use crate::{
     MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
     MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
     MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus,
-    MemoryUpdatePatch, PERSONAL_WORKSPACE, PrivacyDomain, RoutineInference,
-    RoutineInferenceSummary, RoutineRecord, RoutineStatus, SQLiteMemoryStore, THREADS_WORKSPACE,
-    UserId, VectorHit, WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId,
-    contains_secret, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
+    MemoryUpdatePatch, PERSONAL_WORKSPACE, PrivacyDomain, ProjectGraphImportError,
+    ProjectGraphImportReport, RoutineInference, RoutineInferenceSummary, RoutineRecord,
+    RoutineStatus, SQLiteMemoryStore, THREADS_WORKSPACE, UserId, VectorHit,
+    WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, contains_secret,
+    current_timestamp, ensure_artifacts_inside_root, ensure_transition, normalize_graphify_value,
     parse_wiki_markdown,
 };
 use sha2::{Digest, Sha256};
@@ -874,6 +875,44 @@ impl MemoryFacade {
         Ok(self
             .store
             .import_graphify_batch(user_id, workspace_id, entities, relations)?)
+    }
+
+    /// Normalize and atomically replace one workspace's derived project graph.
+    /// A failed write preserves the previously committed projection.
+    pub fn import_graphify_value(
+        &self,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        graph: &serde_json::Value,
+    ) -> MemoryResult<ProjectGraphImportReport> {
+        let normalized = normalize_graphify_value(
+            graph,
+            user_id,
+            workspace_id,
+            PrivacyDomain::new("personal"),
+            DataSensitivity::Internal,
+        )
+        .map_err(|error| match error {
+            ProjectGraphImportError::InvalidRoot | ProjectGraphImportError::InvalidJson(_) => {
+                MemoryError::validation(error.to_string())
+            }
+            ProjectGraphImportError::Store(_) => MemoryError::Store(error.to_string()),
+        })?;
+        let report = normalized.report.clone();
+        let (entities, relations) = self.store.import_graphify_batch(
+            user_id,
+            workspace_id,
+            &normalized.entities,
+            &normalized.relations,
+        )?;
+        if entities != report.unique_nodes || relations != report.unique_edges {
+            return Err(MemoryError::Store(format!(
+                "graphify import report mismatch: expected {}/{} entities/relations, stored {entities}/{relations}",
+                report.unique_nodes, report.unique_edges
+            )));
+        }
+        self.bump_briefing_generation(user_id, workspace_id);
+        Ok(report)
     }
 
     /// Resurrect an entity (drop its tombstone) — used when a live memory references it.

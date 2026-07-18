@@ -2060,13 +2060,15 @@ impl SQLiteMemoryStore {
     ) -> Result<(), String> {
         conn.execute(
             "delete from relations where user_id = ?1 and workspace_id = ?2
-                 and json_extract(metadata_json, '$.source') = 'graphify'",
+                 and (json_extract(metadata_json, '$.source') = 'graphify'
+                      or json_extract(metadata_json, '$.adapter') = 'graphify')",
             params![user_id.as_str(), workspace_id.as_str()],
         )
         .map_err(|error| error.to_string())?;
         conn.execute(
             "delete from entities where user_id = ?1 and workspace_id = ?2
-                 and json_extract(metadata_json, '$.source') = 'graphify'",
+                 and (json_extract(metadata_json, '$.source') = 'graphify'
+                      or json_extract(metadata_json, '$.adapter') = 'graphify')",
             params![user_id.as_str(), workspace_id.as_str()],
         )
         .map_err(|error| error.to_string())?;
@@ -2140,32 +2142,61 @@ impl SQLiteMemoryStore {
         entities: &[MemoryEntity],
         relations: &[MemoryRelation],
     ) -> Result<(usize, usize), String> {
-        // Lock the writer ONCE for the whole transaction: BEGIN/COMMIT/ROLLBACK and
-        // the per-row inserts must run on the SAME connection. The `*_on` helpers
-        // take this `&Connection` directly — calling the public wrappers (which each
-        // re-take the writer lock) inside a BEGIN would deadlock in Pooled mode.
-        let conn = self.write_conn();
-        conn.execute_batch("BEGIN").map_err(|e| e.to_string())?;
-        let run = || -> Result<(usize, usize), String> {
-            self.clear_graphify_on(&conn, user_id, workspace_id)?;
-            for entity in entities {
-                self.upsert_entity_on(&conn, entity)?;
-            }
-            for relation in relations {
-                self.upsert_relation_on(&conn, relation)?;
-            }
-            Ok((entities.len(), relations.len()))
-        };
-        match run() {
-            Ok(counts) => {
-                conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
-                Ok(counts)
-            }
-            Err(error) => {
-                let _ = conn.execute_batch("ROLLBACK");
-                Err(error)
-            }
+        let mut entities = entities.to_vec();
+        let mut relations = relations.to_vec();
+        for metadata in entities
+            .iter_mut()
+            .map(|entity| &mut entity.metadata)
+            .chain(relations.iter_mut().map(|relation| &mut relation.metadata))
+        {
+            let object = metadata
+                .as_object_mut()
+                .ok_or_else(|| "graphify metadata must be a JSON object".to_string())?;
+            object.insert("source".to_string(), serde_json::json!("graphify"));
         }
+        // Lock the writer ONCE for the whole transaction. The `*_on` helpers take
+        // this transaction's connection directly, so pooled mode cannot re-enter
+        // the writer mutex and a dropped error path rolls back automatically.
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+        self.clear_graphify_on(&transaction, user_id, workspace_id)?;
+        for entity in &entities {
+            self.upsert_entity_on(&transaction, entity)?;
+        }
+        for relation in &relations {
+            self.upsert_relation_on(&transaction, relation)?;
+        }
+        let stored_entities: usize = transaction
+            .query_row(
+                "select count(*) from entities
+                 where user_id = ?1 and workspace_id = ?2
+                   and (json_extract(metadata_json, '$.source') = 'graphify'
+                        or json_extract(metadata_json, '$.adapter') = 'graphify')",
+                params![user_id.as_str(), workspace_id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        let stored_relations: usize = transaction
+            .query_row(
+                "select count(*) from relations
+                 where user_id = ?1 and workspace_id = ?2
+                   and (json_extract(metadata_json, '$.source') = 'graphify'
+                        or json_extract(metadata_json, '$.adapter') = 'graphify')",
+                params![user_id.as_str(), workspace_id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if stored_entities != entities.len() || stored_relations != relations.len() {
+            return Err(format!(
+                "graphify replacement count mismatch: expected {}/{} entities/relations, stored {stored_entities}/{stored_relations}",
+                entities.len(),
+                relations.len()
+            ));
+        }
+        transaction.commit().map_err(|error| error.to_string())?;
+        Ok((stored_entities, stored_relations))
     }
 
     /// Resurrect an entity: drop its tombstone so it reappears in the graph. Used by

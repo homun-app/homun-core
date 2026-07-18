@@ -1,5 +1,5 @@
 use local_first_memory::{
-    DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport, PrivacyDomain,
+    DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport, MemoryFacade, PrivacyDomain,
     SQLiteMemoryStore, UserId, WorkspaceId, normalize_graphify_value,
 };
 use std::fs;
@@ -156,6 +156,121 @@ fn graphify_checksum_and_refs_do_not_depend_on_input_order() {
     assert_eq!(forward.relations, reversed.relations);
 }
 
+#[test]
+fn importing_the_same_graph_twice_converges_to_the_same_rows() {
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+    let user = UserId::new("local-user");
+    let workspace = WorkspaceId::new("project-a");
+
+    let first = facade
+        .import_graphify_value(&user, &workspace, &duplicate_graphify_value(false))
+        .unwrap();
+    let second = facade
+        .import_graphify_value(&user, &workspace, &duplicate_graphify_value(true))
+        .unwrap();
+
+    assert_eq!(first.checksum, second.checksum);
+    assert_eq!(
+        facade
+            .list_entities_for_ui(&user, &workspace)
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        facade
+            .list_relations_for_ui(&user, &workspace)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn failed_graphify_replacement_rolls_back_to_the_previous_projection() {
+    let db_path =
+        std::env::temp_dir().join(format!("graphify-rollback-{}.sqlite", uuid::Uuid::new_v4()));
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open(&db_path).unwrap());
+    let user = UserId::new("local-user");
+    let workspace = WorkspaceId::new("project-a");
+    facade
+        .import_graphify_value(&user, &workspace, &duplicate_graphify_value(false))
+        .unwrap();
+    let old_entities = facade.list_entities_for_ui(&user, &workspace).unwrap();
+    let old_relations = facade.list_relations_for_ui(&user, &workspace).unwrap();
+
+    let connection = rusqlite::Connection::open(&db_path).unwrap();
+    connection
+        .execute_batch(
+            "create trigger fail_graphify_relation
+             before insert on relations
+             when json_extract(new.metadata_json, '$.source') = 'graphify'
+             begin
+                 select raise(abort, 'forced graphify insert failure');
+             end;",
+        )
+        .unwrap();
+
+    let error = facade
+        .import_graphify_value(&user, &workspace, &changed_graphify_value())
+        .unwrap_err();
+    assert!(error.to_string().contains("forced graphify insert failure"));
+    assert_eq!(
+        facade.list_entities_for_ui(&user, &workspace).unwrap(),
+        old_entities
+    );
+    assert_eq!(
+        facade.list_relations_for_ui(&user, &workspace).unwrap(),
+        old_relations
+    );
+    drop(connection);
+    let _ = fs::remove_file(db_path);
+}
+
+#[test]
+fn artifact_import_replaces_nodes_removed_from_the_new_graph() {
+    let root = graphify_fixture();
+    let artifacts = GraphifyArtifacts::from_output_dir(&root).unwrap();
+    let store = SQLiteMemoryStore::open_in_memory().unwrap();
+    let importer = GraphifyImport::new(&store);
+    let user = UserId::new("local-user");
+    let workspace = WorkspaceId::new("project-a");
+    importer
+        .import_artifacts(
+            &artifacts,
+            &user,
+            &workspace,
+            PrivacyDomain::new("personal"),
+            DataSensitivity::Internal,
+        )
+        .unwrap();
+    fs::write(
+        &artifacts.graph_json_path,
+        changed_graphify_value().to_string(),
+    )
+    .unwrap();
+
+    importer
+        .import_artifacts(
+            &artifacts,
+            &user,
+            &workspace,
+            PrivacyDomain::new("personal"),
+            DataSensitivity::Internal,
+        )
+        .unwrap();
+
+    let mut names = store
+        .list_entities(&user, &workspace)
+        .unwrap()
+        .into_iter()
+        .map(|entity| entity.name)
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, vec!["a()", "c()"]);
+    assert_eq!(store.list_relations(&user, &workspace).unwrap().len(), 1);
+}
+
 fn duplicate_graphify_value(reversed: bool) -> serde_json::Value {
     let mut nodes = vec![
         serde_json::json!({"id":"a","label":"a()","source_file":"src/a.rs","raw_payload":"discard-me"}),
@@ -173,6 +288,18 @@ fn duplicate_graphify_value(reversed: bool) -> serde_json::Value {
         links.reverse();
     }
     serde_json::json!({"nodes": nodes, "links": links})
+}
+
+fn changed_graphify_value() -> serde_json::Value {
+    serde_json::json!({
+        "nodes": [
+            {"id":"a","label":"a()","source_file":"src/a.rs"},
+            {"id":"c","label":"c()","source_file":"src/c.rs"}
+        ],
+        "links": [
+            {"source":"a","target":"c","relation":"calls"}
+        ]
+    })
 }
 
 fn graphify_fixture() -> std::path::PathBuf {

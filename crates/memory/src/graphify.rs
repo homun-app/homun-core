@@ -149,16 +149,16 @@ impl<'a> GraphifyImport<'a> {
             .iter()
             .map(|relation| relation.reference.clone())
             .collect::<Vec<_>>();
-        for entity in &normalized.entities {
-            self.store.upsert_entity(entity)?;
-        }
-        for relation in &normalized.relations {
-            self.store.upsert_relation(relation)?;
-        }
+        let (nodes_imported, edges_imported) = self.store.import_graphify_batch(
+            user_id,
+            workspace_id,
+            &normalized.entities,
+            &normalized.relations,
+        )?;
 
         Ok(GraphifyImportSummary {
-            nodes_imported: entity_refs.len(),
-            edges_imported: relation_refs.len(),
+            nodes_imported,
+            edges_imported,
             entity_refs,
             relation_refs,
             report: normalized.report,
