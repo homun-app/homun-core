@@ -6,7 +6,7 @@ use crate::{
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
     MemoryContextItem, MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError,
     MemoryEvent, MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryHealth,
-    MemoryLifecycleRequest, MemoryMaintenanceReport, MemoryPolicyEngine,
+    MemoryIntegrityReport, MemoryLifecycleRequest, MemoryMaintenanceReport, MemoryPolicyEngine,
     MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationEditInput,
     MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
     MemoryPublicationResolution, MemoryPublicationResult, MemoryPublicationStatus,
@@ -133,6 +133,15 @@ impl MemoryFacade {
     /// Reclaims free space in the SQLite database file.
     pub fn vacuum(&self) -> Result<(), String> {
         self.store.vacuum()
+    }
+
+    pub fn audit_integrity(
+        &self,
+        known_scopes: &[(UserId, WorkspaceId)],
+    ) -> MemoryResult<MemoryIntegrityReport> {
+        self.store
+            .audit_integrity(known_scopes)
+            .map_err(MemoryError::Store)
     }
 
     pub fn record_event(&self, event: &MemoryEvent) -> MemoryResult<()> {

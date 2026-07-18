@@ -2,14 +2,14 @@ use crate::{
     AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AutomationCandidateRecord, AutomationCandidateStatus,
     DataSensitivity, EncryptedJson, KeyProvider, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
-    MemoryEntity, MemoryEvent, MemoryEvidence, MemoryHealth, MemoryMaintenanceReport,
-    MemoryPublicationCandidate, MemoryPublicationLink, MemoryPublicationProposal,
-    MemoryPublicationReasonCode, MemoryPublicationResolution, MemoryPublicationStatus,
-    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryRestoreMode,
-    MemorySourceAccessEvent, MemorySourceAccessOutcome, MemorySourceCandidateProjection,
-    MemorySourceGrant, MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord,
-    THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId, WorkspacePurgeReport,
-    contains_secret, current_timestamp, decrypt_json, encrypt_json,
+    MemoryEntity, MemoryEvent, MemoryEvidence, MemoryHealth, MemoryIntegrityReport,
+    MemoryMaintenanceReport, MemoryPublicationCandidate, MemoryPublicationLink,
+    MemoryPublicationProposal, MemoryPublicationReasonCode, MemoryPublicationResolution,
+    MemoryPublicationStatus, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
+    MemoryRestoreMode, MemorySourceAccessEvent, MemorySourceAccessOutcome,
+    MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantValidationError,
+    PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId,
+    WorkspacePurgeReport, contains_secret, current_timestamp, decrypt_json, encrypt_json,
     validate_memory_source_grant_intrinsic,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
@@ -460,6 +460,15 @@ impl SQLiteMemoryStore {
             total_wiki_pages: self.count_table("wiki_pages")?,
             access_audit_count: self.access_audit_count()?,
         })
+    }
+
+    /// Runs a read-only, metadata-only integrity audit on one read connection.
+    pub fn audit_integrity(
+        &self,
+        known_scopes: &[(UserId, WorkspaceId)],
+    ) -> Result<MemoryIntegrityReport, String> {
+        let connection = self.read_conn();
+        crate::audit_memory_integrity_on(&connection, known_scopes)
     }
 
     pub fn upsert_memory_source_grant(
