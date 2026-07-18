@@ -749,6 +749,12 @@ def render_pptx(deck, base_dir, out_path):
             cover_fill = brand2 if is_editorial_theme else brand
             cover_text = ink if is_editorial_theme else white
             fill_bg(slide, cover_fill)
+            eyebrow = s.get("eyebrow", "")
+            if eyebrow:
+                # small-caps editorial kicker above the title (matches HTML .eyebrow);
+                # fail-open — no eyebrow key/value means no extra shape at all.
+                textbox(slide, Inches(0.95), Inches(1.9), Inches(11.5), Inches(0.5),
+                        [(eyebrow.upper(), 14, accent, head_font, True, False)])
             runs = [(title, 46 if layout == "cover" else 40, cover_text, head_font, True, False)]
             if s.get("subtitle"):
                 runs.append((s["subtitle"], 20, cover_text, body_font, False, False))

@@ -19549,6 +19549,16 @@ fn docx_heading1_paragraph(text: &str) -> String {
     }
 }
 
+/// A small-caps editorial kicker paragraph above a cover heading (DOCX). Mirrors
+/// the HTML `.eyebrow` styling intent (uppercase, spaced) as far as flat DOCX runs
+/// allow: bold + uppercased text. Empty input renders nothing (fail-open).
+fn docx_eyebrow_paragraph(text: &str) -> String {
+    if text.trim().is_empty() {
+        return String::new();
+    }
+    docx_paragraph_xml(None, &docx_text_run(&text.to_uppercase(), true, false))
+}
+
 /// A Heading2 paragraph, or nothing for an empty/absent title — most doc.json
 /// blocks carry an optional `title` field (`document_content.rs`'s block
 /// registry) and an empty block-level title is deliberate ("use \"\" if none"),
@@ -19611,12 +19621,14 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
     let kind = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
     match kind {
         "section_cover" => {
-            let mut out = docx_heading1_paragraph(&doc_block_field(block, "title"));
+            let mut out = docx_eyebrow_paragraph(&doc_block_field(block, "eyebrow"));
+            out.push_str(&docx_heading1_paragraph(&doc_block_field(block, "title")));
             out.push_str(&docx_normal_paragraph(&doc_block_field(block, "subtitle")));
             out
         }
         "contact_header" => {
-            let mut out = docx_heading1_paragraph(&doc_block_field(block, "name"));
+            let mut out = docx_eyebrow_paragraph(&doc_block_field(block, "eyebrow"));
+            out.push_str(&docx_heading1_paragraph(&doc_block_field(block, "name")));
             let headline = doc_block_field(block, "headline");
             if !headline.is_empty() {
                 out.push_str(&docx_paragraph_xml(
@@ -19818,7 +19830,8 @@ fn doc_block_to_docx_xml(block: &serde_json::Value) -> String {
         // slot to promote to a heading; DOCX editability wins over layout
         // fidelity (the designed HTML/PDF is the fidelity path).
         "letterhead" => {
-            let mut out = docx_normal_paragraph(&doc_block_field(block, "organization"));
+            let mut out = docx_eyebrow_paragraph(&doc_block_field(block, "eyebrow"));
+            out.push_str(&docx_normal_paragraph(&doc_block_field(block, "organization")));
             out.push_str(&docx_normal_paragraph(&doc_block_field(
                 block,
                 "contact_line",
@@ -61833,6 +61846,20 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(document.contains("<w:tbl>"), "{document}");
         assert!(archive.by_name("[Content_Types].xml").is_ok());
         assert!(archive.by_name("word/styles.xml").is_ok());
+    }
+
+    #[test]
+    fn docx_cover_blocks_render_eyebrow_before_title() {
+        let sc = serde_json::json!({"type": "section_cover", "title": "Acme", "subtitle": "s",
+            "eyebrow": "CASE STUDY"});
+        let xml = super::doc_block_to_docx_xml(&sc);
+        assert!(xml.contains("CASE STUDY"));
+        // eyebrow appears BEFORE the title text in the XML stream
+        assert!(xml.find("CASE STUDY").unwrap() < xml.find("Acme").unwrap());
+        // a cover block WITHOUT eyebrow renders no eyebrow paragraph (fail-open)
+        let sc2 = serde_json::json!({"type": "section_cover", "title": "Acme", "subtitle": "s"});
+        let xml2 = super::doc_block_to_docx_xml(&sc2);
+        assert!(!xml2.contains("CASE STUDY"));
     }
 
     #[test]
