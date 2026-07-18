@@ -20,7 +20,8 @@ use crate::{
     RoutineStatus, SQLiteMemoryStore, THREADS_WORKSPACE, UserId, VectorHit,
     WikiCorrectionSyncReport, WikiFileStore, WikiPage, WorkspaceId, WorkspacePurgeReport,
     contains_secret, current_timestamp, ensure_artifacts_inside_root, ensure_transition,
-    normalize_graphify_value, parse_wiki_markdown,
+    memory_evolution_metadata, memory_is_current_at, normalize_graphify_value,
+    parse_wiki_markdown,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -352,6 +353,41 @@ impl MemoryFacade {
         reason: &str,
     ) -> MemoryResult<MemoryRecord> {
         self.transition_memory(request, reference, MemoryStatus::Stale, reason)
+    }
+
+    /// Marks temporally expired active memories stale without deleting their history.
+    /// Repeating the pass at the same timestamp is a no-op.
+    pub fn expire_due_memories(
+        &self,
+        request: &MemoryLifecycleRequest,
+        now_unix: i64,
+    ) -> MemoryResult<usize> {
+        let due = self
+            .store
+            .list_memories(&request.user_id, &request.workspace_id)?
+            .into_iter()
+            .filter(|memory| {
+                matches!(
+                    memory.status,
+                    MemoryStatus::Candidate | MemoryStatus::Confirmed
+                ) && memory.superseded_by.is_none()
+                    && memory_evolution_metadata(&memory.metadata)
+                        .ok()
+                        .flatten()
+                        .and_then(|evolution| evolution.valid_until)
+                        .is_some_and(|valid_until| valid_until <= now_unix)
+            })
+            .map(|memory| memory.reference)
+            .collect::<Vec<_>>();
+        for reference in &due {
+            self.transition_memory(
+                request,
+                reference,
+                MemoryStatus::Stale,
+                "temporal_expiry",
+            )?;
+        }
+        Ok(due.len())
     }
 
     pub fn merge_memories(
@@ -1042,7 +1078,7 @@ impl MemoryFacade {
             .store
             .list_memories(&request.user_id, &request.workspace_id)?
         {
-            if memory.status != MemoryStatus::Confirmed {
+            if !memory_is_current_at(&memory, unix_now(), false) {
                 continue;
             }
             let decision = self.policy.decide_memory(request, &memory);
@@ -1088,6 +1124,11 @@ impl MemoryFacade {
             self.store
                 .record_access_decision(&request.access, &decision)?;
             if decision.kind == AccessDecisionKind::Deny {
+                continue;
+            }
+            let allow_candidate = request.statuses.is_empty()
+                || request.statuses.contains(&MemoryStatus::Candidate);
+            if !memory_is_current_at(&memory, unix_now(), allow_candidate) {
                 continue;
             }
             if !request.statuses.is_empty() && !request.statuses.contains(&memory.status) {
@@ -1191,7 +1232,10 @@ impl MemoryFacade {
         request: &AuthorizedMemorySearchRequest,
         memory: &MemoryRecord,
     ) -> bool {
-        self.policy.decide_memory(&request.access, memory).kind != AccessDecisionKind::Deny
+        let allow_candidate = request.statuses.is_empty()
+            || request.statuses.contains(&MemoryStatus::Candidate);
+        memory_is_current_at(memory, unix_now(), allow_candidate)
+            && self.policy.decide_memory(&request.access, memory).kind != AccessDecisionKind::Deny
             && request
                 .source_policy
                 .as_ref()
@@ -1307,10 +1351,7 @@ impl MemoryFacade {
     ) -> bool {
         if memory.user_id != source.source_user_id
             || memory.workspace_id != source.source_workspace_id
-            || !matches!(
-                memory.status,
-                MemoryStatus::Candidate | MemoryStatus::Confirmed
-            )
+            || !memory_is_current_at(memory, unix_now(), true)
             || is_published_alias(memory)
         {
             return false;
@@ -2317,10 +2358,7 @@ impl MemoryFacade {
         if source.status == MemoryStatus::Deleted {
             return Err(MemoryError::not_found("publication_source_not_found"));
         }
-        if !matches!(
-            source.status,
-            MemoryStatus::Candidate | MemoryStatus::Confirmed
-        ) {
+        if !memory_is_current_at(source, unix_now(), true) {
             return Err(MemoryError::policy("publication_source_inactive"));
         }
         if source.sensitivity == DataSensitivity::Secret {
@@ -3095,6 +3133,13 @@ fn vector_index_scope_key(user_id: &UserId, workspace_id: &WorkspaceId) -> Strin
     format!("{}|{}", user_id.as_str(), workspace_id.as_str())
 }
 
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
+}
+
 fn is_published_alias(memory: &MemoryRecord) -> bool {
     memory
         .metadata
@@ -3105,10 +3150,7 @@ fn is_published_alias(memory: &MemoryRecord) -> bool {
 
 fn publication_candidate_is_eligible(memory: &MemoryRecord) -> bool {
     memory.reference.kind == MemoryRefKind::Memory
-        && matches!(
-            memory.status,
-            MemoryStatus::Candidate | MemoryStatus::Confirmed
-        )
+        && memory_is_current_at(memory, unix_now(), true)
         && memory.sensitivity != DataSensitivity::Secret
         && !is_published_alias(memory)
         && publication_user_metadata_for_secret_scan(memory).is_ok_and(|metadata| {

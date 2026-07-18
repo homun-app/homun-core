@@ -18,21 +18,24 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::{
     cosine, dedup_tokens, jaccard, MemoryFacade, MemoryLifecycleRequest, MemoryRef, MemoryRefKind,
-    MemoryStatus, PERSONAL_WORKSPACE, PrivacyDomain, DataSensitivity, UserId, WikiPage, WorkspaceId,
-    recall::DEDUP_JACCARD, embedding::DEDUP_COSINE, THREADS_WORKSPACE,
+    PERSONAL_WORKSPACE, PrivacyDomain, DataSensitivity, UserId, WikiPage, WorkspaceId,
+    recall::DEDUP_JACCARD, embedding::DEDUP_COSINE, THREADS_WORKSPACE, memory_is_current_at,
 };
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
+}
 
 /// Predicato "record open-loop ATTIVO" — versione completa (spostata fedelmente
 /// dal gateway `active_open_loop_record`). Differisce dalla copia parziale in
 /// `learn.rs` perché filtra anche `superseded_by`, testo vuoto e `runtime_plan`
 /// (i runtime-plan sono control-flow dell'harness, non open-loop generici).
-fn active_open_loop_record(memory: &crate::MemoryRecord) -> bool {
+fn active_open_loop_record(memory: &crate::MemoryRecord, now_unix: i64) -> bool {
     memory.memory_type == "open_loop"
-        && matches!(
-            memory.status,
-            MemoryStatus::Confirmed | MemoryStatus::Candidate
-        )
-        && memory.superseded_by.is_none()
+        && memory_is_current_at(memory, now_unix, true)
         && !memory.text.trim().is_empty()
         // Runtime plans are harness-owned control-flow state. They are resumed
         // only through the per-thread runtime-plan loader; injecting them as
@@ -127,11 +130,11 @@ pub fn rebuild_decisions_wiki(
     let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
         return;
     };
+    let now_unix = unix_now();
     let mut decisions: Vec<_> = memories
         .into_iter()
         .filter(|m| {
-            m.memory_type == "decision"
-                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            m.memory_type == "decision" && memory_is_current_at(m, now_unix, true)
         })
         .collect();
     if decisions.is_empty() {
@@ -244,19 +247,18 @@ pub fn rebuild_project_brief(
     let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
         return;
     };
+    let now_unix = unix_now();
     let goals: Vec<String> = memories
         .iter()
         .filter(|m| {
-            m.memory_type == "goal"
-                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            m.memory_type == "goal" && memory_is_current_at(m, now_unix, true)
         })
         .map(|m| m.text.trim().to_string())
         .collect();
     let decisions: Vec<String> = memories
         .iter()
         .filter(|m| {
-            m.memory_type == "decision"
-                && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+            m.memory_type == "decision" && memory_is_current_at(m, now_unix, true)
         })
         .map(|m| m.text.lines().next().unwrap_or(&m.text).trim().to_string())
         .collect();
@@ -328,9 +330,10 @@ pub fn rebuild_status_wiki(
     let Ok(memories) = facade.list_memories_for_ui(user_id, workspace) else {
         return;
     };
+    let now_unix = unix_now();
     let open_loops: Vec<(MemoryRef, String)> = memories
         .into_iter()
-        .filter(|m| active_open_loop_record(m))
+        .filter(|m| active_open_loop_record(m, now_unix))
         .map(|memory| (memory.reference, memory.text))
         .collect();
     let (body, linked_refs) = status_wiki_body_from_open_loops(&open_loops);
@@ -372,11 +375,12 @@ pub fn deduplicate_open_loops(
     user_id: &UserId,
     workspace: &WorkspaceId,
 ) -> usize {
+    let now_unix = unix_now();
     let mut loops: Vec<crate::MemoryRecord> = facade
         .list_memories_for_ui(user_id, workspace)
         .unwrap_or_default()
         .into_iter()
-        .filter(|m| active_open_loop_record(m))
+        .filter(|m| active_open_loop_record(m, now_unix))
         .collect();
     if loops.len() < 2 {
         return 0;
@@ -461,13 +465,14 @@ pub fn consolidate_prepare(
     }
 
     // 1. Read the durable memories + their embeddings.
+    let now_unix = unix_now();
     let mems: Vec<(MemoryRef, String, String)> = facade
         .list_memories_for_ui(user, workspace)
         .map(|memories| {
             memories
                 .into_iter()
                 .filter(|m| {
-                    matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                    memory_is_current_at(m, now_unix, true)
                         && matches!(
                             m.memory_type.as_str(),
                             "fact" | "preference" | "decision" | "goal"

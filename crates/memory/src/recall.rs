@@ -194,7 +194,7 @@ use crate::{
     AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, MemoryAccessRequest,
     MemoryCollectionKey, MemoryFacade, MemoryGrantOverrideEffect, MemoryRecord, MemoryRef,
     MemoryResult, MemoryScope, MemorySearchRequest, MemoryStatus, PERSONAL_WORKSPACE,
-    PrivacyDomain, RecallHit, RecallPack, UserId, WorkspaceId,
+    PrivacyDomain, RecallHit, RecallPack, UserId, WorkspaceId, memory_is_current_at,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -940,6 +940,7 @@ pub fn recall_search_on_facade(
         .list_memories_for_ui(user, workspace)
         .map(|ms| {
             ms.into_iter()
+                .filter(|memory| memory_is_current_at(memory, now_secs, true))
                 .map(|m| (m.reference.to_string(), m))
                 .collect()
         })
@@ -1195,5 +1196,75 @@ mod tests {
             recall_search_on_facade(&facade, &user, &ws, "ok", &[], None),
             None
         );
+    }
+
+    #[test]
+    fn semantic_recall_uses_only_current_temporal_records() {
+        use crate::{
+            MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryRefKind, SQLiteMemoryStore,
+            write_memory_evolution_metadata,
+        };
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let user = UserId::new("current-user");
+        let ws = WorkspaceId::new("current-project");
+        let make_record = |text: &str| MemoryRecord {
+            reference: crate::MemoryRef::generated(
+                MemoryRefKind::Memory,
+                user.clone(),
+                ws.clone(),
+            ),
+            user_id: user.clone(),
+            workspace_id: ws.clone(),
+            memory_type: "decision".to_string(),
+            text: text.to_string(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.9,
+            status: MemoryStatus::Confirmed,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: DataSensitivity::Public,
+            metadata: serde_json::json!({}),
+            created_at: "unix:100".to_string(),
+            updated_at: "unix:100".to_string(),
+            last_seen_at: None,
+            supersedes: vec![],
+            superseded_by: None,
+            correction_of: None,
+        };
+        let current = make_record("Current temporal launch is Monday");
+        let mut old = make_record("Current temporal launch was Friday");
+        old.superseded_by = Some(current.reference.clone());
+        let mut expired = make_record("Current temporal launch was Tuesday");
+        write_memory_evolution_metadata(
+            &mut expired.metadata,
+            &MemoryEvolutionMetadata {
+                kind: MemoryEvolutionKind::Independent,
+                target_refs: vec![],
+                valid_from: None,
+                valid_until: Some(1),
+                last_confirmed_at: None,
+                reinforcement_count: 1,
+                classifier: "test".to_string(),
+                classifier_confidence: 1.0,
+            },
+        )
+        .unwrap();
+        for record in [&current, &old, &expired] {
+            facade.upsert_memory(record).unwrap();
+        }
+
+        let block = recall_search_on_facade(
+            &facade,
+            &user,
+            &ws,
+            "current temporal launch schedule",
+            &[],
+            None,
+        )
+        .unwrap();
+
+        assert!(block.contains("Monday"));
+        assert!(!block.contains("Friday"));
+        assert!(!block.contains("Tuesday"));
     }
 }

@@ -1,9 +1,10 @@
 use crate::{
     AccessDecisionKind, DataSensitivity, MemoryAccessRequest, MemoryEntity, MemoryFacade,
-    MemoryRecord, MemoryRef, MemoryRelation, PrivacyDomain, UserId, WikiPage, WorkspaceId,
+    MemoryEvolutionMetadata, MemoryRecord, MemoryRef, MemoryRelation, PrivacyDomain, UserId,
+    WikiPage, WorkspaceId, memory_evolution_metadata,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiCount {
@@ -38,10 +39,21 @@ pub struct MemoryListItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryDetail {
     pub memory: MemoryListItem,
+    #[serde(default)]
+    pub evolution: Option<MemoryEvolutionMetadata>,
+    #[serde(default)]
+    pub history: Vec<MemoryHistoryItem>,
     pub evidence: Vec<MemoryRef>,
     pub entities: Vec<MemoryEntity>,
     pub relations: Vec<MemoryRelation>,
     pub wiki_pages: Vec<WikiPage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MemoryHistoryItem {
+    pub memory: MemoryListItem,
+    #[serde(default)]
+    pub evolution: Option<MemoryEvolutionMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +157,8 @@ impl<'a> MemoryUiReadModel<'a> {
         .into_iter()
         .filter(|page| page.linked_refs.contains(reference))
         .collect();
+        let evolution = memory_evolution_metadata(&memory.metadata)?;
+        let history = self.evolution_history(request, &memory, &relations)?;
 
         Ok(Some(MemoryDetail {
             evidence: self
@@ -154,10 +168,82 @@ impl<'a> MemoryUiReadModel<'a> {
                 .map(|evidence| evidence.evidence_ref)
                 .collect(),
             memory: memory_list_item(memory),
+            evolution,
+            history,
             entities,
             relations,
             wiki_pages,
         }))
+    }
+
+    fn evolution_history(
+        &self,
+        request: &MemoryAccessRequest,
+        root: &MemoryRecord,
+        relations: &[MemoryRelation],
+    ) -> Result<Vec<MemoryHistoryItem>, String> {
+        let mut queue = VecDeque::new();
+        queue.extend(root.supersedes.iter().cloned());
+        queue.extend(root.superseded_by.iter().cloned());
+        queue.extend(root.correction_of.iter().cloned());
+        if let Some(evolution) = memory_evolution_metadata(&root.metadata)? {
+            queue.extend(evolution.target_refs);
+        }
+        for relation in relations.iter().filter(|relation| {
+            matches!(
+                relation.relation_type.as_str(),
+                "extends" | "derived_from" | "conflicts_with"
+            )
+        }) {
+            if relation.source_ref == root.reference {
+                queue.push_back(relation.target_ref.clone());
+            } else if relation.target_ref == root.reference {
+                queue.push_back(relation.source_ref.clone());
+            }
+        }
+        let mut visited = HashSet::from([root.reference.clone()]);
+        let mut history = Vec::new();
+        while let Some(reference) = queue.pop_front() {
+            if history.len() >= 100 || !visited.insert(reference.clone()) {
+                continue;
+            }
+            let Some(memory) = self.facade.get_memory_for_ui(
+                &reference,
+                &request.user_id,
+                &request.workspace_id,
+            )? else {
+                continue;
+            };
+            let decision = self.facade.decide_memory_for_ui(request, &memory);
+            self.facade.audit_ui_decision(request, &decision)?;
+            if decision.kind == AccessDecisionKind::Deny {
+                continue;
+            }
+            queue.extend(memory.supersedes.iter().cloned());
+            queue.extend(memory.superseded_by.iter().cloned());
+            queue.extend(memory.correction_of.iter().cloned());
+            let evolution = memory_evolution_metadata(&memory.metadata)?;
+            if let Some(metadata) = &evolution {
+                queue.extend(metadata.target_refs.iter().cloned());
+            }
+            for relation in relations.iter().filter(|relation| {
+                matches!(
+                    relation.relation_type.as_str(),
+                    "extends" | "derived_from" | "conflicts_with"
+                )
+            }) {
+                if relation.source_ref == reference {
+                    queue.push_back(relation.target_ref.clone());
+                } else if relation.target_ref == reference {
+                    queue.push_back(relation.source_ref.clone());
+                }
+            }
+            history.push(MemoryHistoryItem {
+                memory: memory_list_item(memory),
+                evolution,
+            });
+        }
+        Ok(history)
     }
 
     pub fn privacy_overview(

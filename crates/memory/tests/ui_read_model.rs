@@ -1,7 +1,8 @@
 use local_first_memory::{
     DataSensitivity, MemoryAccessRequest, MemoryEntity, MemoryEvent, MemoryEvidence, MemoryFacade,
-    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryStatus, MemoryUiReadModel,
-    PrivacyDomain, SQLiteMemoryStore, UserId, WikiPage, WorkspaceId,
+    MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, MemoryStatus, MemoryUiReadModel, PrivacyDomain, SQLiteMemoryStore, UserId,
+    WikiPage, WorkspaceId, write_memory_evolution_metadata,
 };
 
 #[test]
@@ -50,6 +51,54 @@ fn ui_read_model_returns_memory_detail_with_refs_and_links() {
     assert_eq!(detail.entities.len(), 2);
     assert_eq!(detail.relations.len(), 1);
     assert_eq!(detail.wiki_pages.len(), 1);
+}
+
+#[test]
+fn ui_detail_exposes_authorized_evolution_history_without_leaking_denied_text() {
+    let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+    let mut previous = memory("history_old", "work", DataSensitivity::Private);
+    previous.text = "The authorized historical launch was Friday".to_string();
+    let denied = memory("history_denied", "personal", DataSensitivity::Secret);
+    let mut current = memory("history_current", "work", DataSensitivity::Private);
+    current.text = "The current launch is Monday".to_string();
+    current.supersedes = vec![previous.reference.clone(), denied.reference.clone()];
+    previous.superseded_by = Some(current.reference.clone());
+    write_memory_evolution_metadata(
+        &mut current.metadata,
+        &MemoryEvolutionMetadata {
+            kind: MemoryEvolutionKind::Updates,
+            target_refs: vec![previous.reference.clone()],
+            valid_from: Some(100),
+            valid_until: Some(200),
+            last_confirmed_at: Some(100),
+            reinforcement_count: 1,
+            classifier: "test".to_string(),
+            classifier_confidence: 1.0,
+        },
+    )
+    .unwrap();
+    for item in [&previous, &denied, &current] {
+        facade.upsert_memory(item).unwrap();
+    }
+
+    let detail = MemoryUiReadModel::new(&facade)
+        .memory_detail(&request(vec!["work"]), &current.reference)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(detail.evolution.unwrap().valid_until, Some(200));
+    assert_eq!(detail.history.len(), 1);
+    assert_eq!(detail.history[0].memory.reference, previous.reference);
+    assert_eq!(
+        detail.history[0].memory.summary,
+        "The authorized historical launch was Friday"
+    );
+    assert!(
+        detail
+            .history
+            .iter()
+            .all(|entry| !entry.memory.summary.contains("Private secret memory"))
+    );
 }
 
 #[test]
