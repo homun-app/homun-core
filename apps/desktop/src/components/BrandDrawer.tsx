@@ -2,6 +2,7 @@ import { type ChangeEvent, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageIcon, Save, Upload } from "lucide-react";
 import type { BrandKit } from "../lib/coreBridge";
+import { FONT_FAMILIES, fontFaceStyle } from "./presentationsShared";
 
 const COLOR_KEYS = ["primary_color", "secondary_color", "accent_color"] as const;
 
@@ -28,6 +29,18 @@ export function BrandDrawer({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+
+  // The app never imports the @fontsource CSS for the curated family set (only
+  // the sandboxed preview iframe gets @font-face injected per-render) — inject
+  // it once here too, so the in-drawer specimen actually renders in-family.
+  useEffect(() => {
+    const id = "homun-font-specimens";
+    if (document.getElementById(id)) return;
+    const el = document.createElement("style");
+    el.id = id;
+    el.textContent = fontFaceStyle(FONT_FAMILIES);
+    document.head.appendChild(el);
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -129,19 +142,38 @@ export function BrandDrawer({
 
           <label className="brandkit-field">
             <span>{t("presentations:heading_font")}</span>
-            <input
+            <select
               value={kit.heading_font}
               onChange={(e) => onChange("heading_font", e.target.value)}
-              placeholder="Inter"
-            />
+            >
+              {FONT_FAMILIES.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+            <div
+              className="font-specimen"
+              style={{ fontFamily: `'${kit.heading_font}', sans-serif` }}
+            >
+              Ag — The quick brown fox 123
+            </div>
           </label>
           <label className="brandkit-field">
             <span>{t("presentations:body_font")}</span>
-            <input
-              value={kit.body_font}
-              onChange={(e) => onChange("body_font", e.target.value)}
-              placeholder="Inter"
-            />
+            <select value={kit.body_font} onChange={(e) => onChange("body_font", e.target.value)}>
+              {FONT_FAMILIES.map((f) => (
+                <option key={f} value={f}>
+                  {f}
+                </option>
+              ))}
+            </select>
+            <div
+              className="font-specimen"
+              style={{ fontFamily: `'${kit.body_font}', sans-serif` }}
+            >
+              Ag — The quick brown fox 123
+            </div>
           </label>
 
           <label className="brandkit-field brandkit-field-wide">

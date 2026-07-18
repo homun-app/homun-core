@@ -1,4 +1,10 @@
 import type { BrandKit, TemplateCatalogEntry } from "../lib/coreBridge";
+import { FONT_FACES } from "./fontsManifest";
+
+// Re-exported so BrandDrawer has a single UI entry point for the curated font
+// set (FONT_FAMILIES) alongside fontFaceStyle below, instead of importing the
+// generated manifest directly.
+export { FONT_FAMILIES } from "./fontsManifest";
 
 // Shared, side-effect-free helpers for the Presentations studio surface.
 // Extracted so BrandChip / BrandDrawer / TemplateGallery / TemplateCard can
@@ -63,6 +69,22 @@ export function safeFont(value: string): string {
   return value.replace(/[^A-Za-z0-9 _-]/g, "");
 }
 
+/** @font-face CSS (data-URI) for the given families, from the bundled manifest.
+ *  The preview iframe is a separate document — it needs its own @font-face, and a
+ *  data-URI is the only CSP-safe source under sandbox="". Unknown family → nothing. */
+export function fontFaceStyle(families: string[]): string {
+  const seen = new Set<string>();
+  let css = "";
+  for (const fam of families) {
+    if (!fam || seen.has(fam)) continue;
+    seen.add(fam);
+    for (const f of FONT_FACES[fam] ?? []) {
+      css += `@font-face{font-family:'${fam}';font-weight:${f.weight};font-style:normal;font-display:swap;src:url(${f.dataUri}) format('woff2')}`;
+    }
+  }
+  return css;
+}
+
 /** Live brand recolor for catalog previews. The renderer HTML is parametric
  *  by design (:root{--brand;--brand2;--accent;--head;--body}) — injecting an
  *  override style into the sandboxed srcDoc recolors every card instantly as
@@ -84,8 +106,9 @@ export function brandPreviewOverride(kit: BrandKit): { style: string; logo: stri
   const accent = safeColor(kit.accent_color, DEFAULT_KIT.accent_color);
   const headingFont = safeFont(kit.heading_font);
   const bodyFont = safeFont(kit.body_font);
+  const faces = fontFaceStyle([headingFont, bodyFont]);
   const style =
-    `<style>:root{--brand:${primary} !important;` +
+    `<style>${faces}:root{--brand:${primary} !important;` +
     `--brand2:${secondary} !important;` +
     `--accent:${accent} !important;` +
     `--head:'${headingFont}' !important;` +
