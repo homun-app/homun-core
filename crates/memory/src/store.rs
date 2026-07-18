@@ -2,18 +2,22 @@ use crate::{
     AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AutomationCandidateRecord, AutomationCandidateStatus,
     DataSensitivity, EncryptedJson, KeyProvider, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
-    MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence, MemoryHealth,
+    MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence, MemoryEvolutionKind,
+    MemoryEvolutionMetadata, MemoryEvolutionProposal, MemoryEvolutionResult, MemoryHealth,
     MemoryIntegrityRepairPreview, MemoryIntegrityRepairRequest, MemoryIntegrityRepairResult,
     MemoryIntegrityReport, MemoryMaintenanceReport, MemoryPublicationCandidate,
     MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
     MemoryPublicationResolution, MemoryPublicationStatus, MemoryRecord, MemoryRef, MemoryRefKind,
     MemoryRelation, MemoryRepairAction, MemoryRestoreMode, MemorySourceAccessEvent,
     MemorySourceAccessOutcome, MemorySourceCandidateProjection, MemorySourceGrant,
-    MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId,
-    VectorHit, WikiPage, WorkspaceId, WorkspacePurgeReport, contains_secret, current_timestamp,
-    decrypt_json, encrypt_json, validate_memory_source_grant_intrinsic,
+    MemorySourceGrantValidationError, PrivacyDomain, RelationKind, RoutineRecord,
+    THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId, WorkspacePurgeReport,
+    contains_secret, current_timestamp, decrypt_json, encrypt_json, memory_evolution_metadata,
+    memory_is_current_at, prepare_memory_evolution_record, validate_memory_source_grant_intrinsic,
+    write_memory_evolution_metadata,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,7 +25,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-const SCHEMA_VERSION: u32 = 7;
+const SCHEMA_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemorySourceGrantStoreError {
@@ -1775,6 +1779,269 @@ impl SQLiteMemoryStore {
         Ok(())
     }
 
+    /// Applies one semantic memory evolution as a single SQLite transaction.
+    /// Request ids are scoped and idempotent; only a digest of the proposal is
+    /// retained, so the idempotency ledger never becomes a second content store.
+    pub fn apply_memory_evolution(
+        &self,
+        proposal: &MemoryEvolutionProposal,
+    ) -> Result<MemoryEvolutionResult, String> {
+        if proposal.request_id.trim().is_empty() || proposal.request_id.len() > 128 {
+            return Err("memory evolution request id is invalid".to_string());
+        }
+        if proposal.record.sensitivity == DataSensitivity::Secret
+            || contains_secret(&serde_json::json!({
+                "text": proposal.record.text,
+                "metadata": proposal.record.metadata,
+            }))
+        {
+            return Err("memory evolution rejects Vault-bound secret material".to_string());
+        }
+        let proposal_bytes = serde_json::to_vec(proposal).map_err(|error| error.to_string())?;
+        let proposal_hash = format!("sha256:{:x}", Sha256::digest(proposal_bytes));
+        let mut conn = self.write_conn();
+        let transaction = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| error.to_string())?;
+
+        if let Some((stored_hash, result_ref, kind_json, affected_json, created)) = transaction
+            .query_row(
+                "select proposal_hash, result_ref, evolution_kind, affected_refs_json, created
+                 from memory_evolution_requests
+                 where request_id = ?1 and user_id = ?2 and workspace_id = ?3",
+                params![
+                    proposal.request_id,
+                    proposal.record.user_id.as_str(),
+                    proposal.record.workspace_id.as_str(),
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, bool>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())?
+        {
+            if stored_hash != proposal_hash {
+                return Err(
+                    "memory evolution request id was reused with different input".to_string(),
+                );
+            }
+            let result_ref = parse_ref(result_ref)?;
+            let record = get_memory_on(
+                &transaction,
+                &result_ref,
+                &proposal.record.user_id,
+                &proposal.record.workspace_id,
+            )?
+            .ok_or_else(|| "memory evolution replay result is unavailable".to_string())?;
+            let kind = serde_json::from_str(&kind_json).map_err(|error| error.to_string())?;
+            let affected_refs =
+                serde_json::from_str(&affected_json).map_err(|error| error.to_string())?;
+            return Ok(MemoryEvolutionResult {
+                record,
+                kind,
+                affected_refs,
+                created,
+            });
+        }
+
+        let mut targets = Vec::with_capacity(proposal.evolution.target_refs.len());
+        for reference in &proposal.evolution.target_refs {
+            let target = get_memory_on(
+                &transaction,
+                reference,
+                &proposal.record.user_id,
+                &proposal.record.workspace_id,
+            )?
+            .ok_or_else(|| "memory evolution target is unavailable".to_string())?;
+            targets.push(target);
+        }
+        let now = current_timestamp();
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs() as i64)
+            .unwrap_or_default();
+        for target in &targets {
+            if target.sensitivity == DataSensitivity::Secret
+                || contains_secret(&serde_json::json!({
+                    "text": target.text,
+                    "metadata": target.metadata,
+                }))
+            {
+                return Err("memory evolution rejects Vault-bound target material".to_string());
+            }
+            if !memory_is_current_at(target, now_unix, true) {
+                return Err("memory evolution target is not current".to_string());
+            }
+        }
+        let mut prepared = prepare_memory_evolution_record(proposal, &targets)?;
+        let created;
+        let mut affected_refs = proposal.evolution.target_refs.clone();
+
+        if proposal.evolution.kind == MemoryEvolutionKind::Duplicate {
+            if targets.len() != 1 {
+                return Err("duplicate memory evolution requires exactly one target".to_string());
+            }
+            let mut target = targets[0].clone();
+            let mut evolution =
+                memory_evolution_metadata(&target.metadata)?.unwrap_or(MemoryEvolutionMetadata {
+                    kind: MemoryEvolutionKind::Independent,
+                    target_refs: Vec::new(),
+                    valid_from: proposal.evolution.valid_from,
+                    valid_until: proposal.evolution.valid_until,
+                    last_confirmed_at: None,
+                    reinforcement_count: 1,
+                    classifier: proposal.evolution.classifier.clone(),
+                    classifier_confidence: proposal.evolution.classifier_confidence,
+                });
+            evolution.reinforcement_count = evolution.reinforcement_count.saturating_add(1);
+            evolution.last_confirmed_at = Some(now_unix);
+            write_memory_evolution_metadata(&mut target.metadata, &evolution)?;
+            target.confidence =
+                (target.confidence + (1.0 - target.confidence) * 0.1).clamp(0.0, 1.0);
+            target.updated_at = now.clone();
+            target.last_seen_at = Some(now.clone());
+            upsert_memory_on(&transaction, &target)?;
+            self.index_memory_on(&transaction, &target)?;
+            prepared = target;
+            created = false;
+        } else {
+            if get_memory_on(
+                &transaction,
+                &prepared.reference,
+                &prepared.user_id,
+                &prepared.workspace_id,
+            )?
+            .is_some()
+            {
+                return Err("memory evolution output ref already exists".to_string());
+            }
+            prepared.updated_at = now.clone();
+            prepared.last_seen_at = Some(now.clone());
+            upsert_memory_on(&transaction, &prepared)?;
+            self.index_memory_on(&transaction, &prepared)?;
+
+            if proposal.evolution.kind == MemoryEvolutionKind::Updates {
+                for target in &targets {
+                    let mut superseded = target.clone();
+                    superseded.superseded_by = Some(prepared.reference.clone());
+                    superseded.updated_at = now.clone();
+                    upsert_memory_on(&transaction, &superseded)?;
+                    self.index_memory_on(&transaction, &superseded)?;
+                }
+            }
+
+            if let Some(relation_kind) = evolution_relation_kind(proposal.evolution.kind) {
+                for (index, target) in targets.iter().enumerate() {
+                    let relation = MemoryRelation {
+                        reference: MemoryRef::new(
+                            MemoryRefKind::Relation,
+                            prepared.user_id.clone(),
+                            prepared.workspace_id.clone(),
+                            format!("evolution:{}:{index}", proposal.request_id),
+                        ),
+                        user_id: prepared.user_id.clone(),
+                        workspace_id: prepared.workspace_id.clone(),
+                        source_ref: prepared.reference.clone(),
+                        relation_type: relation_kind.as_str().to_string(),
+                        target_ref: target.reference.clone(),
+                        confidence: proposal.evolution.classifier_confidence,
+                        privacy_domain: prepared.privacy_domain.clone(),
+                        sensitivity: prepared.sensitivity,
+                        evidence: vec![target.reference.clone()],
+                        metadata: serde_json::json!({
+                            "source": "memory_evolution",
+                            "request_id": proposal.request_id,
+                            "classifier": proposal.evolution.classifier,
+                        }),
+                    };
+                    self.upsert_relation_on(&transaction, &relation)?;
+                    if proposal.evolution.kind == MemoryEvolutionKind::Derives {
+                        transaction
+                            .execute(
+                                "insert or replace into memory_evidence
+                                 (memory_ref, evidence_ref, note) values (?1, ?2, ?3)",
+                                params![
+                                    prepared.reference.to_string(),
+                                    target.reference.to_string(),
+                                    "memory_evolution:derived_from",
+                                ],
+                            )
+                            .map_err(|error| error.to_string())?;
+                    }
+                }
+            }
+            affected_refs.push(prepared.reference.clone());
+            created = true;
+        }
+
+        let event_ref = MemoryRef::new(
+            MemoryRefKind::Event,
+            prepared.user_id.clone(),
+            prepared.workspace_id.clone(),
+            format!("memory-evolution:{}", proposal.request_id),
+        );
+        transaction
+            .execute(
+                "insert into memory_events (
+                    ref, user_id, workspace_id, timestamp, source, event_type, payload_json,
+                    privacy_domain, sensitivity
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    event_ref.to_string(),
+                    prepared.user_id.as_str(),
+                    prepared.workspace_id.as_str(),
+                    now,
+                    "memory_evolution",
+                    "memory.evolved",
+                    serde_json::to_string(&serde_json::json!({
+                        "kind": proposal.evolution.kind,
+                        "result_ref": prepared.reference,
+                        "affected_refs": affected_refs,
+                        "created": created,
+                    }))
+                    .map_err(|error| error.to_string())?,
+                    prepared.privacy_domain.as_str(),
+                    enum_name(&DataSensitivity::Internal)?,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction
+            .execute(
+                "insert into memory_evolution_requests (
+                    request_id, user_id, workspace_id, proposal_hash, result_ref,
+                    evolution_kind, affected_refs_json, created, created_at
+                 ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    proposal.request_id,
+                    prepared.user_id.as_str(),
+                    prepared.workspace_id.as_str(),
+                    proposal_hash,
+                    prepared.reference.to_string(),
+                    serde_json::to_string(&proposal.evolution.kind)
+                        .map_err(|error| error.to_string())?,
+                    serde_json::to_string(&affected_refs).map_err(|error| error.to_string())?,
+                    created,
+                    now,
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+        transaction.commit().map_err(|error| error.to_string())?;
+
+        Ok(MemoryEvolutionResult {
+            record: prepared,
+            kind: proposal.evolution.kind,
+            affected_refs,
+            created,
+        })
+    }
+
     pub fn get_memory(
         &self,
         reference: &MemoryRef,
@@ -3293,6 +3560,21 @@ impl SQLiteMemoryStore {
                 );
                 create index if not exists idx_memory_events_scope on memory_events(user_id, workspace_id);
 
+                create table if not exists memory_evolution_requests (
+                    request_id text not null,
+                    user_id text not null,
+                    workspace_id text not null,
+                    proposal_hash text not null,
+                    result_ref text not null,
+                    evolution_kind text not null,
+                    affected_refs_json text not null,
+                    created integer not null check(created in (0, 1)),
+                    created_at text not null,
+                    primary key(request_id, user_id, workspace_id)
+                );
+                create index if not exists idx_memory_evolution_requests_scope
+                    on memory_evolution_requests(user_id, workspace_id, created_at);
+
                 create table if not exists memories (
                     ref text primary key,
                     user_id text not null,
@@ -4008,6 +4290,7 @@ fn purge_workspace_on(
     rows_by_table.insert("memory_search_fts".to_string(), fts);
 
     for table in [
+        "memory_evolution_requests",
         "memory_embeddings",
         "relations",
         "entities",
@@ -4029,6 +4312,7 @@ fn purge_workspace_on(
     }
 
     for table in [
+        "memory_evolution_requests",
         "memory_embeddings",
         "relations",
         "entities",
@@ -4088,6 +4372,7 @@ fn unknown_workspace_users_on(
         .prepare(
             "select distinct user_id from (
                  select user_id, workspace_id from memory_events
+                 union all select user_id, workspace_id from memory_evolution_requests
                  union all select user_id, workspace_id from memories
                  union all select user_id, workspace_id from memory_embeddings
                  union all select user_id, workspace_id from memory_search_fts
@@ -4273,6 +4558,39 @@ fn upsert_memory_on(conn: &Connection, memory: &MemoryRecord) -> Result<(), Stri
     )
     .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn get_memory_on(
+    conn: &Connection,
+    reference: &MemoryRef,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) -> Result<Option<MemoryRecord>, String> {
+    query_optional(
+        conn,
+        "select ref, user_id, workspace_id, memory_type, text, aliases_json,
+                language_hints_json, confidence, status, privacy_domain, sensitivity,
+                metadata_json, created_at, updated_at, last_seen_at, supersedes_json,
+                superseded_by, correction_of
+         from memories
+         where ref = ?1 and user_id = ?2 and workspace_id = ?3",
+        params![
+            reference.to_string(),
+            user_id.as_str(),
+            workspace_id.as_str(),
+        ],
+        memory_from_row,
+    )
+}
+
+fn evolution_relation_kind(kind: MemoryEvolutionKind) -> Option<RelationKind> {
+    match kind {
+        MemoryEvolutionKind::Updates => Some(RelationKind::Supersedes),
+        MemoryEvolutionKind::Extends => Some(RelationKind::Extends),
+        MemoryEvolutionKind::Derives => Some(RelationKind::DerivedFrom),
+        MemoryEvolutionKind::Conflict => Some(RelationKind::ConflictsWith),
+        MemoryEvolutionKind::Independent | MemoryEvolutionKind::Duplicate => None,
+    }
 }
 
 fn memory_from_row(row: &Row<'_>) -> Result<MemoryRecord, String> {

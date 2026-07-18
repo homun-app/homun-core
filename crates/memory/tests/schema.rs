@@ -9,12 +9,12 @@ use std::path::PathBuf;
 fn store_records_schema_version_and_migrations_are_idempotent() {
     let store = SQLiteMemoryStore::open_in_memory().unwrap();
 
-    assert_eq!(store.schema_version().unwrap(), 7);
+    assert_eq!(store.schema_version().unwrap(), 8);
 
     store.run_migrations().unwrap();
     store.run_migrations().unwrap();
 
-    assert_eq!(store.schema_version().unwrap(), 7);
+    assert_eq!(store.schema_version().unwrap(), 8);
 }
 
 #[test]
@@ -79,12 +79,12 @@ fn file_backed_store_keeps_schema_version_after_reopen() {
     let path = unique_db_path();
     {
         let store = SQLiteMemoryStore::open(&path).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 7);
+        assert_eq!(store.schema_version().unwrap(), 8);
     }
 
     let reopened = SQLiteMemoryStore::open(&path).unwrap();
 
-    assert_eq!(reopened.schema_version().unwrap(), 7);
+    assert_eq!(reopened.schema_version().unwrap(), 8);
     let _ = std::fs::remove_file(path);
 }
 
@@ -143,7 +143,7 @@ fn populated_v3_store_migrates_to_v4_without_data_loss() {
 
     {
         let facade = MemoryFacade::new(SQLiteMemoryStore::open(&path).unwrap());
-        assert_eq!(facade.memory_health().unwrap().schema_version, 7);
+        assert_eq!(facade.memory_health().unwrap().schema_version, 8);
         assert_eq!(
             facade
                 .get_memory_for_ui(&memory.reference, &user, &workspace)
@@ -206,7 +206,7 @@ fn populated_v3_store_migrates_to_v4_without_data_loss() {
     }
     {
         let reopened = SQLiteMemoryStore::open(&path).unwrap();
-        assert_eq!(reopened.schema_version().unwrap(), 7);
+        assert_eq!(reopened.schema_version().unwrap(), 8);
         assert!(
             reopened
                 .get_memory(&memory.reference, &user, &workspace)

@@ -1546,10 +1546,10 @@ fn remove_sqlite_files(path: &Path) {
 fn schema_v7_open_remains_compatible() {
     let path = unique_db_path("schema-v4");
     let store = SQLiteMemoryStore::open(&path).unwrap();
-    assert_eq!(store.schema_version().unwrap(), 7);
+    assert_eq!(store.schema_version().unwrap(), 8);
     drop(store);
     let reopened = SQLiteMemoryStore::open(&path).unwrap();
-    assert_eq!(reopened.schema_version().unwrap(), 7);
+    assert_eq!(reopened.schema_version().unwrap(), 8);
     remove_sqlite_files(&path);
 }
 

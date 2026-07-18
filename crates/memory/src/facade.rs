@@ -5,9 +5,10 @@ use crate::{
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
     MemoryContextItem, MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError,
-    MemoryEvent, MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryHealth,
-    MemoryIntegrityRepairPreview, MemoryIntegrityRepairRequest, MemoryIntegrityRepairResult,
-    MemoryIntegrityReport, MemoryLifecycleRequest, MemoryMaintenanceReport, MemoryPolicyEngine,
+    MemoryEvent, MemoryEvidence, MemoryEvolutionProposal, MemoryEvolutionResult, MemoryExtraction,
+    MemoryExtractionSummary, MemoryHealth, MemoryIntegrityRepairPreview,
+    MemoryIntegrityRepairRequest, MemoryIntegrityRepairResult, MemoryIntegrityReport,
+    MemoryLifecycleRequest, MemoryMaintenanceReport, MemoryPolicyEngine,
     MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationEditInput,
     MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
     MemoryPublicationResolution, MemoryPublicationResult, MemoryPublicationStatus,
@@ -179,6 +180,30 @@ impl MemoryFacade {
         self.store.upsert_memory(memory)?;
         self.bump_briefing_generation(&memory.user_id, &memory.workspace_id);
         Ok(())
+    }
+
+    pub fn evolve_memory(
+        &self,
+        proposal: MemoryEvolutionProposal,
+    ) -> MemoryResult<MemoryEvolutionResult> {
+        let user_id = proposal.record.user_id.clone();
+        let workspace_id = proposal.record.workspace_id.clone();
+        let result = self
+            .store
+            .apply_memory_evolution(&proposal)
+            .map_err(MemoryError::Store)?;
+        let key = vector_index_scope_key(&user_id, &workspace_id);
+        if let Ok(mut indexes) = self.vector_indexes.lock() {
+            indexes.remove(&key);
+        }
+        if let Ok(mut indexes) = self.authorized_vector_indexes.lock() {
+            indexes.retain(|cache_key, _| {
+                cache_key.source_user_id != user_id.as_str()
+                    || cache_key.source_workspace_id != workspace_id.as_str()
+            });
+        }
+        self.bump_briefing_generation(&user_id, &workspace_id);
+        Ok(result)
     }
 
     pub fn upsert_entity(&self, entity: &MemoryEntity) -> MemoryResult<()> {

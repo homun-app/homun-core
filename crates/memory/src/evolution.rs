@@ -39,14 +39,14 @@ fn default_reinforcement_count() -> u64 {
     1
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryEvolutionProposal {
     pub request_id: String,
     pub record: MemoryRecord,
     pub evolution: MemoryEvolutionMetadata,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryEvolutionResult {
     pub record: MemoryRecord,
     pub kind: MemoryEvolutionKind,
@@ -124,9 +124,14 @@ pub fn memory_is_current_at(record: &MemoryRecord, now_unix: i64, allow_candidat
         return false;
     }
     match memory_evolution_metadata(&record.metadata) {
-        Ok(Some(evolution)) => evolution
-            .valid_until
-            .is_none_or(|valid_until| valid_until > now_unix),
+        Ok(Some(evolution)) => {
+            evolution
+                .valid_from
+                .is_none_or(|valid_from| valid_from <= now_unix)
+                && evolution
+                    .valid_until
+                    .is_none_or(|valid_until| valid_until > now_unix)
+        }
         Ok(None) => true,
         Err(_) => false,
     }
@@ -141,6 +146,21 @@ pub fn prepare_memory_evolution_record(
     }
     if proposal.record.reference.kind != MemoryRefKind::Memory {
         return Err("memory evolution record must use a memory ref".to_string());
+    }
+    if proposal.record.reference.user_id != proposal.record.user_id
+        || proposal.record.reference.workspace_id != proposal.record.workspace_id
+    {
+        return Err("memory evolution record ref is outside the record scope".to_string());
+    }
+    if !proposal.record.confidence.is_finite() || !(0.0..=1.0).contains(&proposal.record.confidence)
+    {
+        return Err("memory evolution record confidence must be between zero and one".to_string());
+    }
+    if !matches!(
+        proposal.record.status,
+        MemoryStatus::Candidate | MemoryStatus::Confirmed
+    ) {
+        return Err("memory evolution record must be active".to_string());
     }
     validate_memory_evolution_metadata(&proposal.evolution)?;
 
@@ -170,7 +190,10 @@ pub fn prepare_memory_evolution_record(
 
     let mut record = proposal.record.clone();
     write_memory_evolution_metadata(&mut record.metadata, &proposal.evolution)?;
-    if proposal.evolution.kind == MemoryEvolutionKind::Derives {
+    if matches!(
+        proposal.evolution.kind,
+        MemoryEvolutionKind::Derives | MemoryEvolutionKind::Conflict
+    ) {
         record.status = MemoryStatus::Candidate;
     }
     if proposal.evolution.kind == MemoryEvolutionKind::Updates {

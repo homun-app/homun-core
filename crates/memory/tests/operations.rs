@@ -13,7 +13,7 @@ fn health_reports_schema_and_counts() {
 
     let health = facade.memory_health().unwrap();
 
-    assert_eq!(health.schema_version, 7);
+    assert_eq!(health.schema_version, 8);
     assert_eq!(health.total_events, 1);
     assert_eq!(health.total_memories, 0);
 }
