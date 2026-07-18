@@ -715,3 +715,88 @@ pub fn run_command(command: &str, skill_id: Option<&str>) -> Result<String, Stri
     }
     Ok(combined.chars().take(MAX_OUTPUT_CHARS).collect())
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::run_graphify;
+    use std::ffi::OsString;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    struct PathRestore(Option<OsString>);
+
+    impl Drop for PathRestore {
+        fn drop(&mut self) {
+            // SAFETY: this test serializes its process-wide PATH mutation and restores
+            // the original value before releasing TEST_ENV_LOCK.
+            unsafe {
+                match self.0.take() {
+                    Some(value) => std::env::set_var("PATH", value),
+                    None => std::env::remove_var("PATH"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn graphify_runs_from_gateway_managed_mirror() {
+        let _env = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root = std::env::temp_dir().join(format!(
+            "homun-graphify-cwd-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let project = root.join("project");
+        let out = root.join("out");
+        let fake_bin = root.join("bin");
+        let marker = root.join("graphify-pwd");
+        fs::create_dir_all(&project).expect("create project");
+        fs::create_dir_all(&fake_bin).expect("create fake bin");
+        fs::write(project.join("main.rs"), "fn main() {}\n").expect("write project file");
+
+        let fake_graphify = fake_bin.join("graphify");
+        fs::write(
+            &fake_graphify,
+            format!(
+                "#!/bin/sh\n\
+                 if [ \"$1\" = \"--help\" ]; then exit 0; fi\n\
+                 printf '%s' \"$PWD\" > '{}'\n\
+                 mkdir -p \"$2/graphify-out\"\n\
+                 printf '{{\"nodes\":[],\"edges\":[]}}' > \"$2/graphify-out/graph.json\"\n",
+                marker.display()
+            ),
+        )
+        .expect("write fake graphify");
+        let mut permissions = fs::metadata(&fake_graphify)
+            .expect("stat fake graphify")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&fake_graphify, permissions).expect("make fake graphify executable");
+
+        let original_path = std::env::var_os("PATH");
+        let _restore = PathRestore(original_path.clone());
+        let mut path = OsString::from(&fake_bin);
+        if let Some(original) = original_path {
+            path.push(":");
+            path.push(original);
+        }
+        // SAFETY: protected by TEST_ENV_LOCK and restored by PathRestore.
+        unsafe { std::env::set_var("PATH", path) };
+
+        run_graphify(&project, &out).expect("run graphify through the real gateway path");
+
+        let recorded = PathBuf::from(fs::read_to_string(&marker).expect("read cwd marker"));
+        assert_eq!(
+            fs::canonicalize(recorded).expect("canonical recorded cwd"),
+            fs::canonicalize(out.join("_mirror")).expect("canonical managed mirror"),
+            "Graphify auxiliary relative files must stay outside the signed app bundle"
+        );
+
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+}
