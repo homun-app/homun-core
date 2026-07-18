@@ -1,6 +1,7 @@
 //! Local HTTP gateway contracts for the Electron desktop shell.
 
 pub mod project_graph_commit;
+pub mod workspace_delete;
 
 // The single control-marker toolkit (‹‹NAME››…‹‹/NAME›› protocol) moved WHOLE into the engine crate
 // (ADR 0024 inc 5e.3, pure); re-exported so `local_first_desktop_gateway::markers::…` call sites

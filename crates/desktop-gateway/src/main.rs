@@ -103,6 +103,9 @@ use local_first_desktop_gateway::{
 use local_first_desktop_gateway::project_graph_commit::{
     ProjectGraphCommitError, stage_project_graph_build,
 };
+use local_first_desktop_gateway::workspace_delete::{
+    GatewayWorkspacePurgeReport, WorkspaceDeleteError, coordinate_workspace_delete,
+};
 // The pure plan state machine now lives in the engine crate (ADR 0024, increment 3). Imported
 // unqualified so every call site (and the `use super::{…}` in the test module) resolves unchanged.
 // Plan helpers still used by NON-loop gateway code (titling, plan projection, etc.); the loop's own
@@ -52483,19 +52486,27 @@ async fn delete_workspace(
             message: format!("workspace not found: {workspace_id}"),
         });
     }
-    if file.active == workspace_id {
+    let active_changed = file.active == workspace_id;
+    if active_changed {
         file.active = base_workspace_id();
-        set_active_workspace(&file.active);
     }
-    save_workspaces_file(&file).map_err(|error| GatewayError {
+
+    let report = purge_workspace_data(&state, &workspace_id, || {
+        save_workspaces_file(&file)
+            .map_err(|error| WorkspaceDeleteError::Registry(error.to_string()))
+    })
+    .map_err(|error| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "workspaces_write_failed",
+        code: "workspace_purge_failed",
         message: error.to_string(),
     })?;
-    // Cascade purge: delete ALL data for this workspace from every store.
-    // This prevents orphaned rows (chat, tasks, memory) that would otherwise
-    // accumulate forever in the SQLite files.
-    purge_workspace_data(&state, &workspace_id);
+    if active_changed {
+        set_active_workspace(&file.active);
+    }
+    eprintln!(
+        "purge_workspace: completed {workspace_id} (chat={}, tasks={}, memory={}, graph_cache={})",
+        report.chat_threads, report.tasks, report.memory_rows, report.graph_cache_removed
+    );
     Ok(Json(WorkspacesResponse {
         active_workspace_id: file.active.clone(),
         workspaces: file.workspaces,
@@ -52694,56 +52705,59 @@ async fn tags_all_assignments(
     Ok(Json(serde_json::json!({ "assignments": list })))
 }
 
-/// Cascading purge of all data for a workspace across every store. Best-effort:
-/// logs errors but does not fail the workspace deletion (the workspace entry is
-/// already gone from workspaces.json — orphaned rows are cosmetic, not blocking).
-fn purge_workspace_data(state: &AppState, workspace_id: &str) {
-    // Chat store: threads, messages, links, settings.
-    {
-        let Ok(store) = state.chat_store.lock() else {
-            eprintln!("purge_workspace: chat store lock poisoned for {workspace_id}");
-            return;
-        };
-        match store.purge_workspace(workspace_id) {
-            Ok(count) => {
-                eprintln!("purge_workspace: removed {count} chat threads from {workspace_id}")
-            }
-            Err(error) => {
-                eprintln!("purge_workspace: chat store error for {workspace_id}: {error}")
-            }
-        }
-    }
-    // Task store: tasks, dependencies, reservations (task-runtime types).
-    {
-        let task_user = UserId::new("local".to_string());
-        let task_workspace = WorkspaceId::new(workspace_id.to_string());
-        if let Ok(store) = lock_task_store(state) {
-            match store.purge_workspace(&task_user, &task_workspace) {
-                Ok(count) => {
-                    eprintln!("purge_workspace: removed {count} tasks from {workspace_id}")
-                }
-                Err(error) => {
-                    eprintln!("purge_workspace: task store error for {workspace_id}: {error:?}")
-                }
-            }
-        }
-    }
-    // Memory store: memories, entities, relations, embeddings, episodes, wiki (memory crate types).
-    {
-        let mem_user = MemoryUserId::new("local".to_string());
-        let mem_workspace = MemoryWorkspaceId::new(workspace_id.to_string());
-        {
+/// Purges all workspace-owned data before removing the workspace registry entry.
+/// Every step is retry-safe: if one fails, `workspaces.json` still contains the
+/// workspace and the user can retry the deletion.
+fn purge_workspace_data<SaveRegistry>(
+    state: &AppState,
+    workspace_id: &str,
+    save_registry: SaveRegistry,
+) -> Result<GatewayWorkspacePurgeReport, WorkspaceDeleteError>
+where
+    SaveRegistry: FnOnce() -> Result<(), WorkspaceDeleteError>,
+{
+    coordinate_workspace_delete(
+        || {
+            let store = state.chat_store.lock().map_err(|error| {
+                WorkspaceDeleteError::Chat(format!("chat store lock poisoned: {error}"))
+            })?;
+            store
+                .purge_workspace(workspace_id)
+                .map_err(|error| WorkspaceDeleteError::Chat(error.to_string()))
+        },
+        || {
+            let task_user = UserId::new("local".to_string());
+            let task_workspace = WorkspaceId::new(workspace_id.to_string());
+            let store = lock_task_store(state)
+                .map_err(|error| WorkspaceDeleteError::Task(error.message))?;
+            store
+                .purge_workspace(&task_user, &task_workspace)
+                .map_err(|error| WorkspaceDeleteError::Task(error.to_string()))
+        },
+        || {
+            let memory_user = gateway_memory_user_id();
+            let memory_workspace = MemoryWorkspaceId::new(workspace_id.to_string());
             let facade = memory_facade(state);
-            match facade.purge_workspace(&mem_user, &mem_workspace) {
-                Ok(count) => {
-                    eprintln!("purge_workspace: removed {count} memories from {workspace_id}")
-                }
-                Err(error) => {
-                    eprintln!("purge_workspace: memory store error for {workspace_id}: {error}")
-                }
+            facade
+                .purge_workspace(&memory_user, &memory_workspace)
+                .map(|report| report.total_deleted)
+                .map_err(|error| WorkspaceDeleteError::Memory(error.to_string()))
+        },
+        || {
+            let graph_cache = graphify_out_dir(workspace_id);
+            if !graph_cache.exists() {
+                return Ok(false);
             }
-        }
-    }
+            std::fs::remove_dir_all(&graph_cache).map_err(|error| {
+                WorkspaceDeleteError::GraphCache(format!(
+                    "{}: {error}",
+                    graph_cache.display()
+                ))
+            })?;
+            Ok(true)
+        },
+        save_registry,
+    )
 }
 
 /// Runs VACUUM on all SQLite stores to reclaim free space. Called at startup
