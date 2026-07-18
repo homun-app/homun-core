@@ -42,6 +42,7 @@ import os
 import sys
 
 from design_tokens import theme_values
+from fonts_embed import font_face_css
 
 DEFAULT_THEME = {"primary": "#2b6cb0", "secondary": "#1a202c", "accent": "#ed8936",
                  "heading_font": "Inter", "body_font": "Inter", "logo": ""}
@@ -237,9 +238,10 @@ def render_html(doc, base_dir):
     # enumerate() gives _hero_art a call-unique seq per block (see _hero_art docstring).
     body = "".join(render_block(b, base_dir, logo, seq) for seq, b in enumerate(doc.get("blocks", [])))
     tokens = _css_tokens(theme)
+    faces = font_face_css([theme["heading_font"], theme["body_font"]])  # @font-face before use
     title = esc(doc.get("title", "Document"))
     return ("<!doctype html><html><head><meta charset='utf-8'>"
-            f"<title>{title}</title><style>{tokens}{_CSS_BODY}</style></head>"
+            f"<title>{title}</title><style>{faces}{tokens}{_CSS_BODY}</style></head>"
             f"<body><div class=\"doc\">{body}</div></body></html>")
 
 
