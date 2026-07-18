@@ -208,17 +208,20 @@ pub(crate) fn audit_memory_integrity_with_status_on(
                ), '') = f.aliases
          )",
     )?;
+    let wiki_link_ref = wiki_link_ref_sql("link");
     let missing_wiki_links = count_query(
         connection,
-        "select count(*) from wiki_pages w,
+        &format!(
+            "select count(*) from wiki_pages w,
              json_each(case when json_valid(w.linked_refs_json) then w.linked_refs_json else '[]' end) link
          where not exists (
              select 1 from memories m
-             where m.ref = link.value and m.user_id = w.user_id and m.workspace_id = w.workspace_id
+             where m.ref = {wiki_link_ref} and m.user_id = w.user_id and m.workspace_id = w.workspace_id
              union all
              select 1 from entities e
-             where e.ref = link.value and e.user_id = w.user_id and e.workspace_id = w.workspace_id
-         )",
+             where e.ref = {wiki_link_ref} and e.user_id = w.user_id and e.workspace_id = w.workspace_id
+         )"
+        ),
     )?;
     let invalid_json_rows = count_query(connection, INVALID_JSON_ROWS_SQL)?;
 
@@ -291,6 +294,27 @@ pub(crate) fn audit_memory_integrity_with_status_on(
     };
     report.checksum = report_checksum(&report)?;
     Ok(report)
+}
+
+pub(crate) fn wiki_link_ref_sql(alias: &str) -> String {
+    format!(
+        "case {alias}.type
+           when 'text' then cast({alias}.value as text)
+           when 'object' then
+             case when json_type({alias}.value, '$.kind') = 'text'
+                    and json_type({alias}.value, '$.scope') = 'text'
+                    and json_type({alias}.value, '$.user_id') = 'text'
+                    and json_type({alias}.value, '$.workspace_id') = 'text'
+                    and json_type({alias}.value, '$.key') = 'text'
+                  then printf('%s:%s:%s:%s:%s',
+                         json_extract({alias}.value, '$.kind'),
+                         json_extract({alias}.value, '$.scope'),
+                         json_extract({alias}.value, '$.user_id'),
+                         json_extract({alias}.value, '$.workspace_id'),
+                         json_extract({alias}.value, '$.key'))
+             end
+         end"
+    )
 }
 
 pub(crate) fn preview_memory_integrity_repair_on(

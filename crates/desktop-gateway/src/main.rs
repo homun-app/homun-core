@@ -52279,7 +52279,12 @@ fn upsert_workspace_root_memory_entity(
     workspace: &WorkspaceRecord,
 ) -> Result<(), String> {
     let user = gateway_memory_user_id();
-    let memory_workspace = MemoryWorkspaceId::new(workspace.id.clone());
+    let memory_workspace = canonical_memory_workspace_id(&workspace.id);
+    if memory_workspace.as_str() == PERSONAL_WORKSPACE
+        || memory_workspace.as_str() == THREADS_WORKSPACE
+    {
+        return Ok(());
+    }
     let canonical_key = format!("workspace:{}", workspace.id);
     let existing = facade
         .list_entities_for_ui(&user, &memory_workspace)
@@ -66256,6 +66261,47 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
             root.aliases
                 .iter()
                 .any(|alias| alias == "/Users/fabio/Projects/Homun")
+        );
+    }
+
+    #[test]
+    fn base_workspace_never_creates_a_legacy_memory_scope_root() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let base_workspace = super::base_workspace_id();
+        let workspace = super::WorkspaceRecord {
+            id: base_workspace.clone(),
+            name: "Predefinito".to_string(),
+            folder: None,
+            sandbox_mode: None,
+            approval_policy: None,
+            writable_roots: None,
+            skill_confirmations: None,
+        };
+
+        super::upsert_workspace_root_memory_entity(&facade, &workspace).unwrap();
+
+        let user = super::gateway_memory_user_id();
+        assert!(
+            facade
+                .list_entities_for_ui(
+                    &user,
+                    &local_first_memory::WorkspaceId::new(base_workspace)
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            facade
+                .list_entities_for_ui(
+                    &user,
+                    &local_first_memory::WorkspaceId::new(
+                        local_first_memory::PERSONAL_WORKSPACE
+                    )
+                )
+                .unwrap()
+                .is_empty()
         );
     }
 

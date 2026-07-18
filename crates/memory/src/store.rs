@@ -616,20 +616,22 @@ impl SQLiteMemoryStore {
                         .map_err(|error| MemoryError::Store(error.to_string()))?;
                 }
                 MemoryRepairAction::RemoveMissingWikiLinks => {
+                    let wiki_link_ref = crate::wiki_link_ref_sql("link");
                     connection
                         .execute(
-                            "update wiki_pages
+                            &format!(
+                                "update wiki_pages
                              set linked_refs_json = (
                                  select coalesce(json_group_array(link.value), '[]')
                                  from json_each(wiki_pages.linked_refs_json) link
                                  where exists (
                                      select 1 from memories m
-                                     where m.ref = link.value
+                                     where m.ref = {wiki_link_ref}
                                        and m.user_id = wiki_pages.user_id
                                        and m.workspace_id = wiki_pages.workspace_id
                                      union all
                                      select 1 from entities e
-                                     where e.ref = link.value
+                                     where e.ref = {wiki_link_ref}
                                        and e.user_id = wiki_pages.user_id
                                        and e.workspace_id = wiki_pages.workspace_id
                                  )
@@ -638,16 +640,17 @@ impl SQLiteMemoryStore {
                                  select 1 from json_each(wiki_pages.linked_refs_json) link
                                  where not exists (
                                      select 1 from memories m
-                                     where m.ref = link.value
+                                     where m.ref = {wiki_link_ref}
                                        and m.user_id = wiki_pages.user_id
                                        and m.workspace_id = wiki_pages.workspace_id
                                      union all
                                      select 1 from entities e
-                                     where e.ref = link.value
+                                     where e.ref = {wiki_link_ref}
                                        and e.user_id = wiki_pages.user_id
                                        and e.workspace_id = wiki_pages.workspace_id
                                  )
-                             )",
+                             )"
+                            ),
                             [],
                         )
                         .map_err(|error| MemoryError::Store(error.to_string()))?;

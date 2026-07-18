@@ -1,6 +1,6 @@
 use local_first_memory::{
-    MemoryError, MemoryFacade, MemoryIntegrityRepairRequest, MemoryRepairAction, SQLiteMemoryStore,
-    UserId, WorkspaceId,
+    MemoryError, MemoryFacade, MemoryIntegrityRepairRequest, MemoryRef, MemoryRefKind,
+    MemoryRepairAction, SQLiteMemoryStore, UserId, WorkspaceId,
 };
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
@@ -158,6 +158,85 @@ fn repair_actions_roll_back_together_when_a_later_action_fails() {
     assert_eq!(after.orphan_embeddings, 1);
     assert_eq!(after.orphan_evidence_links, 1);
     assert!(backup_path.is_file());
+
+    drop(facade);
+    remove_db(&db_path);
+    remove_db(&backup_path);
+}
+
+#[test]
+fn structured_wiki_refs_are_audited_and_repaired_without_losing_valid_links() {
+    let db_path = temp_db("structured-wiki-refs");
+    let backup_path = temp_db("structured-wiki-refs-backup");
+    let store = SQLiteMemoryStore::open(&db_path).unwrap();
+    let user = UserId::new("local-user");
+    let workspace = WorkspaceId::new("project-a");
+    let valid = MemoryRef::new(
+        MemoryRefKind::Memory,
+        user.clone(),
+        workspace.clone(),
+        "valid",
+    );
+    let missing = MemoryRef::new(
+        MemoryRefKind::Memory,
+        user.clone(),
+        workspace.clone(),
+        "missing",
+    );
+    let connection = Connection::open(&db_path).unwrap();
+    connection
+        .execute(
+            "insert into memories
+               (ref,user_id,workspace_id,memory_type,text,aliases_json,language_hints_json,
+                confidence,status,privacy_domain,sensitivity,metadata_json,created_at,updated_at,
+                supersedes_json)
+             values (?1,?2,?3,'fact','valid fact','[]','[]',1.0,'confirmed','personal',
+                     'internal','{}','unix:1','unix:1','[]')",
+            (valid.to_string(), user.as_str(), workspace.as_str()),
+        )
+        .unwrap();
+    connection
+        .execute(
+            "insert into wiki_pages values
+               ('wiki-a',?1,?2,'project.md','Project','body',?3,'personal','internal')",
+            (
+                user.as_str(),
+                workspace.as_str(),
+                serde_json::to_string(&vec![valid.clone(), missing]).unwrap(),
+            ),
+        )
+        .unwrap();
+    drop(connection);
+    let facade = MemoryFacade::new(store);
+    let known = vec![(user, workspace)];
+
+    let before = facade.audit_integrity(&known).unwrap();
+    assert_eq!(before.missing_wiki_links, 1);
+    let preview = facade
+        .preview_integrity_repair(&known, vec![MemoryRepairAction::RemoveMissingWikiLinks])
+        .unwrap();
+    facade
+        .apply_integrity_repair(
+            &known,
+            MemoryIntegrityRepairRequest {
+                audit_checksum: preview.audit_checksum,
+                actions: preview.actions,
+                approval_token: preview.approval_token,
+                backup_path: Some(backup_path.clone()),
+            },
+        )
+        .unwrap();
+
+    let linked_refs_json: String = Connection::open(&db_path)
+        .unwrap()
+        .query_row(
+            "select linked_refs_json from wiki_pages where ref = 'wiki-a'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let linked_refs: Vec<MemoryRef> = serde_json::from_str(&linked_refs_json).unwrap();
+    assert_eq!(linked_refs, vec![valid]);
 
     drop(facade);
     remove_db(&db_path);
