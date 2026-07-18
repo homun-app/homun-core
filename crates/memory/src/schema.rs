@@ -111,10 +111,12 @@ pub enum RelationKind {
     Affects,    // decision -> artifact
     InformedBy, // decision -> evidence
     AlternativeTo,
-    Supersedes,   // mirrors MemoryRecord.supersedes for graph traversal
-    RationaleFor, // rationale/evidence -> decision/objective
-    Produced,     // tool/workflow/step -> artifact/outcome
-    DerivedFrom,  // artifact/outcome -> source artifact/file/step
+    Supersedes,    // mirrors MemoryRecord.supersedes for graph traversal
+    Extends,       // compatible memory -> the memory it enriches
+    ConflictsWith, // unresolved claim -> conflicting active claim
+    RationaleFor,  // rationale/evidence -> decision/objective
+    Produced,      // tool/workflow/step -> artifact/outcome
+    DerivedFrom,   // artifact/outcome -> source artifact/file/step
     // Software edges
     Calls,
     Imports,
@@ -177,6 +179,8 @@ tag_enum!(RelationKind {
     InformedBy => "informed_by",
     AlternativeTo => "alternative_to",
     Supersedes => "supersedes",
+    Extends => "extends",
+    ConflictsWith => "conflicts_with",
     RationaleFor => "rationale_for",
     Produced => "produced",
     DerivedFrom => "derived_from",
