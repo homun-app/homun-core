@@ -1,7 +1,7 @@
 # Memory Evolution v1
 
-**Date:** 2026-07-18  
-**Status:** Approved for implementation  
+**Date:** 2026-07-18
+**Status:** Approved for implementation
 **Scope:** semantic memory evolution, temporal validity, current recall, inspectable history, and MemoryBench interoperability
 
 ## Purpose

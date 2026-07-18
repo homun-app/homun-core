@@ -582,6 +582,7 @@ fn evolve_extracted_memory(
         .unwrap_or_default()
         .into_iter()
         .filter(|record| memory_is_current_at(record, now_unix, true))
+        .filter(|record| record.privacy_domain == memory.privacy_domain)
         .filter(|record| record.sensitivity != DataSensitivity::Secret)
         .filter(|record| {
             !contains_secret(&serde_json::json!({

@@ -1876,6 +1876,9 @@ impl SQLiteMemoryStore {
             {
                 return Err("memory evolution rejects Vault-bound target material".to_string());
             }
+            if target.privacy_domain != proposal.record.privacy_domain {
+                return Err("memory evolution target is outside the privacy domain".to_string());
+            }
             if !memory_is_current_at(target, now_unix, true) {
                 return Err("memory evolution target is not current".to_string());
             }
@@ -1953,7 +1956,7 @@ impl SQLiteMemoryStore {
                         target_ref: target.reference.clone(),
                         confidence: proposal.evolution.classifier_confidence,
                         privacy_domain: prepared.privacy_domain.clone(),
-                        sensitivity: prepared.sensitivity,
+                        sensitivity: std::cmp::max(prepared.sensitivity, target.sensitivity),
                         evidence: vec![target.reference.clone()],
                         metadata: serde_json::json!({
                             "source": "memory_evolution",

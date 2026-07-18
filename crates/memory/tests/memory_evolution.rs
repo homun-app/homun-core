@@ -178,6 +178,7 @@ fn duplicate_reinforces_without_creating_a_row_and_replay_is_idempotent() {
         .unwrap();
 
     assert!(!first.created);
+    assert!(!replay.created);
     assert_eq!(first, replay);
     assert_eq!(
         facade
@@ -304,6 +305,35 @@ fn conflict_never_selects_a_winner_and_secret_input_is_rejected() {
         ))
         .unwrap_err();
     assert!(error.to_string().contains("Vault"), "{error}");
+}
+
+#[test]
+fn evolution_cannot_mutate_across_privacy_domains() {
+    let facade = facade();
+    let mut target = memory("project-a", "Private-domain fact");
+    target.privacy_domain = PrivacyDomain::new("personal");
+    facade.upsert_memory(&target).unwrap();
+    let mut replacement = memory("project-a", "Work-domain replacement");
+    replacement.privacy_domain = PrivacyDomain::new("work");
+
+    let error = facade
+        .evolve_memory(proposal(
+            "request-cross-domain",
+            MemoryEvolutionKind::Updates,
+            replacement,
+            vec![target.reference.clone()],
+        ))
+        .unwrap_err();
+
+    assert!(error.to_string().contains("privacy domain"), "{error}");
+    assert!(
+        facade
+            .get_memory_for_ui(&target.reference, &target.user_id, &target.workspace_id)
+            .unwrap()
+            .unwrap()
+            .superseded_by
+            .is_none()
+    );
 }
 
 #[test]

@@ -6,7 +6,7 @@
 
 **Architecture:** Typed evolution metadata lives over the existing `MemoryRecord` schema. `SQLiteMemoryStore` owns one atomic mutation boundary; `MemoryFacade` owns policy, audit, and cache invalidation; `learn.rs` supplies validated proposals; recall consumes one shared current-memory predicate. The benchmark adapter talks only to the local gateway.
 
-**Worktree:** `/Users/fabio/Projects/Homun/app/.worktrees/memory-evolution-v1-core`  
+**Worktree:** `/Users/fabio/Projects/Homun/app/.worktrees/memory-evolution-v1-core`
 **Branch:** `fabio/memory-evolution-v1-core`
 
 ## Task 1: Typed evolution and temporal contract

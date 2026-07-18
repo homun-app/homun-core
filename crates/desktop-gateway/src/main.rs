@@ -2202,12 +2202,14 @@ fn spawn_embedding_catchup(state: AppState) {
     });
 }
 
-/// Boot-time memory hygiene sweep (ADR 0022 follow-up). Esegue due pulizie
+/// Boot-time memory hygiene sweep (ADR 0022 follow-up). Esegue tre pulizie
 /// one-shot per ogni scope, ritardate per non competere con l'avvio:
 /// 1. `sweep_gap_facts` — ritira i gap fact obsoleti contraddetti da fatti
 ///    positivi già confirmed (bug "non ricorda che lavoro faccio").
 /// 2. `promote_aged_candidates` — conferma i candidate invecchiati (>10 min)
 ///    che non sono mai stati rejectati dall'utente.
+/// 3. `expire_due_memories` — rende stale i ricordi oltre `valid_until`,
+///    conservandone lo storico ma rimuovendoli dal recall corrente.
 fn spawn_memory_hygiene_sweep(state: AppState) {
     tokio::spawn(async move {
         // Delay so it never competes with the HTTP bind / first turn.
@@ -2221,18 +2223,33 @@ fn spawn_memory_hygiene_sweep(state: AppState) {
         }
         let mut total_gaps = 0usize;
         let mut total_promoted = 0usize;
+        let mut total_expired = 0usize;
+        let now_unix = OffsetDateTime::now_utc().unix_timestamp();
         for scope in scopes {
             let facade = memory_facade(&state);
             let ws = MemoryWorkspaceId::new(&scope);
             total_gaps += local_first_memory::sweep_gap_facts(&facade, &user, &ws);
             total_promoted +=
                 local_first_memory::promote_aged_candidates(&facade, &user, &ws);
+            let lifecycle = MemoryLifecycleRequest {
+                actor_id: "memory-maintenance".to_string(),
+                user_id: user.clone(),
+                workspace_id: ws,
+                purpose: "temporal_expiry".to_string(),
+            };
+            match facade.expire_due_memories(&lifecycle, now_unix) {
+                Ok(expired) => total_expired += expired,
+                Err(error) => eprintln!("memory hygiene: temporal expiry failed: {error}"),
+            }
         }
         if total_gaps > 0 {
             eprintln!("memory hygiene: retired {total_gaps} obsolete gap facts");
         }
         if total_promoted > 0 {
             eprintln!("memory hygiene: promoted {total_promoted} aged candidates");
+        }
+        if total_expired > 0 {
+            eprintln!("memory hygiene: expired {total_expired} temporal memories");
         }
     });
 }
