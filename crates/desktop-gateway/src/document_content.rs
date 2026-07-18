@@ -20,12 +20,15 @@ use serde_json::{Map, Value, json};
 
 use crate::TemplateCatalogEntry;
 
-/// One fixed slot in a document's block skeleton: which block type occupies it
-/// and the key the model-facing schema uses to address it. Order in the
-/// skeleton Vec IS the document order — never re-derived from model output.
+/// One fixed slot in a document's block skeleton: which block type occupies it,
+/// the key the model-facing schema uses to address it, and the CURATED example
+/// block itself. We keep the whole curated block so `assemble_doc_json` can carry
+/// editorial chrome the model never fills (eyebrow/hero_art) onto the output —
+/// making the generated doc match the preview (both sourced from example.json).
 pub(crate) struct DocBlockSlot {
     pub(crate) block_type: String,
     pub(crate) slot_key: String,
+    pub(crate) template_block: Map<String, Value>,
 }
 
 /// Derive the ordered slot skeleton from a pack's `example.json`. The curated
@@ -41,7 +44,9 @@ pub(crate) fn document_block_skeleton(example: &Value) -> Vec<DocBlockSlot> {
         .filter_map(|(i, block)| {
             let block_type = block.get("type")?.as_str()?.to_string();
             let slot_key = format!("slot_{i}_{block_type}");
-            Some(DocBlockSlot { block_type, slot_key })
+            let mut template_block = block.as_object().cloned().unwrap_or_default();
+            template_block.remove("type");
+            Some(DocBlockSlot { block_type, slot_key, template_block })
         })
         .collect()
 }
@@ -329,7 +334,12 @@ pub(crate) fn assemble_doc_json(
             .and_then(|s| s.get(&slot.slot_key))
             .and_then(|v| v.as_object())
             .ok_or_else(|| format!("document content missing slot `{}`", slot.slot_key))?;
-        let mut block = filled.clone();
+        // Start from the curated skeleton block so non-slot chrome (eyebrow/hero_art)
+        // survives; overlay the model's content (it wins on shared keys like name/title).
+        let mut block = slot.template_block.clone();
+        for (k, v) in filled {
+            block.insert(k.clone(), v.clone());
+        }
         block.insert("type".to_string(), Value::String(slot.block_type.clone()));
         blocks.push(Value::Object(block));
     }
@@ -576,5 +586,36 @@ mod tests {
         assert_eq!(doc["blocks"][1]["type"], "timeline");
         let missing = json!({"title": "Doc", "slots": {}});
         assert!(assemble_doc_json("f", &skeleton, &missing).is_err());
+    }
+
+    #[test]
+    fn assemble_carries_skeleton_chrome_and_lets_model_content_win() {
+        // Skeleton cover block carries curated chrome (hero_art) the model never sees,
+        // plus example content (name) the model overwrites.
+        let example = json!({"blocks": [
+            {"type": "contact_header", "name": "Jane Example", "headline": "Example",
+             "eyebrow": "CURRICULUM VITAE", "contact_items": ["a@b.c"]},
+            {"type": "section_cover", "title": "Example", "subtitle": "x",
+             "eyebrow": "CASE STUDY", "hero_art": "gradient"}
+        ]});
+        let skeleton = document_block_skeleton(&example);
+        let model_output = json!({"title": "Real CV", "slots": {
+            "slot_0_contact_header": {"name": "Marco Rossi", "headline": "Ops Lead",
+                "contact_items": ["marco@x.it"]},
+            "slot_1_section_cover": {"title": "Acme × Us", "subtitle": "How we did it"}
+        }});
+        let doc = assemble_doc_json("fallback", &skeleton, &model_output).unwrap();
+        let b = doc["blocks"].as_array().unwrap();
+        // model content wins
+        assert_eq!(b[0]["name"], "Marco Rossi");
+        assert_eq!(b[1]["title"], "Acme × Us");
+        // curated chrome carried from the skeleton (model never emitted these)
+        assert_eq!(b[0]["eyebrow"], "CURRICULUM VITAE");
+        assert_eq!(b[1]["eyebrow"], "CASE STUDY");
+        assert_eq!(b[1]["hero_art"], "gradient");
+        // contact_header has NO hero_art in the skeleton → stays absent
+        assert!(b[0].get("hero_art").is_none());
+        // type preserved
+        assert_eq!(b[0]["type"], "contact_header");
     }
 }
