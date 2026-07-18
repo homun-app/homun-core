@@ -11,8 +11,10 @@
 //! come argomento dal chiamante — il crate non legge il filesystem del gateway.
 
 use crate::{
-    BoxFuture, ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryExtraction, MemoryFacade,
-    MemoryStatus, PERSONAL_WORKSPACE, PrivacyDomain, UserId, WorkspaceId,
+    DataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
+    MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryEvolutionProposal, MemoryExtraction,
+    MemoryFacade, MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus, PERSONAL_WORKSPACE,
+    PrivacyDomain, UserId, WorkspaceId, contains_secret, current_timestamp, memory_is_current_at,
     recall::{cosine, dedup_tokens, jaccard, DEDUP_JACCARD},
 };
 
@@ -142,6 +144,14 @@ now complete, do NOT emit another open_loop. Emit the durable fact/decision/outc
 metadata.closes_open_loop with a short copy/paraphrase of the existing open loop. Use this only for \
 completion with evidence, never for partial progress.";
 
+const EXTRACTOR_EVOLUTION_INSTRUCTION: &str = "For each memory you MAY add an `evolution` object: \
+{\"kind\":\"independent|updates|extends|derives|conflict\",\"target_ref\":\"one exact ref from \
+ACTIVE MEMORY CANDIDATES or null\",\"valid_from\":null,\"valid_until\":null,\"confidence\":0.0}. \
+Use updates only when the new claim replaces the target, extends for compatible added detail, \
+derives for an inference, conflict when both claims need review, and independent when no candidate \
+applies. Never invent or alter a target ref. Exact duplicates are resolved deterministically by \
+Homun and do not need an evolution object.";
+
 /// Costruisce il system prompt completo (base + varianti speaker/actions/project/
 /// known-decisions/known-open-loops). Spostato fedelmente dal gateway. I dati
 /// gateway-only (`project_name`, known loops/decisions) sono forniti dal chiamante.
@@ -189,6 +199,45 @@ otherwise do not save it."
     } else {
         system
     };
+    let now_unix = now_unix_seconds();
+    let active_candidates = facade
+        .list_memories_for_ui(user, active)
+        .map(|memories| {
+            memories
+                .into_iter()
+                .filter(|memory| memory_is_current_at(memory, now_unix, true))
+                .filter(|memory| memory.sensitivity != DataSensitivity::Secret)
+                .filter(|memory| {
+                    !contains_secret(&serde_json::json!({
+                        "text": memory.text,
+                        "metadata": memory.metadata,
+                    }))
+                })
+                .take(24)
+                .map(|memory| {
+                    let summary = memory
+                        .text
+                        .replace(['\n', '\r'], " ")
+                        .chars()
+                        .take(160)
+                        .collect::<String>();
+                    format!(
+                        "- ref={} type={} claim={summary}",
+                        memory.reference, memory.memory_type
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    let system = if active_candidates.is_empty() {
+        format!("{system}\n\n{EXTRACTOR_EVOLUTION_INSTRUCTION}")
+    } else {
+        format!(
+            "{system}\n\n{EXTRACTOR_EVOLUTION_INSTRUCTION}\n\nACTIVE MEMORY CANDIDATES \
+(same scope only; copy refs exactly):\n{active_candidates}"
+        )
+    };
     // Source-suppression: known decisions (solo in project).
     let known_decisions = if active.as_str() == PERSONAL_WORKSPACE {
         String::new()
@@ -200,10 +249,7 @@ otherwise do not save it."
                     .into_iter()
                     .filter(|m| {
                         m.memory_type == "decision"
-                            && matches!(
-                                m.status,
-                                MemoryStatus::Confirmed | MemoryStatus::Candidate
-                            )
+                            && memory_is_current_at(m, now_unix, true)
                     })
                     .take(40)
                     .map(|m| {
@@ -244,7 +290,9 @@ substantially updated decisions relative to these):\n{known_decisions}"
             .list_memories_for_ui(user, &workspace)
             .unwrap_or_default()
             .into_iter()
-            .filter(active_open_loop_record)
+            .filter(|memory| {
+                active_open_loop_record(memory) && memory_is_current_at(memory, now_unix, true)
+            })
             .take(8)
         {
             loop_lines.push(format!("- ({label}) {}", memory.text.trim().replace('\n', " ")));
@@ -378,6 +426,7 @@ fn retire_contradicted_gaps(
         Err(_) => return 0,
     };
     let request = lifecycle_request(user_id, workspace_id);
+    let now_unix = now_unix_seconds();
     let mut retired = 0;
     for m in existing {
         // Ritira fact/preference/open_loop che esprimono un gap. Le open_loop
@@ -386,6 +435,9 @@ fn retire_contradicted_gaps(
             continue;
         }
         if !matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate) {
+            continue;
+        }
+        if !memory_is_current_at(&m, now_unix, true) {
             continue;
         }
         if !is_gap_fact(&m.text) {
@@ -418,11 +470,13 @@ pub fn sweep_gap_facts(facade: &MemoryFacade, user: &UserId, workspace: &Workspa
     };
     // Partition: gap memories (candidates for retirement, incl. open_loops that
     // express a gap) vs positive facts (the contradictors).
+    let now_unix = now_unix_seconds();
     let gaps: Vec<&crate::MemoryRecord> = items
         .iter()
         .filter(|m| {
             matches!(m.memory_type.as_str(), "fact" | "preference" | "open_loop")
                 && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && memory_is_current_at(m, now_unix, true)
                 && is_gap_fact(&m.text)
         })
         .collect();
@@ -431,6 +485,7 @@ pub fn sweep_gap_facts(facade: &MemoryFacade, user: &UserId, workspace: &Workspa
         .filter(|m| {
             matches!(m.memory_type.as_str(), "fact" | "preference")
                 && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
+                && memory_is_current_at(m, now_unix, true)
                 && !is_gap_fact(&m.text)
         })
         .map(|m| (m, dedup_tokens(&m.text)))
@@ -463,14 +518,13 @@ pub fn sweep_gap_facts(facade: &MemoryFacade, user: &UserId, workspace: &Workspa
     retired
 }
 
-/// Persiste le memorie estratte in uno scope, deduplicando contro l'esistente per
-/// overlap di contenuto (jaccard) e chiudendo open-loop. Spostato fedelmente
-/// dal gateway (`persist_scope_memories`).
+/// Persiste le memorie estratte in uno scope, riconciliandole con la memoria
+/// corrente e chiudendo gli open-loop correlati.
 pub fn persist_scope_memories(
     facade: &MemoryFacade,
     user_id: &UserId,
     workspace_id: &WorkspaceId,
-    mut memories: Vec<ExtractedMemory>,
+    memories: Vec<ExtractedMemory>,
 ) {
     if memories.is_empty() {
         return;
@@ -480,31 +534,13 @@ pub fn persist_scope_memories(
         .filter(|memory| memory.memory_type != "open_loop")
         .flat_map(open_loop_closure_targets)
         .collect();
-    // Dedup against the FULL set of existing memories by content overlap.
-    let existing: Vec<(String, std::collections::HashSet<String>)> = facade
-        .list_memories_for_ui(user_id, workspace_id)
-        .map(|mems| {
-            mems.into_iter()
-                .map(|m| (m.text.clone(), dedup_tokens(&m.text)))
-                .collect()
-        })
-        .unwrap_or_default();
-    memories.retain(|new_memory| {
-        let new_tokens = dedup_tokens(&new_memory.text);
-        existing.iter().all(|(existing_text, existing_tokens)| {
-            // Same-type + high jaccard = skip (already stored).
-            let same_text = existing_text.trim() == new_memory.text.trim();
-            !(same_text || jaccard(&new_tokens, existing_tokens) >= DEDUP_JACCARD)
-        })
-    });
-    if memories.is_empty() {
-        return;
-    }
     for memory in memories {
-        // Gap retirement: se il nuovo fatto è positivo, ritira i gap fact
+        if evolve_extracted_memory(facade, user_id, workspace_id, &memory).is_err() {
+            continue;
+        }
+        // Dopo una persistenza riuscita, se il nuovo fatto è positivo ritira i gap fact
         // (assenza/mancanza) topicalamente correlati che ora risultano obsoleti.
-        // Deve avvenire PRIMA della persistenza per evitare di ritirare il fatto
-        // appena creato (che verrebbe dedup-persisted dopo).
+        // La ricerca considera solo i record precedenti e non ritira il fatto appena creato.
         let _ = retire_contradicted_gaps(facade, user_id, workspace_id, &memory);
         // Open-loop closure: if this memory closes an existing loop, mark it stale.
         if !closure_targets.is_empty() {
@@ -524,8 +560,185 @@ pub fn persist_scope_memories(
                 }
             }
         }
-        let _ = create_or_update(facade, user_id, workspace_id, &memory);
     }
+}
+
+fn now_unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+fn evolve_extracted_memory(
+    facade: &MemoryFacade,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    memory: &ExtractedMemory,
+) -> Result<MemoryRecord, String> {
+    let now_unix = now_unix_seconds();
+    let current = facade
+        .list_memories_for_ui(user_id, workspace_id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|record| memory_is_current_at(record, now_unix, true))
+        .filter(|record| record.sensitivity != DataSensitivity::Secret)
+        .filter(|record| {
+            !contains_secret(&serde_json::json!({
+                "text": record.text,
+                "metadata": record.metadata,
+            }))
+        })
+        .collect::<Vec<_>>();
+    let new_tokens = dedup_tokens(&memory.text);
+    let mut duplicates = current
+        .iter()
+        .filter(|record| record.memory_type == memory.memory_type)
+        .filter_map(|record| {
+            let exact = record.text.trim() == memory.text.trim();
+            let score = if exact {
+                1.0
+            } else {
+                jaccard(&new_tokens, &dedup_tokens(&record.text))
+            };
+            (exact || score >= DEDUP_JACCARD).then_some((record, score))
+        })
+        .collect::<Vec<_>>();
+    duplicates.sort_by(|(left_record, left_score), (right_record, right_score)| {
+        right_score.total_cmp(left_score).then_with(|| {
+            left_record
+                .reference
+                .to_string()
+                .cmp(&right_record.reference.to_string())
+        })
+    });
+    let model_candidates = current.iter().take(24).cloned().collect::<Vec<_>>();
+
+    let (kind, targets, classifier, classifier_confidence, valid_from, valid_until) =
+        if let Some((target, score)) = duplicates.first() {
+            (
+                MemoryEvolutionKind::Duplicate,
+                vec![target.reference.clone()],
+                "deterministic-jaccard".to_string(),
+                f64::from(*score),
+                None,
+                None,
+            )
+        } else {
+            classify_extracted_evolution(memory, &model_candidates)
+        };
+    let confidence = memory.confidence.clamp(0.0, 1.0);
+    let reference =
+        MemoryRef::generated(MemoryRefKind::Memory, user_id.clone(), workspace_id.clone());
+    let record = MemoryRecord {
+        reference: reference.clone(),
+        user_id: user_id.clone(),
+        workspace_id: workspace_id.clone(),
+        memory_type: memory.memory_type.clone(),
+        text: memory.text.clone(),
+        aliases: memory.aliases.clone(),
+        language_hints: memory.language_hints.clone(),
+        confidence,
+        status: if confidence >= 0.5 {
+            MemoryStatus::Confirmed
+        } else {
+            MemoryStatus::Candidate
+        },
+        privacy_domain: memory.privacy_domain.clone(),
+        sensitivity: memory.sensitivity,
+        metadata: memory.metadata.clone(),
+        created_at: current_timestamp(),
+        updated_at: current_timestamp(),
+        last_seen_at: Some(current_timestamp()),
+        supersedes: Vec::new(),
+        superseded_by: None,
+        correction_of: None,
+    };
+    let proposal = MemoryEvolutionProposal {
+        request_id: format!("learn-{}", reference.key),
+        record,
+        evolution: MemoryEvolutionMetadata {
+            kind,
+            target_refs: targets,
+            valid_from,
+            valid_until,
+            last_confirmed_at: Some(now_unix),
+            reinforcement_count: 1,
+            classifier,
+            classifier_confidence,
+        },
+    };
+    facade
+        .evolve_memory(proposal)
+        .map(|result| result.record)
+        .map_err(|error| error.to_string())
+}
+
+fn classify_extracted_evolution(
+    memory: &ExtractedMemory,
+    current: &[MemoryRecord],
+) -> (
+    MemoryEvolutionKind,
+    Vec<MemoryRef>,
+    String,
+    f64,
+    Option<i64>,
+    Option<i64>,
+) {
+    let Some(extracted) = &memory.evolution else {
+        return (
+            MemoryEvolutionKind::Independent,
+            Vec::new(),
+            "extractor-v1".to_string(),
+            1.0,
+            None,
+            None,
+        );
+    };
+    let classifier_confidence = if extracted.confidence.is_finite() {
+        extracted.confidence.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let target = extracted
+        .target_ref
+        .as_deref()
+        .and_then(|value| value.parse::<MemoryRef>().ok())
+        .and_then(|reference| {
+            current
+                .iter()
+                .find(|record| record.reference == reference)
+                .map(|record| record.reference.clone())
+        });
+    let proposed_kind = match extracted.kind.as_str() {
+        "updates" if classifier_confidence >= 0.80 => MemoryEvolutionKind::Updates,
+        "updates" if target.is_some() => MemoryEvolutionKind::Conflict,
+        "extends" if classifier_confidence >= 0.70 => MemoryEvolutionKind::Extends,
+        "derives" => MemoryEvolutionKind::Derives,
+        "conflict" => MemoryEvolutionKind::Conflict,
+        _ => MemoryEvolutionKind::Independent,
+    };
+    let kind = if proposed_kind == MemoryEvolutionKind::Independent || target.is_some() {
+        proposed_kind
+    } else {
+        MemoryEvolutionKind::Independent
+    };
+    let targets = target
+        .filter(|_| kind != MemoryEvolutionKind::Independent)
+        .into_iter()
+        .collect();
+    let (valid_from, valid_until) = match (extracted.valid_from, extracted.valid_until) {
+        (Some(from), Some(until)) if until <= from => (None, None),
+        range => range,
+    };
+    (
+        kind,
+        targets,
+        "extractor-v1".to_string(),
+        classifier_confidence,
+        valid_from,
+        valid_until,
+    )
 }
 
 /// Costruisce una `MemoryLifecycleRequest` per lo scope. Helper privato.
@@ -539,39 +752,6 @@ fn lifecycle_request(
         workspace_id: workspace_id.clone(),
         purpose: "extraction".to_string(),
     }
-}
-
-/// Crea/aggiorna una memoria estratta (auto-confirm low-risk). Spostato fedelmente.
-fn create_or_update(
-    facade: &MemoryFacade,
-    user_id: &UserId,
-    workspace_id: &WorkspaceId,
-    memory: &ExtractedMemory,
-) -> Result<(), String> {
-    let request = lifecycle_request(user_id, workspace_id);
-    let confidence = memory.confidence.clamp(0.0, 1.0);
-    let create = crate::MemoryCreateRequest {
-        request: request.clone(),
-        memory_type: memory.memory_type.clone(),
-        text: memory.text.clone(),
-        aliases: memory.aliases.clone(),
-        language_hints: memory.language_hints.clone(),
-        confidence,
-        privacy_domain: memory.privacy_domain.clone(),
-        sensitivity: memory.sensitivity,
-        metadata: memory.metadata.clone(),
-        evidence_refs: Vec::new(),
-    };
-    let record = facade
-        .create_memory_candidate(create)
-        .map_err(|e| e.to_string())?;
-    // Auto-confirm medium+ confidence (low-risk). Soglia abbassata a 0.5 (era 0.6):
-    // l'estrattore LLM a volte assegna confidence 0.5-0.6 a fatti validi, lasciandoli
-    // invisibili (candidate) nel briefing. 0.5 li rende visibili subito.
-    if confidence >= 0.5 {
-        let _ = facade.confirm_memory(&request, &record.reference, "auto-confirm learn");
-    }
-    Ok(())
 }
 
 /// Open-loop closure targets (paraphrase tokens di una memoria che potrebbe
@@ -903,7 +1083,18 @@ pub fn promote_aged_candidates(facade: &MemoryFacade, user: &UserId, workspace: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MemoryFacade, SQLiteMemoryStore};
+    use crate::{
+        BoxFuture, MemoryFacade, MemoryRef, MemoryRefKind, SQLiteMemoryStore,
+        memory_evolution_metadata,
+    };
+
+    fn no_hooks<'a>() -> LearnHooks<'a> {
+        LearnHooks {
+            persist_graph: None,
+            store_episode: None,
+            backfill_embeddings: None,
+        }
+    }
 
     /// LLM mock che ritorna un JSON estratto fisso (una preferenza personale).
     /// Deterministico, no HTTP. L'end-to-end async (learn_on_facade) si testa nel
@@ -961,6 +1152,7 @@ mod tests {
             sensitivity: crate::DataSensitivity::Public,
             metadata: serde_json::json!({"scope": "personal"}),
             evidence_refs: vec![],
+            evolution: None,
         };
         persist_scope_memories(&facade, &user, &ws, vec![existing.clone()]);
         let count_after_first = facade.list_memories_for_ui(&user, &ws).unwrap().len();
@@ -973,6 +1165,188 @@ mod tests {
         persist_scope_memories(&facade, &user, &ws, vec![paraphrase]);
         let count_after_dup = facade.list_memories_for_ui(&user, &ws).unwrap().len();
         assert_eq!(count_after_dup, 1, "paraphrase ad alta jaccard dedupplicata");
+    }
+
+    #[test]
+    fn extractor_prompt_exposes_only_bounded_current_scope_candidates() {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let user = UserId::new("prompt-user");
+        let ws = WorkspaceId::new("project-prompt");
+        let existing = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "The launch is Friday".into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.9,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: crate::DataSensitivity::Internal,
+            metadata: serde_json::json!({"scope": "project"}),
+            evidence_refs: vec![],
+            evolution: None,
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![existing]);
+        let stored = facade.list_memories_for_ui(&user, &ws).unwrap().remove(0);
+        let mut secret = stored.clone();
+        secret.reference = MemoryRef::generated(MemoryRefKind::Memory, user.clone(), ws.clone());
+        secret.text = "password: must-never-enter-extractor-context".to_string();
+        secret.sensitivity = DataSensitivity::Secret;
+        facade.upsert_memory(&secret).unwrap();
+
+        let prompt = build_extractor_system(&facade, &user, &ws, None, "", Some("Probe"));
+
+        assert!(prompt.contains("ACTIVE MEMORY CANDIDATES"));
+        assert!(prompt.contains(&stored.reference.to_string()));
+        assert!(prompt.contains("The launch is Friday"));
+        assert!(!prompt.contains("must-never-enter-extractor-context"));
+    }
+
+    #[test]
+    fn model_proposed_update_supersedes_an_active_same_scope_target() {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let user = UserId::new("update-user");
+        let ws = WorkspaceId::new("project-update");
+        let existing = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "The launch is Friday".into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.95,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: crate::DataSensitivity::Internal,
+            metadata: serde_json::json!({"scope": "project"}),
+            evidence_refs: vec![],
+            evolution: None,
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![existing]);
+        let old = facade.list_memories_for_ui(&user, &ws).unwrap().remove(0);
+        let content = serde_json::json!({
+            "memories": [{
+                "memory_type": "fact",
+                "text": "The launch is Monday",
+                "sensitivity": "internal",
+                "confidence": 0.95,
+                "metadata": {"scope": "project", "certainty": "committed"},
+                "evolution": {"kind": "updates", "target_ref": old.reference.to_string(), "confidence": 0.95}
+            }],
+            "entities": [], "relations": [], "episode": ""
+        });
+
+        assert!(persist_learn_extraction(
+            &facade,
+            &user,
+            &ws,
+            &content.to_string(),
+            Some("thread-update"),
+            no_hooks(),
+        ));
+        let items = facade.list_memories_for_ui(&user, &ws).unwrap();
+        let stored_old = items
+            .iter()
+            .find(|item| item.reference == old.reference)
+            .unwrap();
+        let replacement = items
+            .iter()
+            .find(|item| item.text == "The launch is Monday")
+            .unwrap();
+        assert_eq!(
+            stored_old.superseded_by,
+            Some(replacement.reference.clone())
+        );
+    }
+
+    #[test]
+    fn invalid_model_target_falls_back_to_independent_without_mutating_existing() {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let user = UserId::new("fallback-user");
+        let ws = WorkspaceId::new("project-fallback");
+        let content = serde_json::json!({
+            "memories": [{
+                "memory_type": "fact",
+                "text": "The launch is Monday",
+                "sensitivity": "internal",
+                "confidence": 0.95,
+                "metadata": {"scope": "project"},
+                "evolution": {"kind": "updates", "target_ref": "not-a-memory-ref", "confidence": 0.99}
+            }],
+            "entities": [], "relations": [], "episode": ""
+        });
+
+        assert!(persist_learn_extraction(
+            &facade,
+            &user,
+            &ws,
+            &content.to_string(),
+            None,
+            no_hooks(),
+        ));
+        let item = facade.list_memories_for_ui(&user, &ws).unwrap().remove(0);
+        assert_eq!(
+            memory_evolution_metadata(&item.metadata)
+                .unwrap()
+                .unwrap()
+                .kind,
+            crate::MemoryEvolutionKind::Independent
+        );
+    }
+
+    #[test]
+    fn deterministic_duplicate_reinforces_and_derive_remains_candidate() {
+        let facade = MemoryFacade::new(SQLiteMemoryStore::open_in_memory().unwrap());
+        let user = UserId::new("evolution-user");
+        let ws = WorkspaceId::new("project-evolution");
+        let extracted = ExtractedMemory {
+            memory_type: "fact".into(),
+            text: "The payments team owns checkout".into(),
+            aliases: vec![],
+            language_hints: vec![],
+            confidence: 0.9,
+            privacy_domain: PrivacyDomain::new("personal"),
+            sensitivity: crate::DataSensitivity::Internal,
+            metadata: serde_json::json!({"scope": "project"}),
+            evidence_refs: vec![],
+            evolution: None,
+        };
+        persist_scope_memories(&facade, &user, &ws, vec![extracted.clone()]);
+        let source = facade.list_memories_for_ui(&user, &ws).unwrap().remove(0);
+        persist_scope_memories(&facade, &user, &ws, vec![extracted]);
+        let reinforced = facade
+            .get_memory_for_ui(&source.reference, &user, &ws)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            memory_evolution_metadata(&reinforced.metadata)
+                .unwrap()
+                .unwrap()
+                .reinforcement_count,
+            2
+        );
+
+        let content = serde_json::json!({
+            "memories": [{
+                "memory_type": "fact",
+                "text": "Payments probably owns the revenue roadmap",
+                "sensitivity": "internal",
+                "confidence": 0.9,
+                "metadata": {"scope": "project"},
+                "evolution": {"kind": "derives", "target_ref": source.reference.to_string(), "confidence": 0.9}
+            }],
+            "entities": [], "relations": [], "episode": ""
+        });
+        assert!(persist_learn_extraction(
+            &facade,
+            &user,
+            &ws,
+            &content.to_string(),
+            None,
+            no_hooks(),
+        ));
+        let derived = facade
+            .list_memories_for_ui(&user, &ws)
+            .unwrap()
+            .into_iter()
+            .find(|item| item.text.contains("revenue roadmap"))
+            .unwrap();
+        assert_eq!(derived.status, MemoryStatus::Candidate);
     }
 
     #[test]
@@ -1010,6 +1384,7 @@ mod tests {
             sensitivity: crate::DataSensitivity::Public,
             metadata: serde_json::json!({"scope": "personal"}),
             evidence_refs: vec![],
+            evolution: None,
         };
         persist_scope_memories(&facade, &user, &ws, vec![gap]);
         let confirmed_count = facade.list_memories_for_ui(&user, &ws).unwrap().len();
@@ -1025,6 +1400,7 @@ mod tests {
             sensitivity: crate::DataSensitivity::Public,
             metadata: serde_json::json!({"scope": "personal"}),
             evidence_refs: vec![],
+            evolution: None,
         };
         persist_scope_memories(&facade, &user, &ws, vec![positive]);
         let items = facade.list_memories_for_ui(&user, &ws).unwrap();
@@ -1064,6 +1440,7 @@ mod tests {
             sensitivity: crate::DataSensitivity::Public,
             metadata: serde_json::json!({"scope": "personal"}),
             evidence_refs: vec![],
+            evolution: None,
         };
         persist_scope_memories(&facade, &user, &ws, vec![gap]);
         // Positive fact about a different topic (job, not color).
@@ -1077,6 +1454,7 @@ mod tests {
             sensitivity: crate::DataSensitivity::Public,
             metadata: serde_json::json!({"scope": "personal"}),
             evidence_refs: vec![],
+            evolution: None,
         };
         persist_scope_memories(&facade, &user, &ws, vec![positive]);
         let raw = facade.list_memories_for_ui(&user, &ws).unwrap();

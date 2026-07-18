@@ -213,6 +213,21 @@ pub struct ExtractedMemory {
     pub evidence_refs: Vec<String>,
     #[serde(default)]
     pub metadata: serde_json::Value,
+    #[serde(default)]
+    pub evolution: Option<ExtractedMemoryEvolution>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtractedMemoryEvolution {
+    pub kind: String,
+    #[serde(default)]
+    pub target_ref: Option<String>,
+    #[serde(default)]
+    pub valid_from: Option<i64>,
+    #[serde(default)]
+    pub valid_until: Option<i64>,
+    #[serde(default)]
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

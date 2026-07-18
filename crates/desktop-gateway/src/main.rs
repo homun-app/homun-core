@@ -3747,6 +3747,7 @@ fn store_episode(
         privacy_domain: PrivacyDomain::new("personal"),
         sensitivity: MemoryDataSensitivity::Internal,
         evidence_refs: Vec::new(),
+        evolution: None,
         // `workspace` = the scope this conversation belongs to, so episodic recall can be
         // ISOLATED per project (a project recalls only its own conversations, not personal).
         metadata: serde_json::json!({ "thread_id": thread_id, "scope": "thread", "workspace": origin_workspace }),
