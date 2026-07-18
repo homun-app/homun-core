@@ -188,7 +188,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     env, fs,
-    io::{Cursor, Write},
+    io::{Cursor, Read, Write},
     net::SocketAddr,
     path::{Path as FsPath, PathBuf},
     process::Command,
@@ -45383,51 +45383,155 @@ fn is_code_file(name: &str) -> bool {
             | "scala"
             | "m"
             | "lua"
-            | "sh"
-            | "bash"
     )
 }
 
-/// Newest mtime among a project's SOURCE files (excludes vendored/build trees), for
-/// staleness: rebuild the code graph only when the project changed since last build.
-fn project_newest_mtime(root: &std::path::Path) -> Option<std::time::SystemTime> {
-    fn walk(dir: &std::path::Path, newest: &mut Option<std::time::SystemTime>, depth: usize) {
-        if depth > 12 {
-            return;
+fn project_fingerprint_update(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(0x100000001b3);
+    }
+}
+
+fn project_fingerprint_field(hash: &mut u64, bytes: &[u8]) {
+    project_fingerprint_update(hash, &(bytes.len() as u64).to_le_bytes());
+    project_fingerprint_update(hash, bytes);
+}
+
+#[cfg(unix)]
+fn project_relative_path_bytes(path: &std::path::Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn project_relative_path_bytes(path: &std::path::Path) -> Vec<u8> {
+    path.to_string_lossy().replace('\\', "/").into_bytes()
+}
+
+#[cfg(unix)]
+fn project_path_from_git_bytes(bytes: &[u8]) -> std::path::PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+}
+
+#[cfg(not(unix))]
+fn project_path_from_git_bytes(bytes: &[u8]) -> std::path::PathBuf {
+    std::path::PathBuf::from(String::from_utf8_lossy(bytes).as_ref())
+}
+
+fn project_relative_path_is_source(bytes: &[u8]) -> bool {
+    let path = project_path_from_git_bytes(bytes);
+    let mut components = path.components().filter_map(|component| match component {
+        std::path::Component::Normal(value) => Some(value.to_string_lossy()),
+        _ => None,
+    });
+    let Some(first) = components.next() else {
+        return false;
+    };
+    let mut last = first;
+    if is_noise_dir(&last) {
+        return false;
+    }
+    for component in components {
+        if is_noise_dir(&component) {
+            return false;
         }
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if is_noise_dir(&name) {
-                continue;
-            }
-            let path = entry.path();
-            if let Ok(ft) = entry.file_type() {
-                if ft.is_dir() {
-                    walk(&path, newest, depth + 1);
-                } else if is_code_file(&name) {
-                    if let Ok(m) = entry.metadata().and_then(|md| md.modified()) {
-                        if newest.map(|n| m > n).unwrap_or(true) {
-                            *newest = Some(m);
-                        }
-                    }
-                }
+        last = component;
+    }
+    is_code_file(&last)
+}
+
+fn project_fingerprint_file(hash: &mut u64, path: &std::path::Path) {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        project_fingerprint_field(hash, b"missing");
+        return;
+    };
+    if metadata.file_type().is_symlink() {
+        project_fingerprint_field(hash, b"symlink");
+        let target = std::fs::read_link(path)
+            .map(|value| project_relative_path_bytes(&value))
+            .unwrap_or_default();
+        project_fingerprint_field(hash, &target);
+        return;
+    }
+
+    project_fingerprint_field(hash, b"file");
+    project_fingerprint_update(hash, &metadata.len().to_le_bytes());
+    let Ok(mut file) = std::fs::File::open(path) else {
+        project_fingerprint_field(hash, b"unreadable");
+        return;
+    };
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => project_fingerprint_update(hash, &buffer[..read]),
+            Err(_) => {
+                project_fingerprint_field(hash, b"read-error");
+                break;
             }
         }
     }
-    let mut newest = None;
-    walk(root, &mut newest, 0);
-    newest
 }
 
-/// Authoritative "has the code changed?" signal for a project: git HEAD + a hash of
-/// `git status --porcelain` (tracked + untracked working-tree changes). Catches edits by
-/// ANYONE — the agent, the user's own editor, checkout/pull/commit — unlike mtime
-/// (heuristic) or the agent's tool-trace (only ITS writes). Falls back to the newest
-/// source mtime for non-git projects. Cheap (git uses its index); safe to call per-turn.
+fn project_fingerprint_source_tree(
+    root: &std::path::Path,
+    tracked: Option<&HashSet<Vec<u8>>>,
+    dirty: &HashSet<Vec<u8>>,
+    hash: &mut u64,
+) {
+    fn walk(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        tracked: Option<&HashSet<Vec<u8>>>,
+        dirty: &HashSet<Vec<u8>>,
+        hash: &mut u64,
+    ) {
+        let Ok(read_dir) = std::fs::read_dir(dir) else {
+            project_fingerprint_field(hash, b"unreadable-directory");
+            return;
+        };
+        let mut entries = read_dir.flatten().collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let name = entry.file_name();
+            let name_text = name.to_string_lossy();
+            if is_noise_dir(&name_text) {
+                continue;
+            }
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                walk(root, &path, tracked, dirty, hash);
+                continue;
+            }
+            if !is_code_file(&name_text) {
+                continue;
+            }
+            let Ok(relative) = path.strip_prefix(root) else {
+                continue;
+            };
+            let relative = project_relative_path_bytes(relative);
+            let needs_content = tracked
+                .map(|paths| !paths.contains(&relative) || dirty.contains(&relative))
+                .unwrap_or(true);
+            if needs_content {
+                project_fingerprint_field(hash, &relative);
+                project_fingerprint_file(hash, &path);
+            }
+        }
+    }
+    walk(root, root, tracked, dirty, hash);
+}
+
+/// Authoritative "has the analyzed code changed?" signal. For Git projects, HEAD
+/// represents clean tracked sources while dirty tracked, untracked, and Git-ignored
+/// source contents are hashed incrementally from disk. Non-Git projects hash the same
+/// source tree in full. File contents are streamed, and vendored/build trees are pruned,
+/// so the signal follows Graphify's actual input without materializing large files.
 fn project_change_fingerprint(root: &std::path::Path) -> String {
     let git = |args: &[&str]| {
         std::process::Command::new("git")
@@ -45437,23 +45541,34 @@ fn project_change_fingerprint(root: &std::path::Path) -> String {
             .output()
             .ok()
             .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .map(|o| o.stdout)
     };
     if let Some(head) = git(&["rev-parse", "HEAD"]) {
-        let status = git(&["status", "--porcelain", "--untracked-files=all"]).unwrap_or_default();
-        // FNV-1a hash so the fingerprint stays small even on a large dirty tree.
         let mut h: u64 = 0xcbf29ce484222325;
-        for b in status.as_bytes() {
-            h ^= u64::from(*b);
-            h = h.wrapping_mul(0x100000001b3);
+        project_fingerprint_field(&mut h, &head);
+        let tracked = git(&["ls-files", "--cached", "-z"])
+            .unwrap_or_default()
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty() && project_relative_path_is_source(path))
+            .map(Vec::from)
+            .collect::<HashSet<_>>();
+        let dirty = git(&["diff", "--relative", "--name-only", "-z", "HEAD", "--"])
+            .unwrap_or_default()
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty() && project_relative_path_is_source(path))
+            .map(Vec::from)
+            .collect::<HashSet<_>>();
+        let mut dirty_paths = dirty.iter().collect::<Vec<_>>();
+        dirty_paths.sort();
+        for path in dirty_paths {
+            project_fingerprint_field(&mut h, path);
         }
-        return format!("git:{}:{:x}", head.trim(), h);
+        project_fingerprint_source_tree(root, Some(&tracked), &dirty, &mut h);
+        return format!("git:{}:{:x}", String::from_utf8_lossy(&head).trim(), h);
     }
-    // Non-git project: newest source-file mtime as the change signal.
-    match project_newest_mtime(root).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()) {
-        Some(d) => format!("mtime:{}", d.as_secs()),
-        None => "none".to_string(),
-    }
+    let mut h: u64 = 0xcbf29ce484222325;
+    project_fingerprint_source_tree(root, None, &HashSet::new(), &mut h);
+    format!("tree:{h:x}")
 }
 
 /// Count CODE files under a project, stopping early at `cap` (cheap guard). Counts only
@@ -68970,6 +69085,111 @@ Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
         );
         // Age helper: 86_400s == 1 day.
         assert!((memory_age_days("unix:999913600", 1_000_000_000) - 1.0).abs() < 0.01);
+    }
+
+    fn initialise_fingerprint_test_repository(name: &str) -> std::path::PathBuf {
+        let root = isolated_gateway_test_dir(name);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "fn alpha() {}\n").unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "--quiet"]);
+        git(&["config", "user.name", "Homun Tests"]);
+        git(&["config", "user.email", "tests@homun.local"]);
+        git(&["add", "src/lib.rs"]);
+        git(&["commit", "--quiet", "-m", "baseline"]);
+        root
+    }
+
+    #[test]
+    fn project_change_fingerprint_tracks_repeated_content_edits_to_the_same_dirty_file() {
+        let root = initialise_fingerprint_test_repository("project-fingerprint-dirty-content");
+        let clean = super::project_change_fingerprint(&root);
+
+        std::fs::write(root.join("src/lib.rs"), "fn beta() {}\n").unwrap();
+        let first_dirty = super::project_change_fingerprint(&root);
+        assert_ne!(clean, first_dirty);
+
+        // The porcelain status line remains ` M src/lib.rs`; only its contents change.
+        std::fs::write(root.join("src/lib.rs"), "fn gamma() {}\n").unwrap();
+        let second_dirty = super::project_change_fingerprint(&root);
+        assert_ne!(first_dirty, second_dirty);
+    }
+
+    #[test]
+    fn project_change_fingerprint_tracks_repeated_content_edits_to_an_untracked_file() {
+        let root = initialise_fingerprint_test_repository("project-fingerprint-untracked-content");
+        let note = root.join("src/notes.rs");
+
+        std::fs::write(&note, "const NOTE: &str = \"one\";\n").unwrap();
+        let first_untracked = super::project_change_fingerprint(&root);
+        std::fs::write(&note, "const NOTE: &str = \"two\";\n").unwrap();
+        let second_untracked = super::project_change_fingerprint(&root);
+
+        assert_ne!(first_untracked, second_untracked);
+    }
+
+    #[test]
+    fn project_change_fingerprint_tracks_git_ignored_source_content() {
+        let root = initialise_fingerprint_test_repository("project-fingerprint-ignored-content");
+        std::fs::write(root.join(".gitignore"), "src/generated.rs\n").unwrap();
+        let generated = root.join("src/generated.rs");
+
+        std::fs::write(&generated, "fn generated_one() {}\n").unwrap();
+        let first_ignored = super::project_change_fingerprint(&root);
+        std::fs::write(&generated, "fn generated_two() {}\n").unwrap();
+        let second_ignored = super::project_change_fingerprint(&root);
+
+        assert_ne!(first_ignored, second_ignored);
+    }
+
+    #[test]
+    fn project_change_fingerprint_tracks_repeated_staged_content_edits() {
+        let root = initialise_fingerprint_test_repository("project-fingerprint-staged-content");
+        let git_add = || {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(["add", "src/lib.rs"])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+        };
+
+        std::fs::write(root.join("src/lib.rs"), "fn beta() {}\n").unwrap();
+        git_add();
+        let first_staged = super::project_change_fingerprint(&root);
+        assert_eq!(first_staged, super::project_change_fingerprint(&root));
+
+        std::fs::write(root.join("src/lib.rs"), "fn gamma() {}\n").unwrap();
+        git_add();
+        let second_staged = super::project_change_fingerprint(&root);
+        assert_ne!(first_staged, second_staged);
+    }
+
+    #[test]
+    fn project_change_fingerprint_tracks_repeated_edits_in_a_scoped_subdirectory() {
+        let root = initialise_fingerprint_test_repository("project-fingerprint-subdirectory");
+        let scoped_root = root.join("src");
+
+        std::fs::write(scoped_root.join("lib.rs"), "fn beta() {}\n").unwrap();
+        let first_dirty = super::project_change_fingerprint(&scoped_root);
+        std::fs::write(scoped_root.join("lib.rs"), "fn gamma() {}\n").unwrap();
+        let second_dirty = super::project_change_fingerprint(&scoped_root);
+
+        assert_ne!(first_dirty, second_dirty);
     }
 
     #[test]
