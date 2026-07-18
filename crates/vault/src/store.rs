@@ -1,4 +1,6 @@
-use crate::{LocalPinVerifier, VaultRecord, VaultRecordId};
+use crate::{
+    LocalPinVerifier, VaultBackupReport, VaultIntegrityReport, VaultRecord, VaultRecordId,
+};
 use base64::Engine;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
@@ -6,7 +8,7 @@ use local_first_secrets::{SecretMaterial, SecretRef};
 use rand::RngCore;
 use rusqlite::{Connection, params};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Mutex;
 
@@ -37,12 +39,14 @@ pub struct InMemoryVaultStore {
 
 pub struct SQLiteVaultStore {
     conn: Mutex<Connection>,
+    db_path: Option<PathBuf>,
 }
 
 impl SQLiteVaultStore {
     pub fn open_in_memory() -> Result<Self, String> {
         let store = Self {
             conn: Mutex::new(Connection::open_in_memory().map_err(|error| error.to_string())?),
+            db_path: None,
         };
         store.init()?;
         Ok(store)
@@ -55,6 +59,7 @@ impl SQLiteVaultStore {
         }
         let store = Self {
             conn: Mutex::new(Connection::open(path).map_err(|error| error.to_string())?),
+            db_path: Some(path.to_path_buf()),
         };
         store.init()?;
         Ok(store)
@@ -96,6 +101,49 @@ impl SQLiteVaultStore {
             )
             .map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    pub fn audit_integrity(&self) -> Result<VaultIntegrityReport, String> {
+        let connection = self
+            .conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?;
+        crate::audit_vault_integrity_on(&connection)
+    }
+
+    pub fn backup_to(&self, destination: impl AsRef<Path>) -> Result<VaultBackupReport, String> {
+        let source = self
+            .db_path
+            .as_ref()
+            .ok_or_else(|| "in-memory vault cannot be backed up".to_string())?;
+        let destination = destination.as_ref().to_path_buf();
+        if source == &destination {
+            return Err("vault backup destination must differ from source".to_string());
+        }
+        if destination.exists() {
+            return Err("vault backup destination already exists".to_string());
+        }
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+
+        let connection = self
+            .conn
+            .lock()
+            .map_err(|_| "vault sqlite lock poisoned".to_string())?;
+        let result = connection.execute("vacuum into ?1", [destination.to_string_lossy().as_ref()]);
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&destination);
+            return Err(error.to_string());
+        }
+        let bytes = std::fs::metadata(&destination)
+            .map_err(|error| error.to_string())?
+            .len();
+        Ok(VaultBackupReport {
+            source: source.clone(),
+            destination,
+            bytes,
+        })
     }
 
     pub fn set_local_pin_verifier(&self, verifier: LocalPinVerifier) -> Result<(), String> {
