@@ -58,6 +58,48 @@ Smoke verificato in Europe/Rome il 2026-07-17: isolamento, grant/collection/over
 revoca, filtro delle fonti mancanti e perimetro contatti. Nessun deploy è implicato da
 questa verifica locale.
 
+Ogni hit collegato conserva provenance strutturata: ref originale, workspace sorgente,
+grant che ha autorizzato l'accesso e versione della policy. L'origine non viene dedotta
+dal testo e il record non viene copiato nello scope consumatore. Revoca o modifica del
+grant invalida la cache vettoriale autorizzata: il comportamento successivo è
+fail-closed. La memoria personale non diventa implicitamente visibile solo perché un
+progetto ha ricevuto accesso a un altro progetto, e viceversa.
+
+## Integrità operativa di Memory, Vault e grafi progetto
+
+L'identità Graphify è deterministica: nodi e archi vengono normalizzati su chiavi
+canoniche dello scope, indipendenti dall'ordine dell'output. Duplicati e relazioni
+dangling vengono contati e scartati; l'import sostituisce in transazione l'intera
+proiezione Graphify del progetto. La sequenza runtime ammessa è **import → publish
+atomico → fingerprint → ready**. Se un passaggio fallisce, il database e l'artifact
+precedenti restano disponibili, il fingerprint non avanza e viene emesso `failed`, mai
+un falso `ready`.
+
+L'audit locale (`GET /api/integrity/audit`) è read-only e metadata-only. Riporta
+integrità SQLite, cardinalità, orfani, duplicati, coerenza grant, copertura FTS, stato
+Vault e stato `missing|fresh|stale|invalid` dei grafi registrati. Non serializza
+contenuti di memoria, valori Vault, materiale cifrato, nonce o path assoluti.
+
+Il repair è sempre esplicito e preview-first:
+
+1. scegliere azioni nominate;
+2. ottenere stime, checksum e approval token dal preview;
+3. confermare le stesse azioni con `confirm=true`;
+4. superare il controllo anti-drift e creare un backup nuovo;
+5. applicare in transazione e rieseguire l'audit.
+
+Non esiste repair automatico allo startup. Un token non è riutilizzabile se audit,
+azioni o stato del grafo cambiano. Un refresh grafo viene eseguito separatamente dai
+repair Memory. La cancellazione progetto rimuove prima, in transazione, dati,
+cross-link e cache dello scope `local-user`; il registry viene aggiornato per ultimo,
+così un fallimento resta ritentabile.
+
+Le duplicate relation prodotte da Graphify sono una proiezione meccanica e possono
+essere riparate automaticamente, ma solo nello scope di un progetto registrato. I
+duplicati semantici tra memorie attive sono invece soltanto segnalati per revisione:
+non vengono mai fusi o cancellati dal repair di integrità. Anche il purge di scope non
+registrati richiede una scelta separata e non fa parte della manutenzione ordinaria.
+
 ## Tre facce della stessa memoria
 
 | Faccia | Ruolo | Stato |

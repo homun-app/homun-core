@@ -169,6 +169,57 @@ assorbendo `name` / `canonical_key` / `aliases` dell'altro come alias (mai sovra
 la `canonical_key` del survivor) e unendo i metadata con motivazione. È il meccanismo che
 tiene **un solo nodo per entità reale** nel grafo (es. dedup di persone/simboli).
 
+### Integrità del grafo progetto e identità Graphify
+
+L'import Graphify è una **proiezione sostituibile** dello scope progetto, non un flusso
+append-only. Prima di scrivere, l'adapter normalizza ogni nodo su un'identità canonica
+derivata da workspace, tipo e chiave stabile; gli archi usano source, tipo e target
+canonici. Ordine dell'input e duplicati dell'estrattore non cambiano quindi ref o
+checksum. Nodi senza identità valida, archi duplicati e archi con estremi mancanti
+vengono conteggiati nel report d'importazione e scartati prima del database.
+
+La sostituzione di entity e relation Graphify dello scope avviene in una singola
+transazione. Se parsing, normalizzazione o import falliscono, la proiezione precedente
+resta intatta. Anche la pubblicazione runtime segue un ordine fail-closed:
+
+1. import transazionale nel `MemoryFacade`;
+2. pubblicazione atomica dell'artifact `graph.json`;
+3. persistenza del fingerprint del progetto;
+4. emissione dell'evento `project_graph.ready`.
+
+Un errore in uno dei primi tre passaggi emette `project_graph.failed`, non avanza il
+fingerprint e non dichiara pronto un grafo parziale. Rianalizzare due volte lo stesso
+progetto converge sullo stesso checksum e sulle stesse ref; un'analisi cambiata
+sostituisce esattamente la proiezione precedente.
+
+### Audit e repair governato
+
+`GET /api/integrity/audit` esegue un audit **read-only e metadata-only** di Memory,
+Vault e stato dei grafi registrati. I report contengono soltanto versioni, conteggi,
+stati e checksum: mai testo di memoria, path assoluti, secret, nonce o ciphertext. Per
+ogni grafo registrato lo stato è `missing`, `fresh`, `stale` o `invalid`; i fingerprint
+sono esposti solo tramite hash.
+
+Il repair non parte mai automaticamente e usa quattro passaggi obbligatori:
+
+1. azioni nominate e canoniche inviate a `POST /api/integrity/repair/preview`;
+2. preview con stime, checksum dell'audit e approval token legato esattamente alle azioni;
+3. nuovo controllo anti-drift e backup SQLite server-side;
+4. `POST /api/integrity/repair/apply` con `confirm=true`, stesso checksum, token e azioni.
+
+Qualunque differenza invalida l'approvazione. Le riparazioni Memory sono transazionali;
+il refresh di un grafo riusa il percorso fail-closed sopra. Per evitare esiti misti tra
+domini, un refresh grafo non si applica insieme a repair Memory nello stesso comando.
+La cancellazione di un progetto segue inoltre la regola **registry-last**: pulisce in
+transazione dati, cross-link e cache usando lo user canonico `local-user`, quindi rimuove
+la voce dal registry solo dopo il successo. Un retry deve essere sicuro.
+
+I duplicati hanno due classi diverse. Le relation Graphify duplicate sono difetti di una
+proiezione deterministica e possono essere rimosse automaticamente per uno scope
+registrato. Le memorie semanticamente simili, invece, sono conoscenza dell'utente:
+l'audit le segnala come gruppi revisionabili, ma il repair di integrità non le fonde e
+non le cancella mai automaticamente.
+
 ## Perché è così
 
 - **Ibrido FTS + denso + RRF**: il lessicale prende le corrispondenze esatte, il denso le
