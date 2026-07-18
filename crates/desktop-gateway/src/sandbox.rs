@@ -369,7 +369,7 @@ fn contained_computer_def_hash() -> Option<String> {
     let out = Command::new("bash")
         .arg("-c")
         .arg(
-            "cat Dockerfile entrypoint.sh deck_render.py deck_qa.py doc_render.py design_tokens.py whisper_server.py novnc-view.html 2>/dev/null | \
+            "cat Dockerfile entrypoint.sh deck_render.py deck_qa.py doc_render.py design_tokens.py fonts_embed.py fonts_manifest.py whisper_server.py novnc-view.html fonts/*.woff2 2>/dev/null | \
              { command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum; } | cut -c1-16",
         )
         .current_dir(&dir)

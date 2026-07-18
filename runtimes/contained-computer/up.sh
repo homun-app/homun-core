@@ -32,10 +32,13 @@ fi
 # otherwise a renderer change (deck_render.py) wouldn't trigger a rebuild and the
 # container would keep an old copy. MUST stay in sync with the gateway's
 # contained_computer_def_hash().
-HASH_FILES="Dockerfile entrypoint.sh deck_render.py deck_qa.py doc_render.py design_tokens.py whisper_server.py novnc-view.html"
+HASH_FILES="Dockerfile entrypoint.sh deck_render.py deck_qa.py doc_render.py design_tokens.py fonts_embed.py fonts_manifest.py whisper_server.py novnc-view.html"
 if [ -z "${HOMUN_CC_HASH:-}" ]; then
   HASH_PATHS=""
   for f in ${HASH_FILES}; do HASH_PATHS="${HASH_PATHS} ${HERE}/${f}"; done
+  # Font binaries aren't in HASH_FILES (they're a glob, not fixed names) but ARE
+  # baked into the image — a font swap must still invalidate the hash.
+  for f in "${HERE}"/fonts/*.woff2; do HASH_PATHS="${HASH_PATHS} ${f}"; done
   if command -v shasum >/dev/null 2>&1; then
     HOMUN_CC_HASH="$(cat ${HASH_PATHS} 2>/dev/null | shasum -a 256 | cut -c1-16)"
   elif command -v sha256sum >/dev/null 2>&1; then
