@@ -17659,7 +17659,7 @@ fn deck_content_schema() -> serde_json::Value {
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["layout", "title", "bullets", "notes", "want_image"],
+                    "required": ["layout", "title", "bullets", "notes", "want_image", "eyebrow"],
                     "properties": {
                         "layout": { "type": "string", "enum": ["cover", "section", "bullets", "closing"] },
                         "title": { "type": "string" },
@@ -61318,9 +61318,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let schema = super::deck_content_schema();
         let item = &schema["properties"]["slides"]["items"]["properties"];
         assert!(item.get("eyebrow").is_some());
-        // eyebrow is NOT required (blank/omitted is fine; overlay supplies the default)
+        // eyebrow IS required (OpenAI strict structured-outputs demands every
+        // property be listed in `required`); refinable/blankable is expressed
+        // by the model emitting "" on non-cover slides, not by omission.
         let req = schema["properties"]["slides"]["items"]["required"].as_array().unwrap();
-        assert!(!req.iter().any(|v| v == "eyebrow"));
+        assert!(req.iter().any(|v| v == "eyebrow"));
     }
 
     #[test]
