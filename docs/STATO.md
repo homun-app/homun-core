@@ -5,6 +5,49 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-18.**
 
+## ⭐⭐ CHECKPOINT 2026-07-18 (bis) — S3 (tipografia reale + font picker) SHIPPED — arco Presentations completo
+
+Piano eseguito su branch `presentations-s3-typography` (SDD, ledger in `.superpowers/sdd/progress.md`,
+sezione `S3`; piano `docs/superpowers/plans/2026-07-18-*`): 6 task, commit
+`3a677d18..80699373` (+ questo checkpoint). Chiude l'ultimo item aperto della coda Presentations
+Studio ("Cosa resta" del checkpoint precedente): il font era finora un **nome** nel design token,
+mai un `@font-face` reale — anteprima e generato mostravano il fallback del sistema, non il font
+scelto.
+
+**La cura (6 task):**
+- **Set curato bundled** (Task 1, `497364e6`): 12 Google Font (woff2, `@fontsource`, subset
+  `latin`, licenza OFL) impacchettati via manifest unico `build_fonts.py` → py + ts, un solo
+  sorgente per renderer e UI (converge, non duplica).
+- **`@font-face` self-contained** (Task 2, `dcd9f49f`): `fonts_embed.py` inietta `@font-face`
+  data-URI nei renderer deck/doc — nessuna dipendenza di rete, WYSIWYG per costruzione (stesso
+  woff2 in anteprima e generato).
+- **Temi editoriali via bundled serif** (Task 3, `e419a8cf`): Georgia → Playfair Display /
+  Source Serif 4, sync py+rust.
+- **Font picker curato** (Task 4, `0c8c3e4c`): select + specimen nel `BrandDrawer`, sostituisce
+  il testo libero — scelta è uno **slot vincolato** al set curato (caposaldo: consegna del font =
+  stato-in-codice), recolor live alimentato da `@font-face` reale.
+- **Font nel container** (Task 5, `80699373`): woff2 bundled nell'immagine `homun-cc`, hash di
+  freschezza sincronizzato (`up.sh` + `sandbox.rs`) così il container non serve font stantii.
+- **Preview rigenerate** (Task 6, questo checkpoint): tutte le 8 `preview.html` committate
+  ri-renderizzate col renderer reale — ora incorporano `@font-face` (crescita attesa: da
+  ~7-8KB a ~127-133KB per file, data-URI woff2 inline) + thumbnail aggiornati.
+
+**Fail-open ovunque** (caposaldo, invariato): famiglia fuori dal set curato / woff2 mancante →
+stack di fallback, mai un crash, mai `@font-face` con `src` vuoto. **Caveat documentato**:
+PPTX/DOCX portano solo il **nome** del font (embedding font in Office = fuori scope, YAGNI);
+l'anteprima HTML/PDF resta la verità sulla tipografia.
+
+**Gate finali (tutti verdi, sessione 2026-07-18):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-desktop-gateway` | 674 passed, 0 failed, 5 ignored |
+| `npm run build` (desktop) | OK |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN (capability/orchestrator/gateway/ui-contract/desktop-build/eval/deck/doc renderer tests) |
+
+**Cosa resta:** niente nel backlog Presentations — arco S1a/S1b/S1c/S2/Fase2/S3 completo.
+
 ## ⭐ CHECKPOINT 2026-07-18 — Fase 2 (editorial cover al generato) SHIPPED
 
 Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `FASE2`; piano
