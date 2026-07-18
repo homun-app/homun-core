@@ -849,6 +849,7 @@ pub fn recall_source_on_facade(
             source_label: source.source_label.clone(),
             collection,
             grant_id: source.grant_id.clone(),
+            policy_version: source.grant_id.as_ref().map(|_| source.policy_version),
             sensitivity: record.sensitivity,
             status: record.status,
             updated_at: record.updated_at,

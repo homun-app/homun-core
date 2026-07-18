@@ -27,6 +27,10 @@ pub struct RecallStreamHit {
     /// source. Keeping the null explicit lets UI authorization fail closed for
     /// legacy events that did not carry provenance.
     pub grant_id: Option<String>,
+    /// Policy version used by a linked grant. Legacy/local hits deserialize as
+    /// `None`, so consumers can distinguish unversioned provenance explicitly.
+    #[serde(default)]
+    pub policy_version: Option<u64>,
     /// Il coordinatore ha rilevato un conflitto semantico con un altro hit.
     pub conflict: bool,
 }
@@ -151,12 +155,17 @@ mod tests {
             source_workspace_id: "project-a".to_string(),
             source_label: "Homun roadmap".to_string(),
             collection: "decisions".to_string(),
-            grant_id: None,
+            grant_id: Some("grant-a".to_string()),
+            policy_version: Some(7),
             conflict: false,
         };
-        let value = serde_json::to_value(hit).expect("serialize recall hit");
+        let mut value = serde_json::to_value(hit).expect("serialize recall hit");
         assert_eq!(value["source_workspace_id"], "project-a");
         assert_eq!(value["collection"], "decisions");
-        assert_eq!(value["grant_id"], serde_json::Value::Null);
+        assert_eq!(value["grant_id"], "grant-a");
+        assert_eq!(value["policy_version"], 7);
+        value.as_object_mut().unwrap().remove("policy_version");
+        let legacy: RecallStreamHit = serde_json::from_value(value).expect("legacy recall hit");
+        assert_eq!(legacy.policy_version, None);
     }
 }

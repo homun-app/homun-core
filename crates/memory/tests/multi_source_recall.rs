@@ -1,12 +1,12 @@
 use local_first_memory::{
     AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, MemoryAccessRequest,
-    MemoryCollectionKey, MemoryEntity, MemoryFacade, MemoryGrantOverrideEffect, MemoryRecord,
-    MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySourceAccessEvent,
-    MemorySourceAccessOutcome, MemorySourceGrant, MemorySourcePolicy, MemoryStatus, PrivacyDomain,
-    RecallHit, SQLiteMemoryStore, UserId, WorkspaceId, memory_recall_intent, merge_recall_hits,
+    MemoryCollectionKey, MemoryEntity, MemoryExtraction, MemoryFacade, MemoryGrantOverrideEffect,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySourceAccessEvent,
+    MemorySourceAccessOutcome, MemorySourceGrant, MemorySourcePolicy, MemoryStatus,
+    MemoryWikiProjection, PrivacyDomain, RecallHit, SQLiteMemoryStore, UserId, WikiFileStore,
+    WikiPage, WorkspaceId, memory_recall_intent, merge_recall_hits,
     recall_authorized_sources_on_facade, recall_authorized_sources_on_facade_with_source_filter,
-    recall_source_on_facade,
-    revalidate_recall_hits_before_injection,
+    recall_source_on_facade, revalidate_recall_hits_before_injection,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -37,6 +37,7 @@ fn hit(
         source_label: workspace.to_string(),
         collection,
         grant_id: grant_id.map(str::to_string),
+        policy_version: grant_id.map(|_| 1),
         sensitivity: DataSensitivity::Private,
         status: MemoryStatus::Confirmed,
         updated_at: "unix:1800000000".to_string(),
@@ -360,12 +361,16 @@ struct MultiSourceFixture {
 
 impl MultiSourceFixture {
     fn new() -> Self {
+        Self::with_consumer("project-a")
+    }
+
+    fn with_consumer(consumer: &str) -> Self {
         Self {
             facade: std::sync::Arc::new(MemoryFacade::new(
                 SQLiteMemoryStore::open_in_memory().expect("store"),
             )),
             user: UserId::new("multi-user"),
-            consumer: WorkspaceId::new("project-a"),
+            consumer: WorkspaceId::new(consumer),
         }
     }
 
@@ -439,6 +444,233 @@ impl MultiSourceFixture {
             })
             .expect("grant");
     }
+}
+
+#[test]
+fn semantic_linked_memory_end_to_end_preserves_provenance_and_revokes_cached_access() {
+    let fixture = MultiSourceFixture::with_consumer("project-b");
+    let source = WorkspaceId::new("project-a");
+    let project_entity = MemoryRef::new(
+        MemoryRefKind::Entity,
+        fixture.user.clone(),
+        source.clone(),
+        "project:atlas",
+    );
+    let component_entity = MemoryRef::new(
+        MemoryRefKind::Entity,
+        fixture.user.clone(),
+        source.clone(),
+        "component:memory",
+    );
+    let extraction: MemoryExtraction = serde_json::from_value(serde_json::json!({
+        "memories": [
+            {
+                "memory_type": "fact",
+                "text": "Atlas continuum uses a local metadata store",
+                "privacy_domain": "work",
+                "sensitivity": "private"
+            },
+            {
+                "memory_type": "decision",
+                "text": "Atlas continuum decision keeps project isolation",
+                "privacy_domain": "work",
+                "sensitivity": "private",
+                "metadata": {"subject_key": "atlas_isolation"}
+            },
+            {
+                "memory_type": "goal",
+                "text": "Atlas continuum goal must remain individually denied",
+                "privacy_domain": "work",
+                "sensitivity": "private"
+            },
+            {
+                "memory_type": "open_loop",
+                "text": "Atlas continuum open loop verifies linked recall",
+                "privacy_domain": "work",
+                "sensitivity": "private"
+            }
+        ],
+        "entities": [
+            {
+                "entity_type": "project",
+                "name": "Atlas",
+                "canonical_key": "project:atlas",
+                "privacy_domain": "work",
+                "sensitivity": "private"
+            },
+            {
+                "entity_type": "component",
+                "name": "Memory",
+                "canonical_key": "component:memory",
+                "privacy_domain": "work",
+                "sensitivity": "private"
+            }
+        ],
+        "relations": [{
+            "source_ref": project_entity.to_string(),
+            "relation_type": "uses",
+            "target_ref": component_entity.to_string(),
+            "privacy_domain": "work",
+            "sensitivity": "private"
+        }]
+    }))
+    .unwrap();
+    let summary = fixture
+        .facade
+        .apply_extraction(&fixture.user, &source, extraction)
+        .expect("semantic extraction");
+    assert_eq!(summary.memories_imported, 4);
+    assert_eq!(summary.entities_imported, 2);
+    assert_eq!(summary.relations_imported, 1);
+    for reference in &summary.memory_refs {
+        fixture
+            .facade
+            .upsert_embedding(reference, &fixture.user, &source, "fixture", &[1.0, 0.0])
+            .expect("semantic embedding");
+    }
+
+    let wiki_root = std::env::temp_dir().join(format!(
+        "homun-linked-memory-wiki-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let wiki = WikiFileStore::new(&wiki_root);
+    let mut linked_refs = summary.memory_refs.clone();
+    linked_refs.extend(summary.entity_refs.clone());
+    fixture
+        .facade
+        .project_to_wiki(
+            &wiki,
+            &MemoryWikiProjection {
+                page: WikiPage {
+                    reference: MemoryRef::new(
+                        MemoryRefKind::Wiki,
+                        fixture.user.clone(),
+                        source.clone(),
+                        "Projects/Atlas.md",
+                    ),
+                    user_id: fixture.user.clone(),
+                    workspace_id: source.clone(),
+                    path: "Projects/Atlas.md".to_string(),
+                    title: "Atlas".to_string(),
+                    body: "Atlas semantic memory projection".to_string(),
+                    linked_refs,
+                    privacy_domain: PrivacyDomain::new("work"),
+                    sensitivity: DataSensitivity::Private,
+                },
+            },
+        )
+        .expect("wiki projection");
+    assert_eq!(
+        fixture
+            .facade
+            .list_wiki_pages_for_ui(&fixture.user, &source)
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        fixture
+            .facade
+            .list_relations_for_ui(&fixture.user, &source)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    fixture.insert(
+        "__personal__",
+        "personal-atlas",
+        "fact",
+        "Atlas continuum personal fact must remain isolated",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    let query = "Atlas continuum decision goal obiettivo aperto fact";
+    let isolated = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        query,
+        &[1.0, 0.0],
+        1_800_000_000,
+        None,
+    )
+    .expect("isolated recall");
+    assert!(isolated.hits.is_empty());
+
+    let denied_goal = summary.memory_refs[2].clone();
+    fixture.grant(
+        "grant-atlas",
+        "project-a",
+        [
+            MemoryCollectionKey::Knowledge,
+            MemoryCollectionKey::Decisions,
+            MemoryCollectionKey::Goals,
+        ],
+        HashMap::from([(denied_goal.clone(), MemoryGrantOverrideEffect::Deny)]),
+    );
+    let linked = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        query,
+        &[1.0, 0.0],
+        1_800_000_000,
+        None,
+    )
+    .expect("linked recall");
+    assert_eq!(linked.hits.len(), 3);
+    let original_refs = summary
+        .memory_refs
+        .iter()
+        .map(ToString::to_string)
+        .collect::<BTreeSet<_>>();
+    assert!(linked.hits.iter().all(|hit| {
+        hit.source_workspace_id == source
+            && hit.grant_id.as_deref() == Some("grant-atlas")
+            && hit.policy_version == Some(1)
+            && original_refs.contains(&hit.memory_ref)
+            && !hit.text.contains("project-a")
+    }));
+    assert!(
+        linked
+            .hits
+            .iter()
+            .all(|hit| hit.memory_ref != denied_goal.to_string())
+    );
+    assert!(
+        linked
+            .hits
+            .iter()
+            .all(|hit| hit.source_workspace_id.as_str() != "__personal__")
+    );
+    assert!(fixture.facade.authorized_vector_index_cache_len_for_tests() > 0);
+
+    fixture
+        .facade
+        .revoke_memory_source_grant(
+            &fixture.user,
+            &fixture.consumer,
+            "grant-atlas",
+            1_800_000_001,
+        )
+        .expect("revoke linked source");
+    assert_eq!(
+        fixture.facade.authorized_vector_index_cache_len_for_tests(),
+        0
+    );
+    let revoked = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        query,
+        &[1.0, 0.0],
+        1_800_000_001,
+        None,
+    )
+    .expect("revoked recall");
+    assert!(revoked.hits.is_empty());
+    let _ = std::fs::remove_dir_all(wiki_root);
 }
 
 #[test]
@@ -555,10 +787,11 @@ fn coordinator_loads_one_source_authorization_snapshot_per_resolution_pass() {
     )
     .expect("recall with source snapshots");
 
-    assert!(pack
-        .hits
-        .iter()
-        .any(|hit| hit.source_workspace_id.as_str() == "project-b"));
+    assert!(
+        pack.hits
+            .iter()
+            .any(|hit| hit.source_workspace_id.as_str() == "project-b")
+    );
     assert_eq!(snapshots.load(Ordering::SeqCst), 3);
 }
 

@@ -1617,6 +1617,7 @@ fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::
                 source_label: recall_source_label(hit.source_workspace_id.as_str()),
                 collection: recall_collection_token(hit.collection).to_string(),
                 grant_id: hit.grant_id.clone(),
+                policy_version: hit.policy_version,
                 conflict: hit.conflict,
             })
             .collect(),
@@ -13692,6 +13693,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                             source_label: recall_source_label(workspace.as_str()),
                             collection: recall_collection_token(collection).to_string(),
                             grant_id: None,
+                            policy_version: None,
                             conflict: false,
                         }
                     })
@@ -13753,6 +13755,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                     source_label: recall_source_label(active.as_str()),
                     collection: "episodes".to_string(),
                     grant_id: None,
+                    policy_version: None,
                     conflict: false,
                 });
             }
@@ -68921,6 +68924,278 @@ Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
         );
         // Age helper: 86_400s == 1 day.
         assert!((memory_age_days("unix:999913600", 1_000_000_000) - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn project_graph_end_to_end_reanalysis_converges_and_failed_import_never_publishes_ready() {
+        let root = isolated_gateway_test_dir("project-graph-end-to-end");
+        let repository = root.join("repository");
+        let published = root.join("published");
+        std::fs::create_dir_all(repository.join("src")).unwrap();
+        std::fs::write(repository.join("src/lib.rs"), "fn alpha() {}\n").unwrap();
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local-user");
+        let workspace = local_first_memory::WorkspaceId::new("project-a");
+        let graph = |reversed: bool| {
+            let mut nodes = vec![
+                serde_json::json!({"id":"a","label":"alpha"}),
+                serde_json::json!({"id":"a","label":"alpha"}),
+                serde_json::json!({"id":"b","label":"beta"}),
+            ];
+            let mut links = vec![
+                serde_json::json!({"source":"a","target":"b","relation":"calls"}),
+                serde_json::json!({"source":"a","target":"b","relation":"calls"}),
+                serde_json::json!({"source":"a","target":"missing","relation":"calls"}),
+            ];
+            if reversed {
+                nodes.reverse();
+                links.reverse();
+            }
+            serde_json::json!({"nodes": nodes, "links": links})
+        };
+        let analyze = |fingerprint: &str, output: serde_json::Value| {
+            local_first_desktop_gateway::project_graph_commit::stage_project_graph_build(
+                &published,
+                fingerprint,
+                |staging| {
+                    assert!(repository.join("src/lib.rs").is_file());
+                    std::fs::write(staging.join("graph.json"), output.to_string())
+                        .map_err(|error| error.to_string())
+                },
+                |value| {
+                    facade
+                        .import_graphify_value(&user, &workspace, value)
+                        .map_err(|error| {
+                            local_first_desktop_gateway::project_graph_commit::ProjectGraphCommitError::Import(
+                                error.to_string(),
+                            )
+                        })
+                },
+            )
+        };
+
+        let first = analyze("fingerprint-1", graph(false)).unwrap();
+        assert_eq!(first.duplicate_nodes, 1);
+        assert_eq!(first.duplicate_edges, 1);
+        assert_eq!(first.dangling_edges, 1);
+        let entity_refs = facade
+            .list_entities_for_ui(&user, &workspace)
+            .unwrap()
+            .into_iter()
+            .map(|entity| entity.reference)
+            .collect::<Vec<_>>();
+        let relation_refs = facade
+            .list_relations_for_ui(&user, &workspace)
+            .unwrap()
+            .into_iter()
+            .map(|relation| relation.reference)
+            .collect::<Vec<_>>();
+
+        let second = analyze("fingerprint-2", graph(true)).unwrap();
+        assert_eq!(second.checksum, first.checksum);
+        assert_eq!(
+            facade
+                .list_entities_for_ui(&user, &workspace)
+                .unwrap()
+                .into_iter()
+                .map(|entity| entity.reference)
+                .collect::<Vec<_>>(),
+            entity_refs
+        );
+        assert_eq!(
+            facade
+                .list_relations_for_ui(&user, &workspace)
+                .unwrap()
+                .into_iter()
+                .map(|relation| relation.reference)
+                .collect::<Vec<_>>(),
+            relation_refs
+        );
+
+        let changed = serde_json::json!({
+            "nodes": [
+                {"id":"a","label":"alpha"},
+                {"id":"c","label":"gamma"}
+            ],
+            "links": [{"source":"a","target":"c","relation":"calls"}]
+        });
+        let third = analyze("fingerprint-3", changed).unwrap();
+        assert_ne!(third.checksum, first.checksum);
+        let mut keys = facade
+            .list_entities_for_ui(&user, &workspace)
+            .unwrap()
+            .into_iter()
+            .map(|entity| entity.canonical_key)
+            .collect::<Vec<_>>();
+        keys.sort();
+        assert_eq!(keys, vec!["code:a", "code:c"]);
+        assert_eq!(
+            facade
+                .list_relations_for_ui(&user, &workspace)
+                .unwrap()
+                .len(),
+            1
+        );
+        let published_graph = std::fs::read(published.join("graph.json")).unwrap();
+        let published_fingerprint =
+            std::fs::read_to_string(published.join(".fingerprint")).unwrap();
+        let failed =
+            local_first_desktop_gateway::project_graph_commit::stage_project_graph_build(
+                &published,
+                "fingerprint-4",
+                |staging| {
+                    std::fs::write(
+                        staging.join("graph.json"),
+                        serde_json::json!({"nodes":[{"id":"z"}],"links":[]}).to_string(),
+                    )
+                    .map_err(|error| error.to_string())
+                },
+                |_| {
+                    Err(local_first_desktop_gateway::project_graph_commit::ProjectGraphCommitError::Import(
+                        "forced import failure".to_string(),
+                    ))
+                },
+            );
+        assert!(failed.is_err());
+        assert_eq!(
+            std::fs::read(published.join("graph.json")).unwrap(),
+            published_graph
+        );
+        assert_eq!(
+            std::fs::read_to_string(published.join(".fingerprint")).unwrap(),
+            published_fingerprint
+        );
+        assert_eq!(
+            facade
+                .list_entities_for_ui(&user, &workspace)
+                .unwrap()
+                .len(),
+            2
+        );
+
+        let mut events = super::app_events_tx().subscribe();
+        let failure: Result<
+            Option<local_first_memory::ProjectGraphImportReport>,
+            local_first_desktop_gateway::project_graph_commit::ProjectGraphCommitError,
+        > = Err(
+            local_first_desktop_gateway::project_graph_commit::ProjectGraphCommitError::Import(
+                "forced import failure".to_string(),
+            ),
+        );
+        super::publish_project_graph_result("project-a", &failure);
+        let event = events.try_recv().expect("project graph failure event");
+        assert!(event.contains("project_graph.failed"));
+        assert!(!event.contains("project_graph.ready"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn vault_end_to_end_encrypts_deduplicates_recalls_reveals_and_deletes_without_leakage() {
+        let root = isolated_gateway_test_dir("vault-end-to-end");
+        std::fs::create_dir_all(&root).unwrap();
+        let db_path = root.join("vault.sqlite");
+        let vault = local_first_vault::SQLiteVaultStore::open(&db_path).unwrap();
+        super::apply_vault_pin_setup(
+            &vault,
+            &TEST_VAULT_WRAP_KEY,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("vault pin setup");
+        let request = vault_action_request(
+            "identity",
+            "Codice fiscale Atlas",
+            "[VAULT:identity:fiscal_code]",
+            Some("VAULT_SECRET_SENTINEL"),
+        );
+        let saved = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &request,
+        )
+        .expect("vault proposal save");
+        assert_eq!(saved.status, "created");
+        let duplicate = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &request,
+        )
+        .expect("vault duplicate");
+        assert_eq!(duplicate.status, "ignored");
+        assert_eq!(duplicate.record_id, saved.record_id);
+        let conflict = super::accept_vault_proposal(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &vault_action_request(
+                "identity",
+                "Codice fiscale Atlas",
+                "[VAULT:identity:fiscal_code]",
+                Some("DIFFERENT_VALUE"),
+            ),
+        )
+        .expect("vault key conflict");
+        assert_eq!(conflict.status, "conflict");
+        assert_eq!(conflict.match_type.as_deref(), Some("key"));
+        assert_eq!(vault.list().unwrap().len(), 1);
+
+        let recall = super::recall_memory_response_with_vault_fallback(
+            &vault,
+            "mostra il codice fiscale Atlas",
+            Vec::new(),
+            false,
+        );
+        assert!(recall.contains("reveal_card"));
+        assert!(recall.contains("[VAULT:identity:fiscal_code]"));
+        assert!(!recall.contains("VAULT_SECRET_SENTINEL"));
+        for response in [
+            serde_json::to_string(&saved).unwrap(),
+            serde_json::to_string(&duplicate).unwrap(),
+            serde_json::to_string(&conflict).unwrap(),
+        ] {
+            assert!(!response.contains("VAULT_SECRET_SENTINEL"));
+        }
+
+        let connection = rusqlite::Connection::open(&db_path).unwrap();
+        for sql in [
+            "select coalesce(group_concat(id || category || label || secret_ref || metadata_json), '') from vault_records",
+            "select coalesce(group_concat(verifier_json), '') from vault_local_pin",
+            "select coalesce(group_concat(algorithm || nonce || ciphertext), '') from vault_local_keyring",
+            "select coalesce(group_concat(algorithm || nonce || ciphertext), '') from vault_secret_material",
+        ] {
+            let stored: String = connection.query_row(sql, [], |row| row.get(0)).unwrap();
+            assert!(!stored.contains("VAULT_SECRET_SENTINEL"), "{sql}");
+        }
+
+        let record_id = saved.record_id.parse().unwrap();
+        let revealed = super::reveal_vault_record_secret(
+            &vault,
+            None,
+            &TEST_VAULT_WRAP_KEY,
+            &record_id,
+            &super::VaultRecordRevealRequest {
+                pin: "123456".to_string(),
+            },
+        )
+        .expect("authorized reveal");
+        assert_eq!(revealed.secret_value, "VAULT_SECRET_SENTINEL");
+        vault.delete(&record_id).expect("vault delete");
+        assert!(vault.list().unwrap().is_empty());
+        let secret_rows: u64 = connection
+            .query_row("select count(*) from vault_secret_material", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(secret_rows, 0);
+        drop(connection);
+        drop(vault);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn integrity_route_test_app(state: super::AppState) -> axum::Router {

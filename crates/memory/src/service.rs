@@ -111,6 +111,9 @@ pub struct RecallHit {
     pub collection: MemoryCollectionKey,
     /// Grant che autorizza una fonte collegata; `None` per la fonte locale.
     pub grant_id: Option<String>,
+    /// Versione esatta della policy del grant usata per produrre l'hit.
+    /// `None` per la fonte locale implicita.
+    pub policy_version: Option<u64>,
     pub sensitivity: DataSensitivity,
     pub status: MemoryStatus,
     pub updated_at: String,

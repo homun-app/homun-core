@@ -165,6 +165,18 @@ fn importing_the_same_graph_twice_converges_to_the_same_rows() {
     let first = facade
         .import_graphify_value(&user, &workspace, &duplicate_graphify_value(false))
         .unwrap();
+    let first_entity_refs = facade
+        .list_entities_for_ui(&user, &workspace)
+        .unwrap()
+        .into_iter()
+        .map(|entity| entity.reference)
+        .collect::<Vec<_>>();
+    let first_relation_refs = facade
+        .list_relations_for_ui(&user, &workspace)
+        .unwrap()
+        .into_iter()
+        .map(|relation| relation.reference)
+        .collect::<Vec<_>>();
     let second = facade
         .import_graphify_value(&user, &workspace, &duplicate_graphify_value(true))
         .unwrap();
@@ -174,9 +186,47 @@ fn importing_the_same_graph_twice_converges_to_the_same_rows() {
         facade
             .list_entities_for_ui(&user, &workspace)
             .unwrap()
+            .into_iter()
+            .map(|entity| entity.reference)
+            .collect::<Vec<_>>(),
+        first_entity_refs
+    );
+    assert_eq!(
+        facade
+            .list_relations_for_ui(&user, &workspace)
+            .unwrap()
+            .into_iter()
+            .map(|relation| relation.reference)
+            .collect::<Vec<_>>(),
+        first_relation_refs
+    );
+    assert_eq!(
+        facade
+            .list_entities_for_ui(&user, &workspace)
+            .unwrap()
             .len(),
         2
     );
+    assert_eq!(
+        facade
+            .list_relations_for_ui(&user, &workspace)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let third = facade
+        .import_graphify_value(&user, &workspace, &changed_graphify_value())
+        .unwrap();
+    assert_ne!(third.checksum, first.checksum);
+    let mut canonical_keys = facade
+        .list_entities_for_ui(&user, &workspace)
+        .unwrap()
+        .into_iter()
+        .map(|entity| entity.canonical_key)
+        .collect::<Vec<_>>();
+    canonical_keys.sort();
+    assert_eq!(canonical_keys, vec!["code:a", "code:c"]);
     assert_eq!(
         facade
             .list_relations_for_ui(&user, &workspace)

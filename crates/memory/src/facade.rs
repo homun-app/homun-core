@@ -1510,7 +1510,14 @@ impl MemoryFacade {
         crate::store::validate_memory_source_grant(grant).map_err(MemoryError::validation)?;
         self.store
             .upsert_memory_source_grant(grant)
-            .map_err(memory_source_grant_error)
+            .map_err(memory_source_grant_error)?;
+        // Authorization policy is part of the derived-cache identity, but old
+        // entries must not remain resident after a direct grant change. Clearing
+        // this small bounded cache is deterministic and fail-closed.
+        if let Ok(mut indexes) = self.authorized_vector_indexes.lock() {
+            indexes.clear();
+        }
+        Ok(())
     }
 
     pub fn list_memory_source_grants(
@@ -1567,7 +1574,11 @@ impl MemoryFacade {
     ) -> MemoryResult<()> {
         self.store
             .revoke_memory_source_grant(consumer_user_id, consumer_workspace_id, id, revoked_at)
-            .map_err(memory_source_grant_error)
+            .map_err(memory_source_grant_error)?;
+        if let Ok(mut indexes) = self.authorized_vector_indexes.lock() {
+            indexes.clear();
+        }
+        Ok(())
     }
 
     pub fn record_memory_source_access(

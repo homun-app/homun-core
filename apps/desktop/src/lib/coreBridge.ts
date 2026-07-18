@@ -380,6 +380,8 @@ export interface RecallHitPayload {
   collection: MemoryCollectionKey;
   /** Direct grant used for a linked source; null only for an explicitly local source. */
   grant_id: string | null;
+  /** Exact linked-grant policy version used for this hit; null for local/legacy hits. */
+  policy_version: number | null;
   /** The recall coordinator detected a semantic conflict for this hit. */
   conflict: boolean;
 }
