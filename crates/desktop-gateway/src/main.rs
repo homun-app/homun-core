@@ -18208,6 +18208,57 @@ fn document_template_pack(entry: Option<&TemplateCatalogEntry>) -> Option<&Templ
         .then_some(entry)
 }
 
+/// Deck analogue of `document_template_pack`: a template_ref qualifies for chrome
+/// overlay only when it resolves to a BUNDLED presentation pack with a pack root
+/// on disk (so `load_pack_example` can read example.json). Imported/non-bundled or
+/// no template → no overlay (fail-open, identical to today).
+fn deck_template_pack(entry: Option<&TemplateCatalogEntry>) -> Option<&TemplateCatalogEntry> {
+    let entry = entry?;
+    (entry.kind == "presentation" && entry.bundled && entry.template_pack_root.is_some())
+        .then_some(entry)
+}
+
+/// Carry the pack's curated editorial chrome onto the model-generated deck:
+/// hero_art is DETERMINISTIC (the model never produces it) and taken from the
+/// pack's cover/section slides; eyebrow is REFINABLE — a non-empty model eyebrow
+/// wins (adapts to the brief), otherwise the pack default is used. This makes the
+/// generated deck match the preview (both sourced from example.json). Fail-open:
+/// a missing slides array or absent chrome leaves the deck untouched.
+fn apply_deck_template_chrome(deck: &mut serde_json::Value, example: &serde_json::Value) {
+    let pack_slides = example.get("slides").and_then(|s| s.as_array());
+    let Some(pack_slides) = pack_slides else { return };
+    let pack_for = |layout: &str| -> Option<&serde_json::Value> {
+        pack_slides.iter().find(|s| s.get("layout").and_then(|l| l.as_str()) == Some(layout))
+    };
+    let pack_cover = pack_for("cover");
+    let pack_section = pack_for("section");
+    let Some(slides) = deck.get_mut("slides").and_then(|s| s.as_array_mut()) else { return };
+    for slide in slides.iter_mut() {
+        let layout = slide.get("layout").and_then(|l| l.as_str()).unwrap_or("");
+        let pack = match layout {
+            "cover" => pack_cover,
+            "section" => pack_section,
+            _ => None,
+        };
+        let Some(pack) = pack else { continue };
+        // hero_art: deterministic — always from the pack.
+        if let Some(art) = pack.get("hero_art").cloned() {
+            slide["hero_art"] = art;
+        }
+        // eyebrow: keep a non-empty model value (refinement), else the pack default.
+        let model_eyebrow_blank = slide
+            .get("eyebrow")
+            .and_then(|v| v.as_str())
+            .map(|v| v.trim().is_empty())
+            .unwrap_or(true);
+        if model_eyebrow_blank {
+            if let Some(eyebrow) = pack.get("eyebrow").cloned() {
+                slide["eyebrow"] = eyebrow;
+            }
+        }
+    }
+}
+
 /// Container-relative render command for a templated document — same shape as
 /// the deck command (cd into the bind-mounted output dir, render, headless
 /// Chromium to PDF, QA-gate on the SAME `DECK_QA_JSON:` prefix so the existing
@@ -22657,6 +22708,15 @@ available tools (for data from the web use the browser: browser_navigate on the 
                         design_theme.as_deref(),
                         &brand,
                     );
+                    // Carry the pack's curated editorial chrome (hero_art deterministic,
+                    // eyebrow refinable) so the generated deck matches the preview.
+                    // Fail-open when the template is not a bundled presentation pack or
+                    // its example.json is unreadable.
+                    if let Some(pack) = deck_template_pack(catalog_template.as_ref()) {
+                        if let Ok(example) = document_content::load_pack_example(pack) {
+                            apply_deck_template_chrome(&mut deck, &example);
+                        }
+                    }
                     let quality_issues = apply_deck_quality_guardrails(&mut deck);
                     if !quality_issues.is_empty() {
                         let _ = emit_stream_event(
@@ -61187,6 +61247,44 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(super::document_template_pack(Some(&no_root)).is_none());
 
         assert!(super::document_template_pack(None).is_none());
+    }
+
+    #[test]
+    fn deck_template_chrome_overlays_cover_and_section() {
+        // Pack example: cover has eyebrow+hero_art, section has hero_art.
+        let example = serde_json::json!({"slides": [
+            {"layout": "cover", "title": "Kite", "eyebrow": "SEED ROUND", "hero_art": "rings"},
+            {"layout": "section", "title": "Market", "hero_art": "grid"}
+        ]});
+        // Generated deck: model gave a cover (no chrome) + a refined eyebrow on cover,
+        // a section (no chrome), and a bullets slide.
+        let mut deck = serde_json::json!({"slides": [
+            {"layout": "cover", "title": "Real Co", "eyebrow": "SERIES A · 2026"},
+            {"layout": "section", "title": "Traction"},
+            {"layout": "bullets", "title": "Ask", "bullets": ["x"]}
+        ]});
+        super::apply_deck_template_chrome(&mut deck, &example);
+        let s = deck["slides"].as_array().unwrap();
+        // cover: model eyebrow kept (refinement), hero_art carried deterministically
+        assert_eq!(s[0]["eyebrow"], "SERIES A · 2026");
+        assert_eq!(s[0]["hero_art"], "rings");
+        // section: hero_art carried from the pack's section
+        assert_eq!(s[1]["hero_art"], "grid");
+        // bullets slide untouched
+        assert!(s[2].get("hero_art").is_none());
+    }
+
+    #[test]
+    fn deck_template_chrome_uses_pack_eyebrow_when_model_blank_and_is_failopen() {
+        let example = serde_json::json!({"slides": [
+            {"layout": "cover", "title": "Kite", "eyebrow": "PITCH", "hero_art": "rings"}]});
+        let mut deck = serde_json::json!({"slides": [{"layout": "cover", "title": "Real"}]});
+        super::apply_deck_template_chrome(&mut deck, &example);
+        assert_eq!(deck["slides"][0]["eyebrow"], "PITCH");   // pack default when model blank
+        // fail-open: example with no slides / no cover chrome does nothing, no panic
+        let mut deck2 = serde_json::json!({"slides": [{"layout": "cover", "title": "R"}]});
+        super::apply_deck_template_chrome(&mut deck2, &serde_json::json!({}));
+        assert!(deck2["slides"][0].get("hero_art").is_none());
     }
 
     #[test]
