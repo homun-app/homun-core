@@ -1,0 +1,9 @@
+[
+  "project_isolation",
+  "direct_grant_and_revoke",
+  "update_history",
+  "repeated_ingest",
+  "temporal_expiry",
+  "abstention",
+  "vault_non_leakage"
+]

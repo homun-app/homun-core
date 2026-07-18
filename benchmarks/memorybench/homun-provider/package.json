@@ -1,0 +1,12 @@
+{
+  "name": "@homun/memorybench-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/provider.test.ts"
+  },
+  "engines": {
+    "node": ">=22.6"
+  }
+}

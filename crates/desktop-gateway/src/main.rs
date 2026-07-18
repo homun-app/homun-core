@@ -149,7 +149,8 @@ use local_first_memory::{
     BriefingPack, CachedBriefing, DataSensitivity as MemoryDataSensitivity, Exchange,
     ExtractedEntity, ExtractedMemory, ExtractedRelation, MemoryAccessRequest, MemoryCollectionKey,
     MemoryCreateRequest, MemoryDashboard, MemoryEntity, MemoryError, MemoryExtraction,
-    MemoryFacade, MemoryGrantOverrideEffect, MemoryLifecycleRequest, MemoryRecallService,
+    MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryEvolutionProposal, MemoryFacade,
+    MemoryGrantOverrideEffect, MemoryLifecycleRequest, MemoryRecallService,
     MemoryIntegrityRepairRequest,
     MemoryPublicationDestination, MemoryPublicationEditInput, MemoryPublicationProposal,
     MemoryPublicationResolution, MemoryPublicationResult, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
@@ -1169,6 +1170,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/update/trigger", post(update_trigger))
         .route("/api/system/browser/close-all", post(close_all_browsers))
         .route("/api/memory/dashboard", get(memory_dashboard))
+        .route("/api/memory/bench/ingest", post(memory_bench_ingest))
+        .route("/api/memory/bench/status", post(memory_bench_status))
+        .route("/api/memory/bench/search", post(memory_bench_search))
         .route("/api/memory/export", get(memory_export))
         .route("/api/export", get(export_user_data))
         .route("/api/memory/items", get(memory_items))
@@ -44790,6 +44794,462 @@ async fn local_computer_artifact_preview(
     })))
 }
 
+const MEMORYBENCH_MAX_SESSIONS: usize = 2_000;
+const MEMORYBENCH_MAX_MESSAGES: usize = 10_000;
+const MEMORYBENCH_MAX_CONTENT_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Debug, Deserialize)]
+struct MemoryBenchMessage {
+    role: String,
+    content: String,
+    #[serde(default)]
+    timestamp: Option<String>,
+    #[serde(default)]
+    speaker: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryBenchSession {
+    session_id: String,
+    messages: Vec<MemoryBenchMessage>,
+    #[serde(default)]
+    metadata: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryBenchIngestRequest {
+    container_tag: String,
+    sessions: Vec<MemoryBenchSession>,
+    #[serde(default)]
+    metadata: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBenchIngestResponse {
+    workspace_id: String,
+    document_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryBenchStatusRequest {
+    container_tag: String,
+    document_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBenchStatusResponse {
+    completed_ids: Vec<String>,
+    failed_ids: Vec<String>,
+    total: usize,
+    pending: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryBenchSearchRequest {
+    container_tag: String,
+    workspace_id: String,
+    query: String,
+    #[serde(default = "memorybench_default_limit")]
+    limit: usize,
+    #[serde(default)]
+    threshold: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBenchSearchResult {
+    reference: String,
+    summary: String,
+    score: f64,
+    source_user_id: String,
+    source_workspace_id: String,
+    source_label: String,
+    status: String,
+    memory_type: String,
+}
+
+fn memorybench_default_limit() -> usize {
+    30
+}
+
+fn memorybench_enabled() -> bool {
+    std::env::var("HOMUN_MEMORYBENCH_ENABLED")
+        .map(|value| matches!(value.trim(), "1" | "true" | "on" | "yes"))
+        .unwrap_or(false)
+}
+
+fn memorybench_error(
+    status: StatusCode,
+    code: &'static str,
+    message: impl Into<String>,
+) -> GatewayError {
+    GatewayError {
+        status,
+        code,
+        message: message.into(),
+    }
+}
+
+fn validate_memorybench_container_tag(value: &str) -> Result<&str, GatewayError> {
+    let valid = !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+    valid.then_some(value).ok_or_else(|| {
+        memorybench_error(
+            StatusCode::BAD_REQUEST,
+            "memorybench_container_invalid",
+            "invalid MemoryBench container tag",
+        )
+    })
+}
+
+fn memorybench_workspace_id(container_tag: &str) -> String {
+    let digest = Sha256::digest(container_tag.as_bytes());
+    format!("memorybench_{:x}", digest)[..44].to_string()
+}
+
+fn require_memorybench_enabled() -> Result<(), GatewayError> {
+    memorybench_enabled().then_some(()).ok_or_else(|| {
+        memorybench_error(
+            StatusCode::NOT_FOUND,
+            "memorybench_disabled",
+            "MemoryBench endpoints are disabled",
+        )
+    })
+}
+
+fn ensure_memorybench_workspace(container_tag: &str) -> Result<String, GatewayError> {
+    let workspace_id = memorybench_workspace_id(container_tag);
+    let mut file = load_workspaces_file();
+    if file.workspaces.iter().any(|workspace| workspace.id == workspace_id) {
+        return Ok(workspace_id);
+    }
+    let folder = gateway_data_dir()
+        .map_err(|error| {
+            memorybench_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "memorybench_workspace_failed",
+                error.to_string(),
+            )
+        })?
+        .join("memorybench")
+        .join(&workspace_id);
+    fs::create_dir_all(&folder).map_err(|error| {
+        memorybench_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "memorybench_workspace_failed",
+            error.to_string(),
+        )
+    })?;
+    file.workspaces.push(WorkspaceRecord {
+        id: workspace_id.clone(),
+        name: format!("MemoryBench {container_tag}"),
+        folder: Some(folder.to_string_lossy().to_string()),
+        sandbox_mode: None,
+        approval_policy: None,
+        writable_roots: None,
+        skill_confirmations: None,
+    });
+    save_workspaces_file(&file).map_err(|error| {
+        memorybench_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "memorybench_workspace_failed",
+            error.to_string(),
+        )
+    })?;
+    Ok(workspace_id)
+}
+
+fn memorybench_session_text(session: &MemoryBenchSession) -> Result<String, GatewayError> {
+    if session.messages.is_empty() {
+        return Err(memorybench_error(
+            StatusCode::BAD_REQUEST,
+            "memorybench_session_invalid",
+            "sessions require at least one message",
+        ));
+    }
+    let mut lines = Vec::with_capacity(session.messages.len() + 1);
+    if let Some(date) = session.metadata.get("formattedDate").and_then(|value| value.as_str()) {
+        lines.push(format!("Session date: {date}"));
+    }
+    for message in &session.messages {
+        if !matches!(message.role.as_str(), "user" | "assistant") || message.content.trim().is_empty()
+        {
+            return Err(memorybench_error(
+                StatusCode::BAD_REQUEST,
+                "memorybench_session_invalid",
+                "sessions require non-empty user or assistant messages",
+            ));
+        }
+        let timestamp = message
+            .timestamp
+            .as_deref()
+            .map(|value| format!("[{value}] "))
+            .unwrap_or_default();
+        let speaker = message
+            .speaker
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| format!(" ({value})"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "{timestamp}{}{speaker}: {}",
+            message.role,
+            message.content.trim()
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+async fn memory_bench_ingest(
+    State(state): State<AppState>,
+    Json(request): Json<MemoryBenchIngestRequest>,
+) -> Result<Json<MemoryBenchIngestResponse>, GatewayError> {
+    require_memorybench_enabled()?;
+    let container_tag = validate_memorybench_container_tag(&request.container_tag)?;
+    let message_count = request
+        .sessions
+        .iter()
+        .map(|session| session.messages.len())
+        .sum::<usize>();
+    let content_bytes = request
+        .sessions
+        .iter()
+        .flat_map(|session| session.messages.iter())
+        .map(|message| message.content.len())
+        .sum::<usize>();
+    if request.sessions.len() > MEMORYBENCH_MAX_SESSIONS
+        || message_count > MEMORYBENCH_MAX_MESSAGES
+        || content_bytes > MEMORYBENCH_MAX_CONTENT_BYTES
+    {
+        return Err(memorybench_error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "memorybench_payload_too_large",
+            "MemoryBench ingest payload exceeds the local safety limit",
+        ));
+    }
+    let mut prepared = Vec::with_capacity(request.sessions.len());
+    for session in &request.sessions {
+        if session.session_id.trim().is_empty() || session.session_id.len() > 256 {
+            return Err(memorybench_error(
+                StatusCode::BAD_REQUEST,
+                "memorybench_session_invalid",
+                "session id is required",
+            ));
+        }
+        let text = memorybench_session_text(session)?;
+        let identity = serde_json::json!({
+            "container_tag": container_tag,
+            "session_id": session.session_id,
+            "messages": session.messages.iter().map(|message| serde_json::json!({
+                "role": message.role,
+                "content": message.content,
+                "timestamp": message.timestamp,
+                "speaker": message.speaker,
+            })).collect::<Vec<_>>(),
+            "session_metadata": session.metadata,
+            "ingest_metadata": request.metadata,
+        });
+        if contains_secret(&serde_json::json!({ "text": text, "metadata": identity })) {
+            return Err(memorybench_error(
+                StatusCode::BAD_REQUEST,
+                "memorybench_ingest_rejected",
+                "secret-bearing benchmark content is not accepted by Memory",
+            ));
+        }
+        let digest = Sha256::digest(
+            serde_json::to_vec(&identity)
+                .map_err(|error| {
+                    memorybench_error(
+                        StatusCode::BAD_REQUEST,
+                        "memorybench_session_invalid",
+                        error.to_string(),
+                    )
+                })?
+                .as_slice(),
+        );
+        let digest = format!("{digest:x}");
+        prepared.push((
+            session.session_id.clone(),
+            text,
+            session.metadata.clone(),
+            digest,
+        ));
+    }
+    let workspace_id = ensure_memorybench_workspace(container_tag)?;
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(workspace_id.clone());
+    let facade = memory_facade(&state);
+    let mut document_ids = Vec::with_capacity(prepared.len());
+    for (session_id, text, session_metadata, digest) in prepared {
+        let reference = MemoryRef::new(
+            MemoryRefKind::Memory,
+            user.clone(),
+            workspace.clone(),
+            format!("session_{}", &digest[..32]),
+        );
+        let record = MemoryRecord {
+            reference: reference.clone(),
+            user_id: user.clone(),
+            workspace_id: workspace.clone(),
+            memory_type: "episode".to_string(),
+            text,
+            aliases: vec![session_id.clone()],
+            language_hints: Vec::new(),
+            confidence: 1.0,
+            status: MemoryStatus::Confirmed,
+            privacy_domain: PrivacyDomain::new("work"),
+            sensitivity: MemoryDataSensitivity::Internal,
+            metadata: serde_json::json!({
+                "source": "memorybench",
+                "container_tag": container_tag,
+                "session_id": session_id,
+                "session_metadata": session_metadata,
+                "ingest_metadata": request.metadata,
+            }),
+            created_at: format!("memorybench:{}", &digest[..16]),
+            updated_at: format!("memorybench:{}", &digest[..16]),
+            last_seen_at: None,
+            supersedes: Vec::new(),
+            superseded_by: None,
+            correction_of: None,
+        };
+        let result = facade
+            .evolve_memory(MemoryEvolutionProposal {
+                request_id: format!("memorybench-{digest}"),
+                record,
+                evolution: MemoryEvolutionMetadata {
+                    kind: MemoryEvolutionKind::Independent,
+                    target_refs: Vec::new(),
+                    valid_from: None,
+                    valid_until: None,
+                    last_confirmed_at: None,
+                    reinforcement_count: 1,
+                    classifier: "memorybench-adapter".to_string(),
+                    classifier_confidence: 1.0,
+                },
+            })
+            .map_err(|error| {
+                memorybench_error(
+                    StatusCode::BAD_REQUEST,
+                    "memorybench_ingest_rejected",
+                    error.to_string(),
+                )
+            })?;
+        document_ids.push(result.record.reference.to_string());
+    }
+    Ok(Json(MemoryBenchIngestResponse {
+        workspace_id,
+        document_ids,
+    }))
+}
+
+async fn memory_bench_status(
+    State(state): State<AppState>,
+    Json(request): Json<MemoryBenchStatusRequest>,
+) -> Result<Json<MemoryBenchStatusResponse>, GatewayError> {
+    require_memorybench_enabled()?;
+    let container_tag = validate_memorybench_container_tag(&request.container_tag)?;
+    let workspace = MemoryWorkspaceId::new(memorybench_workspace_id(container_tag));
+    let user = gateway_memory_user_id();
+    let facade = memory_facade(&state);
+    let mut completed_ids = Vec::new();
+    let mut failed_ids = Vec::new();
+    for value in &request.document_ids {
+        let reference = value.parse::<MemoryRef>();
+        let completed = reference.as_ref().ok().is_some_and(|reference| {
+            reference.user_id == user
+                && reference.workspace_id == workspace
+                && facade
+                    .get_memory_for_ui(reference, &user, &workspace)
+                    .ok()
+                    .flatten()
+                    .is_some()
+        });
+        if completed {
+            completed_ids.push(value.clone());
+        } else {
+            failed_ids.push(value.clone());
+        }
+    }
+    Ok(Json(MemoryBenchStatusResponse {
+        completed_ids,
+        failed_ids,
+        total: request.document_ids.len(),
+        pending: false,
+    }))
+}
+
+async fn memory_bench_search(
+    State(state): State<AppState>,
+    Json(request): Json<MemoryBenchSearchRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    require_memorybench_enabled()?;
+    let container_tag = validate_memorybench_container_tag(&request.container_tag)?;
+    let expected_workspace = memorybench_workspace_id(container_tag);
+    if request.workspace_id != expected_workspace
+        || request.query.trim().is_empty()
+        || request.limit == 0
+        || request.limit > 100
+        || !request.threshold.is_finite()
+        || !(0.0..=1.0).contains(&request.threshold)
+    {
+        return Err(memorybench_error(
+            StatusCode::BAD_REQUEST,
+            "memorybench_search_invalid",
+            "invalid MemoryBench search request",
+        ));
+    }
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(expected_workspace.clone());
+    let page = memory_facade(&state)
+        .search_memories(MemorySearchRequest {
+            access: MemoryAccessRequest {
+                actor_id: "memorybench".to_string(),
+                user_id: user.clone(),
+                workspace_id: workspace,
+                purpose: "memorybench_search".to_string(),
+                allowed_domains: vec![PrivacyDomain::new("work")],
+                max_sensitivity: MemoryDataSensitivity::Private,
+                allow_raw_payload: false,
+                allow_export: false,
+                broad_query: false,
+            },
+            query: request.query,
+            statuses: vec![MemoryStatus::Confirmed, MemoryStatus::Candidate],
+            memory_types: Vec::new(),
+            limit: request.limit,
+            offset: 0,
+        })
+        .map_err(|error| {
+            memorybench_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "memorybench_search_failed",
+                error.to_string(),
+            )
+        })?;
+    let results = page
+        .items
+        .into_iter()
+        .filter_map(|item| {
+            let score = 1.0 / item.rank.max(1) as f64;
+            (score >= request.threshold).then(|| MemoryBenchSearchResult {
+                reference: item.reference.to_string(),
+                summary: item.summary,
+                score,
+                source_user_id: user.as_str().to_string(),
+                source_workspace_id: expected_workspace.clone(),
+                source_label: format!("MemoryBench {container_tag}"),
+                status: format!("{:?}", item.status).to_lowercase(),
+                memory_type: item.memory_type,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(serde_json::json!({ "results": results })))
+}
+
 async fn memory_dashboard(
     State(state): State<AppState>,
 ) -> Result<Json<MemoryDashboard>, GatewayError> {
@@ -53338,8 +53798,10 @@ mod tests {
     // only these unit tests do — import it here rather than re-exporting it at the crate root.
     use local_first_engine::plan::collapse_plan_markers;
     use super::{
-        ActiveModelInputs, ChannelSettings, ConnectorErrorKind, InboundAction, LegacyDirAction,
-        MAX_PLAN_STALL_RESUMES, MemoryCandidate, MemoryDataSensitivity,
+        ActiveModelInputs, AppState, ChannelSettings, ConnectorErrorKind, InboundAction,
+        LegacyDirAction, MAX_PLAN_STALL_RESUMES, MemoryBenchIngestRequest, MemoryBenchMessage,
+        MemoryBenchSearchRequest, MemoryBenchSession, MemoryBenchStatusRequest, MemoryCandidate,
+        MemoryDataSensitivity,
         MemorySourceOverrideInput, MemorySourceUpsertRequest, TASK_EXECUTOR_DEFAULT_WORKER_COUNT,
         ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile, active_llm_concurrency,
         adapt_skill_body, aggregate_session_state_from_counts,
@@ -53356,8 +53818,10 @@ mod tests {
         enforce_monotonic_plan_progress, legacy_dir_action,
         llm_concurrency_view, mcp_error_hint,
         mcp_provider_slug, mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata,
-        memory_age_days, memory_source_candidates_from_records, memory_source_grant_views,
-        memory_source_facade_error, memory_sources_flag, merge_plan,
+        delete_workspace, gateway_memory_user_id, memory_age_days, memory_bench_ingest,
+        memory_bench_search, memory_bench_status, memory_facade,
+        memory_source_candidates_from_records, memory_source_grant_views,
+        memory_source_facade_error, memory_sources_flag, memorybench_workspace_id, merge_plan,
         next_plan_stall, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
@@ -53374,6 +53838,8 @@ mod tests {
         tool_touches_contacts, validate_memory_source_input, validate_memory_source_overrides,
         validate_memory_source_workspaces, wiki_title_from_text, workspace_write_roots,
     };
+    use axum::extract::{Path, State};
+    use axum::Json;
     use crate::browser_safety;
     use crate::chat_store::{self, ChatStore};
     // 5.D1c.2: test-only engine helpers (not used by non-test gateway code, so imported here, not at
@@ -53385,6 +53851,7 @@ mod tests {
     use local_first_browser_automation::BrowserMethod;
     use local_first_capabilities::{CapabilityCallResult, ProviderId as CapProviderId};
     use local_first_local_computer_session::SessionStatus;
+    use local_first_memory::WorkspaceId as MemoryWorkspaceId;
     use local_first_task_runtime::{
         ApprovalPolicy, ApprovalRequest, Automation, AutomationSource, AutomationTrigger,
         ExecutorResult, ResourceClass, ResourceGovernor, ResourceLimits, ResourceRequirement,
@@ -53439,6 +53906,153 @@ mod tests {
 
     fn isolated_gateway_test_dir(prefix: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("homun-{prefix}-{}", uuid::Uuid::new_v4().simple()))
+    }
+
+    struct TestMemoryBenchFlag {
+        _lock: MutexGuard<'static, ()>,
+        restore: Option<String>,
+    }
+
+    impl TestMemoryBenchFlag {
+        fn enabled() -> Self {
+            let lock = TEST_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let restore = std::env::var("HOMUN_MEMORYBENCH_ENABLED").ok();
+            // SAFETY: process-global mutation is serialized by TEST_ENV_LOCK and restored in Drop.
+            unsafe { std::env::set_var("HOMUN_MEMORYBENCH_ENABLED", "1") };
+            Self {
+                _lock: lock,
+                restore,
+            }
+        }
+    }
+
+    impl Drop for TestMemoryBenchFlag {
+        fn drop(&mut self) {
+            // SAFETY: see TestMemoryBenchFlag::enabled.
+            unsafe {
+                match &self.restore {
+                    Some(value) => std::env::set_var("HOMUN_MEMORYBENCH_ENABLED", value),
+                    None => std::env::remove_var("HOMUN_MEMORYBENCH_ENABLED"),
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn memorybench_routes_ingest_search_status_and_governed_clear() {
+        let dir = isolated_gateway_test_dir("memorybench-routes");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _flag = TestMemoryBenchFlag::enabled();
+        let _data = TestGatewayDataDir::new(&dir);
+        let state = AppState::for_tests();
+        let container_tag = "route-contract".to_string();
+        let workspace_id = memorybench_workspace_id(&container_tag);
+        let ingest_request = || MemoryBenchIngestRequest {
+            container_tag: container_tag.clone(),
+            sessions: vec![MemoryBenchSession {
+                session_id: "session-1".to_string(),
+                messages: vec![MemoryBenchMessage {
+                    role: "user".to_string(),
+                    content: "The benchmark launch moved to Monday".to_string(),
+                    timestamp: None,
+                    speaker: None,
+                }],
+                metadata: serde_json::json!({}),
+            }],
+            metadata: serde_json::json!({}),
+        };
+        let ingest = memory_bench_ingest(
+            State(state.clone()),
+            Json(ingest_request()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(ingest.workspace_id, workspace_id);
+        assert_eq!(ingest.document_ids.len(), 1);
+        let repeated = memory_bench_ingest(State(state.clone()), Json(ingest_request()))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(repeated.document_ids, ingest.document_ids);
+        assert_eq!(
+            memory_facade(&state)
+                .list_memories_for_ui(
+                    &gateway_memory_user_id(),
+                    &MemoryWorkspaceId::new(workspace_id.clone()),
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+        let secret = memory_bench_ingest(
+            State(state.clone()),
+            Json(MemoryBenchIngestRequest {
+                container_tag: container_tag.clone(),
+                sessions: vec![MemoryBenchSession {
+                    session_id: "secret-session".to_string(),
+                    messages: vec![MemoryBenchMessage {
+                        role: "user".to_string(),
+                        content: "OPENAI_API_KEY=sk-test-memorybench-must-not-leak".to_string(),
+                        timestamp: None,
+                        speaker: None,
+                    }],
+                    metadata: serde_json::json!({}),
+                }],
+                metadata: serde_json::json!({}),
+            }),
+        )
+        .await;
+        assert!(secret.is_err());
+
+        let status = memory_bench_status(
+            State(state.clone()),
+            Json(MemoryBenchStatusRequest {
+                container_tag: container_tag.clone(),
+                document_ids: ingest.document_ids.clone(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(status.completed_ids, ingest.document_ids);
+        assert!(status.failed_ids.is_empty());
+        assert!(!status.pending);
+
+        let search = memory_bench_search(
+            State(state.clone()),
+            Json(MemoryBenchSearchRequest {
+                container_tag,
+                workspace_id: workspace_id.clone(),
+                query: "benchmark launch Monday".to_string(),
+                limit: 10,
+                threshold: 0.0,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(search["results"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            search["results"][0]["source_workspace_id"],
+            workspace_id
+        );
+
+        let _ = delete_workspace(State(state.clone()), Path(workspace_id.clone()))
+            .await
+            .unwrap();
+        assert!(
+            memory_facade(&state)
+                .list_memories_for_ui(
+                    &gateway_memory_user_id(),
+                    &MemoryWorkspaceId::new(workspace_id),
+                )
+                .unwrap()
+                .is_empty()
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

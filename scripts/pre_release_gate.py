@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 PYTHON = sys.executable or "python3"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DESKTOP = os.path.join(ROOT, "apps", "desktop")
+MEMORYBENCH_PROVIDER = os.path.join(ROOT, "benchmarks", "memorybench", "homun-provider")
 GATEWAY_EVAL_SNIPPET = (
     "import scripts.eval_suite as e; "
     "ok = e.run_gateway_checks(); "
@@ -52,6 +53,7 @@ def build_plan(env: dict[str, str]) -> list[Step]:
         ),
         Step("orchestrator tests", ["cargo", "test", "-p", "local-first-orchestrator", "--", "--nocapture"]),
         Step("gateway tests", ["cargo", "test", "-p", "local-first-desktop-gateway", "--", "--nocapture"]),
+        Step("memorybench provider", ["npm", "test"], cwd=MEMORYBENCH_PROVIDER),
         Step("ui contract", ["npm", "run", "test:ui-contract"], cwd=DESKTOP),
         Step("desktop build", ["npm", "run", "build"], cwd=DESKTOP),
         Step(

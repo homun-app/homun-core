@@ -13,6 +13,7 @@ class PreReleaseGateTests(unittest.TestCase):
         self.assertIn("capability tests", labels)
         self.assertIn("orchestrator tests", labels)
         self.assertIn("gateway tests", labels)
+        self.assertIn("memorybench provider", labels)
         self.assertIn("ui contract", labels)
         self.assertIn("desktop build", labels)
         self.assertIn("eval unit tests", labels)
@@ -58,7 +59,16 @@ class PreReleaseGateTests(unittest.TestCase):
         ok = gate.run_plan(gate.build_plan({}), fake_run)
 
         self.assertFalse(ok)
-        self.assertEqual(calls, ["capability tests", "orchestrator tests", "gateway tests", "ui contract"])
+        self.assertEqual(
+            calls,
+            [
+                "capability tests",
+                "orchestrator tests",
+                "gateway tests",
+                "memorybench provider",
+                "ui contract",
+            ],
+        )
 
 
 if __name__ == "__main__":
