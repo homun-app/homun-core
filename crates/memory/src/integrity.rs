@@ -1,8 +1,12 @@
-use crate::{UserId, WorkspaceId, current_timestamp};
+use crate::{
+    MemoryBackupReport, PERSONAL_WORKSPACE, THREADS_WORKSPACE, UserId, WorkspaceId,
+    current_timestamp,
+};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,9 +47,59 @@ pub struct MemoryIntegrityReport {
     pub checksum: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MemoryRepairAction {
+    RemoveGraphifyDuplicateRelations { workspace_id: WorkspaceId },
+    RemoveOrphanEmbeddings,
+    RemoveOrphanEvidenceLinks,
+    RemoveMissingWikiLinks,
+    RebuildFts,
+    PurgeUnknownWorkspace { workspace_id: WorkspaceId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryRepairEstimate {
+    pub action: MemoryRepairAction,
+    pub estimated_rows: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryIntegrityRepairPreview {
+    pub audit_checksum: String,
+    pub actions: Vec<MemoryRepairAction>,
+    pub estimates: Vec<MemoryRepairEstimate>,
+    pub approval_token: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryIntegrityRepairRequest {
+    pub audit_checksum: String,
+    pub actions: Vec<MemoryRepairAction>,
+    pub approval_token: String,
+    pub backup_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryIntegrityRepairResult {
+    pub before: MemoryIntegrityReport,
+    pub after: MemoryIntegrityReport,
+    pub backup: MemoryBackupReport,
+    pub applied: Vec<MemoryRepairEstimate>,
+}
+
 pub(crate) fn audit_memory_integrity_on(
     connection: &Connection,
     known_scopes: &[(UserId, WorkspaceId)],
+) -> Result<MemoryIntegrityReport, String> {
+    let integrity_ok = sqlite_integrity_ok(connection)?;
+    audit_memory_integrity_with_status_on(connection, known_scopes, integrity_ok)
+}
+
+pub(crate) fn audit_memory_integrity_with_status_on(
+    connection: &Connection,
+    known_scopes: &[(UserId, WorkspaceId)],
+    integrity_ok: bool,
 ) -> Result<MemoryIntegrityReport, String> {
     let schema_version = connection
         .query_row(
@@ -56,7 +110,6 @@ pub(crate) fn audit_memory_integrity_on(
         .map_err(|error| error.to_string())?
         .parse::<u32>()
         .map_err(|error| error.to_string())?;
-    let integrity_ok = sqlite_integrity_ok(connection)?;
     let foreign_key_violations = pragma_row_count(connection, "pragma foreign_key_check")?;
     let rows_by_table = rows_by_table(connection)?;
 
@@ -240,6 +293,154 @@ pub(crate) fn audit_memory_integrity_on(
     Ok(report)
 }
 
+pub(crate) fn preview_memory_integrity_repair_on(
+    connection: &Connection,
+    known_scopes: &[(UserId, WorkspaceId)],
+    actions: Vec<MemoryRepairAction>,
+) -> Result<MemoryIntegrityRepairPreview, String> {
+    let audit = audit_memory_integrity_on(connection, known_scopes)?;
+    preview_for_audit_on(connection, known_scopes, &audit, actions)
+}
+
+pub(crate) fn preview_for_audit_on(
+    connection: &Connection,
+    known_scopes: &[(UserId, WorkspaceId)],
+    audit: &MemoryIntegrityReport,
+    actions: Vec<MemoryRepairAction>,
+) -> Result<MemoryIntegrityRepairPreview, String> {
+    let actions = canonical_actions(actions)?;
+    if actions.is_empty() {
+        return Err("integrity repair requires at least one explicit action".to_string());
+    }
+    let known = known_scopes
+        .iter()
+        .map(|(user, workspace)| (user.as_str().to_string(), workspace.as_str().to_string()))
+        .collect::<HashSet<_>>();
+    let mut estimates = Vec::with_capacity(actions.len());
+    for action in &actions {
+        let estimated_rows = match action {
+            MemoryRepairAction::RemoveGraphifyDuplicateRelations { workspace_id } => {
+                if workspace_id.as_str().trim().is_empty()
+                    || !known
+                        .iter()
+                        .any(|(_, workspace)| workspace == workspace_id.as_str())
+                {
+                    return Err(format!(
+                        "graphify duplicate repair requires a registered workspace: {}",
+                        workspace_id.as_str()
+                    ));
+                }
+                graphify_duplicate_extras_for_workspace(connection, known_scopes, workspace_id)?
+            }
+            MemoryRepairAction::RemoveOrphanEmbeddings => audit.orphan_embeddings,
+            MemoryRepairAction::RemoveOrphanEvidenceLinks => audit.orphan_evidence_links,
+            MemoryRepairAction::RemoveMissingWikiLinks => audit.missing_wiki_links,
+            MemoryRepairAction::RebuildFts => audit
+                .memories_missing_fts
+                .saturating_add(audit.stale_fts_rows),
+            MemoryRepairAction::PurgeUnknownWorkspace { workspace_id } => {
+                if workspace_id.as_str().trim().is_empty()
+                    || matches!(
+                        workspace_id.as_str(),
+                        PERSONAL_WORKSPACE | THREADS_WORKSPACE
+                    )
+                    || known
+                        .iter()
+                        .any(|(_, workspace)| workspace == workspace_id.as_str())
+                {
+                    return Err(format!(
+                        "workspace is not eligible for unknown-scope purge: {}",
+                        workspace_id.as_str()
+                    ));
+                }
+                audit
+                    .unknown_scopes
+                    .iter()
+                    .find(|scope| scope.workspace_id == workspace_id.as_str())
+                    .map(|scope| scope.total_rows)
+                    .ok_or_else(|| {
+                        format!("unknown workspace not present: {}", workspace_id.as_str())
+                    })?
+            }
+        };
+        estimates.push(MemoryRepairEstimate {
+            action: action.clone(),
+            estimated_rows,
+        });
+    }
+    let approval_token = repair_approval_token(&audit.checksum, &actions)?;
+    Ok(MemoryIntegrityRepairPreview {
+        audit_checksum: audit.checksum.clone(),
+        actions,
+        estimates,
+        approval_token,
+    })
+}
+
+pub(crate) fn canonical_actions(
+    actions: Vec<MemoryRepairAction>,
+) -> Result<Vec<MemoryRepairAction>, String> {
+    let mut encoded = actions
+        .into_iter()
+        .map(|action| {
+            serde_json::to_string(&action)
+                .map(|json| (json, action))
+                .map_err(|error| error.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    encoded.sort_by(|left, right| left.0.cmp(&right.0));
+    for pair in encoded.windows(2) {
+        if pair[0].0 == pair[1].0 {
+            return Err("integrity repair contains duplicate actions".to_string());
+        }
+    }
+    Ok(encoded.into_iter().map(|(_, action)| action).collect())
+}
+
+pub(crate) fn repair_approval_token(
+    audit_checksum: &str,
+    actions: &[MemoryRepairAction],
+) -> Result<String, String> {
+    let canonical = serde_json::to_vec(actions).map_err(|error| error.to_string())?;
+    let mut hasher = Sha256::new();
+    hasher.update(audit_checksum.as_bytes());
+    hasher.update([0]);
+    hasher.update(canonical);
+    let digest = hasher.finalize();
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn graphify_duplicate_extras_for_workspace(
+    connection: &Connection,
+    known_scopes: &[(UserId, WorkspaceId)],
+    workspace_id: &WorkspaceId,
+) -> Result<u64, String> {
+    let mut total = 0_u64;
+    for (user_id, known_workspace) in known_scopes {
+        if known_workspace != workspace_id {
+            continue;
+        }
+        let extras = connection
+            .query_row(
+                "select coalesce(sum(duplicate_count - 1), 0)
+                 from (
+                     select count(*) duplicate_count from relations
+                     where user_id = ?1 and workspace_id = ?2
+                       and json_valid(metadata_json)
+                       and (json_extract(metadata_json, '$.adapter') = 'graphify'
+                            or json_extract(metadata_json, '$.source') = 'graphify')
+                     group by source_ref, relation_type, target_ref
+                     having count(*) > 1
+                 )",
+                (user_id.as_str(), workspace_id.as_str()),
+                |row| row.get::<_, u64>(0),
+            )
+            .map_err(|error| error.to_string())?;
+        total = total.saturating_add(extras);
+    }
+    Ok(total)
+}
+
 fn sqlite_integrity_ok(connection: &Connection) -> Result<bool, String> {
     let mut statement = connection
         .prepare("pragma integrity_check")
@@ -251,7 +452,9 @@ fn sqlite_integrity_ok(connection: &Connection) -> Result<bool, String> {
     for row in rows {
         results.push(row.map_err(|error| error.to_string())?);
     }
-    Ok(results.len() == 1 && results[0] == "ok")
+    Ok(results.iter().all(|result| {
+        result == "ok" || result == "malformed inverted index for FTS5 table main.memory_search_fts"
+    }))
 }
 
 fn pragma_row_count(connection: &Connection, pragma: &str) -> Result<u64, String> {

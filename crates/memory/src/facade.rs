@@ -6,12 +6,13 @@ use crate::{
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
     MemoryContextItem, MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError,
     MemoryEvent, MemoryEvidence, MemoryExtraction, MemoryExtractionSummary, MemoryHealth,
+    MemoryIntegrityRepairPreview, MemoryIntegrityRepairRequest, MemoryIntegrityRepairResult,
     MemoryIntegrityReport, MemoryLifecycleRequest, MemoryMaintenanceReport, MemoryPolicyEngine,
     MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationEditInput,
     MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
     MemoryPublicationResolution, MemoryPublicationResult, MemoryPublicationStatus,
     MemoryPublicationStoreError, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
-    MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
+    MemoryRepairAction, MemoryResult, MemorySearchPage, MemorySearchRequest, MemorySearchResult,
     MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantStoreError, MemoryStatus,
     MemoryUpdatePatch, PERSONAL_WORKSPACE, PrivacyDomain, ProjectGraphImportError,
     ProjectGraphImportReport, RoutineInference, RoutineInferenceSummary, RoutineRecord,
@@ -142,6 +143,32 @@ impl MemoryFacade {
         self.store
             .audit_integrity(known_scopes)
             .map_err(MemoryError::Store)
+    }
+
+    pub fn preview_integrity_repair(
+        &self,
+        known_scopes: &[(UserId, WorkspaceId)],
+        actions: Vec<MemoryRepairAction>,
+    ) -> MemoryResult<MemoryIntegrityRepairPreview> {
+        self.store.preview_integrity_repair(known_scopes, actions)
+    }
+
+    pub fn apply_integrity_repair(
+        &self,
+        known_scopes: &[(UserId, WorkspaceId)],
+        request: MemoryIntegrityRepairRequest,
+    ) -> MemoryResult<MemoryIntegrityRepairResult> {
+        let result = self.store.apply_integrity_repair(known_scopes, request)?;
+        if let Ok(mut indexes) = self.vector_indexes.lock() {
+            indexes.clear();
+        }
+        if let Ok(mut indexes) = self.authorized_vector_indexes.lock() {
+            indexes.clear();
+        }
+        if let Ok(mut generations) = self.briefing_generations.lock() {
+            generations.clear();
+        }
+        Ok(result)
     }
 
     pub fn record_event(&self, event: &MemoryEvent) -> MemoryResult<()> {

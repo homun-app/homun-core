@@ -2,15 +2,16 @@ use crate::{
     AUTHORIZED_MEMORY_SEARCH_LIMIT_MAX, AutomationCandidateRecord, AutomationCandidateStatus,
     DataSensitivity, EncryptedJson, KeyProvider, MEMORY_SOURCE_CANDIDATE_PAGE_MAX,
     MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
-    MemoryEntity, MemoryEvent, MemoryEvidence, MemoryHealth, MemoryIntegrityReport,
-    MemoryMaintenanceReport, MemoryPublicationCandidate, MemoryPublicationLink,
-    MemoryPublicationProposal, MemoryPublicationReasonCode, MemoryPublicationResolution,
-    MemoryPublicationStatus, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation,
-    MemoryRestoreMode, MemorySourceAccessEvent, MemorySourceAccessOutcome,
-    MemorySourceCandidateProjection, MemorySourceGrant, MemorySourceGrantValidationError,
-    PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId, VectorHit, WikiPage, WorkspaceId,
-    WorkspacePurgeReport, contains_secret, current_timestamp, decrypt_json, encrypt_json,
-    validate_memory_source_grant_intrinsic,
+    MemoryEntity, MemoryError, MemoryEvent, MemoryEvidence, MemoryHealth,
+    MemoryIntegrityRepairPreview, MemoryIntegrityRepairRequest, MemoryIntegrityRepairResult,
+    MemoryIntegrityReport, MemoryMaintenanceReport, MemoryPublicationCandidate,
+    MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
+    MemoryPublicationResolution, MemoryPublicationStatus, MemoryRecord, MemoryRef, MemoryRefKind,
+    MemoryRelation, MemoryRepairAction, MemoryRestoreMode, MemorySourceAccessEvent,
+    MemorySourceAccessOutcome, MemorySourceCandidateProjection, MemorySourceGrant,
+    MemorySourceGrantValidationError, PrivacyDomain, RoutineRecord, THREADS_WORKSPACE, UserId,
+    VectorHit, WikiPage, WorkspaceId, WorkspacePurgeReport, contains_secret, current_timestamp,
+    decrypt_json, encrypt_json, validate_memory_source_grant_intrinsic,
 };
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -469,6 +470,202 @@ impl SQLiteMemoryStore {
     ) -> Result<MemoryIntegrityReport, String> {
         let connection = self.read_conn();
         crate::audit_memory_integrity_on(&connection, known_scopes)
+    }
+
+    pub fn preview_integrity_repair(
+        &self,
+        known_scopes: &[(UserId, WorkspaceId)],
+        actions: Vec<MemoryRepairAction>,
+    ) -> Result<MemoryIntegrityRepairPreview, MemoryError> {
+        let connection = self.read_conn();
+        crate::preview_memory_integrity_repair_on(&connection, known_scopes, actions)
+            .map_err(MemoryError::Validation)
+    }
+
+    pub fn apply_integrity_repair(
+        &self,
+        known_scopes: &[(UserId, WorkspaceId)],
+        request: MemoryIntegrityRepairRequest,
+    ) -> Result<MemoryIntegrityRepairResult, MemoryError> {
+        let backup_path = request.backup_path.as_ref().ok_or_else(|| {
+            MemoryError::Policy("integrity repair requires an explicit backup path".to_string())
+        })?;
+        if backup_path.as_os_str().is_empty() || backup_path.exists() {
+            return Err(MemoryError::Policy(
+                "integrity repair backup path must be new and non-empty".to_string(),
+            ));
+        }
+
+        {
+            let connection = self.read_conn();
+            let current = crate::preview_memory_integrity_repair_on(
+                &connection,
+                known_scopes,
+                request.actions.clone(),
+            )
+            .map_err(MemoryError::Policy)?;
+            validate_repair_request(&request, &current)?;
+        }
+
+        let backup = self.backup_to(backup_path).map_err(MemoryError::Store)?;
+        let mut connection = self.write_conn();
+        let pre_transaction = crate::audit_memory_integrity_on(&connection, known_scopes)
+            .map_err(MemoryError::Store)?;
+        let pre_transaction_preview = crate::preview_for_audit_on(
+            &connection,
+            known_scopes,
+            &pre_transaction,
+            request.actions.clone(),
+        )
+        .map_err(MemoryError::Policy)?;
+        validate_repair_request(&request, &pre_transaction_preview)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| MemoryError::Store(error.to_string()))?;
+        let before = crate::audit_memory_integrity_with_status_on(
+            &transaction,
+            known_scopes,
+            pre_transaction.integrity_ok,
+        )
+        .map_err(MemoryError::Store)?;
+        let current = crate::preview_for_audit_on(
+            &transaction,
+            known_scopes,
+            &before,
+            request.actions.clone(),
+        )
+        .map_err(MemoryError::Policy)?;
+        validate_repair_request(&request, &current)?;
+
+        self.apply_integrity_repair_actions_on(&transaction, known_scopes, &current.actions)?;
+        let after = crate::audit_memory_integrity_with_status_on(
+            &transaction,
+            known_scopes,
+            pre_transaction.integrity_ok,
+        )
+        .map_err(MemoryError::Store)?;
+        transaction
+            .commit()
+            .map_err(|error| MemoryError::Store(error.to_string()))?;
+        Ok(MemoryIntegrityRepairResult {
+            before,
+            after,
+            backup,
+            applied: current.estimates,
+        })
+    }
+
+    fn apply_integrity_repair_actions_on(
+        &self,
+        connection: &Connection,
+        known_scopes: &[(UserId, WorkspaceId)],
+        actions: &[MemoryRepairAction],
+    ) -> Result<(), MemoryError> {
+        for action in actions {
+            match action {
+                MemoryRepairAction::RemoveGraphifyDuplicateRelations { workspace_id } => {
+                    for (user_id, known_workspace) in known_scopes {
+                        if known_workspace != workspace_id {
+                            continue;
+                        }
+                        connection
+                            .execute(
+                                "delete from relations where ref in (
+                                     select ref from (
+                                         select ref, row_number() over (
+                                             partition by source_ref, relation_type, target_ref
+                                             order by ref
+                                         ) duplicate_rank
+                                         from relations
+                                         where user_id = ?1 and workspace_id = ?2
+                                           and json_valid(metadata_json)
+                                           and (json_extract(metadata_json, '$.adapter') = 'graphify'
+                                                or json_extract(metadata_json, '$.source') = 'graphify')
+                                     ) where duplicate_rank > 1
+                                 )",
+                                (user_id.as_str(), workspace_id.as_str()),
+                            )
+                            .map_err(|error| MemoryError::Store(error.to_string()))?;
+                    }
+                }
+                MemoryRepairAction::RemoveOrphanEmbeddings => {
+                    connection
+                        .execute(
+                            "delete from memory_embeddings
+                             where not exists (
+                                 select 1 from memories
+                                 where memories.ref = memory_embeddings.ref
+                                   and memories.user_id = memory_embeddings.user_id
+                                   and memories.workspace_id = memory_embeddings.workspace_id
+                             )",
+                            [],
+                        )
+                        .map_err(|error| MemoryError::Store(error.to_string()))?;
+                }
+                MemoryRepairAction::RemoveOrphanEvidenceLinks => {
+                    connection
+                        .execute(
+                            "delete from memory_evidence
+                             where not exists (
+                                 select 1 from memories where memories.ref = memory_evidence.memory_ref
+                             ) or not exists (
+                                 select 1 from memory_events where memory_events.ref = memory_evidence.evidence_ref
+                             )",
+                            [],
+                        )
+                        .map_err(|error| MemoryError::Store(error.to_string()))?;
+                }
+                MemoryRepairAction::RemoveMissingWikiLinks => {
+                    connection
+                        .execute(
+                            "update wiki_pages
+                             set linked_refs_json = (
+                                 select coalesce(json_group_array(link.value), '[]')
+                                 from json_each(wiki_pages.linked_refs_json) link
+                                 where exists (
+                                     select 1 from memories m
+                                     where m.ref = link.value
+                                       and m.user_id = wiki_pages.user_id
+                                       and m.workspace_id = wiki_pages.workspace_id
+                                     union all
+                                     select 1 from entities e
+                                     where e.ref = link.value
+                                       and e.user_id = wiki_pages.user_id
+                                       and e.workspace_id = wiki_pages.workspace_id
+                                 )
+                             )
+                             where json_valid(linked_refs_json) and exists (
+                                 select 1 from json_each(wiki_pages.linked_refs_json) link
+                                 where not exists (
+                                     select 1 from memories m
+                                     where m.ref = link.value
+                                       and m.user_id = wiki_pages.user_id
+                                       and m.workspace_id = wiki_pages.workspace_id
+                                     union all
+                                     select 1 from entities e
+                                     where e.ref = link.value
+                                       and e.user_id = wiki_pages.user_id
+                                       and e.workspace_id = wiki_pages.workspace_id
+                                 )
+                             )",
+                            [],
+                        )
+                        .map_err(|error| MemoryError::Store(error.to_string()))?;
+                }
+                MemoryRepairAction::RebuildFts => self
+                    .rebuild_memory_search_index_on(connection)
+                    .map_err(MemoryError::Store)?,
+                MemoryRepairAction::PurgeUnknownWorkspace { workspace_id } => {
+                    for user_id in unknown_workspace_users_on(connection, workspace_id)
+                        .map_err(MemoryError::Store)?
+                    {
+                        purge_workspace_on(connection, &user_id, workspace_id.as_str())
+                            .map_err(MemoryError::Store)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn upsert_memory_source_grant(
@@ -2958,154 +3155,9 @@ impl SQLiteMemoryStore {
         let transaction = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
-        let mut rows_by_table = std::collections::BTreeMap::new();
-
-        let evidence = transaction
-            .execute(
-                "delete from memory_evidence
-                 where memory_ref in (
-                    select ref from memories where user_id = ?1 and workspace_id = ?2
-                 ) or evidence_ref in (
-                    select ref from memory_events where user_id = ?1 and workspace_id = ?2
-                    union select ref from memories where user_id = ?1 and workspace_id = ?2
-                    union select ref from entities where user_id = ?1 and workspace_id = ?2
-                    union select ref from wiki_pages where user_id = ?1 and workspace_id = ?2
-                    union select ref from routines where user_id = ?1 and workspace_id = ?2
-                    union select ref from automation_candidates where user_id = ?1 and workspace_id = ?2
-                 )",
-                params![uid, wid],
-            )
-            .map_err(|error| error.to_string())?;
-        rows_by_table.insert("memory_evidence".to_string(), evidence);
-
-        for table in [
-            "memory_source_grant_collections",
-            "memory_source_grant_overrides",
-        ] {
-            let deleted = transaction
-                .execute(
-                    &format!(
-                        "delete from {table} where grant_id in (
-                            select id from memory_source_grants
-                            where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
-                               or (source_user_id = ?1 and source_workspace_id = ?2)
-                        )"
-                    ),
-                    params![uid, wid],
-                )
-                .map_err(|error| error.to_string())?;
-            rows_by_table.insert(table.to_string(), deleted);
-        }
-        let access_events = transaction
-            .execute(
-                "delete from memory_source_access_events
-                 where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
-                    or source_workspace_id = ?2
-                    or grant_id in (
-                        select id from memory_source_grants
-                        where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
-                           or (source_user_id = ?1 and source_workspace_id = ?2)
-                    )",
-                params![uid, wid],
-            )
-            .map_err(|error| error.to_string())?;
-        rows_by_table.insert("memory_source_access_events".to_string(), access_events);
-        let grants = transaction
-            .execute(
-                "delete from memory_source_grants
-                 where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
-                    or (source_user_id = ?1 and source_workspace_id = ?2)",
-                params![uid, wid],
-            )
-            .map_err(|error| error.to_string())?;
-        rows_by_table.insert("memory_source_grants".to_string(), grants);
-
-        let publication_links = transaction
-            .execute(
-                "delete from memory_publication_links
-                 where json_extract(source_ref_json, '$.workspace_id') = ?1
-                    or json_extract(destination_ref_json, '$.workspace_id') = ?1",
-                params![wid],
-            )
-            .map_err(|error| error.to_string())?;
-        rows_by_table.insert("memory_publication_links".to_string(), publication_links);
-        let publication_proposals = transaction
-            .execute(
-                "delete from memory_publication_proposals
-                 where (source_user_id = ?1 and source_workspace_id = ?2)
-                    or (destination_user_id = ?1 and destination_workspace_id = ?2)",
-                params![uid, wid],
-            )
-            .map_err(|error| error.to_string())?;
-        rows_by_table.insert(
-            "memory_publication_proposals".to_string(),
-            publication_proposals,
-        );
-
-        let fts = transaction
-            .execute(
-                "delete from memory_search_fts where user_id = ?1 and workspace_id = ?2",
-                params![uid, wid],
-            )
-            .map_err(|error| error.to_string())?;
-        rows_by_table.insert("memory_search_fts".to_string(), fts);
-
-        for table in [
-            "memory_embeddings",
-            "relations",
-            "entities",
-            "wiki_pages",
-            "routines",
-            "automation_candidates",
-            "access_audit",
-            "tombstones",
-            "memory_events",
-            "memories",
-        ] {
-            let deleted = transaction
-                .execute(
-                    &format!("delete from {table} where user_id = ?1 and workspace_id = ?2"),
-                    params![uid, wid],
-                )
-                .map_err(|error| error.to_string())?;
-            rows_by_table.insert(table.to_string(), deleted);
-        }
-
-        for table in [
-            "memory_embeddings",
-            "relations",
-            "entities",
-            "wiki_pages",
-            "routines",
-            "automation_candidates",
-            "access_audit",
-            "tombstones",
-            "memory_events",
-            "memories",
-        ] {
-            let remaining: usize = transaction
-                .query_row(
-                    &format!(
-                        "select count(*) from {table} where user_id = ?1 and workspace_id = ?2"
-                    ),
-                    params![uid, wid],
-                    |row| row.get(0),
-                )
-                .map_err(|error| error.to_string())?;
-            if remaining != 0 {
-                return Err(format!(
-                    "workspace purge verification failed for {table}: {remaining} rows remain"
-                ));
-            }
-        }
-
+        let report = purge_workspace_on(&transaction, uid, wid)?;
         transaction.commit().map_err(|error| error.to_string())?;
-        let total_deleted = rows_by_table.values().sum();
-        Ok(WorkspacePurgeReport {
-            workspace_id: wid.to_string(),
-            rows_by_table,
-            total_deleted,
-        })
+        Ok(report)
     }
 
     /// Reclaims free space. Call periodically, NOT on every delete.
@@ -3854,6 +3906,220 @@ impl SQLiteMemoryStore {
         }
         Ok(memories)
     }
+}
+
+fn purge_workspace_on(
+    connection: &Connection,
+    uid: &str,
+    wid: &str,
+) -> Result<WorkspacePurgeReport, String> {
+    let mut rows_by_table = std::collections::BTreeMap::new();
+    let evidence = connection
+        .execute(
+            "delete from memory_evidence
+             where memory_ref in (
+                select ref from memories where user_id = ?1 and workspace_id = ?2
+             ) or evidence_ref in (
+                select ref from memory_events where user_id = ?1 and workspace_id = ?2
+                union select ref from memories where user_id = ?1 and workspace_id = ?2
+                union select ref from entities where user_id = ?1 and workspace_id = ?2
+                union select ref from wiki_pages where user_id = ?1 and workspace_id = ?2
+                union select ref from routines where user_id = ?1 and workspace_id = ?2
+                union select ref from automation_candidates where user_id = ?1 and workspace_id = ?2
+             )",
+            params![uid, wid],
+        )
+        .map_err(|error| error.to_string())?;
+    rows_by_table.insert("memory_evidence".to_string(), evidence);
+
+    for table in [
+        "memory_source_grant_collections",
+        "memory_source_grant_overrides",
+    ] {
+        let deleted = connection
+            .execute(
+                &format!(
+                    "delete from {table} where grant_id in (
+                        select id from memory_source_grants
+                        where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
+                           or (source_user_id = ?1 and source_workspace_id = ?2)
+                    )"
+                ),
+                params![uid, wid],
+            )
+            .map_err(|error| error.to_string())?;
+        rows_by_table.insert(table.to_string(), deleted);
+    }
+    let access_events = connection
+        .execute(
+            "delete from memory_source_access_events
+             where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
+                or source_workspace_id = ?2
+                or grant_id in (
+                    select id from memory_source_grants
+                    where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
+                       or (source_user_id = ?1 and source_workspace_id = ?2)
+                )",
+            params![uid, wid],
+        )
+        .map_err(|error| error.to_string())?;
+    rows_by_table.insert("memory_source_access_events".to_string(), access_events);
+    let grants = connection
+        .execute(
+            "delete from memory_source_grants
+             where (consumer_user_id = ?1 and consumer_workspace_id = ?2)
+                or (source_user_id = ?1 and source_workspace_id = ?2)",
+            params![uid, wid],
+        )
+        .map_err(|error| error.to_string())?;
+    rows_by_table.insert("memory_source_grants".to_string(), grants);
+
+    let publication_links = connection
+        .execute(
+            "delete from memory_publication_links
+             where json_extract(source_ref_json, '$.workspace_id') = ?1
+                or json_extract(destination_ref_json, '$.workspace_id') = ?1",
+            params![wid],
+        )
+        .map_err(|error| error.to_string())?;
+    rows_by_table.insert("memory_publication_links".to_string(), publication_links);
+    let publication_proposals = connection
+        .execute(
+            "delete from memory_publication_proposals
+             where (source_user_id = ?1 and source_workspace_id = ?2)
+                or (destination_user_id = ?1 and destination_workspace_id = ?2)",
+            params![uid, wid],
+        )
+        .map_err(|error| error.to_string())?;
+    rows_by_table.insert(
+        "memory_publication_proposals".to_string(),
+        publication_proposals,
+    );
+
+    let fts = connection
+        .execute(
+            "delete from memory_search_fts where user_id = ?1 and workspace_id = ?2",
+            params![uid, wid],
+        )
+        .map_err(|error| error.to_string())?;
+    rows_by_table.insert("memory_search_fts".to_string(), fts);
+
+    for table in [
+        "memory_embeddings",
+        "relations",
+        "entities",
+        "wiki_pages",
+        "routines",
+        "automation_candidates",
+        "access_audit",
+        "tombstones",
+        "memory_events",
+        "memories",
+    ] {
+        let deleted = connection
+            .execute(
+                &format!("delete from {table} where user_id = ?1 and workspace_id = ?2"),
+                params![uid, wid],
+            )
+            .map_err(|error| error.to_string())?;
+        rows_by_table.insert(table.to_string(), deleted);
+    }
+
+    for table in [
+        "memory_embeddings",
+        "relations",
+        "entities",
+        "wiki_pages",
+        "routines",
+        "automation_candidates",
+        "access_audit",
+        "tombstones",
+        "memory_events",
+        "memories",
+    ] {
+        let remaining: usize = connection
+            .query_row(
+                &format!("select count(*) from {table} where user_id = ?1 and workspace_id = ?2"),
+                params![uid, wid],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if remaining != 0 {
+            return Err(format!(
+                "workspace purge verification failed for {table}: {remaining} rows remain"
+            ));
+        }
+    }
+
+    let total_deleted = rows_by_table.values().sum();
+    Ok(WorkspacePurgeReport {
+        workspace_id: wid.to_string(),
+        rows_by_table,
+        total_deleted,
+    })
+}
+
+fn validate_repair_request(
+    request: &MemoryIntegrityRepairRequest,
+    current: &MemoryIntegrityRepairPreview,
+) -> Result<(), MemoryError> {
+    if request.audit_checksum != current.audit_checksum {
+        return Err(MemoryError::Policy(format!(
+            "integrity repair audit checksum is stale (requested={}, current={})",
+            request.audit_checksum, current.audit_checksum
+        )));
+    }
+    if request.approval_token != current.approval_token {
+        return Err(MemoryError::Policy(
+            "integrity repair approval token does not match".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn unknown_workspace_users_on(
+    connection: &Connection,
+    workspace_id: &WorkspaceId,
+) -> Result<Vec<String>, String> {
+    let mut statement = connection
+        .prepare(
+            "select distinct user_id from (
+                 select user_id, workspace_id from memory_events
+                 union all select user_id, workspace_id from memories
+                 union all select user_id, workspace_id from memory_embeddings
+                 union all select user_id, workspace_id from memory_search_fts
+                 union all select user_id, workspace_id from entities
+                 union all select user_id, workspace_id from relations
+                 union all select user_id, workspace_id from wiki_pages
+                 union all select user_id, workspace_id from routines
+                 union all select user_id, workspace_id from automation_candidates
+                 union all select user_id, workspace_id from access_audit
+                 union all select user_id, workspace_id from tombstones
+                 union all select consumer_user_id, consumer_workspace_id from memory_source_grants
+                 union all select source_user_id, source_workspace_id from memory_source_grants
+                 union all select consumer_user_id, consumer_workspace_id from memory_source_access_events
+                 union all select consumer_user_id, source_workspace_id from memory_source_access_events
+                 union all select source_user_id, source_workspace_id from memory_publication_proposals
+                 union all select destination_user_id, destination_workspace_id from memory_publication_proposals
+                 union all
+                 select json_extract(source_ref_json, '$.user_id'),
+                        json_extract(source_ref_json, '$.workspace_id')
+                 from memory_publication_links where json_valid(source_ref_json)
+                 union all
+                 select json_extract(destination_ref_json, '$.user_id'),
+                        json_extract(destination_ref_json, '$.workspace_id')
+                 from memory_publication_links where json_valid(destination_ref_json)
+             ) where workspace_id = ?1 order by user_id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = statement
+        .query_map([workspace_id.as_str()], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    let mut users = Vec::new();
+    for row in rows {
+        users.push(row.map_err(|error| error.to_string())?);
+    }
+    Ok(users)
 }
 
 fn query_optional<T, P, F>(
