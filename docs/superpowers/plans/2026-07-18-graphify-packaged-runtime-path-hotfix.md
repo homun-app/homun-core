@@ -17,23 +17,29 @@
 
 - [ ] **Step 1: Add a Unix-only test module for the real Graphify runner**
 
-Append a `#[cfg(all(test, unix))]` module. Create isolated project, output, fake-home, and marker directories under `std::env::temp_dir()` using a UUID. Put an executable `graphify` script in `<fake-home>/.local/bin` that:
+Append a `#[cfg(all(test, unix))]` module. Create isolated project, output,
+fake-binary, and marker paths under `std::env::temp_dir()` using a UUID. Put an
+executable `graphify` script in the isolated binary directory that records `$PWD` to
+the test's absolute marker path:
 
 ```sh
 if [ "$1" = "--help" ]; then exit 0; fi
-printf '%s' "$PWD" > "$GRAPHIFY_TEST_PWD_FILE"
+printf '%s' "$PWD" > '<absolute-marker-path>'
 mkdir -p "$2/graphify-out"
 printf '{"nodes":[],"edges":[]}' > "$2/graphify-out/graph.json"
 ```
 
-Serialize and restore `HOME` plus `GRAPHIFY_TEST_PWD_FILE` with a process-wide mutex and a drop guard. Invoke `run_graphify(&project, &out)` and assert the recorded directory equals `out.join("_mirror")`.
+Exercise a private `run_graphify_with_cli` seam shared with the public wrapper and
+pass the absolute fake executable directly. Do not mutate process-wide `PATH` and do
+not depend on a real `~/.local/bin/graphify`. Assert the recorded directory equals
+`out.join("_mirror")` and use a drop guard to clean the temporary tree on failure.
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
 Run:
 
 ```bash
-cargo test -p local-first-desktop-gateway graphify_runs_from_gateway_managed_mirror -- --exact --nocapture
+cargo test -p local-first-desktop-gateway sandbox::tests::graphify_runs_from_gateway_managed_mirror -- --exact --nocapture
 ```
 
 Expected: FAIL because the fake CLI records the repository/application working directory instead of `<out>/_mirror`.
@@ -64,11 +70,19 @@ let extracted = Command::new("graphify")
     .output()
 ```
 
-Add a concise comment explaining that Graphify writes auxiliary relative files and a packaged gateway must never let those land in the signed app bundle.
+Canonicalize the output directory before deriving `work`, so an explicitly relative
+`HOMUN_DATA_DIR` still supplies one absolute path to both `current_dir` and the
+Graphify target argument. Add a concise comment explaining that Graphify writes
+auxiliary relative files and a packaged gateway must never let those land in the
+signed app bundle.
 
 - [ ] **Step 2: Run the focused test and verify GREEN**
 
-Run the same focused Cargo command from Task 1.
+Run the same focused Cargo command from Task 1, plus:
+
+```bash
+cargo test -p local-first-desktop-gateway sandbox::tests::graphify_managed_mirror_is_absolute_when_output_root_is_relative -- --exact --nocapture
+```
 
 Expected: PASS; the marker equals the gateway-managed mirror.
 

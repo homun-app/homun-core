@@ -570,11 +570,10 @@ pub fn ensure_project_git(folder: &Path) -> bool {
 
 /// Ensures the `graphify` CLI is on the host, installing it via `uv` if missing — the
 /// same host-managed pattern as the pypi MCP servers (uvx). Best-effort.
-fn ensure_graphify() -> Result<(), String> {
-    let path = host_tools_path();
-    let present = Command::new("graphify")
+fn ensure_graphify(graphify: &Path, path: &str) -> Result<(), String> {
+    let present = Command::new(graphify)
         .arg("--help")
-        .env("PATH", &path)
+        .env("PATH", path)
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
@@ -583,7 +582,7 @@ fn ensure_graphify() -> Result<(), String> {
     }
     let install = Command::new("uv")
         .args(["tool", "install", "graphifyy"])
-        .env("PATH", &path)
+        .env("PATH", path)
         .output()
         .map_err(|e| format!("graphify missing and `uv` not available on the host: {e}"))?;
     if !install.status.success() {
@@ -602,9 +601,21 @@ fn ensure_graphify() -> Result<(), String> {
 /// Docker sidecar on macOS and no memory cap. `--no-cluster` is offline, so dropping
 /// container isolation here costs nothing (it only reads code and writes JSON).
 pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
-    ensure_graphify()?;
     let path = host_tools_path();
+    run_graphify_with_cli(project, out, Path::new("graphify"), &path)
+}
+
+fn run_graphify_with_cli(
+    project: &Path,
+    out: &Path,
+    graphify: &Path,
+    path: &str,
+) -> Result<(), String> {
+    ensure_graphify(graphify, path)?;
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
+    // Resolve once before changing the subprocess cwd. A relative HOMUN_DATA_DIR is
+    // supported, but passing its relative mirror after chdir would resolve it twice.
+    let out = std::fs::canonicalize(out).map_err(|e| e.to_string())?;
     // PERSISTENT mirror (not a throwaway _work): kept between runs so both rsync AND
     // graphify are INCREMENTAL — rsync copies only changed files, graphify (its AST
     // cache lives in _mirror/graphify-out/cache) re-parses only those. This makes the
@@ -646,14 +657,14 @@ pub fn run_graphify(project: &Path, out: &Path) -> Result<(), String> {
     }
 
     // Code-only graph: deterministic tree-sitter, no LLM, no network.
-    let extracted = Command::new("graphify")
+    let extracted = Command::new(graphify)
         .args(["update"])
         .arg(&work)
         .arg("--no-cluster")
         // Graphify writes auxiliary paths relative to its cwd. Keep those inside the
         // managed mirror: a packaged gateway may otherwise mutate its signed app bundle.
         .current_dir(&work)
-        .env("PATH", &path)
+        .env("PATH", path)
         .output()
         .map_err(|e| format!("graphify: failed to start: {e}"))?;
     let produced = work.join("graphify-out/graph.json");
@@ -721,45 +732,29 @@ pub fn run_command(command: &str, skill_id: Option<&str>) -> Result<String, Stri
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::run_graphify;
-    use std::ffi::OsString;
+    use super::run_graphify_with_cli;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
-    use std::sync::Mutex;
 
-    static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
+    struct TestDir(PathBuf);
 
-    struct PathRestore(Option<OsString>);
-
-    impl Drop for PathRestore {
+    impl Drop for TestDir {
         fn drop(&mut self) {
-            // SAFETY: this test serializes its process-wide PATH mutation and restores
-            // the original value before releasing TEST_ENV_LOCK.
-            unsafe {
-                match self.0.take() {
-                    Some(value) => std::env::set_var("PATH", value),
-                    None => std::env::remove_var("PATH"),
-                }
-            }
+            let _ = fs::remove_dir_all(&self.0);
         }
     }
 
-    #[test]
-    fn graphify_runs_from_gateway_managed_mirror() {
-        let _env = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let root = std::env::temp_dir().join(format!(
-            "homun-graphify-cwd-test-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+    fn assert_graphify_runs_from_gateway_managed_mirror(root: PathBuf) {
+        let _cleanup = TestDir(root.clone());
         let project = root.join("project");
         let out = root.join("out");
         let fake_bin = root.join("bin");
-        let marker = root.join("graphify-pwd");
         fs::create_dir_all(&project).expect("create project");
         fs::create_dir_all(&fake_bin).expect("create fake bin");
+        let marker = fs::canonicalize(&root)
+            .expect("canonical test root")
+            .join("graphify-pwd");
         fs::write(project.join("main.rs"), "fn main() {}\n").expect("write project file");
 
         let fake_graphify = fake_bin.join("graphify");
@@ -781,17 +776,10 @@ mod tests {
         permissions.set_mode(0o755);
         fs::set_permissions(&fake_graphify, permissions).expect("make fake graphify executable");
 
-        let original_path = std::env::var_os("PATH");
-        let _restore = PathRestore(original_path.clone());
-        let mut path = OsString::from(&fake_bin);
-        if let Some(original) = original_path {
-            path.push(":");
-            path.push(original);
-        }
-        // SAFETY: protected by TEST_ENV_LOCK and restored by PathRestore.
-        unsafe { std::env::set_var("PATH", path) };
-
-        run_graphify(&project, &out).expect("run graphify through the real gateway path");
+        let fake_graphify = fs::canonicalize(fake_graphify).expect("canonical fake graphify");
+        let path = std::env::var("PATH").unwrap_or_default();
+        run_graphify_with_cli(&project, &out, &fake_graphify, &path)
+            .expect("run graphify through the real gateway path");
 
         let recorded = PathBuf::from(fs::read_to_string(&marker).expect("read cwd marker"));
         assert_eq!(
@@ -799,7 +787,21 @@ mod tests {
             fs::canonicalize(out.join("_mirror")).expect("canonical managed mirror"),
             "Graphify auxiliary relative files must stay outside the signed app bundle"
         );
+    }
 
-        fs::remove_dir_all(root).expect("remove test directory");
+    #[test]
+    fn graphify_runs_from_gateway_managed_mirror() {
+        assert_graphify_runs_from_gateway_managed_mirror(std::env::temp_dir().join(format!(
+            "homun-graphify-cwd-test-{}",
+            uuid::Uuid::new_v4().simple()
+        )));
+    }
+
+    #[test]
+    fn graphify_managed_mirror_is_absolute_when_output_root_is_relative() {
+        assert_graphify_runs_from_gateway_managed_mirror(PathBuf::from("target").join(format!(
+            "homun-graphify-relative-cwd-test-{}",
+            uuid::Uuid::new_v4().simple()
+        )));
     }
 }
