@@ -3,7 +3,48 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-17.**
+> **Ultimo aggiornamento: 2026-07-18.**
+
+## ⭐ CHECKPOINT 2026-07-18 — Fase 2 (editorial cover al generato) SHIPPED
+
+Piano eseguito (SDD, ledger in `.superpowers/sdd/progress.md`, sezione `FASE2`; piano
+`docs/superpowers/plans/2026-07-18-editorial-cover-at-generation.md`): 5 task su `main`,
+commit `3553a292..1ee68358` (+ questo checkpoint). Chiude l'ultimo item lasciato aperto da
+S1a/S2 (vedi checkpoint precedente, "Cosa resta"): `eyebrow`/`hero_art` erano valorizzati solo
+negli `example.json` committati dei pack, mai nel deliverable generato in produzione.
+
+**La cura (5 task):**
+- **Documenti** (Task 1, `0a0f2bca`): `assemble_doc_json` porta lo scheletro editoriale curato
+  del pack (`DocBlockSlot.template_block`) nel documento generato; `hero_art` resta
+  deterministico — stato-in-codice, mai inventato dal modello.
+- **Eyebrow raffinabile nei documenti** (Task 2, `e8ba899b`): `document_content_schema` inietta
+  lo slot `eyebrow` solo dove lo scheletro del pack lo prevede; guardia post-merge ripristina il
+  default del pack se il modello lo lascia vuoto — raffinabile, mai perso.
+- **Deck** (Task 3, `fa2cbb5d`): `apply_deck_template_chrome`, cablato DOPO
+  `apply_deck_design_theme`, sovrappone `hero_art` (deterministico) + `eyebrow` (default pack,
+  raffinabile) al deck generato, riusando `load_pack_example`.
+- **Eyebrow raffinabile nei deck + fix strict-schema** (Task 4, `44dc6fc3`..`beaeb210`): slot
+  `eyebrow` seminato nel prompt di `generate_deck_content`; fix chiave — lo slot era
+  property-not-required con `strict:true` → 400 da provider OpenAI-compatibili degradava
+  l'intero deck; reso `required`+blankable (stesso pattern di `notes`/`want_image`).
+- **Export nativi** (Task 5, `1ee68358`): `eyebrow` renderizzato in DOCX
+  (`docx_eyebrow_paragraph`, prepended a section_cover/contact_header/letterhead) e PPTX
+  (`render_pptx`, cover/section arm, gated su non-vuoto), fail-open. **`hero_art` resta
+  HTML/PDF-only** — l'SVG non porta a Office, caveat documentato e accettato, non un difetto.
+
+**Fail-open ovunque** (caposaldo, invariato): nessun pack / pack importato / `example.json`
+illeggibile / cover senza chrome → comportamento identico a prima di Fase 2. Renderer HTML/PDF
+non toccati, **nessuna rigenerazione delle preview** committate — anteprima e generato
+combaciano per costruzione (stessa sorgente `example.json`).
+
+**Gate finali (tutti verdi, sessione 2026-07-18):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-desktop-gateway` | 665 passed, 0 failed, 5 ignored |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN (capability/orchestrator/gateway/ui-contract/desktop-build/eval/deck/doc renderer tests) |
+
+**Cosa resta:**
+- **S3**: font picker — unico item ancora aperto della coda Presentations Studio.
 
 ## ⭐⭐⭐⭐ CHECKPOINT 2026-07-17 (quater) — S2 plugin-owned deterministic routing SHIPPED
 
