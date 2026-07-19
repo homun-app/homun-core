@@ -1,3 +1,4 @@
+use crate::linked_memory_repair::{LinkedMemoryRepairApplyResult, LinkedMemoryRepairPreview};
 use local_first_memory::{
     DataSensitivity, MemoryIntegrityReport, MemoryRepairAction, MemoryRepairEstimate,
     PrivacyDomain, ProjectGraphImportReport, UserId, WorkspaceId, normalize_graphify_value,
@@ -141,6 +142,14 @@ pub struct IntegrityRepairApplyResponse {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub refreshed_graphs: Vec<GraphIntegrityStatus>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkedMemoryRepairApplyRequest {
+    pub preview: LinkedMemoryRepairPreview,
+    pub confirm: bool,
+}
+
+pub type LinkedMemoryRepairApplyResponse = LinkedMemoryRepairApplyResult;
 
 pub fn inspect_registered_graph(
     workspace_id: &str,

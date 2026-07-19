@@ -1,6 +1,7 @@
 //! Local HTTP gateway contracts for the Electron desktop shell.
 
 pub mod integrity_api;
+pub mod linked_memory_repair;
 pub mod project_graph_commit;
 pub mod workspace_delete;
 

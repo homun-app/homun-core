@@ -108,8 +108,14 @@ use local_first_desktop_gateway::{
 use local_first_desktop_gateway::integrity_api::{
     GraphIntegrityStatus, IntegrityAuditResponse, IntegrityBackupSummary, IntegrityRepairAction,
     IntegrityRepairApplyRequest, IntegrityRepairApplyResponse, IntegrityRepairEstimate,
-    IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse, canonical_integrity_actions,
-    gateway_approval_token, gateway_audit_checksum, inspect_registered_graph,
+    IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse,
+    LinkedMemoryRepairApplyRequest, LinkedMemoryRepairApplyResponse,
+    canonical_integrity_actions, gateway_approval_token, gateway_audit_checksum,
+    inspect_registered_graph,
+};
+use local_first_desktop_gateway::linked_memory_repair::{
+    LinkedMemoryRepairPreview, LinkedRepairError, LinkedRepairFailureInjection,
+    apply_linked_memory_repair, preview_linked_memory_repair,
 };
 use local_first_desktop_gateway::project_graph_commit::{
     ProjectGraphCommitError, stage_project_graph_build,
@@ -1587,6 +1593,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // is applied (below) so these routes are still bearer-gated like the rest of /api.
     let chat_routes = chat_routes
         .route("/api/integrity/audit", get(integrity_audit))
+        .route(
+            "/api/integrity/linked-memory/repair/preview",
+            post(linked_memory_repair_preview),
+        )
+        .route(
+            "/api/integrity/linked-memory/repair/apply",
+            post(linked_memory_repair_apply),
+        )
         .route(
             "/api/integrity/repair/preview",
             post(integrity_repair_preview),
@@ -47151,6 +47165,91 @@ async fn integrity_repair_preview(
         &state,
         request.actions,
     )?))
+}
+
+fn linked_repair_gateway_error(error: LinkedRepairError) -> GatewayError {
+    match error {
+        LinkedRepairError::StalePreview | LinkedRepairError::ApprovalTokenMismatch => GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "linked_memory_repair_preview_stale",
+            message: "linked-memory repair preview is stale".to_string(),
+        },
+        LinkedRepairError::BackupPathInvalid => {
+            integrity_bad_request("linked_memory_repair_backup_invalid")
+        }
+        LinkedRepairError::InjectedFailure
+        | LinkedRepairError::Database(_)
+        | LinkedRepairError::Io(_) => {
+            integrity_internal_error("linked_memory_repair_failed", error)
+        }
+    }
+}
+
+async fn linked_memory_repair_preview(
+    State(_state): State<AppState>,
+) -> Result<Json<LinkedMemoryRepairPreview>, GatewayError> {
+    let chat_path = gateway_database_path()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_failed", error))?;
+    let memory_path = gateway_memory_database_path()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_failed", error))?;
+    preview_linked_memory_repair(&chat_path, &memory_path)
+        .map(Json)
+        .map_err(linked_repair_gateway_error)
+}
+
+fn next_linked_memory_repair_backup_directory() -> Result<PathBuf, GatewayError> {
+    let timestamp = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    let parent = gateway_data_dir()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_backup_failed", error))?
+        .join("backups")
+        .join("linked-memory");
+    fs::create_dir_all(&parent).map_err(|error| {
+        integrity_internal_error("linked_memory_repair_backup_failed", error)
+    })?;
+    Ok(parent.join(format!(
+        "{timestamp}-{}",
+        uuid::Uuid::new_v4().simple()
+    )))
+}
+
+async fn linked_memory_repair_apply(
+    State(state): State<AppState>,
+    Json(request): Json<LinkedMemoryRepairApplyRequest>,
+) -> Result<Json<LinkedMemoryRepairApplyResponse>, GatewayError> {
+    if !request.confirm {
+        return Err(integrity_bad_request(
+            "linked_memory_repair_confirmation_required",
+        ));
+    }
+    let chat_path = gateway_database_path()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_failed", error))?;
+    let memory_path = gateway_memory_database_path()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_failed", error))?;
+    let backup_directory = next_linked_memory_repair_backup_directory()?;
+    let chat_guard = state.chat_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "chat_store_lock_error",
+        message: error.to_string(),
+    })?;
+    let result = apply_linked_memory_repair(
+        &chat_path,
+        &memory_path,
+        &backup_directory,
+        &request.preview,
+        LinkedRepairFailureInjection::None,
+    )
+    .map_err(linked_repair_gateway_error)?;
+    drop(chat_guard);
+    for workspace in &result.affected_workspaces {
+        if workspace != PERSONAL_WORKSPACE && workspace != THREADS_WORKSPACE {
+            rebuild_project_brief(
+                &state.memory_facade,
+                &gateway_memory_user_id(),
+                &MemoryWorkspaceId::new(workspace),
+            );
+        }
+    }
+    Ok(Json(result))
 }
 
 fn next_integrity_backup_path() -> Result<PathBuf, GatewayError> {
