@@ -362,8 +362,13 @@ assertNotContains("src/components/TemplateGallery.tsx", "builtin:template-previe
 assertContains("src/components/presentationsShared.ts", "brandPreviewOverride", "the brand kit must recolor catalog previews live");
 assertContains("src/components/TemplateCard.tsx", "brandPreviewOverride", "template cards must apply the live brand recolor");
 // S1b-T4: dark editorial surfaces (editorial_noir/editorial_bold) own their palette —
-// the live recolor only swaps --brand/--accent, not --surface, so it must be skipped there.
+// the live recolor only swaps --brand/--accent, not --surface, so it must be guarded there.
 assertContains("src/components/TemplateCard.tsx", "DARK_SURFACE_THEMES", "live brand recolor must be guarded against dark editorial surfaces");
+// S1b/S3-T3: the colour guard must NOT skip the whole override on dark packs — only the
+// colour vars are conditional; the font override (@font-face/--head/--body) always applies.
+assertContains("src/components/presentationsShared.ts", "opts.colorSafe", "brandPreviewOverride must gate colour vars behind colorSafe while always emitting the font override");
+assertContains("src/components/TemplateCard.tsx", "brandPreviewOverride(brandKit, { colorSafe })", "template cards must always call brandPreviewOverride (font applies everywhere) and pass colorSafe to gate only the colour vars");
+assertNotContains("src/components/TemplateCard.tsx", "allowRecolor", "the recolor guard must no longer skip the entire override (font must survive on dark packs) — use colorSafe instead");
 // S1b-T3: purpose tabs (entry.category) replaced the old kind+source tabs.
 assertContains("src/components/TemplateGallery.tsx", "entry.category", "template gallery tabs must filter by the catalog's category field, not kind/source");
 assertContains("src/components/BrandKitPanel.tsx", "TemplateCatalogGallery", "BrandKitPanel must stay a thin compositor wiring the gallery + brand chip/drawer");
