@@ -25,7 +25,8 @@ export function categoryLabelKey(category: string): string {
 
 // Editorial themes whose SURFACE is dark. The live brand recolor only overrides
 // --brand/--accent (not --surface), so a dark user brand on a dark surface makes
-// accents/eyebrows/KPI vanish — skip recolor for these packs (see brandPreviewOverride caller).
+// accents/eyebrows/KPI vanish — these packs get colorSafe:false (font override still
+// applies) when calling brandPreviewOverride (see TemplateCard.tsx caller).
 export const DARK_SURFACE_THEMES = new Set(["editorial_noir", "editorial_bold"]);
 
 export const DEFAULT_KIT: BrandKit = {
@@ -94,8 +95,17 @@ export function fontFaceStyle(families: string[]): string {
  *  the user edits the brand kit. Returns null when the kit still equals the
  *  defaults: an unconfigured user must see each pack's curated theme, not a
  *  uniformly-recolored catalog. String injection only — the iframe stays
- *  sandbox="" (no scripts, opaque origin), so no postMessage/DOM path exists. */
-export function brandPreviewOverride(kit: BrandKit): { style: string; logo: string } | null {
+ *  sandbox="" (no scripts, opaque origin), so no postMessage/DOM path exists.
+ *
+ *  `opts.colorSafe` (default true) gates only the --brand/--brand2/--accent
+ *  vars: dark editorial surfaces (see DARK_SURFACE_THEMES) own their palette,
+ *  and swapping those vars there makes accents/eyebrows/KPI vanish against
+ *  the dark --surface. The @font-face + --head/--body override never touches
+ *  --surface, so it is always safe and always applied regardless of colorSafe. */
+export function brandPreviewOverride(
+  kit: BrandKit,
+  opts: { colorSafe?: boolean } = { colorSafe: true },
+): { style: string; logo: string } | null {
   const isDefault =
     kit.primary_color === DEFAULT_KIT.primary_color &&
     kit.secondary_color === DEFAULT_KIT.secondary_color &&
@@ -104,16 +114,16 @@ export function brandPreviewOverride(kit: BrandKit): { style: string; logo: stri
     kit.body_font === DEFAULT_KIT.body_font &&
     !kit.logo_data_url;
   if (isDefault) return null;
-  const primary = safeColor(kit.primary_color, DEFAULT_KIT.primary_color);
-  const secondary = safeColor(kit.secondary_color, DEFAULT_KIT.secondary_color);
-  const accent = safeColor(kit.accent_color, DEFAULT_KIT.accent_color);
   const headingFont = safeFont(kit.heading_font);
   const bodyFont = safeFont(kit.body_font);
   const faces = fontFaceStyle([headingFont, bodyFont]);
+  const colourVars = opts.colorSafe
+    ? `--brand:${safeColor(kit.primary_color, DEFAULT_KIT.primary_color)} !important;` +
+      `--brand2:${safeColor(kit.secondary_color, DEFAULT_KIT.secondary_color)} !important;` +
+      `--accent:${safeColor(kit.accent_color, DEFAULT_KIT.accent_color)} !important;`
+    : "";
   const style =
-    `<style>${faces}:root{--brand:${primary} !important;` +
-    `--brand2:${secondary} !important;` +
-    `--accent:${accent} !important;` +
+    `<style>${faces}:root{${colourVars}` +
     `--head:'${headingFont}' !important;` +
     `--body:'${bodyFont}' !important;}</style>`;
   // data: URL from our own canvas rasterizer — safe to inline; absolute over

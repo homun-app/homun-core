@@ -169,9 +169,11 @@ export function TemplateLivePreview({
   // (deck_render _HTML_SHELL, doc_render render_html); if either is missing the replace
   // is a no-op and `html` passes through untouched (fail-open, never a broken srcDoc).
   // Dark editorial surfaces own their palette; the recolor only swaps --brand/--accent
-  // (not --surface), so a dark user brand would make accents vanish. Skip recolor there.
-  const allowRecolor = !(entry.design_theme && DARK_SURFACE_THEMES.has(entry.design_theme));
-  const override = brandKit && allowRecolor ? brandPreviewOverride(brandKit) : null;
+  // (not --surface), so a dark user brand would make accents vanish there. Colour override
+  // is skipped on those packs (colorSafe:false) but the font override is never surface-unsafe,
+  // so it always applies — brandPreviewOverride always runs, only colourVars are gated.
+  const colorSafe = !(entry.design_theme && DARK_SURFACE_THEMES.has(entry.design_theme));
+  const override = brandKit ? brandPreviewOverride(brandKit, { colorSafe }) : null;
   const srcDoc = override
     ? html
         .replace("</head>", `${override.style}</head>`)

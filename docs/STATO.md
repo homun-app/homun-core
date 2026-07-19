@@ -3,7 +3,49 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-18.**
+> **Ultimo aggiornamento: 2026-07-19.**
+
+## ⭐ CHECKPOINT 2026-07-19 — S4 (brand kit UX + font estesi) SHIPPED
+
+Piano eseguito su branch `presentations-s3-typography` (SDD, ledger in `.superpowers/sdd/progress.md`,
+sezione `S4`; piano `docs/superpowers/plans/2026-07-19-brandkit-ux-expanded-fonts.md`): 4 task
+implementativi + questo checkpoint, commit `9addad3b..8b834bd3` (+ questo checkpoint). Raccoglie il
+feedback live di Fabio sull'app S3 (checkpoint precedente): drawer troppo stretto per il color-swatch,
+set curato di 12 font percepito corto, override del font che si perdeva sui pack scuri.
+
+**La cura (4 task):**
+- **Drawer allargato + swatch prominente** (Task 1, `5dbb5dec`): `BrandDrawer` 380→560px,
+  `overflow-x:hidden` (niente scroll orizzontale), color-swatch 44×36 al posto dell'input piatto.
+  CSS-only, nessun impatto su renderer/dati.
+- **Set font bundled 12→36** (Task 2, `6f6cfda5`): stessa pipeline `build_fonts.py` (unico sorgente,
+  converge non duplica) estesa a 36 famiglie `@fontsource` (72 woff2, latin 400+700, licenza OFL,
+  0 slug non risolti) + `FONT_CATEGORIES` (sans/serif/slab/mono) nel manifest condiviso py/ts.
+  Fail-loud invariato: woff2 mancante = build che fallisce, non un fallback silenzioso.
+- **Font override anche sui pack scuri** (Task 3, `694b469e`): `brandPreviewOverride(kit,{colorSafe})`
+  separa le due dimensioni — `@font-face` + `--head`/`--body` si applicano SEMPRE, i colori solo
+  quando `colorSafe` (pack chiari); `TemplateCard` passa `colorSafe=!dark`, quindi la scelta
+  tipografica ora si vede anche su cover/temi scuri senza toccarne la palette.
+- **`FontSelect` ricercabile** (Task 4, `8b834bd3`): combobox con ricerca + raggruppamento per
+  categoria + specimen in-famiglia, sostituisce i 2 select piatti nel `BrandDrawer`; fail-open su
+  valori legacy fuori dal set curato, effetto di mount per il `@font-face` invariato.
+
+**Fail-open ovunque** (caposaldo, invariato): famiglia fuori dal set curato / woff2 mancante → stack
+di fallback, mai un crash. Offline/WYSIWYG intatto — zero fetch a runtime, stesso `@font-face`
+alimenta anteprima, generato e container. PPTX/DOCX invariati (portano solo il nome del font, come da S3).
+
+**Gate finali (tutti verdi, sessione 2026-07-19):**
+| Gate | Esito |
+| --- | --- |
+| `npm run build` (desktop) | OK |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 13/13 |
+| `cargo test -p local-first-desktop-gateway` | 674 passed, 0 failed, 5 ignored |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN (capability/orchestrator/gateway/ui-contract/desktop-build/eval/deck/doc renderer tests) |
+
+**Cosa resta:** niente nel backlog Presentations — arco S1a/S1b/S1c/S2/Fase2/S3/S4 completo. Futuro
+possibile (non pianificato): catalogo Google Fonts on-demand fetch+cache, solo se mai servisse andare
+oltre le 36 famiglie bundled. A fine slice: merge di `presentations-s3-typography` → main su richiesta
+di Fabio (porta anche S3).
 
 ## ⭐⭐ CHECKPOINT 2026-07-18 (bis) — S3 (tipografia reale + font picker) SHIPPED — arco Presentations completo
 

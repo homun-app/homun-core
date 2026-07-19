@@ -2,6 +2,7 @@ import { type ChangeEvent, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageIcon, Save, Upload } from "lucide-react";
 import type { BrandKit } from "../lib/coreBridge";
+import { FontSelect } from "./FontSelect";
 import { FONT_FAMILIES, fontFaceStyle } from "./presentationsShared";
 
 const COLOR_KEYS = ["primary_color", "secondary_color", "accent_color"] as const;
@@ -142,38 +143,19 @@ export function BrandDrawer({
 
           <label className="brandkit-field">
             <span>{t("presentations:heading_font")}</span>
-            <select
+            <FontSelect
               value={kit.heading_font}
-              onChange={(e) => onChange("heading_font", e.target.value)}
-            >
-              {FONT_FAMILIES.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </select>
-            <div
-              className="font-specimen"
-              style={{ fontFamily: `'${kit.heading_font}', sans-serif` }}
-            >
-              Ag — The quick brown fox 123
-            </div>
+              onChange={(f) => onChange("heading_font", f)}
+              label={t("presentations:heading_font")}
+            />
           </label>
           <label className="brandkit-field">
             <span>{t("presentations:body_font")}</span>
-            <select value={kit.body_font} onChange={(e) => onChange("body_font", e.target.value)}>
-              {FONT_FAMILIES.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
-            </select>
-            <div
-              className="font-specimen"
-              style={{ fontFamily: `'${kit.body_font}', sans-serif` }}
-            >
-              Ag — The quick brown fox 123
-            </div>
+            <FontSelect
+              value={kit.body_font}
+              onChange={(f) => onChange("body_font", f)}
+              label={t("presentations:body_font")}
+            />
           </label>
 
           <label className="brandkit-field brandkit-field-wide">

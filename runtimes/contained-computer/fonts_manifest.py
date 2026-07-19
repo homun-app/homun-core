@@ -29,6 +29,58 @@ FONTS = {
         400: "poppins-400.woff2",
         700: "poppins-700.woff2"
     },
+    "Source Sans 3": {
+        400: "source-sans-3-400.woff2",
+        700: "source-sans-3-700.woff2"
+    },
+    "Nunito Sans": {
+        400: "nunito-sans-400.woff2",
+        700: "nunito-sans-700.woff2"
+    },
+    "Mulish": {
+        400: "mulish-400.woff2",
+        700: "mulish-700.woff2"
+    },
+    "Manrope": {
+        400: "manrope-400.woff2",
+        700: "manrope-700.woff2"
+    },
+    "DM Sans": {
+        400: "dm-sans-400.woff2",
+        700: "dm-sans-700.woff2"
+    },
+    "Figtree": {
+        400: "figtree-400.woff2",
+        700: "figtree-700.woff2"
+    },
+    "Plus Jakarta Sans": {
+        400: "plus-jakarta-sans-400.woff2",
+        700: "plus-jakarta-sans-700.woff2"
+    },
+    "IBM Plex Sans": {
+        400: "ibm-plex-sans-400.woff2",
+        700: "ibm-plex-sans-700.woff2"
+    },
+    "Archivo": {
+        400: "archivo-400.woff2",
+        700: "archivo-700.woff2"
+    },
+    "Rubik": {
+        400: "rubik-400.woff2",
+        700: "rubik-700.woff2"
+    },
+    "Karla": {
+        400: "karla-400.woff2",
+        700: "karla-700.woff2"
+    },
+    "Space Grotesk": {
+        400: "space-grotesk-400.woff2",
+        700: "space-grotesk-700.woff2"
+    },
+    "Sora": {
+        400: "sora-400.woff2",
+        700: "sora-700.woff2"
+    },
     "Source Serif 4": {
         400: "source-serif-4-400.woff2",
         700: "source-serif-4-700.woff2"
@@ -45,8 +97,52 @@ FONTS = {
         400: "playfair-display-400.woff2",
         700: "playfair-display-700.woff2"
     },
+    "PT Serif": {
+        400: "pt-serif-400.woff2",
+        700: "pt-serif-700.woff2"
+    },
+    "Libre Baskerville": {
+        400: "libre-baskerville-400.woff2",
+        700: "libre-baskerville-700.woff2"
+    },
+    "EB Garamond": {
+        400: "eb-garamond-400.woff2",
+        700: "eb-garamond-700.woff2"
+    },
+    "Crimson Pro": {
+        400: "crimson-pro-400.woff2",
+        700: "crimson-pro-700.woff2"
+    },
+    "Spectral": {
+        400: "spectral-400.woff2",
+        700: "spectral-700.woff2"
+    },
+    "Fraunces": {
+        400: "fraunces-400.woff2",
+        700: "fraunces-700.woff2"
+    },
+    "Bitter": {
+        400: "bitter-400.woff2",
+        700: "bitter-700.woff2"
+    },
+    "Roboto Slab": {
+        400: "roboto-slab-400.woff2",
+        700: "roboto-slab-700.woff2"
+    },
+    "Zilla Slab": {
+        400: "zilla-slab-400.woff2",
+        700: "zilla-slab-700.woff2"
+    },
     "JetBrains Mono": {
         400: "jetbrains-mono-400.woff2",
         700: "jetbrains-mono-700.woff2"
+    },
+    "IBM Plex Mono": {
+        400: "ibm-plex-mono-400.woff2",
+        700: "ibm-plex-mono-700.woff2"
+    },
+    "Space Mono": {
+        400: "space-mono-400.woff2",
+        700: "space-mono-700.woff2"
     }
 }
