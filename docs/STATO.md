@@ -5,6 +5,45 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-19.**
 
+## ⭐ CHECKPOINT 2026-07-19 — Settings: lingue es/fr/de + factory reset SHIPPED
+
+Slice eseguita su branch `settings-i18n-factory-reset` (SDD, task A1→A4 + B1/B2 + questo
+checkpoint B3). Due feature indipendenti in Settings: cataloghi lingua mancanti e un vero
+factory reset al posto del bottone placeholder disabilitato.
+
+**Lingue es/fr/de** (task A1→A4): cataloghi tradotti aggiunti per `i18n/locales/{es,fr,de}.json`
+(main), `plugins/presentations/locales/{es,fr,de}.json` e `plugins/proattivita/locales/{es,fr,de}.json`
+— il gateway le supportava già lato backend, mancava solo la traduzione UI. Registrate nel loader
+i18n con `fallbackLng: en`. Anti-drift: test `node --test` per ciascun catalogo verifica parità
+chiavi 1:1 con l'inglese (9 test, uno per file/lingua), così una chiave aggiunta/rimossa in un
+catalogo senza toccare gli altri fa fallire il gate invece di degradare silenziosamente in
+produzione.
+
+**Factory reset totale** (task B1/B2): sostituisce il bottone placeholder disabilitato in
+SettingsView con un reset reale. Electron main: `isResetting` guard → kill gateway → `rm -rf
+~/.homun` → `session.clearStorageData` (localStorage) → relaunch, ogni passo in try/catch loggato
+indipendentemente (fail-open per passo, mai un crash a metà reset). Il kill del gateway durante il
+reset non è più classificato come crash dal watchdog (altrimenti avrebbe innescato la stessa logica
+di restart-con-backoff pensata per i crash reali). UI: dialog di conferma esplicita nel composer di
+SettingsView, desktop-gated (il reset tocca `~/.homun` e il processo gateway locale, non ha senso
+fuori dall'app desktop), con failure-path visibile se un passo fallisce. Dopo il reset l'onboarding
+riappare naturalmente via `needs_setup` del gateway (nessuno stato onboarding duplicato lato UI).
+
+**Nota:** il reset è distruttivo (cancella `~/.homun` e riavvia il processo) — non è
+computer-verificabile in sicurezza; la prova end-to-end è stata fatta a schermo da Fabio.
+
+**Gate finali (tutti verdi, sessione 2026-07-19):**
+| Gate | Esito |
+| --- | --- |
+| `npm run build` (desktop) | OK |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 22/22 (incluse le 9 parità chiavi es/fr/de) |
+| `cargo test -p local-first-desktop-gateway` | 681 passed, 0 failed, 5 ignored |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN (capability/orchestrator/gateway/ui-contract/desktop-build/eval/deck/doc renderer tests) |
+
+**Cosa resta:** niente nel backlog di questa slice. Merge di `settings-i18n-factory-reset` → main
+su richiesta di Fabio.
+
 ## ⭐ CHECKPOINT 2026-07-19 — S4 (brand kit UX + font estesi) SHIPPED
 
 Piano eseguito su branch `presentations-s3-typography` (SDD, ledger in `.superpowers/sdd/progress.md`,
