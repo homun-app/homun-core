@@ -320,18 +320,24 @@ impl TaskStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> TaskRuntimeResult<usize> {
-        let count = self.connection.execute(
+        let tx = self.connection.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM agent_runs WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        let count = tx.execute(
             "DELETE FROM tasks WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
-        self.connection.execute(
+        tx.execute(
             "DELETE FROM task_dependencies WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
-        self.connection.execute(
+        tx.execute(
             "DELETE FROM resource_reservations WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
+        tx.commit()?;
         Ok(count)
     }
 
@@ -1232,6 +1238,48 @@ impl TaskStore {
         )?)
     }
 
+    pub fn abort_running_agent_runs_for_turn(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+        terminal_reason: &str,
+    ) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "UPDATE agent_runs
+             SET status = 'aborted', completed_at = ?1, terminal_reason = ?2
+             WHERE turn_id = ?3 AND user_id = ?4 AND workspace_id = ?5 AND status = 'running'",
+            params![
+                OffsetDateTime::now_utc().unix_timestamp(),
+                terminal_reason,
+                turn_id,
+                user_id,
+                workspace_id,
+            ],
+        )?)
+    }
+
+    /// Deletes a bounded batch of old terminal runs; event rows cascade with their parent run.
+    pub fn purge_terminal_agent_runs_before(
+        &self,
+        completed_before: i64,
+        limit: usize,
+    ) -> TaskRuntimeResult<usize> {
+        if limit == 0 {
+            return Ok(0);
+        }
+        Ok(self.connection.execute(
+            "DELETE FROM agent_runs
+             WHERE run_id IN (
+                 SELECT run_id FROM agent_runs
+                 WHERE status != 'running' AND completed_at IS NOT NULL AND completed_at < ?1
+                 ORDER BY completed_at ASC
+                 LIMIT ?2
+             )",
+            params![completed_before, limit as i64],
+        )?)
+    }
+
     /// Projects the durable per-turn log into a thread-level cockpit view for the working
     /// island (see `ThreadActivityProjection`). ONE JOIN turn_events⋈tasks(thread_id) — both
     /// tables live in the same sqlite — yields every activity+plan_update across the thread's
@@ -1723,6 +1771,50 @@ mod agent_run_tests {
         assert_eq!(runs[0].status, AgentRunStatus::Completed);
         assert_eq!(runs[0].terminal_reason.as_deref(), Some("delivered"));
         assert!(runs[0].completed_at.is_some());
+    }
+
+    #[test]
+    fn workspace_purge_deletes_owned_runs_and_events_only() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.create_agent_run(&new_run("owned", "turn-owned", "u", "w")).unwrap();
+        store.create_agent_run(&new_run("other", "turn-other", "u", "other")).unwrap();
+
+        store
+            .purge_workspace(&UserId::new("u"), &WorkspaceId::new("w"))
+            .unwrap();
+
+        assert!(
+            store
+                .list_agent_runs_for_turn("turn-owned", "u", "w")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_agent_runs_for_turn("turn-other", "u", "other")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn retention_deletes_only_old_terminal_runs() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.create_agent_run(&new_run("old", "turn-old", "u", "w")).unwrap();
+        store.create_agent_run(&new_run("recent", "turn-recent", "u", "w")).unwrap();
+        store.create_agent_run(&new_run("active", "turn-active", "u", "w")).unwrap();
+        store.finish_agent_run("old", AgentRunStatus::Completed, None).unwrap();
+        store.finish_agent_run("recent", AgentRunStatus::Completed, None).unwrap();
+        store
+            .connection
+            .execute("UPDATE agent_runs SET completed_at = 10 WHERE run_id = 'old'", [])
+            .unwrap();
+
+        assert_eq!(store.purge_terminal_agent_runs_before(100, 10).unwrap(), 1);
+        assert!(store.list_agent_runs_for_turn("turn-old", "u", "w").unwrap().is_empty());
+        assert_eq!(store.list_agent_runs_for_turn("turn-recent", "u", "w").unwrap().len(), 1);
+        assert_eq!(store.list_agent_runs_for_turn("turn-active", "u", "w").unwrap().len(), 1);
     }
 }
 

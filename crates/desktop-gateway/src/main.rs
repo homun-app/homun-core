@@ -59,6 +59,9 @@ mod tool_exec;
 mod tool_safety;
 // tool_trace_dump moved to `local_first_engine::trace` (5.D1c.9); the loop calls it there.
 
+const AGENT_JOURNAL_RETENTION_DAYS: i64 = 30;
+const AGENT_JOURNAL_RETENTION_BATCH: usize = 1_000;
+
 // ADR 0023 tool-safety vocabulary + pure decision fn, used by the (unconditional)
 // write-confirm branches in `execute_chat_tool`.
 use crate::tool_safety::{SafetyDecision, SandboxPolicy, assess_tool_safety};
@@ -885,6 +888,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let store = state.task_store.lock().expect("task store lock at boot");
         let generation = store.bump_process_generation().expect("bump process generation");
+        if let Err(error) = store.abort_running_agent_runs("gateway_restart") {
+            eprintln!("agent journal: boot recovery error: {error}");
+        }
+        let journal_cutoff = (OffsetDateTime::now_utc()
+            - Duration::days(AGENT_JOURNAL_RETENTION_DAYS))
+        .unix_timestamp();
+        if let Err(error) = store.purge_terminal_agent_runs_before(
+            journal_cutoff,
+            AGENT_JOURNAL_RETENTION_BATCH,
+        ) {
+            eprintln!("agent journal: retention error: {error}");
+        }
         let user_id = gateway_user_id();
         let workspace_id = gateway_workspace_id();
         let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(

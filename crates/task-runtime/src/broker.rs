@@ -399,6 +399,15 @@ pub fn recover_chat_turns_at_boot(
             continue;
         }
 
+        // The prior process can no longer append to this run. Preserve its exact event prefix and
+        // close only the stale task's in-flight journal before requeueing a fresh broker attempt.
+        store.abort_running_agent_runs_for_turn(
+            task.task_id.as_str(),
+            user_id.as_str(),
+            workspace_id.as_str(),
+            "gateway_restart",
+        )?;
+
         // release resources, clear lease, re-queue
         store.release_resources(&task)?;
         task.status = TaskStatus::Queued;
@@ -565,7 +574,7 @@ mod tests {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
-    use crate::{TaskRecord, TaskStore, TaskStatus, UserId, WorkspaceId};
+    use crate::{AgentRunStatus, NewAgentRun, TaskRecord, TaskStore, TaskStatus, UserId, WorkspaceId};
     use serde_json::json;
     use time::Duration;
 
@@ -589,6 +598,18 @@ mod recovery_tests {
     fn recover_requeues_stale_running_from_previous_generation() {
         let s = store();
         seed_running_with_generation(&s, 1);
+        s.create_agent_run(&NewAgentRun {
+            run_id: "run-stale".into(),
+            turn_id: "turn_stale".into(),
+            thread_id: "t1".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            attempt: 1,
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        })
+        .unwrap();
         // bump twice to simulate "we are generation 2, the lease is from generation 1"
         s.bump_process_generation().unwrap();
         let gen_now = s.bump_process_generation().unwrap();
@@ -603,6 +624,16 @@ mod recovery_tests {
         let events = s.read_turn_events("turn_stale", 0).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, TurnEventKind::Aborted);
+        let runs = s.list_agent_runs_for_turn("turn_stale", "u", "w").unwrap();
+        assert_eq!(runs[0].status, AgentRunStatus::Aborted);
+        assert_eq!(runs[0].terminal_reason.as_deref(), Some("gateway_restart"));
+        assert_eq!(
+            s.list_agent_run_events("run-stale", "u", "w", None)
+                .unwrap()
+                .len(),
+            1,
+            "recovery preserves the exact durable event prefix"
+        );
     }
 
     #[test]
