@@ -12789,8 +12789,7 @@ body.resizing-drawer {
   font-weight: 600;
 }
 .brandkit-field input[type="text"],
-.brandkit-field > input,
-.brandkit-field > select {
+.brandkit-field > input {
   font: inherit;
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -12798,18 +12797,37 @@ body.resizing-drawer {
   background: var(--surface);
   color: var(--text);
 }
-/* Renders in the picked family via the manifest @font-face injected once by
- * BrandDrawer's mount-effect — the specimen is the whole point of the picker. */
-.font-specimen {
-  padding: 8px 10px;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
-  font-size: 15px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Searchable, categorised font combobox (replaces the old flat <select> +
+ * .font-specimen pair) — the trigger button itself is the specimen, rendered
+ * in-family via the same manifest @font-face BrandDrawer injects into <head>. */
+.font-select { position: relative; }
+.font-select-btn {
+  width: 100%; text-align: left; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--text); font-size: 15px; cursor: pointer;
 }
+.font-select-pop {
+  position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(15,23,42,.24); padding: 8px; max-height: 320px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.font-select-search {
+  font: inherit; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--surface); color: var(--text);
+}
+.font-select-list { overflow-y: auto; }
+.font-select-group-label {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); padding: 8px 6px 4px;
+}
+.font-select-option {
+  display: block; width: 100%; text-align: left; padding: 7px 10px;
+  border: 0; border-radius: 6px; background: none; color: var(--text);
+  font-size: 15px; cursor: pointer;
+}
+.font-select-option:hover, .font-select-option.selected { background: var(--surface-muted, rgba(127,127,127,.12)); }
+.font-select-empty { padding: 10px; color: var(--muted); font-size: 13px; }
 .brandkit-color {
   display: flex;
   align-items: center;
