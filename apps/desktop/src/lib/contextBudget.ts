@@ -17,6 +17,9 @@ export function buildJuicePromptChatContext(
   messages: ChatContextMessage[],
   options: ChatContextBudgetOptions = {},
 ): ChatContextMessage[] {
+  // This helper only applies a display/local-fallback size budget. Persisted
+  // thread context is rebuilt and authorization-filtered by the gateway; this
+  // client projection must never be treated as memory provenance authority.
   const maxContextChars = options.maxContextChars ?? DEFAULT_MAX_CONTEXT_CHARS;
   const maxMessageChars = options.maxMessageChars ?? DEFAULT_MAX_MESSAGE_CHARS;
   const preserveRecentMessages =

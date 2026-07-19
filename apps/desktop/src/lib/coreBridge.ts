@@ -68,6 +68,22 @@ export interface CoreChatMessage {
   linked_automation_ref: string | null;
   attachments: CoreChatAttachment[];
   event_parts?: unknown[];
+  memory_reuse?: CoreMemoryReuseEnvelope | null;
+}
+
+export type CoreMemoryWritePolicy = "normal" | "user_input_only" | "blocked_unknown";
+
+export interface CoreLinkedMemoryReadRef {
+  source_workspace_id: string;
+  grant_id: string;
+  policy_version: number;
+  memory_ref: string;
+  source_revision: string;
+}
+
+export interface CoreMemoryReuseEnvelope {
+  write_policy: CoreMemoryWritePolicy;
+  linked_reads: CoreLinkedMemoryReadRef[];
 }
 
 export interface CoreChatMessageMetrics {

@@ -3,8 +3,9 @@ use crate::{
     AuthorizedMemorySource, AutomationCandidateCreateRequest, AutomationCandidateRecord,
     AutomationCandidateStatus, DataSensitivity, GraphifyArtifacts, GraphifyCli, GraphifyImport,
     GraphifyImportSummary, GraphifyOperation, GraphifyQueryRequest, GraphifyQueryResult,
-    MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport, MemoryCollectionKey,
-    MemoryContextItem, MemoryContextPack, MemoryCreateRequest, MemoryEntity, MemoryError,
+    LinkedMemoryReadRef, MemoryAccessDecision, MemoryAccessRequest, MemoryBackupReport,
+    MemoryCollectionKey, MemoryContextItem, MemoryContextPack, MemoryCreateRequest, MemoryEntity,
+    MemoryError,
     MemoryEvent, MemoryEvidence, MemoryEvolutionProposal, MemoryEvolutionResult, MemoryExtraction,
     MemoryExtractionSummary, MemoryHealth, MemoryIntegrityRepairPreview,
     MemoryIntegrityRepairRequest, MemoryIntegrityRepairResult, MemoryIntegrityReport,
@@ -1859,6 +1860,55 @@ impl MemoryFacade {
                 MemoryError::validation(error)
             }
         })
+    }
+
+    /// Rivalida una lettura collegata prima che la risposta che ne deriva
+    /// rientri nel contesto del modello. Errori, ambiguita e drift sono deny.
+    pub fn validate_linked_memory_read(
+        &self,
+        consumer_user: &UserId,
+        consumer_workspace: &WorkspaceId,
+        read: &LinkedMemoryReadRef,
+        now_unix: i64,
+    ) -> MemoryResult<bool> {
+        if read.grant_id.trim().is_empty()
+            || read.source_workspace_id.trim().is_empty()
+            || read.memory_ref.trim().is_empty()
+            || read.source_revision.trim().is_empty()
+            || read.policy_version == 0
+        {
+            return Ok(false);
+        }
+        let sources = match self.resolve_memory_sources(
+            consumer_user,
+            consumer_workspace,
+            now_unix,
+        ) {
+            Ok(sources) => sources,
+            Err(_) => return Ok(false),
+        };
+        let Some(source) = sources.iter().find(|source| {
+            source.grant_id.as_deref() == Some(read.grant_id.as_str())
+                && source.source_workspace_id.as_str() == read.source_workspace_id
+                && source.policy_version == read.policy_version
+        }) else {
+            return Ok(false);
+        };
+        let reference = match MemoryRef::from_str(&read.memory_ref) {
+            Ok(reference) => reference,
+            Err(_) => return Ok(false),
+        };
+        if reference.kind != MemoryRefKind::Memory
+            || reference.user_id != source.source_user_id
+            || reference.workspace_id != source.source_workspace_id
+        {
+            return Ok(false);
+        }
+        let memory = match self.get_authorized_memory_for_source(source, &reference) {
+            Ok(Some(memory)) => memory,
+            Ok(None) | Err(_) => return Ok(false),
+        };
+        Ok(crate::memory_record_revision(&memory) == read.source_revision)
     }
 
     pub fn get_memory_source_grant(

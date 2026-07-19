@@ -25624,9 +25624,19 @@ async fn stream_chat_via_openai(
     let model_context_window = registry_model_capabilities(&base_url, &model)
         .and_then(|caps| caps.context_length)
         .map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX));
+    let effective_context = match request.thread_id.as_deref() {
+        Some(thread_id) => thread_context_for_model(
+            state,
+            thread_id,
+            &[],
+            Some(request.prompt.as_str()),
+        )
+        .unwrap_or_default(),
+        None => request.context.clone(),
+    };
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
-        context: request.context.clone(),
+        context: effective_context.clone(),
         max_context_chars: Some(chat_context_budget_chars(model_context_window)),
     })
     .runtime_prompt;
@@ -26888,8 +26898,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     let memory_user_message = request.prompt.clone();
     // The assistant's most recent prior turn (the question a short "sì" would answer),
     // so the extractor can ground a confirmation into the fact it commits.
-    let memory_prev_assistant = request
-        .context
+    let memory_prev_assistant = effective_context
         .iter()
         .rev()
         .find(|m| matches!(m.role, ChatContextRole::Assistant))
@@ -26906,8 +26915,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         if !from_store.is_empty() {
             from_store
         } else {
-            request
-                .context
+            effective_context
                 .iter()
                 .rev()
                 .find(|m| m.text.contains("‹‹PLAN››"))
@@ -32167,28 +32175,98 @@ fn start_visible_conversation_turn(
     Some(turn)
 }
 
-fn agent_turn_context(
+const LINKED_MEMORY_CONTEXT_OMITTED: &str =
+    "[Previous assistant response omitted because its linked memory authorization is unavailable.]";
+
+fn context_message_for_model(
+    facade: &MemoryFacade,
+    consumer: (&MemoryUserId, &MemoryWorkspaceId),
+    message: &ChatMessage,
+    now_unix: i64,
+) -> Option<ChatContextMessage> {
+    let role = match message.role.as_str() {
+        "user" => ChatContextRole::User,
+        "assistant" => ChatContextRole::Assistant,
+        _ => return None,
+    };
+    if message.role == "user" {
+        return Some(ChatContextMessage {
+            role,
+            text: message.text.clone(),
+        });
+    }
+    let allowed = match message.memory_reuse.as_ref() {
+        Some(envelope)
+            if envelope.write_policy == local_first_memory::MemoryWritePolicy::Normal
+                && envelope.linked_reads.is_empty() =>
+        {
+            true
+        }
+        Some(envelope)
+            if envelope.write_policy == local_first_memory::MemoryWritePolicy::UserInputOnly
+                && !envelope.linked_reads.is_empty() =>
+        {
+            envelope.linked_reads.iter().all(|read| {
+                facade
+                    .validate_linked_memory_read(consumer.0, consumer.1, read, now_unix)
+                    .unwrap_or(false)
+            })
+        }
+        _ => false,
+    };
+    Some(ChatContextMessage {
+        role,
+        text: if allowed {
+            message.text.clone()
+        } else {
+            LINKED_MEMORY_CONTEXT_OMITTED.to_string()
+        },
+    })
+}
+
+fn thread_context_for_model(
     state: &AppState,
     thread_id: &str,
     skip_message_ids: &[&str],
+    current_prompt: Option<&str>,
 ) -> Option<Vec<ChatContextMessage>> {
     let skip: std::collections::HashSet<&str> = skip_message_ids.iter().copied().collect();
-    let Ok(store) = lock_store(state) else {
-        return None;
+    let (snapshot, workspace_id) = {
+        let Ok(store) = lock_store(state) else {
+            return None;
+        };
+        (
+            store.messages(thread_id).ok()?,
+            store.workspace_for_thread(thread_id).ok()?,
+        )
     };
-    let snapshot = store.messages(thread_id).ok()?;
-    let mut msgs: Vec<ChatContextMessage> = snapshot
+    let mut messages: Vec<ChatMessage> = snapshot
         .messages
         .into_iter()
         .filter(|m| matches!(m.role.as_str(), "user" | "assistant"))
         .filter(|m| !skip.contains(m.id.as_str()))
-        .map(|m| ChatContextMessage {
-            role: if m.role == "assistant" {
-                ChatContextRole::Assistant
-            } else {
-                ChatContextRole::User
-            },
-            text: m.text,
+        .collect();
+    if messages
+        .last()
+        .is_some_and(|message| message.role == "assistant" && message.text.trim() == "…")
+    {
+        messages.pop();
+    }
+    if let Some(current_prompt) = current_prompt
+        && messages.last().is_some_and(|message| {
+            message.role == "user" && message.text.trim() == current_prompt.trim()
+        })
+    {
+        messages.pop();
+    }
+    let facade = memory_facade(state);
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(workspace_id);
+    let now_unix = i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX);
+    let mut msgs: Vec<ChatContextMessage> = messages
+        .iter()
+        .filter_map(|message| {
+            context_message_for_model(facade, (&user, &workspace), message, now_unix)
         })
         .collect();
     let len = msgs.len();
@@ -32196,6 +32274,14 @@ fn agent_turn_context(
         msgs.drain(0..len - 16);
     }
     Some(msgs)
+}
+
+fn agent_turn_context(
+    state: &AppState,
+    thread_id: &str,
+    skip_message_ids: &[&str],
+) -> Option<Vec<ChatContextMessage>> {
+    thread_context_for_model(state, thread_id, skip_message_ids, None)
 }
 
 fn apply_agent_stream_line(
@@ -64605,6 +64691,113 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             collector.envelope().write_policy,
             local_first_memory::MemoryWritePolicy::BlockedUnknown
         );
+    }
+
+    #[test]
+    fn revoked_linked_answer_stays_visible_but_is_not_model_context() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let mut message = super::channel_chat_message("assistant", "NEBULA-7429");
+        message.memory_reuse = Some(
+            local_first_memory::MemoryReuseEnvelope::user_input_only(vec![
+                local_first_memory::LinkedMemoryReadRef {
+                    source_workspace_id: "source-a".to_string(),
+                    grant_id: "revoked-grant".to_string(),
+                    policy_version: 2,
+                    memory_ref: "memory:owner:source-a:fact-a".to_string(),
+                    source_revision: "sha256:rev-a".to_string(),
+                },
+            ]),
+        );
+
+        assert!(message.text.contains("NEBULA-7429"));
+        let context = super::context_message_for_model(
+            &facade,
+            (
+                &local_first_memory::UserId::new("owner"),
+                &local_first_memory::WorkspaceId::new("project-a"),
+            ),
+            &message,
+            1_800_000_000,
+        )
+        .unwrap();
+
+        assert!(!context.text.contains("NEBULA-7429"));
+    }
+
+    #[test]
+    fn one_invalid_linked_read_excludes_the_whole_assistant_message() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let mut message = super::channel_chat_message("assistant", "MULTI-GRANT-SENTINEL");
+        message.memory_reuse = Some(
+            local_first_memory::MemoryReuseEnvelope::user_input_only(vec![
+                local_first_memory::LinkedMemoryReadRef {
+                    source_workspace_id: "source-a".to_string(),
+                    grant_id: "grant-a".to_string(),
+                    policy_version: 1,
+                    memory_ref: "memory:owner:source-a:fact-a".to_string(),
+                    source_revision: "sha256:rev-a".to_string(),
+                },
+                local_first_memory::LinkedMemoryReadRef {
+                    source_workspace_id: "source-b".to_string(),
+                    grant_id: "grant-b".to_string(),
+                    policy_version: 1,
+                    memory_ref: "memory:owner:source-b:fact-b".to_string(),
+                    source_revision: "sha256:rev-b".to_string(),
+                },
+            ]),
+        );
+
+        let context = super::context_message_for_model(
+            &facade,
+            (
+                &local_first_memory::UserId::new("owner"),
+                &local_first_memory::WorkspaceId::new("project-a"),
+            ),
+            &message,
+            1_800_000_000,
+        )
+        .unwrap();
+        assert!(!context.text.contains("MULTI-GRANT-SENTINEL"));
+    }
+
+    #[test]
+    fn persisted_thread_context_is_filtered_server_side() {
+        let state = super::AppState::for_tests();
+        let (thread_id, blocked_id) = {
+            let store = state.chat_store.lock().unwrap();
+            let thread = store.create_thread("project-a").unwrap();
+            let mut blocked = super::channel_chat_message("assistant", "SERVER-ONLY-SENTINEL");
+            blocked.memory_reuse = Some(
+                local_first_memory::MemoryReuseEnvelope::blocked_unknown(),
+            );
+            let blocked_id = blocked.id.clone();
+            store
+                .append_assistant_message(&thread.thread_id, &blocked)
+                .unwrap();
+            (thread.thread_id, blocked_id)
+        };
+
+        let context = super::thread_context_for_model(&state, &thread_id, &[], None).unwrap();
+
+        assert!(state
+            .chat_store
+            .lock()
+            .unwrap()
+            .message(&thread_id, &blocked_id)
+            .unwrap()
+            .unwrap()
+            .text
+            .contains("SERVER-ONLY-SENTINEL"));
+        assert!(!context
+            .iter()
+            .any(|message| message.text.contains("SERVER-ONLY-SENTINEL")));
+        assert!(context
+            .iter()
+            .any(|message| message.text == super::LINKED_MEMORY_CONTEXT_OMITTED));
     }
 
     #[test]
