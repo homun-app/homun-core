@@ -6,10 +6,36 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use local_first_task_runtime::{
-    broker::CancelNotify, TaskRuntimeResult, TaskStore, TurnEventKind,
+    AgentRunStatus, NewAgentRun, broker::CancelNotify, TaskRuntimeResult, TaskStore, TurnEventKind,
 };
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, Notify};
+
+fn finalize_agent_run(
+    state: &crate::AppState,
+    agent_run: &Option<(String, crate::agent_journal::GatewayExecutionJournal)>,
+    status: AgentRunStatus,
+    reason: &'static str,
+    terminal_event: Option<local_first_engine::AgentExecutionEvent>,
+) {
+    let Some((run_id, journal)) = agent_run else {
+        return;
+    };
+    if let Some(event) = terminal_event {
+        local_first_engine::ExecutionJournal::record(journal, event);
+    }
+    let flushed = journal.flush();
+    let dropped = journal.dropped_events();
+    if !flushed || dropped > 0 {
+        tracing::warn!(target: "agent::journal", %run_id, flushed, dropped, "journal completed with degraded observability");
+    }
+    if let Ok(store) = state.task_store.lock() {
+        if let Err(error) = store.finish_agent_run(run_id, status, Some(reason)) {
+            tracing::warn!(target: "agent::journal", %run_id, %error, "could not finalize agent run");
+        }
+    }
+    crate::agent_journal::unregister(run_id);
+}
 
 /// A live subscriber fan-out for a single turn_id. Created when the turn starts running,
 /// dropped when it terminates. Mirrors the StreamEntry pattern but keyed by turn_id
@@ -183,6 +209,58 @@ pub fn execute_chat_turn_task(
         _ => "full",
     };
 
+    // Operational journal setup is best-effort: an observability failure must never prevent the
+    // user-visible turn. Run creation still preserves the exact broker attempt and scope when the
+    // task-runtime database is available.
+    let agent_run = crate::gateway_task_database_path()
+        .ok()
+        .and_then(|database_path| {
+            let run_id = format!("agent_run_{}", uuid::Uuid::new_v4());
+            let attempt = state
+                .task_store
+                .lock()
+                .ok()
+                .and_then(|store| {
+                    store
+                        .list_agent_runs_for_turn(
+                            turn_id,
+                            task.user_id.as_str(),
+                            task.workspace_id.as_str(),
+                        )
+                        .ok()
+                })
+                .and_then(|runs| runs.into_iter().map(|run| run.attempt).max())
+                .unwrap_or(0)
+                + 1;
+            let new_run = NewAgentRun {
+                run_id: run_id.clone(),
+                turn_id: turn_id.to_string(),
+                thread_id: thread_id.to_string(),
+                user_id: task.user_id.as_str().to_string(),
+                workspace_id: task.workspace_id.as_str().to_string(),
+                attempt,
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            };
+            let created = state
+                .task_store
+                .lock()
+                .ok()
+                .and_then(|store| store.create_agent_run(&new_run).ok())
+                .is_some();
+            if !created {
+                tracing::warn!(target: "agent::journal", turn_id, "could not create agent run");
+                return None;
+            }
+            let journal = crate::agent_journal::GatewayExecutionJournal::start(
+                run_id.clone(),
+                database_path,
+            );
+            crate::agent_journal::register(&run_id, journal.clone());
+            Some((run_id, journal))
+        });
+
     // 3. Register the live turn broadcast (Task 1a.2). Cancellation + the
     //    per-turn SSE/WS fan-out key off this. Always unregistered on exit.
     let broadcast = register_turn(turn_id);
@@ -217,10 +295,22 @@ pub fn execute_chat_turn_task(
         // live stream (island + transcript) — the whole point of routing channel turns through
         // the broker instead of an invisible inline run.
         Some(turn_id),
-    )
-    .ok_or_else(|| crate::LocalTaskExecutionError {
-        message: "could not start a visible conversation turn".to_string(),
-    })?;
+    );
+    let Some(visible_turn) = visible_turn else {
+        finalize_agent_run(
+            state,
+            &agent_run,
+            AgentRunStatus::Failed,
+            "visible_turn_start_failed",
+            Some(local_first_engine::AgentExecutionEvent::RunFailed {
+                reason: "visible_turn_start_failed".to_string(),
+            }),
+        );
+        unregister_turn(turn_id);
+        return Err(crate::LocalTaskExecutionError {
+            message: "could not start a visible conversation turn".to_string(),
+        });
+    };
 
     // 4b. Channel turns: show a "typing…" indicator on the origin channel for the WHOLE turn.
     // The broker runs the turn in a worker (the inbound handler already returned), so unlike the
@@ -254,6 +344,7 @@ pub fn execute_chat_turn_task(
                 &visible_turn.user_message_id,
                 &visible_turn.assistant_message_id,
                 turn_id,
+                agent_run.as_ref().map(|(run_id, _)| run_id.as_str()),
             ) => Some(answer),
         }
     });
@@ -269,6 +360,38 @@ pub fn execute_chat_turn_task(
     let answer = run
         .flatten()
         .unwrap_or_else(|| "No reply generated.".to_string());
+    let generated = !cancelled
+        && !answer.trim().is_empty()
+        && answer.trim() != "No reply generated.";
+    if cancelled {
+        finalize_agent_run(
+            state,
+            &agent_run,
+            AgentRunStatus::Aborted,
+            "cancelled",
+            Some(local_first_engine::AgentExecutionEvent::RunAborted {
+                reason: "cancelled".to_string(),
+            }),
+        );
+    } else if generated {
+        finalize_agent_run(
+            state,
+            &agent_run,
+            AgentRunStatus::Completed,
+            "delivered",
+            None,
+        );
+    } else {
+        finalize_agent_run(
+            state,
+            &agent_run,
+            AgentRunStatus::Failed,
+            "no_reply_generated",
+            Some(local_first_engine::AgentExecutionEvent::RunFailed {
+                reason: "no_reply_generated".to_string(),
+            }),
+        );
+    }
     tracing::info!(
         target: "broker::executor",
         turn_id = %turn_id,
@@ -332,9 +455,7 @@ pub fn execute_chat_turn_task(
     // 9. Build the outcome — same shape as `execute_proactive_prompt_task`. A cancelled
     // turn is never "completed"; the runner sees completed=false + the store's Cancelled
     // status and closes out without overwriting it.
-    let completed = !cancelled
-        && !answer.trim().is_empty()
-        && answer.trim() != "No reply generated.";
+    let completed = generated;
     tracing::info!(
         target: "broker::executor",
         turn_id = %turn_id,

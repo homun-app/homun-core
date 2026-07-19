@@ -2,6 +2,7 @@
 // browser_* tools).
 mod apply_patch;
 mod attachments;
+mod agent_journal;
 mod browser_safety;
 mod chat_store;
 // One-shot fuse of the two legacy SQLite files into the unified homun.sqlite.
@@ -25000,6 +25001,7 @@ impl GatewayBrowseExecutor<'_> {
             &completion_judge,
             &compactor,
             &turn_policy,
+            &local_first_engine::NoopExecutionJournal,
             &drain,
             0.2, // low temperature: deterministic extraction, not creative writing
             self.thread_id,
@@ -26445,6 +26447,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         .unwrap_or_else(|_| state.http.clone());
     let state_owned = state.clone();
     let temperature = request.temperature;
+    let execution_journal = agent_journal::for_run(request.agent_run_id.as_deref());
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
@@ -26691,7 +26694,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, &turn_trace, vision_fallback_armed).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, execution_journal, &turn_trace, vision_fallback_armed).await;
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
         // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
@@ -26811,6 +26814,7 @@ async fn run_agent_rounds(
     // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
     // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
     trace_dir: Option<std::path::PathBuf>,
+    execution_journal: agent_journal::GatewayJournal,
     // Readable per-turn observability sink (ported): passed into the capability executor (Plan event)
     // and into `run_turn` (the in-loop events). No-op when disabled. See `engine::turn_trace`.
     turn_trace: &local_first_engine::turn_trace::TurnTrace,
@@ -26903,6 +26907,7 @@ async fn run_agent_rounds(
         &completion_judge,
         &compactor,
         &turn_policy,
+        &execution_journal,
         tx,
         temperature,
         thread_id.as_deref(),
@@ -26979,6 +26984,7 @@ async fn run_agent_rounds(
         &completion_judge,
         &compactor,
         &turn_policy,
+        &execution_journal,
         tx,
         temperature,
         thread_id.as_deref(),
@@ -32058,6 +32064,7 @@ async fn run_agent_turn_into_message(
     let request_id = format!("agentturn-{thread_id}-{}", now_epoch_secs());
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
+        agent_run_id: None,
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,
@@ -32110,6 +32117,7 @@ async fn run_agent_turn_into_message_with_fanout(
     source_user_message_id: &str,
     assistant_message_id: &str,
     turn_id: &str,
+    agent_run_id: Option<&str>,
 ) -> Option<String> {
     let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))?;
     let context = agent_turn_context(
@@ -32120,6 +32128,7 @@ async fn run_agent_turn_into_message_with_fanout(
     let request_id = format!("broker-{turn_id}");
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
+        agent_run_id: agent_run_id.map(str::to_string),
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,
