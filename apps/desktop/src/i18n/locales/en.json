@@ -94,6 +94,7 @@
       "generic": "The proposal could not be updated. Try again.",
       "secret_never_shareable": "Memories containing secrets cannot be published.",
       "vault_payload_never_shareable": "Vault data cannot be published.",
+      "linked_memory_read_only": "Linked memories are read-only and cannot be copied into this project.",
       "publication_actor_mismatch": "You are not authorized to use this proposal.",
       "publication_decision_required": "Explicitly choose how to handle the destination memory.",
       "publication_conflict": "The proposal is no longer valid. Review it and try again.",

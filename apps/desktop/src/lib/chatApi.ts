@@ -636,6 +636,8 @@ function updateThreadAfterMessages(
 }
 
 function recentChatContext(threadId: string, limit: number) {
+  // Preview/local fallback only. The gateway ignores client history for a
+  // persisted thread and reconstructs the model context from the ChatStore.
   return buildJuicePromptChatContext(rawRecentChatContext(threadId, limit), {
     maxContextChars: 3_600,
     maxMessageChars: 900,

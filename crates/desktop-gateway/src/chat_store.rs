@@ -1,6 +1,6 @@
 use local_first_desktop_gateway::{
-    ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, compact_thread_title,
-    seeded_ready_message,
+    ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, LinkedMemoryReadRef,
+    MemoryReuseEnvelope, MemoryWritePolicy, compact_thread_title, seeded_ready_message,
 };
 // The generic marker parsers live in the single `markers` module now; aliased so the local
 // call sites read unchanged.
@@ -846,7 +846,7 @@ impl ChatStore {
         let mut stmt = self.conn.prepare(
             "select id, role, text, timestamp, metadata, metrics_json, feedback,
                     saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                    event_parts_json, parent_id
+                    event_parts_json, memory_reuse_json, parent_id
                from chat_messages
               where thread_id = ?1
               order by rowid asc",
@@ -855,7 +855,7 @@ impl ChatStore {
         let mut parents: HashMap<String, Option<String>> = HashMap::new();
         let mut by_id: HashMap<String, ChatMessage> = HashMap::new();
         let rows = stmt.query_map(params![thread_id], |row| {
-            let parent: Option<String> = row.get(12)?;
+            let parent: Option<String> = row.get(13)?;
             Ok((message_from_row(row)?, parent))
         })?;
         for row in rows {
@@ -982,7 +982,7 @@ impl ChatStore {
             .query_row(
                 "select id, role, text, timestamp, metadata, metrics_json, feedback,
                         saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                        event_parts_json
+                        event_parts_json, memory_reuse_json
                    from chat_messages
                   where thread_id = ?1 and id = ?2",
                 params![thread_id, message_id],
@@ -1255,19 +1255,19 @@ impl ChatStore {
         part: &serde_json::Value,
     ) -> rusqlite::Result<bool> {
         let tx = self.conn.unchecked_transaction()?;
-        let existing: Option<String> = tx
+        let existing: Option<Option<String>> = tx
             .query_row(
                 "select event_parts_json from chat_messages
                   where thread_id = ?1 and id = ?2 and role = 'assistant'",
                 params![thread_id, message_id],
-                |row| row.get(0),
+                |row| row.get::<_, Option<String>>(0),
             )
             .optional()?;
         let Some(existing) = existing else {
             tx.commit()?;
             return Ok(false);
         };
-        let mut parts = parse_optional_json_array(Some(existing.as_str()), "event_parts_json");
+        let mut parts = parse_optional_json_array(existing.as_deref(), "event_parts_json");
         if parts.iter().any(|current| current == part) {
             tx.commit()?;
             return Ok(false);
@@ -1281,6 +1281,46 @@ impl ChatStore {
         )?;
         tx.commit()?;
         Ok(true)
+    }
+
+    /// Finalizza una risposta e la relativa provenance con una singola
+    /// transazione. Se event parts ed envelope non coincidono, la risposta
+    /// resta visibile ma viene attestata come fail-closed.
+    pub fn finalize_assistant_message(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+        text: &str,
+        event_parts: &[serde_json::Value],
+        requested_envelope: &MemoryReuseEnvelope,
+    ) -> rusqlite::Result<ChatMessage> {
+        let event_parts_json = serde_json::to_string(event_parts).map_err(json_error)?;
+        let derived = memory_reuse_from_event_parts(event_parts);
+        let envelope = if &derived == requested_envelope {
+            requested_envelope.clone()
+        } else {
+            MemoryReuseEnvelope::blocked_unknown()
+        };
+        let memory_reuse_json = serde_json::to_string(&envelope).map_err(json_error)?;
+        let tx = self.conn.unchecked_transaction()?;
+        let changed = tx.execute(
+            "update chat_messages
+                set text = ?1, event_parts_json = ?2, memory_reuse_json = ?3
+              where thread_id = ?4 and id = ?5 and role = 'assistant'",
+            params![
+                text,
+                event_parts_json,
+                memory_reuse_json,
+                thread_id,
+                message_id,
+            ],
+        )?;
+        if changed != 1 {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
+        tx.commit()?;
+        self.message(thread_id, message_id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
     }
 
     pub fn append_assistant_message(
@@ -2269,6 +2309,7 @@ impl ChatStore {
                 linked_automation_ref text,
                 attachments_json text,
                 event_parts_json text,
+                memory_reuse_json text,
                 foreign key(thread_id) references chat_threads(thread_id) on delete cascade
             );
 
@@ -2643,6 +2684,12 @@ impl ChatStore {
         if !self.column_exists("chat_messages", "event_parts_json")? {
             self.conn.execute(
                 "alter table chat_messages add column event_parts_json text",
+                [],
+            )?;
+        }
+        if !self.column_exists("chat_messages", "memory_reuse_json")? {
+            self.conn.execute(
+                "alter table chat_messages add column memory_reuse_json text",
                 [],
             )?;
         }
@@ -3193,8 +3240,8 @@ impl ChatStore {
             "insert or ignore into chat_messages (
                 id, thread_id, role, text, timestamp, metadata, metrics_json, feedback,
                 saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                parent_id, event_parts_json
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                parent_id, event_parts_json, memory_reuse_json
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 message.id,
                 thread_id,
@@ -3210,6 +3257,7 @@ impl ChatStore {
                 attachments_to_json(message)?,
                 parent_id,
                 event_parts_to_json(message)?,
+                memory_reuse_to_json(message)?,
             ],
         )?;
         // Advance the active leaf only when a row was actually inserted —
@@ -3292,8 +3340,9 @@ impl ChatStore {
             "update chat_messages
                 set role = ?1, text = ?2, timestamp = ?3, metadata = ?4, metrics_json = ?5,
                     feedback = ?6, saved_memory_ref = ?7, linked_task_id = ?8,
-                    linked_automation_ref = ?9, attachments_json = ?10, event_parts_json = ?11
-              where id = ?12 and thread_id = ?13",
+                    linked_automation_ref = ?9, attachments_json = ?10, event_parts_json = ?11,
+                    memory_reuse_json = ?12
+              where id = ?13 and thread_id = ?14",
             params![
                 message.role,
                 message.text,
@@ -3306,6 +3355,7 @@ impl ChatStore {
                 message.linked_automation_ref,
                 attachments_to_json(message)?,
                 event_parts_to_json(message)?,
+                memory_reuse_to_json(message)?,
                 message_id,
                 thread_id,
             ],
@@ -3441,9 +3491,12 @@ fn should_replace_channel_recipient(current: Option<&str>, next: &str) -> bool {
 
 fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
     let metrics_json: Option<String> = row.get(5)?;
+    let role: String = row.get(1)?;
+    let event_parts = event_parts_from_row(row, 11)?;
+    let memory_reuse = memory_reuse_from_row(row, 12, &role, &event_parts)?;
     Ok(ChatMessage {
         id: row.get(0)?,
-        role: row.get(1)?,
+        role,
         text: row.get(2)?,
         timestamp: row.get(3)?,
         metadata: row.get(4)?,
@@ -3455,7 +3508,8 @@ fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
         linked_task_id: row.get(8)?,
         linked_automation_ref: row.get(9)?,
         attachments: attachments_from_row(row, 10)?,
-        event_parts: event_parts_from_row(row, 11)?,
+        event_parts,
+        memory_reuse,
     })
 }
 
@@ -3550,6 +3604,97 @@ fn event_parts_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>
     }
 }
 
+fn memory_reuse_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String>> {
+    if message.role != "assistant" {
+        return Ok(None);
+    }
+    let envelope = message
+        .memory_reuse
+        .clone()
+        .unwrap_or_else(|| memory_reuse_from_event_parts(&message.event_parts));
+    serde_json::to_string(&envelope)
+        .map(Some)
+        .map_err(json_error)
+}
+
+fn linked_read_from_legacy_hit(
+    hit: &serde_json::Value,
+) -> Result<Option<LinkedMemoryReadRef>, ()> {
+    let Some(hit) = hit.as_object() else {
+        return Err(());
+    };
+    let grant = hit.get("grant_id").filter(|value| !value.is_null());
+    let policy = hit.get("policy_version").filter(|value| !value.is_null());
+    let revision = hit.get("source_revision").filter(|value| !value.is_null());
+    if grant.is_none() && policy.is_none() && revision.is_none() {
+        return Ok(None);
+    }
+    let non_empty = |key: &str| {
+        hit.get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .ok_or(())
+    };
+    let policy_version = policy
+        .and_then(serde_json::Value::as_u64)
+        .filter(|version| *version > 0)
+        .ok_or(())?;
+    Ok(Some(LinkedMemoryReadRef {
+        source_workspace_id: non_empty("source_workspace_id")?,
+        grant_id: non_empty("grant_id")?,
+        policy_version,
+        memory_ref: non_empty("ref")?,
+        source_revision: non_empty("source_revision")?,
+    }))
+}
+
+fn memory_reuse_from_event_parts(event_parts: &[serde_json::Value]) -> MemoryReuseEnvelope {
+    let mut reads = Vec::new();
+    for part in event_parts {
+        if part.get("type").and_then(serde_json::Value::as_str) != Some("recall") {
+            continue;
+        }
+        let Some(hits) = part
+            .get("payload")
+            .and_then(|payload| payload.get("hits"))
+            .and_then(serde_json::Value::as_array)
+        else {
+            return MemoryReuseEnvelope::blocked_unknown();
+        };
+        for hit in hits {
+            match linked_read_from_legacy_hit(hit) {
+                Ok(Some(read)) => reads.push(read),
+                Ok(None) => {}
+                Err(()) => return MemoryReuseEnvelope::blocked_unknown(),
+            }
+        }
+    }
+    if reads.is_empty() {
+        MemoryReuseEnvelope::normal()
+    } else {
+        MemoryReuseEnvelope::user_input_only(reads)
+    }
+}
+
+fn valid_memory_reuse_envelope(envelope: &MemoryReuseEnvelope) -> bool {
+    match envelope.write_policy {
+        MemoryWritePolicy::Normal => envelope.linked_reads.is_empty(),
+        MemoryWritePolicy::UserInputOnly => {
+            !envelope.linked_reads.is_empty()
+                && envelope.linked_reads.iter().all(|read| {
+                    read.policy_version > 0
+                        && !read.source_workspace_id.trim().is_empty()
+                        && !read.grant_id.trim().is_empty()
+                        && !read.memory_ref.trim().is_empty()
+                        && !read.source_revision.trim().is_empty()
+                })
+        }
+        MemoryWritePolicy::BlockedUnknown => true,
+    }
+}
+
 fn push_text_marker_part(
     text: &str,
     parts: &mut Vec<serde_json::Value>,
@@ -3597,6 +3742,39 @@ fn event_parts_from_row(
     Ok(parse_optional_json_array(event_parts_json.as_deref(), "event_parts_json"))
 }
 
+fn memory_reuse_from_row(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+    role: &str,
+    event_parts: &[serde_json::Value],
+) -> rusqlite::Result<Option<MemoryReuseEnvelope>> {
+    if role != "assistant" {
+        return Ok(None);
+    }
+    let encoded: Option<String> = row.get(index)?;
+    if let Some(encoded) = encoded.map(|value| value.trim().to_string())
+        && !encoded.is_empty()
+    {
+        return Ok(Some(
+            serde_json::from_str::<MemoryReuseEnvelope>(&encoded)
+                .ok()
+                .filter(valid_memory_reuse_envelope)
+                .unwrap_or_else(MemoryReuseEnvelope::blocked_unknown),
+        ));
+    }
+
+    // Legacy rows have no envelope. Reconstruct only from structured recall
+    // parts; malformed JSON must never collapse to Normal through the display
+    // parser's intentional fail-open behavior.
+    let raw_event_parts: Option<String> = row.get(11)?;
+    if let Some(raw) = raw_event_parts.as_deref().map(str::trim).filter(|raw| !raw.is_empty())
+        && serde_json::from_str::<Vec<serde_json::Value>>(raw).is_err()
+    {
+        return Ok(Some(MemoryReuseEnvelope::blocked_unknown()));
+    }
+    Ok(Some(memory_reuse_from_event_parts(event_parts)))
+}
+
 /// Parse a nullable JSON-array metadata column, FAIL-OPEN. These columns (attachments,
 /// event parts) are optional display metadata: a single malformed/legacy-corrupt row (e.g. a
 /// historical bug that stored a bare `msg_…` parent-id here) must NEVER abort the whole read
@@ -3641,6 +3819,204 @@ fn monotonic_suffix() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn linked_read() -> local_first_desktop_gateway::LinkedMemoryReadRef {
+        local_first_desktop_gateway::LinkedMemoryReadRef {
+            source_workspace_id: "source-a".to_string(),
+            grant_id: "grant-a".to_string(),
+            policy_version: 3,
+            memory_ref: "memory:owner:source-a:fact-a".to_string(),
+            source_revision: "sha256:rev-a".to_string(),
+        }
+    }
+
+    #[test]
+    fn finalize_assistant_message_is_atomic() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            current_timestamp_seconds(),
+        );
+        assistant.id = "assistant_atomic".to_string();
+        assistant.text = "…".to_string();
+        assistant.memory_reuse = Some(
+            local_first_desktop_gateway::MemoryReuseEnvelope::blocked_unknown(),
+        );
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let recall_part = serde_json::json!({
+            "type": "recall",
+            "payload": {
+                "query": "linked fact",
+                "scope": "project",
+                "hits": [{
+                    "ref": "memory:owner:source-a:fact-a",
+                    "source_workspace_id": "source-a",
+                    "grant_id": "grant-a",
+                    "policy_version": 3,
+                    "source_revision": "sha256:rev-a"
+                }]
+            }
+        });
+        let envelope = local_first_desktop_gateway::MemoryReuseEnvelope::user_input_only(vec![
+            linked_read(),
+        ]);
+
+        let saved = store
+            .finalize_assistant_message(
+                &thread.thread_id,
+                &assistant.id,
+                "Answer",
+                std::slice::from_ref(&recall_part),
+                &envelope,
+            )
+            .unwrap();
+
+        assert_eq!(saved.text, "Answer");
+        assert_eq!(saved.event_parts, vec![recall_part]);
+        assert_eq!(saved.memory_reuse, Some(envelope));
+    }
+
+    #[test]
+    fn linked_legacy_event_fails_closed() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            current_timestamp_seconds(),
+        );
+        assistant.id = "assistant_legacy_corrupt".to_string();
+        assistant.event_parts = vec![serde_json::json!({
+            "type": "recall",
+            "payload": {
+                "hits": [{
+                    "ref": "memory:owner:source-a:fact-a",
+                    "source_workspace_id": "source-a",
+                    "grant_id": "grant-a",
+                    "policy_version": 3
+                }]
+            }
+        })];
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        store
+            .conn
+            .execute(
+                "update chat_messages set memory_reuse_json = null where id = ?1",
+                params![assistant.id],
+            )
+            .unwrap();
+
+        let saved = store
+            .message(&thread.thread_id, &assistant.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.memory_reuse.unwrap().write_policy,
+            local_first_desktop_gateway::MemoryWritePolicy::BlockedUnknown
+        );
+    }
+
+    #[test]
+    fn complete_and_local_legacy_recall_derive_distinct_policies() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut linked = seeded_ready_message(&thread.thread_id, current_timestamp_seconds());
+        linked.id = "assistant_legacy_linked".to_string();
+        linked.event_parts = vec![serde_json::json!({
+            "type": "recall",
+            "payload": { "hits": [{
+                "ref": "memory:owner:source-a:fact-a",
+                "source_workspace_id": "source-a",
+                "grant_id": "grant-a",
+                "policy_version": 3,
+                "source_revision": "sha256:rev-a"
+            }] }
+        })];
+        let mut local = seeded_ready_message(&thread.thread_id, current_timestamp_seconds());
+        local.id = "assistant_legacy_local".to_string();
+        local.event_parts = vec![serde_json::json!({
+            "type": "recall",
+            "payload": { "hits": [{
+                "ref": "memory:owner:default:fact-local",
+                "source_workspace_id": "default",
+                "grant_id": null,
+                "policy_version": null,
+                "source_revision": null
+            }] }
+        })];
+        store.append_assistant_message(&thread.thread_id, &linked).unwrap();
+        store.append_assistant_message(&thread.thread_id, &local).unwrap();
+        store
+            .conn
+            .execute(
+                "update chat_messages set memory_reuse_json = null where id in (?1, ?2)",
+                params![linked.id, local.id],
+            )
+            .unwrap();
+
+        let linked = store.message(&thread.thread_id, &linked.id).unwrap().unwrap();
+        let local = store.message(&thread.thread_id, &local.id).unwrap().unwrap();
+        assert_eq!(
+            linked.memory_reuse.unwrap().write_policy,
+            MemoryWritePolicy::UserInputOnly
+        );
+        assert_eq!(
+            local.memory_reuse.unwrap().write_policy,
+            MemoryWritePolicy::Normal
+        );
+    }
+
+    #[test]
+    fn mismatched_or_corrupt_envelopes_fail_closed() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut assistant = seeded_ready_message(&thread.thread_id, current_timestamp_seconds());
+        assistant.id = "assistant_mismatch".to_string();
+        assistant.memory_reuse = Some(MemoryReuseEnvelope::blocked_unknown());
+        store.append_assistant_message(&thread.thread_id, &assistant).unwrap();
+        let linked_part = serde_json::json!({
+            "type": "recall",
+            "payload": { "hits": [{
+                "ref": "memory:owner:source-a:fact-a",
+                "source_workspace_id": "source-a",
+                "grant_id": "grant-a",
+                "policy_version": 3,
+                "source_revision": "sha256:rev-a"
+            }] }
+        });
+
+        let saved = store
+            .finalize_assistant_message(
+                &thread.thread_id,
+                &assistant.id,
+                "Answer",
+                &[linked_part],
+                &MemoryReuseEnvelope::normal(),
+            )
+            .unwrap();
+        assert_eq!(
+            saved.memory_reuse.unwrap().write_policy,
+            MemoryWritePolicy::BlockedUnknown
+        );
+
+        store
+            .conn
+            .execute(
+                "update chat_messages set memory_reuse_json = '{' where id = ?1",
+                params![assistant.id],
+            )
+            .unwrap();
+        let corrupted = store.message(&thread.thread_id, &assistant.id).unwrap().unwrap();
+        assert_eq!(
+            corrupted.memory_reuse.unwrap().write_policy,
+            MemoryWritePolicy::BlockedUnknown
+        );
+    }
 
     #[test]
     fn parse_optional_json_array_fails_open_on_corruption() {
@@ -3980,6 +4356,7 @@ mod tests {
             linked_automation_ref: None,
             attachments: Vec::new(),
             event_parts: Vec::new(),
+            memory_reuse: None,
         };
         let assistant = ChatMessage {
             id: "assistant_1".to_string(),
@@ -3994,6 +4371,7 @@ mod tests {
             linked_automation_ref: None,
             attachments: Vec::new(),
             event_parts: Vec::new(),
+            memory_reuse: None,
         };
 
         let messages = store
@@ -4031,6 +4409,7 @@ mod tests {
             linked_automation_ref: None,
             attachments: Vec::new(),
             event_parts: Vec::new(),
+            memory_reuse: None,
         };
 
         store.insert_message(&thread.thread_id, &assistant).unwrap();
@@ -4075,6 +4454,7 @@ mod tests {
             linked_automation_ref: None,
             attachments: Vec::new(),
             event_parts: Vec::new(),
+            memory_reuse: None,
         };
 
         store.insert_message(&thread.thread_id, &assistant).unwrap();
@@ -4124,6 +4504,7 @@ mod tests {
                     "options": ["Yes", "No"]
                 }
             })],
+            memory_reuse: None,
         };
 
         store
@@ -4158,6 +4539,7 @@ mod tests {
             linked_automation_ref: None,
             attachments: Vec::new(),
             event_parts: vec![serde_json::json!({ "type": "activity", "text": "Thinking" })],
+            memory_reuse: None,
         };
         store.append_assistant_message(&thread.thread_id, &assistant).unwrap();
         let recall = serde_json::json!({
@@ -4187,6 +4569,27 @@ mod tests {
     }
 
     #[test]
+    fn append_recall_part_accepts_an_empty_placeholder() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut assistant = seeded_ready_message(&thread.thread_id, current_timestamp_seconds());
+        assistant.id = "assistant_empty_placeholder".to_string();
+        assistant.text = "…".to_string();
+        assistant.memory_reuse = Some(MemoryReuseEnvelope::blocked_unknown());
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let recall = serde_json::json!({
+            "type": "recall",
+            "payload": { "query": "none", "hits": [], "scope": "project" }
+        });
+
+        assert!(store
+            .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
+            .unwrap());
+    }
+
+    #[test]
     fn committed_chat_message_attachments_survive_reload() {
         let store = ChatStore::in_memory().unwrap();
         let thread = store.create_thread("default").unwrap();
@@ -4211,6 +4614,7 @@ mod tests {
             linked_automation_ref: None,
             attachments: vec![attachment.clone()],
             event_parts: Vec::new(),
+            memory_reuse: None,
         };
         let assistant = mk_message("assistant_after_file", "assistant");
 
@@ -4410,6 +4814,7 @@ mod tests {
             linked_automation_ref: None,
             attachments: Vec::new(),
             event_parts: Vec::new(),
+            memory_reuse: None,
         };
         store
             .append_assistant_message(&thread.thread_id, &assistant)
@@ -4441,6 +4846,7 @@ mod tests {
             linked_automation_ref: None,
             attachments: Vec::new(),
             event_parts: Vec::new(),
+            memory_reuse: None,
         }
     }
 

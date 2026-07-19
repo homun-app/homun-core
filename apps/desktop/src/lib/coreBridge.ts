@@ -68,6 +68,22 @@ export interface CoreChatMessage {
   linked_automation_ref: string | null;
   attachments: CoreChatAttachment[];
   event_parts?: unknown[];
+  memory_reuse?: CoreMemoryReuseEnvelope | null;
+}
+
+export type CoreMemoryWritePolicy = "normal" | "user_input_only" | "blocked_unknown";
+
+export interface CoreLinkedMemoryReadRef {
+  source_workspace_id: string;
+  grant_id: string;
+  policy_version: number;
+  memory_ref: string;
+  source_revision: string;
+}
+
+export interface CoreMemoryReuseEnvelope {
+  write_policy: CoreMemoryWritePolicy;
+  linked_reads: CoreLinkedMemoryReadRef[];
 }
 
 export interface CoreChatMessageMetrics {
@@ -382,8 +398,12 @@ export interface RecallHitPayload {
   grant_id: string | null;
   /** Exact linked-grant policy version used for this hit; null for local/legacy hits. */
   policy_version: number | null;
+  /** Exact source-record revision; absent/null on local and legacy events. */
+  source_revision?: string | null;
   /** The recall coordinator detected a semantic conflict for this hit. */
   conflict: boolean;
+  /** Canonical graph relations followed from the direct hit; absent on legacy events. */
+  graph_path?: string[];
 }
 
 /** D3 (Piano UI): una modifica di codice proposta dal modello (diff inline). */

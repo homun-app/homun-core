@@ -94,6 +94,7 @@
       "generic": "Der Vorschlag konnte nicht aktualisiert werden. Versuchen Sie es erneut.",
       "secret_never_shareable": "Erinnerungen, die Secrets enthalten, können nicht veröffentlicht werden.",
       "vault_payload_never_shareable": "Vault-Daten können nicht veröffentlicht werden.",
+      "linked_memory_read_only": "Verknüpfte Erinnerungen sind schreibgeschützt und können nicht in dieses Projekt kopiert werden.",
       "publication_actor_mismatch": "Sie sind nicht berechtigt, diesen Vorschlag zu verwenden.",
       "publication_decision_required": "Legen Sie ausdrücklich fest, wie mit der Ziel-Erinnerung verfahren werden soll.",
       "publication_conflict": "Der Vorschlag ist nicht mehr gültig. Überprüfen Sie ihn und versuchen Sie es erneut.",

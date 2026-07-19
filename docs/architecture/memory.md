@@ -64,9 +64,30 @@ revoca, e il perimetro contatti. Ogni fonte progetto deve inoltre comparire nel 
 persistito `workspaces.json`: fonte assente, illeggibile, corrotta o vuota viene filtrata
 come `source_unavailable` prima di candidati, recall, audit o aggiornamento last-used.
 Grant e policy restano persistiti e revocabili; il richiamo collegato non pubblica né
-copia record e i flussi di pubblicazione restano separati. I candidati qui sono elementi
-di recall/indice già filtrati dalla policy, non l'Advanced picker: quel picker gestisce
-la selezione di record non-segreti disponibili come fonte.
+copia record. Una memoria che è stata collegata in quella direzione non può essere
+pubblicata nel consumer neppure dopo revoca o scadenza del grant: per conservarla basta
+mantenere il collegamento. Il server applica questo vincolo dal ledger storico e risponde
+con `linked_memory_read_only`; nascondere la provenance nel client non lo aggira. I
+candidati qui sono elementi di recall/indice già filtrati dalla policy, non l'Advanced
+picker: quel picker gestisce la selezione di record non-segreti disponibili come fonte.
+
+Ogni hit collegato porta la tupla completa `source_workspace_id`, `grant_id`,
+`policy_version`, `memory_ref`, `source_revision`. Il loop accumula queste tuple in un
+read set del turno sia per il recall automatico sia per `recall_memory`; il gateway le
+salva atomicamente con la risposta in `chat_messages.memory_reuse_json`. L'envelope ha
+tre policy fail-closed:
+
+- `normal`: nessuna lettura collegata, apprendimento ordinario;
+- `user_input_only`: l'estrattore può vedere solo il messaggio diretto dell'utente;
+- `blocked_unknown`: provenance assente, corrotta o incoerente, nessun write-back.
+
+Il transcript resta sempre visibile all'utente. Prima di ricostruire il contesto per il
+modello, però, il server rilegge i messaggi persistiti e rivalida grant, versione, ref e
+revisione corrente. Revoca, scadenza, deny, source mancante o drift della revisione
+escludono la risposta derivata dal contesto. La stessa policy impedisce che risposta,
+azioni, episodio `__threads__`, checkpoint di compattazione, entità, relazioni, Wiki o
+briefing diventino una copia durevole della fonte. Non esistono keyword di attivazione:
+è il recall autorizzato a produrre il read set strutturato.
 
 - `MemoryRecord` (`types.rs`, `pub struct MemoryRecord`): `memory_type` (`fact | preference |
   decision | goal | episode | open_loop | artifact`), `text`, `confidence`, `status`,
@@ -219,6 +240,19 @@ proiezione deterministica e possono essere rimosse automaticamente per uno scope
 registrato. Le memorie semanticamente simili, invece, sono conoscenza dell'utente:
 l'audit le segnala come gruppi revisionabili, ma il repair di integrità non le fonde e
 non le cancella mai automaticamente.
+
+La contaminazione legacy da letture collegate ha un repair separato, perché coinvolge
+insieme transcript ed effetti derivati:
+
+1. `POST /api/integrity/linked-memory/repair/preview` individua i thread tramite event
+   parts strutturate e restituisce soltanto conteggi, checksum e approval token;
+2. `POST /api/integrity/linked-memory/repair/apply` richiede `confirm=true` e la preview
+   identica, poi crea backup nuovi di `homun.sqlite` e `memory.sqlite`;
+3. una transazione sui due database backfilla gli envelope, rimuove soltanto derivati
+   automatici riconducibili ai thread, ricostruisce FTS ed esegue `quick_check`;
+4. memorie manuali, proiezione Graphify, grant, audit, source e transcript non vengono
+   modificati. Un errore esegue rollback di entrambi i database; una seconda preview
+   dopo l'apply deve essere un no-op per righe e derivati.
 
 ## Perché è così
 

@@ -196,6 +196,7 @@ assertContains("src/components/MemoryPublicationDialog.tsx", "event.target === e
 assertNotContains("src/components/MemoryPublicationDialog.tsx", "rejectAndClose", "local dialog exits must never invoke a stale reject request");
 assertContains("src/components/MemoryUsagePopover.tsx", "hit.source_workspace_id === consumerWorkspaceId", "publication must be limited to the current consumer workspace");
 assertContains("src/components/MemoryUsagePopover.tsx", "hit.grant_id === null", "publication must never be offered for linked or legacy sources");
+assertContains("src/i18n/locales/en.json", "linked_memory_read_only", "linked publication rejection must have a user-facing reason");
 assertContains("src/components/ChatView.tsx", "onPublicationApproved={refreshAfterChatSubmit}", "successful publication must refresh persisted task data");
 assertContains("src/components/MemorySourcesDialog.tsx", "closeDialog", "all dialog exits must reset transient source-management state");
 assertContains("src/components/MemorySourcesDialog.tsx", "Never consulted", "missing last-access timestamps must be disclosed clearly");

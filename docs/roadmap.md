@@ -19,6 +19,19 @@ default, con escape hatch locale `HOMUN_MEMORY_SOURCES=0` o `HOMUN_MEMORY_SOURCE
 Lo smoke corretto del 2026-07-17 Europe/Rome copre questo perimetro; non include deploy,
 pubblicazione o trasformazione dei candidati autorizzati nell'Advanced picker.
 
+## Nota di rilascio — recall autorizzato guidato dal grafo (2026-07-19)
+
+Il coordinatore non interseca più le collection con un router a parole chiave: ricerca
+sempre dentro tutte e sole le collection autorizzate dal grant diretto. I risultati
+lessicali/semantici diventano seed e `recall_memory` percorre le relazioni canoniche
+della stessa fonte per massimo due archi, 64 nodi autorizzati, 32 vicini autorizzati
+per nodo, 512 relazioni ispezionate complessivamente e quattro espansioni per fonte.
+Memorie, entity e archi vengono rivalidati fail-closed; un record
+negato non è né risultato né ponte e nessun percorso attraversa un altro grant. Il
+percorso arriva al prompt e all'evento strutturato come `graph_path`. Non sono stati
+aggiunti store, cataloghi o proiezioni persistenti: SQL resta canonico e Markdown resta
+la vista leggibile.
+
 ## Fase corrente
 
 WS6 è chiusa localmente; WS2-3.1 è passata in runtime, WS2-3.2c/3.3 ha un

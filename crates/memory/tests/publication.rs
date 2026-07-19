@@ -3,10 +3,11 @@ use local_first_memory::{
     MemoryPublicationCandidate, MemoryPublicationDestination, MemoryPublicationEditInput,
     MemoryPublicationLink, MemoryPublicationProposal, MemoryPublicationReasonCode,
     MemoryPublicationResolution, MemoryPublicationStatus, MemoryPublicationStoreError,
-    MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus, PrivacyDomain, SQLiteMemoryStore, UserId,
-    WorkspaceId, recall_source_on_facade,
+    MemoryRecord, MemoryRef, MemoryRefKind, MemorySourceGrant, MemoryStatus, PrivacyDomain,
+    SQLiteMemoryStore, UserId, WorkspaceId, recall_source_on_facade,
 };
 use rusqlite::Connection;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier};
 
@@ -100,6 +101,81 @@ fn publication_version(facade: &MemoryFacade, proposal_id: &str) -> u64 {
         .unwrap()
         .unwrap()
         .proposal_version
+}
+
+#[test]
+fn historical_source_grant_link_permanently_blocks_copy_publication() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Linked source must remain read only");
+    let consumer = WorkspaceId::new("project-b");
+    assert!(!fixture
+        .facade
+        .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
+        .unwrap());
+    fixture
+        .facade
+        .upsert_memory_source_grant(&MemorySourceGrant {
+            id: "grant-publication-firewall".to_string(),
+            consumer_user_id: fixture.owner.clone(),
+            consumer_workspace_id: consumer.clone(),
+            source_user_id: fixture.owner.clone(),
+            source_workspace_id: fixture.project.clone(),
+            collections: BTreeSet::from([MemoryCollectionKey::Preferences]),
+            max_sensitivity: DataSensitivity::Private,
+            overrides: HashMap::new(),
+            expires_at: Some(10),
+            revoked_at: None,
+            policy_version: 1,
+            created_by: OWNER.to_string(),
+            created_at: "unix:1".to_string(),
+            updated_at: "unix:1".to_string(),
+        })
+        .unwrap();
+    assert!(fixture
+        .facade
+        .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
+        .unwrap());
+    fixture
+        .facade
+        .revoke_memory_source_grant(
+            &fixture.owner,
+            &consumer,
+            "grant-publication-firewall",
+            11,
+        )
+        .unwrap();
+    assert!(fixture
+        .facade
+        .has_memory_source_grant_link(&fixture.owner, &consumer, &fixture.project)
+        .unwrap());
+
+    let error = fixture
+        .facade
+        .create_publication_proposal(
+            &source,
+            &MemoryPublicationDestination::new(fixture.owner.clone(), consumer),
+            OWNER,
+        )
+        .unwrap_err();
+    assert_eq!(error.as_str(), "linked_memory_read_only");
+}
+
+#[test]
+fn publication_between_never_linked_scopes_remains_allowed() {
+    let fixture = PublicationFixture::new();
+    let source = fixture.insert_source_preference("Local publication remains supported");
+    let destination = MemoryPublicationDestination::new(
+        fixture.owner.clone(),
+        WorkspaceId::new("project-never-linked"),
+    );
+
+    let proposal = fixture
+        .facade
+        .create_publication_proposal(&source, &destination, OWNER)
+        .unwrap();
+
+    assert_eq!(proposal.source_workspace_id, fixture.project);
+    assert_eq!(proposal.destination_workspace_id, destination.workspace_id);
 }
 
 #[test]

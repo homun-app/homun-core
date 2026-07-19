@@ -108,8 +108,14 @@ use local_first_desktop_gateway::{
 use local_first_desktop_gateway::integrity_api::{
     GraphIntegrityStatus, IntegrityAuditResponse, IntegrityBackupSummary, IntegrityRepairAction,
     IntegrityRepairApplyRequest, IntegrityRepairApplyResponse, IntegrityRepairEstimate,
-    IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse, canonical_integrity_actions,
-    gateway_approval_token, gateway_audit_checksum, inspect_registered_graph,
+    IntegrityRepairPreviewRequest, IntegrityRepairPreviewResponse,
+    LinkedMemoryRepairApplyRequest, LinkedMemoryRepairApplyResponse,
+    canonical_integrity_actions, gateway_approval_token, gateway_audit_checksum,
+    inspect_registered_graph,
+};
+use local_first_desktop_gateway::linked_memory_repair::{
+    LinkedMemoryRepairPreview, LinkedRepairError, LinkedRepairFailureInjection,
+    apply_linked_memory_repair, preview_linked_memory_repair,
 };
 use local_first_desktop_gateway::project_graph_commit::{
     ProjectGraphCommitError, stage_project_graph_build,
@@ -1588,6 +1594,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let chat_routes = chat_routes
         .route("/api/integrity/audit", get(integrity_audit))
         .route(
+            "/api/integrity/linked-memory/repair/preview",
+            post(linked_memory_repair_preview),
+        )
+        .route(
+            "/api/integrity/linked-memory/repair/apply",
+            post(linked_memory_repair_apply),
+        )
+        .route(
             "/api/integrity/repair/preview",
             post(integrity_repair_preview),
         )
@@ -1813,13 +1827,35 @@ fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::
                 collection: recall_collection_token(hit.collection).to_string(),
                 grant_id: hit.grant_id.clone(),
                 policy_version: hit.policy_version,
+                source_revision: hit
+                    .grant_id
+                    .as_ref()
+                    .map(|_| hit.source_revision.clone()),
                 conflict: hit.conflict,
+                graph_path: hit.graph_path.clone(),
             })
             .collect(),
         scope: match &pack.scope {
             MemoryScope::Personal => "personal".to_string(),
             MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
         },
+    }
+}
+
+fn memory_read_effects_from_recall_payload(
+    payload: &local_first_subagents::RecallStreamPayload,
+) -> local_first_engine::ToolEffects {
+    let mut effects = local_first_engine::ToolEffects::default();
+    effects.memory_reads.extend_payload(payload);
+    effects
+}
+
+fn seed_loop_memory_reads(
+    state: &mut local_first_engine::LoopState,
+    payload: Option<&local_first_subagents::RecallStreamPayload>,
+) {
+    if let Some(payload) = payload {
+        state.memory_reads.extend_payload(payload);
     }
 }
 
@@ -5701,12 +5737,9 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         let workspace = scope.workspace_id();
         let llm = self.llm.clone();
         let state = self.state.clone();
-        let user_message = exchange.user_message.clone();
-        let assistant_message = exchange.assistant_message.clone();
-        let actions = exchange.actions.clone();
+        let exchange = exchange.clone();
         let thread_id = exchange.thread_id.clone();
-        let speaker = exchange.speaker.clone();
-        let prev_assistant = exchange.prev_assistant.clone();
+        let write_policy = exchange.reuse_envelope.write_policy;
         Box::pin(async move {
             let active = workspace.clone();
             let project_name = if active.as_str() != PERSONAL_WORKSPACE {
@@ -5725,11 +5758,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                     &facade,
                     &user,
                     &active,
-                    &user_message,
-                    &assistant_message,
-                    &actions,
-                    speaker.as_deref(),
-                    prev_assistant.as_deref(),
+                    &exchange,
                     project_name.as_deref(),
                 )
             };
@@ -5753,6 +5782,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                 &active,
                 &content,
                 thread_id.as_deref(),
+                write_policy,
                 hooks,
             );
         })
@@ -5773,6 +5803,7 @@ fn learn_via_service_or_inline(
     thread_id: Option<&str>,
     speaker: Option<&str>,
     prev_assistant: Option<&str>,
+    reuse_envelope: local_first_memory::MemoryReuseEnvelope,
 ) -> local_first_memory::BoxFuture<'static, ()> {
     if let Some(service) = state.memory_service.clone() {
         let scope = scope_from_active_workspace();
@@ -5783,6 +5814,7 @@ fn learn_via_service_or_inline(
             thread_id: thread_id.map(str::to_string),
             speaker: speaker.map(str::to_string),
             prev_assistant: prev_assistant.map(str::to_string),
+            reuse_envelope,
         };
         Box::pin(async move { service.learn(&exchange, &scope).await })
     } else {
@@ -5794,6 +5826,15 @@ fn learn_via_service_or_inline(
         let thread_id = thread_id.map(str::to_string);
         let speaker = speaker.map(str::to_string);
         let prev_assistant = prev_assistant.map(str::to_string);
+        let exchange = Exchange {
+            user_message,
+            assistant_message,
+            actions,
+            thread_id: thread_id.clone(),
+            speaker,
+            prev_assistant,
+            reuse_envelope,
+        };
         Box::pin(async move {
             let user = gateway_memory_user_id();
             let active = gateway_memory_workspace_id();
@@ -5815,11 +5856,7 @@ fn learn_via_service_or_inline(
                     &facade,
                     &user,
                     &active,
-                    &user_message,
-                    &assistant_message,
-                    &actions,
-                    speaker.as_deref(),
-                    prev_assistant.as_deref(),
+                    &exchange,
                     project_name.as_deref(),
                 )
             };
@@ -5843,6 +5880,7 @@ fn learn_via_service_or_inline(
                 &active,
                 &content,
                 thread_id.as_deref(),
+                exchange.reuse_envelope.write_policy,
                 hooks,
             );
         })
@@ -14002,7 +14040,9 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                             collection: recall_collection_token(collection).to_string(),
                             grant_id: None,
                             policy_version: None,
+                            source_revision: None,
                             conflict: false,
+                            graph_path: Vec::new(),
                         }
                     })
                     .collect()
@@ -14032,43 +14072,6 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
         artifact_provenance_context_for_query(&facade, &user, &active, query)
     {
         lines.push(provenance);
-    }
-    if let Ok(episodes) =
-        facade.list_memories_for_ui(&user, &MemoryWorkspaceId::new(THREADS_WORKSPACE))
-    {
-        let needle = query.to_lowercase();
-        let terms: Vec<&str> = needle
-            .split_whitespace()
-            .filter(|w| w.chars().count() >= 4)
-            .collect();
-        let mut hits: Vec<String> = episodes
-            .into_iter()
-            .filter(|m| m.memory_type == "episode")
-            .filter(|m| {
-                m.metadata.get("workspace").and_then(|w| w.as_str()) == Some(active.as_str())
-            })
-            .filter(|m| terms.is_empty() || terms.iter().any(|t| m.text.to_lowercase().contains(t)))
-            .map(|m| format!("- [conversation] {}", m.text))
-            .collect();
-        hits.truncate(8);
-        // Episodi come hits UI, nello stesso scope locale della recall.
-        for h in &hits {
-            if let Some(text) = h.strip_prefix("- [conversation] ") {
-                ui_hits.push(local_first_subagents::RecallStreamHit {
-                    r#ref: String::new(),
-                    text: text.to_string(),
-                    score: 0.0,
-                    kind: "conversation".to_string(),
-                    source_workspace_id: active.as_str().to_string(),
-                    source_label: recall_source_label(active.as_str()),
-                    collection: "episodes".to_string(),
-                    grant_id: None,
-                    policy_version: None,
-                    conflict: false,
-                });
-            }
-        }
-        lines.extend(hits);
     }
     let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     if !in_project {
@@ -15703,6 +15706,7 @@ async fn compact_for_context_budget(
     messages: &mut Vec<serde_json::Value>,
     context_window: Option<usize>,
     thread_id: Option<&str>,
+    memory_reads: &local_first_engine::events::TurnMemoryReadSet,
 ) {
     if !needs_context_compaction(
         estimate_tokens(messages),
@@ -15727,7 +15731,7 @@ async fn compact_for_context_budget(
     // collapsing it — durable, recallable, off-path, fire-and-forget. The safety net that
     // makes even an aggressive summary lossless.
     let span_text = render_slice_text(&slice);
-    if !span_text.trim().is_empty() {
+    if !span_text.trim().is_empty() && compaction_checkpoint_allowed(memory_reads) {
         tokio::spawn(learn_via_service_or_inline(
             state,
             &span_text,
@@ -15736,6 +15740,7 @@ async fn compact_for_context_budget(
             thread_id,
             None,
             None,
+            local_first_memory::MemoryReuseEnvelope::normal(),
         ));
     }
     // Salience-preserving summary replaces the span in-context. Best-effort: on failure
@@ -15750,6 +15755,12 @@ async fn compact_for_context_budget(
         ),
     });
     messages.splice(from..to, std::iter::once(note));
+}
+
+fn compaction_checkpoint_allowed(
+    memory_reads: &local_first_engine::events::TurnMemoryReadSet,
+) -> bool {
+    !memory_reads.has_linked_reads() && !memory_reads.is_blocked_unknown()
 }
 
 /// Whether the active orchestrator provider runs locally (loopback base_url).
@@ -23668,10 +23679,13 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                         scope: "personal".to_string(),
                     },
                 });
+            let payload = recall_stream_payload_from_outcome(&outcome, &query);
+            let recall_effects = memory_read_effects_from_recall_payload(&payload);
+            effects.memory_reads.extend(recall_effects.memory_reads);
             let _ = emit_stream_event(
                 ctx.tx,
                 GenerateStreamEvent::Recall {
-                    payload: recall_stream_payload_from_outcome(&outcome, &query),
+                    payload,
                 },
             )
             .await;
@@ -25595,9 +25609,19 @@ async fn stream_chat_via_openai(
     let model_context_window = registry_model_capabilities(&base_url, &model)
         .and_then(|caps| caps.context_length)
         .map(|tokens| usize::try_from(tokens).unwrap_or(usize::MAX));
+    let effective_context = match request.thread_id.as_deref() {
+        Some(thread_id) => thread_context_for_model(
+            state,
+            thread_id,
+            &[],
+            Some(request.prompt.as_str()),
+        )
+        .unwrap_or_default(),
+        None => request.context.clone(),
+    };
     let prompt = build_chat_runtime_prompt(&BuildPromptRequest {
         prompt: request.prompt.clone(),
-        context: request.context.clone(),
+        context: effective_context.clone(),
         max_context_chars: Some(chat_context_budget_chars(model_context_window)),
     })
     .runtime_prompt;
@@ -26859,8 +26883,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     let memory_user_message = request.prompt.clone();
     // The assistant's most recent prior turn (the question a short "sì" would answer),
     // so the extractor can ground a confirmation into the fact it commits.
-    let memory_prev_assistant = request
-        .context
+    let memory_prev_assistant = effective_context
         .iter()
         .rev()
         .find(|m| matches!(m.role, ChatContextRole::Assistant))
@@ -26877,8 +26900,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         if !from_store.is_empty() {
             from_store
         } else {
-            request
-                .context
+            effective_context
                 .iter()
                 .rev()
                 .find(|m| m.text.contains("‹‹PLAN››"))
@@ -26909,6 +26931,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let mut ls = local_first_engine::LoopState::new();
         ls.prompt_packets = prompt_packets;
         ls.messages = messages;
+        seed_loop_memory_reads(&mut ls, automatic_recall_payload.as_ref());
         // RAG completed before the loop starts. Publish the exact selected hits before any
         // narration delta so a resumed client and the persisted assistant message agree on
         // which memory sources informed this turn.
@@ -27129,6 +27152,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             let learn_thread = tail_thread.clone();
             let learn_actions = outcome.tool_actions.clone();
             let learn_prev = memory_prev_assistant.clone();
+            let learn_envelope = memory_reuse_envelope_from_read_set(&outcome.memory_reads);
             tokio::spawn(async move {
                 learn_via_service_or_inline(
                     &learn_state,
@@ -27138,6 +27162,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                     learn_thread.as_deref(),
                     None,
                     learn_prev.as_deref(),
+                    learn_envelope,
                 )
                 .await;
             });
@@ -31153,7 +31178,17 @@ async fn handle_channel_inbound(
         let content = message.content.clone();
         tokio::spawn(async move {
             // thread_id=None: record_channel_message already stored the episode.
-            learn_via_service_or_inline(&st, &content, "", "", None, speaker.as_deref(), None).await;
+            learn_via_service_or_inline(
+                &st,
+                &content,
+                "",
+                "",
+                None,
+                speaker.as_deref(),
+                None,
+                local_first_memory::MemoryReuseEnvelope::normal(),
+            )
+            .await;
         });
     }
     match action {
@@ -31978,6 +32013,7 @@ fn channel_chat_message(role: &str, text: &str) -> ChatMessage {
         linked_automation_ref: None,
         attachments: Vec::new(),
         event_parts: Vec::new(),
+        memory_reuse: None,
     }
 }
 
@@ -32059,7 +32095,9 @@ fn start_visible_conversation_turn(
         Some(id) => channel_chat_message_with_id("user", user_text, id),
         None => channel_chat_message("user", user_text),
     };
-    let assistant_message = channel_chat_message("assistant", "…");
+    let mut assistant_message = channel_chat_message("assistant", "…");
+    assistant_message.memory_reuse =
+        Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
     let turn = VisibleConversationTurn {
         turn_id: match turn_id_override {
             Some(id) => id.to_string(),
@@ -32134,28 +32172,98 @@ fn start_visible_conversation_turn(
     Some(turn)
 }
 
-fn agent_turn_context(
+const LINKED_MEMORY_CONTEXT_OMITTED: &str =
+    "[Previous assistant response omitted because its linked memory authorization is unavailable.]";
+
+fn context_message_for_model(
+    facade: &MemoryFacade,
+    consumer: (&MemoryUserId, &MemoryWorkspaceId),
+    message: &ChatMessage,
+    now_unix: i64,
+) -> Option<ChatContextMessage> {
+    let role = match message.role.as_str() {
+        "user" => ChatContextRole::User,
+        "assistant" => ChatContextRole::Assistant,
+        _ => return None,
+    };
+    if message.role == "user" {
+        return Some(ChatContextMessage {
+            role,
+            text: message.text.clone(),
+        });
+    }
+    let allowed = match message.memory_reuse.as_ref() {
+        Some(envelope)
+            if envelope.write_policy == local_first_memory::MemoryWritePolicy::Normal
+                && envelope.linked_reads.is_empty() =>
+        {
+            true
+        }
+        Some(envelope)
+            if envelope.write_policy == local_first_memory::MemoryWritePolicy::UserInputOnly
+                && !envelope.linked_reads.is_empty() =>
+        {
+            envelope.linked_reads.iter().all(|read| {
+                facade
+                    .validate_linked_memory_read(consumer.0, consumer.1, read, now_unix)
+                    .unwrap_or(false)
+            })
+        }
+        _ => false,
+    };
+    Some(ChatContextMessage {
+        role,
+        text: if allowed {
+            message.text.clone()
+        } else {
+            LINKED_MEMORY_CONTEXT_OMITTED.to_string()
+        },
+    })
+}
+
+fn thread_context_for_model(
     state: &AppState,
     thread_id: &str,
     skip_message_ids: &[&str],
+    current_prompt: Option<&str>,
 ) -> Option<Vec<ChatContextMessage>> {
     let skip: std::collections::HashSet<&str> = skip_message_ids.iter().copied().collect();
-    let Ok(store) = lock_store(state) else {
-        return None;
+    let (snapshot, workspace_id) = {
+        let Ok(store) = lock_store(state) else {
+            return None;
+        };
+        (
+            store.messages(thread_id).ok()?,
+            store.workspace_for_thread(thread_id).ok()?,
+        )
     };
-    let snapshot = store.messages(thread_id).ok()?;
-    let mut msgs: Vec<ChatContextMessage> = snapshot
+    let mut messages: Vec<ChatMessage> = snapshot
         .messages
         .into_iter()
         .filter(|m| matches!(m.role.as_str(), "user" | "assistant"))
         .filter(|m| !skip.contains(m.id.as_str()))
-        .map(|m| ChatContextMessage {
-            role: if m.role == "assistant" {
-                ChatContextRole::Assistant
-            } else {
-                ChatContextRole::User
-            },
-            text: m.text,
+        .collect();
+    if messages
+        .last()
+        .is_some_and(|message| message.role == "assistant" && message.text.trim() == "…")
+    {
+        messages.pop();
+    }
+    if let Some(current_prompt) = current_prompt
+        && messages.last().is_some_and(|message| {
+            message.role == "user" && message.text.trim() == current_prompt.trim()
+        })
+    {
+        messages.pop();
+    }
+    let facade = memory_facade(state);
+    let user = gateway_memory_user_id();
+    let workspace = MemoryWorkspaceId::new(workspace_id);
+    let now_unix = i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX);
+    let mut msgs: Vec<ChatContextMessage> = messages
+        .iter()
+        .filter_map(|message| {
+            context_message_for_model(facade, (&user, &workspace), message, now_unix)
         })
         .collect();
     let len = msgs.len();
@@ -32163,6 +32271,14 @@ fn agent_turn_context(
         msgs.drain(0..len - 16);
     }
     Some(msgs)
+}
+
+fn agent_turn_context(
+    state: &AppState,
+    thread_id: &str,
+    skip_message_ids: &[&str],
+) -> Option<Vec<ChatContextMessage>> {
+    thread_context_for_model(state, thread_id, skip_message_ids, None)
 }
 
 fn apply_agent_stream_line(
@@ -32213,6 +32329,102 @@ fn update_channel_assistant_message(
     }));
 }
 
+fn memory_reuse_envelope_from_read_set(
+    reads: &local_first_engine::events::TurnMemoryReadSet,
+) -> local_first_memory::MemoryReuseEnvelope {
+    if reads.is_blocked_unknown() {
+        return local_first_memory::MemoryReuseEnvelope::blocked_unknown();
+    }
+    if !reads.has_linked_reads() {
+        return local_first_memory::MemoryReuseEnvelope::normal();
+    }
+    local_first_memory::MemoryReuseEnvelope::user_input_only(
+        reads
+            .linked
+            .iter()
+            .map(|read| local_first_memory::LinkedMemoryReadRef {
+                source_workspace_id: read.source_workspace_id.clone(),
+                grant_id: read.grant_id.clone(),
+                policy_version: read.policy_version,
+                memory_ref: read.memory_ref.clone(),
+                source_revision: read.source_revision.clone(),
+            })
+            .collect(),
+    )
+}
+
+#[derive(Debug, Default)]
+struct StreamMemoryReuseCollector {
+    event_parts: Vec<serde_json::Value>,
+    reads: local_first_engine::events::TurnMemoryReadSet,
+}
+
+impl StreamMemoryReuseCollector {
+    fn observe_line(&mut self, line: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            return;
+        };
+        if value.get("type").and_then(serde_json::Value::as_str) != Some("recall") {
+            return;
+        }
+        let Some(payload_value) = value.get("payload").cloned() else {
+            self.reads.blocked_unknown = true;
+            return;
+        };
+        let part = serde_json::json!({
+            "type": "recall",
+            "payload": payload_value,
+        });
+        if !self.event_parts.contains(&part) {
+            self.event_parts.push(part);
+        }
+        match serde_json::from_value::<local_first_subagents::RecallStreamPayload>(payload_value) {
+            Ok(payload) => self.reads.extend_payload(&payload),
+            Err(_) => self.reads.blocked_unknown = true,
+        }
+    }
+
+    fn event_parts(&self) -> &[serde_json::Value] {
+        &self.event_parts
+    }
+
+    fn envelope(&self) -> local_first_memory::MemoryReuseEnvelope {
+        memory_reuse_envelope_from_read_set(&self.reads)
+    }
+}
+
+fn finalize_streamed_assistant_message(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    text: &str,
+    collector: &StreamMemoryReuseCollector,
+) {
+    if let Ok(store) = lock_store(state) {
+        if let Err(error) = store.finalize_assistant_message(
+            thread_id,
+            message_id,
+            text,
+            collector.event_parts(),
+            &collector.envelope(),
+        ) {
+            tracing::warn!(
+                target: "gateway::memory_firewall",
+                %thread_id,
+                %message_id,
+                %error,
+                "atomic assistant finalization failed; retaining fail-closed placeholder envelope"
+            );
+            let _ = store.set_message_text(thread_id, message_id, text);
+        }
+    }
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+    }));
+}
+
 async fn drain_agent_stream_into_message(
     state: &AppState,
     thread_id: &str,
@@ -32223,6 +32435,7 @@ async fn drain_agent_stream_into_message(
     let mut final_text: Option<String> = None;
     let mut last_flush = std::time::Instant::now();
     let mut last_flushed_len = 0usize;
+    let mut memory_reuse = StreamMemoryReuseCollector::default();
 
     let (snapshot, mut brx) = {
         let buf = entry.lines.lock().expect("stream lines lock");
@@ -32230,6 +32443,7 @@ async fn drain_agent_stream_into_message(
     };
     for line in snapshot {
         let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        memory_reuse.observe_line(&line);
         persist_recall_event_part(state, thread_id, assistant_message_id, &line);
         if streamed_text.len() != last_flushed_len
             && last_flush.elapsed() >= std::time::Duration::from_millis(200)
@@ -32252,6 +32466,7 @@ async fn drain_agent_stream_into_message(
         match brx.recv().await {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                memory_reuse.observe_line(&line);
                 persist_recall_event_part(state, thread_id, assistant_message_id, &line);
                 if streamed_text.len() != last_flushed_len
                     && last_flush.elapsed() >= std::time::Duration::from_millis(200)
@@ -32279,7 +32494,13 @@ async fn drain_agent_stream_into_message(
     if final_text.is_empty() {
         return None;
     }
-    update_channel_assistant_message(state, thread_id, assistant_message_id, &final_text);
+    finalize_streamed_assistant_message(
+        state,
+        thread_id,
+        assistant_message_id,
+        &final_text,
+        &memory_reuse,
+    );
     Some(final_text)
 }
 
@@ -32386,6 +32607,7 @@ async fn drain_agent_stream_into_message_with_fanout(
     let mut final_text: Option<String> = None;
     let mut last_flush = std::time::Instant::now();
     let mut last_flushed_len = 0usize;
+    let mut memory_reuse = StreamMemoryReuseCollector::default();
 
     let (snapshot, mut brx) = {
         let buf = entry.lines.lock().expect("stream lines lock");
@@ -32393,6 +32615,7 @@ async fn drain_agent_stream_into_message_with_fanout(
     };
     for line in snapshot {
         let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        memory_reuse.observe_line(&line);
         persist_recall_event_part(state, thread_id, assistant_message_id, &line);
         fanout_turn_event(state, turn_id, &line);
         if streamed_text.len() != last_flushed_len
@@ -32416,6 +32639,7 @@ async fn drain_agent_stream_into_message_with_fanout(
         match brx.recv().await {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                memory_reuse.observe_line(&line);
                 persist_recall_event_part(state, thread_id, assistant_message_id, &line);
                 fanout_turn_event(state, turn_id, &line);
                 if streamed_text.len() != last_flushed_len
@@ -32444,7 +32668,13 @@ async fn drain_agent_stream_into_message_with_fanout(
     if final_text.is_empty() {
         return None;
     }
-    update_channel_assistant_message(state, thread_id, assistant_message_id, &final_text);
+    finalize_streamed_assistant_message(
+        state,
+        thread_id,
+        assistant_message_id,
+        &final_text,
+        &memory_reuse,
+    );
     Some(final_text)
 }
 
@@ -33984,12 +34214,14 @@ impl local_first_engine::ContextCompactor for GatewayContextCompactor {
         &self,
         messages: &mut Vec<serde_json::Value>,
         context_window: Option<usize>,
+        memory_reads: &local_first_engine::events::TurnMemoryReadSet,
     ) {
         compact_for_context_budget(
             &self.state,
             messages,
             context_window,
             self.thread_id.as_deref(),
+            memory_reads,
         )
         .await;
     }
@@ -36463,6 +36695,7 @@ fn append_task_result_to_chat(
         linked_automation_ref: None,
         attachments: Vec::new(),
         event_parts: Vec::new(),
+        memory_reuse: None,
     };
     lock_store(state)?
         .append_assistant_message(&thread.thread_id, &message)
@@ -46934,6 +47167,91 @@ async fn integrity_repair_preview(
     )?))
 }
 
+fn linked_repair_gateway_error(error: LinkedRepairError) -> GatewayError {
+    match error {
+        LinkedRepairError::StalePreview | LinkedRepairError::ApprovalTokenMismatch => GatewayError {
+            status: StatusCode::CONFLICT,
+            code: "linked_memory_repair_preview_stale",
+            message: "linked-memory repair preview is stale".to_string(),
+        },
+        LinkedRepairError::BackupPathInvalid => {
+            integrity_bad_request("linked_memory_repair_backup_invalid")
+        }
+        LinkedRepairError::InjectedFailure
+        | LinkedRepairError::Database(_)
+        | LinkedRepairError::Io(_) => {
+            integrity_internal_error("linked_memory_repair_failed", error)
+        }
+    }
+}
+
+async fn linked_memory_repair_preview(
+    State(_state): State<AppState>,
+) -> Result<Json<LinkedMemoryRepairPreview>, GatewayError> {
+    let chat_path = gateway_database_path()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_failed", error))?;
+    let memory_path = gateway_memory_database_path()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_failed", error))?;
+    preview_linked_memory_repair(&chat_path, &memory_path)
+        .map(Json)
+        .map_err(linked_repair_gateway_error)
+}
+
+fn next_linked_memory_repair_backup_directory() -> Result<PathBuf, GatewayError> {
+    let timestamp = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    let parent = gateway_data_dir()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_backup_failed", error))?
+        .join("backups")
+        .join("linked-memory");
+    fs::create_dir_all(&parent).map_err(|error| {
+        integrity_internal_error("linked_memory_repair_backup_failed", error)
+    })?;
+    Ok(parent.join(format!(
+        "{timestamp}-{}",
+        uuid::Uuid::new_v4().simple()
+    )))
+}
+
+async fn linked_memory_repair_apply(
+    State(state): State<AppState>,
+    Json(request): Json<LinkedMemoryRepairApplyRequest>,
+) -> Result<Json<LinkedMemoryRepairApplyResponse>, GatewayError> {
+    if !request.confirm {
+        return Err(integrity_bad_request(
+            "linked_memory_repair_confirmation_required",
+        ));
+    }
+    let chat_path = gateway_database_path()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_failed", error))?;
+    let memory_path = gateway_memory_database_path()
+        .map_err(|error| integrity_internal_error("linked_memory_repair_failed", error))?;
+    let backup_directory = next_linked_memory_repair_backup_directory()?;
+    let chat_guard = state.chat_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        code: "chat_store_lock_error",
+        message: error.to_string(),
+    })?;
+    let result = apply_linked_memory_repair(
+        &chat_path,
+        &memory_path,
+        &backup_directory,
+        &request.preview,
+        LinkedRepairFailureInjection::None,
+    )
+    .map_err(linked_repair_gateway_error)?;
+    drop(chat_guard);
+    for workspace in &result.affected_workspaces {
+        if workspace != PERSONAL_WORKSPACE && workspace != THREADS_WORKSPACE {
+            rebuild_project_brief(
+                &state.memory_facade,
+                &gateway_memory_user_id(),
+                &MemoryWorkspaceId::new(workspace),
+            );
+        }
+    }
+    Ok(Json(result))
+}
+
 fn next_integrity_backup_path() -> Result<PathBuf, GatewayError> {
     let timestamp = OffsetDateTime::now_utc().unix_timestamp_nanos();
     let directory = gateway_data_dir()
@@ -48188,6 +48506,7 @@ async fn memory_wiki_save(
             None,
             None,
             None,
+            local_first_memory::MemoryReuseEnvelope::normal(),
         )
         .await;
         reconcile_memory_scope(&st, &reconcile_ws);
@@ -52444,6 +52763,9 @@ fn memory_publication_facade_error(error: MemoryError) -> GatewayError {
             "publication_preview_stale" => {
                 (StatusCode::CONFLICT, "publication_preview_stale")
             }
+            "linked_memory_read_only" => {
+                (StatusCode::CONFLICT, "linked_memory_read_only")
+            }
             "publication_conflict" | "publication_already_pending" | "publication_not_pending"
             | "publication_already_published"
             | "publication_source_inactive" | "publication_sensitivity_not_allowed" => {
@@ -52563,6 +52885,24 @@ async fn memory_publication_create(
     let owner = gateway_memory_user_id();
     let reference = parse_publication_reference(&request.source_ref, &owner, &source_workspace_id)?;
     let facade = memory_facade(&state);
+    if facade
+        .has_memory_source_grant_link(
+            &owner,
+            &destination_workspace_id,
+            &source_workspace_id,
+        )
+        .map_err(|_| {
+            memory_publication_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "memory_publication_store_error",
+            )
+        })?
+    {
+        return Err(memory_publication_error(
+            StatusCode::CONFLICT,
+            "linked_memory_read_only",
+        ));
+    }
     let source = facade
         .get_memory_for_ui(&reference, &owner, &source_workspace_id)
         .map_err(|_| {
@@ -55858,6 +56198,113 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn publication_rejects_active_revoked_and_expired_linked_sources() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let dir = isolated_gateway_test_dir("linked-publication-firewall");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, true);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let facade = super::memory_facade(&state);
+        let source = create_publication_route_memory(
+            facade,
+            owner.clone(),
+            "project-a",
+            "Linked answer cannot be copied",
+            local_first_memory::DataSensitivity::Private,
+        );
+        insert_test_source_grant(
+            facade,
+            &owner,
+            &local_first_memory::WorkspaceId::new("project-b"),
+            &local_first_memory::WorkspaceId::new("project-a"),
+            "grant-linked-publication",
+            local_first_memory::MemoryCollectionKey::Preferences,
+        );
+        let app = memory_publication_route_test_app(state.clone());
+        let request_body = serde_json::json!({
+            "source_ref": source.reference.to_string(),
+            "source_workspace_id": "project-a",
+            "destination_workspace_id": "project-b",
+        })
+        .to_string();
+
+        for expected_state in ["active", "revoked"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/memory/publications")
+                        .header("content-type", "application/json")
+                        .body(Body::from(request_body.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let (status, body) = memory_source_response_json(response).await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{expected_state}");
+            assert_eq!(body["error"]["code"], "linked_memory_read_only");
+            if expected_state == "active" {
+                facade
+                    .revoke_memory_source_grant(
+                        &owner,
+                        &local_first_memory::WorkspaceId::new("project-b"),
+                        "grant-linked-publication",
+                        2,
+                    )
+                    .unwrap();
+            }
+        }
+
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: "grant-expired-publication".to_string(),
+                consumer_user_id: owner.clone(),
+                consumer_workspace_id: local_first_memory::WorkspaceId::new("project-c"),
+                source_user_id: owner.clone(),
+                source_workspace_id: local_first_memory::WorkspaceId::new("project-a"),
+                collections: [local_first_memory::MemoryCollectionKey::Preferences]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Private,
+                overrides: std::collections::HashMap::new(),
+                expires_at: Some(1),
+                revoked_at: None,
+                policy_version: 1,
+                created_by: owner.as_str().to_string(),
+                created_at: "unix:1".to_string(),
+                updated_at: "unix:1".to_string(),
+            })
+            .unwrap();
+        let expired_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": source.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": "project-c",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, body) = memory_source_response_json(expired_response).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(body["error"]["code"], "linked_memory_read_only");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn memory_source_routes_return_disabled_before_body_or_query_parsing() {
         use axum::{body::Body, http::Request};
         use tower::ServiceExt;
@@ -57191,6 +57638,30 @@ mod tests {
         // result is never orphaned from its assistant tool_calls.
         let roles2 = ["system", "user", "a", "tool", "a", "tool", "a", "tool", "a", "user"];
         assert_eq!(context_compaction_span(&roles2, 2, 3), Some((2, 6)));
+    }
+
+    #[test]
+    fn linked_or_unknown_turns_never_create_compaction_checkpoints() {
+        let empty = local_first_engine::events::TurnMemoryReadSet::default();
+        assert!(super::compaction_checkpoint_allowed(&empty));
+
+        let linked = local_first_engine::events::TurnMemoryReadSet {
+            linked: vec![local_first_engine::events::LinkedMemoryRead {
+                source_workspace_id: "source-a".to_string(),
+                grant_id: "grant-a".to_string(),
+                policy_version: 1,
+                memory_ref: "memory:owner:source-a:fact-a".to_string(),
+                source_revision: "sha256:rev-a".to_string(),
+            }],
+            blocked_unknown: false,
+        };
+        assert!(!super::compaction_checkpoint_allowed(&linked));
+
+        let blocked = local_first_engine::events::TurnMemoryReadSet {
+            linked: Vec::new(),
+            blocked_unknown: true,
+        };
+        assert!(!super::compaction_checkpoint_allowed(&blocked));
     }
 
     #[test]
@@ -64354,6 +64825,225 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     }
 
     #[test]
+    fn automatic_recall_payload_preserves_graph_path() {
+        let pack = local_first_memory::RecallPack::from_hits(
+            "atlas".to_string(),
+            local_first_memory::MemoryScope::Project(MemoryWorkspaceId::new("project-a")),
+            vec![local_first_memory::RecallHit {
+                memory_ref: "memory:owner:project-a:related".to_string(),
+                text: "Related memory".to_string(),
+                score: 0.5,
+                kind: "fact".to_string(),
+                source_user_id: local_first_memory::UserId::new("owner"),
+                source_workspace_id: MemoryWorkspaceId::new("project-a"),
+                source_label: "Project A".to_string(),
+                collection: local_first_memory::MemoryCollectionKey::Knowledge,
+                grant_id: None,
+                policy_version: None,
+                source_revision: "sha256:test-revision".to_string(),
+                sensitivity: MemoryDataSensitivity::Internal,
+                status: local_first_memory::MemoryStatus::Confirmed,
+                updated_at: "unix:1800000000".to_string(),
+                subject_key: None,
+                conflict: false,
+                publication_link: None,
+                graph_path: vec!["mentions".to_string(), "mentions".to_string()],
+            }],
+        );
+
+        let payload = super::recall_stream_payload_from_pack(&pack);
+        let value = serde_json::to_value(payload).expect("serialize recall payload");
+        assert_eq!(
+            value["hits"][0]["graph_path"],
+            serde_json::json!(["mentions", "mentions"])
+        );
+    }
+
+    fn linked_recall_payload_for_turn() -> local_first_subagents::RecallStreamPayload {
+        local_first_subagents::RecallStreamPayload {
+            query: "linked fact".to_string(),
+            hits: vec![local_first_subagents::RecallStreamHit {
+                r#ref: "memory:owner:source-a:fact-a".to_string(),
+                text: "Linked fact".to_string(),
+                score: 0.9,
+                kind: "fact".to_string(),
+                source_workspace_id: "source-a".to_string(),
+                source_label: "Source A".to_string(),
+                collection: "knowledge".to_string(),
+                grant_id: Some("grant-a".to_string()),
+                policy_version: Some(3),
+                source_revision: Some("sha256:rev-a".to_string()),
+                conflict: false,
+                graph_path: Vec::new(),
+            }],
+            scope: "project".to_string(),
+        }
+    }
+
+    #[test]
+    fn automatic_recall_seeds_the_loop_read_set() {
+        let mut state = local_first_engine::LoopState::new();
+        let payload = linked_recall_payload_for_turn();
+
+        super::seed_loop_memory_reads(&mut state, Some(&payload));
+
+        assert_eq!(state.memory_reads.linked.len(), 1);
+        assert_eq!(state.memory_reads.linked[0].grant_id, "grant-a");
+    }
+
+    #[test]
+    fn explicit_recall_payload_becomes_tool_memory_read_effects() {
+        let payload = linked_recall_payload_for_turn();
+
+        let effects = super::memory_read_effects_from_recall_payload(&payload);
+
+        assert_eq!(effects.memory_reads.linked.len(), 1);
+        assert_eq!(effects.memory_reads.linked[0].grant_id, "grant-a");
+    }
+
+    #[test]
+    fn stream_memory_reuse_collector_attests_linked_reads() {
+        let payload = linked_recall_payload_for_turn();
+        let line = serde_json::json!({ "type": "recall", "payload": payload }).to_string();
+        let mut collector = super::StreamMemoryReuseCollector::default();
+
+        collector.observe_line(&line);
+
+        assert_eq!(collector.event_parts().len(), 1);
+        let envelope = collector.envelope();
+        assert_eq!(
+            envelope.write_policy,
+            local_first_memory::MemoryWritePolicy::UserInputOnly
+        );
+        assert_eq!(envelope.linked_reads.len(), 1);
+        assert_eq!(envelope.linked_reads[0].grant_id, "grant-a");
+    }
+
+    #[test]
+    fn stream_memory_reuse_collector_fails_closed_on_corrupt_recall() {
+        let line = serde_json::json!({
+            "type": "recall",
+            "payload": { "hits": [{ "grant_id": "grant-a" }] }
+        })
+        .to_string();
+        let mut collector = super::StreamMemoryReuseCollector::default();
+
+        collector.observe_line(&line);
+
+        assert_eq!(
+            collector.envelope().write_policy,
+            local_first_memory::MemoryWritePolicy::BlockedUnknown
+        );
+    }
+
+    #[test]
+    fn revoked_linked_answer_stays_visible_but_is_not_model_context() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let mut message = super::channel_chat_message("assistant", "NEBULA-7429");
+        message.memory_reuse = Some(
+            local_first_memory::MemoryReuseEnvelope::user_input_only(vec![
+                local_first_memory::LinkedMemoryReadRef {
+                    source_workspace_id: "source-a".to_string(),
+                    grant_id: "revoked-grant".to_string(),
+                    policy_version: 2,
+                    memory_ref: "memory:owner:source-a:fact-a".to_string(),
+                    source_revision: "sha256:rev-a".to_string(),
+                },
+            ]),
+        );
+
+        assert!(message.text.contains("NEBULA-7429"));
+        let context = super::context_message_for_model(
+            &facade,
+            (
+                &local_first_memory::UserId::new("owner"),
+                &local_first_memory::WorkspaceId::new("project-a"),
+            ),
+            &message,
+            1_800_000_000,
+        )
+        .unwrap();
+
+        assert!(!context.text.contains("NEBULA-7429"));
+    }
+
+    #[test]
+    fn one_invalid_linked_read_excludes_the_whole_assistant_message() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let mut message = super::channel_chat_message("assistant", "MULTI-GRANT-SENTINEL");
+        message.memory_reuse = Some(
+            local_first_memory::MemoryReuseEnvelope::user_input_only(vec![
+                local_first_memory::LinkedMemoryReadRef {
+                    source_workspace_id: "source-a".to_string(),
+                    grant_id: "grant-a".to_string(),
+                    policy_version: 1,
+                    memory_ref: "memory:owner:source-a:fact-a".to_string(),
+                    source_revision: "sha256:rev-a".to_string(),
+                },
+                local_first_memory::LinkedMemoryReadRef {
+                    source_workspace_id: "source-b".to_string(),
+                    grant_id: "grant-b".to_string(),
+                    policy_version: 1,
+                    memory_ref: "memory:owner:source-b:fact-b".to_string(),
+                    source_revision: "sha256:rev-b".to_string(),
+                },
+            ]),
+        );
+
+        let context = super::context_message_for_model(
+            &facade,
+            (
+                &local_first_memory::UserId::new("owner"),
+                &local_first_memory::WorkspaceId::new("project-a"),
+            ),
+            &message,
+            1_800_000_000,
+        )
+        .unwrap();
+        assert!(!context.text.contains("MULTI-GRANT-SENTINEL"));
+    }
+
+    #[test]
+    fn persisted_thread_context_is_filtered_server_side() {
+        let state = super::AppState::for_tests();
+        let (thread_id, blocked_id) = {
+            let store = state.chat_store.lock().unwrap();
+            let thread = store.create_thread("project-a").unwrap();
+            let mut blocked = super::channel_chat_message("assistant", "SERVER-ONLY-SENTINEL");
+            blocked.memory_reuse = Some(
+                local_first_memory::MemoryReuseEnvelope::blocked_unknown(),
+            );
+            let blocked_id = blocked.id.clone();
+            store
+                .append_assistant_message(&thread.thread_id, &blocked)
+                .unwrap();
+            (thread.thread_id, blocked_id)
+        };
+
+        let context = super::thread_context_for_model(&state, &thread_id, &[], None).unwrap();
+
+        assert!(state
+            .chat_store
+            .lock()
+            .unwrap()
+            .message(&thread_id, &blocked_id)
+            .unwrap()
+            .unwrap()
+            .text
+            .contains("SERVER-ONLY-SENTINEL"));
+        assert!(!context
+            .iter()
+            .any(|message| message.text.contains("SERVER-ONLY-SENTINEL")));
+        assert!(context
+            .iter()
+            .any(|message| message.text == super::LINKED_MEMORY_CONTEXT_OMITTED));
+    }
+
+    #[test]
     fn sandbox_terminal_owner_is_only_live_while_command_runs() {
         super::sandbox_clear(Some("thread-live-owner".to_string()));
         super::sandbox_begin(
@@ -66514,6 +67204,39 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             None => unsafe {
                 std::env::remove_var("HOMUN_USER_ID");
             },
+        }
+    }
+
+    #[test]
+    fn recall_memory_does_not_relabel_thread_episodes_as_local_hits() {
+        let _flag = TestMemorySourcesFlag::set(Some("off"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "episode-bypass-user");
+        }
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("episode-bypass-user");
+        super::store_episode(
+            &facade,
+            &user,
+            "thread-episode-bypass",
+            "NEBULA-7429 appeared in an older conversation",
+            "project-a",
+        );
+        let state = test_app_state_for_brief(facade);
+        super::set_memory_workspace("project-a");
+
+        let outcome = super::recall_memory(&state, "NEBULA-7429");
+
+        assert!(!outcome.response.contains("older conversation"));
+        assert!(!outcome.payload.hits.iter().any(|hit| {
+            hit.kind == "conversation" && hit.grant_id.is_none() && hit.r#ref.is_empty()
+        }));
+        match previous_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value) },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID") },
         }
     }
 

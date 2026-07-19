@@ -937,6 +937,34 @@ impl SQLiteMemoryStore {
         Ok(grant)
     }
 
+    /// Returns whether this exact source -> consumer relationship has ever
+    /// been authorized. Revocation and expiry deliberately do not erase the
+    /// ledger entry: disconnecting a source never grants copy rights.
+    pub fn has_memory_source_grant_link(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        source_workspace_id: &WorkspaceId,
+    ) -> MemorySourceGrantStoreResult<bool> {
+        let conn = self.read_conn();
+        conn.query_row(
+            "select exists(
+                select 1 from memory_source_grants
+                where consumer_user_id = ?1
+                  and consumer_workspace_id = ?2
+                  and source_user_id = ?1
+                  and source_workspace_id = ?3
+            )",
+            (
+                consumer_user_id.as_str(),
+                consumer_workspace_id.as_str(),
+                source_workspace_id.as_str(),
+            ),
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(MemorySourceGrantStoreError::store)
+    }
+
     pub fn revoke_memory_source_grant(
         &self,
         consumer_user_id: &UserId,
@@ -2905,6 +2933,57 @@ impl SQLiteMemoryStore {
                 source_ref.to_string(),
                 user_id.as_str().to_string(),
                 workspace_id.as_str().to_string(),
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut relations = Vec::new();
+        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
+            relations.push(relation_from_row(row)?);
+        }
+        Ok(relations)
+    }
+
+    /// Returns live graph edges touching one exact node. This is intentionally
+    /// scoped by owner and workspace so a recall traversal cannot use a graph
+    /// edge as a bridge into another memory source.
+    pub(crate) fn visible_relations_touching_exact(
+        &self,
+        node_ref: &MemoryRef,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        limit: usize,
+    ) -> Result<Vec<MemoryRelation>, String> {
+        if limit == 0
+            || node_ref.user_id != *user_id
+            || node_ref.workspace_id != *workspace_id
+        {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let conn = self.read_conn();
+        let mut statement = conn
+            .prepare(
+                "select r.ref, r.user_id, r.workspace_id, r.source_ref, r.relation_type,
+                        r.target_ref, r.confidence, r.privacy_domain, r.sensitivity,
+                        r.evidence_json, r.metadata_json
+                 from relations r
+                 where (r.source_ref = ?1 or r.target_ref = ?1)
+                   and r.user_id = ?2 and r.workspace_id = ?3
+                   and not exists (
+                       select 1 from tombstones t
+                       where t.ref = r.ref
+                         and t.user_id = r.user_id
+                         and t.workspace_id = r.workspace_id
+                   )
+                 order by r.ref
+                 limit ?4",
+            )
+            .map_err(|error| error.to_string())?;
+        let mut rows = statement
+            .query((
+                node_ref.to_string(),
+                user_id.as_str().to_string(),
+                workspace_id.as_str().to_string(),
+                limit,
             ))
             .map_err(|error| error.to_string())?;
         let mut relations = Vec::new();
@@ -5210,6 +5289,60 @@ mod fts_query_tests {
         assert!(q.contains(" OR "), "not OR: {q}");
         assert!(!q.contains("\"of\""), "must not include token <3: {q}");
         assert_eq!(fts_or_query("?? !! a b"), "");
+    }
+}
+
+#[cfg(test)]
+mod graph_scan_tests {
+    use super::*;
+
+    #[test]
+    fn touching_relation_query_applies_its_limit_in_sql() {
+        let store = SQLiteMemoryStore::open_in_memory().expect("store");
+        let user = UserId::new("scan-user");
+        let workspace = WorkspaceId::new("scan-workspace");
+        let node = MemoryRef::new(
+            MemoryRefKind::Entity,
+            user.clone(),
+            workspace.clone(),
+            "node",
+        );
+
+        for index in 0..3 {
+            let target = MemoryRef::new(
+                MemoryRefKind::Entity,
+                user.clone(),
+                workspace.clone(),
+                format!("target-{index}"),
+            );
+            store
+                .upsert_relation(&MemoryRelation {
+                    reference: MemoryRef::new(
+                        MemoryRefKind::Relation,
+                        user.clone(),
+                        workspace.clone(),
+                        format!("relation-{index}"),
+                    ),
+                    user_id: user.clone(),
+                    workspace_id: workspace.clone(),
+                    source_ref: node.clone(),
+                    relation_type: "relates_to".to_string(),
+                    target_ref: target,
+                    confidence: 1.0,
+                    privacy_domain: PrivacyDomain::new("work"),
+                    sensitivity: DataSensitivity::Private,
+                    evidence: Vec::new(),
+                    metadata: serde_json::json!({}),
+                })
+                .expect("relation");
+        }
+
+        let relations = store
+            .visible_relations_touching_exact(&node, &user, &workspace, 2)
+            .expect("bounded graph query");
+        assert_eq!(relations.len(), 2);
+        assert_eq!(relations[0].reference.key, "relation-0");
+        assert_eq!(relations[1].reference.key, "relation-1");
     }
 }
 

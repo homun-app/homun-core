@@ -35,9 +35,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
 use crate::{
-    DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryScope, MemoryStatus, UserId,
-    WorkspaceId,
+    DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryRecord, MemoryScope, MemoryStatus,
+    UserId, WorkspaceId,
 };
 
 /// Un blocco di testo già formattato pronto da accodare al system prompt.
@@ -114,6 +117,8 @@ pub struct RecallHit {
     /// Versione esatta della policy del grant usata per produrre l'hit.
     /// `None` per la fonte locale implicita.
     pub policy_version: Option<u64>,
+    /// SHA-256 della serializzazione canonica del record autorizzato.
+    pub source_revision: String,
     pub sensitivity: DataSensitivity,
     pub status: MemoryStatus,
     pub updated_at: String,
@@ -124,6 +129,16 @@ pub struct RecallHit {
     /// Identita del collegamento di pubblicazione, quando disponibile. Due copie
     /// che condividono questo valore rappresentano la stessa conoscenza canonica.
     pub publication_link: Option<String>,
+    /// Relazioni canoniche percorse dal seed fino a questo hit. Vuoto per gli
+    /// hit trovati direttamente dalla query.
+    pub graph_path: Vec<String>,
+}
+
+/// Revisione stabile usata per invalidare una risposta quando il record source
+/// cambia senza affidarsi al solo timestamp.
+pub fn memory_record_revision(record: &MemoryRecord) -> String {
+    let encoded = serde_json::to_vec(record).expect("MemoryRecord is serializable");
+    format!("sha256:{:x}", Sha256::digest(encoded))
 }
 
 /// Risultato della recall RAG episodica — contesto *mirato* alla query.
@@ -220,12 +235,12 @@ pub fn format_recall_hits(hits: &[RecallHit]) -> Option<String> {
     let normal = hits
         .iter()
         .filter(|hit| !hit.conflict)
-        .map(|hit| format!("- [source: {}] {}", hit.source_label, hit.text))
+        .map(format_recall_hit)
         .collect::<Vec<_>>();
     let conflicting = hits
         .iter()
         .filter(|hit| hit.conflict)
-        .map(|hit| format!("- [source: {}] {}", hit.source_label, hit.text))
+        .map(format_recall_hit)
         .collect::<Vec<_>>();
     let mut sections = Vec::new();
     if !normal.is_empty() {
@@ -238,6 +253,88 @@ pub fn format_recall_hits(hits: &[RecallHit]) -> Option<String> {
         ));
     }
     Some(sections.join("\n\n"))
+}
+
+fn format_recall_hit(hit: &RecallHit) -> String {
+    if hit.graph_path.is_empty() {
+        format!("- [source: {}] {}", hit.source_label, hit.text)
+    } else {
+        format!(
+            "- [source: {}; graph: {}] {}",
+            hit.source_label,
+            hit.graph_path.join(" -> "),
+            hit.text
+        )
+    }
+}
+
+/// Decisione attestata sul materiale che puo essere riutilizzato dopo un turno.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryWritePolicy {
+    Normal,
+    UserInputOnly,
+    BlockedUnknown,
+}
+
+/// Identificativi sufficienti a rivalidare una lettura collegata senza
+/// duplicarne il contenuto nel transcript o nell'audit.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LinkedMemoryReadRef {
+    pub source_workspace_id: String,
+    pub grant_id: String,
+    pub policy_version: u64,
+    pub memory_ref: String,
+    pub source_revision: String,
+}
+
+/// Provenienza persistita con la risposta dell'assistente.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryReuseEnvelope {
+    pub write_policy: MemoryWritePolicy,
+    #[serde(default)]
+    pub linked_reads: Vec<LinkedMemoryReadRef>,
+}
+
+impl MemoryReuseEnvelope {
+    pub fn normal() -> Self {
+        Self {
+            write_policy: MemoryWritePolicy::Normal,
+            linked_reads: Vec::new(),
+        }
+    }
+
+    pub fn user_input_only(mut linked_reads: Vec<LinkedMemoryReadRef>) -> Self {
+        linked_reads.sort();
+        linked_reads.dedup();
+        Self {
+            write_policy: MemoryWritePolicy::UserInputOnly,
+            linked_reads,
+        }
+    }
+
+    pub fn blocked_unknown() -> Self {
+        Self {
+            write_policy: MemoryWritePolicy::BlockedUnknown,
+            linked_reads: Vec::new(),
+        }
+    }
+}
+
+impl Default for MemoryReuseEnvelope {
+    fn default() -> Self {
+        Self::blocked_unknown()
+    }
+}
+
+/// Testo gia ridotto al solo materiale che la write policy consente di
+/// consegnare all'extractor. Non contiene provenance o payload source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LearnMaterial {
+    pub user_message: String,
+    pub assistant_message: String,
+    pub actions: String,
+    pub prev_assistant: Option<String>,
 }
 
 /// Uno scambio completo turno utente↔assistente, input di [`MemoryRecallService::learn`].
@@ -259,6 +356,35 @@ pub struct Exchange {
     pub speaker: Option<String>,
     /// Risposta assistente del turno precedente, per groundare le conferme.
     pub prev_assistant: Option<String>,
+    /// Attestazione obbligatoria del materiale riusabile per questo turno.
+    /// Il default e intenzionalmente fail-closed.
+    pub reuse_envelope: MemoryReuseEnvelope,
+}
+
+impl Exchange {
+    pub fn learn_material(&self) -> Option<LearnMaterial> {
+        match self.reuse_envelope.write_policy {
+            MemoryWritePolicy::Normal if self.reuse_envelope.linked_reads.is_empty() => {
+                Some(LearnMaterial {
+                    user_message: self.user_message.clone(),
+                    assistant_message: self.assistant_message.clone(),
+                    actions: self.actions.clone(),
+                    prev_assistant: self.prev_assistant.clone(),
+                })
+            }
+            MemoryWritePolicy::UserInputOnly if !self.reuse_envelope.linked_reads.is_empty() => {
+                Some(LearnMaterial {
+                    user_message: self.user_message.clone(),
+                    assistant_message: String::new(),
+                    actions: String::new(),
+                    prev_assistant: None,
+                })
+            }
+            MemoryWritePolicy::Normal
+            | MemoryWritePolicy::UserInputOnly
+            | MemoryWritePolicy::BlockedUnknown => None,
+        }
+    }
 }
 
 /// Alias per un future boxed `Send` — serve a rendere il trait object-safe

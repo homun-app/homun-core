@@ -16,6 +16,8 @@ pub struct TurnOutcome {
     /// The turn's consequential tool actions, newline-joined — the "why" the learn extractor records
     /// alongside the answer.
     pub tool_actions: String,
+    /// Provenance delle letture collegate che hanno informato la risposta.
+    pub memory_reads: crate::events::TurnMemoryReadSet,
     /// The source URLs actually visited this turn (the browser_navigate targets), in first-seen order.
     /// The MAIN path already folds these into the answer's "Fonti" section and ignores this field; it
     /// exists for ADR 0025's `browse(goal)` recursion, where the sub-turn's `BrowseResult.sources` is
