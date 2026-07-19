@@ -8,6 +8,7 @@ pub mod workspace_delete;
 // (ADR 0024 inc 5e.3, pure); re-exported so `local_first_desktop_gateway::markers::…` call sites
 // (main.rs, chat_store.rs) are unchanged. Mirror of the frontend's `lib/markers.ts`.
 pub use local_first_engine::markers;
+pub use local_first_memory::{LinkedMemoryReadRef, MemoryReuseEnvelope, MemoryWritePolicy};
 
 use local_first_context_compression::{
     CompressionMetrics, CompressionPolicy, CompressionResult, ContextCompressor, ContextItem,
@@ -219,6 +220,8 @@ pub struct ChatMessage {
     pub attachments: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub event_parts: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_reuse: Option<MemoryReuseEnvelope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -330,6 +333,7 @@ pub fn seeded_ready_message(thread_id: &str, timestamp: String) -> ChatMessage {
         linked_automation_ref: None,
         attachments: Vec::new(),
         event_parts: Vec::new(),
+        memory_reuse: None,
     }
 }
 

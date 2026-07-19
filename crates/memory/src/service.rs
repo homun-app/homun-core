@@ -36,6 +36,7 @@ use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryRecord, MemoryScope, MemoryStatus,
@@ -264,6 +265,59 @@ fn format_recall_hit(hit: &RecallHit) -> String {
             hit.graph_path.join(" -> "),
             hit.text
         )
+    }
+}
+
+/// Decisione attestata sul materiale che puo essere riutilizzato dopo un turno.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryWritePolicy {
+    Normal,
+    UserInputOnly,
+    BlockedUnknown,
+}
+
+/// Identificativi sufficienti a rivalidare una lettura collegata senza
+/// duplicarne il contenuto nel transcript o nell'audit.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LinkedMemoryReadRef {
+    pub source_workspace_id: String,
+    pub grant_id: String,
+    pub policy_version: u64,
+    pub memory_ref: String,
+    pub source_revision: String,
+}
+
+/// Provenienza persistita con la risposta dell'assistente.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryReuseEnvelope {
+    pub write_policy: MemoryWritePolicy,
+    #[serde(default)]
+    pub linked_reads: Vec<LinkedMemoryReadRef>,
+}
+
+impl MemoryReuseEnvelope {
+    pub fn normal() -> Self {
+        Self {
+            write_policy: MemoryWritePolicy::Normal,
+            linked_reads: Vec::new(),
+        }
+    }
+
+    pub fn user_input_only(mut linked_reads: Vec<LinkedMemoryReadRef>) -> Self {
+        linked_reads.sort();
+        linked_reads.dedup();
+        Self {
+            write_policy: MemoryWritePolicy::UserInputOnly,
+            linked_reads,
+        }
+    }
+
+    pub fn blocked_unknown() -> Self {
+        Self {
+            write_policy: MemoryWritePolicy::BlockedUnknown,
+            linked_reads: Vec::new(),
+        }
     }
 }
 

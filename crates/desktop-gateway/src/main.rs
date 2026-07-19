@@ -32008,6 +32008,7 @@ fn channel_chat_message(role: &str, text: &str) -> ChatMessage {
         linked_automation_ref: None,
         attachments: Vec::new(),
         event_parts: Vec::new(),
+        memory_reuse: None,
     }
 }
 
@@ -32089,7 +32090,9 @@ fn start_visible_conversation_turn(
         Some(id) => channel_chat_message_with_id("user", user_text, id),
         None => channel_chat_message("user", user_text),
     };
-    let assistant_message = channel_chat_message("assistant", "…");
+    let mut assistant_message = channel_chat_message("assistant", "…");
+    assistant_message.memory_reuse =
+        Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
     let turn = VisibleConversationTurn {
         turn_id: match turn_id_override {
             Some(id) => id.to_string(),
@@ -32243,6 +32246,96 @@ fn update_channel_assistant_message(
     }));
 }
 
+#[derive(Debug, Default)]
+struct StreamMemoryReuseCollector {
+    event_parts: Vec<serde_json::Value>,
+    reads: local_first_engine::events::TurnMemoryReadSet,
+}
+
+impl StreamMemoryReuseCollector {
+    fn observe_line(&mut self, line: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            return;
+        };
+        if value.get("type").and_then(serde_json::Value::as_str) != Some("recall") {
+            return;
+        }
+        let Some(payload_value) = value.get("payload").cloned() else {
+            self.reads.blocked_unknown = true;
+            return;
+        };
+        let part = serde_json::json!({
+            "type": "recall",
+            "payload": payload_value,
+        });
+        if !self.event_parts.contains(&part) {
+            self.event_parts.push(part);
+        }
+        match serde_json::from_value::<local_first_subagents::RecallStreamPayload>(payload_value) {
+            Ok(payload) => self.reads.extend_payload(&payload),
+            Err(_) => self.reads.blocked_unknown = true,
+        }
+    }
+
+    fn event_parts(&self) -> &[serde_json::Value] {
+        &self.event_parts
+    }
+
+    fn envelope(&self) -> local_first_memory::MemoryReuseEnvelope {
+        if self.reads.is_blocked_unknown() {
+            return local_first_memory::MemoryReuseEnvelope::blocked_unknown();
+        }
+        if !self.reads.has_linked_reads() {
+            return local_first_memory::MemoryReuseEnvelope::normal();
+        }
+        local_first_memory::MemoryReuseEnvelope::user_input_only(
+            self.reads
+                .linked
+                .iter()
+                .map(|read| local_first_memory::LinkedMemoryReadRef {
+                    source_workspace_id: read.source_workspace_id.clone(),
+                    grant_id: read.grant_id.clone(),
+                    policy_version: read.policy_version,
+                    memory_ref: read.memory_ref.clone(),
+                    source_revision: read.source_revision.clone(),
+                })
+                .collect(),
+        )
+    }
+}
+
+fn finalize_streamed_assistant_message(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    text: &str,
+    collector: &StreamMemoryReuseCollector,
+) {
+    if let Ok(store) = lock_store(state) {
+        if let Err(error) = store.finalize_assistant_message(
+            thread_id,
+            message_id,
+            text,
+            collector.event_parts(),
+            &collector.envelope(),
+        ) {
+            tracing::warn!(
+                target: "gateway::memory_firewall",
+                %thread_id,
+                %message_id,
+                %error,
+                "atomic assistant finalization failed; retaining fail-closed placeholder envelope"
+            );
+            let _ = store.set_message_text(thread_id, message_id, text);
+        }
+    }
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+    }));
+}
+
 async fn drain_agent_stream_into_message(
     state: &AppState,
     thread_id: &str,
@@ -32253,6 +32346,7 @@ async fn drain_agent_stream_into_message(
     let mut final_text: Option<String> = None;
     let mut last_flush = std::time::Instant::now();
     let mut last_flushed_len = 0usize;
+    let mut memory_reuse = StreamMemoryReuseCollector::default();
 
     let (snapshot, mut brx) = {
         let buf = entry.lines.lock().expect("stream lines lock");
@@ -32260,6 +32354,7 @@ async fn drain_agent_stream_into_message(
     };
     for line in snapshot {
         let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        memory_reuse.observe_line(&line);
         persist_recall_event_part(state, thread_id, assistant_message_id, &line);
         if streamed_text.len() != last_flushed_len
             && last_flush.elapsed() >= std::time::Duration::from_millis(200)
@@ -32282,6 +32377,7 @@ async fn drain_agent_stream_into_message(
         match brx.recv().await {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                memory_reuse.observe_line(&line);
                 persist_recall_event_part(state, thread_id, assistant_message_id, &line);
                 if streamed_text.len() != last_flushed_len
                     && last_flush.elapsed() >= std::time::Duration::from_millis(200)
@@ -32309,7 +32405,13 @@ async fn drain_agent_stream_into_message(
     if final_text.is_empty() {
         return None;
     }
-    update_channel_assistant_message(state, thread_id, assistant_message_id, &final_text);
+    finalize_streamed_assistant_message(
+        state,
+        thread_id,
+        assistant_message_id,
+        &final_text,
+        &memory_reuse,
+    );
     Some(final_text)
 }
 
@@ -32416,6 +32518,7 @@ async fn drain_agent_stream_into_message_with_fanout(
     let mut final_text: Option<String> = None;
     let mut last_flush = std::time::Instant::now();
     let mut last_flushed_len = 0usize;
+    let mut memory_reuse = StreamMemoryReuseCollector::default();
 
     let (snapshot, mut brx) = {
         let buf = entry.lines.lock().expect("stream lines lock");
@@ -32423,6 +32526,7 @@ async fn drain_agent_stream_into_message_with_fanout(
     };
     for line in snapshot {
         let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+        memory_reuse.observe_line(&line);
         persist_recall_event_part(state, thread_id, assistant_message_id, &line);
         fanout_turn_event(state, turn_id, &line);
         if streamed_text.len() != last_flushed_len
@@ -32446,6 +32550,7 @@ async fn drain_agent_stream_into_message_with_fanout(
         match brx.recv().await {
             Ok(line) => {
                 let terminal = apply_agent_stream_line(&line, &mut streamed_text, &mut final_text);
+                memory_reuse.observe_line(&line);
                 persist_recall_event_part(state, thread_id, assistant_message_id, &line);
                 fanout_turn_event(state, turn_id, &line);
                 if streamed_text.len() != last_flushed_len
@@ -32474,7 +32579,13 @@ async fn drain_agent_stream_into_message_with_fanout(
     if final_text.is_empty() {
         return None;
     }
-    update_channel_assistant_message(state, thread_id, assistant_message_id, &final_text);
+    finalize_streamed_assistant_message(
+        state,
+        thread_id,
+        assistant_message_id,
+        &final_text,
+        &memory_reuse,
+    );
     Some(final_text)
 }
 
@@ -36493,6 +36604,7 @@ fn append_task_result_to_chat(
         linked_automation_ref: None,
         attachments: Vec::new(),
         event_parts: Vec::new(),
+        memory_reuse: None,
     };
     lock_store(state)?
         .append_assistant_message(&thread.thread_id, &message)
@@ -64458,6 +64570,41 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
 
         assert_eq!(effects.memory_reads.linked.len(), 1);
         assert_eq!(effects.memory_reads.linked[0].grant_id, "grant-a");
+    }
+
+    #[test]
+    fn stream_memory_reuse_collector_attests_linked_reads() {
+        let payload = linked_recall_payload_for_turn();
+        let line = serde_json::json!({ "type": "recall", "payload": payload }).to_string();
+        let mut collector = super::StreamMemoryReuseCollector::default();
+
+        collector.observe_line(&line);
+
+        assert_eq!(collector.event_parts().len(), 1);
+        let envelope = collector.envelope();
+        assert_eq!(
+            envelope.write_policy,
+            local_first_memory::MemoryWritePolicy::UserInputOnly
+        );
+        assert_eq!(envelope.linked_reads.len(), 1);
+        assert_eq!(envelope.linked_reads[0].grant_id, "grant-a");
+    }
+
+    #[test]
+    fn stream_memory_reuse_collector_fails_closed_on_corrupt_recall() {
+        let line = serde_json::json!({
+            "type": "recall",
+            "payload": { "hits": [{ "grant_id": "grant-a" }] }
+        })
+        .to_string();
+        let mut collector = super::StreamMemoryReuseCollector::default();
+
+        collector.observe_line(&line);
+
+        assert_eq!(
+            collector.envelope().write_policy,
+            local_first_memory::MemoryWritePolicy::BlockedUnknown
+        );
     }
 
     #[test]
