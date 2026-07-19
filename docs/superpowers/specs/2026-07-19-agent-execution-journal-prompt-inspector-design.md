@@ -213,19 +213,18 @@ pub struct PromptSnapshot {
 }
 
 pub struct PromptMessageSnapshot {
-    pub position: usize,
     pub role: String,
     pub content: serde_json::Value,
-    pub content_chars: usize,
-    pub content_hash: String,
+    pub chars: usize,
+    pub sha256: String,
     pub redacted: bool,
 }
 
 pub struct PromptToolSnapshot {
-    pub position: usize,
-    pub name: String,
-    pub schema_chars: usize,
-    pub schema_hash: String,
+    pub name: Option<String>,
+    pub schema: serde_json::Value,
+    pub chars: usize,
+    pub sha256: String,
 }
 ```
 
@@ -235,10 +234,10 @@ Regole:
 - `content` contiene esclusivamente la versione redatta;
 - immagini data URL diventano metadati `{kind, mime_type, byte_length, sha256}`;
 - chiavi e valori noti come sensibili sono rimossi prima della serializzazione;
-- tool schema completi non vengono duplicati: nome, dimensione e hash bastano a verificare quale schema fosse attivo;
-- `fingerprint` è calcolato sulla rappresentazione canonica redatta più gli hash degli schemi;
-- ogni snapshot ha un limite serializzato di 64 KiB; oltre il limite, i contenuti più vecchi sono sostituiti da marker con hash e dimensione, senza alterare ordine e fingerprint complessivo;
-- la redazione usa il percorso canonico già disponibile nel gateway, non una seconda implementazione divergente nel `TaskStore`.
+- i tool schema restano ordinati e ispezionabili; se uno schema rende lo snapshot troppo grande viene sostituito da un marker con hash e dimensione;
+- `fingerprint` è calcolato sulla richiesta canonica effettiva e viene persistito esclusivamente come SHA-256, mai come copia raw;
+- ogni snapshot ha un limite serializzato di 64 KiB; oltre il limite, contenuti e schemi grandi diventano marker verificabili e, solo se necessario, la coda eccedente viene omessa con contatori espliciti;
+- la redazione avviene nell'adapter gateway immediatamente prima dell'accodamento al writer; il `TaskStore` riceve soltanto JSON già redatto.
 
 ## Prompt Inspector API
 
@@ -262,18 +261,17 @@ Comportamento:
 
 ## Recovery, cancellazione e retention
 
-- Al boot, quando un `chat_turn` running viene recuperato, l'ultimo `agent_run` ancora `running` viene chiuso come `aborted` con `terminal_reason=lease_expired_at_boot`.
+- Al boot ogni `agent_run` ancora `running` viene chiuso come `aborted` con `terminal_reason=gateway_restart`; il recovery lease-aware della task conserva separatamente il marker pubblico `lease_expired_at_boot`.
 - Il nuovo tentativo riceve un nuovo `run_id` e `attempt`; gli eventi precedenti non vengono sovrascritti.
 - La cancellazione di un thread/workspace elimina anche run ed eventi correlati nello stesso flusso di purge già esistente, filtrando sulle colonne scope di `agent_runs`; la correttezza non dipende dalla presenza di una riga `tasks` già cancellata.
-- V1 conserva gli ultimi 20 run per thread e tutti i run non terminali. La potatura avviene dopo la chiusura di un run, best-effort.
+- V1 conserva i run terminali per 30 giorni e tutti i run non terminali. Al boot elimina al massimo 1.000 run scaduti per passaggio; gli eventi vengono rimossi in cascata con il run.
 - Il journal non è ancora usato per riprendere un `LoopState`; nessun codice deve fingere una garanzia di exactly-once.
 
 ## Sicurezza e privacy
 
 - Il journal è redatto **prima** della persistenza.
 - API key, PIN, token OAuth, segreti Vault, valori sensibili e payload immagine raw non possono apparire in `payload_json`.
-- Gli argomenti dei tool sono registrati come chiavi presenti, hash canonico e preview redatta bounded; mai come raw JSON completo per default.
-- I risultati dei tool conservano stato, dimensione, hash, tipo di evidenza e preview redatta bounded.
+- Gli eventi tool v1 conservano identificatore chiamata, nome e dimensione del risultato; argomenti e risultati raw non vengono persistiti.
 - Un errore di redazione o serializzazione causa la sostituzione dell'evento con un record minimale `journal_payload_omitted`; non deve fare fail-open sui contenuti.
 - Il journal non viene inviato alla memoria semantica automaticamente.
 
@@ -281,9 +279,9 @@ Comportamento:
 
 - Migrazione esclusivamente additiva; nessuna modifica al wire format di `turn_events`.
 - `turn-trace.jsonl` resta disponibile durante la migrazione e potrà essere ritirato solo dopo confronto di parità.
-- Ogni evento include `schema_version`; lettori futuri ignorano campi sconosciuti.
+- Ogni payload evento include `schema_version=1`; lettori futuri ignorano campi sconosciuti.
 - Le scritture del journal sono best-effort e non aumentano il numero di round né cambiano la selezione degli strumenti.
-- Una metrica locale conta eventi omessi, errori di persistenza e snapshot troncate.
+- Una coda sincrona limitata a 256 eventi separa il loop dal writer SQLite; `try_send` non blocca e un contatore locale registra gli eventi omessi. Il flush attende solo al confine terminale del run.
 
 ## Strategia di test
 
@@ -294,7 +292,7 @@ Comportamento:
 - le sequenze degli eventi sono monotone e isolate per run;
 - la cancellazione elimina gli eventi del run;
 - abort al recovery chiude solo il run `running` corretto;
-- la retention conserva run attivi e gli ultimi 20 terminali.
+- la retention conserva run attivi e i terminali più recenti di 30 giorni.
 
 ### Engine
 

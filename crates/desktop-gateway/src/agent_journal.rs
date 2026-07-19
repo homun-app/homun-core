@@ -137,7 +137,13 @@ pub(crate) fn unregister(run_id: &str) {
 
 fn prepare_event(event: AgentExecutionEvent) -> (&'static str, Option<usize>, Value) {
     let (kind, round, payload) = event.into_parts();
-    (kind, round, redact_json_value(payload))
+    let mut payload = redact_json_value(payload);
+    if let Value::Object(object) = &mut payload {
+        object.insert("schema_version".to_string(), Value::from(1));
+    } else {
+        payload = serde_json::json!({"schema_version": 1, "value": payload});
+    }
+    (kind, round, payload)
 }
 
 fn redact_json_value(value: Value) -> Value {
