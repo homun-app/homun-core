@@ -358,6 +358,74 @@ mod agent_run_api_tests {
         .unwrap_err();
         assert_eq!(error.status, StatusCode::NOT_FOUND);
     }
+
+    #[test]
+    fn runtime_plan_control_store_is_authoritative_and_workspace_scoped() {
+        let state = AppState::for_tests();
+        let thread = state.chat_store.lock().unwrap().create_thread("workspace-a").unwrap();
+        let user = gateway_user_id();
+        {
+            let store = state.task_store.lock().unwrap();
+            store
+                .upsert_runtime_plan(
+                    user.as_str(),
+                    "workspace-b",
+                    &thread.thread_id,
+                    &serde_json::json!([{"title": "foreign", "status": "doing"}]),
+                    "open",
+                )
+                .unwrap();
+        }
+        assert!(load_runtime_plan_from_state(&state, Some(&thread.thread_id)).is_empty());
+
+        {
+            let store = state.task_store.lock().unwrap();
+            store
+                .upsert_runtime_plan(
+                    user.as_str(),
+                    "workspace-a",
+                    &thread.thread_id,
+                    &serde_json::json!([{"title": "owned", "status": "doing"}]),
+                    "open",
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            load_runtime_plan_from_state(&state, Some(&thread.thread_id))[0]["title"],
+            "owned"
+        );
+        assert!(thread_has_active_runtime_plan(&state, Some(&thread.thread_id)));
+    }
+
+    #[test]
+    fn runtime_plan_control_store_owns_stall_bookkeeping() {
+        let state = AppState::for_tests();
+        let thread = state.chat_store.lock().unwrap().create_thread("workspace-a").unwrap();
+        let steps = serde_json::json!([{"title": "step", "status": "doing"}]);
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .upsert_runtime_plan(
+                gateway_user_id().as_str(),
+                "workspace-a",
+                &thread.thread_id,
+                &steps,
+                "open",
+            )
+            .unwrap();
+        let steps = steps.as_array().unwrap();
+        assert!(!plan_stall_check_and_bump(&state, Some(&thread.thread_id), steps));
+        assert!(!plan_stall_check_and_bump(&state, Some(&thread.thread_id), steps));
+        let stored = state
+            .task_store
+            .lock()
+            .unwrap()
+            .load_runtime_plan(gateway_user_id().as_str(), "workspace-a", &thread.thread_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.stall_turns, 1);
+    }
 }
 
 impl AppState {
@@ -2644,13 +2712,23 @@ async fn delete_chat_thread(
     let workspace_id = lock_store(&state)?
         .workspace_for_thread(&thread_id)
         .map_err(GatewayError::store)?;
-    lock_task_store(&state)?
-        .purge_agent_runs_for_thread(
-            &thread_id,
-            gateway_user_id().as_str(),
-            &workspace_id,
-        )
-        .map_err(GatewayError::task)?;
+    {
+        let task_store = lock_task_store(&state)?;
+        task_store
+            .purge_agent_runs_for_thread(
+                &thread_id,
+                gateway_user_id().as_str(),
+                &workspace_id,
+            )
+            .map_err(GatewayError::task)?;
+        task_store
+            .purge_runtime_plan_for_thread(
+                gateway_user_id().as_str(),
+                &workspace_id,
+                &thread_id,
+            )
+            .map_err(GatewayError::task)?;
+    }
     let snapshot = lock_store(&state)?
         .delete_thread(&thread_id)
         .map_err(GatewayError::store)?;
@@ -6989,6 +7067,28 @@ fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
         .to_string()
 }
 
+fn runtime_plan_control_scope(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Option<(String, String, String)> {
+    let thread_id = runtime_plan_thread_key(thread_id);
+    let workspace_id = if thread_id == "__no_thread__" {
+        gateway_workspace_id().as_str().to_string()
+    } else {
+        state
+            .chat_store
+            .lock()
+            .ok()?
+            .workspace_for_thread(&thread_id)
+            .ok()?
+    };
+    Some((
+        gateway_user_id().as_str().to_string(),
+        workspace_id,
+        thread_id,
+    ))
+}
+
 fn runtime_plan_memory_text(plan: &[serde_json::Value]) -> Option<String> {
     if plan.is_empty() {
         return None;
@@ -8842,13 +8942,21 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
 /// which prunes the plan's own tools (`update_plan`, `browser_navigate`) and dead-ends it.
 /// Tier- and flag-independent: it holds even with the adaptive floor off.
 fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> bool {
-    let thread_key = runtime_plan_thread_key(thread_id);
-    let facade = memory_facade(state);
-    facade
-        .list_memories_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
-        .unwrap_or_default()
-        .iter()
-        .any(|memory| runtime_plan_memory_matches(memory, &thread_key))
+    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
+    else {
+        return false;
+    };
+    state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .load_runtime_plan(&user_id, &workspace_id, &thread_id)
+                .ok()
+                .flatten()
+        })
+        .is_some_and(|plan| plan.status == "open")
 }
 
 /// S2 T4 (critical demotion guard, flagged by T3 review): true when the plan-precedence
@@ -8884,20 +8992,22 @@ fn load_runtime_plan_from_state(
     state: &AppState,
     thread_id: Option<&str>,
 ) -> Vec<serde_json::Value> {
-    let thread_key = runtime_plan_thread_key(thread_id);
-    let facade = memory_facade(state);
-    facade
-        .list_memories_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
-        .unwrap_or_default()
-        .iter()
-        .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
-        .and_then(|memory| {
-            memory
-                .metadata
-                .get("steps")
-                .and_then(|s| s.as_array())
-                .cloned()
+    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
+    else {
+        return Vec::new();
+    };
+    state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .load_runtime_plan(&user_id, &workspace_id, &thread_id)
+                .ok()
+                .flatten()
         })
+        .filter(|plan| plan.status == "open")
+        .and_then(|plan| plan.plan_json.as_array().cloned())
         .unwrap_or_default()
 }
 
@@ -8912,60 +9022,22 @@ fn plan_stall_check_and_bump(
     thread_id: Option<&str>,
     resume_plan: &[serde_json::Value],
 ) -> bool {
-    let thread_key = runtime_plan_thread_key(thread_id);
-    let facade = memory_facade(state);
-    let user = gateway_memory_user_id();
-    let workspace = gateway_memory_workspace_id();
-    let Some(memory) = facade
-        .list_memories_for_ui(&user, &workspace)
-        .unwrap_or_default()
-        .into_iter()
-        .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
+    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
     else {
         return false;
     };
-    let prior_stall = memory
-        .metadata
-        .get("stall_turns")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let last_resume_done = memory
-        .metadata
-        .get("last_resume_done")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as usize;
     let current_done = plan_done_count(resume_plan);
-    let new_stall = next_plan_stall(prior_stall, last_resume_done, current_done);
-
-    let mut metadata = memory.metadata.clone();
-    if let Some(obj) = metadata.as_object_mut() {
-        obj.insert("stall_turns".to_string(), serde_json::json!(new_stall));
-        obj.insert(
-            "last_resume_done".to_string(),
-            serde_json::json!(current_done),
-        );
-    }
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "runtime-plan".to_string(),
-        user_id: user.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "sync_runtime_plan".to_string(),
-    };
-    let _ = facade.update_memory(
-        &lifecycle,
-        &memory.reference,
-        MemoryUpdatePatch {
-            text: None,
-            aliases: None,
-            language_hints: None,
-            confidence: None,
-            privacy_domain: None,
-            sensitivity: None,
-            metadata: Some(metadata),
-            last_seen_at: None,
-        },
-    );
-    plan_stall_exhausted(new_stall)
+    state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .bump_runtime_plan_stall(&user_id, &workspace_id, &thread_id, current_done)
+                .ok()
+                .flatten()
+        })
+        .is_some_and(|plan| plan_stall_exhausted(plan.stall_turns))
 }
 
 /// A bare continuation/approval message ("1", a step/option number, "ok"/"procedi"/
@@ -9534,6 +9606,36 @@ fn upsert_runtime_plan_memory_from_state(
     thread_id: Option<&str>,
     plan: &[serde_json::Value],
 ) {
+    let Some((user_id, workspace_id, thread_key)) = runtime_plan_control_scope(state, thread_id)
+    else {
+        eprintln!("runtime plan skipped: thread scope could not be resolved");
+        return;
+    };
+    let status = if plan_is_settled(plan) { "settled" } else { "open" };
+    let plan_json = serde_json::Value::Array(plan.to_vec());
+    let canonical_write_ok = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .upsert_runtime_plan(
+                    &user_id,
+                    &workspace_id,
+                    &thread_key,
+                    &plan_json,
+                    status,
+                )
+                .ok()
+        })
+        .is_some();
+    if !canonical_write_ok {
+        eprintln!("runtime plan canonical write failed for thread {thread_key}");
+        return;
+    }
+
+    // Semantic memory remains a best-effort projection for recall and graph navigation.
+    // It is no longer consulted for control flow, resumption or stall bookkeeping.
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
