@@ -1,10 +1,10 @@
 use crate::{
     AgentRun, AgentRunEvent, AgentRunStatus, ApprovalRequest, Automation, AutomationRun,
-    NewAgentRun, ResourceClass, TaskCheckpoint, TaskDependencyOutput, TaskId, TaskRecord,
-    TaskRuntimeError, TaskRuntimeResult, TaskStatus, SubagentInfo, ThreadActivityProjection,
+    NewAgentRun, ResourceClass, SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId,
+    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, ThreadActivityProjection,
     TurnEvent, TurnEventKind, UserId, WorkspaceId,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
 use std::path::Path;
 use time::OffsetDateTime;
@@ -955,11 +955,16 @@ impl TaskStore {
         Ok(out)
     }
 
-    /// Creates a broker-attempt run and its first event atomically. Event sequence 1 is
-    /// therefore always `run_started`, or the run does not exist at all.
+    /// Allocates the next attempt and creates its first event in one immediate transaction.
+    /// Event sequence 1 is therefore always `run_started`, or the run does not exist at all.
     pub fn create_agent_run(&self, run: &NewAgentRun) -> TaskRuntimeResult<AgentRun> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        let tx = self.connection.unchecked_transaction()?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let attempt = tx.query_row(
+            "SELECT COALESCE(MAX(attempt), 0) + 1 FROM agent_runs WHERE turn_id = ?1",
+            params![run.turn_id],
+            |row| row.get::<_, u32>(0),
+        )?;
         tx.execute(
             "INSERT INTO agent_runs (
                 run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
@@ -971,7 +976,7 @@ impl TaskStore {
                 run.thread_id,
                 run.user_id,
                 run.workspace_id,
-                run.attempt,
+                attempt,
                 run.model,
                 run.provider,
                 run.prompt_fingerprint,
@@ -984,7 +989,7 @@ impl TaskStore {
             params![
                 run.run_id,
                 serde_json::to_string(&serde_json::json!({
-                    "attempt": run.attempt,
+                    "attempt": attempt,
                     "schema_version": 1,
                 }))?,
                 now,
@@ -997,7 +1002,7 @@ impl TaskStore {
             thread_id: run.thread_id.clone(),
             user_id: run.user_id.clone(),
             workspace_id: run.workspace_id.clone(),
-            attempt: run.attempt,
+            attempt,
             status: AgentRunStatus::Running,
             model: run.model.clone(),
             provider: run.provider.clone(),
@@ -1022,7 +1027,14 @@ impl TaskStore {
         tx.execute(
             "INSERT INTO agent_run_events (run_id, seq, round, kind, payload_json, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![run_id, seq, round, kind, serde_json::to_string(payload)?, now],
+            params![
+                run_id,
+                seq,
+                round,
+                kind,
+                serde_json::to_string(payload)?,
+                now
+            ],
         )?;
         let event_id = tx.last_insert_rowid();
         if kind == "prompt_snapshot" {
@@ -1161,17 +1173,20 @@ impl TaskStore {
              WHERE e.run_id = ?1 AND r.user_id = ?2 AND r.workspace_id = ?3 AND e.seq > ?4
              ORDER BY e.seq ASC",
         )?;
-        let rows = stmt.query_map(params![run_id, user_id, workspace_id, since.unwrap_or(0)], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, i64>(6)?,
-            ))
-        })?;
+        let rows = stmt.query_map(
+            params![run_id, user_id, workspace_id, since.unwrap_or(0)],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            },
+        )?;
         let mut events = Vec::new();
         for row in rows {
             let (event_id, run_id, seq, round, kind, payload_json, created_at) = row?;
@@ -1215,17 +1230,19 @@ impl TaskStore {
                 ))
             })
             .optional()?;
-        row.map(|(event_id, run_id, seq, round, kind, payload_json, created_at)| {
-            Ok(AgentRunEvent {
-                event_id,
-                run_id,
-                seq,
-                round,
-                kind,
-                payload: serde_json::from_str(&payload_json)?,
-                created_at,
-            })
-        })
+        row.map(
+            |(event_id, run_id, seq, round, kind, payload_json, created_at)| {
+                Ok(AgentRunEvent {
+                    event_id,
+                    run_id,
+                    seq,
+                    round,
+                    kind,
+                    payload: serde_json::from_str(&payload_json)?,
+                    created_at,
+                })
+            },
+        )
         .transpose()
     }
 
@@ -1256,6 +1273,20 @@ impl TaskStore {
                 user_id,
                 workspace_id,
             ],
+        )?)
+    }
+
+    /// Deletes every journal owned by one chat thread; event rows cascade with each run.
+    pub fn purge_agent_runs_for_thread(
+        &self,
+        thread_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "DELETE FROM agent_runs
+             WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3",
+            params![thread_id, user_id, workspace_id],
         )?)
     }
 
@@ -1694,7 +1725,6 @@ mod agent_run_tests {
             thread_id: "thread-1".to_string(),
             user_id: user_id.to_string(),
             workspace_id: workspace_id.to_string(),
-            attempt: 1,
             model: Some("test-model".to_string()),
             provider: Some("test-provider".to_string()),
             prompt_fingerprint: None,
@@ -1704,7 +1734,9 @@ mod agent_run_tests {
     #[test]
     fn agent_run_events_are_append_only_and_scope_filtered() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.create_agent_run(&new_run("run-1", "turn-1", "u1", "w1")).unwrap();
+        store
+            .create_agent_run(&new_run("run-1", "turn-1", "u1", "w1"))
+            .unwrap();
         store
             .append_agent_run_event("run-1", 2, Some(1), "model_response", &json!({"ok": true}))
             .unwrap();
@@ -1738,7 +1770,9 @@ mod agent_run_tests {
     #[test]
     fn latest_prompt_snapshot_returns_only_the_latest_snapshot() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.create_agent_run(&new_run("run-2", "turn-2", "u", "w")).unwrap();
+        store
+            .create_agent_run(&new_run("run-2", "turn-2", "u", "w"))
+            .unwrap();
         store
             .append_agent_run_event("run-2", 2, Some(1), "prompt_snapshot", &json!({"round": 1}))
             .unwrap();
@@ -1763,7 +1797,9 @@ mod agent_run_tests {
     #[test]
     fn agent_run_lifecycle_is_explicit() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.create_agent_run(&new_run("run-3", "turn-3", "u", "w")).unwrap();
+        store
+            .create_agent_run(&new_run("run-3", "turn-3", "u", "w"))
+            .unwrap();
         store
             .finish_agent_run("run-3", AgentRunStatus::Completed, Some("delivered"))
             .unwrap();
@@ -1774,10 +1810,28 @@ mod agent_run_tests {
     }
 
     #[test]
+    fn agent_run_attempt_is_allocated_atomically_by_the_store() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .create_agent_run(&new_run("attempt-a", "turn-retry", "u", "w"))
+            .unwrap();
+        let second = store
+            .create_agent_run(&new_run("attempt-b", "turn-retry", "u", "w"))
+            .unwrap();
+
+        assert_eq!(first.attempt, 1);
+        assert_eq!(second.attempt, 2);
+    }
+
+    #[test]
     fn workspace_purge_deletes_owned_runs_and_events_only() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.create_agent_run(&new_run("owned", "turn-owned", "u", "w")).unwrap();
-        store.create_agent_run(&new_run("other", "turn-other", "u", "other")).unwrap();
+        store
+            .create_agent_run(&new_run("owned", "turn-owned", "u", "w"))
+            .unwrap();
+        store
+            .create_agent_run(&new_run("other", "turn-other", "u", "other"))
+            .unwrap();
 
         store
             .purge_workspace(&UserId::new("u"), &WorkspaceId::new("w"))
@@ -1799,22 +1853,92 @@ mod agent_run_tests {
     }
 
     #[test]
+    fn thread_purge_deletes_owned_runs_and_events_only() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .create_agent_run(&new_run("owned-thread", "turn-a", "u", "w"))
+            .unwrap();
+        store
+            .append_agent_run_event("owned-thread", 2, Some(1), "model_response", &json!({}))
+            .unwrap();
+        let mut other = new_run("other-thread", "turn-b", "u", "w");
+        other.thread_id = "thread-2".to_string();
+        store.create_agent_run(&other).unwrap();
+
+        assert_eq!(
+            store
+                .purge_agent_runs_for_thread("thread-1", "u", "w")
+                .unwrap(),
+            1
+        );
+        assert!(
+            store
+                .list_agent_runs_for_turn("turn-a", "u", "w")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_agent_runs_for_turn("turn-b", "u", "w")
+                .unwrap()
+                .len(),
+            1
+        );
+        let event_count: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run_events WHERE run_id = 'owned-thread'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_count, 0);
+    }
+
+    #[test]
     fn retention_deletes_only_old_terminal_runs() {
         let store = TaskStore::open_in_memory().unwrap();
-        store.create_agent_run(&new_run("old", "turn-old", "u", "w")).unwrap();
-        store.create_agent_run(&new_run("recent", "turn-recent", "u", "w")).unwrap();
-        store.create_agent_run(&new_run("active", "turn-active", "u", "w")).unwrap();
-        store.finish_agent_run("old", AgentRunStatus::Completed, None).unwrap();
-        store.finish_agent_run("recent", AgentRunStatus::Completed, None).unwrap();
+        store
+            .create_agent_run(&new_run("old", "turn-old", "u", "w"))
+            .unwrap();
+        store
+            .create_agent_run(&new_run("recent", "turn-recent", "u", "w"))
+            .unwrap();
+        store
+            .create_agent_run(&new_run("active", "turn-active", "u", "w"))
+            .unwrap();
+        store
+            .finish_agent_run("old", AgentRunStatus::Completed, None)
+            .unwrap();
+        store
+            .finish_agent_run("recent", AgentRunStatus::Completed, None)
+            .unwrap();
         store
             .connection
             .execute("UPDATE agent_runs SET completed_at = 10 WHERE run_id = 'old'", [])
             .unwrap();
 
         assert_eq!(store.purge_terminal_agent_runs_before(100, 10).unwrap(), 1);
-        assert!(store.list_agent_runs_for_turn("turn-old", "u", "w").unwrap().is_empty());
-        assert_eq!(store.list_agent_runs_for_turn("turn-recent", "u", "w").unwrap().len(), 1);
-        assert_eq!(store.list_agent_runs_for_turn("turn-active", "u", "w").unwrap().len(), 1);
+        assert!(
+            store
+                .list_agent_runs_for_turn("turn-old", "u", "w")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_agent_runs_for_turn("turn-recent", "u", "w")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .list_agent_runs_for_turn("turn-active", "u", "w")
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }
 

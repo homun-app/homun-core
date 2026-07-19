@@ -275,7 +275,6 @@ mod agent_run_api_tests {
                 thread_id: "thread-test".to_string(),
                 user_id: user_id.to_string(),
                 workspace_id: gateway_workspace_id().as_str().to_string(),
-                attempt: 1,
                 model: None,
                 provider: None,
                 prompt_fingerprint: None,
@@ -2640,6 +2639,18 @@ async fn delete_chat_thread(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
 ) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    // Read the owning workspace before removing the thread, then purge its execution journal.
+    // This step runs first so a task-store failure leaves the visible chat available for retry.
+    let workspace_id = lock_store(&state)?
+        .workspace_for_thread(&thread_id)
+        .map_err(GatewayError::store)?;
+    lock_task_store(&state)?
+        .purge_agent_runs_for_thread(
+            &thread_id,
+            gateway_user_id().as_str(),
+            &workspace_id,
+        )
+        .map_err(GatewayError::task)?;
     let snapshot = lock_store(&state)?
         .delete_thread(&thread_id)
         .map_err(GatewayError::store)?;
@@ -66790,6 +66801,63 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         assert!(
             !super::delete_chat_thread_should_remove_artifacts(),
             "chat deletion must not remove deliverables; artifact deletion is explicit"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn delete_chat_thread_purges_its_execution_journal() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("journal-workspace")
+            .unwrap();
+        let user = super::gateway_user_id();
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .create_agent_run(&local_first_task_runtime::NewAgentRun {
+                run_id: "delete-thread-run".to_string(),
+                turn_id: "delete-thread-turn".to_string(),
+                thread_id: thread.thread_id.clone(),
+                user_id: user.as_str().to_string(),
+                workspace_id: "journal-workspace".to_string(),
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            })
+            .unwrap();
+
+        let _ = super::delete_chat_thread(
+            axum::extract::State(state.clone()),
+            axum::extract::Path(thread.thread_id.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .list_agent_runs_for_turn(
+                    "delete-thread-turn",
+                    user.as_str(),
+                    "journal-workspace",
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            state
+                .chat_store
+                .lock()
+                .unwrap()
+                .thread(&thread.thread_id)
+                .unwrap()
+                .is_none()
         );
     }
 

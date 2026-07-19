@@ -223,7 +223,6 @@ pub struct NewAgentRun {
     pub thread_id: String,
     pub user_id: String,
     pub workspace_id: String,
-    pub attempt: u32,
     pub model: Option<String>,
     pub provider: Option<String>,
     pub prompt_fingerprint: Option<String>,

@@ -604,7 +604,6 @@ mod recovery_tests {
             thread_id: "t1".into(),
             user_id: "u".into(),
             workspace_id: "w".into(),
-            attempt: 1,
             model: None,
             provider: None,
             prompt_fingerprint: None,

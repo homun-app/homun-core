@@ -51,6 +51,7 @@ const MAX_PLAN_NUDGES: u32 = 8;
 pub async fn try_advance_frontier_from_evidence(
     ls: &mut LoopState,
     plan_progress: &impl PlanProgress,
+    execution_journal: &impl ExecutionJournal,
     event_sink: &impl EventSink,
     cfg: &TurnConfig,
     thread_id: Option<&str>,
@@ -114,6 +115,10 @@ pub async fn try_advance_frontier_from_evidence(
         let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
         event_sink.emit(GenerateStreamEvent::Delta { text: plan_mark }).await;
         plan_progress.persist_plan(thread_id, &plan_steps).await;
+        execution_journal.record(AgentExecutionEvent::PlanUpdated {
+            round,
+            source: "verified_evidence".to_string(),
+        });
         // This evidence window was consumed by the advance — reset it + the stride anchor.
         ls.step_evidence.clear();
         ls.progress_verify_anchor = 0;
@@ -325,9 +330,6 @@ missing, give what you have and note the gap in one short line.",
                 // Return with NOTHING emitted and nothing committed: no Done, no answer, no memory. The
                 // gateway replaces the images with a vision model's description and calls us again, and
                 // the user never sees that this attempt happened.
-                execution_journal.record(AgentExecutionEvent::RunAborted {
-                    reason: "image_unsupported_replay".to_string(),
-                });
                 return crate::TurnOutcome {
                     image_rejection: Some(reason),
                     ..Default::default()
@@ -626,7 +628,16 @@ missing, give what you have and note the gap in one short line.",
                     }
                     // Harness-derived progress: advance the plan frontier when the gathered
                     // evidence VERIFIES the current step (the weak browser model never does).
-                    try_advance_frontier_from_evidence(&mut ls, plan_progress, event_sink, &cfg, thread_id.as_deref(), round).await;
+                    try_advance_frontier_from_evidence(
+                        &mut ls,
+                        plan_progress,
+                        execution_journal,
+                        event_sink,
+                        &cfg,
+                        thread_id.as_deref(),
+                        round,
+                    )
+                    .await;
                 }
                 // Parity harness: compute the result-derived fingerprint fields
                 // from `&result` BEFORE the push moves `result` into the message.
@@ -1071,9 +1082,6 @@ Tell me if you want me to retry or rephrase."
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
     // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
     // engine's turn ends here.
-    execution_journal.record(AgentExecutionEvent::RunCompleted {
-        reason: if final_done { "model_answer" } else { "forced_synthesis" }.to_string(),
-    });
     crate::TurnOutcome {
         memory_answer,
         tool_actions: ls.tool_trace.join("\n"),
@@ -1244,7 +1252,7 @@ mod tests {
 
         assert_eq!(
             journal.0.lock().unwrap().as_slice(),
-            ["prompt_snapshot", "model_response", "run_completed"]
+            ["prompt_snapshot", "model_response"]
         );
 
         // The model answered immediately → the turn commits that answer and ends.

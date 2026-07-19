@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const JOURNAL_QUEUE_CAPACITY: usize = 256;
 
@@ -24,6 +24,7 @@ enum WriterMessage {
 pub(crate) struct GatewayExecutionJournal {
     sender: SyncSender<WriterMessage>,
     dropped_events: Arc<AtomicU64>,
+    accepting: Arc<Mutex<bool>>,
 }
 
 #[derive(Clone)]
@@ -41,9 +42,11 @@ impl ExecutionJournal for GatewayJournal {
 }
 
 impl GatewayExecutionJournal {
-    pub(crate) fn start(run_id: String, database_path: PathBuf) -> Self {
+    pub(crate) fn start(run_id: String, database_path: PathBuf) -> Option<Self> {
         let (sender, receiver) = mpsc::sync_channel(JOURNAL_QUEUE_CAPACITY);
         let dropped_events = Arc::new(AtomicU64::new(0));
+        let writer_dropped_events = dropped_events.clone();
+        let accepting = Arc::new(Mutex::new(true));
         std::thread::Builder::new()
             .name(format!("agent-journal-{}", run_id.chars().take(16).collect::<String>()))
             .spawn(move || {
@@ -66,8 +69,11 @@ impl GatewayExecutionJournal {
                                     kind,
                                     &payload,
                                 ) {
+                                    writer_dropped_events.fetch_add(1, Ordering::Relaxed);
                                     tracing::warn!(target: "agent::journal", %run_id, seq, kind, %error, "journal event write failed");
                                 }
+                            } else {
+                                writer_dropped_events.fetch_add(1, Ordering::Relaxed);
                             }
                             seq += 1;
                         }
@@ -77,17 +83,45 @@ impl GatewayExecutionJournal {
                     }
                 }
             })
-            .expect("spawn agent journal writer");
-        Self { sender, dropped_events }
+            .ok()?;
+        Some(Self {
+            sender,
+            dropped_events,
+            accepting,
+        })
     }
 
     /// Waits only at the gateway lifecycle boundary, never inside the engine loop.
     pub(crate) fn flush(&self) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
         let (ack_tx, ack_rx) = mpsc::channel();
-        if self.sender.send(WriterMessage::Flush(ack_tx)).is_err() {
-            return false;
+        let mut message = WriterMessage::Flush(ack_tx);
+        loop {
+            match self.sender.try_send(message) {
+                Ok(()) => break,
+                Err(TrySendError::Full(returned)) => {
+                    if Instant::now() >= deadline {
+                        return false;
+                    }
+                    message = returned;
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(TrySendError::Disconnected(_)) => return false,
+            }
         }
-        ack_rx.recv_timeout(Duration::from_secs(5)).is_ok()
+        ack_rx
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .is_ok()
+    }
+
+    pub(crate) fn close_and_flush(&self) -> bool {
+        let mut accepting = self
+            .accepting
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *accepting = false;
+        drop(accepting);
+        self.flush()
     }
 
     pub(crate) fn dropped_events(&self) -> u64 {
@@ -97,8 +131,20 @@ impl GatewayExecutionJournal {
 
 impl ExecutionJournal for GatewayExecutionJournal {
     fn record(&self, event: AgentExecutionEvent) {
+        let accepting = self
+            .accepting
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !*accepting {
+            self.dropped_events.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
         let (kind, round, payload) = prepare_event(event);
-        match self.sender.try_send(WriterMessage::Event { kind, round, payload }) {
+        match self.sender.try_send(WriterMessage::Event {
+            kind,
+            round,
+            payload,
+        }) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
                 self.dropped_events.fetch_add(1, Ordering::Relaxed);
@@ -149,15 +195,15 @@ fn prepare_event(event: AgentExecutionEvent) -> (&'static str, Option<usize>, Va
 fn redact_json_value(value: Value) -> Value {
     match value {
         Value::String(text) => Value::String(redact_prompt_text(&text)),
-        Value::Array(values) => {
-            Value::Array(values.into_iter().map(redact_json_value).collect())
-        }
+        Value::Array(values) => Value::Array(values.into_iter().map(redact_json_value).collect()),
         Value::Object(values) => Value::Object(
             values
                 .into_iter()
                 .map(|(key, value)| {
                     if key == "redacted" {
                         (key, Value::Bool(true))
+                    } else if sensitive_json_key(&key) {
+                        (key, Value::String("[REDACTED]".to_string()))
                     } else {
                         (key, redact_json_value(value))
                     }
@@ -168,16 +214,39 @@ fn redact_json_value(value: Value) -> Value {
     }
 }
 
+fn sensitive_json_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().replace('-', "_").as_str(),
+        "api_key"
+            | "apikey"
+            | "authorization"
+            | "access_token"
+            | "refresh_token"
+            | "oauth_token"
+            | "token"
+            | "password"
+            | "secret"
+            | "pin"
+            | "cvv"
+            | "private_key"
+    )
+}
+
 fn redact_prompt_text(text: &str) -> String {
     let mut output = crate::strip_terminal_control_sequences(&redact_data_urls(text));
     let earliest = [
         "sk-",
         "sk_proj_",
         "token=",
+        "api_key=",
+        "access_token=",
+        "refresh_token=",
         "Authorization:",
         "Bearer ",
         "password=",
         "secret=",
+        "pin=",
+        "cvv=",
     ]
     .into_iter()
     .filter_map(|marker| {
@@ -233,10 +302,8 @@ mod tests {
             false,
             None,
         );
-        let (_, _, payload) = prepare_event(AgentExecutionEvent::PromptSnapshot {
-            round: 1,
-            snapshot,
-        });
+        let (_, _, payload) =
+            prepare_event(AgentExecutionEvent::PromptSnapshot { round: 1, snapshot });
         let encoded = serde_json::to_string(&payload).unwrap();
         assert!(!encoded.contains("secret-token"));
         assert!(!encoded.contains("sk-test"));
@@ -251,6 +318,18 @@ mod tests {
         assert_eq!(redacted["items"][0], "first");
         assert_eq!(redacted["items"][2], "third");
         assert_ne!(redacted["items"][1], "token=abc");
+    }
+
+    #[test]
+    fn sensitive_json_keys_are_redacted_even_when_the_value_has_no_marker() {
+        let value = json!({
+            "api_key": "plain-value",
+            "nested": {"refresh_token": "another-value", "safe": "kept"}
+        });
+        let redacted = redact_json_value(value);
+        assert_eq!(redacted["api_key"], "[REDACTED]");
+        assert_eq!(redacted["nested"]["refresh_token"], "[REDACTED]");
+        assert_eq!(redacted["nested"]["safe"], "kept");
     }
 
     #[test]
@@ -271,7 +350,6 @@ mod tests {
                 thread_id: "thread-test".to_string(),
                 user_id: "u".to_string(),
                 workspace_id: "w".to_string(),
-                attempt: 1,
                 model: None,
                 provider: None,
                 prompt_fingerprint: None,
@@ -279,7 +357,7 @@ mod tests {
             .unwrap();
         drop(store);
 
-        let journal = GatewayExecutionJournal::start("run-test".to_string(), path.clone());
+        let journal = GatewayExecutionJournal::start("run-test".to_string(), path.clone()).unwrap();
         journal.record(AgentExecutionEvent::RunCompleted {
             reason: "test".to_string(),
         });
@@ -290,7 +368,10 @@ mod tests {
             .list_agent_run_events("run-test", "u", "w", None)
             .unwrap();
         assert_eq!(
-            events.iter().map(|event| event.kind.as_str()).collect::<Vec<_>>(),
+            events
+                .iter()
+                .map(|event| event.kind.as_str())
+                .collect::<Vec<_>>(),
             vec!["run_started", "run_completed"]
         );
         drop(store);
@@ -298,5 +379,82 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("sqlite-wal"));
         let _ = std::fs::remove_file(path.with_extension("sqlite-shm"));
+    }
+
+    #[test]
+    fn close_and_flush_rejects_late_events() {
+        let path = std::env::temp_dir().join(format!(
+            "homun-agent-journal-close-{}-{}.sqlite",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let store = TaskStore::open(&path).unwrap();
+        store
+            .create_agent_run(&NewAgentRun {
+                run_id: "run-close".to_string(),
+                turn_id: "turn-close".to_string(),
+                thread_id: "thread-close".to_string(),
+                user_id: "u".to_string(),
+                workspace_id: "w".to_string(),
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            })
+            .unwrap();
+        drop(store);
+
+        let journal =
+            GatewayExecutionJournal::start("run-close".to_string(), path.clone()).unwrap();
+        journal.record(AgentExecutionEvent::RunAborted {
+            reason: "cancelled".to_string(),
+        });
+        assert!(journal.close_and_flush());
+        journal.record(AgentExecutionEvent::RunCompleted {
+            reason: "late".to_string(),
+        });
+        assert_eq!(journal.dropped_events(), 1);
+
+        let store = TaskStore::open(&path).unwrap();
+        let events = store
+            .list_agent_run_events("run-close", "u", "w", None)
+            .unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.kind.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run_started", "run_aborted"]
+        );
+        drop(store);
+        drop(journal);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("sqlite-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite-shm"));
+    }
+
+    #[test]
+    fn unavailable_store_is_counted_as_dropped_observability() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-agent-journal-missing-parent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let journal = GatewayExecutionJournal::start(
+            "run-unavailable".to_string(),
+            root.join("missing").join("journal.sqlite"),
+        )
+        .unwrap();
+
+        journal.record(AgentExecutionEvent::RunFailed {
+            reason: "test".to_string(),
+        });
+        assert!(journal.close_and_flush());
+        assert_eq!(journal.dropped_events(), 1);
     }
 }

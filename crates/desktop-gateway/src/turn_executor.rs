@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use local_first_task_runtime::{
-    AgentRunStatus, NewAgentRun, broker::CancelNotify, TaskRuntimeResult, TaskStore, TurnEventKind,
+    AgentRunStatus, NewAgentRun, TaskRuntimeResult, TaskStore, TurnEventKind, broker::CancelNotify,
 };
-use serde_json::{json, Value};
-use tokio::sync::{broadcast, Notify};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
+use tokio::sync::{Notify, broadcast};
 
 fn finalize_agent_run(
     state: &crate::AppState,
@@ -24,7 +26,7 @@ fn finalize_agent_run(
     if let Some(event) = terminal_event {
         local_first_engine::ExecutionJournal::record(journal, event);
     }
-    let flushed = journal.flush();
+    let flushed = journal.close_and_flush();
     let dropped = journal.dropped_events();
     if !flushed || dropped > 0 {
         tracing::warn!(target: "agent::journal", %run_id, flushed, dropped, "journal completed with degraded observability");
@@ -216,29 +218,12 @@ pub fn execute_chat_turn_task(
         .ok()
         .and_then(|database_path| {
             let run_id = format!("agent_run_{}", uuid::Uuid::new_v4());
-            let attempt = state
-                .task_store
-                .lock()
-                .ok()
-                .and_then(|store| {
-                    store
-                        .list_agent_runs_for_turn(
-                            turn_id,
-                            task.user_id.as_str(),
-                            task.workspace_id.as_str(),
-                        )
-                        .ok()
-                })
-                .and_then(|runs| runs.into_iter().map(|run| run.attempt).max())
-                .unwrap_or(0)
-                + 1;
             let new_run = NewAgentRun {
                 run_id: run_id.clone(),
                 turn_id: turn_id.to_string(),
                 thread_id: thread_id.to_string(),
                 user_id: task.user_id.as_str().to_string(),
                 workspace_id: task.workspace_id.as_str().to_string(),
-                attempt,
                 model: None,
                 provider: None,
                 prompt_fingerprint: None,
@@ -253,10 +238,19 @@ pub fn execute_chat_turn_task(
                 tracing::warn!(target: "agent::journal", turn_id, "could not create agent run");
                 return None;
             }
-            let journal = crate::agent_journal::GatewayExecutionJournal::start(
-                run_id.clone(),
-                database_path,
-            );
+            let Some(journal) =
+                crate::agent_journal::GatewayExecutionJournal::start(run_id.clone(), database_path)
+            else {
+                if let Ok(store) = state.task_store.lock() {
+                    let _ = store.finish_agent_run(
+                        &run_id,
+                        AgentRunStatus::Failed,
+                        Some("journal_writer_spawn_failed"),
+                    );
+                }
+                tracing::warn!(target: "agent::journal", %run_id, "could not spawn journal writer");
+                return None;
+            };
             crate::agent_journal::register(&run_id, journal.clone());
             Some((run_id, journal))
         });
@@ -379,7 +373,9 @@ pub fn execute_chat_turn_task(
             &agent_run,
             AgentRunStatus::Completed,
             "delivered",
-            None,
+            Some(local_first_engine::AgentExecutionEvent::RunCompleted {
+                reason: "delivered".to_string(),
+            }),
         );
     } else {
         finalize_agent_run(
