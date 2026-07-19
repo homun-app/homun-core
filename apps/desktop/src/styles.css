@@ -12816,12 +12816,14 @@ body.resizing-drawer {
   gap: 8px;
 }
 .brandkit-color input[type="color"] {
-  width: 40px;
+  width: 44px;
   height: 36px;
   padding: 0;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: none;
+  cursor: pointer;
+  flex: none;
 }
 .brandkit-color input:not([type="color"]) {
   flex: 1;
@@ -12958,8 +12960,11 @@ body.resizing-drawer {
   right: 0;
   bottom: 0;
   z-index: 430;
-  width: min(380px, 100vw);
+  /* 380px made the 2-col brandkit grid overflow horizontally (live feedback) — 560px
+   * gives the grid + the wider colour swatch room to breathe without scrolling. */
+  width: min(560px, 100vw);
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--surface);
   border-left: 1px solid var(--line);
   box-shadow: -24px 0 70px rgba(15, 23, 42, 0.26);
