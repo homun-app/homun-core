@@ -61,6 +61,9 @@ pub mod trace;
 /// turn did and NEVER changes any control-flow decision. Kept separate from `trace` (the hashed oracle).
 pub mod turn_trace;
 
+/// Durable, provider-neutral observability events emitted by the guarded loop.
+pub mod execution_journal;
+
 /// The single guarded ReAct loop — motore #1 (ADR 0021), extracted here (ADR 0024 inc 5, 5.D1c.10).
 pub mod agent_loop;
 
@@ -68,9 +71,13 @@ pub mod agent_loop;
 pub mod browse;
 
 pub use contract::{
-    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, LoadedTool, ModelCall,
-    ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects,
-    ToolOutcome, TurnCompletionJudge, TurnPolicy,
+    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal, LoadedTool,
+    ModelCall, ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding,
+    ToolEffects, ToolOutcome, TurnCompletionJudge, TurnPolicy,
+};
+pub use execution_journal::{
+    AgentExecutionEvent, NoopExecutionJournal, PromptMessageSnapshot, PromptSnapshot,
+    PromptToolSnapshot, build_prompt_snapshot,
 };
 pub use browse::{BrowseResult, Confidence};
 pub use config::TurnConfig;

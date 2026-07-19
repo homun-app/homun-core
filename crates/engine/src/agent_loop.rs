@@ -13,9 +13,10 @@
 
 use crate::browser::{is_browser_granular_tool, prune_browser_history, resolve_browser_chat_tool_name};
 use crate::contract::{
-    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ModelClient, PlanProgress,
-    TurnCompletionJudge, TurnPolicy,
+    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal, ModelClient,
+    PlanProgress, TurnCompletionJudge, TurnPolicy,
 };
+use crate::execution_journal::{AgentExecutionEvent, build_prompt_snapshot};
 use crate::events::{GenerateStreamEvent, TokenMetrics};
 use crate::markers::{
     append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
@@ -125,7 +126,7 @@ pub async fn try_advance_frontier_from_evidence(
 /// tail (memory learn + code-graph refresh) consumes. Called unconditionally by `run_agent_rounds`
 /// (ADR 0024 5.D2) — no flag, no inline copy.
 #[allow(clippy::too_many_arguments)] // the turn's seams + engine-safe data; grouped further post-5.D2.
-pub async fn run_turn<M, C, B, P, J, K, Pol, E>(
+pub async fn run_turn<M, C, B, P, J, K, Pol, X, E>(
     mut ls: LoopState,
     cfg: TurnConfig,
     model_client: &M,
@@ -135,6 +136,7 @@ pub async fn run_turn<M, C, B, P, J, K, Pol, E>(
     completion_judge: &J,
     compactor: &K,
     turn_policy: &Pol,
+    execution_journal: &X,
     event_sink: &E,
     temperature: f64,
     // by-ref: these are also borrowed by the gateway-constructed executors (dispatch shares one
@@ -163,6 +165,7 @@ where
     J: TurnCompletionJudge,
     K: ContextCompactor,
     Pol: TurnPolicy,
+    X: ExecutionJournal,
     E: EventSink,
 {
     for round in 0..cfg.hard_round_ceiling {
@@ -213,6 +216,10 @@ gathered‹‹/ACT››"
         // multi-step turn from overflowing the context window.
         if ls.pending_compaction {
             ls.pending_compaction = false;
+            execution_journal.record(AgentExecutionEvent::ContextCompacted {
+                round,
+                reason: "verified_step_boundary".to_string(),
+            });
             compactor.compact(&mut ls.messages, &mut ls.step_messages_start).await;
         }
         // Fase 1.1: token-budget auto-compaction (the memory-checkpoint path) — independent of
@@ -259,6 +266,17 @@ missing, give what you have and note the gap in one short line.",
         // HTTP, retry/backoff, provider fallback, and the OpenAI/Ollama stream collectors are
         // owned there. A mid-round provider swap comes back via ProviderBinding so the next
         // rounds use the effective provider.
+        execution_journal.record(AgentExecutionEvent::PromptSnapshot {
+            round,
+            snapshot: build_prompt_snapshot(
+                &ls.provider.model,
+                &ls.provider.base_url,
+                &ls.messages,
+                &ls.tool_schemas,
+                is_final_round,
+                if round == 0 { cfg.forced_tool.as_deref() } else { None },
+            ),
+        });
         let out = model_client
             .generate(
                 &crate::ModelCall {
@@ -307,6 +325,9 @@ missing, give what you have and note the gap in one short line.",
                 // Return with NOTHING emitted and nothing committed: no Done, no answer, no memory. The
                 // gateway replaces the images with a vision model's description and calls us again, and
                 // the user never sees that this attempt happened.
+                execution_journal.record(AgentExecutionEvent::RunAborted {
+                    reason: "image_unsupported_replay".to_string(),
+                });
                 return crate::TurnOutcome {
                     image_rejection: Some(reason),
                     ..Default::default()
@@ -347,6 +368,13 @@ missing, give what you have and note the gap in one short line.",
                     Some(model_normalize::synthesize_tool_calls(round, parsed))
                 }
             });
+
+        execution_journal.record(AgentExecutionEvent::ModelResponse {
+            round,
+            finish_reason: round_finish_reason.clone(),
+            content_chars: raw_content.chars().count(),
+            tool_calls: tool_calls.as_ref().map_or(0, Vec::len),
+        });
 
         // Turn trace: record this round's outcome (finish_reason + tools chosen) before `tool_calls` is
         // consumed below. Observability only — reads state, never alters it.
@@ -525,6 +553,11 @@ missing, give what you have and note the gap in one short line.",
                     }
                 }
 
+                execution_journal.record(AgentExecutionEvent::ToolCallStarted {
+                    round,
+                    call_id: call_id.clone(),
+                    name: name.to_string(),
+                });
                 let (result, tool_effects) = if is_browser_granular_tool(name) {
                     // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
                     // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
@@ -546,6 +579,18 @@ missing, give what you have and note the gap in one short line.",
                         Err(e) => (e, crate::ToolEffects::default()),
                     }
                 };
+                execution_journal.record(AgentExecutionEvent::ToolCallCompleted {
+                    round,
+                    call_id: call_id.clone(),
+                    name: name.to_string(),
+                    result_chars: result.chars().count(),
+                });
+                if matches!(name, "update_plan" | "step_advance") {
+                    execution_journal.record(AgentExecutionEvent::PlanUpdated {
+                        round,
+                        source: name.to_string(),
+                    });
+                }
                 // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                 // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
                 ls.apply_effects(&mut pending_confirm, round, tool_effects);
@@ -840,6 +885,10 @@ missing, give what you have and note the gap in one short line.",
             turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
                 finish_reason: round_finish_reason.clone().unwrap_or_default(),
             });
+            execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
+                round: Some(round),
+                reason: "empty_visible_answer".to_string(),
+            });
             // Keep the reasoning trace in context so the synthesis builds on it.
             if !content.trim().is_empty() {
                 ls.messages.push(serde_json::json!({ "role": "assistant", "content": content }));
@@ -909,6 +958,10 @@ missing, give what you have and note the gap in one short line.",
         turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
             finish_reason: "post_loop_exhausted".into(),
         });
+        execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
+            round: None,
+            reason: "post_loop_exhausted".to_string(),
+        });
         // Guaranteed synthesis: the model exhausted the tool rounds without a
         // text answer (it kept calling tools). Force one final NO-TOOLS call so it
         // synthesizes from what it did, instead of dead-ending on "limite di passi".
@@ -930,6 +983,17 @@ to proceed."
         // A provider swap here is moot (the turn ends right after), and any error →
         // empty synth, falling through to the accumulated / last_model_error / canned
         // chain below (same fallback shape as before).
+        execution_journal.record(AgentExecutionEvent::PromptSnapshot {
+            round: cfg.hard_round_ceiling,
+            snapshot: build_prompt_snapshot(
+                &ls.provider.model,
+                &ls.provider.base_url,
+                &ls.messages,
+                &[],
+                true,
+                None,
+            ),
+        });
         let synth_out = model_client
             .generate(
                 &crate::ModelCall {
@@ -955,6 +1019,14 @@ to proceed."
                 .and_then(|c| c.as_str())
                 .unwrap_or(""),
         );
+        if let Ok(output) = &synth_out {
+            execution_journal.record(AgentExecutionEvent::ModelResponse {
+                round: cfg.hard_round_ceiling,
+                finish_reason: output.finish_reason.clone(),
+                content_chars: synth_text.chars().count(),
+                tool_calls: 0,
+            });
+        }
         // synth_text was already streamed live by the collector; the committed text
         // is the authoritative Done payload below.
         let mut final_text = if !synth_text.trim().is_empty() {
@@ -999,6 +1071,9 @@ Tell me if you want me to retry or rephrase."
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
     // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
     // engine's turn ends here.
+    execution_journal.record(AgentExecutionEvent::RunCompleted {
+        reason: if final_done { "model_answer" } else { "forced_synthesis" }.to_string(),
+    });
     crate::TurnOutcome {
         memory_answer,
         tool_actions: ls.tool_trace.join("\n"),
@@ -1099,6 +1174,13 @@ mod tests {
             self.0.lock().unwrap().push(e);
         }
     }
+    #[derive(Default)]
+    struct CollectJournal(Mutex<Vec<String>>);
+    impl crate::ExecutionJournal for CollectJournal {
+        fn record(&self, event: crate::AgentExecutionEvent) {
+            self.0.lock().unwrap().push(event.into_parts().0.to_string());
+        }
+    }
 
     fn cfg() -> TurnConfig {
         TurnConfig {
@@ -1127,6 +1209,7 @@ mod tests {
         ];
         ls.step_messages_start = ls.messages.len();
         let sink = Collect::default();
+        let journal = CollectJournal::default();
         let mut browser = NoBrowser;
         let composio_writes = std::collections::BTreeSet::new();
         let catalog_index: Vec<(String, String, Value)> = Vec::new();
@@ -1141,6 +1224,7 @@ mod tests {
             &DoneJudge,
             &NoCompact,
             &OpenPolicy,
+            &journal,
             &sink,
             0.0,
             None,
@@ -1157,6 +1241,11 @@ mod tests {
             &crate::turn_trace::TurnTrace::disabled(),
         )
         .await;
+
+        assert_eq!(
+            journal.0.lock().unwrap().as_slice(),
+            ["prompt_snapshot", "model_response", "run_completed"]
+        );
 
         // The model answered immediately → the turn commits that answer and ends.
         assert!(
@@ -1266,6 +1355,7 @@ mod tests {
         ];
         ls.step_messages_start = ls.messages.len();
         let sink = Collect::default();
+        let journal = CollectJournal::default();
         let mut browser = NoBrowser;
         let composio_writes = std::collections::BTreeSet::new();
         let catalog_index: Vec<(String, String, Value)> = Vec::new();
@@ -1290,6 +1380,7 @@ mod tests {
             &DoneJudge,
             &NoCompact,
             &OpenPolicy,
+            &journal,
             &sink,
             0.0,
             None,

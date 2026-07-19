@@ -12,6 +12,7 @@
 //! (inc 5c) — ahead of the loop move (inc 5e) that consumes them: the same contract-first pattern.
 
 use crate::events::GenerateStreamEvent;
+use crate::execution_journal::AgentExecutionEvent;
 use serde_json::Value;
 use std::future::Future;
 
@@ -201,6 +202,12 @@ pub trait BrowserExecutor {
 /// reason as `ModelClient`). Defined ahead of the loop move (inc 5e) that will consume it.
 pub trait EventSink {
     fn emit(&self, event: GenerateStreamEvent) -> impl Future<Output = ()> + Send;
+}
+
+/// Best-effort operational observability for the agent loop. Implementations must never block or
+/// feed errors back into control flow; persistence and redaction are gateway responsibilities.
+pub trait ExecutionJournal: Send + Sync {
+    fn record(&self, event: AgentExecutionEvent);
 }
 
 /// The loop's runtime-plan progress port (ADR 0024, increment 5c). The harness — not the model —
