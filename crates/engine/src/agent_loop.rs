@@ -233,6 +233,7 @@ gathered‹‹/ACT››"
         // boundary as the step compaction; fail-open (unknown window → no-op) so a turn without a
         // known window keeps exactly today's round-based hygiene.
         compactor.compact_for_budget(&mut ls.messages, cfg.context_window).await;
+        execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
         // On the LAST allowed round, forbid tools so the model MUST synthesize
         // a final answer from what it already gathered — otherwise it can burn
         // every round on tool calls and end with no answer ("limite di passi").

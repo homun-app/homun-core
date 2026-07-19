@@ -24866,6 +24866,34 @@ struct GatewayCapabilityExecutor<'a> {
     // Readable per-turn observability sink (ported); passed into each per-call ChatToolCtx so the plan
     // arm can record the Plan event. No-op when disabled. See `engine::turn_trace`.
     turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
+    turn_id: Option<&'a str>,
+    run_id: Option<&'a str>,
+}
+
+fn canonical_json(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(values) => {
+            let ordered = values
+                .into_iter()
+                .map(|(key, value)| (key, canonical_json(value)))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            serde_json::Value::Object(ordered.into_iter().collect())
+        }
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(canonical_json).collect())
+        }
+        other => other,
+    }
+}
+
+fn effectful_tool_name(name: &str, composio_writes: &std::collections::BTreeSet<String>) -> bool {
+    composio_writes.contains(name)
+        || [
+            "write", "edit", "apply", "create", "update", "delete", "remove", "send",
+            "save", "make_", "book", "purchase", "forget", "cancel", "record_decision",
+        ]
+        .iter()
+        .any(|token| name.to_ascii_lowercase().contains(token))
 }
 
 impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
@@ -24910,6 +24938,67 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             .iter()
             .filter_map(|t| crate::skills::SensitiveCategory::parse(t))
             .collect();
+        let receipt = if effectful_tool_name(name, self.composio_writes) {
+            let (Some(turn_id), Some(run_id), Some(thread_id)) =
+                (self.turn_id, self.run_id, self.thread_id)
+            else {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: "Effectful tool blocked: no durable execution scope is available."
+                        .to_string(),
+                    effects: Default::default(),
+                });
+            };
+            let args = canonical_json(
+                serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({})),
+            );
+            let arguments_hash = format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&args).unwrap_or_default())
+            );
+            let idempotency_key = format!("{name}:{arguments_hash}");
+            let new_receipt = local_first_task_runtime::NewAgentToolReceipt {
+                turn_id: turn_id.to_string(),
+                idempotency_key: idempotency_key.clone(),
+                run_id: run_id.to_string(),
+                thread_id: thread_id.to_string(),
+                user_id: self.automation_user_id.as_str().to_string(),
+                workspace_id: self.automation_workspace_id.as_str().to_string(),
+                tool_name: name.to_string(),
+                arguments_hash,
+            };
+            let claim = self
+                .state
+                .task_store
+                .lock()
+                .map_err(|_| "effect receipt store unavailable".to_string())?
+                .claim_tool_receipt(&new_receipt)
+                .map_err(|error| format!("effect receipt claim failed: {error}"))?;
+            match claim {
+                local_first_task_runtime::ToolReceiptClaim::Execute => {
+                    Some((turn_id.to_string(), idempotency_key))
+                }
+                local_first_task_runtime::ToolReceiptClaim::Replay(receipt) => {
+                    let result = receipt
+                        .result_json
+                        .and_then(|value| value.as_str().map(str::to_string))
+                        .unwrap_or_else(|| "Previously completed effect replayed.".to_string());
+                    let effects = receipt
+                        .effects_json
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default();
+                    return Ok(local_first_engine::ToolOutcome { result, effects });
+                }
+                local_first_task_runtime::ToolReceiptClaim::Uncertain(_) => {
+                    return Ok(local_first_engine::ToolOutcome {
+                        result: "This effect may already have run before an interruption. It was not repeated; inspect the target state before retrying.".to_string(),
+                        effects: Default::default(),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+
         let ctx = ChatToolCtx {
             plan: &mut ls.plan,
             step_evidence: &mut ls.step_evidence,
@@ -24947,6 +25036,18 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                     let _ = store.clear_thread_routing_binding(thread_id);
                 }
             }
+        }
+        if let Some((turn_id, idempotency_key)) = receipt {
+            let result_json = agent_journal::redact_json_value(serde_json::Value::String(result.clone()));
+            let effects_json = agent_journal::redact_json_value(
+                serde_json::to_value(&effects).unwrap_or_else(|_| serde_json::json!({})),
+            );
+            self.state
+                .task_store
+                .lock()
+                .map_err(|_| "effect receipt completion store unavailable".to_string())?
+                .complete_tool_receipt(&turn_id, &idempotency_key, &result_json, &effects_json)
+                .map_err(|error| format!("effect receipt completion failed: {error}"))?;
         }
         Ok(local_first_engine::ToolOutcome { result, effects })
     }
@@ -26679,6 +26780,12 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     let state_owned = state.clone();
     let temperature = request.temperature;
     let execution_journal = agent_journal::for_run(request.agent_run_id.as_deref());
+    let recovery_checkpoint = request.agent_checkpoint.clone();
+    let effect_run_id = request.agent_run_id.clone();
+    let effect_turn_id = request
+        .agent_run_id
+        .as_ref()
+        .and_then(|_| request.request_id.strip_prefix("broker-").map(str::to_string));
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
@@ -26897,6 +27004,11 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // larger browser budget). This keeps non-browser turns identical to today.
         // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
         ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
+        if let Some(checkpoint) = recovery_checkpoint
+            .and_then(|value| serde_json::from_value::<local_first_engine::LoopCheckpoint>(value).ok())
+        {
+            checkpoint.apply_to(&mut ls);
+        }
         // 5.D1c.1: resolve the loop's turn-constant config ONCE (env-stable for the turn) so the moved
         // loop never reads env. Behavior-preserving — same values the inline getters returned.
         let cfg = local_first_engine::TurnConfig {
@@ -26925,7 +27037,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, execution_journal, &turn_trace, vision_fallback_armed).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, execution_journal, effect_turn_id, effect_run_id, &turn_trace, vision_fallback_armed).await;
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
         // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
@@ -27046,6 +27158,8 @@ async fn run_agent_rounds(
     // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
     trace_dir: Option<std::path::PathBuf>,
     execution_journal: agent_journal::GatewayJournal,
+    effect_turn_id: Option<String>,
+    effect_run_id: Option<String>,
     // Readable per-turn observability sink (ported): passed into the capability executor (Plan event)
     // and into `run_turn` (the in-loop events). No-op when disabled. See `engine::turn_trace`.
     turn_trace: &local_first_engine::turn_trace::TurnTrace,
@@ -27081,6 +27195,8 @@ async fn run_agent_rounds(
         prompt: &prompt,
         channel_owner,
         turn_trace,
+        turn_id: effect_turn_id.as_deref(),
+        run_id: effect_run_id.as_deref(),
     };
     // The browser tool chokepoint (ADR 0025 seam): OWNS the browser subsystem's private state (session +
     // snapshot/tab/nav bookkeeping); `&mut` because run_turn mutates it per browser call.
@@ -32296,6 +32412,7 @@ async fn run_agent_turn_into_message(
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
         agent_run_id: None,
+        agent_checkpoint: None,
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,
@@ -32357,9 +32474,39 @@ async fn run_agent_turn_into_message_with_fanout(
         &[source_user_message_id, assistant_message_id],
     )?;
     let request_id = format!("broker-{turn_id}");
+    let checkpoint_workspace = state
+        .chat_store
+        .lock()
+        .ok()
+        .and_then(|store| store.workspace_for_thread(thread_id).ok())
+        .unwrap_or_else(|| gateway_workspace_id().as_str().to_string());
+    let agent_checkpoint = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .latest_resumable_checkpoint_for_turn(
+                    turn_id,
+                    gateway_user_id().as_str(),
+                    &checkpoint_workspace,
+                )
+                .ok()
+                .flatten()
+        })
+        .and_then(|checkpoint| {
+            let actual = format!(
+                "{:x}",
+                sha2::Sha256::digest(
+                    serde_json::to_vec(&checkpoint.state_json).unwrap_or_default()
+                )
+            );
+            (actual == checkpoint.fingerprint).then_some(checkpoint.state_json)
+        });
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
         agent_run_id: agent_run_id.map(str::to_string),
+        agent_checkpoint,
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,

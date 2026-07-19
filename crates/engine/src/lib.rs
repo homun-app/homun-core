@@ -38,6 +38,7 @@ pub mod model_normalize;
 /// The loop's turn-carried state (ADR 0024 inc 5, Point 4) — bundled at its destination
 /// ahead of the loop-body move; the gateway constructs it and the inline loop mutates it.
 pub mod loop_state;
+pub mod loop_checkpoint;
 
 /// The loop's turn-constant config (ADR 0024 inc 5, 5.D1c.1) — resolved gateway-side, injected so the
 /// leaf engine never reads env.
@@ -82,4 +83,5 @@ pub use execution_journal::{
 pub use browse::{BrowseResult, Confidence};
 pub use config::TurnConfig;
 pub use loop_state::LoopState;
+pub use loop_checkpoint::LoopCheckpoint;
 pub use outcome::TurnOutcome;

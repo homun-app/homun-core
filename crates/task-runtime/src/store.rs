@@ -1,6 +1,7 @@
 use crate::{
-    AgentRun, AgentRunEvent, AgentRunStatus, ApprovalRequest, Automation, AutomationRun,
-    NewAgentRun, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint,
+    AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalRequest,
+    Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ResourceClass, RuntimePlanRecord,
+    SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
     ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkspaceId,
 };
@@ -490,6 +491,167 @@ impl TaskStore {
              WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
             params![user_id, workspace_id, thread_id],
         )?)
+    }
+
+    pub fn append_agent_checkpoint(
+        &self,
+        run_id: &str,
+        round: u32,
+        state: &Value,
+        fingerprint: &str,
+        resumable: bool,
+    ) -> TaskRuntimeResult<AgentCheckpoint> {
+        let (turn_id, thread_id, user_id, workspace_id): (String, String, String, String) =
+            self.connection.query_row(
+                "SELECT turn_id, thread_id, user_id, workspace_id FROM agent_runs WHERE run_id = ?1",
+                params![run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        let checkpoint_id = format!("{run_id}:{round}");
+        let created_at = OffsetDateTime::now_utc().unix_timestamp();
+        self.connection.execute(
+            "INSERT INTO agent_checkpoints (
+                checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                round, state_json, fingerprint, resumable, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(run_id, round) DO UPDATE SET
+                state_json = excluded.state_json,
+                fingerprint = excluded.fingerprint,
+                resumable = excluded.resumable,
+                created_at = excluded.created_at",
+            params![
+                checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                round as i64, serde_json::to_string(state)?, fingerprint,
+                if resumable { 1 } else { 0 }, created_at,
+            ],
+        )?;
+        Ok(AgentCheckpoint {
+            checkpoint_id,
+            run_id: run_id.to_string(),
+            turn_id,
+            thread_id,
+            user_id,
+            workspace_id,
+            round,
+            state_json: state.clone(),
+            fingerprint: fingerprint.to_string(),
+            resumable,
+            created_at,
+        })
+    }
+
+    pub fn latest_resumable_checkpoint_for_turn(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Option<AgentCheckpoint>> {
+        self.connection
+            .query_row(
+                "SELECT c.checkpoint_id, c.run_id, c.turn_id, c.thread_id, c.user_id,
+                        c.workspace_id, c.round, c.state_json, c.fingerprint,
+                        c.resumable, c.created_at
+                 FROM agent_checkpoints c
+                 JOIN agent_runs r ON r.run_id = c.run_id
+                 WHERE c.turn_id = ?1 AND c.user_id = ?2 AND c.workspace_id = ?3
+                   AND c.resumable = 1 AND r.status = 'aborted'
+                   AND r.terminal_reason = 'gateway_restart'
+                 ORDER BY c.created_at DESC, c.round DESC
+                 LIMIT 1",
+                params![turn_id, user_id, workspace_id],
+                |row| {
+                    let state_json: String = row.get(7)?;
+                    Ok((
+                        row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?, state_json,
+                        row.get::<_, String>(8)?, row.get::<_, i64>(9)?,
+                        row.get::<_, i64>(10)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                   round, state_json, fingerprint, resumable, created_at)| {
+                Ok(AgentCheckpoint {
+                    checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                    round: round as u32,
+                    state_json: serde_json::from_str(&state_json)?, fingerprint,
+                    resumable: resumable != 0, created_at,
+                })
+            })
+            .transpose()
+    }
+
+    pub fn claim_tool_receipt(
+        &self,
+        new_receipt: &NewAgentToolReceipt,
+    ) -> TaskRuntimeResult<ToolReceiptClaim> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO agent_tool_receipts (
+                turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
+                tool_name, arguments_hash, status, started_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'started', ?9)",
+            params![
+                new_receipt.turn_id, new_receipt.idempotency_key, new_receipt.run_id,
+                new_receipt.thread_id, new_receipt.user_id, new_receipt.workspace_id,
+                new_receipt.tool_name, new_receipt.arguments_hash, now,
+            ],
+        )?;
+        let receipt = load_tool_receipt_on(&tx, &new_receipt.turn_id, &new_receipt.idempotency_key)?
+            .ok_or_else(|| TaskRuntimeError::Store("tool receipt disappeared after claim".into()))?;
+        let claim = if inserted == 1 {
+            ToolReceiptClaim::Execute
+        } else if receipt.status == "completed" {
+            ToolReceiptClaim::Replay(receipt)
+        } else {
+            ToolReceiptClaim::Uncertain(receipt)
+        };
+        tx.commit()?;
+        Ok(claim)
+    }
+
+    pub fn complete_tool_receipt(
+        &self,
+        turn_id: &str,
+        idempotency_key: &str,
+        result: &Value,
+        effects: &Value,
+    ) -> TaskRuntimeResult<AgentToolReceipt> {
+        let completed_at = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE agent_tool_receipts
+             SET status = 'completed', result_json = ?1, effects_json = ?2, completed_at = ?3
+             WHERE turn_id = ?4 AND idempotency_key = ?5 AND status = 'started'",
+            params![serde_json::to_string(result)?, serde_json::to_string(effects)?,
+                    completed_at, turn_id, idempotency_key],
+        )?;
+        if changed != 1 {
+            return Err(TaskRuntimeError::Store("tool receipt is not claimable".into()));
+        }
+        load_tool_receipt_on(&self.connection, turn_id, idempotency_key)?
+            .ok_or_else(|| TaskRuntimeError::Store("completed tool receipt disappeared".into()))
+    }
+
+    pub fn list_tool_receipts_for_thread(
+        &self,
+        thread_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Vec<AgentToolReceipt>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
+                    tool_name, arguments_hash, status, result_json, effects_json,
+                    started_at, completed_at
+             FROM agent_tool_receipts
+             WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+             ORDER BY started_at ASC, idempotency_key ASC",
+        )?;
+        let rows = stmt.query_map(params![thread_id, user_id, workspace_id], map_tool_receipt_row)?;
+        rows.map(|row| row.map_err(Into::into)).collect()
     }
 
     /// Reclaims free space. Call periodically, NOT on every delete.
@@ -1797,6 +1959,44 @@ fn load_runtime_plan_on(
     .transpose()
 }
 
+fn map_tool_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentToolReceipt> {
+    let result_json: Option<String> = row.get(9)?;
+    let effects_json: Option<String> = row.get(10)?;
+    Ok(AgentToolReceipt {
+        turn_id: row.get(0)?,
+        idempotency_key: row.get(1)?,
+        run_id: row.get(2)?,
+        thread_id: row.get(3)?,
+        user_id: row.get(4)?,
+        workspace_id: row.get(5)?,
+        tool_name: row.get(6)?,
+        arguments_hash: row.get(7)?,
+        status: row.get(8)?,
+        result_json: result_json.and_then(|raw| serde_json::from_str(&raw).ok()),
+        effects_json: effects_json.and_then(|raw| serde_json::from_str(&raw).ok()),
+        started_at: row.get(11)?,
+        completed_at: row.get(12)?,
+    })
+}
+
+fn load_tool_receipt_on(
+    conn: &Connection,
+    turn_id: &str,
+    idempotency_key: &str,
+) -> TaskRuntimeResult<Option<AgentToolReceipt>> {
+    Ok(conn
+        .query_row(
+            "SELECT turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
+                    tool_name, arguments_hash, status, result_json, effects_json,
+                    started_at, completed_at
+             FROM agent_tool_receipts
+             WHERE turn_id = ?1 AND idempotency_key = ?2",
+            params![turn_id, idempotency_key],
+            map_tool_receipt_row,
+        )
+        .optional()?)
+}
+
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info({table})")) else {
         return false;
@@ -1917,6 +2117,78 @@ mod runtime_plan_tests {
             .purge_workspace(&UserId::new("u"), &WorkspaceId::new("other"))
             .unwrap();
         assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod agent_control_state_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn run(run_id: &str) -> NewAgentRun {
+        NewAgentRun {
+            run_id: run_id.into(),
+            turn_id: "turn".into(),
+            thread_id: "thread".into(),
+            user_id: "user".into(),
+            workspace_id: "workspace".into(),
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        }
+    }
+
+    fn receipt() -> NewAgentToolReceipt {
+        NewAgentToolReceipt {
+            turn_id: "turn".into(),
+            idempotency_key: "write_file:abc".into(),
+            run_id: "run".into(),
+            thread_id: "thread".into(),
+            user_id: "user".into(),
+            workspace_id: "workspace".into(),
+            tool_name: "write_file".into(),
+            arguments_hash: "abc".into(),
+        }
+    }
+
+    #[test]
+    fn checkpoint_recovery_requires_gateway_restart_abort() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.create_agent_run(&run("run")).unwrap();
+        store
+            .append_agent_checkpoint("run", 2, &json!({"round": 2}), "fp", true)
+            .unwrap();
+        assert!(store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .is_none());
+        store
+            .abort_running_agent_runs_for_turn(
+                "turn", "user", "workspace", "gateway_restart",
+            )
+            .unwrap();
+        let checkpoint = store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .unwrap();
+        assert_eq!(checkpoint.round, 2);
+    }
+
+    #[test]
+    fn tool_receipt_never_reclaims_uncertain_started_action() {
+        let store = TaskStore::open_in_memory().unwrap();
+        assert!(matches!(store.claim_tool_receipt(&receipt()).unwrap(), ToolReceiptClaim::Execute));
+        assert!(matches!(
+            store.claim_tool_receipt(&receipt()).unwrap(),
+            ToolReceiptClaim::Uncertain(_)
+        ));
+        store
+            .complete_tool_receipt("turn", "write_file:abc", &json!({"ok": true}), &json!({}))
+            .unwrap();
+        assert!(matches!(
+            store.claim_tool_receipt(&receipt()).unwrap(),
+            ToolReceiptClaim::Replay(_)
+        ));
     }
 }
 

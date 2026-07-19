@@ -246,6 +246,57 @@ pub struct RuntimePlanRecord {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentCheckpoint {
+    pub checkpoint_id: String,
+    pub run_id: String,
+    pub turn_id: String,
+    pub thread_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub round: u32,
+    pub state_json: Value,
+    pub fingerprint: String,
+    pub resumable: bool,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewAgentToolReceipt {
+    pub turn_id: String,
+    pub idempotency_key: String,
+    pub run_id: String,
+    pub thread_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub tool_name: String,
+    pub arguments_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentToolReceipt {
+    pub turn_id: String,
+    pub idempotency_key: String,
+    pub run_id: String,
+    pub thread_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub tool_name: String,
+    pub arguments_hash: String,
+    pub status: String,
+    pub result_json: Option<Value>,
+    pub effects_json: Option<Value>,
+    pub started_at: i64,
+    pub completed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolReceiptClaim {
+    Execute,
+    Replay(AgentToolReceipt),
+    Uncertain(AgentToolReceipt),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRunStatus {

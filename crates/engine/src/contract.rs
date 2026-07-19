@@ -13,6 +13,7 @@
 
 use crate::events::GenerateStreamEvent;
 use crate::execution_journal::AgentExecutionEvent;
+use crate::LoopCheckpoint;
 use serde_json::Value;
 use std::future::Future;
 
@@ -91,6 +92,7 @@ pub trait ModelClient {
 /// A tool the loop should mark loaded mid-turn (dynamic capability loading: `find_capability` /
 /// `use_skill`). `key` dedups against what's already loaded; `schema` is `None` when the key is only
 /// being marked loaded (a connector entry with no schema) — the loop adds a schema only when `Some`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LoadedTool {
     pub key: String,
     pub schema: Option<Value>,
@@ -106,7 +108,7 @@ pub struct LoadedTool {
 /// `request_confirm`→`*ctx.pending_confirm`, `request_compaction`→`*ctx.pending_compaction`,
 /// `reset_stall_guards`→ real-progress reset (`progress_anchor_round=round`, `repeat_count=0`,
 /// `last_round_sig.clear()`), which today fire together in the `update_plan`/`step_advance` arm.
-#[derive(Default)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolEffects {
     /// Text to append to the assistant's accumulated output, in order (artifact/plan markers, cards).
     pub append_output: Vec<String>,
@@ -208,6 +210,8 @@ pub trait EventSink {
 /// feed errors back into control flow; persistence and redaction are gateway responsibilities.
 pub trait ExecutionJournal: Send + Sync {
     fn record(&self, event: AgentExecutionEvent);
+
+    fn checkpoint(&self, _checkpoint: LoopCheckpoint) {}
 }
 
 /// The loop's runtime-plan progress port (ADR 0024, increment 5c). The harness — not the model —

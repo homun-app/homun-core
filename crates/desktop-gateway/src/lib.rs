@@ -71,6 +71,9 @@ pub struct ChatGenerateStreamRequest {
     /// Interactive callers leave it empty; it is never model-visible.
     #[serde(default)]
     pub agent_run_id: Option<String>,
+    /// Redacted, checksum-validated safe-round state from an aborted broker attempt.
+    #[serde(default)]
+    pub agent_checkpoint: Option<serde_json::Value>,
     pub prompt: String,
     /// Chat thread this request belongs to. Lets browser work reuse a single
     /// persistent browser session per thread (search → then book on the same

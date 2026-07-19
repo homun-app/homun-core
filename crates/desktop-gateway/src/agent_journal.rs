@@ -1,6 +1,7 @@
-use local_first_engine::{AgentExecutionEvent, ExecutionJournal};
+use local_first_engine::{AgentExecutionEvent, ExecutionJournal, LoopCheckpoint};
 use local_first_task_runtime::TaskStore;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,6 +16,11 @@ enum WriterMessage {
         kind: &'static str,
         round: Option<usize>,
         payload: Value,
+    },
+    Checkpoint {
+        round: usize,
+        state: Value,
+        fingerprint: String,
     },
     Flush(mpsc::Sender<()>),
 }
@@ -37,6 +43,12 @@ impl ExecutionJournal for GatewayJournal {
     fn record(&self, event: AgentExecutionEvent) {
         if let Self::Durable(journal) = self {
             journal.record(event);
+        }
+    }
+
+    fn checkpoint(&self, checkpoint: LoopCheckpoint) {
+        if let Self::Durable(journal) = self {
+            journal.checkpoint(checkpoint);
         }
     }
 }
@@ -76,6 +88,20 @@ impl GatewayExecutionJournal {
                                 writer_dropped_events.fetch_add(1, Ordering::Relaxed);
                             }
                             seq += 1;
+                        }
+                        WriterMessage::Checkpoint { round, state, fingerprint } => {
+                            if let Some(store) = &store {
+                                if let Err(error) = store.append_agent_checkpoint(
+                                    &run_id,
+                                    round as u32,
+                                    &state,
+                                    &fingerprint,
+                                    true,
+                                ) {
+                                    writer_dropped_events.fetch_add(1, Ordering::Relaxed);
+                                    tracing::warn!(target: "agent::journal", %run_id, round, %error, "checkpoint write failed");
+                                }
+                            }
                         }
                         WriterMessage::Flush(ack) => {
                             let _ = ack.send(());
@@ -151,6 +177,25 @@ impl ExecutionJournal for GatewayExecutionJournal {
             }
         }
     }
+
+    fn checkpoint(&self, checkpoint: LoopCheckpoint) {
+        let accepting = self.accepting.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !*accepting {
+            self.dropped_events.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        let round = checkpoint.round;
+        let state = redact_json_value(
+            serde_json::to_value(checkpoint).unwrap_or_else(|_| serde_json::json!({})),
+        );
+        let fingerprint = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&state).unwrap_or_default())
+        );
+        if self.sender.try_send(WriterMessage::Checkpoint { round, state, fingerprint }).is_err() {
+            self.dropped_events.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 fn journal_registry() -> &'static Mutex<HashMap<String, GatewayExecutionJournal>> {
@@ -192,7 +237,7 @@ fn prepare_event(event: AgentExecutionEvent) -> (&'static str, Option<usize>, Va
     (kind, round, payload)
 }
 
-fn redact_json_value(value: Value) -> Value {
+pub(crate) fn redact_json_value(value: Value) -> Value {
     match value {
         Value::String(text) => Value::String(redact_prompt_text(&text)),
         Value::Array(values) => Value::Array(values.into_iter().map(redact_json_value).collect()),

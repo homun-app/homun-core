@@ -30,10 +30,11 @@ pub use resources::{ResourceGovernor, ResourceLimits};
 pub use scheduler::TaskScheduler;
 pub use store::TaskStore;
 pub use types::{
-    AgentRun, AgentRunEvent, AgentRunStatus, ApprovalPolicy, Automation, AutomationRun,
+    AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalPolicy,
+    Automation, AutomationRun,
     AutomationSource, AutomationTrigger, EventTrigger, NewAgentRun, ResourceClass,
-    ResourceRequirement, RetryPolicy, RuntimePlanRecord, TaskId, TaskPriority, TaskRecord,
-    TaskStatus, SubagentInfo, ThreadActivityProjection, TurnEvent, TurnEventKind, UserId,
-    WorkflowId, WorkspaceId,
+    NewAgentToolReceipt, ResourceRequirement, RetryPolicy, RuntimePlanRecord, TaskId,
+    TaskPriority, TaskRecord, TaskStatus, SubagentInfo, ThreadActivityProjection,
+    ToolReceiptClaim, TurnEvent, TurnEventKind, UserId, WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};
