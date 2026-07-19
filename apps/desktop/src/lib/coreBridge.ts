@@ -382,6 +382,8 @@ export interface RecallHitPayload {
   grant_id: string | null;
   /** Exact linked-grant policy version used for this hit; null for local/legacy hits. */
   policy_version: number | null;
+  /** Exact source-record revision; absent/null on local and legacy events. */
+  source_revision?: string | null;
   /** The recall coordinator detected a semantic conflict for this hit. */
   conflict: boolean;
   /** Canonical graph relations followed from the direct hit; absent on legacy events. */

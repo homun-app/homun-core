@@ -1813,6 +1813,7 @@ fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::
                 collection: recall_collection_token(hit.collection).to_string(),
                 grant_id: hit.grant_id.clone(),
                 policy_version: hit.policy_version,
+                source_revision: Some(hit.source_revision.clone()),
                 conflict: hit.conflict,
                 graph_path: hit.graph_path.clone(),
             })
@@ -14003,6 +14004,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                             collection: recall_collection_token(collection).to_string(),
                             grant_id: None,
                             policy_version: None,
+                            source_revision: None,
                             conflict: false,
                             graph_path: Vec::new(),
                         }
@@ -14066,6 +14068,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                     collection: "episodes".to_string(),
                     grant_id: None,
                     policy_version: None,
+                    source_revision: None,
                     conflict: false,
                     graph_path: Vec::new(),
                 });
@@ -64372,6 +64375,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
                 collection: local_first_memory::MemoryCollectionKey::Knowledge,
                 grant_id: None,
                 policy_version: None,
+                source_revision: "sha256:test-revision".to_string(),
                 sensitivity: MemoryDataSensitivity::Internal,
                 status: local_first_memory::MemoryStatus::Confirmed,
                 updated_at: "unix:1800000000".to_string(),

@@ -35,9 +35,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 
+use sha2::{Digest, Sha256};
+
 use crate::{
-    DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryScope, MemoryStatus, UserId,
-    WorkspaceId,
+    DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryRecord, MemoryScope, MemoryStatus,
+    UserId, WorkspaceId,
 };
 
 /// Un blocco di testo già formattato pronto da accodare al system prompt.
@@ -114,6 +116,8 @@ pub struct RecallHit {
     /// Versione esatta della policy del grant usata per produrre l'hit.
     /// `None` per la fonte locale implicita.
     pub policy_version: Option<u64>,
+    /// SHA-256 della serializzazione canonica del record autorizzato.
+    pub source_revision: String,
     pub sensitivity: DataSensitivity,
     pub status: MemoryStatus,
     pub updated_at: String,
@@ -127,6 +131,13 @@ pub struct RecallHit {
     /// Relazioni canoniche percorse dal seed fino a questo hit. Vuoto per gli
     /// hit trovati direttamente dalla query.
     pub graph_path: Vec<String>,
+}
+
+/// Revisione stabile usata per invalidare una risposta quando il record source
+/// cambia senza affidarsi al solo timestamp.
+pub fn memory_record_revision(record: &MemoryRecord) -> String {
+    let encoded = serde_json::to_vec(record).expect("MemoryRecord is serializable");
+    format!("sha256:{:x}", Sha256::digest(encoded))
 }
 
 /// Risultato della recall RAG episodica — contesto *mirato* alla query.

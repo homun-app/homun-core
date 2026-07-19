@@ -38,6 +38,7 @@ fn hit(
         collection,
         grant_id: grant_id.map(str::to_string),
         policy_version: grant_id.map(|_| 1),
+        source_revision: "sha256:test-revision".to_string(),
         sensitivity: DataSensitivity::Private,
         status: MemoryStatus::Confirmed,
         updated_at: "unix:1800000000".to_string(),
@@ -78,6 +79,71 @@ fn linked_recall_searches_every_granted_collection_without_keyword_activation() 
     .expect("recall");
 
     assert!(pack.hits.iter().any(|hit| hit.text.contains("NEBULA-7429")));
+}
+
+#[test]
+fn linked_hit_revision_changes_with_the_source() {
+    let fixture = MultiSourceFixture::new();
+    let source = WorkspaceId::new("project-b");
+    let reference = fixture.insert(
+        source.as_str(),
+        "revision-fact",
+        "fact",
+        "Revision anchor is alpha",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    fixture.grant(
+        "grant-b",
+        source.as_str(),
+        [MemoryCollectionKey::Knowledge],
+        HashMap::new(),
+    );
+    let first = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "revision anchor",
+        &[1.0, 0.0],
+        1_800_000_000,
+        None,
+    )
+    .expect("first recall");
+    let first_revision = first
+        .hits
+        .iter()
+        .find(|hit| hit.memory_ref == reference.to_string())
+        .expect("first hit")
+        .source_revision
+        .clone();
+    let mut changed = fixture
+        .facade
+        .get_memory_for_ui(&reference, &fixture.user, &source)
+        .expect("load source")
+        .expect("source exists");
+    changed.text = "Revision anchor is beta".to_string();
+    changed.updated_at = "unix:1800000001".to_string();
+    fixture.facade.upsert_memory(&changed).expect("update source");
+    let second = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "revision anchor",
+        &[1.0, 0.0],
+        1_800_000_001,
+        None,
+    )
+    .expect("second recall");
+    let second_revision = second
+        .hits
+        .iter()
+        .find(|hit| hit.memory_ref == reference.to_string())
+        .expect("second hit")
+        .source_revision
+        .clone();
+    assert!(!first_revision.is_empty());
+    assert!(!second_revision.is_empty());
+    assert_ne!(first_revision, second_revision);
 }
 
 #[test]

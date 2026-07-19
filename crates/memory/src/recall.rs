@@ -846,6 +846,7 @@ fn recall_hit_for_record(
     score: f32,
     graph_path: Vec<String>,
 ) -> MemoryResult<Option<RecallHit>> {
+    let source_revision = crate::memory_record_revision(&record);
     let Some(collection) = collection_for_record(&record) else {
         return Ok(None);
     };
@@ -877,6 +878,7 @@ fn recall_hit_for_record(
         collection,
         grant_id: source.grant_id.clone(),
         policy_version: source.grant_id.as_ref().map(|_| source.policy_version),
+        source_revision,
         sensitivity: record.sensitivity,
         status: record.status,
         updated_at: record.updated_at,

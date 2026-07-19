@@ -31,6 +31,11 @@ pub struct RecallStreamHit {
     /// `None`, so consumers can distinguish unversioned provenance explicitly.
     #[serde(default)]
     pub policy_version: Option<u64>,
+    /// Fingerprint della revisione esatta del record autorizzato. Legacy e hit
+    /// locali possono non averlo; una lettura collegata senza revisione non è
+    /// riusabile in modo sicuro.
+    #[serde(default)]
+    pub source_revision: Option<String>,
     /// Il coordinatore ha rilevato un conflitto semantico con un altro hit.
     pub conflict: bool,
     /// Relazioni canoniche percorse dal seed della query fino a questo hit.
@@ -49,6 +54,63 @@ pub struct RecallStreamPayload {
     pub hits: Vec<RecallStreamHit>,
     /// Scope della recall ("personal" | "project").
     pub scope: String,
+}
+
+/// Una lettura collegata realmente iniettata nel modello. Contiene solo
+/// identificativi e versioni: il testo della source non viene duplicato.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LinkedMemoryRead {
+    pub source_workspace_id: String,
+    pub grant_id: String,
+    pub policy_version: u64,
+    pub memory_ref: String,
+    pub source_revision: String,
+}
+
+/// Provenance cumulativa delle memorie collegate usate durante un turno.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnMemoryReadSet {
+    pub linked: Vec<LinkedMemoryRead>,
+}
+
+impl TurnMemoryReadSet {
+    /// Unisce gli hit completi del payload. Gli hit locali e la provenance
+    /// legacy/incompleta non possono diventare autorizzazione implicita.
+    pub fn extend_payload(&mut self, payload: &RecallStreamPayload) {
+        self.linked.extend(payload.hits.iter().filter_map(|hit| {
+            let grant_id = hit.grant_id.as_ref()?.trim();
+            let policy_version = hit.policy_version?;
+            let source_revision = hit.source_revision.as_ref()?.trim();
+            let source_workspace_id = hit.source_workspace_id.trim();
+            let memory_ref = hit.r#ref.trim();
+            if grant_id.is_empty()
+                || source_revision.is_empty()
+                || source_workspace_id.is_empty()
+                || memory_ref.is_empty()
+            {
+                return None;
+            }
+            Some(LinkedMemoryRead {
+                source_workspace_id: source_workspace_id.to_string(),
+                grant_id: grant_id.to_string(),
+                policy_version,
+                memory_ref: memory_ref.to_string(),
+                source_revision: source_revision.to_string(),
+            })
+        }));
+        self.linked.sort();
+        self.linked.dedup();
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        self.linked.extend(other.linked);
+        self.linked.sort();
+        self.linked.dedup();
+    }
+
+    pub fn has_linked_reads(&self) -> bool {
+        !self.linked.is_empty()
+    }
 }
 
 /// Piano UI D3: payload di una modifica di codice proposta (diff inline).
@@ -147,7 +209,7 @@ impl TokenMetrics {
 
 #[cfg(test)]
 mod tests {
-    use super::RecallStreamHit;
+    use super::{RecallStreamHit, RecallStreamPayload, TurnMemoryReadSet};
 
     #[test]
     fn recall_stream_hit_serializes_source_provenance() {
@@ -161,6 +223,7 @@ mod tests {
             collection: "decisions".to_string(),
             grant_id: Some("grant-a".to_string()),
             policy_version: Some(7),
+            source_revision: Some("sha256:revision-a".to_string()),
             conflict: false,
             graph_path: vec!["mentions".to_string(), "mentions".to_string()],
         };
@@ -169,14 +232,79 @@ mod tests {
         assert_eq!(value["collection"], "decisions");
         assert_eq!(value["grant_id"], "grant-a");
         assert_eq!(value["policy_version"], 7);
+        assert_eq!(value["source_revision"], "sha256:revision-a");
         assert_eq!(
             value["graph_path"],
             serde_json::json!(["mentions", "mentions"])
         );
         value.as_object_mut().unwrap().remove("policy_version");
+        value.as_object_mut().unwrap().remove("source_revision");
         value.as_object_mut().unwrap().remove("graph_path");
         let legacy: RecallStreamHit = serde_json::from_value(value).expect("legacy recall hit");
         assert_eq!(legacy.policy_version, None);
+        assert_eq!(legacy.source_revision, None);
         assert!(legacy.graph_path.is_empty());
+    }
+
+    #[test]
+    fn linked_recall_hit_round_trips_its_source_revision() {
+        let hit = RecallStreamHit {
+            r#ref: "memory:owner:source:fact-1".to_string(),
+            text: "A linked fact".to_string(),
+            score: 0.9,
+            kind: "fact".to_string(),
+            source_workspace_id: "source".to_string(),
+            source_label: "Source".to_string(),
+            collection: "knowledge".to_string(),
+            grant_id: Some("grant-1".to_string()),
+            policy_version: Some(7),
+            source_revision: Some("sha256:abc".to_string()),
+            conflict: false,
+            graph_path: Vec::new(),
+        };
+        let mut value = serde_json::to_value(hit).expect("serialize recall hit");
+        assert_eq!(value["source_revision"], "sha256:abc");
+        let decoded: RecallStreamHit =
+            serde_json::from_value(value.clone()).expect("round-trip recall hit");
+        assert_eq!(decoded.source_revision.as_deref(), Some("sha256:abc"));
+        value.as_object_mut().unwrap().remove("source_revision");
+        let legacy: RecallStreamHit = serde_json::from_value(value).expect("legacy recall hit");
+        assert_eq!(legacy.source_revision, None);
+    }
+
+    #[test]
+    fn turn_read_set_keeps_only_complete_linked_reads_and_deduplicates() {
+        let linked = RecallStreamHit {
+            r#ref: "memory:owner:source:fact-1".to_string(),
+            text: "A linked fact".to_string(),
+            score: 0.9,
+            kind: "fact".to_string(),
+            source_workspace_id: "source".to_string(),
+            source_label: "Source".to_string(),
+            collection: "knowledge".to_string(),
+            grant_id: Some("grant-1".to_string()),
+            policy_version: Some(7),
+            source_revision: Some("sha256:abc".to_string()),
+            conflict: false,
+            graph_path: Vec::new(),
+        };
+        let mut local = linked.clone();
+        local.grant_id = None;
+        local.policy_version = None;
+        local.source_revision = None;
+        let mut incomplete = linked.clone();
+        incomplete.source_revision = None;
+        let payload = RecallStreamPayload {
+            query: "fact".to_string(),
+            hits: vec![linked.clone(), local, incomplete, linked],
+            scope: "project".to_string(),
+        };
+        let mut reads = TurnMemoryReadSet::default();
+        reads.extend_payload(&payload);
+        assert_eq!(reads.linked.len(), 1);
+        assert_eq!(reads.linked[0].grant_id, "grant-1");
+        assert_eq!(reads.linked[0].policy_version, 7);
+        assert_eq!(reads.linked[0].memory_ref, "memory:owner:source:fact-1");
+        assert_eq!(reads.linked[0].source_revision, "sha256:abc");
     }
 }
