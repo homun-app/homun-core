@@ -5723,12 +5723,9 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         let workspace = scope.workspace_id();
         let llm = self.llm.clone();
         let state = self.state.clone();
-        let user_message = exchange.user_message.clone();
-        let assistant_message = exchange.assistant_message.clone();
-        let actions = exchange.actions.clone();
+        let exchange = exchange.clone();
         let thread_id = exchange.thread_id.clone();
-        let speaker = exchange.speaker.clone();
-        let prev_assistant = exchange.prev_assistant.clone();
+        let write_policy = exchange.reuse_envelope.write_policy;
         Box::pin(async move {
             let active = workspace.clone();
             let project_name = if active.as_str() != PERSONAL_WORKSPACE {
@@ -5747,11 +5744,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                     &facade,
                     &user,
                     &active,
-                    &user_message,
-                    &assistant_message,
-                    &actions,
-                    speaker.as_deref(),
-                    prev_assistant.as_deref(),
+                    &exchange,
                     project_name.as_deref(),
                 )
             };
@@ -5775,6 +5768,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                 &active,
                 &content,
                 thread_id.as_deref(),
+                write_policy,
                 hooks,
             );
         })
@@ -5795,6 +5789,7 @@ fn learn_via_service_or_inline(
     thread_id: Option<&str>,
     speaker: Option<&str>,
     prev_assistant: Option<&str>,
+    reuse_envelope: local_first_memory::MemoryReuseEnvelope,
 ) -> local_first_memory::BoxFuture<'static, ()> {
     if let Some(service) = state.memory_service.clone() {
         let scope = scope_from_active_workspace();
@@ -5805,6 +5800,7 @@ fn learn_via_service_or_inline(
             thread_id: thread_id.map(str::to_string),
             speaker: speaker.map(str::to_string),
             prev_assistant: prev_assistant.map(str::to_string),
+            reuse_envelope,
         };
         Box::pin(async move { service.learn(&exchange, &scope).await })
     } else {
@@ -5816,6 +5812,15 @@ fn learn_via_service_or_inline(
         let thread_id = thread_id.map(str::to_string);
         let speaker = speaker.map(str::to_string);
         let prev_assistant = prev_assistant.map(str::to_string);
+        let exchange = Exchange {
+            user_message,
+            assistant_message,
+            actions,
+            thread_id: thread_id.clone(),
+            speaker,
+            prev_assistant,
+            reuse_envelope,
+        };
         Box::pin(async move {
             let user = gateway_memory_user_id();
             let active = gateway_memory_workspace_id();
@@ -5837,11 +5842,7 @@ fn learn_via_service_or_inline(
                     &facade,
                     &user,
                     &active,
-                    &user_message,
-                    &assistant_message,
-                    &actions,
-                    speaker.as_deref(),
-                    prev_assistant.as_deref(),
+                    &exchange,
                     project_name.as_deref(),
                 )
             };
@@ -5865,6 +5866,7 @@ fn learn_via_service_or_inline(
                 &active,
                 &content,
                 thread_id.as_deref(),
+                exchange.reuse_envelope.write_policy,
                 hooks,
             );
         })
@@ -15762,6 +15764,7 @@ async fn compact_for_context_budget(
             thread_id,
             None,
             None,
+            local_first_memory::MemoryReuseEnvelope::normal(),
         ));
     }
     // Salience-preserving summary replaces the span in-context. Best-effort: on failure
@@ -27167,6 +27170,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
             let learn_thread = tail_thread.clone();
             let learn_actions = outcome.tool_actions.clone();
             let learn_prev = memory_prev_assistant.clone();
+            let learn_envelope = memory_reuse_envelope_from_read_set(&outcome.memory_reads);
             tokio::spawn(async move {
                 learn_via_service_or_inline(
                     &learn_state,
@@ -27176,6 +27180,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                     learn_thread.as_deref(),
                     None,
                     learn_prev.as_deref(),
+                    learn_envelope,
                 )
                 .await;
             });
@@ -31191,7 +31196,17 @@ async fn handle_channel_inbound(
         let content = message.content.clone();
         tokio::spawn(async move {
             // thread_id=None: record_channel_message already stored the episode.
-            learn_via_service_or_inline(&st, &content, "", "", None, speaker.as_deref(), None).await;
+            learn_via_service_or_inline(
+                &st,
+                &content,
+                "",
+                "",
+                None,
+                speaker.as_deref(),
+                None,
+                local_first_memory::MemoryReuseEnvelope::normal(),
+            )
+            .await;
         });
     }
     match action {
@@ -32332,6 +32347,30 @@ fn update_channel_assistant_message(
     }));
 }
 
+fn memory_reuse_envelope_from_read_set(
+    reads: &local_first_engine::events::TurnMemoryReadSet,
+) -> local_first_memory::MemoryReuseEnvelope {
+    if reads.is_blocked_unknown() {
+        return local_first_memory::MemoryReuseEnvelope::blocked_unknown();
+    }
+    if !reads.has_linked_reads() {
+        return local_first_memory::MemoryReuseEnvelope::normal();
+    }
+    local_first_memory::MemoryReuseEnvelope::user_input_only(
+        reads
+            .linked
+            .iter()
+            .map(|read| local_first_memory::LinkedMemoryReadRef {
+                source_workspace_id: read.source_workspace_id.clone(),
+                grant_id: read.grant_id.clone(),
+                policy_version: read.policy_version,
+                memory_ref: read.memory_ref.clone(),
+                source_revision: read.source_revision.clone(),
+            })
+            .collect(),
+    )
+}
+
 #[derive(Debug, Default)]
 struct StreamMemoryReuseCollector {
     event_parts: Vec<serde_json::Value>,
@@ -32368,25 +32407,7 @@ impl StreamMemoryReuseCollector {
     }
 
     fn envelope(&self) -> local_first_memory::MemoryReuseEnvelope {
-        if self.reads.is_blocked_unknown() {
-            return local_first_memory::MemoryReuseEnvelope::blocked_unknown();
-        }
-        if !self.reads.has_linked_reads() {
-            return local_first_memory::MemoryReuseEnvelope::normal();
-        }
-        local_first_memory::MemoryReuseEnvelope::user_input_only(
-            self.reads
-                .linked
-                .iter()
-                .map(|read| local_first_memory::LinkedMemoryReadRef {
-                    source_workspace_id: read.source_workspace_id.clone(),
-                    grant_id: read.grant_id.clone(),
-                    policy_version: read.policy_version,
-                    memory_ref: read.memory_ref.clone(),
-                    source_revision: read.source_revision.clone(),
-                })
-                .collect(),
-        )
+        memory_reuse_envelope_from_read_set(&self.reads)
     }
 }
 
@@ -48416,6 +48437,7 @@ async fn memory_wiki_save(
             None,
             None,
             None,
+            local_first_memory::MemoryReuseEnvelope::normal(),
         )
         .await;
         reconcile_memory_scope(&st, &reconcile_ws);

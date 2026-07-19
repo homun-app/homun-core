@@ -35,8 +35,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     DataSensitivity, MemoryCollectionKey, MemoryFacade, MemoryRecord, MemoryScope, MemoryStatus,
@@ -321,6 +321,22 @@ impl MemoryReuseEnvelope {
     }
 }
 
+impl Default for MemoryReuseEnvelope {
+    fn default() -> Self {
+        Self::blocked_unknown()
+    }
+}
+
+/// Testo gia ridotto al solo materiale che la write policy consente di
+/// consegnare all'extractor. Non contiene provenance o payload source.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LearnMaterial {
+    pub user_message: String,
+    pub assistant_message: String,
+    pub actions: String,
+    pub prev_assistant: Option<String>,
+}
+
 /// Uno scambio completo turno utente↔assistente, input di [`MemoryRecallService::learn`].
 ///
 /// Incapsula i parametri di `learn_from_exchange` del gateway. I campi
@@ -340,6 +356,35 @@ pub struct Exchange {
     pub speaker: Option<String>,
     /// Risposta assistente del turno precedente, per groundare le conferme.
     pub prev_assistant: Option<String>,
+    /// Attestazione obbligatoria del materiale riusabile per questo turno.
+    /// Il default e intenzionalmente fail-closed.
+    pub reuse_envelope: MemoryReuseEnvelope,
+}
+
+impl Exchange {
+    pub fn learn_material(&self) -> Option<LearnMaterial> {
+        match self.reuse_envelope.write_policy {
+            MemoryWritePolicy::Normal if self.reuse_envelope.linked_reads.is_empty() => {
+                Some(LearnMaterial {
+                    user_message: self.user_message.clone(),
+                    assistant_message: self.assistant_message.clone(),
+                    actions: self.actions.clone(),
+                    prev_assistant: self.prev_assistant.clone(),
+                })
+            }
+            MemoryWritePolicy::UserInputOnly if !self.reuse_envelope.linked_reads.is_empty() => {
+                Some(LearnMaterial {
+                    user_message: self.user_message.clone(),
+                    assistant_message: String::new(),
+                    actions: String::new(),
+                    prev_assistant: None,
+                })
+            }
+            MemoryWritePolicy::Normal
+            | MemoryWritePolicy::UserInputOnly
+            | MemoryWritePolicy::BlockedUnknown => None,
+        }
+    }
 }
 
 /// Alias per un future boxed `Send` — serve a rendere il trait object-safe

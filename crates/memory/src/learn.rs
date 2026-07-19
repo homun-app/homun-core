@@ -11,11 +11,12 @@
 //! come argomento dal chiamante — il crate non legge il filesystem del gateway.
 
 use crate::{
-    DataSensitivity, ExtractedEntity, ExtractedMemory, ExtractedRelation,
+    DataSensitivity, Exchange, ExtractedEntity, ExtractedMemory, ExtractedRelation,
     MemoryEvolutionKind, MemoryEvolutionMetadata, MemoryEvolutionProposal, MemoryExtraction,
-    MemoryFacade, MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus, PERSONAL_WORKSPACE,
-    PrivacyDomain, UserId, WorkspaceId, contains_secret, current_timestamp, memory_is_current_at,
-    recall::{cosine, dedup_tokens, jaccard, DEDUP_JACCARD},
+    MemoryFacade, MemoryRecord, MemoryRef, MemoryRefKind, MemoryStatus, MemoryWritePolicy,
+    PERSONAL_WORKSPACE, PrivacyDomain, UserId, WorkspaceId, contains_secret, current_timestamp,
+    memory_is_current_at,
+    recall::{DEDUP_JACCARD, cosine, dedup_tokens, jaccard},
 };
 
 /// Etichetta di "record open-loop attivo", spostata fedelmente dal gateway
@@ -23,10 +24,7 @@ use crate::{
 /// prompt di closure) e per il routing.
 pub fn active_open_loop_record(m: &crate::MemoryRecord) -> bool {
     m.memory_type == "open_loop"
-        && matches!(
-            m.status,
-            MemoryStatus::Confirmed | MemoryStatus::Candidate
-        )
+        && matches!(m.status, MemoryStatus::Confirmed | MemoryStatus::Candidate)
 }
 
 /// Sostituisce i valori default mancanti in un item estratto. Spostato fedelmente
@@ -36,7 +34,11 @@ pub fn fill_extraction_defaults(item: &serde_json::Value) -> serde_json::Value {
     if value.get("confidence").and_then(|c| c.as_f64()).is_none() {
         value["confidence"] = serde_json::json!(0.5);
     }
-    if value.get("privacy_domain").and_then(|s| s.as_str()).is_none() {
+    if value
+        .get("privacy_domain")
+        .and_then(|s| s.as_str())
+        .is_none()
+    {
         value["privacy_domain"] = serde_json::json!("personal");
     }
     value
@@ -248,8 +250,7 @@ otherwise do not save it."
                 memories
                     .into_iter()
                     .filter(|m| {
-                        m.memory_type == "decision"
-                            && memory_is_current_at(m, now_unix, true)
+                        m.memory_type == "decision" && memory_is_current_at(m, now_unix, true)
                     })
                     .take(40)
                     .map(|m| {
@@ -295,7 +296,10 @@ substantially updated decisions relative to these):\n{known_decisions}"
             })
             .take(8)
         {
-            loop_lines.push(format!("- ({label}) {}", memory.text.trim().replace('\n', " ")));
+            loop_lines.push(format!(
+                "- ({label}) {}",
+                memory.text.trim().replace('\n', " ")
+            ));
         }
     }
     let known_open_loops = loop_lines.join("\n");
@@ -384,7 +388,10 @@ fn is_gap_fact(text: &str) -> bool {
 /// Overlap coefficient = |A ∩ B| / min(|A|, |B|). A differenza della jaccard
 /// (che divide per |A ∪ B|), questa metrica è robusta quando i due insiemi
 /// hanno cardinalità molto diverse (caso tipico gap-verbose vs fatto-conciso).
-fn overlap_coefficient(a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>) -> f32 {
+fn overlap_coefficient(
+    a: &std::collections::HashSet<String>,
+    b: &std::collections::HashSet<String>,
+) -> f32 {
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
@@ -783,11 +790,23 @@ fn _cosine_link(a: &[f32], b: &[f32]) -> f32 {
 pub struct LearnHooks<'a> {
     /// Persiste entità/relazioni nel grafo (personal + project). Firma speculare
     /// a `persist_graph` del gateway.
-    pub persist_graph: Option<&'a (dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, Vec<ExtractedEntity>, Vec<ExtractedRelation>, Option<&WorkspaceId>) + Sync)>,
+    pub persist_graph: Option<
+        &'a (
+                dyn Fn(
+            &MemoryFacade,
+            &UserId,
+            &WorkspaceId,
+            Vec<ExtractedEntity>,
+            Vec<ExtractedRelation>,
+            Option<&WorkspaceId>,
+        ) + Sync
+            ),
+    >,
     /// Memorizza l'episodio one-line (M4) nel thread scope.
     pub store_episode: Option<&'a (dyn Fn(&MemoryFacade, &UserId, &str, &str, &str) + Sync)>,
     /// Backfill embeddings incrementale (background). Firma: (facade, user, ws, batch).
-    pub backfill_embeddings: Option<&'a (dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, usize) + Sync)>,
+    pub backfill_embeddings:
+        Option<&'a (dyn Fn(&MemoryFacade, &UserId, &WorkspaceId, usize) + Sync)>,
 }
 
 /// Orchestrazione learn: gating salience → build prompt (con facade per known
@@ -808,16 +827,17 @@ pub fn prepare_learn_prompt(
     facade: &MemoryFacade,
     user: &UserId,
     active: &WorkspaceId,
-    user_message: &str,
-    assistant_message: &str,
-    actions: &str,
-    speaker: Option<&str>,
-    prev_assistant: Option<&str>,
+    exchange: &Exchange,
     project_name: Option<&str>,
 ) -> Option<(String, String)> {
-    let is_confirmation = prev_assistant
-        .is_some_and(|p| !p.trim().is_empty())
-        && is_confirmation_reply(user_message);
+    let material = exchange.learn_material()?;
+    let user_message = material.user_message.as_str();
+    let assistant_message = material.assistant_message.as_str();
+    let actions = material.actions.as_str();
+    let speaker = exchange.speaker.as_deref();
+    let prev_assistant = material.prev_assistant.as_deref();
+    let is_confirmation =
+        prev_assistant.is_some_and(|p| !p.trim().is_empty()) && is_confirmation_reply(user_message);
     if actions.trim().is_empty() && !is_salient_exchange(user_message) && !is_confirmation {
         return None;
     }
@@ -854,8 +874,12 @@ pub fn persist_learn_extraction(
     active: &WorkspaceId,
     content: &str,
     thread_id: Option<&str>,
+    write_policy: MemoryWritePolicy,
     hooks: LearnHooks<'_>,
 ) -> bool {
+    if write_policy == MemoryWritePolicy::BlockedUnknown {
+        return false;
+    }
     let Ok(root) = serde_json::from_str::<serde_json::Value>(strip_json_fences(content)) else {
         return false;
     };
@@ -1020,9 +1044,26 @@ pub fn is_confirmation_reply(user_message: &str) -> bool {
     let normalized = user_message.trim().to_lowercase();
     matches!(
         normalized.as_str(),
-        "ok" | "okay" | "va bene" | "procedi" | "conferma" | "confermato" | "annulla"
-            | "cancella" | "stop" | "cambio idea" | "non salvare" | "salva" | "sì"
-            | "si" | "yes" | "no" | "esatto" | "giusto" | "corretto" | "certo" | "d'accordo"
+        "ok" | "okay"
+            | "va bene"
+            | "procedi"
+            | "conferma"
+            | "confermato"
+            | "annulla"
+            | "cancella"
+            | "stop"
+            | "cambio idea"
+            | "non salvare"
+            | "salva"
+            | "sì"
+            | "si"
+            | "yes"
+            | "no"
+            | "esatto"
+            | "giusto"
+            | "corretto"
+            | "certo"
+            | "d'accordo"
     )
 }
 
@@ -1034,7 +1075,11 @@ pub fn is_confirmation_reply(user_message: &str) -> bool {
 ///
 /// Chiamata in coda a `persist_learn_extraction` per ogni scope toccato. Soglia
 /// default: 10 minuti (knob `HOMUN_CANDIDATE_PROMOTE_MINS`).
-pub fn promote_aged_candidates(facade: &MemoryFacade, user: &UserId, workspace: &WorkspaceId) -> usize {
+pub fn promote_aged_candidates(
+    facade: &MemoryFacade,
+    user: &UserId,
+    workspace: &WorkspaceId,
+) -> usize {
     let promote_after_secs: i64 = std::env::var("HOMUN_CANDIDATE_PROMOTE_MINS")
         .ok()
         .and_then(|v| v.trim().parse::<i64>().ok())
@@ -1165,7 +1210,10 @@ mod tests {
         };
         persist_scope_memories(&facade, &user, &ws, vec![paraphrase]);
         let count_after_dup = facade.list_memories_for_ui(&user, &ws).unwrap().len();
-        assert_eq!(count_after_dup, 1, "paraphrase ad alta jaccard dedupplicata");
+        assert_eq!(
+            count_after_dup, 1,
+            "paraphrase ad alta jaccard dedupplicata"
+        );
     }
 
     #[test]
@@ -1238,6 +1286,7 @@ mod tests {
             &ws,
             &content.to_string(),
             Some("thread-update"),
+            MemoryWritePolicy::Normal,
             no_hooks(),
         ));
         let items = facade.list_memories_for_ui(&user, &ws).unwrap();
@@ -1278,6 +1327,7 @@ mod tests {
             &ws,
             &content.to_string(),
             None,
+            MemoryWritePolicy::Normal,
             no_hooks(),
         ));
         let item = facade.list_memories_for_ui(&user, &ws).unwrap().remove(0);
@@ -1339,6 +1389,7 @@ mod tests {
             &ws,
             &content.to_string(),
             None,
+            MemoryWritePolicy::Normal,
             no_hooks(),
         ));
         let derived = facade
@@ -1353,7 +1404,9 @@ mod tests {
     #[test]
     fn is_gap_fact_detects_negative_assertions_multilang() {
         // Italian gap facts.
-        assert!(is_gap_fact("Non è ancora noto il titolo di ruolo professionale"));
+        assert!(is_gap_fact(
+            "Non è ancora noto il titolo di ruolo professionale"
+        ));
         assert!(is_gap_fact("Il nome dell'azienda è sconosciuto"));
         assert!(is_gap_fact("Non risulta alcuna informazione sul progetto"));
         assert!(is_gap_fact("manca la data di consegna"));
@@ -1406,9 +1459,9 @@ mod tests {
         persist_scope_memories(&facade, &user, &ws, vec![positive]);
         let items = facade.list_memories_for_ui(&user, &ws).unwrap();
         // The positive fact must be present and confirmed...
-        let has_positive = items.iter().any(|m| {
-            m.status == MemoryStatus::Confirmed && m.text.contains("senior developer")
-        });
+        let has_positive = items
+            .iter()
+            .any(|m| m.status == MemoryStatus::Confirmed && m.text.contains("senior developer"));
         assert!(has_positive, "il fatto positivo è confirmed");
         // ...and the gap fact must be RETIRED (stale), not confirmed/candidate.
         // list_memories_for_ui include gli stale (filtra solo tombstoned/deleted),
