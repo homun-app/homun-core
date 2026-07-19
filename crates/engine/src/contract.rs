@@ -299,6 +299,7 @@ pub trait ContextCompactor {
         &self,
         _messages: &mut Vec<Value>,
         _context_window: Option<usize>,
+        _memory_reads: &TurnMemoryReadSet,
     ) -> impl Future<Output = ()> + Send {
         async {}
     }

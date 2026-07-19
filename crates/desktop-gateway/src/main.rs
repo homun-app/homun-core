@@ -14059,45 +14059,6 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     {
         lines.push(provenance);
     }
-    if let Ok(episodes) =
-        facade.list_memories_for_ui(&user, &MemoryWorkspaceId::new(THREADS_WORKSPACE))
-    {
-        let needle = query.to_lowercase();
-        let terms: Vec<&str> = needle
-            .split_whitespace()
-            .filter(|w| w.chars().count() >= 4)
-            .collect();
-        let mut hits: Vec<String> = episodes
-            .into_iter()
-            .filter(|m| m.memory_type == "episode")
-            .filter(|m| {
-                m.metadata.get("workspace").and_then(|w| w.as_str()) == Some(active.as_str())
-            })
-            .filter(|m| terms.is_empty() || terms.iter().any(|t| m.text.to_lowercase().contains(t)))
-            .map(|m| format!("- [conversation] {}", m.text))
-            .collect();
-        hits.truncate(8);
-        // Episodi come hits UI, nello stesso scope locale della recall.
-        for h in &hits {
-            if let Some(text) = h.strip_prefix("- [conversation] ") {
-                ui_hits.push(local_first_subagents::RecallStreamHit {
-                    r#ref: String::new(),
-                    text: text.to_string(),
-                    score: 0.0,
-                    kind: "conversation".to_string(),
-                    source_workspace_id: active.as_str().to_string(),
-                    source_label: recall_source_label(active.as_str()),
-                    collection: "episodes".to_string(),
-                    grant_id: None,
-                    policy_version: None,
-                    source_revision: None,
-                    conflict: false,
-                    graph_path: Vec::new(),
-                });
-            }
-        }
-        lines.extend(hits);
-    }
     let personal = MemoryWorkspaceId::new(PERSONAL_WORKSPACE);
     if !in_project {
         if let Ok(relations) = facade.list_relations_for_ui(&user, &personal) {
@@ -15731,6 +15692,7 @@ async fn compact_for_context_budget(
     messages: &mut Vec<serde_json::Value>,
     context_window: Option<usize>,
     thread_id: Option<&str>,
+    memory_reads: &local_first_engine::events::TurnMemoryReadSet,
 ) {
     if !needs_context_compaction(
         estimate_tokens(messages),
@@ -15755,7 +15717,7 @@ async fn compact_for_context_budget(
     // collapsing it — durable, recallable, off-path, fire-and-forget. The safety net that
     // makes even an aggressive summary lossless.
     let span_text = render_slice_text(&slice);
-    if !span_text.trim().is_empty() {
+    if !span_text.trim().is_empty() && compaction_checkpoint_allowed(memory_reads) {
         tokio::spawn(learn_via_service_or_inline(
             state,
             &span_text,
@@ -15779,6 +15741,12 @@ async fn compact_for_context_budget(
         ),
     });
     messages.splice(from..to, std::iter::once(note));
+}
+
+fn compaction_checkpoint_allowed(
+    memory_reads: &local_first_engine::events::TurnMemoryReadSet,
+) -> bool {
+    !memory_reads.has_linked_reads() && !memory_reads.is_blocked_unknown()
 }
 
 /// Whether the active orchestrator provider runs locally (loopback base_url).
@@ -34232,12 +34200,14 @@ impl local_first_engine::ContextCompactor for GatewayContextCompactor {
         &self,
         messages: &mut Vec<serde_json::Value>,
         context_window: Option<usize>,
+        memory_reads: &local_first_engine::events::TurnMemoryReadSet,
     ) {
         compact_for_context_budget(
             &self.state,
             messages,
             context_window,
             self.thread_id.as_deref(),
+            memory_reads,
         )
         .await;
     }
@@ -57444,6 +57414,30 @@ mod tests {
     }
 
     #[test]
+    fn linked_or_unknown_turns_never_create_compaction_checkpoints() {
+        let empty = local_first_engine::events::TurnMemoryReadSet::default();
+        assert!(super::compaction_checkpoint_allowed(&empty));
+
+        let linked = local_first_engine::events::TurnMemoryReadSet {
+            linked: vec![local_first_engine::events::LinkedMemoryRead {
+                source_workspace_id: "source-a".to_string(),
+                grant_id: "grant-a".to_string(),
+                policy_version: 1,
+                memory_ref: "memory:owner:source-a:fact-a".to_string(),
+                source_revision: "sha256:rev-a".to_string(),
+            }],
+            blocked_unknown: false,
+        };
+        assert!(!super::compaction_checkpoint_allowed(&linked));
+
+        let blocked = local_first_engine::events::TurnMemoryReadSet {
+            linked: Vec::new(),
+            blocked_unknown: true,
+        };
+        assert!(!super::compaction_checkpoint_allowed(&blocked));
+    }
+
+    #[test]
     fn danger_mode_resolves_to_danger_full_access_but_the_os_fence_is_separate() {
         // The APP-LEVEL resolver yields DangerFullAccess under `danger`. This asserts the
         // app-level verdict ONLY — the OS kernel fence around subprocesses is resolved
@@ -66983,6 +66977,39 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             None => unsafe {
                 std::env::remove_var("HOMUN_USER_ID");
             },
+        }
+    }
+
+    #[test]
+    fn recall_memory_does_not_relabel_thread_episodes_as_local_hits() {
+        let _flag = TestMemorySourcesFlag::set(Some("off"));
+        let previous_user = std::env::var("HOMUN_USER_ID").ok();
+        unsafe {
+            std::env::set_var("HOMUN_USER_ID", "episode-bypass-user");
+        }
+        let facade = super::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("episode-bypass-user");
+        super::store_episode(
+            &facade,
+            &user,
+            "thread-episode-bypass",
+            "NEBULA-7429 appeared in an older conversation",
+            "project-a",
+        );
+        let state = test_app_state_for_brief(facade);
+        super::set_memory_workspace("project-a");
+
+        let outcome = super::recall_memory(&state, "NEBULA-7429");
+
+        assert!(!outcome.response.contains("older conversation"));
+        assert!(!outcome.payload.hits.iter().any(|hit| {
+            hit.kind == "conversation" && hit.grant_id.is_none() && hit.r#ref.is_empty()
+        }));
+        match previous_user {
+            Some(value) => unsafe { std::env::set_var("HOMUN_USER_ID", value) },
+            None => unsafe { std::env::remove_var("HOMUN_USER_ID") },
         }
     }
 

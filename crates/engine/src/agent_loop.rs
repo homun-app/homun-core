@@ -232,7 +232,9 @@ gathered‹‹/ACT››"
         // the older span to the memory engine and collapsing it in-context. Same safe round
         // boundary as the step compaction; fail-open (unknown window → no-op) so a turn without a
         // known window keeps exactly today's round-based hygiene.
-        compactor.compact_for_budget(&mut ls.messages, cfg.context_window).await;
+        compactor
+            .compact_for_budget(&mut ls.messages, cfg.context_window, &ls.memory_reads)
+            .await;
         execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
         // On the LAST allowed round, forbid tools so the model MUST synthesize
         // a final answer from what it already gathered — otherwise it can burn
@@ -1171,6 +1173,20 @@ mod tests {
     impl ContextCompactor for NoCompact {
         async fn compact(&self, _m: &mut Vec<Value>, _s: &mut usize) {}
     }
+    #[derive(Default)]
+    struct ReadRecordingCompactor(Mutex<Vec<TurnMemoryReadSet>>);
+    impl ContextCompactor for ReadRecordingCompactor {
+        async fn compact(&self, _m: &mut Vec<Value>, _s: &mut usize) {}
+
+        async fn compact_for_budget(
+            &self,
+            _messages: &mut Vec<Value>,
+            _context_window: Option<usize>,
+            memory_reads: &TurnMemoryReadSet,
+        ) {
+            self.0.lock().unwrap().push(memory_reads.clone());
+        }
+    }
     struct OpenPolicy;
     impl TurnPolicy for OpenPolicy {
         fn route_blocked(&self, _t: &str) -> Option<String> {
@@ -1361,6 +1377,7 @@ mod tests {
         let mut browser = NoBrowser;
         let composio_writes = std::collections::BTreeSet::new();
         let catalog_index: Vec<(String, String, Value)> = Vec::new();
+        let compactor = ReadRecordingCompactor::default();
 
         let outcome = run_turn(
             ls,
@@ -1370,7 +1387,7 @@ mod tests {
             &mut browser,
             &NoPlan,
             &DoneJudge,
-            &NoCompact,
+            &compactor,
             &OpenPolicy,
             &journal,
             &sink,
@@ -1392,6 +1409,12 @@ mod tests {
 
         assert_eq!(outcome.memory_reads.linked.len(), 1);
         assert_eq!(outcome.memory_reads.linked[0].grant_id, "grant-a");
+        assert!(compactor
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(TurnMemoryReadSet::has_linked_reads));
     }
 
     // Round-0-only mock: returns a `make_document` tool call on the FIRST `generate` invocation,
