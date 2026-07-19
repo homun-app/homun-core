@@ -43,6 +43,7 @@ import rehypeSanitize from "rehype-sanitize";
 import {
   coreBridge,
   composioLogoUrl,
+  factoryReset,
   type ActiveModelInfo,
   type AllowedTool,
   type ArtifactDestination,
@@ -707,6 +708,8 @@ function AccountPane({
   const [profileImageError, setProfileImageError] = useState<string | null>(null);
   const [profileImageMenuOpen, setProfileImageMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const openProfileImagePicker = () => {
     setProfileImageMenuOpen(false);
@@ -898,10 +901,35 @@ function AccountPane({
           <div className="dt">{t("settings.deleteLocalData")}</div>
           <div className="dd">{t("settings.deleteLocalDataDesc")}</div>
         </div>
-        <button className="set-btn danger" type="button" disabled title={t("settings.availableSoon")}>
+        <button
+          className="set-btn danger"
+          type="button"
+          onClick={() => setConfirmReset(true)}
+        >
           {t("settings.deleteData")}
         </button>
       </div>
+      {confirmReset && (
+        <div className="set-confirm-scrim" role="dialog" aria-modal="true">
+          <div className="set-confirm">
+            <h3>{t("settings.factoryResetConfirmTitle")}</h3>
+            <p>{t("settings.factoryResetConfirmBody")}</p>
+            <div className="set-confirm-actions">
+              <button className="auto-btn" type="button" disabled={resetting} onClick={() => setConfirmReset(false)}>
+                {t("settings.cancel")}
+              </button>
+              <button
+                className="set-btn danger"
+                type="button"
+                disabled={resetting}
+                onClick={async () => { setResetting(true); await factoryReset(); }}
+              >
+                {t("settings.factoryResetConfirmCta")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

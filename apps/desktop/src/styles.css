@@ -14452,6 +14452,29 @@ body.resizing-drawer {
 .set-modal-body { padding: 22px 24px; }
 .set-modal-label { font-size: 12px; color: var(--faint); margin-bottom: 6px; }
 
+/* ── Danger-zone confirm dialog (factory reset) ─────────────────────────── */
+.set-confirm-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 22, 28, 0.42);
+}
+.set-confirm {
+  width: min(420px, calc(100vw - 48px));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.45);
+  padding: 20px 22px;
+}
+.set-confirm h3 { margin: 0 0 8px; font-size: 15px; font-weight: 700; }
+.set-confirm p { margin: 0 0 18px; color: var(--muted); line-height: 1.45; }
+.set-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
 /* ── Sub-nav (indented nav submenu item) ────────────────────────────────── */
 .set-subnav-item {
   display: flex;
