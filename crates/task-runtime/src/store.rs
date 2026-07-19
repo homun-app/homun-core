@@ -1,9 +1,11 @@
 use crate::{
-    ApprovalRequest, Automation, AutomationRun, ResourceClass, TaskCheckpoint,
+    AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalRequest,
+    Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ResourceClass, RuntimePlanRecord,
+    SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    SubagentInfo, ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkspaceId,
+    ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkspaceId,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
 use std::path::Path;
 use time::OffsetDateTime;
@@ -35,7 +37,7 @@ impl TaskStore {
         // SQLITE_BUSY when the other writer is mid-commit.
         store
             .connection
-            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")?;
+            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")?;
         store.run_migrations()?;
         Ok(store)
     }
@@ -47,7 +49,7 @@ impl TaskStore {
         // WAL is a no-op on in-memory DBs but busy_timeout still applies.
         store
             .connection
-            .execute_batch("PRAGMA busy_timeout=5000;")?;
+            .execute_batch("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")?;
         store.run_migrations()?;
         Ok(store)
     }
@@ -182,13 +184,108 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_turn_events_turn
                 ON turn_events(turn_id, seq);
 
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                run_id TEXT PRIMARY KEY,
+                turn_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                attempt INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                model TEXT,
+                provider TEXT,
+                prompt_fingerprint TEXT,
+                started_at INTEGER NOT NULL,
+                completed_at INTEGER,
+                terminal_reason TEXT,
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(turn_id, attempt)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_runs_turn
+                ON agent_runs(turn_id, attempt);
+
+            CREATE INDEX IF NOT EXISTS idx_agent_runs_scope
+                ON agent_runs(user_id, workspace_id, started_at DESC);
+
+            CREATE TABLE IF NOT EXISTS agent_run_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                round INTEGER,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                UNIQUE(run_id, seq),
+                FOREIGN KEY(run_id) REFERENCES agent_runs(run_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_run_events_run
+                ON agent_run_events(run_id, seq);
+
+            CREATE TABLE IF NOT EXISTS runtime_plans (
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                stall_turns INTEGER NOT NULL DEFAULT 0,
+                last_resume_done INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, workspace_id, thread_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_runtime_plans_scope_status
+                ON runtime_plans(user_id, workspace_id, status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS agent_checkpoints (
+                checkpoint_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                round INTEGER NOT NULL,
+                state_json TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                resumable INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                UNIQUE(run_id, round),
+                FOREIGN KEY(run_id) REFERENCES agent_runs(run_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_recovery
+                ON agent_checkpoints(turn_id, user_id, workspace_id, round DESC, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS agent_tool_receipts (
+                turn_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                arguments_hash TEXT NOT NULL,
+                status TEXT NOT NULL,
+                result_json TEXT,
+                effects_json TEXT,
+                started_at INTEGER NOT NULL,
+                completed_at INTEGER,
+                PRIMARY KEY (turn_id, idempotency_key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_tool_receipts_scope
+                ON agent_tool_receipts(user_id, workspace_id, thread_id, started_at DESC);
+
             CREATE TABLE IF NOT EXISTS broker_meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
 
             INSERT INTO task_runtime_metadata(key, value)
-            VALUES ('schema_version', '4')
+            VALUES ('schema_version', '6')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             ",
         )?;
@@ -280,19 +377,281 @@ impl TaskStore {
         user_id: &UserId,
         workspace_id: &WorkspaceId,
     ) -> TaskRuntimeResult<usize> {
-        let count = self.connection.execute(
+        let tx = self.connection.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM runtime_plans WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        tx.execute(
+            "DELETE FROM agent_tool_receipts WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        tx.execute(
+            "DELETE FROM agent_runs WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        let count = tx.execute(
             "DELETE FROM tasks WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
-        self.connection.execute(
+        tx.execute(
             "DELETE FROM task_dependencies WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
-        self.connection.execute(
+        tx.execute(
             "DELETE FROM resource_reservations WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
+        tx.commit()?;
         Ok(count)
+    }
+
+    pub fn upsert_runtime_plan(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        plan: &Value,
+        status: &str,
+    ) -> TaskRuntimeResult<RuntimePlanRecord> {
+        if !matches!(status, "open" | "settled" | "blocked") {
+            return Err(TaskRuntimeError::Store(format!(
+                "invalid runtime plan status: {status}"
+            )));
+        }
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO runtime_plans (
+                user_id, workspace_id, thread_id, status, plan_json, revision,
+                stall_turns, last_resume_done, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 0, NULL, ?6, ?6)
+             ON CONFLICT(user_id, workspace_id, thread_id) DO UPDATE SET
+                status = excluded.status,
+                plan_json = excluded.plan_json,
+                revision = runtime_plans.revision + 1,
+                updated_at = excluded.updated_at",
+            params![
+                user_id,
+                workspace_id,
+                thread_id,
+                status,
+                serde_json::to_string(plan)?,
+                now,
+            ],
+        )?;
+        let record = load_runtime_plan_on(&tx, user_id, workspace_id, thread_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("runtime plan disappeared after upsert".into()))?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn load_runtime_plan(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<Option<RuntimePlanRecord>> {
+        load_runtime_plan_on(&self.connection, user_id, workspace_id, thread_id)
+    }
+
+    pub fn bump_runtime_plan_stall(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        current_done: usize,
+    ) -> TaskRuntimeResult<Option<RuntimePlanRecord>> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        tx.execute(
+            "UPDATE runtime_plans
+             SET stall_turns = CASE
+                    WHEN last_resume_done IS NULL OR last_resume_done != ?1 THEN 0
+                    ELSE stall_turns + 1
+                 END,
+                 last_resume_done = ?1,
+                 updated_at = ?2
+             WHERE user_id = ?3 AND workspace_id = ?4 AND thread_id = ?5",
+            params![current_done as i64, now, user_id, workspace_id, thread_id],
+        )?;
+        let record = load_runtime_plan_on(&tx, user_id, workspace_id, thread_id)?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn purge_runtime_plan_for_thread(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "DELETE FROM runtime_plans
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+            params![user_id, workspace_id, thread_id],
+        )?)
+    }
+
+    pub fn append_agent_checkpoint(
+        &self,
+        run_id: &str,
+        round: u32,
+        state: &Value,
+        fingerprint: &str,
+        resumable: bool,
+    ) -> TaskRuntimeResult<AgentCheckpoint> {
+        let (turn_id, thread_id, user_id, workspace_id): (String, String, String, String) =
+            self.connection.query_row(
+                "SELECT turn_id, thread_id, user_id, workspace_id FROM agent_runs WHERE run_id = ?1",
+                params![run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        let checkpoint_id = format!("{run_id}:{round}");
+        let created_at = OffsetDateTime::now_utc().unix_timestamp();
+        self.connection.execute(
+            "INSERT INTO agent_checkpoints (
+                checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                round, state_json, fingerprint, resumable, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(run_id, round) DO UPDATE SET
+                state_json = excluded.state_json,
+                fingerprint = excluded.fingerprint,
+                resumable = excluded.resumable,
+                created_at = excluded.created_at",
+            params![
+                checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                round as i64, serde_json::to_string(state)?, fingerprint,
+                if resumable { 1 } else { 0 }, created_at,
+            ],
+        )?;
+        Ok(AgentCheckpoint {
+            checkpoint_id,
+            run_id: run_id.to_string(),
+            turn_id,
+            thread_id,
+            user_id,
+            workspace_id,
+            round,
+            state_json: state.clone(),
+            fingerprint: fingerprint.to_string(),
+            resumable,
+            created_at,
+        })
+    }
+
+    pub fn latest_resumable_checkpoint_for_turn(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Option<AgentCheckpoint>> {
+        self.connection
+            .query_row(
+                "SELECT c.checkpoint_id, c.run_id, c.turn_id, c.thread_id, c.user_id,
+                        c.workspace_id, c.round, c.state_json, c.fingerprint,
+                        c.resumable, c.created_at
+                 FROM agent_checkpoints c
+                 JOIN agent_runs r ON r.run_id = c.run_id
+                 WHERE c.turn_id = ?1 AND c.user_id = ?2 AND c.workspace_id = ?3
+                   AND c.resumable = 1 AND r.status = 'aborted'
+                   AND r.terminal_reason = 'gateway_restart'
+                 ORDER BY c.created_at DESC, c.round DESC
+                 LIMIT 1",
+                params![turn_id, user_id, workspace_id],
+                |row| {
+                    let state_json: String = row.get(7)?;
+                    Ok((
+                        row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?, state_json,
+                        row.get::<_, String>(8)?, row.get::<_, i64>(9)?,
+                        row.get::<_, i64>(10)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                   round, state_json, fingerprint, resumable, created_at)| {
+                Ok(AgentCheckpoint {
+                    checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                    round: round as u32,
+                    state_json: serde_json::from_str(&state_json)?, fingerprint,
+                    resumable: resumable != 0, created_at,
+                })
+            })
+            .transpose()
+    }
+
+    pub fn claim_tool_receipt(
+        &self,
+        new_receipt: &NewAgentToolReceipt,
+    ) -> TaskRuntimeResult<ToolReceiptClaim> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO agent_tool_receipts (
+                turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
+                tool_name, arguments_hash, status, started_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'started', ?9)",
+            params![
+                new_receipt.turn_id, new_receipt.idempotency_key, new_receipt.run_id,
+                new_receipt.thread_id, new_receipt.user_id, new_receipt.workspace_id,
+                new_receipt.tool_name, new_receipt.arguments_hash, now,
+            ],
+        )?;
+        let receipt = load_tool_receipt_on(&tx, &new_receipt.turn_id, &new_receipt.idempotency_key)?
+            .ok_or_else(|| TaskRuntimeError::Store("tool receipt disappeared after claim".into()))?;
+        let claim = if inserted == 1 {
+            ToolReceiptClaim::Execute
+        } else if receipt.status == "completed" {
+            ToolReceiptClaim::Replay(receipt)
+        } else {
+            ToolReceiptClaim::Uncertain(receipt)
+        };
+        tx.commit()?;
+        Ok(claim)
+    }
+
+    pub fn complete_tool_receipt(
+        &self,
+        turn_id: &str,
+        idempotency_key: &str,
+        result: &Value,
+        effects: &Value,
+    ) -> TaskRuntimeResult<AgentToolReceipt> {
+        let completed_at = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE agent_tool_receipts
+             SET status = 'completed', result_json = ?1, effects_json = ?2, completed_at = ?3
+             WHERE turn_id = ?4 AND idempotency_key = ?5 AND status = 'started'",
+            params![serde_json::to_string(result)?, serde_json::to_string(effects)?,
+                    completed_at, turn_id, idempotency_key],
+        )?;
+        if changed != 1 {
+            return Err(TaskRuntimeError::Store("tool receipt is not claimable".into()));
+        }
+        load_tool_receipt_on(&self.connection, turn_id, idempotency_key)?
+            .ok_or_else(|| TaskRuntimeError::Store("completed tool receipt disappeared".into()))
+    }
+
+    pub fn list_tool_receipts_for_thread(
+        &self,
+        thread_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Vec<AgentToolReceipt>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
+                    tool_name, arguments_hash, status, result_json, effects_json,
+                    started_at, completed_at
+             FROM agent_tool_receipts
+             WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+             ORDER BY started_at ASC, idempotency_key ASC",
+        )?;
+        let rows = stmt.query_map(params![thread_id, user_id, workspace_id], map_tool_receipt_row)?;
+        rows.map(|row| row.map_err(Into::into)).collect()
     }
 
     /// Reclaims free space. Call periodically, NOT on every delete.
@@ -909,6 +1268,444 @@ impl TaskStore {
         Ok(out)
     }
 
+    /// Allocates the next attempt and creates its first event in one immediate transaction.
+    /// Event sequence 1 is therefore always `run_started`, or the run does not exist at all.
+    pub fn create_agent_run(&self, run: &NewAgentRun) -> TaskRuntimeResult<AgentRun> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let attempt = tx.query_row(
+            "SELECT COALESCE(MAX(attempt), 0) + 1 FROM agent_runs WHERE turn_id = ?1",
+            params![run.turn_id],
+            |row| row.get::<_, u32>(0),
+        )?;
+        tx.execute(
+            "INSERT INTO agent_runs (
+                run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
+                model, provider, prompt_fingerprint, started_at, schema_version
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'running', ?7, ?8, ?9, ?10, 1)",
+            params![
+                run.run_id,
+                run.turn_id,
+                run.thread_id,
+                run.user_id,
+                run.workspace_id,
+                attempt,
+                run.model,
+                run.provider,
+                run.prompt_fingerprint,
+                now,
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO agent_run_events (run_id, seq, round, kind, payload_json, created_at)
+             VALUES (?1, 1, NULL, 'run_started', ?2, ?3)",
+            params![
+                run.run_id,
+                serde_json::to_string(&serde_json::json!({
+                    "attempt": attempt,
+                    "schema_version": 1,
+                }))?,
+                now,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(AgentRun {
+            run_id: run.run_id.clone(),
+            turn_id: run.turn_id.clone(),
+            thread_id: run.thread_id.clone(),
+            user_id: run.user_id.clone(),
+            workspace_id: run.workspace_id.clone(),
+            attempt,
+            status: AgentRunStatus::Running,
+            model: run.model.clone(),
+            provider: run.provider.clone(),
+            prompt_fingerprint: run.prompt_fingerprint.clone(),
+            started_at: now,
+            completed_at: None,
+            terminal_reason: None,
+            schema_version: 1,
+        })
+    }
+
+    pub fn append_agent_run_event(
+        &self,
+        run_id: &str,
+        seq: i64,
+        round: Option<i64>,
+        kind: &str,
+        payload: &Value,
+    ) -> TaskRuntimeResult<AgentRunEvent> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = self.connection.unchecked_transaction()?;
+        tx.execute(
+            "INSERT INTO agent_run_events (run_id, seq, round, kind, payload_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                run_id,
+                seq,
+                round,
+                kind,
+                serde_json::to_string(payload)?,
+                now
+            ],
+        )?;
+        let event_id = tx.last_insert_rowid();
+        if kind == "prompt_snapshot" {
+            if let Some(fingerprint) = payload.get("fingerprint").and_then(Value::as_str) {
+                tx.execute(
+                    "UPDATE agent_runs SET prompt_fingerprint = ?2 WHERE run_id = ?1",
+                    params![run_id, fingerprint],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(AgentRunEvent {
+            event_id,
+            run_id: run_id.to_string(),
+            seq,
+            round,
+            kind: kind.to_string(),
+            payload: payload.clone(),
+            created_at: now,
+        })
+    }
+
+    pub fn finish_agent_run(
+        &self,
+        run_id: &str,
+        status: AgentRunStatus,
+        terminal_reason: Option<&str>,
+    ) -> TaskRuntimeResult<()> {
+        if status == AgentRunStatus::Running {
+            return Err(TaskRuntimeError::Store(
+                "finish_agent_run requires a terminal status".to_string(),
+            ));
+        }
+        let changed = self.connection.execute(
+            "UPDATE agent_runs
+             SET status = ?2, completed_at = ?3, terminal_reason = ?4
+             WHERE run_id = ?1 AND status = 'running'",
+            params![
+                run_id,
+                status.as_str(),
+                OffsetDateTime::now_utc().unix_timestamp(),
+                terminal_reason,
+            ],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Store(format!(
+                "agent run is missing or already terminal: {run_id}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn list_agent_runs_for_turn(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Vec<AgentRun>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
+                    model, provider, prompt_fingerprint, started_at, completed_at,
+                    terminal_reason, schema_version
+             FROM agent_runs
+             WHERE turn_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+             ORDER BY attempt ASC, started_at ASC",
+        )?;
+        let rows = stmt.query_map(params![turn_id, user_id, workspace_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, u32>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, Option<i64>>(11)?,
+                row.get::<_, Option<String>>(12)?,
+                row.get::<_, u32>(13)?,
+            ))
+        })?;
+        let mut runs = Vec::new();
+        for row in rows {
+            let (
+                run_id,
+                turn_id,
+                thread_id,
+                user_id,
+                workspace_id,
+                attempt,
+                status,
+                model,
+                provider,
+                prompt_fingerprint,
+                started_at,
+                completed_at,
+                terminal_reason,
+                schema_version,
+            ) = row?;
+            runs.push(AgentRun {
+                run_id,
+                turn_id,
+                thread_id,
+                user_id,
+                workspace_id,
+                attempt,
+                status: AgentRunStatus::parse(&status).ok_or_else(|| {
+                    TaskRuntimeError::Store(format!("unknown agent run status: {status}"))
+                })?,
+                model,
+                provider,
+                prompt_fingerprint,
+                started_at,
+                completed_at,
+                terminal_reason,
+                schema_version,
+            });
+        }
+        Ok(runs)
+    }
+
+    pub fn list_agent_runs_for_thread(
+        &self,
+        thread_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Vec<AgentRun>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
+                    model, provider, prompt_fingerprint, started_at, completed_at,
+                    terminal_reason, schema_version
+             FROM agent_runs
+             WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+             ORDER BY started_at DESC, attempt DESC",
+        )?;
+        let rows = stmt.query_map(params![thread_id, user_id, workspace_id], |row| {
+            let status: String = row.get(6)?;
+            Ok((
+                AgentRun {
+                    run_id: row.get(0)?, turn_id: row.get(1)?, thread_id: row.get(2)?,
+                    user_id: row.get(3)?, workspace_id: row.get(4)?, attempt: row.get(5)?,
+                    status: AgentRunStatus::parse(&status).unwrap_or(AgentRunStatus::Failed),
+                    model: row.get(7)?, provider: row.get(8)?, prompt_fingerprint: row.get(9)?,
+                    started_at: row.get(10)?, completed_at: row.get(11)?,
+                    terminal_reason: row.get(12)?, schema_version: row.get(13)?,
+                },
+                status,
+            ))
+        })?;
+        let mut runs = Vec::new();
+        for row in rows {
+            let (run, status) = row?;
+            if AgentRunStatus::parse(&status).is_none() {
+                return Err(TaskRuntimeError::Store(format!("unknown agent run status: {status}")));
+            }
+            runs.push(run);
+        }
+        Ok(runs)
+    }
+
+    pub fn workspace_for_agent_run(
+        &self,
+        run_id: &str,
+        user_id: &str,
+    ) -> TaskRuntimeResult<Option<String>> {
+        Ok(self.connection.query_row(
+            "SELECT workspace_id FROM agent_runs WHERE run_id = ?1 AND user_id = ?2",
+            params![run_id, user_id],
+            |row| row.get(0),
+        ).optional()?)
+    }
+
+    pub fn latest_agent_checkpoint(
+        &self,
+        run_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Option<AgentCheckpoint>> {
+        self.connection.query_row(
+            "SELECT c.checkpoint_id, c.run_id, c.turn_id, c.thread_id, c.user_id,
+                    c.workspace_id, c.round, c.state_json, c.fingerprint,
+                    c.resumable, c.created_at
+             FROM agent_checkpoints c
+             JOIN agent_runs r ON r.run_id = c.run_id
+             WHERE c.run_id = ?1 AND r.user_id = ?2 AND r.workspace_id = ?3
+             ORDER BY c.round DESC LIMIT 1",
+            params![run_id, user_id, workspace_id],
+            |row| {
+                let state_json: String = row.get(7)?;
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?, state_json, row.get::<_, String>(8)?,
+                    row.get::<_, i64>(9)?, row.get::<_, i64>(10)?))
+            },
+        ).optional()?.map(|(checkpoint_id, run_id, turn_id, thread_id, user_id,
+                            workspace_id, round, state_json, fingerprint, resumable, created_at)| {
+            Ok(AgentCheckpoint { checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                round: round as u32, state_json: serde_json::from_str(&state_json)?, fingerprint,
+                resumable: resumable != 0, created_at })
+        }).transpose()
+    }
+
+    pub fn list_agent_run_events(
+        &self,
+        run_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+        since: Option<i64>,
+    ) -> TaskRuntimeResult<Vec<AgentRunEvent>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT e.event_id, e.run_id, e.seq, e.round, e.kind, e.payload_json, e.created_at
+             FROM agent_run_events e
+             JOIN agent_runs r ON r.run_id = e.run_id
+             WHERE e.run_id = ?1 AND r.user_id = ?2 AND r.workspace_id = ?3 AND e.seq > ?4
+             ORDER BY e.seq ASC",
+        )?;
+        let rows = stmt.query_map(
+            params![run_id, user_id, workspace_id, since.unwrap_or(0)],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            },
+        )?;
+        let mut events = Vec::new();
+        for row in rows {
+            let (event_id, run_id, seq, round, kind, payload_json, created_at) = row?;
+            events.push(AgentRunEvent {
+                event_id,
+                run_id,
+                seq,
+                round,
+                kind,
+                payload: serde_json::from_str(&payload_json)?,
+                created_at,
+            });
+        }
+        Ok(events)
+    }
+
+    pub fn latest_agent_prompt_snapshot(
+        &self,
+        run_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Option<AgentRunEvent>> {
+        let mut events = self.connection.prepare(
+            "SELECT e.event_id, e.run_id, e.seq, e.round, e.kind, e.payload_json, e.created_at
+             FROM agent_run_events e
+             JOIN agent_runs r ON r.run_id = e.run_id
+             WHERE e.run_id = ?1 AND r.user_id = ?2 AND r.workspace_id = ?3
+               AND e.kind = 'prompt_snapshot'
+             ORDER BY e.seq DESC LIMIT 1",
+        )?;
+        let row = events
+            .query_row(params![run_id, user_id, workspace_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            })
+            .optional()?;
+        row.map(
+            |(event_id, run_id, seq, round, kind, payload_json, created_at)| {
+                Ok(AgentRunEvent {
+                    event_id,
+                    run_id,
+                    seq,
+                    round,
+                    kind,
+                    payload: serde_json::from_str(&payload_json)?,
+                    created_at,
+                })
+            },
+        )
+        .transpose()
+    }
+
+    pub fn abort_running_agent_runs(&self, terminal_reason: &str) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "UPDATE agent_runs
+             SET status = 'aborted', completed_at = ?1, terminal_reason = ?2
+             WHERE status = 'running'",
+            params![OffsetDateTime::now_utc().unix_timestamp(), terminal_reason],
+        )?)
+    }
+
+    pub fn abort_running_agent_runs_for_turn(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+        terminal_reason: &str,
+    ) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "UPDATE agent_runs
+             SET status = 'aborted', completed_at = ?1, terminal_reason = ?2
+             WHERE turn_id = ?3 AND user_id = ?4 AND workspace_id = ?5 AND status = 'running'",
+            params![
+                OffsetDateTime::now_utc().unix_timestamp(),
+                terminal_reason,
+                turn_id,
+                user_id,
+                workspace_id,
+            ],
+        )?)
+    }
+
+    /// Deletes every journal owned by one chat thread; event rows cascade with each run.
+    pub fn purge_agent_runs_for_thread(
+        &self,
+        thread_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "DELETE FROM agent_runs
+             WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3",
+            params![thread_id, user_id, workspace_id],
+        )?)
+    }
+
+    /// Deletes a bounded batch of old terminal runs; event rows cascade with their parent run.
+    pub fn purge_terminal_agent_runs_before(
+        &self,
+        completed_before: i64,
+        limit: usize,
+    ) -> TaskRuntimeResult<usize> {
+        if limit == 0 {
+            return Ok(0);
+        }
+        Ok(self.connection.execute(
+            "DELETE FROM agent_runs
+             WHERE run_id IN (
+                 SELECT run_id FROM agent_runs
+                 WHERE status != 'running' AND completed_at IS NOT NULL AND completed_at < ?1
+                 ORDER BY completed_at ASC
+                 LIMIT ?2
+             )",
+            params![completed_before, limit as i64],
+        )?)
+    }
+
     /// Projects the durable per-turn log into a thread-level cockpit view for the working
     /// island (see `ThreadActivityProjection`). ONE JOIN turn_events⋈tasks(thread_id) — both
     /// tables live in the same sqlite — yields every activity+plan_update across the thread's
@@ -1198,6 +1995,90 @@ impl TaskStore {
     }
 }
 
+fn load_runtime_plan_on(
+    conn: &Connection,
+    user_id: &str,
+    workspace_id: &str,
+    thread_id: &str,
+) -> TaskRuntimeResult<Option<RuntimePlanRecord>> {
+    conn.query_row(
+        "SELECT user_id, workspace_id, thread_id, status, plan_json, revision,
+                stall_turns, last_resume_done, created_at, updated_at
+         FROM runtime_plans
+         WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+        params![user_id, workspace_id, thread_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
+            ))
+        },
+    )
+    .optional()?
+    .map(|(user_id, workspace_id, thread_id, status, plan_json, revision,
+           stall_turns, last_resume_done, created_at, updated_at)| {
+        Ok(RuntimePlanRecord {
+            user_id,
+            workspace_id,
+            thread_id,
+            status,
+            plan_json: serde_json::from_str(&plan_json)?,
+            revision: revision as u64,
+            stall_turns: stall_turns as u32,
+            last_resume_done: last_resume_done.map(|value| value as usize),
+            created_at,
+            updated_at,
+        })
+    })
+    .transpose()
+}
+
+fn map_tool_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentToolReceipt> {
+    let result_json: Option<String> = row.get(9)?;
+    let effects_json: Option<String> = row.get(10)?;
+    Ok(AgentToolReceipt {
+        turn_id: row.get(0)?,
+        idempotency_key: row.get(1)?,
+        run_id: row.get(2)?,
+        thread_id: row.get(3)?,
+        user_id: row.get(4)?,
+        workspace_id: row.get(5)?,
+        tool_name: row.get(6)?,
+        arguments_hash: row.get(7)?,
+        status: row.get(8)?,
+        result_json: result_json.and_then(|raw| serde_json::from_str(&raw).ok()),
+        effects_json: effects_json.and_then(|raw| serde_json::from_str(&raw).ok()),
+        started_at: row.get(11)?,
+        completed_at: row.get(12)?,
+    })
+}
+
+fn load_tool_receipt_on(
+    conn: &Connection,
+    turn_id: &str,
+    idempotency_key: &str,
+) -> TaskRuntimeResult<Option<AgentToolReceipt>> {
+    Ok(conn
+        .query_row(
+            "SELECT turn_id, idempotency_key, run_id, thread_id, user_id, workspace_id,
+                    tool_name, arguments_hash, status, result_json, effects_json,
+                    started_at, completed_at
+             FROM agent_tool_receipts
+             WHERE turn_id = ?1 AND idempotency_key = ?2",
+            params![turn_id, idempotency_key],
+            map_tool_receipt_row,
+        )
+        .optional()?)
+}
+
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info({table})")) else {
         return false;
@@ -1249,13 +2130,147 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 4);
+        assert_eq!(store.schema_version().unwrap(), 6);
+        assert!(table_exists(&store.connection, "agent_runs"));
+        assert!(table_exists(&store.connection, "agent_run_events"));
+        assert!(table_exists(&store.connection, "runtime_plans"));
+        assert!(table_exists(&store.connection, "agent_checkpoints"));
+        assert!(table_exists(&store.connection, "agent_tool_receipts"));
     }
 
     #[test]
     fn chat_turn_index_exists() {
         let store = TaskStore::open_in_memory().expect("open");
         assert!(index_exists(&store.connection, "idx_tasks_chat_turn_thread"));
+    }
+}
+
+#[cfg(test)]
+mod runtime_plan_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn runtime_plan_is_scoped_and_revisioned() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .upsert_runtime_plan("u", "w", "t", &json!({"steps": []}), "open")
+            .unwrap();
+        let second = store
+            .upsert_runtime_plan("u", "w", "t", &json!({"steps": [1]}), "open")
+            .unwrap();
+        assert_eq!((first.revision, second.revision), (1, 2));
+        assert_eq!(second.plan_json, json!({"steps": [1]}));
+        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_none());
+    }
+
+    #[test]
+    fn runtime_plan_stall_bookkeeping_is_atomic() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .upsert_runtime_plan(
+                "u", "w", "t",
+                &json!({"steps": [{"status": "in_progress"}]}),
+                "open",
+            )
+            .unwrap();
+        let first = store.bump_runtime_plan_stall("u", "w", "t", 0).unwrap().unwrap();
+        let repeated = store.bump_runtime_plan_stall("u", "w", "t", 0).unwrap().unwrap();
+        let progressed = store.bump_runtime_plan_stall("u", "w", "t", 1).unwrap().unwrap();
+        assert_eq!(first.stall_turns, 0);
+        assert_eq!(repeated.stall_turns, 1);
+        assert_eq!(progressed.stall_turns, 0);
+        assert_eq!(progressed.last_resume_done, Some(1));
+    }
+
+    #[test]
+    fn runtime_plan_cleanup_is_scope_safe() {
+        let store = TaskStore::open_in_memory().unwrap();
+        for (workspace, thread) in [("w", "t"), ("w", "other"), ("other", "t")] {
+            store
+                .upsert_runtime_plan("u", workspace, thread, &json!({"steps": []}), "open")
+                .unwrap();
+        }
+        assert_eq!(store.purge_runtime_plan_for_thread("u", "w", "t").unwrap(), 1);
+        assert!(store.load_runtime_plan("u", "w", "t").unwrap().is_none());
+        assert!(store.load_runtime_plan("u", "w", "other").unwrap().is_some());
+        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_some());
+        store
+            .purge_workspace(&UserId::new("u"), &WorkspaceId::new("other"))
+            .unwrap();
+        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod agent_control_state_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn run(run_id: &str) -> NewAgentRun {
+        NewAgentRun {
+            run_id: run_id.into(),
+            turn_id: "turn".into(),
+            thread_id: "thread".into(),
+            user_id: "user".into(),
+            workspace_id: "workspace".into(),
+            model: None,
+            provider: None,
+            prompt_fingerprint: None,
+        }
+    }
+
+    fn receipt() -> NewAgentToolReceipt {
+        NewAgentToolReceipt {
+            turn_id: "turn".into(),
+            idempotency_key: "write_file:abc".into(),
+            run_id: "run".into(),
+            thread_id: "thread".into(),
+            user_id: "user".into(),
+            workspace_id: "workspace".into(),
+            tool_name: "write_file".into(),
+            arguments_hash: "abc".into(),
+        }
+    }
+
+    #[test]
+    fn checkpoint_recovery_requires_gateway_restart_abort() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.create_agent_run(&run("run")).unwrap();
+        store
+            .append_agent_checkpoint("run", 2, &json!({"round": 2}), "fp", true)
+            .unwrap();
+        assert!(store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .is_none());
+        store
+            .abort_running_agent_runs_for_turn(
+                "turn", "user", "workspace", "gateway_restart",
+            )
+            .unwrap();
+        let checkpoint = store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .unwrap();
+        assert_eq!(checkpoint.round, 2);
+    }
+
+    #[test]
+    fn tool_receipt_never_reclaims_uncertain_started_action() {
+        let store = TaskStore::open_in_memory().unwrap();
+        assert!(matches!(store.claim_tool_receipt(&receipt()).unwrap(), ToolReceiptClaim::Execute));
+        assert!(matches!(
+            store.claim_tool_receipt(&receipt()).unwrap(),
+            ToolReceiptClaim::Uncertain(_)
+        ));
+        store
+            .complete_tool_receipt("turn", "write_file:abc", &json!({"ok": true}), &json!({}))
+            .unwrap();
+        assert!(matches!(
+            store.claim_tool_receipt(&receipt()).unwrap(),
+            ToolReceiptClaim::Replay(_)
+        ));
     }
 }
 
@@ -1304,6 +2319,236 @@ mod turn_event_tests {
         assert_eq!(
             events.iter().map(|e| e.kind).collect::<Vec<_>>(),
             vec![TurnEventKind::Delta, TurnEventKind::Aborted, TurnEventKind::Cancelled]
+        );
+    }
+}
+
+#[cfg(test)]
+mod agent_run_tests {
+    use super::*;
+    use crate::{AgentRunStatus, NewAgentRun};
+    use serde_json::json;
+
+    fn new_run(run_id: &str, turn_id: &str, user_id: &str, workspace_id: &str) -> NewAgentRun {
+        NewAgentRun {
+            run_id: run_id.to_string(),
+            turn_id: turn_id.to_string(),
+            thread_id: "thread-1".to_string(),
+            user_id: user_id.to_string(),
+            workspace_id: workspace_id.to_string(),
+            model: Some("test-model".to_string()),
+            provider: Some("test-provider".to_string()),
+            prompt_fingerprint: None,
+        }
+    }
+
+    #[test]
+    fn agent_run_events_are_append_only_and_scope_filtered() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .create_agent_run(&new_run("run-1", "turn-1", "u1", "w1"))
+            .unwrap();
+        store
+            .append_agent_run_event("run-1", 2, Some(1), "model_response", &json!({"ok": true}))
+            .unwrap();
+        assert!(
+            store
+                .append_agent_run_event("run-1", 2, Some(1), "model_response", &json!({}))
+                .is_err(),
+            "duplicate sequence numbers must be rejected"
+        );
+
+        let events = store
+            .list_agent_run_events("run-1", "u1", "w1", Some(1))
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].seq, 2);
+        assert!(
+            store
+                .list_agent_run_events("run-1", "other", "w1", None)
+                .unwrap()
+                .is_empty(),
+            "foreign scopes must not observe the run"
+        );
+        assert!(
+            store
+                .list_agent_runs_for_turn("turn-1", "u1", "other")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn latest_prompt_snapshot_returns_only_the_latest_snapshot() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .create_agent_run(&new_run("run-2", "turn-2", "u", "w"))
+            .unwrap();
+        store
+            .append_agent_run_event("run-2", 2, Some(1), "prompt_snapshot", &json!({"round": 1}))
+            .unwrap();
+        store
+            .append_agent_run_event("run-2", 3, Some(2), "prompt_snapshot", &json!({"round": 2}))
+            .unwrap();
+
+        let latest = store
+            .latest_agent_prompt_snapshot("run-2", "u", "w")
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest.seq, 3);
+        assert_eq!(latest.payload["round"], 2);
+        assert!(
+            store
+                .latest_agent_prompt_snapshot("run-2", "u", "foreign")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn agent_run_lifecycle_is_explicit() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .create_agent_run(&new_run("run-3", "turn-3", "u", "w"))
+            .unwrap();
+        store
+            .finish_agent_run("run-3", AgentRunStatus::Completed, Some("delivered"))
+            .unwrap();
+        let runs = store.list_agent_runs_for_turn("turn-3", "u", "w").unwrap();
+        assert_eq!(runs[0].status, AgentRunStatus::Completed);
+        assert_eq!(runs[0].terminal_reason.as_deref(), Some("delivered"));
+        assert!(runs[0].completed_at.is_some());
+    }
+
+    #[test]
+    fn agent_run_attempt_is_allocated_atomically_by_the_store() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .create_agent_run(&new_run("attempt-a", "turn-retry", "u", "w"))
+            .unwrap();
+        let second = store
+            .create_agent_run(&new_run("attempt-b", "turn-retry", "u", "w"))
+            .unwrap();
+
+        assert_eq!(first.attempt, 1);
+        assert_eq!(second.attempt, 2);
+    }
+
+    #[test]
+    fn workspace_purge_deletes_owned_runs_and_events_only() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .create_agent_run(&new_run("owned", "turn-owned", "u", "w"))
+            .unwrap();
+        store
+            .create_agent_run(&new_run("other", "turn-other", "u", "other"))
+            .unwrap();
+
+        store
+            .purge_workspace(&UserId::new("u"), &WorkspaceId::new("w"))
+            .unwrap();
+
+        assert!(
+            store
+                .list_agent_runs_for_turn("turn-owned", "u", "w")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_agent_runs_for_turn("turn-other", "u", "other")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn thread_purge_deletes_owned_runs_and_events_only() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .create_agent_run(&new_run("owned-thread", "turn-a", "u", "w"))
+            .unwrap();
+        store
+            .append_agent_run_event("owned-thread", 2, Some(1), "model_response", &json!({}))
+            .unwrap();
+        let mut other = new_run("other-thread", "turn-b", "u", "w");
+        other.thread_id = "thread-2".to_string();
+        store.create_agent_run(&other).unwrap();
+
+        assert_eq!(
+            store
+                .purge_agent_runs_for_thread("thread-1", "u", "w")
+                .unwrap(),
+            1
+        );
+        assert!(
+            store
+                .list_agent_runs_for_turn("turn-a", "u", "w")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_agent_runs_for_turn("turn-b", "u", "w")
+                .unwrap()
+                .len(),
+            1
+        );
+        let event_count: i64 = store
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM agent_run_events WHERE run_id = 'owned-thread'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_count, 0);
+    }
+
+    #[test]
+    fn retention_deletes_only_old_terminal_runs() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .create_agent_run(&new_run("old", "turn-old", "u", "w"))
+            .unwrap();
+        store
+            .create_agent_run(&new_run("recent", "turn-recent", "u", "w"))
+            .unwrap();
+        store
+            .create_agent_run(&new_run("active", "turn-active", "u", "w"))
+            .unwrap();
+        store
+            .finish_agent_run("old", AgentRunStatus::Completed, None)
+            .unwrap();
+        store
+            .finish_agent_run("recent", AgentRunStatus::Completed, None)
+            .unwrap();
+        store
+            .connection
+            .execute("UPDATE agent_runs SET completed_at = 10 WHERE run_id = 'old'", [])
+            .unwrap();
+
+        assert_eq!(store.purge_terminal_agent_runs_before(100, 10).unwrap(), 1);
+        assert!(
+            store
+                .list_agent_runs_for_turn("turn-old", "u", "w")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_agent_runs_for_turn("turn-recent", "u", "w")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .list_agent_runs_for_turn("turn-active", "u", "w")
+                .unwrap()
+                .len(),
+            1
         );
     }
 }
@@ -1474,7 +2719,7 @@ mod upgrade_tests {
     use rusqlite::Connection;
 
     #[test]
-    fn upgrades_v3_to_v4_adding_chat_turn_cols() {
+    fn upgrades_v3_to_v5_adding_chat_turn_and_agent_journal_schema() {
         // Build a valid v3-era TaskRecord blob so get_task round-trips after migration.
         let task = TaskRecord::new(
             "t",
@@ -1520,7 +2765,9 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 4);
+        assert_eq!(store.schema_version().unwrap(), 6);
+        assert!(table_exists(&store.connection, "agent_runs"));
+        assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {
             assert!(column_exists(&store.connection, "tasks", col));
         }

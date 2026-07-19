@@ -30,6 +30,8 @@ use std::collections::BTreeSet;
 /// turn that carries images — never mid-loop, where a copy would mean two divergent histories.
 #[derive(Debug, Default, Clone)]
 pub struct LoopState {
+    /// Ordered instruction provenance exposed by the Prompt Inspector.
+    pub prompt_packets: Vec<crate::PromptPacketMetadata>,
     /// The OpenAI-compat conversation array the model sees: seeded gateway-side with the
     /// system+user messages, then grown by the loop (assistant turns, tool results,
     /// F3 compaction). `Value` (not a typed message) because the loop builds these as
@@ -173,6 +175,7 @@ mod tests {
     fn new_is_all_empty() {
         let ls = LoopState::new();
         assert!(ls.messages.is_empty());
+        assert!(ls.prompt_packets.is_empty());
         assert_eq!(ls.step_messages_start, 0);
         assert!(ls.accumulated.is_empty());
         assert!(ls.pending_vault_reveal_marker.is_none());

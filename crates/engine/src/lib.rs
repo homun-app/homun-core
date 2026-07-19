@@ -38,6 +38,8 @@ pub mod model_normalize;
 /// The loop's turn-carried state (ADR 0024 inc 5, Point 4) — bundled at its destination
 /// ahead of the loop-body move; the gateway constructs it and the inline loop mutates it.
 pub mod loop_state;
+pub mod loop_checkpoint;
+pub mod prompt_packets;
 
 /// The loop's turn-constant config (ADR 0024 inc 5, 5.D1c.1) — resolved gateway-side, injected so the
 /// leaf engine never reads env.
@@ -61,6 +63,9 @@ pub mod trace;
 /// turn did and NEVER changes any control-flow decision. Kept separate from `trace` (the hashed oracle).
 pub mod turn_trace;
 
+/// Durable, provider-neutral observability events emitted by the guarded loop.
+pub mod execution_journal;
+
 /// The single guarded ReAct loop — motore #1 (ADR 0021), extracted here (ADR 0024 inc 5, 5.D1c.10).
 pub mod agent_loop;
 
@@ -68,11 +73,17 @@ pub mod agent_loop;
 pub mod browse;
 
 pub use contract::{
-    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, LoadedTool, ModelCall,
-    ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding, ToolEffects,
-    ToolOutcome, TurnCompletionJudge, TurnPolicy,
+    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal, LoadedTool,
+    ModelCall, ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding,
+    ToolEffects, ToolOutcome, TurnCompletionJudge, TurnPolicy,
+};
+pub use execution_journal::{
+    AgentExecutionEvent, NoopExecutionJournal, PromptMessageSnapshot, PromptSnapshot,
+    PromptToolSnapshot, build_prompt_snapshot,
 };
 pub use browse::{BrowseResult, Confidence};
 pub use config::TurnConfig;
 pub use loop_state::LoopState;
+pub use loop_checkpoint::LoopCheckpoint;
+pub use prompt_packets::{PromptPacket, PromptPacketMetadata, PromptPacketSource, compose_prompt_packets};
 pub use outcome::TurnOutcome;

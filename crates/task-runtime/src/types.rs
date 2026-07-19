@@ -196,6 +196,148 @@ pub struct TurnEvent {
     pub created_at: i64,
 }
 
+/// One broker attempt through the guarded agent loop. This is operational state, not
+/// semantic memory: it exists so a run can be inspected and recovered without changing recall.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentRun {
+    pub run_id: String,
+    pub turn_id: String,
+    pub thread_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub attempt: u32,
+    pub status: AgentRunStatus,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub prompt_fingerprint: Option<String>,
+    pub started_at: i64,
+    pub completed_at: Option<i64>,
+    pub terminal_reason: Option<String>,
+    pub schema_version: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewAgentRun {
+    pub run_id: String,
+    pub turn_id: String,
+    pub thread_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub prompt_fingerprint: Option<String>,
+}
+
+/// Canonical, operational plan state for one chat thread.
+///
+/// This deliberately lives outside semantic memory: plan execution state must be
+/// isolated by user/workspace/thread and updated transactionally.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimePlanRecord {
+    pub user_id: String,
+    pub workspace_id: String,
+    pub thread_id: String,
+    pub status: String,
+    pub plan_json: Value,
+    pub revision: u64,
+    pub stall_turns: u32,
+    pub last_resume_done: Option<usize>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentCheckpoint {
+    pub checkpoint_id: String,
+    pub run_id: String,
+    pub turn_id: String,
+    pub thread_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub round: u32,
+    pub state_json: Value,
+    pub fingerprint: String,
+    pub resumable: bool,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewAgentToolReceipt {
+    pub turn_id: String,
+    pub idempotency_key: String,
+    pub run_id: String,
+    pub thread_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub tool_name: String,
+    pub arguments_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentToolReceipt {
+    pub turn_id: String,
+    pub idempotency_key: String,
+    pub run_id: String,
+    pub thread_id: String,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub tool_name: String,
+    pub arguments_hash: String,
+    pub status: String,
+    pub result_json: Option<Value>,
+    pub effects_json: Option<Value>,
+    pub started_at: i64,
+    pub completed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolReceiptClaim {
+    Execute,
+    Replay(AgentToolReceipt),
+    Uncertain(AgentToolReceipt),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRunStatus {
+    Running,
+    Completed,
+    Failed,
+    Aborted,
+}
+
+impl AgentRunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Aborted => "aborted",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "running" => Self::Running,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "aborted" => Self::Aborted,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentRunEvent {
+    pub event_id: i64,
+    pub run_id: String,
+    pub seq: i64,
+    pub round: Option<i64>,
+    pub kind: String,
+    pub payload: Value,
+    pub created_at: i64,
+}
+
 /// Thread-level cockpit projection over the durable per-turn log (`turn_events`) for the
 /// working island. Plans supersede (latest `plan_update` wins); activity accumulates across
 /// ALL turns of the thread in chronological order (capped to bound the payload). This is the

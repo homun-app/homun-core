@@ -13,9 +13,10 @@
 
 use crate::browser::{is_browser_granular_tool, prune_browser_history, resolve_browser_chat_tool_name};
 use crate::contract::{
-    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ModelClient, PlanProgress,
-    TurnCompletionJudge, TurnPolicy,
+    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal, ModelClient,
+    PlanProgress, TurnCompletionJudge, TurnPolicy,
 };
+use crate::execution_journal::AgentExecutionEvent;
 use crate::events::{GenerateStreamEvent, TokenMetrics};
 use crate::markers::{
     append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
@@ -50,6 +51,7 @@ const MAX_PLAN_NUDGES: u32 = 8;
 pub async fn try_advance_frontier_from_evidence(
     ls: &mut LoopState,
     plan_progress: &impl PlanProgress,
+    execution_journal: &impl ExecutionJournal,
     event_sink: &impl EventSink,
     cfg: &TurnConfig,
     thread_id: Option<&str>,
@@ -113,6 +115,10 @@ pub async fn try_advance_frontier_from_evidence(
         let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
         event_sink.emit(GenerateStreamEvent::Delta { text: plan_mark }).await;
         plan_progress.persist_plan(thread_id, &plan_steps).await;
+        execution_journal.record(AgentExecutionEvent::PlanUpdated {
+            round,
+            source: "verified_evidence".to_string(),
+        });
         // This evidence window was consumed by the advance — reset it + the stride anchor.
         ls.step_evidence.clear();
         ls.progress_verify_anchor = 0;
@@ -125,7 +131,7 @@ pub async fn try_advance_frontier_from_evidence(
 /// tail (memory learn + code-graph refresh) consumes. Called unconditionally by `run_agent_rounds`
 /// (ADR 0024 5.D2) — no flag, no inline copy.
 #[allow(clippy::too_many_arguments)] // the turn's seams + engine-safe data; grouped further post-5.D2.
-pub async fn run_turn<M, C, B, P, J, K, Pol, E>(
+pub async fn run_turn<M, C, B, P, J, K, Pol, X, E>(
     mut ls: LoopState,
     cfg: TurnConfig,
     model_client: &M,
@@ -135,6 +141,7 @@ pub async fn run_turn<M, C, B, P, J, K, Pol, E>(
     completion_judge: &J,
     compactor: &K,
     turn_policy: &Pol,
+    execution_journal: &X,
     event_sink: &E,
     temperature: f64,
     // by-ref: these are also borrowed by the gateway-constructed executors (dispatch shares one
@@ -163,6 +170,7 @@ where
     J: TurnCompletionJudge,
     K: ContextCompactor,
     Pol: TurnPolicy,
+    X: ExecutionJournal,
     E: EventSink,
 {
     for round in 0..cfg.hard_round_ceiling {
@@ -213,6 +221,10 @@ gathered‹‹/ACT››"
         // multi-step turn from overflowing the context window.
         if ls.pending_compaction {
             ls.pending_compaction = false;
+            execution_journal.record(AgentExecutionEvent::ContextCompacted {
+                round,
+                reason: "verified_step_boundary".to_string(),
+            });
             compactor.compact(&mut ls.messages, &mut ls.step_messages_start).await;
         }
         // Fase 1.1: token-budget auto-compaction (the memory-checkpoint path) — independent of
@@ -221,6 +233,7 @@ gathered‹‹/ACT››"
         // boundary as the step compaction; fail-open (unknown window → no-op) so a turn without a
         // known window keeps exactly today's round-based hygiene.
         compactor.compact_for_budget(&mut ls.messages, cfg.context_window).await;
+        execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
         // On the LAST allowed round, forbid tools so the model MUST synthesize
         // a final answer from what it already gathered — otherwise it can burn
         // every round on tool calls and end with no answer ("limite di passi").
@@ -259,6 +272,18 @@ missing, give what you have and note the gap in one short line.",
         // HTTP, retry/backoff, provider fallback, and the OpenAI/Ollama stream collectors are
         // owned there. A mid-round provider swap comes back via ProviderBinding so the next
         // rounds use the effective provider.
+        execution_journal.record(AgentExecutionEvent::PromptSnapshot {
+            round,
+            snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
+                &ls.provider.model,
+                &ls.provider.base_url,
+                &ls.messages,
+                &ls.tool_schemas,
+                is_final_round,
+                if round == 0 { cfg.forced_tool.as_deref() } else { None },
+                &ls.prompt_packets,
+            ),
+        });
         let out = model_client
             .generate(
                 &crate::ModelCall {
@@ -347,6 +372,13 @@ missing, give what you have and note the gap in one short line.",
                     Some(model_normalize::synthesize_tool_calls(round, parsed))
                 }
             });
+
+        execution_journal.record(AgentExecutionEvent::ModelResponse {
+            round,
+            finish_reason: round_finish_reason.clone(),
+            content_chars: raw_content.chars().count(),
+            tool_calls: tool_calls.as_ref().map_or(0, Vec::len),
+        });
 
         // Turn trace: record this round's outcome (finish_reason + tools chosen) before `tool_calls` is
         // consumed below. Observability only — reads state, never alters it.
@@ -525,6 +557,11 @@ missing, give what you have and note the gap in one short line.",
                     }
                 }
 
+                execution_journal.record(AgentExecutionEvent::ToolCallStarted {
+                    round,
+                    call_id: call_id.clone(),
+                    name: name.to_string(),
+                });
                 let (result, tool_effects) = if is_browser_granular_tool(name) {
                     // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
                     // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
@@ -546,6 +583,18 @@ missing, give what you have and note the gap in one short line.",
                         Err(e) => (e, crate::ToolEffects::default()),
                     }
                 };
+                execution_journal.record(AgentExecutionEvent::ToolCallCompleted {
+                    round,
+                    call_id: call_id.clone(),
+                    name: name.to_string(),
+                    result_chars: result.chars().count(),
+                });
+                if matches!(name, "update_plan" | "step_advance") {
+                    execution_journal.record(AgentExecutionEvent::PlanUpdated {
+                        round,
+                        source: name.to_string(),
+                    });
+                }
                 // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                 // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
                 ls.apply_effects(&mut pending_confirm, round, tool_effects);
@@ -581,7 +630,16 @@ missing, give what you have and note the gap in one short line.",
                     }
                     // Harness-derived progress: advance the plan frontier when the gathered
                     // evidence VERIFIES the current step (the weak browser model never does).
-                    try_advance_frontier_from_evidence(&mut ls, plan_progress, event_sink, &cfg, thread_id.as_deref(), round).await;
+                    try_advance_frontier_from_evidence(
+                        &mut ls,
+                        plan_progress,
+                        execution_journal,
+                        event_sink,
+                        &cfg,
+                        thread_id.as_deref(),
+                        round,
+                    )
+                    .await;
                 }
                 // Parity harness: compute the result-derived fingerprint fields
                 // from `&result` BEFORE the push moves `result` into the message.
@@ -840,6 +898,10 @@ missing, give what you have and note the gap in one short line.",
             turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
                 finish_reason: round_finish_reason.clone().unwrap_or_default(),
             });
+            execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
+                round: Some(round),
+                reason: "empty_visible_answer".to_string(),
+            });
             // Keep the reasoning trace in context so the synthesis builds on it.
             if !content.trim().is_empty() {
                 ls.messages.push(serde_json::json!({ "role": "assistant", "content": content }));
@@ -909,6 +971,10 @@ missing, give what you have and note the gap in one short line.",
         turn_trace.record(crate::turn_trace::TurnEvent::ForcedSynthesis {
             finish_reason: "post_loop_exhausted".into(),
         });
+        execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
+            round: None,
+            reason: "post_loop_exhausted".to_string(),
+        });
         // Guaranteed synthesis: the model exhausted the tool rounds without a
         // text answer (it kept calling tools). Force one final NO-TOOLS call so it
         // synthesizes from what it did, instead of dead-ending on "limite di passi".
@@ -930,6 +996,18 @@ to proceed."
         // A provider swap here is moot (the turn ends right after), and any error →
         // empty synth, falling through to the accumulated / last_model_error / canned
         // chain below (same fallback shape as before).
+        execution_journal.record(AgentExecutionEvent::PromptSnapshot {
+            round: cfg.hard_round_ceiling,
+            snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
+                &ls.provider.model,
+                &ls.provider.base_url,
+                &ls.messages,
+                &[],
+                true,
+                None,
+                &ls.prompt_packets,
+            ),
+        });
         let synth_out = model_client
             .generate(
                 &crate::ModelCall {
@@ -955,6 +1033,14 @@ to proceed."
                 .and_then(|c| c.as_str())
                 .unwrap_or(""),
         );
+        if let Ok(output) = &synth_out {
+            execution_journal.record(AgentExecutionEvent::ModelResponse {
+                round: cfg.hard_round_ceiling,
+                finish_reason: output.finish_reason.clone(),
+                content_chars: synth_text.chars().count(),
+                tool_calls: 0,
+            });
+        }
         // synth_text was already streamed live by the collector; the committed text
         // is the authoritative Done payload below.
         let mut final_text = if !synth_text.trim().is_empty() {
@@ -1099,6 +1185,13 @@ mod tests {
             self.0.lock().unwrap().push(e);
         }
     }
+    #[derive(Default)]
+    struct CollectJournal(Mutex<Vec<String>>);
+    impl crate::ExecutionJournal for CollectJournal {
+        fn record(&self, event: crate::AgentExecutionEvent) {
+            self.0.lock().unwrap().push(event.into_parts().0.to_string());
+        }
+    }
 
     fn cfg() -> TurnConfig {
         TurnConfig {
@@ -1127,6 +1220,7 @@ mod tests {
         ];
         ls.step_messages_start = ls.messages.len();
         let sink = Collect::default();
+        let journal = CollectJournal::default();
         let mut browser = NoBrowser;
         let composio_writes = std::collections::BTreeSet::new();
         let catalog_index: Vec<(String, String, Value)> = Vec::new();
@@ -1141,6 +1235,7 @@ mod tests {
             &DoneJudge,
             &NoCompact,
             &OpenPolicy,
+            &journal,
             &sink,
             0.0,
             None,
@@ -1157,6 +1252,11 @@ mod tests {
             &crate::turn_trace::TurnTrace::disabled(),
         )
         .await;
+
+        assert_eq!(
+            journal.0.lock().unwrap().as_slice(),
+            ["prompt_snapshot", "model_response"]
+        );
 
         // The model answered immediately → the turn commits that answer and ends.
         assert!(
@@ -1266,6 +1366,7 @@ mod tests {
         ];
         ls.step_messages_start = ls.messages.len();
         let sink = Collect::default();
+        let journal = CollectJournal::default();
         let mut browser = NoBrowser;
         let composio_writes = std::collections::BTreeSet::new();
         let catalog_index: Vec<(String, String, Value)> = Vec::new();
@@ -1290,6 +1391,7 @@ mod tests {
             &DoneJudge,
             &NoCompact,
             &OpenPolicy,
+            &journal,
             &sink,
             0.0,
             None,

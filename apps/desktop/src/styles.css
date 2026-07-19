@@ -15601,3 +15601,24 @@ body.resizing-drawer {
 .cc-step-stalled {
   color: var(--amber);
 }
+
+.execution-inspector {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+.execution-run-select { display: grid; gap: 6px; color: var(--muted); }
+.execution-run-select select { width: 100%; }
+.execution-summary { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.execution-status { padding: 3px 8px; border-radius: 999px; background: var(--surface-muted); text-transform: capitalize; }
+.execution-status.completed { color: var(--green); }
+.execution-status.failed, .execution-status.aborted { color: var(--amber); }
+.execution-inspector section { border-top: 1px solid var(--border); padding-top: 12px; }
+.execution-inspector h4 { margin: 0 0 8px; font-size: var(--text-sm); }
+.execution-inspector ul, .execution-timeline { margin: 0; padding-left: 18px; }
+.execution-inspector li { margin: 5px 0; }
+.execution-inspector li small { display: block; color: var(--muted); }
+.execution-timeline li { display: flex; justify-content: space-between; gap: 12px; }
+.execution-inspector details pre { max-height: 360px; overflow: auto; white-space: pre-wrap; color: var(--muted); font-size: var(--text-xs); }
