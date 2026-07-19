@@ -32,7 +32,8 @@ pub use store::TaskStore;
 pub use types::{
     AgentRun, AgentRunEvent, AgentRunStatus, ApprovalPolicy, Automation, AutomationRun,
     AutomationSource, AutomationTrigger, EventTrigger, NewAgentRun, ResourceClass,
-    ResourceRequirement, RetryPolicy, TaskId, TaskPriority, TaskRecord, TaskStatus, SubagentInfo,
-    ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkflowId, WorkspaceId,
+    ResourceRequirement, RetryPolicy, RuntimePlanRecord, TaskId, TaskPriority, TaskRecord,
+    TaskStatus, SubagentInfo, ThreadActivityProjection, TurnEvent, TurnEventKind, UserId,
+    WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

@@ -1,8 +1,8 @@
 use crate::{
     AgentRun, AgentRunEvent, AgentRunStatus, ApprovalRequest, Automation, AutomationRun,
-    NewAgentRun, ResourceClass, SubagentInfo, TaskCheckpoint, TaskDependencyOutput, TaskId,
-    TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, ThreadActivityProjection,
-    TurnEvent, TurnEventKind, UserId, WorkspaceId,
+    NewAgentRun, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint,
+    TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
+    ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
@@ -222,13 +222,69 @@ impl TaskStore {
             CREATE INDEX IF NOT EXISTS idx_agent_run_events_run
                 ON agent_run_events(run_id, seq);
 
+            CREATE TABLE IF NOT EXISTS runtime_plans (
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                stall_turns INTEGER NOT NULL DEFAULT 0,
+                last_resume_done INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, workspace_id, thread_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_runtime_plans_scope_status
+                ON runtime_plans(user_id, workspace_id, status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS agent_checkpoints (
+                checkpoint_id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                round INTEGER NOT NULL,
+                state_json TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                resumable INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                UNIQUE(run_id, round),
+                FOREIGN KEY(run_id) REFERENCES agent_runs(run_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_recovery
+                ON agent_checkpoints(turn_id, user_id, workspace_id, round DESC, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS agent_tool_receipts (
+                turn_id TEXT NOT NULL,
+                idempotency_key TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                arguments_hash TEXT NOT NULL,
+                status TEXT NOT NULL,
+                result_json TEXT,
+                effects_json TEXT,
+                started_at INTEGER NOT NULL,
+                completed_at INTEGER,
+                PRIMARY KEY (turn_id, idempotency_key)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_agent_tool_receipts_scope
+                ON agent_tool_receipts(user_id, workspace_id, thread_id, started_at DESC);
+
             CREATE TABLE IF NOT EXISTS broker_meta (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
 
             INSERT INTO task_runtime_metadata(key, value)
-            VALUES ('schema_version', '5')
+            VALUES ('schema_version', '6')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             ",
         )?;
@@ -322,6 +378,14 @@ impl TaskStore {
     ) -> TaskRuntimeResult<usize> {
         let tx = self.connection.unchecked_transaction()?;
         tx.execute(
+            "DELETE FROM runtime_plans WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        tx.execute(
+            "DELETE FROM agent_tool_receipts WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        tx.execute(
             "DELETE FROM agent_runs WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
@@ -339,6 +403,93 @@ impl TaskStore {
         )?;
         tx.commit()?;
         Ok(count)
+    }
+
+    pub fn upsert_runtime_plan(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        plan: &Value,
+        status: &str,
+    ) -> TaskRuntimeResult<RuntimePlanRecord> {
+        if !matches!(status, "open" | "settled" | "blocked") {
+            return Err(TaskRuntimeError::Store(format!(
+                "invalid runtime plan status: {status}"
+            )));
+        }
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO runtime_plans (
+                user_id, workspace_id, thread_id, status, plan_json, revision,
+                stall_turns, last_resume_done, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 0, NULL, ?6, ?6)
+             ON CONFLICT(user_id, workspace_id, thread_id) DO UPDATE SET
+                status = excluded.status,
+                plan_json = excluded.plan_json,
+                revision = runtime_plans.revision + 1,
+                updated_at = excluded.updated_at",
+            params![
+                user_id,
+                workspace_id,
+                thread_id,
+                status,
+                serde_json::to_string(plan)?,
+                now,
+            ],
+        )?;
+        let record = load_runtime_plan_on(&tx, user_id, workspace_id, thread_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("runtime plan disappeared after upsert".into()))?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn load_runtime_plan(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<Option<RuntimePlanRecord>> {
+        load_runtime_plan_on(&self.connection, user_id, workspace_id, thread_id)
+    }
+
+    pub fn bump_runtime_plan_stall(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        current_done: usize,
+    ) -> TaskRuntimeResult<Option<RuntimePlanRecord>> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        tx.execute(
+            "UPDATE runtime_plans
+             SET stall_turns = CASE
+                    WHEN last_resume_done IS NULL OR last_resume_done != ?1 THEN 0
+                    ELSE stall_turns + 1
+                 END,
+                 last_resume_done = ?1,
+                 updated_at = ?2
+             WHERE user_id = ?3 AND workspace_id = ?4 AND thread_id = ?5",
+            params![current_done as i64, now, user_id, workspace_id, thread_id],
+        )?;
+        let record = load_runtime_plan_on(&tx, user_id, workspace_id, thread_id)?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn purge_runtime_plan_for_thread(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<usize> {
+        Ok(self.connection.execute(
+            "DELETE FROM runtime_plans
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+            params![user_id, workspace_id, thread_id],
+        )?)
     }
 
     /// Reclaims free space. Call periodically, NOT on every delete.
@@ -1600,6 +1751,52 @@ impl TaskStore {
     }
 }
 
+fn load_runtime_plan_on(
+    conn: &Connection,
+    user_id: &str,
+    workspace_id: &str,
+    thread_id: &str,
+) -> TaskRuntimeResult<Option<RuntimePlanRecord>> {
+    conn.query_row(
+        "SELECT user_id, workspace_id, thread_id, status, plan_json, revision,
+                stall_turns, last_resume_done, created_at, updated_at
+         FROM runtime_plans
+         WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+        params![user_id, workspace_id, thread_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, Option<i64>>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(9)?,
+            ))
+        },
+    )
+    .optional()?
+    .map(|(user_id, workspace_id, thread_id, status, plan_json, revision,
+           stall_turns, last_resume_done, created_at, updated_at)| {
+        Ok(RuntimePlanRecord {
+            user_id,
+            workspace_id,
+            thread_id,
+            status,
+            plan_json: serde_json::from_str(&plan_json)?,
+            revision: revision as u64,
+            stall_turns: stall_turns as u32,
+            last_resume_done: last_resume_done.map(|value| value as usize),
+            created_at,
+            updated_at,
+        })
+    })
+    .transpose()
+}
+
 fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
     let Ok(mut stmt) = conn.prepare(&format!("PRAGMA table_info({table})")) else {
         return false;
@@ -1651,15 +1848,75 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 5);
+        assert_eq!(store.schema_version().unwrap(), 6);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
+        assert!(table_exists(&store.connection, "runtime_plans"));
+        assert!(table_exists(&store.connection, "agent_checkpoints"));
+        assert!(table_exists(&store.connection, "agent_tool_receipts"));
     }
 
     #[test]
     fn chat_turn_index_exists() {
         let store = TaskStore::open_in_memory().expect("open");
         assert!(index_exists(&store.connection, "idx_tasks_chat_turn_thread"));
+    }
+}
+
+#[cfg(test)]
+mod runtime_plan_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn runtime_plan_is_scoped_and_revisioned() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .upsert_runtime_plan("u", "w", "t", &json!({"steps": []}), "open")
+            .unwrap();
+        let second = store
+            .upsert_runtime_plan("u", "w", "t", &json!({"steps": [1]}), "open")
+            .unwrap();
+        assert_eq!((first.revision, second.revision), (1, 2));
+        assert_eq!(second.plan_json, json!({"steps": [1]}));
+        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_none());
+    }
+
+    #[test]
+    fn runtime_plan_stall_bookkeeping_is_atomic() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .upsert_runtime_plan(
+                "u", "w", "t",
+                &json!({"steps": [{"status": "in_progress"}]}),
+                "open",
+            )
+            .unwrap();
+        let first = store.bump_runtime_plan_stall("u", "w", "t", 0).unwrap().unwrap();
+        let repeated = store.bump_runtime_plan_stall("u", "w", "t", 0).unwrap().unwrap();
+        let progressed = store.bump_runtime_plan_stall("u", "w", "t", 1).unwrap().unwrap();
+        assert_eq!(first.stall_turns, 0);
+        assert_eq!(repeated.stall_turns, 1);
+        assert_eq!(progressed.stall_turns, 0);
+        assert_eq!(progressed.last_resume_done, Some(1));
+    }
+
+    #[test]
+    fn runtime_plan_cleanup_is_scope_safe() {
+        let store = TaskStore::open_in_memory().unwrap();
+        for (workspace, thread) in [("w", "t"), ("w", "other"), ("other", "t")] {
+            store
+                .upsert_runtime_plan("u", workspace, thread, &json!({"steps": []}), "open")
+                .unwrap();
+        }
+        assert_eq!(store.purge_runtime_plan_for_thread("u", "w", "t").unwrap(), 1);
+        assert!(store.load_runtime_plan("u", "w", "t").unwrap().is_none());
+        assert!(store.load_runtime_plan("u", "w", "other").unwrap().is_some());
+        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_some());
+        store
+            .purge_workspace(&UserId::new("u"), &WorkspaceId::new("other"))
+            .unwrap();
+        assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_none());
     }
 }
 
@@ -2154,7 +2411,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 5);
+        assert_eq!(store.schema_version().unwrap(), 6);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {

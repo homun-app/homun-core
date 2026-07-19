@@ -228,6 +228,24 @@ pub struct NewAgentRun {
     pub prompt_fingerprint: Option<String>,
 }
 
+/// Canonical, operational plan state for one chat thread.
+///
+/// This deliberately lives outside semantic memory: plan execution state must be
+/// isolated by user/workspace/thread and updated transactionally.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimePlanRecord {
+    pub user_id: String,
+    pub workspace_id: String,
+    pub thread_id: String,
+    pub status: String,
+    pub plan_json: Value,
+    pub revision: u64,
+    pub stall_turns: u32,
+    pub last_resume_done: Option<usize>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRunStatus {
