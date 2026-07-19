@@ -4,6 +4,9 @@ import { ProattivitaView } from "../../components/ProattivitaView";
 import type { PluginManifest } from "../registry";
 import en from "./locales/en.json";
 import it from "./locales/it.json";
+import es from "./locales/es.json";
+import fr from "./locales/fr.json";
+import de from "./locales/de.json";
 
 /**
  * The Proactivity addon — the FIRST plugin (ADR 0011 §9).
@@ -33,5 +36,8 @@ export const proattivitaPlugin: PluginManifest = {
   registerI18n: (i18n: I18n) => {
     i18n.addResourceBundle("en", "proattivita", en);
     i18n.addResourceBundle("it", "proattivita", it);
+    i18n.addResourceBundle("es", "proattivita", es);
+    i18n.addResourceBundle("fr", "proattivita", fr);
+    i18n.addResourceBundle("de", "proattivita", de);
   },
 };
