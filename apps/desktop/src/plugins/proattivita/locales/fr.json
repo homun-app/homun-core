@@ -1,0 +1,22 @@
+{
+  "title": "Proactivité",
+  "eyebrow": "Votre assistant, proactif",
+  "lead": "Ce que j'ai remarqué à propos de vos projets et de votre vie personnelle. Ouvrez ce dont vous avez besoin : je crée le chat dans le bon espace.",
+  "pending": "en attente",
+  "filterAll": "Tous",
+  "filterProjects": "Projets",
+  "refresh": "Actualiser",
+  "loading": "Chargement des suggestions…",
+  "emptyHint": "Aucune suggestion en attente. Quand je remarque quelque chose d'utile, vous le trouverez ici.",
+  "suggestion": "suggestion",
+  "suggestions": "suggestions",
+  "openChat": "Ouvrir le chat",
+  "done": "Fait",
+  "doneTitle": "Bonne idée, je m'en suis déjà occupé",
+  "notUseful": "Pas utile",
+  "notUsefulTitle": "Pas utile : ne plus afficher ce type de suggestion",
+  "other": "autre",
+  "others": "autres",
+  "in": "dans",
+  "collapse": "Réduire"
+}

@@ -4,6 +4,9 @@ import { BrandKitPanel } from "../../components/BrandKitPanel";
 import type { PluginManifest } from "../registry";
 import en from "./locales/en.json";
 import it from "./locales/it.json";
+import es from "./locales/es.json";
+import fr from "./locales/fr.json";
+import de from "./locales/de.json";
 
 /**
  * The Presentations addon — produces on-brand decks (and documents). Phase F2: the
@@ -25,5 +28,8 @@ export const presentationsPlugin: PluginManifest = {
   registerI18n: (i18n: I18n) => {
     i18n.addResourceBundle("en", "presentations", en);
     i18n.addResourceBundle("it", "presentations", it);
+    i18n.addResourceBundle("es", "presentations", es);
+    i18n.addResourceBundle("fr", "presentations", fr);
+    i18n.addResourceBundle("de", "presentations", de);
   },
 };

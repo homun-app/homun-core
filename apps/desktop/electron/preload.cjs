@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld("localFirstDesktop", {
   // "Report a problem": builds a local tar.gz of ~/.homun/logs + a report.json
   // (versions/specs) and reveals it. Logs only — never memory/chat stores.
   createFeedbackBundle: () => ipcRenderer.invoke("lfpa:feedback-bundle"),
+  // Settings → danger zone: stops the gateway, wipes ~/.homun, clears localStorage,
+  // and relaunches into a clean first run. Irreversible — the caller confirms first.
+  factoryReset: () => ipcRenderer.invoke("lfpa:factory-reset"),
   // Auto-update (desktop only). Check returns {available, version, current,
   // releaseNotes}; install downloads the new version and restarts.
   checkForUpdate: () => ipcRenderer.invoke("lfpa:update-check"),

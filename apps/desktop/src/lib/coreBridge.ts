@@ -3041,6 +3041,19 @@ async function electronInstallRegistrySkills(
   });
 }
 
+// Settings → danger zone "Delete local data": stops the gateway, wipes ~/.homun,
+// clears localStorage, and relaunches (Electron main owns the wipe — the gateway
+// holds ~/.homun's SQLite handles open and can't delete itself). Cast inline
+// (rather than threading through gatewayConfig's typed LocalFirstDesktopConfig)
+// since this is a one-off irreversible action, not a call site reused across the
+// app; { ok: false } on web (no localFirstDesktop) is the safe no-op.
+export async function factoryReset(): Promise<{ ok: boolean }> {
+  const api = (window as unknown as { localFirstDesktop?: { factoryReset?: () => Promise<{ ok: boolean }> } })
+    .localFirstDesktop;
+  if (!api?.factoryReset) return { ok: false };
+  return api.factoryReset();
+}
+
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
   runtimeModel: () => electronRuntimeModel(),
@@ -3243,6 +3256,7 @@ export const coreBridge = {
   skillRegistry: (repo?: string) => electronSkillsRegistry(repo),
   installRegistrySkills: (repo: string, path: string) =>
     electronInstallRegistrySkills(repo, path),
+  factoryReset: () => factoryReset(),
   skillCatalog: (query?: string, category?: string) => electronSkillsCatalog(query, category),
   templateCatalog: () => electronTemplateCatalog(),
   importPptxTemplate: (payload: ImportPptxTemplateRequest) =>

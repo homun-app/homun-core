@@ -21,13 +21,15 @@ configurati** (vedi sotto). Finché non lo sono, anche il build macOS gira ma
 
 ## Come si rilascia
 
-1. Aggiorna la versione in [`apps/desktop/package.json`](../apps/desktop/package.json) (`version`).
+1. Verifica il commit esatto di `main` che deve essere rilasciato.
 2. Crea e pusha un tag che inizia con `v`:
    ```bash
    git tag v0.1.0
    git push origin v0.1.0
    ```
-3. Il workflow builda le tre piattaforme e crea una **GitHub Release in bozza**
+3. Il workflow usa il tag come fonte autoritativa della versione e la applica
+   automaticamente a `apps/desktop/package.json` durante la build.
+4. Il workflow builda le tre piattaforme e crea una **GitHub Release in bozza**
    con gli installer allegati. Controlli gli asset e poi la pubblichi a mano.
 
 Per **provare la pipeline senza rilasciare**: Actions → "Build installers" →

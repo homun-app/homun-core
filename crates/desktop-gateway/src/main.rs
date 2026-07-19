@@ -2,6 +2,7 @@
 // browser_* tools).
 mod apply_patch;
 mod attachments;
+mod agent_journal;
 mod browser_safety;
 mod chat_store;
 // One-shot fuse of the two legacy SQLite files into the unified homun.sqlite.
@@ -50,6 +51,7 @@ mod task_registry;
 mod temporal;
 mod template_packs;
 mod vision;
+mod working_ledger;
 mod turn_executor;
 mod ws_gateway;
 mod tool_exec;
@@ -57,6 +59,9 @@ mod tool_exec;
 // not wired yet — seam types only).
 mod tool_safety;
 // tool_trace_dump moved to `local_first_engine::trace` (5.D1c.9); the loop calls it there.
+
+const AGENT_JOURNAL_RETENTION_DAYS: i64 = 30;
+const AGENT_JOURNAL_RETENTION_BATCH: usize = 1_000;
 
 // ADR 0023 tool-safety vocabulary + pure decision fn, used by the (unconditional)
 // write-confirm branches in `execute_chat_tool`.
@@ -255,6 +260,173 @@ pub(crate) struct AppState {
     pub(crate) ws_registry: std::sync::Arc<ws_gateway::WsRegistry>,
     /// Stores quarantined by the startup integrity sweep (empty = all healthy).
     recovered_stores: std::sync::Arc<Vec<String>>,
+}
+
+#[cfg(test)]
+mod agent_run_api_tests {
+    use super::*;
+    use local_first_task_runtime::NewAgentRun;
+
+    fn seed_run(state: &AppState, run_id: &str, turn_id: &str, user_id: &str) {
+        let store = state.task_store.lock().unwrap();
+        store
+            .create_agent_run(&NewAgentRun {
+                run_id: run_id.to_string(),
+                turn_id: turn_id.to_string(),
+                thread_id: "thread-test".to_string(),
+                user_id: user_id.to_string(),
+                workspace_id: gateway_workspace_id().as_str().to_string(),
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            })
+            .unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn agent_run_api_is_ordered_cursor_based_and_scope_checked() {
+        let state = AppState::for_tests();
+        seed_run(&state, "run-api", "turn-api", gateway_user_id().as_str());
+        {
+            let store = state.task_store.lock().unwrap();
+            store
+                .append_agent_run_event(
+                    "run-api",
+                    2,
+                    Some(1),
+                    "prompt_snapshot",
+                    &serde_json::json!({
+                        "fingerprint": "abc",
+                        "redacted": true,
+                        "messages": [{"role": "user", "content": "safe"}],
+                        "tools": [],
+                    }),
+                )
+                .unwrap();
+            store
+                .append_agent_run_event(
+                    "run-api",
+                    3,
+                    Some(1),
+                    "model_response",
+                    &serde_json::json!({"content_chars": 4}),
+                )
+                .unwrap();
+        }
+
+        let runs = get_agent_runs(Path("turn-api".to_string()), State(state.clone()))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].run_id, "run-api");
+
+        let events = get_agent_run_events(
+            Path("run-api".to_string()),
+            State(state.clone()),
+            Query(TurnSinceQuery { since: Some(1) }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(events.iter().map(|event| event.seq).collect::<Vec<_>>(), vec![2, 3]);
+
+        let prompt = get_latest_agent_prompt(
+            Path("run-api".to_string()),
+            State(state.clone()),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(prompt["fingerprint"], "abc");
+        assert_eq!(prompt["redacted"], true);
+
+        let cursor_error = get_agent_run_events(
+            Path("run-api".to_string()),
+            State(state.clone()),
+            Query(TurnSinceQuery { since: Some(-1) }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(cursor_error.status, StatusCode::BAD_REQUEST);
+
+        seed_run(&state, "foreign-run", "foreign-turn", "other-user");
+        let error = get_latest_agent_prompt(
+            Path("foreign-run".to_string()),
+            State(state),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn runtime_plan_control_store_is_authoritative_and_workspace_scoped() {
+        let state = AppState::for_tests();
+        let thread = state.chat_store.lock().unwrap().create_thread("workspace-a").unwrap();
+        let user = gateway_user_id();
+        {
+            let store = state.task_store.lock().unwrap();
+            store
+                .upsert_runtime_plan(
+                    user.as_str(),
+                    "workspace-b",
+                    &thread.thread_id,
+                    &serde_json::json!([{"title": "foreign", "status": "doing"}]),
+                    "open",
+                )
+                .unwrap();
+        }
+        assert!(load_runtime_plan_from_state(&state, Some(&thread.thread_id)).is_empty());
+
+        {
+            let store = state.task_store.lock().unwrap();
+            store
+                .upsert_runtime_plan(
+                    user.as_str(),
+                    "workspace-a",
+                    &thread.thread_id,
+                    &serde_json::json!([{"title": "owned", "status": "doing"}]),
+                    "open",
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            load_runtime_plan_from_state(&state, Some(&thread.thread_id))[0]["title"],
+            "owned"
+        );
+        assert!(thread_has_active_runtime_plan(&state, Some(&thread.thread_id)));
+    }
+
+    #[test]
+    fn runtime_plan_control_store_owns_stall_bookkeeping() {
+        let state = AppState::for_tests();
+        let thread = state.chat_store.lock().unwrap().create_thread("workspace-a").unwrap();
+        let steps = serde_json::json!([{"title": "step", "status": "doing"}]);
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .upsert_runtime_plan(
+                gateway_user_id().as_str(),
+                "workspace-a",
+                &thread.thread_id,
+                &steps,
+                "open",
+            )
+            .unwrap();
+        let steps = steps.as_array().unwrap();
+        assert!(!plan_stall_check_and_bump(&state, Some(&thread.thread_id), steps));
+        assert!(!plan_stall_check_and_bump(&state, Some(&thread.thread_id), steps));
+        let stored = state
+            .task_store
+            .lock()
+            .unwrap()
+            .load_runtime_plan(gateway_user_id().as_str(), "workspace-a", &thread.thread_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.stall_turns, 1);
+    }
 }
 
 impl AppState {
@@ -884,6 +1056,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let store = state.task_store.lock().expect("task store lock at boot");
         let generation = store.bump_process_generation().expect("bump process generation");
+        if let Err(error) = store.abort_running_agent_runs("gateway_restart") {
+            eprintln!("agent journal: boot recovery error: {error}");
+        }
+        let journal_cutoff = (OffsetDateTime::now_utc()
+            - Duration::days(AGENT_JOURNAL_RETENTION_DAYS))
+        .unix_timestamp();
+        if let Err(error) = store.purge_terminal_agent_runs_before(
+            journal_cutoff,
+            AGENT_JOURNAL_RETENTION_BATCH,
+        ) {
+            eprintln!("agent journal: retention error: {error}");
+        }
         let user_id = gateway_user_id();
         let workspace_id = gateway_workspace_id();
         let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(
@@ -1417,6 +1601,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(get_turn).delete(cancel_turn),
         )
         .route("/api/chat/turns/{turn_id}/events", get(get_turn_events))
+        .route("/api/chat/turns/{turn_id}/runs", get(get_agent_runs))
+        .route("/api/chat/threads/{thread_id}/runs", get(get_thread_agent_runs))
+        .route("/api/chat/threads/{thread_id}/runtime-plan", get(get_thread_runtime_plan))
+        .route("/api/chat/threads/{thread_id}/ledger", get(get_thread_working_ledger))
+        .route("/api/chat/runs/{run_id}/events", get(get_agent_run_events))
+        .route("/api/chat/runs/{run_id}/prompt/latest", get(get_latest_agent_prompt))
+        .route("/api/chat/runs/{run_id}/checkpoint/latest", get(get_latest_agent_checkpoint))
         .route("/api/chat/turns/{turn_id}/stream", get(subscribe_turn_stream));
     let chat_routes = chat_routes.route_layer(middleware::from_fn_with_state(
         state.clone(),
@@ -2521,9 +2712,34 @@ async fn delete_chat_thread(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
 ) -> Result<Json<ChatThreadSnapshot>, GatewayError> {
+    // Read the owning workspace before removing the thread, then purge its execution journal.
+    // This step runs first so a task-store failure leaves the visible chat available for retry.
+    let workspace_id = lock_store(&state)?
+        .workspace_for_thread(&thread_id)
+        .map_err(GatewayError::store)?;
+    {
+        let task_store = lock_task_store(&state)?;
+        task_store
+            .purge_agent_runs_for_thread(
+                &thread_id,
+                gateway_user_id().as_str(),
+                &workspace_id,
+            )
+            .map_err(GatewayError::task)?;
+        task_store
+            .purge_runtime_plan_for_thread(
+                gateway_user_id().as_str(),
+                &workspace_id,
+                &thread_id,
+            )
+            .map_err(GatewayError::task)?;
+    }
     let snapshot = lock_store(&state)?
         .delete_thread(&thread_id)
         .map_err(GatewayError::store)?;
+    if let Ok(data_dir) = gateway_data_dir() {
+        let _ = std::fs::remove_file(working_ledger::ledger_path(&data_dir, &thread_id));
+    }
     // Deleting ends the thread → close its warm browser session.
     let st = state.clone();
     let tid = thread_id.clone();
@@ -6859,6 +7075,74 @@ fn runtime_plan_thread_key(thread_id: Option<&str>) -> String {
         .to_string()
 }
 
+fn runtime_plan_control_scope(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Option<(String, String, String)> {
+    let thread_id = runtime_plan_thread_key(thread_id);
+    let workspace_id = if thread_id == "__no_thread__" {
+        gateway_workspace_id().as_str().to_string()
+    } else {
+        state
+            .chat_store
+            .lock()
+            .ok()?
+            .workspace_for_thread(&thread_id)
+            .ok()?
+    };
+    Some((
+        gateway_user_id().as_str().to_string(),
+        workspace_id,
+        thread_id,
+    ))
+}
+
+fn read_project_instruction(root: &std::path::Path, relative: &str) -> Option<String> {
+    const MAX_PROJECT_INSTRUCTION_CHARS: usize = 32 * 1024;
+    let root = root.canonicalize().ok()?;
+    let path = root.join(relative).canonicalize().ok()?;
+    if !path.starts_with(&root) || !path.is_file() {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    Some(text.chars().take(MAX_PROJECT_INSTRUCTION_CHARS).collect())
+}
+
+fn compose_gateway_prompt_packets(
+    state: &AppState,
+    thread_id: Option<&str>,
+    core: String,
+) -> (String, Vec<local_first_engine::PromptPacketMetadata>) {
+    let mut packets = vec![local_first_engine::PromptPacket {
+        id: "homun-core".to_string(),
+        source: local_first_engine::PromptPacketSource::Core,
+        priority: 10,
+        content: core,
+    }];
+    if let Some(root) = project_root_for_thread(state, thread_id) {
+        for (id, relative, priority) in [
+            ("project-agents", "AGENTS.md", 30),
+            ("project-homun", ".homun/instructions.md", 31),
+        ] {
+            if let Some(content) = read_project_instruction(&root, relative) {
+                packets.push(local_first_engine::PromptPacket {
+                    id: id.to_string(),
+                    source: local_first_engine::PromptPacketSource::Project,
+                    priority,
+                    content,
+                });
+            }
+        }
+    }
+    packets.push(local_first_engine::PromptPacket {
+        id: "runtime-control".to_string(),
+        source: local_first_engine::PromptPacketSource::Runtime,
+        priority: 100,
+        content: "RUNTIME CONTROL: preserve verified plan progress, do not repeat an effect whose receipt is uncertain, and obey the currently offered tool surface.".to_string(),
+    });
+    local_first_engine::compose_prompt_packets(&packets)
+}
+
 fn runtime_plan_memory_text(plan: &[serde_json::Value]) -> Option<String> {
     if plan.is_empty() {
         return None;
@@ -8712,13 +8996,21 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
 /// which prunes the plan's own tools (`update_plan`, `browser_navigate`) and dead-ends it.
 /// Tier- and flag-independent: it holds even with the adaptive floor off.
 fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> bool {
-    let thread_key = runtime_plan_thread_key(thread_id);
-    let facade = memory_facade(state);
-    facade
-        .list_memories_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
-        .unwrap_or_default()
-        .iter()
-        .any(|memory| runtime_plan_memory_matches(memory, &thread_key))
+    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
+    else {
+        return false;
+    };
+    state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .load_runtime_plan(&user_id, &workspace_id, &thread_id)
+                .ok()
+                .flatten()
+        })
+        .is_some_and(|plan| plan.status == "open")
 }
 
 /// S2 T4 (critical demotion guard, flagged by T3 review): true when the plan-precedence
@@ -8754,20 +9046,22 @@ fn load_runtime_plan_from_state(
     state: &AppState,
     thread_id: Option<&str>,
 ) -> Vec<serde_json::Value> {
-    let thread_key = runtime_plan_thread_key(thread_id);
-    let facade = memory_facade(state);
-    facade
-        .list_memories_for_ui(&gateway_memory_user_id(), &gateway_memory_workspace_id())
-        .unwrap_or_default()
-        .iter()
-        .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
-        .and_then(|memory| {
-            memory
-                .metadata
-                .get("steps")
-                .and_then(|s| s.as_array())
-                .cloned()
+    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
+    else {
+        return Vec::new();
+    };
+    state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .load_runtime_plan(&user_id, &workspace_id, &thread_id)
+                .ok()
+                .flatten()
         })
+        .filter(|plan| plan.status == "open")
+        .and_then(|plan| plan.plan_json.as_array().cloned())
         .unwrap_or_default()
 }
 
@@ -8782,60 +9076,22 @@ fn plan_stall_check_and_bump(
     thread_id: Option<&str>,
     resume_plan: &[serde_json::Value],
 ) -> bool {
-    let thread_key = runtime_plan_thread_key(thread_id);
-    let facade = memory_facade(state);
-    let user = gateway_memory_user_id();
-    let workspace = gateway_memory_workspace_id();
-    let Some(memory) = facade
-        .list_memories_for_ui(&user, &workspace)
-        .unwrap_or_default()
-        .into_iter()
-        .find(|memory| runtime_plan_memory_matches(memory, &thread_key))
+    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
     else {
         return false;
     };
-    let prior_stall = memory
-        .metadata
-        .get("stall_turns")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-    let last_resume_done = memory
-        .metadata
-        .get("last_resume_done")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as usize;
     let current_done = plan_done_count(resume_plan);
-    let new_stall = next_plan_stall(prior_stall, last_resume_done, current_done);
-
-    let mut metadata = memory.metadata.clone();
-    if let Some(obj) = metadata.as_object_mut() {
-        obj.insert("stall_turns".to_string(), serde_json::json!(new_stall));
-        obj.insert(
-            "last_resume_done".to_string(),
-            serde_json::json!(current_done),
-        );
-    }
-    let lifecycle = MemoryLifecycleRequest {
-        actor_id: "runtime-plan".to_string(),
-        user_id: user.clone(),
-        workspace_id: workspace.clone(),
-        purpose: "sync_runtime_plan".to_string(),
-    };
-    let _ = facade.update_memory(
-        &lifecycle,
-        &memory.reference,
-        MemoryUpdatePatch {
-            text: None,
-            aliases: None,
-            language_hints: None,
-            confidence: None,
-            privacy_domain: None,
-            sensitivity: None,
-            metadata: Some(metadata),
-            last_seen_at: None,
-        },
-    );
-    plan_stall_exhausted(new_stall)
+    state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .bump_runtime_plan_stall(&user_id, &workspace_id, &thread_id, current_done)
+                .ok()
+                .flatten()
+        })
+        .is_some_and(|plan| plan_stall_exhausted(plan.stall_turns))
 }
 
 /// A bare continuation/approval message ("1", a step/option number, "ok"/"procedi"/
@@ -9404,6 +9660,36 @@ fn upsert_runtime_plan_memory_from_state(
     thread_id: Option<&str>,
     plan: &[serde_json::Value],
 ) {
+    let Some((user_id, workspace_id, thread_key)) = runtime_plan_control_scope(state, thread_id)
+    else {
+        eprintln!("runtime plan skipped: thread scope could not be resolved");
+        return;
+    };
+    let status = if plan_is_settled(plan) { "settled" } else { "open" };
+    let plan_json = serde_json::Value::Array(plan.to_vec());
+    let canonical_write_ok = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .upsert_runtime_plan(
+                    &user_id,
+                    &workspace_id,
+                    &thread_key,
+                    &plan_json,
+                    status,
+                )
+                .ok()
+        })
+        .is_some();
+    if !canonical_write_ok {
+        eprintln!("runtime plan canonical write failed for thread {thread_key}");
+        return;
+    }
+
+    // Semantic memory remains a best-effort projection for recall and graph navigation.
+    // It is no longer consulted for control flow, resumption or stall bookkeeping.
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let workspace = gateway_memory_workspace_id();
@@ -24634,6 +24920,34 @@ struct GatewayCapabilityExecutor<'a> {
     // Readable per-turn observability sink (ported); passed into each per-call ChatToolCtx so the plan
     // arm can record the Plan event. No-op when disabled. See `engine::turn_trace`.
     turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
+    turn_id: Option<&'a str>,
+    run_id: Option<&'a str>,
+}
+
+fn canonical_json(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(values) => {
+            let ordered = values
+                .into_iter()
+                .map(|(key, value)| (key, canonical_json(value)))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            serde_json::Value::Object(ordered.into_iter().collect())
+        }
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(canonical_json).collect())
+        }
+        other => other,
+    }
+}
+
+fn effectful_tool_name(name: &str, composio_writes: &std::collections::BTreeSet<String>) -> bool {
+    composio_writes.contains(name)
+        || [
+            "write", "edit", "apply", "create", "update", "delete", "remove", "send",
+            "save", "make_", "book", "purchase", "forget", "cancel", "record_decision",
+        ]
+        .iter()
+        .any(|token| name.to_ascii_lowercase().contains(token))
 }
 
 impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
@@ -24678,6 +24992,67 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             .iter()
             .filter_map(|t| crate::skills::SensitiveCategory::parse(t))
             .collect();
+        let receipt = if effectful_tool_name(name, self.composio_writes) {
+            let (Some(turn_id), Some(run_id), Some(thread_id)) =
+                (self.turn_id, self.run_id, self.thread_id)
+            else {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: "Effectful tool blocked: no durable execution scope is available."
+                        .to_string(),
+                    effects: Default::default(),
+                });
+            };
+            let args = canonical_json(
+                serde_json::from_str(args_raw).unwrap_or_else(|_| serde_json::json!({})),
+            );
+            let arguments_hash = format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&args).unwrap_or_default())
+            );
+            let idempotency_key = format!("{name}:{arguments_hash}");
+            let new_receipt = local_first_task_runtime::NewAgentToolReceipt {
+                turn_id: turn_id.to_string(),
+                idempotency_key: idempotency_key.clone(),
+                run_id: run_id.to_string(),
+                thread_id: thread_id.to_string(),
+                user_id: self.automation_user_id.as_str().to_string(),
+                workspace_id: self.automation_workspace_id.as_str().to_string(),
+                tool_name: name.to_string(),
+                arguments_hash,
+            };
+            let claim = self
+                .state
+                .task_store
+                .lock()
+                .map_err(|_| "effect receipt store unavailable".to_string())?
+                .claim_tool_receipt(&new_receipt)
+                .map_err(|error| format!("effect receipt claim failed: {error}"))?;
+            match claim {
+                local_first_task_runtime::ToolReceiptClaim::Execute => {
+                    Some((turn_id.to_string(), idempotency_key))
+                }
+                local_first_task_runtime::ToolReceiptClaim::Replay(receipt) => {
+                    let result = receipt
+                        .result_json
+                        .and_then(|value| value.as_str().map(str::to_string))
+                        .unwrap_or_else(|| "Previously completed effect replayed.".to_string());
+                    let effects = receipt
+                        .effects_json
+                        .and_then(|value| serde_json::from_value(value).ok())
+                        .unwrap_or_default();
+                    return Ok(local_first_engine::ToolOutcome { result, effects });
+                }
+                local_first_task_runtime::ToolReceiptClaim::Uncertain(_) => {
+                    return Ok(local_first_engine::ToolOutcome {
+                        result: "This effect may already have run before an interruption. It was not repeated; inspect the target state before retrying.".to_string(),
+                        effects: Default::default(),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+
         let ctx = ChatToolCtx {
             plan: &mut ls.plan,
             step_evidence: &mut ls.step_evidence,
@@ -24715,6 +25090,18 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                     let _ = store.clear_thread_routing_binding(thread_id);
                 }
             }
+        }
+        if let Some((turn_id, idempotency_key)) = receipt {
+            let result_json = agent_journal::redact_json_value(serde_json::Value::String(result.clone()));
+            let effects_json = agent_journal::redact_json_value(
+                serde_json::to_value(&effects).unwrap_or_else(|_| serde_json::json!({})),
+            );
+            self.state
+                .task_store
+                .lock()
+                .map_err(|_| "effect receipt completion store unavailable".to_string())?
+                .complete_tool_receipt(&turn_id, &idempotency_key, &result_json, &effects_json)
+                .map_err(|error| format!("effect receipt completion failed: {error}"))?;
         }
         Ok(local_first_engine::ToolOutcome { result, effects })
     }
@@ -25000,6 +25387,7 @@ impl GatewayBrowseExecutor<'_> {
             &completion_judge,
             &compactor,
             &turn_policy,
+            &local_first_engine::NoopExecutionJournal,
             &drain,
             0.2, // low temperature: deterministic extraction, not creative writing
             self.thread_id,
@@ -26032,6 +26420,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         ),
         _ => system,
     };
+    let (system, prompt_packets) =
+        compose_gateway_prompt_packets(state, request.thread_id.as_deref(), system);
     let system = system.as_str();
     // (The 401/tool-compat/timeout fallback flags moved into GatewayModelClient::generate,
     // which now owns the per-round provider swap — ADR 0024.)
@@ -26445,6 +26835,13 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         .unwrap_or_else(|_| state.http.clone());
     let state_owned = state.clone();
     let temperature = request.temperature;
+    let execution_journal = agent_journal::for_run(request.agent_run_id.as_deref());
+    let recovery_checkpoint = request.agent_checkpoint.clone();
+    let effect_run_id = request.agent_run_id.clone();
+    let effect_turn_id = request
+        .agent_run_id
+        .as_ref()
+        .and_then(|_| request.request_id.strip_prefix("broker-").map(str::to_string));
     // Thread this chat belongs to: lets browser work reuse a persistent
     // per-thread browser session (search → then book on the same tab).
     let thread_id = request.thread_id.clone();
@@ -26510,6 +26907,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut ls = local_first_engine::LoopState::new();
+        ls.prompt_packets = prompt_packets;
         ls.messages = messages;
         // RAG completed before the loop starts. Publish the exact selected hits before any
         // narration delta so a resumed client and the persisted assistant message agree on
@@ -26663,6 +27061,11 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         // larger browser budget). This keeps non-browser turns identical to today.
         // ADR 0026: provider binding travels with LoopState (per-round swap), not as separate args.
         ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
+        if let Some(checkpoint) = recovery_checkpoint
+            .and_then(|value| serde_json::from_value::<local_first_engine::LoopCheckpoint>(value).ok())
+        {
+            checkpoint.apply_to(&mut ls);
+        }
         // 5.D1c.1: resolve the loop's turn-constant config ONCE (env-stable for the turn) so the moved
         // loop never reads env. Behavior-preserving — same values the inline getters returned.
         let cfg = local_first_engine::TurnConfig {
@@ -26691,7 +27094,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, &turn_trace, vision_fallback_armed).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, execution_journal, effect_turn_id, effect_run_id, &turn_trace, vision_fallback_armed).await;
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
         // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
@@ -26811,6 +27214,9 @@ async fn run_agent_rounds(
     // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
     // disarmed / the dir won't resolve. The engine appends here instead of calling `gateway_logs_dir`.
     trace_dir: Option<std::path::PathBuf>,
+    execution_journal: agent_journal::GatewayJournal,
+    effect_turn_id: Option<String>,
+    effect_run_id: Option<String>,
     // Readable per-turn observability sink (ported): passed into the capability executor (Plan event)
     // and into `run_turn` (the in-loop events). No-op when disabled. See `engine::turn_trace`.
     turn_trace: &local_first_engine::turn_trace::TurnTrace,
@@ -26846,6 +27252,8 @@ async fn run_agent_rounds(
         prompt: &prompt,
         channel_owner,
         turn_trace,
+        turn_id: effect_turn_id.as_deref(),
+        run_id: effect_run_id.as_deref(),
     };
     // The browser tool chokepoint (ADR 0025 seam): OWNS the browser subsystem's private state (session +
     // snapshot/tab/nav bookkeeping); `&mut` because run_turn mutates it per browser call.
@@ -26903,6 +27311,7 @@ async fn run_agent_rounds(
         &completion_judge,
         &compactor,
         &turn_policy,
+        &execution_journal,
         tx,
         temperature,
         thread_id.as_deref(),
@@ -26979,6 +27388,7 @@ async fn run_agent_rounds(
         &completion_judge,
         &compactor,
         &turn_policy,
+        &execution_journal,
         tx,
         temperature,
         thread_id.as_deref(),
@@ -32058,6 +32468,8 @@ async fn run_agent_turn_into_message(
     let request_id = format!("agentturn-{thread_id}-{}", now_epoch_secs());
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
+        agent_run_id: None,
+        agent_checkpoint: None,
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,
@@ -32110,6 +32522,7 @@ async fn run_agent_turn_into_message_with_fanout(
     source_user_message_id: &str,
     assistant_message_id: &str,
     turn_id: &str,
+    agent_run_id: Option<&str>,
 ) -> Option<String> {
     let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))?;
     let context = agent_turn_context(
@@ -32118,8 +32531,39 @@ async fn run_agent_turn_into_message_with_fanout(
         &[source_user_message_id, assistant_message_id],
     )?;
     let request_id = format!("broker-{turn_id}");
+    let checkpoint_workspace = state
+        .chat_store
+        .lock()
+        .ok()
+        .and_then(|store| store.workspace_for_thread(thread_id).ok())
+        .unwrap_or_else(|| gateway_workspace_id().as_str().to_string());
+    let agent_checkpoint = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .latest_resumable_checkpoint_for_turn(
+                    turn_id,
+                    gateway_user_id().as_str(),
+                    &checkpoint_workspace,
+                )
+                .ok()
+                .flatten()
+        })
+        .and_then(|checkpoint| {
+            let actual = format!(
+                "{:x}",
+                sha2::Sha256::digest(
+                    serde_json::to_vec(&checkpoint.state_json).unwrap_or_default()
+                )
+            );
+            (actual == checkpoint.fingerprint).then_some(checkpoint.state_json)
+        });
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
+        agent_run_id: agent_run_id.map(str::to_string),
+        agent_checkpoint,
         prompt: prompt.to_string(),
         thread_id: Some(thread_id.to_string()),
         context,
@@ -34110,6 +34554,233 @@ async fn cancel_turn(
 struct TurnSinceQuery {
     #[serde(default)]
     since: Option<i64>,
+}
+
+fn execution_thread_workspace(state: &AppState, thread_id: &str) -> Result<String, GatewayError> {
+    lock_store(state)?
+        .workspace_for_thread(thread_id)
+        .map_err(|_| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_thread_not_found",
+            message: "thread not found".to_string(),
+        })
+}
+
+async fn get_thread_agent_runs(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<local_first_task_runtime::AgentRun>>, GatewayError> {
+    let workspace = execution_thread_workspace(&state, &thread_id)?;
+    let runs = lock_task_store(&state)?
+        .list_agent_runs_for_thread(&thread_id, gateway_user_id().as_str(), &workspace)
+        .map_err(GatewayError::task)?;
+    Ok(Json(runs))
+}
+
+async fn get_thread_runtime_plan(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, GatewayError> {
+    let workspace = execution_thread_workspace(&state, &thread_id)?;
+    let plan = lock_task_store(&state)?
+        .load_runtime_plan(gateway_user_id().as_str(), &workspace, &thread_id)
+        .map_err(GatewayError::task)?;
+    Ok(Json(serde_json::to_value(plan).unwrap_or(Value::Null)))
+}
+
+async fn get_thread_working_ledger(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, GatewayError> {
+    let workspace = execution_thread_workspace(&state, &thread_id)?;
+    let store = lock_task_store(&state)?;
+    let markdown = working_ledger::render(
+        &store,
+        gateway_user_id().as_str(),
+        &workspace,
+        &thread_id,
+    )
+    .map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "working_ledger_render",
+        message,
+    })?;
+    Ok(Json(serde_json::json!({"thread_id": thread_id, "markdown": markdown})))
+}
+
+async fn get_latest_agent_checkpoint(
+    Path(run_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<local_first_task_runtime::AgentCheckpoint>, GatewayError> {
+    let store = lock_task_store(&state)?;
+    let user = gateway_user_id();
+    let workspace = store
+        .workspace_for_agent_run(&run_id, user.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_checkpoint_not_found",
+            message: "checkpoint not found".to_string(),
+        })?;
+    let checkpoint = store
+        .latest_agent_checkpoint(
+            &run_id,
+            user.as_str(),
+            &workspace,
+        )
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_checkpoint_not_found",
+            message: "checkpoint not found".to_string(),
+        })?;
+    Ok(Json(checkpoint))
+}
+
+/// GET /api/chat/turns/{turn_id}/runs — ordered broker attempts for the authenticated scope.
+async fn get_agent_runs(
+    Path(turn_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<local_first_task_runtime::AgentRun>>, GatewayError> {
+    let store = state.task_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "agent_run_store_lock",
+        message: format!("lock: {error}"),
+    })?;
+    let runs = store
+        .list_agent_runs_for_turn(
+            &turn_id,
+            gateway_user_id().as_str(),
+            gateway_workspace_id().as_str(),
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "agent_run_list",
+            message: error.to_string(),
+        })?;
+    if runs.is_empty() {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_run_not_found",
+            message: "agent run not found".to_string(),
+        });
+    }
+    Ok(Json(runs))
+}
+
+/// GET /api/chat/runs/{run_id}/events — append-only internal events after the cursor.
+async fn get_agent_run_events(
+    Path(run_id): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<TurnSinceQuery>,
+) -> Result<Json<Vec<local_first_task_runtime::AgentRunEvent>>, GatewayError> {
+    if query.since.is_some_and(|since| since < 0) {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "agent_run_cursor_invalid",
+            message: "since must be zero or greater".to_string(),
+        });
+    }
+    let store = state.task_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "agent_run_store_lock",
+        message: format!("lock: {error}"),
+    })?;
+    let user_id = gateway_user_id();
+    let workspace_id = store
+        .workspace_for_agent_run(&run_id, user_id.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_run_not_found",
+            message: "agent run not found".to_string(),
+        })?;
+    let runs = store
+        .list_agent_run_events(
+            &run_id,
+            user_id.as_str(),
+            &workspace_id,
+            query.since,
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "agent_run_events",
+            message: error.to_string(),
+        })?;
+    // An empty cursor page is valid only when the run itself exists in this scope.
+    if runs.is_empty()
+        && store
+            .latest_agent_prompt_snapshot(&run_id, user_id.as_str(), &workspace_id)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "agent_run_lookup",
+                message: error.to_string(),
+            })?
+            .is_none()
+    {
+        let scoped_run_exists = store
+            .list_agent_run_events(&run_id, user_id.as_str(), &workspace_id, None)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "agent_run_lookup",
+                message: error.to_string(),
+            })?
+            .into_iter()
+            .any(|event| event.kind == "run_started");
+        if !scoped_run_exists {
+            return Err(GatewayError {
+                status: StatusCode::NOT_FOUND,
+                code: "agent_run_not_found",
+                message: "agent run not found".to_string(),
+            });
+        }
+    }
+    Ok(Json(runs))
+}
+
+/// GET /api/chat/runs/{run_id}/prompt/latest — latest redacted model-visible request only.
+async fn get_latest_agent_prompt(
+    Path(run_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, GatewayError> {
+    let store = state.task_store.lock().map_err(|error| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "agent_run_store_lock",
+        message: format!("lock: {error}"),
+    })?;
+    let user = gateway_user_id();
+    let workspace = store
+        .workspace_for_agent_run(&run_id, user.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_run_not_found",
+            message: "agent run not found".to_string(),
+        })?;
+    let event = store
+        .latest_agent_prompt_snapshot(
+            &run_id,
+            user.as_str(),
+            &workspace,
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "agent_prompt_latest",
+            message: error.to_string(),
+        })?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_run_not_found",
+            message: "agent run or prompt snapshot not found".to_string(),
+        })?;
+    let mut payload = event.payload;
+    if let Value::Object(object) = &mut payload {
+        object.insert("run_id".to_string(), Value::String(event.run_id));
+        object.insert("seq".to_string(), Value::from(event.seq));
+        object.insert("round".to_string(), serde_json::to_value(event.round).unwrap_or(Value::Null));
+        object.insert("created_at".to_string(), Value::from(event.created_at));
+    }
+    Ok(Json(payload))
 }
 
 /// GET /api/chat/turns/{turn_id}/events — batch read of events with seq > ?since=.
@@ -66533,6 +67204,63 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         assert!(
             !super::delete_chat_thread_should_remove_artifacts(),
             "chat deletion must not remove deliverables; artifact deletion is explicit"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn delete_chat_thread_purges_its_execution_journal() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("journal-workspace")
+            .unwrap();
+        let user = super::gateway_user_id();
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .create_agent_run(&local_first_task_runtime::NewAgentRun {
+                run_id: "delete-thread-run".to_string(),
+                turn_id: "delete-thread-turn".to_string(),
+                thread_id: thread.thread_id.clone(),
+                user_id: user.as_str().to_string(),
+                workspace_id: "journal-workspace".to_string(),
+                model: None,
+                provider: None,
+                prompt_fingerprint: None,
+            })
+            .unwrap();
+
+        let _ = super::delete_chat_thread(
+            axum::extract::State(state.clone()),
+            axum::extract::Path(thread.thread_id.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .list_agent_runs_for_turn(
+                    "delete-thread-turn",
+                    user.as_str(),
+                    "journal-workspace",
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            state
+                .chat_store
+                .lock()
+                .unwrap()
+                .thread(&thread.thread_id)
+                .unwrap()
+                .is_none()
         );
     }
 
