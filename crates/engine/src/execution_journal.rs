@@ -34,6 +34,8 @@ pub struct PromptSnapshot {
     pub truncated: bool,
     pub omitted_messages: usize,
     pub omitted_tools: usize,
+    #[serde(default)]
+    pub packets: Vec<crate::PromptPacketMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,6 +157,20 @@ pub fn build_prompt_snapshot(
     is_final_round: bool,
     forced_tool: Option<&str>,
 ) -> PromptSnapshot {
+    build_prompt_snapshot_with_packets(
+        model, provider, messages, tools, is_final_round, forced_tool, &[],
+    )
+}
+
+pub fn build_prompt_snapshot_with_packets(
+    model: &str,
+    provider: &str,
+    messages: &[Value],
+    tools: &[Value],
+    is_final_round: bool,
+    forced_tool: Option<&str>,
+    packets: &[crate::PromptPacketMetadata],
+) -> PromptSnapshot {
     let message_snapshots = messages
         .iter()
         .map(|message| {
@@ -215,6 +231,7 @@ pub fn build_prompt_snapshot(
         truncated: false,
         omitted_messages: 0,
         omitted_tools: 0,
+        packets: packets.to_vec(),
     };
     bound_snapshot(&mut snapshot);
     snapshot

@@ -39,6 +39,7 @@ pub mod model_normalize;
 /// ahead of the loop-body move; the gateway constructs it and the inline loop mutates it.
 pub mod loop_state;
 pub mod loop_checkpoint;
+pub mod prompt_packets;
 
 /// The loop's turn-constant config (ADR 0024 inc 5, 5.D1c.1) — resolved gateway-side, injected so the
 /// leaf engine never reads env.
@@ -84,4 +85,5 @@ pub use browse::{BrowseResult, Confidence};
 pub use config::TurnConfig;
 pub use loop_state::LoopState;
 pub use loop_checkpoint::LoopCheckpoint;
+pub use prompt_packets::{PromptPacket, PromptPacketMetadata, PromptPacketSource, compose_prompt_packets};
 pub use outcome::TurnOutcome;

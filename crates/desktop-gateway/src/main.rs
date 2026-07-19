@@ -7089,6 +7089,52 @@ fn runtime_plan_control_scope(
     ))
 }
 
+fn read_project_instruction(root: &std::path::Path, relative: &str) -> Option<String> {
+    const MAX_PROJECT_INSTRUCTION_CHARS: usize = 32 * 1024;
+    let root = root.canonicalize().ok()?;
+    let path = root.join(relative).canonicalize().ok()?;
+    if !path.starts_with(&root) || !path.is_file() {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    Some(text.chars().take(MAX_PROJECT_INSTRUCTION_CHARS).collect())
+}
+
+fn compose_gateway_prompt_packets(
+    state: &AppState,
+    thread_id: Option<&str>,
+    core: String,
+) -> (String, Vec<local_first_engine::PromptPacketMetadata>) {
+    let mut packets = vec![local_first_engine::PromptPacket {
+        id: "homun-core".to_string(),
+        source: local_first_engine::PromptPacketSource::Core,
+        priority: 10,
+        content: core,
+    }];
+    if let Some(root) = project_root_for_thread(state, thread_id) {
+        for (id, relative, priority) in [
+            ("project-agents", "AGENTS.md", 30),
+            ("project-homun", ".homun/instructions.md", 31),
+        ] {
+            if let Some(content) = read_project_instruction(&root, relative) {
+                packets.push(local_first_engine::PromptPacket {
+                    id: id.to_string(),
+                    source: local_first_engine::PromptPacketSource::Project,
+                    priority,
+                    content,
+                });
+            }
+        }
+    }
+    packets.push(local_first_engine::PromptPacket {
+        id: "runtime-control".to_string(),
+        source: local_first_engine::PromptPacketSource::Runtime,
+        priority: 100,
+        content: "RUNTIME CONTROL: preserve verified plan progress, do not repeat an effect whose receipt is uncertain, and obey the currently offered tool surface.".to_string(),
+    });
+    local_first_engine::compose_prompt_packets(&packets)
+}
+
 fn runtime_plan_memory_text(plan: &[serde_json::Value]) -> Option<String> {
     if plan.is_empty() {
         return None;
@@ -26366,6 +26412,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         ),
         _ => system,
     };
+    let (system, prompt_packets) =
+        compose_gateway_prompt_packets(state, request.thread_id.as_deref(), system);
     let system = system.as_str();
     // (The 401/tool-compat/timeout fallback flags moved into GatewayModelClient::generate,
     // which now owns the per-round provider swap — ADR 0024.)
@@ -26851,6 +26899,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
     let capability_route_for_runtime = capability_route.clone();
     tokio::spawn(async move {
         let mut ls = local_first_engine::LoopState::new();
+        ls.prompt_packets = prompt_packets;
         ls.messages = messages;
         // RAG completed before the loop starts. Publish the exact selected hits before any
         // narration delta so a resumed client and the persisted assistant message agree on

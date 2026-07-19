@@ -16,7 +16,7 @@ use crate::contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal, ModelClient,
     PlanProgress, TurnCompletionJudge, TurnPolicy,
 };
-use crate::execution_journal::{AgentExecutionEvent, build_prompt_snapshot};
+use crate::execution_journal::AgentExecutionEvent;
 use crate::events::{GenerateStreamEvent, TokenMetrics};
 use crate::markers::{
     append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
@@ -274,13 +274,14 @@ missing, give what you have and note the gap in one short line.",
         // rounds use the effective provider.
         execution_journal.record(AgentExecutionEvent::PromptSnapshot {
             round,
-            snapshot: build_prompt_snapshot(
+            snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
                 &ls.provider.model,
                 &ls.provider.base_url,
                 &ls.messages,
                 &ls.tool_schemas,
                 is_final_round,
                 if round == 0 { cfg.forced_tool.as_deref() } else { None },
+                &ls.prompt_packets,
             ),
         });
         let out = model_client
@@ -997,13 +998,14 @@ to proceed."
         // chain below (same fallback shape as before).
         execution_journal.record(AgentExecutionEvent::PromptSnapshot {
             round: cfg.hard_round_ceiling,
-            snapshot: build_prompt_snapshot(
+            snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
                 &ls.provider.model,
                 &ls.provider.base_url,
                 &ls.messages,
                 &[],
                 true,
                 None,
+                &ls.prompt_packets,
             ),
         });
         let synth_out = model_client
