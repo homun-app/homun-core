@@ -50,6 +50,7 @@ import {
   Reply,
   RotateCcw,
   Search,
+  ScanSearch,
   Share2,
   Tag,
   Target,
@@ -104,6 +105,7 @@ import {
   type VaultProposalAcceptResult,
 } from "../lib/coreBridge";
 import { wsSubscription } from "../lib/wsSubscription";
+import { ExecutionInspector } from "./ExecutionInspector";
 import { fetchThreadActivity, type SubagentInfo } from "../lib/chatApi";
 import {
   createLoadingComputerSession,
@@ -654,6 +656,7 @@ export function ChatView({
         if (view.key === "plan") return workspacePlanSteps.length > 0;
         if (view.key === "goals") return projectGoalCount > 0 || Boolean(goalSeed);
         if (view.key === "memoria") return projectMemoryCount > 0;
+        if (view.key === "execution") return true;
         return false;
       }),
     [
@@ -4016,7 +4019,7 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
  *  project directory tree); "artifacts" = generated outputs; "activity" =
  *  background/scheduled tasks; "plan" = the orchestrator's operational plan.
  *  (Computer stays docked above the composer by design.) */
-export type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan";
+export type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan" | "execution";
 
 /** A generated artifact or uploaded file, projected into the island's "Sources" section.
  *  `kind` only selects the (monochrome) glyph; `meta` is a one-word provenance hint. */
@@ -4034,6 +4037,7 @@ const PANEL_VIEWS: { key: WorkbenchTab; label: string; icon: typeof FileText }[]
   { key: "files", label: "Files", icon: FolderOpen },
   { key: "activity", label: "Activity", icon: Clock3 },
   { key: "plan", label: "Plan", icon: ListTodo },
+  { key: "execution", label: "Execution", icon: ScanSearch },
   { key: "memoria", label: "Memory", icon: Share2 },
   { key: "goals", label: "Goals", icon: Target },
 ];
@@ -4044,6 +4048,7 @@ const PANEL_VIEW_LABEL: Record<WorkbenchTab, string> = {
   goals: "Goals",
   activity: "Activity",
   plan: "Plan",
+  execution: "Execution",
 };
 
 /** The Workbench: one toggle → a docked right panel with tabs, consolidating the
@@ -5434,6 +5439,7 @@ function Workbench({
               <p>No active operational plan. When the assistant plans a multi-step task, steps appear here.</p>
             </div>
           ))}
+        {tab === "execution" && <ExecutionInspector threadId={threadId} />}
       </div>
     </aside>
   );

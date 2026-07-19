@@ -744,6 +744,64 @@ export interface EnqueueTurnResponse {
   position_in_queue: number;
 }
 
+export interface AgentRunView {
+  run_id: string;
+  turn_id: string;
+  thread_id: string;
+  attempt: number;
+  status: "running" | "completed" | "failed" | "aborted";
+  model: string | null;
+  provider: string | null;
+  prompt_fingerprint: string | null;
+  started_at: number;
+  completed_at: number | null;
+  terminal_reason: string | null;
+}
+
+export interface AgentRunEventView {
+  event_id: number;
+  run_id: string;
+  seq: number;
+  round: number | null;
+  kind: string;
+  payload: Record<string, unknown>;
+  created_at: number;
+}
+
+export interface PromptPacketView {
+  id: string;
+  source: string;
+  priority: number;
+  chars: number;
+  sha256: string;
+}
+
+export interface AgentPromptView {
+  fingerprint?: string;
+  model?: string;
+  provider?: string;
+  packets?: PromptPacketView[];
+  messages?: Array<{ role: string; chars: number; sha256: string; redacted: boolean }>;
+  tools?: Array<{ name: string | null; chars: number; sha256: string }>;
+}
+
+async function executionJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, { headers: gatewayHeaders() });
+  if (!response.ok) throw new Error(`Execution Inspector request failed (${response.status})`);
+  return response.json() as Promise<T>;
+}
+
+export const fetchThreadAgentRuns = (threadId: string) =>
+  executionJson<AgentRunView[]>(`/api/chat/threads/${encodeURIComponent(threadId)}/runs`);
+export const fetchAgentRunEvents = (runId: string) =>
+  executionJson<AgentRunEventView[]>(`/api/chat/runs/${encodeURIComponent(runId)}/events`);
+export const fetchLatestAgentPrompt = (runId: string) =>
+  executionJson<AgentPromptView>(`/api/chat/runs/${encodeURIComponent(runId)}/prompt/latest`);
+export const fetchLatestAgentCheckpoint = (runId: string) =>
+  executionJson<Record<string, unknown>>(`/api/chat/runs/${encodeURIComponent(runId)}/checkpoint/latest`);
+export const fetchThreadWorkingLedger = (threadId: string) =>
+  executionJson<{ thread_id: string; markdown: string }>(`/api/chat/threads/${encodeURIComponent(threadId)}/ledger`);
+
 /** Thrown by enqueueTurn when the thread already has an active turn (HTTP 409). */
 export class TurnBusyError extends Error {
   constructor(public readonly activeTurnId: string) {
