@@ -1088,6 +1088,7 @@ Tell me if you want me to retry or rephrase."
     crate::TurnOutcome {
         memory_answer,
         tool_actions: ls.tool_trace.join("\n"),
+        memory_reads: ls.memory_reads,
         browse_sources,
         // Carry the final runtime plan out for the gateway's turn_trace TurnEnd (observability only).
         final_plan: ls.plan,
@@ -1103,6 +1104,7 @@ mod tests {
     use crate::contract::{
         ModelCall, ModelCallError, ModelRoundOutput, ProviderBinding, ToolEffects, ToolOutcome,
     };
+    use crate::events::{LinkedMemoryRead, TurnMemoryReadSet};
     use serde_json::{json, Value};
     use std::sync::Mutex;
 
@@ -1264,11 +1266,132 @@ mod tests {
             "expected the model answer, got: {:?}",
             outcome.memory_answer
         );
+        assert!(!outcome.memory_reads.has_linked_reads());
         // A terminal Done event was emitted.
         assert!(
             sink.0.lock().unwrap().iter().any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
             "expected a Done event"
         );
+    }
+
+    #[derive(Default)]
+    struct RecallThenAnswerModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for RecallThenAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "recall_1",
+                            "type": "function",
+                            "function": { "name": "recall_memory", "arguments": "{}" },
+                        }],
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                })
+            } else {
+                on_delta("Answer from linked memory.");
+                Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "Answer from linked memory."
+                    }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+        }
+    }
+
+    struct LinkedRecallTool;
+
+    impl CapabilityExecutor for LinkedRecallTool {
+        async fn execute_tool(
+            &self,
+            name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            assert_eq!(name, "recall_memory");
+            Ok(ToolOutcome {
+                result: "linked fact".to_string(),
+                effects: ToolEffects {
+                    memory_reads: TurnMemoryReadSet {
+                        linked: vec![LinkedMemoryRead {
+                            source_workspace_id: "source-a".to_string(),
+                            grant_id: "grant-a".to_string(),
+                            policy_version: 3,
+                            memory_ref: "memory:owner:source-a:fact-a".to_string(),
+                            source_revision: "sha256:rev-a".to_string(),
+                        }],
+                        blocked_unknown: false,
+                    },
+                    ..ToolEffects::default()
+                },
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn recall_tool_reads_reach_turn_outcome() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "recall" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &RecallThenAnswerModel::default(),
+            &LinkedRecallTool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "recall".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.memory_reads.linked.len(), 1);
+        assert_eq!(outcome.memory_reads.linked[0].grant_id, "grant-a");
     }
 
     // Round-0-only mock: returns a `make_document` tool call on the FIRST `generate` invocation,

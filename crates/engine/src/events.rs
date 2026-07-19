@@ -71,38 +71,55 @@ pub struct LinkedMemoryRead {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnMemoryReadSet {
     pub linked: Vec<LinkedMemoryRead>,
+    /// È stata osservata provenance che sembrava collegata ma non era completa.
+    /// Il gateway deve convertirla in una policy fail-closed.
+    pub blocked_unknown: bool,
 }
 
 impl TurnMemoryReadSet {
     /// Unisce gli hit completi del payload. Gli hit locali e la provenance
     /// legacy/incompleta non possono diventare autorizzazione implicita.
     pub fn extend_payload(&mut self, payload: &RecallStreamPayload) {
-        self.linked.extend(payload.hits.iter().filter_map(|hit| {
-            let grant_id = hit.grant_id.as_ref()?.trim();
-            let policy_version = hit.policy_version?;
-            let source_revision = hit.source_revision.as_ref()?.trim();
+        for hit in &payload.hits {
+            let Some(grant_id) = hit.grant_id.as_ref().map(|value| value.trim()) else {
+                if hit.policy_version.is_some() || hit.source_revision.is_some() {
+                    self.blocked_unknown = true;
+                }
+                continue;
+            };
+            let Some(policy_version) = hit.policy_version else {
+                self.blocked_unknown = true;
+                continue;
+            };
+            let Some(source_revision) = hit.source_revision.as_ref().map(|value| value.trim()) else {
+                self.blocked_unknown = true;
+                continue;
+            };
             let source_workspace_id = hit.source_workspace_id.trim();
             let memory_ref = hit.r#ref.trim();
             if grant_id.is_empty()
+                || policy_version == 0
                 || source_revision.is_empty()
                 || source_workspace_id.is_empty()
                 || memory_ref.is_empty()
             {
-                return None;
+                self.blocked_unknown = true;
+                continue;
             }
-            Some(LinkedMemoryRead {
+            self.linked.push(LinkedMemoryRead {
                 source_workspace_id: source_workspace_id.to_string(),
                 grant_id: grant_id.to_string(),
                 policy_version,
                 memory_ref: memory_ref.to_string(),
                 source_revision: source_revision.to_string(),
-            })
-        }));
+            });
+        }
         self.linked.sort();
         self.linked.dedup();
     }
 
     pub fn extend(&mut self, other: Self) {
+        self.blocked_unknown |= other.blocked_unknown;
         self.linked.extend(other.linked);
         self.linked.sort();
         self.linked.dedup();
@@ -110,6 +127,10 @@ impl TurnMemoryReadSet {
 
     pub fn has_linked_reads(&self) -> bool {
         !self.linked.is_empty()
+    }
+
+    pub fn is_blocked_unknown(&self) -> bool {
+        self.blocked_unknown
     }
 }
 
@@ -302,6 +323,7 @@ mod tests {
         let mut reads = TurnMemoryReadSet::default();
         reads.extend_payload(&payload);
         assert_eq!(reads.linked.len(), 1);
+        assert!(reads.blocked_unknown);
         assert_eq!(reads.linked[0].grant_id, "grant-1");
         assert_eq!(reads.linked[0].policy_version, 7);
         assert_eq!(reads.linked[0].memory_ref, "memory:owner:source:fact-1");

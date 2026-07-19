@@ -1813,7 +1813,10 @@ fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::
                 collection: recall_collection_token(hit.collection).to_string(),
                 grant_id: hit.grant_id.clone(),
                 policy_version: hit.policy_version,
-                source_revision: Some(hit.source_revision.clone()),
+                source_revision: hit
+                    .grant_id
+                    .as_ref()
+                    .map(|_| hit.source_revision.clone()),
                 conflict: hit.conflict,
                 graph_path: hit.graph_path.clone(),
             })
@@ -1822,6 +1825,23 @@ fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::
             MemoryScope::Personal => "personal".to_string(),
             MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
         },
+    }
+}
+
+fn memory_read_effects_from_recall_payload(
+    payload: &local_first_subagents::RecallStreamPayload,
+) -> local_first_engine::ToolEffects {
+    let mut effects = local_first_engine::ToolEffects::default();
+    effects.memory_reads.extend_payload(payload);
+    effects
+}
+
+fn seed_loop_memory_reads(
+    state: &mut local_first_engine::LoopState,
+    payload: Option<&local_first_subagents::RecallStreamPayload>,
+) {
+    if let Some(payload) = payload {
+        state.memory_reads.extend_payload(payload);
     }
 }
 
@@ -23674,10 +23694,13 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                         scope: "personal".to_string(),
                     },
                 });
+            let payload = recall_stream_payload_from_outcome(&outcome, &query);
+            let recall_effects = memory_read_effects_from_recall_payload(&payload);
+            effects.memory_reads.extend(recall_effects.memory_reads);
             let _ = emit_stream_event(
                 ctx.tx,
                 GenerateStreamEvent::Recall {
-                    payload: recall_stream_payload_from_outcome(&outcome, &query),
+                    payload,
                 },
             )
             .await;
@@ -26915,6 +26938,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let mut ls = local_first_engine::LoopState::new();
         ls.prompt_packets = prompt_packets;
         ls.messages = messages;
+        seed_loop_memory_reads(&mut ls, automatic_recall_payload.as_ref());
         // RAG completed before the loop starts. Publish the exact selected hits before any
         // narration delta so a resumed client and the persisted assistant message agree on
         // which memory sources informed this turn.
@@ -64392,6 +64416,48 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             value["hits"][0]["graph_path"],
             serde_json::json!(["mentions", "mentions"])
         );
+    }
+
+    fn linked_recall_payload_for_turn() -> local_first_subagents::RecallStreamPayload {
+        local_first_subagents::RecallStreamPayload {
+            query: "linked fact".to_string(),
+            hits: vec![local_first_subagents::RecallStreamHit {
+                r#ref: "memory:owner:source-a:fact-a".to_string(),
+                text: "Linked fact".to_string(),
+                score: 0.9,
+                kind: "fact".to_string(),
+                source_workspace_id: "source-a".to_string(),
+                source_label: "Source A".to_string(),
+                collection: "knowledge".to_string(),
+                grant_id: Some("grant-a".to_string()),
+                policy_version: Some(3),
+                source_revision: Some("sha256:rev-a".to_string()),
+                conflict: false,
+                graph_path: Vec::new(),
+            }],
+            scope: "project".to_string(),
+        }
+    }
+
+    #[test]
+    fn automatic_recall_seeds_the_loop_read_set() {
+        let mut state = local_first_engine::LoopState::new();
+        let payload = linked_recall_payload_for_turn();
+
+        super::seed_loop_memory_reads(&mut state, Some(&payload));
+
+        assert_eq!(state.memory_reads.linked.len(), 1);
+        assert_eq!(state.memory_reads.linked[0].grant_id, "grant-a");
+    }
+
+    #[test]
+    fn explicit_recall_payload_becomes_tool_memory_read_effects() {
+        let payload = linked_recall_payload_for_turn();
+
+        let effects = super::memory_read_effects_from_recall_payload(&payload);
+
+        assert_eq!(effects.memory_reads.linked.len(), 1);
+        assert_eq!(effects.memory_reads.linked[0].grant_id, "grant-a");
     }
 
     #[test]

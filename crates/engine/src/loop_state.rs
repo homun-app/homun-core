@@ -12,6 +12,7 @@
 //! browser state stays gateway-side behind the temporary seam until ADR 0025.
 
 use crate::contract::{ProviderBinding, ToolEffects};
+use crate::events::TurnMemoryReadSet;
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -50,6 +51,8 @@ pub struct LoopState {
     /// Consequential actions performed this turn (any domain) → fed to the memory
     /// extractor so the "why" of each mutation is remembered.
     pub tool_trace: Vec<String>,
+    /// Tutti gli hit collegati realmente usati nel turno, deduplicati.
+    pub memory_reads: TurnMemoryReadSet,
     /// No-progress guard (F1): signature of the last round's tool calls; a repeat means
     /// the model is stuck (see `repeat_count`).
     pub last_round_sig: String,
@@ -120,6 +123,7 @@ impl LoopState {
         for line in &effects.append_output {
             self.accumulated.push_str(line);
         }
+        self.memory_reads.extend(effects.memory_reads);
         // P5: `plan` is the opaque `Value`, so the effect (already the whole plan serialized by the
         // update_plan arm) is assigned directly — no deserialize round-trip, same whole-plan result.
         if let Some(plan_val) = effects.plan {
@@ -167,6 +171,7 @@ impl LoopState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::{LinkedMemoryRead, TurnMemoryReadSet};
 
     // Guards the "start-of-turn zero" contract: the gateway constructs `LoopState::new()`
     // and seeds nothing, so every field must begin empty. If a field ever gains a non-default
@@ -180,6 +185,8 @@ mod tests {
         assert!(ls.accumulated.is_empty());
         assert!(ls.pending_vault_reveal_marker.is_none());
         assert!(ls.tool_trace.is_empty());
+        assert!(!ls.memory_reads.has_linked_reads());
+        assert!(!ls.memory_reads.is_blocked_unknown());
         assert!(ls.last_round_sig.is_empty());
         assert_eq!(ls.repeat_count, 0);
         assert_eq!(ls.progress_anchor_round, 0);
@@ -194,5 +201,30 @@ mod tests {
         assert!(!ls.browser_used);
         assert!(ls.pending_browser_image.is_none());
         assert!(ls.browser_tool_call_ids.is_empty());
+    }
+
+    #[test]
+    fn loop_state_collects_linked_memory_reads() {
+        let mut ls = LoopState::new();
+        let mut pending_confirm = false;
+        let read = LinkedMemoryRead {
+            source_workspace_id: "source-a".to_string(),
+            grant_id: "grant-a".to_string(),
+            policy_version: 2,
+            memory_ref: "memory:owner:source-a:fact-a".to_string(),
+            source_revision: "sha256:rev-a".to_string(),
+        };
+        let effects = ToolEffects {
+            memory_reads: TurnMemoryReadSet {
+                linked: vec![read.clone()],
+                blocked_unknown: false,
+            },
+            ..ToolEffects::default()
+        };
+
+        ls.apply_effects(&mut pending_confirm, 1, effects.clone());
+        ls.apply_effects(&mut pending_confirm, 2, effects);
+
+        assert_eq!(ls.memory_reads.linked, vec![read]);
     }
 }

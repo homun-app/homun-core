@@ -11,7 +11,7 @@
 //! (`engine::events`, inc 5a), so `EventSink` can be defined here (inc 5b) — and `PlanProgress`
 //! (inc 5c) — ahead of the loop move (inc 5e) that consumes them: the same contract-first pattern.
 
-use crate::events::GenerateStreamEvent;
+use crate::events::{GenerateStreamEvent, TurnMemoryReadSet};
 use crate::execution_journal::AgentExecutionEvent;
 use crate::LoopCheckpoint;
 use serde_json::Value;
@@ -112,6 +112,9 @@ pub struct LoadedTool {
 pub struct ToolEffects {
     /// Text to append to the assistant's accumulated output, in order (artifact/plan markers, cards).
     pub append_output: Vec<String>,
+    /// Letture collegate effettuate dal tool; il loop le unisce alla provenance
+    /// cumulativa del turno prima di proseguire.
+    pub memory_reads: TurnMemoryReadSet,
     /// The tool replaced the runtime plan (canonical, verified state).
     pub plan: Option<Value>,
     /// Tool schemas to begin offering this turn (deduped by `LoadedTool::key`).
