@@ -1,7 +1,7 @@
 # Agent Execution Journal e Prompt Inspector — Design
 
-**Data:** 2026-07-19  
-**Stato:** approvato a livello concettuale; specifica scritta in attesa di review  
+**Data:** 2026-07-19
+**Stato:** implementato e verificato sulla branch `fabio/agent-execution-foundation`
 **Ambito:** prima tranche della roadmap agent-loop derivata dal confronto con Codex
 
 ## Sintesi
@@ -39,7 +39,7 @@ Il journal è osservabilità strutturata e fondazione per il futuro resume da ch
 
 Si aggiungerebbero eventi interni come `model_request`, `tool_result` e `compaction` alla tabella già usata dalla UI.
 
-**Vantaggi:** migrazione minima, replay e sequenza già disponibili.  
+**Vantaggi:** migrazione minima, replay e sequenza già disponibili.
 **Svantaggi:** mescola protocollo pubblico e diagnostica privata, aumenta il rischio di esposizione, gonfia lo stream e rende più difficile cambiare il journal senza rompere client storici.
 
 **Decisione:** scartata.
@@ -48,7 +48,7 @@ Si aggiungerebbero eventi interni come `model_request`, `tool_result` e `compact
 
 Ogni tentativo scriverebbe un file append-only con tutti gli eventi.
 
-**Vantaggi:** facile da ispezionare con strumenti testuali, scrittura sequenziale semplice.  
+**Vantaggi:** facile da ispezionare con strumenti testuali, scrittura sequenziale semplice.
 **Svantaggi:** secondo indice da sincronizzare con SQLite, gestione di retention e cancellazione più complessa, minore coerenza con il database locale unificato di Homun.
 
 **Decisione:** non scelta per v1. Un export JSONL potrà essere aggiunto come vista del journal.
@@ -57,7 +57,7 @@ Ogni tentativo scriverebbe un file append-only con tutti gli eventi.
 
 Due nuove tabelle nello stesso `homun.sqlite` conservano run ed eventi interni. `turn_events` resta il contratto client; l'eventuale JSONL e il Working Ledger diventano export rigenerabili.
 
-**Vantaggi:** transazioni, query, retention e cancellazione nello stesso perimetro; separazione netta delle responsabilità; base adatta a checkpoint futuri.  
+**Vantaggi:** transazioni, query, retention e cancellazione nello stesso perimetro; separazione netta delle responsabilità; base adatta a checkpoint futuri.
 **Svantaggi:** richiede nuovi contratti engine/gateway e una migrazione additiva.
 
 **Decisione:** approccio scelto.
