@@ -384,6 +384,8 @@ export interface RecallHitPayload {
   policy_version: number | null;
   /** The recall coordinator detected a semantic conflict for this hit. */
   conflict: boolean;
+  /** Canonical graph relations followed from the direct hit; absent on legacy events. */
+  graph_path?: string[];
 }
 
 /** D3 (Piano UI): una modifica di codice proposta dal modello (diff inline). */

@@ -24,12 +24,52 @@ use crate::{
     parse_wiki_markdown,
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Mutex;
 
 const AUTHORIZED_VECTOR_INDEX_CACHE_MAX: usize = 64;
+const AUTHORIZED_GRAPH_MAX_HOPS: usize = 2;
+const AUTHORIZED_GRAPH_NODE_BUDGET: usize = 64;
+const AUTHORIZED_GRAPH_EDGES_PER_NODE: usize = 32;
+const AUTHORIZED_GRAPH_RELATION_SCAN_BUDGET: usize = 512;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GraphNodeReservation {
+    Reserved,
+    AlreadyVisited,
+    BudgetExhausted,
+}
+
+fn reserve_authorized_graph_node(
+    visited: &mut HashSet<MemoryRef>,
+    reference: MemoryRef,
+) -> GraphNodeReservation {
+    if visited.contains(&reference) {
+        return GraphNodeReservation::AlreadyVisited;
+    }
+    if visited.len() >= AUTHORIZED_GRAPH_NODE_BUDGET {
+        return GraphNodeReservation::BudgetExhausted;
+    }
+    visited.insert(reference);
+    GraphNodeReservation::Reserved
+}
+
+fn is_safe_graph_relation_type(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AuthorizedGraphMemory {
+    pub record: MemoryRecord,
+    pub seed_ref: MemoryRef,
+    pub relation_path: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct AuthorizedVectorIndexKey {
@@ -1342,6 +1382,207 @@ impl MemoryFacade {
             }
         }
         Ok(subject)
+    }
+
+    /// Expands already-authorized seed memories through the canonical graph.
+    /// Every edge and node remains inside one exact source and every discovered
+    /// memory is rechecked against the same source policy before materialization.
+    pub(crate) fn related_authorized_memories_for_source(
+        &self,
+        source: &AuthorizedMemorySource,
+        seeds: &[MemoryRef],
+        max_hops: usize,
+        limit: usize,
+    ) -> MemoryResult<Vec<AuthorizedGraphMemory>> {
+        let max_hops = max_hops.min(AUTHORIZED_GRAPH_MAX_HOPS);
+        if max_hops == 0 || limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        // The caller supplies seeds in descending recall rank. Preserve that
+        // order so the strongest seed owns a shared graph path and its score.
+        let mut unique_seed_refs = HashSet::new();
+        let seeds = seeds
+            .iter()
+            .filter(|reference| {
+                reference.kind == MemoryRefKind::Memory
+                    && reference.user_id == source.source_user_id
+                    && reference.workspace_id == source.source_workspace_id
+            })
+            .filter(|reference| unique_seed_refs.insert((*reference).clone()))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let seed_refs = seeds.iter().cloned().collect::<HashSet<_>>();
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        for seed in seeds {
+            if self
+                .get_authorized_memory_for_source(source, &seed)?
+                .is_none()
+            {
+                continue;
+            }
+            match reserve_authorized_graph_node(&mut visited, seed.clone()) {
+                GraphNodeReservation::Reserved => {
+                    queue.push_back((seed.clone(), seed, Vec::<String>::new()));
+                }
+                GraphNodeReservation::AlreadyVisited => {}
+                GraphNodeReservation::BudgetExhausted => break,
+            }
+        }
+
+        let mut related = Vec::new();
+        let mut inspected_relations = 0usize;
+        while let Some((node, seed_ref, path)) = queue.pop_front() {
+            if path.len() >= max_hops
+                || visited.len() >= AUTHORIZED_GRAPH_NODE_BUDGET
+                || inspected_relations >= AUTHORIZED_GRAPH_RELATION_SCAN_BUDGET
+            {
+                continue;
+            }
+            let mut authorized_edges = 0usize;
+            let remaining_relation_budget =
+                AUTHORIZED_GRAPH_RELATION_SCAN_BUDGET - inspected_relations;
+            let relations = self.store.visible_relations_touching_exact(
+                &node,
+                &source.source_user_id,
+                &source.source_workspace_id,
+                remaining_relation_budget,
+            )?;
+            inspected_relations += relations.len();
+            for relation in relations {
+                if !self.relation_is_allowed_for_source(source, &relation) {
+                    continue;
+                }
+                let neighbour = if relation.source_ref == node {
+                    relation.target_ref.clone()
+                } else if relation.target_ref == node {
+                    relation.source_ref.clone()
+                } else {
+                    continue;
+                };
+                if visited.contains(&neighbour) {
+                    continue;
+                }
+                let mut relation_path = path.clone();
+                relation_path.push(relation.relation_type.clone());
+                match neighbour.kind {
+                    MemoryRefKind::Memory => {
+                        let Some(record) =
+                            self.get_authorized_memory_for_source(source, &neighbour)?
+                        else {
+                            continue;
+                        };
+                        match reserve_authorized_graph_node(&mut visited, neighbour.clone()) {
+                            GraphNodeReservation::Reserved => authorized_edges += 1,
+                            GraphNodeReservation::AlreadyVisited => continue,
+                            GraphNodeReservation::BudgetExhausted => break,
+                        }
+                        if !seed_refs.contains(&neighbour) {
+                            related.push(AuthorizedGraphMemory {
+                                record,
+                                seed_ref: seed_ref.clone(),
+                                relation_path: relation_path.clone(),
+                            });
+                            if related.len() == limit {
+                                return Ok(related);
+                            }
+                        }
+                        if relation_path.len() < max_hops {
+                            queue.push_back((neighbour, seed_ref.clone(), relation_path));
+                        }
+                    }
+                    MemoryRefKind::Entity => {
+                        if !self.entity_is_allowed_for_source(source, &neighbour)? {
+                            continue;
+                        }
+                        match reserve_authorized_graph_node(&mut visited, neighbour.clone()) {
+                            GraphNodeReservation::Reserved => authorized_edges += 1,
+                            GraphNodeReservation::AlreadyVisited => continue,
+                            GraphNodeReservation::BudgetExhausted => break,
+                        }
+                        if relation_path.len() < max_hops {
+                            queue.push_back((neighbour, seed_ref.clone(), relation_path));
+                        }
+                    }
+                    _ => {}
+                }
+                if authorized_edges >= AUTHORIZED_GRAPH_EDGES_PER_NODE {
+                    break;
+                }
+            }
+        }
+        Ok(related)
+    }
+
+    fn relation_is_allowed_for_source(
+        &self,
+        source: &AuthorizedMemorySource,
+        relation: &MemoryRelation,
+    ) -> bool {
+        let max_sensitivity = source
+            .policy
+            .as_ref()
+            .map(|policy| policy.max_sensitivity)
+            .unwrap_or(DataSensitivity::Private);
+        relation.user_id == source.source_user_id
+            && relation.workspace_id == source.source_workspace_id
+            && relation.reference.kind == MemoryRefKind::Relation
+            && relation.reference.user_id == source.source_user_id
+            && relation.reference.workspace_id == source.source_workspace_id
+            && relation.source_ref.user_id == source.source_user_id
+            && relation.source_ref.workspace_id == source.source_workspace_id
+            && relation.target_ref.user_id == source.source_user_id
+            && relation.target_ref.workspace_id == source.source_workspace_id
+            && is_safe_graph_relation_type(&relation.relation_type)
+            && matches!(
+                relation.privacy_domain.as_str(),
+                "personal" | "work" | "general"
+            )
+            && relation.sensitivity != DataSensitivity::Secret
+            && relation.sensitivity <= max_sensitivity
+            && relation.evidence.iter().all(|reference| {
+                reference.user_id == source.source_user_id
+                    && reference.workspace_id == source.source_workspace_id
+            })
+            && !contains_secret(&relation.metadata)
+    }
+
+    fn entity_is_allowed_for_source(
+        &self,
+        source: &AuthorizedMemorySource,
+        reference: &MemoryRef,
+    ) -> MemoryResult<bool> {
+        let max_sensitivity = source
+            .policy
+            .as_ref()
+            .map(|policy| policy.max_sensitivity)
+            .unwrap_or(DataSensitivity::Private);
+        let Some(entity) = self.store.get_visible_entity_exact(
+            reference,
+            &source.source_user_id,
+            &source.source_workspace_id,
+        )?
+        else {
+            return Ok(false);
+        };
+        let payload = serde_json::json!({
+            "name": &entity.name,
+            "canonical_key": &entity.canonical_key,
+            "aliases": &entity.aliases,
+            "metadata": &entity.metadata,
+        });
+        Ok(entity.reference.kind == MemoryRefKind::Entity
+            && entity.user_id == source.source_user_id
+            && entity.workspace_id == source.source_workspace_id
+            && matches!(
+                entity.privacy_domain.as_str(),
+                "personal" | "work" | "general"
+            )
+            && entity.sensitivity != DataSensitivity::Secret
+            && entity.sensitivity <= max_sensitivity
+            && !contains_secret(&payload))
     }
 
     fn memory_is_allowed_for_source(
@@ -3240,5 +3481,42 @@ fn merge_entity_metadata(
         .or_insert_with(|| serde_json::Value::Array(Vec::new()));
     if let Some(items) = merged_meta.as_array_mut() {
         items.push(absorbed.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authorized_graph_node_reservation_never_exceeds_budget() {
+        let user = UserId::new("budget-user");
+        let workspace = WorkspaceId::new("budget-workspace");
+        let mut visited = HashSet::new();
+
+        for index in 0..AUTHORIZED_GRAPH_NODE_BUDGET {
+            let reference = MemoryRef::new(
+                MemoryRefKind::Entity,
+                user.clone(),
+                workspace.clone(),
+                format!("entity-{index}"),
+            );
+            assert_eq!(
+                reserve_authorized_graph_node(&mut visited, reference),
+                GraphNodeReservation::Reserved
+            );
+        }
+
+        let overflow = MemoryRef::new(
+            MemoryRefKind::Entity,
+            user,
+            workspace,
+            "overflow",
+        );
+        assert_eq!(
+            reserve_authorized_graph_node(&mut visited, overflow),
+            GraphNodeReservation::BudgetExhausted
+        );
+        assert_eq!(visited.len(), AUTHORIZED_GRAPH_NODE_BUDGET);
     }
 }

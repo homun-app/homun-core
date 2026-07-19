@@ -1814,6 +1814,7 @@ fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::
                 grant_id: hit.grant_id.clone(),
                 policy_version: hit.policy_version,
                 conflict: hit.conflict,
+                graph_path: hit.graph_path.clone(),
             })
             .collect(),
         scope: match &pack.scope {
@@ -14003,6 +14004,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                             grant_id: None,
                             policy_version: None,
                             conflict: false,
+                            graph_path: Vec::new(),
                         }
                     })
                     .collect()
@@ -14065,6 +14067,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                     grant_id: None,
                     policy_version: None,
                     conflict: false,
+                    graph_path: Vec::new(),
                 });
             }
         }
@@ -64351,6 +64354,40 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert_eq!(payload.query, "launch");
         assert!(payload.hits.is_empty());
         assert_eq!(payload.scope, "personal");
+    }
+
+    #[test]
+    fn automatic_recall_payload_preserves_graph_path() {
+        let pack = local_first_memory::RecallPack::from_hits(
+            "atlas".to_string(),
+            local_first_memory::MemoryScope::Project(MemoryWorkspaceId::new("project-a")),
+            vec![local_first_memory::RecallHit {
+                memory_ref: "memory:owner:project-a:related".to_string(),
+                text: "Related memory".to_string(),
+                score: 0.5,
+                kind: "fact".to_string(),
+                source_user_id: local_first_memory::UserId::new("owner"),
+                source_workspace_id: MemoryWorkspaceId::new("project-a"),
+                source_label: "Project A".to_string(),
+                collection: local_first_memory::MemoryCollectionKey::Knowledge,
+                grant_id: None,
+                policy_version: None,
+                sensitivity: MemoryDataSensitivity::Internal,
+                status: local_first_memory::MemoryStatus::Confirmed,
+                updated_at: "unix:1800000000".to_string(),
+                subject_key: None,
+                conflict: false,
+                publication_link: None,
+                graph_path: vec!["mentions".to_string(), "mentions".to_string()],
+            }],
+        );
+
+        let payload = super::recall_stream_payload_from_pack(&pack);
+        let value = serde_json::to_value(payload).expect("serialize recall payload");
+        assert_eq!(
+            value["hits"][0]["graph_path"],
+            serde_json::json!(["mentions", "mentions"])
+        );
     }
 
     #[test]

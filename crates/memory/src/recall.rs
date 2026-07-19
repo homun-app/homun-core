@@ -9,7 +9,7 @@
 //!
 //! La funzione di orchestrazione `recall_on_facade` (Step 1) vive qui.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -192,15 +192,10 @@ pub const DEDUP_JACCARD: f32 = 0.55;
 
 use crate::{
     AuthorizedMemorySearchRequest, AuthorizedMemorySource, DataSensitivity, MemoryAccessRequest,
-    MemoryCollectionKey, MemoryFacade, MemoryGrantOverrideEffect, MemoryRecord, MemoryRef,
-    MemoryResult, MemoryScope, MemorySearchRequest, MemoryStatus, PERSONAL_WORKSPACE,
-    PrivacyDomain, RecallHit, RecallPack, UserId, WorkspaceId, memory_is_current_at,
+    MemoryCollectionKey, MemoryFacade, MemoryRecord, MemoryRef, MemoryResult, MemoryScope,
+    MemorySearchRequest, MemoryStatus, PERSONAL_WORKSPACE, PrivacyDomain, RecallHit, RecallPack,
+    UserId, WorkspaceId, memory_is_current_at,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemoryRecallIntent {
-    pub collections: BTreeSet<MemoryCollectionKey>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -224,53 +219,6 @@ pub struct MemorySourceAccessEvent {
     pub candidate_count: usize,
     pub injected_refs: Vec<String>,
     pub created_at: i64,
-}
-
-/// Deterministic query router. It sees only user text and the stable collection
-/// catalog; source contents never participate in routing.
-pub fn memory_recall_intent(query: &str) -> MemoryRecallIntent {
-    let lower = query.to_lowercase();
-    let mut collections = BTreeSet::from([
-        MemoryCollectionKey::Knowledge,
-        MemoryCollectionKey::Decisions,
-    ]);
-    if ["prefer", "stile", "lingua", "language", "tone", "come vuoi"]
-        .iter()
-        .any(|term| lower.contains(term))
-    {
-        collections.insert(MemoryCollectionKey::Preferences);
-    }
-    if ["chi sono", "profilo", "lavoro", "my ", "mio ", "mia "]
-        .iter()
-        .any(|term| lower.contains(term))
-    {
-        collections.insert(MemoryCollectionKey::Profile);
-    }
-    if ["obiettivo", "goal", "todo", "aperto", "manca"]
-        .iter()
-        .any(|term| lower.contains(term))
-    {
-        collections.insert(MemoryCollectionKey::Goals);
-    }
-    if [
-        "file",
-        "document",
-        "presentazione",
-        "artifact",
-        "deliverable",
-    ]
-    .iter()
-    .any(|term| lower.contains(term))
-    {
-        collections.insert(MemoryCollectionKey::Artifacts);
-    }
-    if ["prima", "scorsa", "discusso", "ricordi", "previous"]
-        .iter()
-        .any(|term| lower.contains(term))
-    {
-        collections.insert(MemoryCollectionKey::Episodes);
-    }
-    MemoryRecallIntent { collections }
 }
 
 fn normalized_recall_text(text: &str) -> String {
@@ -301,6 +249,7 @@ fn recall_hit_order(
 ) -> std::cmp::Ordering {
     semantic_rank(left, consumer_workspace)
         .cmp(&semantic_rank(right, consumer_workspace))
+        .then_with(|| right.graph_path.is_empty().cmp(&left.graph_path.is_empty()))
         .then_with(|| {
             let left_confirmed = left.status == MemoryStatus::Confirmed;
             let right_confirmed = right.status == MemoryStatus::Confirmed;
@@ -542,42 +491,11 @@ pub fn recall_authorized_sources_on_facade_with_source_filter(
         now_unix,
         source_allowed,
     )?;
-    let intent = memory_recall_intent(query);
     let mut hits = Vec::new();
     let mut degraded_sources = initially_unavailable;
     let mut source_audits = Vec::new();
     for source in &sources {
-        let effective_source = match source.policy.as_ref() {
-            None => source.clone(),
-            Some(policy) => {
-                let has_individual_allow = policy
-                    .overrides
-                    .values()
-                    .any(|effect| *effect == MemoryGrantOverrideEffect::Allow);
-                let collections = policy
-                    .collections
-                    .intersection(&intent.collections)
-                    .copied()
-                    .collect::<BTreeSet<_>>();
-                if collections.is_empty() && !has_individual_allow {
-                    source_audits.push((
-                        source.clone(),
-                        MemorySourceAccessOutcome::Deny,
-                        "intent_not_selected".to_string(),
-                        0,
-                    ));
-                    continue;
-                }
-                let mut effective = source.clone();
-                effective.policy = Some(crate::MemorySourcePolicy {
-                    collections,
-                    max_sensitivity: policy.max_sensitivity,
-                    overrides: policy.overrides.clone(),
-                });
-                effective
-            }
-        };
-        match recall_source_on_facade(facade, &effective_source, query, query_vec, graph_context) {
+        match recall_source_on_facade(facade, source, query, query_vec, graph_context) {
             Ok(pack) => {
                 let candidate_count = pack.hits.len();
                 hits.extend(pack.hits);
@@ -719,6 +637,9 @@ pub fn recall_authorized_sources_on_facade_with_source_filter(
 /// Soglia minima di lunghezza della query perché il recall parta (il gateway
 /// salta query < 8 char). Spostato fedelmente (`main.rs:13576`).
 const RECALL_MIN_QUERY_CHARS: usize = 8;
+const GRAPH_RECALL_MAX_HOPS: usize = 2;
+const GRAPH_RECALL_EXPANSION_LIMIT: usize = 4;
+const GRAPH_RECALL_SCORE_DECAY: f32 = 0.75;
 
 /// Soglia di score denso sotto la quale un hit vettoriale è scartato (paraphrase
 /// troppo debole). Spostato fedelmente (`main.rs:13656`).
@@ -820,13 +741,6 @@ pub fn recall_source_on_facade(
         let Some(record) = facade.get_authorized_memory_for_source(source, &memory_ref)? else {
             continue;
         };
-        let Some(collection) = collection_for_record(&record) else {
-            continue;
-        };
-        let subject_key = match explicit_subject_key(&record.metadata) {
-            Some(subject_key) => Some(subject_key),
-            None => facade.canonical_subject_key_for_memory(source, &memory_ref)?,
-        };
         let importance = record
             .metadata
             .get("importance")
@@ -839,36 +753,53 @@ pub fn recall_source_on_facade(
             importance,
             age_days: memory_age_days(&record.created_at, now_secs),
         };
-        hits.push(RecallHit {
-            memory_ref: reference,
-            text: format_recall_entry(&record.text, &record.metadata),
-            score: hybrid_memory_score(&candidate),
-            kind: record.memory_type,
-            source_user_id: source.source_user_id.clone(),
-            source_workspace_id: source.source_workspace_id.clone(),
-            source_label: source.source_label.clone(),
-            collection,
-            grant_id: source.grant_id.clone(),
-            policy_version: source.grant_id.as_ref().map(|_| source.policy_version),
-            sensitivity: record.sensitivity,
-            status: record.status,
-            updated_at: record.updated_at,
-            subject_key,
-            conflict: false,
-            publication_link: record
-                .metadata
-                .get("publication_link")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-                .or_else(|| {
-                    record
-                        .metadata
-                        .get("publication_source_ref")
-                        .cloned()
-                        .and_then(|value| serde_json::from_value::<MemoryRef>(value).ok())
-                        .and_then(|reference| serde_json::to_string(&reference).ok())
-                }),
-        });
+        if let Some(hit) = recall_hit_for_record(
+            facade,
+            source,
+            record,
+            hybrid_memory_score(&candidate),
+            Vec::new(),
+        )? {
+            hits.push(hit);
+        }
+    }
+    hits.sort_by(|left, right| {
+        right
+            .score
+            .total_cmp(&left.score)
+            .then_with(|| left.memory_ref.cmp(&right.memory_ref))
+    });
+
+    let direct_scores = hits
+        .iter()
+        .map(|hit| (hit.memory_ref.clone(), hit.score))
+        .collect::<std::collections::HashMap<_, _>>();
+    let seed_refs = hits
+        .iter()
+        .filter_map(|hit| hit.memory_ref.parse::<MemoryRef>().ok())
+        .collect::<Vec<_>>();
+    let mut seen_refs = direct_scores.keys().cloned().collect::<HashSet<_>>();
+    for related in facade.related_authorized_memories_for_source(
+        source,
+        &seed_refs,
+        GRAPH_RECALL_MAX_HOPS,
+        GRAPH_RECALL_EXPANSION_LIMIT,
+    )? {
+        let reference = related.record.reference.to_string();
+        if !seen_refs.insert(reference) {
+            continue;
+        }
+        let Some(seed_score) = direct_scores.get(&related.seed_ref.to_string()) else {
+            continue;
+        };
+        let score = *seed_score
+            * GRAPH_RECALL_SCORE_DECAY
+                .powi(i32::try_from(related.relation_path.len()).unwrap_or(2));
+        if let Some(hit) =
+            recall_hit_for_record(facade, source, related.record, score, related.relation_path)?
+        {
+            hits.push(hit);
+        }
     }
     hits.sort_by(|left, right| {
         right
@@ -906,6 +837,54 @@ fn explicit_subject_key(metadata: &serde_json::Value) -> Option<String> {
                 .filter(|value| !value.is_empty())
         })
         .map(str::to_string)
+}
+
+fn recall_hit_for_record(
+    facade: &MemoryFacade,
+    source: &AuthorizedMemorySource,
+    record: MemoryRecord,
+    score: f32,
+    graph_path: Vec<String>,
+) -> MemoryResult<Option<RecallHit>> {
+    let Some(collection) = collection_for_record(&record) else {
+        return Ok(None);
+    };
+    let subject_key = match explicit_subject_key(&record.metadata) {
+        Some(subject_key) => Some(subject_key),
+        None => facade.canonical_subject_key_for_memory(source, &record.reference)?,
+    };
+    let publication_link = record
+        .metadata
+        .get("publication_link")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            record
+                .metadata
+                .get("publication_source_ref")
+                .cloned()
+                .and_then(|value| serde_json::from_value::<MemoryRef>(value).ok())
+                .and_then(|reference| serde_json::to_string(&reference).ok())
+        });
+    Ok(Some(RecallHit {
+        memory_ref: record.reference.to_string(),
+        text: format_recall_entry(&record.text, &record.metadata),
+        score,
+        kind: record.memory_type,
+        source_user_id: source.source_user_id.clone(),
+        source_workspace_id: source.source_workspace_id.clone(),
+        source_label: source.source_label.clone(),
+        collection,
+        grant_id: source.grant_id.clone(),
+        policy_version: source.grant_id.as_ref().map(|_| source.policy_version),
+        sensitivity: record.sensitivity,
+        status: record.status,
+        updated_at: record.updated_at,
+        subject_key,
+        conflict: false,
+        publication_link,
+        graph_path,
+    }))
 }
 
 /// Recall RAG episodico — fase 2: FTS + vector search + fusione RRF + formatting,

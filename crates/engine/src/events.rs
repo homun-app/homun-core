@@ -33,6 +33,10 @@ pub struct RecallStreamHit {
     pub policy_version: Option<u64>,
     /// Il coordinatore ha rilevato un conflitto semantico con un altro hit.
     pub conflict: bool,
+    /// Relazioni canoniche percorse dal seed della query fino a questo hit.
+    /// Vuoto per una corrispondenza diretta e per gli eventi storici.
+    #[serde(default)]
+    pub graph_path: Vec<String>,
 }
 
 /// ADR 0022 (Piano UI A2/A3) — payload dell'evento `Recall` stream. Shape identica
@@ -158,14 +162,21 @@ mod tests {
             grant_id: Some("grant-a".to_string()),
             policy_version: Some(7),
             conflict: false,
+            graph_path: vec!["mentions".to_string(), "mentions".to_string()],
         };
         let mut value = serde_json::to_value(hit).expect("serialize recall hit");
         assert_eq!(value["source_workspace_id"], "project-a");
         assert_eq!(value["collection"], "decisions");
         assert_eq!(value["grant_id"], "grant-a");
         assert_eq!(value["policy_version"], 7);
+        assert_eq!(
+            value["graph_path"],
+            serde_json::json!(["mentions", "mentions"])
+        );
         value.as_object_mut().unwrap().remove("policy_version");
+        value.as_object_mut().unwrap().remove("graph_path");
         let legacy: RecallStreamHit = serde_json::from_value(value).expect("legacy recall hit");
         assert_eq!(legacy.policy_version, None);
+        assert!(legacy.graph_path.is_empty());
     }
 }

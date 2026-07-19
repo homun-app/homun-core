@@ -124,6 +124,9 @@ pub struct RecallHit {
     /// Identita del collegamento di pubblicazione, quando disponibile. Due copie
     /// che condividono questo valore rappresentano la stessa conoscenza canonica.
     pub publication_link: Option<String>,
+    /// Relazioni canoniche percorse dal seed fino a questo hit. Vuoto per gli
+    /// hit trovati direttamente dalla query.
+    pub graph_path: Vec<String>,
 }
 
 /// Risultato della recall RAG episodica — contesto *mirato* alla query.
@@ -220,12 +223,12 @@ pub fn format_recall_hits(hits: &[RecallHit]) -> Option<String> {
     let normal = hits
         .iter()
         .filter(|hit| !hit.conflict)
-        .map(|hit| format!("- [source: {}] {}", hit.source_label, hit.text))
+        .map(format_recall_hit)
         .collect::<Vec<_>>();
     let conflicting = hits
         .iter()
         .filter(|hit| hit.conflict)
-        .map(|hit| format!("- [source: {}] {}", hit.source_label, hit.text))
+        .map(format_recall_hit)
         .collect::<Vec<_>>();
     let mut sections = Vec::new();
     if !normal.is_empty() {
@@ -238,6 +241,19 @@ pub fn format_recall_hits(hits: &[RecallHit]) -> Option<String> {
         ));
     }
     Some(sections.join("\n\n"))
+}
+
+fn format_recall_hit(hit: &RecallHit) -> String {
+    if hit.graph_path.is_empty() {
+        format!("- [source: {}] {}", hit.source_label, hit.text)
+    } else {
+        format!(
+            "- [source: {}; graph: {}] {}",
+            hit.source_label,
+            hit.graph_path.join(" -> "),
+            hit.text
+        )
+    }
 }
 
 /// Uno scambio completo turno utente↔assistente, input di [`MemoryRecallService::learn`].

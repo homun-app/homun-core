@@ -4,9 +4,9 @@ use local_first_memory::{
     MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySourceAccessEvent,
     MemorySourceAccessOutcome, MemorySourceGrant, MemorySourcePolicy, MemoryStatus,
     MemoryWikiProjection, PrivacyDomain, RecallHit, SQLiteMemoryStore, UserId, WikiFileStore,
-    WikiPage, WorkspaceId, memory_recall_intent, merge_recall_hits,
-    recall_authorized_sources_on_facade, recall_authorized_sources_on_facade_with_source_filter,
-    recall_source_on_facade, revalidate_recall_hits_before_injection,
+    WikiPage, WorkspaceId, merge_recall_hits, recall_authorized_sources_on_facade,
+    recall_authorized_sources_on_facade_with_source_filter, recall_source_on_facade,
+    revalidate_recall_hits_before_injection,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -44,33 +44,40 @@ fn hit(
         subject_key: subject_key.map(str::to_string),
         conflict: false,
         publication_link: None,
+        graph_path: Vec::new(),
     }
 }
 
 #[test]
-fn intent_router_selects_expected_catalog_collections_without_source_content() {
-    let preference = memory_recall_intent("Che lingua e tone preferisci?");
-    assert!(
-        preference
-            .collections
-            .contains(&MemoryCollectionKey::Preferences)
+fn linked_recall_searches_every_granted_collection_without_keyword_activation() {
+    let fixture = MultiSourceFixture::new();
+    fixture.insert(
+        "__personal__",
+        "personal-code",
+        "fact",
+        "Il codice personale confermato è NEBULA-7429",
+        serde_json::json!({"scope": "personal"}),
+        &[1.0, 0.0],
     );
-    let decision = memory_recall_intent("Quale decisione abbiamo preso?");
-    assert!(
-        decision
-            .collections
-            .contains(&MemoryCollectionKey::Decisions)
+    fixture.grant(
+        "grant-personal",
+        "__personal__",
+        [MemoryCollectionKey::Profile],
+        HashMap::new(),
     );
-    let goal = memory_recall_intent("Quale obiettivo manca?");
-    assert!(goal.collections.contains(&MemoryCollectionKey::Goals));
-    let artifact = memory_recall_intent("Trova il deliverable del progetto");
-    assert!(
-        artifact
-            .collections
-            .contains(&MemoryCollectionKey::Artifacts)
-    );
-    let episode = memory_recall_intent("Cosa abbiamo discusso la scorsa volta?");
-    assert!(episode.collections.contains(&MemoryCollectionKey::Episodes));
+
+    let pack = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "Qual è il codice personale confermato?",
+        &[1.0, 0.0],
+        1_800_000_000,
+        None,
+    )
+    .expect("recall");
+
+    assert!(pack.hits.iter().any(|hit| hit.text.contains("NEBULA-7429")));
 }
 
 #[test]
@@ -444,6 +451,381 @@ impl MultiSourceFixture {
             })
             .expect("grant");
     }
+
+    fn insert_entity(&self, workspace: &str, key: &str, name: &str) -> MemoryRef {
+        let workspace = WorkspaceId::new(workspace);
+        let reference = MemoryRef::new(
+            MemoryRefKind::Entity,
+            self.user.clone(),
+            workspace.clone(),
+            key,
+        );
+        self.facade
+            .upsert_entity(&MemoryEntity {
+                reference: reference.clone(),
+                user_id: self.user.clone(),
+                workspace_id: workspace,
+                entity_type: "project".to_string(),
+                name: name.to_string(),
+                canonical_key: key.to_string(),
+                aliases: Vec::new(),
+                privacy_domain: PrivacyDomain::new("work"),
+                sensitivity: DataSensitivity::Private,
+                metadata: serde_json::json!({}),
+            })
+            .expect("entity");
+        reference
+    }
+
+    fn link(
+        &self,
+        workspace: &str,
+        key: &str,
+        source_ref: &MemoryRef,
+        relation_type: &str,
+        target_ref: &MemoryRef,
+    ) {
+        let workspace = WorkspaceId::new(workspace);
+        self.facade
+            .upsert_relation(&MemoryRelation {
+                reference: MemoryRef::new(
+                    MemoryRefKind::Relation,
+                    self.user.clone(),
+                    workspace.clone(),
+                    key,
+                ),
+                user_id: self.user.clone(),
+                workspace_id: workspace,
+                source_ref: source_ref.clone(),
+                relation_type: relation_type.to_string(),
+                target_ref: target_ref.clone(),
+                confidence: 1.0,
+                privacy_domain: PrivacyDomain::new("work"),
+                sensitivity: DataSensitivity::Private,
+                evidence: Vec::new(),
+                metadata: serde_json::json!({}),
+            })
+            .expect("relation");
+    }
+}
+
+#[test]
+fn recall_expands_seed_through_same_source_graph() {
+    let fixture = MultiSourceFixture::new();
+    let seed = fixture.insert(
+        "project-b",
+        "atlas-decision",
+        "decision",
+        "Atlas release uses the September window",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    let related = fixture.insert(
+        "project-b",
+        "isolation-fact",
+        "fact",
+        "Personal knowledge remains isolated unless explicitly linked",
+        serde_json::json!({}),
+        &[0.0, 1.0],
+    );
+    let entity = fixture.insert_entity("project-b", "project:atlas", "Atlas");
+    fixture.link("project-b", "seed-mentions", &seed, "mentions", &entity);
+    fixture.link(
+        "project-b",
+        "related-mentions",
+        &related,
+        "mentions",
+        &entity,
+    );
+    fixture.grant(
+        "grant-b",
+        "project-b",
+        [
+            MemoryCollectionKey::Decisions,
+            MemoryCollectionKey::Knowledge,
+        ],
+        HashMap::new(),
+    );
+
+    let pack = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "Quale finestra usa Atlas?",
+        &[],
+        1_800_000_000,
+        None,
+    )
+    .expect("graph recall");
+
+    assert!(
+        pack.hits
+            .iter()
+            .any(|hit| hit.memory_ref == seed.to_string())
+    );
+    let expanded = pack
+        .hits
+        .iter()
+        .find(|hit| hit.memory_ref == related.to_string())
+        .expect("related graph memory");
+    assert_eq!(expanded.graph_path, vec!["mentions", "mentions"]);
+    assert_eq!(expanded.source_workspace_id.as_str(), "project-b");
+    assert!(
+        pack.block
+            .as_deref()
+            .is_some_and(|block| block.contains("graph: mentions -> mentions"))
+    );
+}
+
+#[test]
+fn graph_expansion_keeps_the_highest_ranked_seed_as_provenance() {
+    let fixture = MultiSourceFixture::new();
+    let lower_ranked_seed = fixture.insert(
+        "project-b",
+        "a-lower-ranked-seed",
+        "decision",
+        "A secondary contextual decision",
+        serde_json::json!({}),
+        &[0.6, 0.8],
+    );
+    let higher_ranked_seed = fixture.insert(
+        "project-b",
+        "z-higher-ranked-seed",
+        "decision",
+        "Priority anchor for the Atlas release",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    let related = fixture.insert(
+        "project-b",
+        "related-fact",
+        "fact",
+        "Verified ledger mandate",
+        serde_json::json!({}),
+        &[0.0, 1.0],
+    );
+    let entity = fixture.insert_entity("project-b", "project:atlas", "Atlas");
+    fixture.link(
+        "project-b",
+        "lower-mentions",
+        &lower_ranked_seed,
+        "mentions",
+        &entity,
+    );
+    fixture.link(
+        "project-b",
+        "higher-mentions",
+        &higher_ranked_seed,
+        "mentions",
+        &entity,
+    );
+    fixture.link(
+        "project-b",
+        "related-mentions",
+        &related,
+        "mentions",
+        &entity,
+    );
+    fixture.grant(
+        "grant-b",
+        "project-b",
+        [
+            MemoryCollectionKey::Decisions,
+            MemoryCollectionKey::Knowledge,
+        ],
+        HashMap::new(),
+    );
+
+    let pack = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "Priority anchor for the Atlas release",
+        &[1.0, 0.0],
+        1_800_000_000,
+        None,
+    )
+    .expect("graph recall");
+
+    let higher_ranked_hit = pack
+        .hits
+        .iter()
+        .find(|hit| hit.memory_ref == higher_ranked_seed.to_string())
+        .expect("higher-ranked seed");
+    let lower_ranked_hit = pack
+        .hits
+        .iter()
+        .find(|hit| hit.memory_ref == lower_ranked_seed.to_string())
+        .expect("lower-ranked seed");
+    assert!(higher_ranked_hit.score > lower_ranked_hit.score);
+    let expanded = pack
+        .hits
+        .iter()
+        .find(|hit| hit.memory_ref == related.to_string())
+        .expect("related graph memory");
+    let expected_score = higher_ranked_hit.score * 0.75_f32.powi(2);
+    assert!(
+        (expanded.score - expected_score).abs() < f32::EPSILON,
+        "expanded={}, expected={}, high={}, low={}, path={:?}",
+        expanded.score,
+        expected_score,
+        higher_ranked_hit.score,
+        lower_ranked_hit.score,
+        expanded.graph_path
+    );
+}
+
+#[test]
+fn denied_graph_memory_cannot_be_returned_or_used_as_a_bridge() {
+    let fixture = MultiSourceFixture::new();
+    let seed = fixture.insert(
+        "project-b",
+        "atlas-launch",
+        "decision",
+        "Atlas launch is scheduled for September",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    let denied_bridge = fixture.insert(
+        "project-b",
+        "private-bridge",
+        "fact",
+        "A restricted intermediate memory",
+        serde_json::json!({}),
+        &[0.0, 1.0],
+    );
+    let downstream = fixture.insert(
+        "project-b",
+        "downstream",
+        "fact",
+        "Use the sealed evidence ledger",
+        serde_json::json!({}),
+        &[0.0, 1.0],
+    );
+    fixture.link(
+        "project-b",
+        "seed-bridge",
+        &seed,
+        "relates_to",
+        &denied_bridge,
+    );
+    fixture.link(
+        "project-b",
+        "bridge-downstream",
+        &denied_bridge,
+        "derived_from",
+        &downstream,
+    );
+    fixture.grant(
+        "grant-b",
+        "project-b",
+        [
+            MemoryCollectionKey::Decisions,
+            MemoryCollectionKey::Knowledge,
+        ],
+        HashMap::from([(denied_bridge.clone(), MemoryGrantOverrideEffect::Deny)]),
+    );
+
+    let pack = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "When does Atlas launch?",
+        &[],
+        1_800_000_000,
+        None,
+    )
+    .expect("graph recall");
+
+    assert!(
+        pack.hits
+            .iter()
+            .any(|hit| hit.memory_ref == seed.to_string())
+    );
+    assert!(
+        pack.hits
+            .iter()
+            .all(|hit| hit.memory_ref != denied_bridge.to_string())
+    );
+    assert!(
+        pack.hits
+            .iter()
+            .all(|hit| hit.memory_ref != downstream.to_string())
+    );
+}
+
+#[test]
+fn denied_graph_neighbours_cannot_crowd_out_an_authorized_relation() {
+    let fixture = MultiSourceFixture::new();
+    let seed = fixture.insert(
+        "project-b",
+        "atlas-anchor",
+        "decision",
+        "Atlas launch anchor",
+        serde_json::json!({}),
+        &[1.0, 0.0],
+    );
+    let allowed = fixture.insert(
+        "project-b",
+        "authorized-ledger",
+        "fact",
+        "Verified ledger mandate",
+        serde_json::json!({}),
+        &[0.0, 1.0],
+    );
+    let mut overrides = HashMap::new();
+    for index in 0..64 {
+        let denied = fixture.insert(
+            "project-b",
+            &format!("denied-{index:02}"),
+            "fact",
+            &format!("Restricted neighbour {index}"),
+            serde_json::json!({}),
+            &[0.0, 1.0],
+        );
+        fixture.link(
+            "project-b",
+            &format!("a-denied-{index:02}"),
+            &seed,
+            "relates_to",
+            &denied,
+        );
+        overrides.insert(denied, MemoryGrantOverrideEffect::Deny);
+    }
+    fixture.link(
+        "project-b",
+        "z-authorized",
+        &seed,
+        "relates_to",
+        &allowed,
+    );
+    fixture.grant(
+        "grant-b",
+        "project-b",
+        [
+            MemoryCollectionKey::Decisions,
+            MemoryCollectionKey::Knowledge,
+        ],
+        overrides,
+    );
+
+    let pack = recall_authorized_sources_on_facade(
+        &fixture.facade,
+        &fixture.user,
+        &fixture.consumer,
+        "Atlas launch anchor",
+        &[1.0, 0.0],
+        1_800_000_000,
+        None,
+    )
+    .expect("graph recall");
+
+    let expanded = pack
+        .hits
+        .iter()
+        .find(|hit| hit.memory_ref == allowed.to_string())
+        .expect("authorized relation survives denied neighbours");
+    assert_eq!(expanded.graph_path, vec!["relates_to"]);
 }
 
 #[test]
@@ -674,7 +1056,7 @@ fn semantic_linked_memory_end_to_end_preserves_provenance_and_revokes_cached_acc
 }
 
 #[test]
-fn coordinator_queries_local_always_and_linked_only_on_intent_or_individual_allow() {
+fn coordinator_queries_local_and_enforces_linked_collection_or_individual_allow() {
     let fixture = MultiSourceFixture::new();
     fixture.insert(
         "project-a",
@@ -796,7 +1178,7 @@ fn coordinator_loads_one_source_authorization_snapshot_per_resolution_pass() {
 }
 
 #[test]
-fn linked_recall_intersects_grant_collections_with_query_intent() {
+fn linked_recall_searches_all_granted_collections() {
     let fixture = MultiSourceFixture::new();
     fixture.insert(
         "project-b",
@@ -836,12 +1218,21 @@ fn linked_recall_intersects_grant_collections_with_query_intent() {
         .filter(|item| item.source_workspace_id.as_str() == "project-b")
         .collect::<Vec<_>>();
 
-    assert_eq!(linked.len(), 1);
-    assert_eq!(linked[0].collection, MemoryCollectionKey::Preferences);
+    assert_eq!(linked.len(), 2);
+    assert!(
+        linked
+            .iter()
+            .any(|item| item.collection == MemoryCollectionKey::Preferences)
+    );
+    assert!(
+        linked
+            .iter()
+            .any(|item| item.collection == MemoryCollectionKey::Goals)
+    );
 }
 
 #[test]
-fn individual_allow_outside_intent_does_not_reopen_other_granted_collections() {
+fn individual_allow_adds_one_memory_without_narrowing_granted_collections() {
     let fixture = MultiSourceFixture::new();
     fixture.insert(
         "project-b",
@@ -906,7 +1297,7 @@ fn individual_allow_outside_intent_does_not_reopen_other_granted_collections() {
     assert!(
         linked
             .iter()
-            .all(|item| item.collection != MemoryCollectionKey::Goals)
+            .any(|item| item.collection == MemoryCollectionKey::Goals)
     );
 }
 

@@ -65,6 +65,21 @@ grant invalida la cache vettoriale autorizzata: il comportamento successivo è
 fail-closed. La memoria personale non diventa implicitamente visibile solo perché un
 progetto ha ricevuto accesso a un altro progetto, e viceversa.
 
+Dal 2026-07-19 il richiamo non usa più parole chiave per scegliere quali collection
+consultare. Ogni collection concessa dal grant partecipa alla ricerca dei nodi iniziali;
+le corrispondenze lessicali/semantiche servono soltanto a trovare pochi seed nello scope
+esatto della fonte. Da ciascun seed il recall percorre poi il grafo canonico per un
+massimo di due archi, 64 nodi autorizzati, 32 vicini autorizzati per nodo e 512
+relazioni ispezionate complessivamente; aggiunge al massimo quattro memorie collegate
+per fonte.
+
+Ogni arco, entity e memoria attraversata viene rivalidata contro utente, workspace,
+privacy domain, sensibilità e policy della stessa fonte. Una memoria negata non viene
+restituita e non può fare da ponte; il percorso non passa mai da un grant a quello di
+un'altra fonte. Gli hit espansi conservano il percorso in `graph_path`, oltre a ref,
+workspace, grant e policy version. Le pagine Markdown restano una proiezione leggibile:
+non esiste un catalogo o un “cassetto” persistente parallelo a SQL e grafo.
+
 ## Integrità operativa di Memory, Vault e grafi progetto
 
 L'identità Graphify è deterministica: nodi e archi vengono normalizzati su chiavi
@@ -113,6 +128,9 @@ registrati richiede una scelta separata e non fa parte della manutenzione ordina
 Fatto:
 
 - recall ibrido lessicale + semantico;
+- recall graph-guided sulle fonti autorizzate: seed mirati, attraversamento canonico
+  limitato a due archi, provenienza `graph_path` e nessun gate per parole chiave sulle
+  collection concesse;
 - Graphify/graphification per importare conoscenza strutturata in `entities` /
   `relations`; oggi il path maturo è il code graph, queryabile via `query_code_graph`;
 - briefing always-on con preferenze/profilo;
