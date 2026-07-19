@@ -1472,6 +1472,88 @@ impl TaskStore {
         Ok(runs)
     }
 
+    pub fn list_agent_runs_for_thread(
+        &self,
+        thread_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Vec<AgentRun>> {
+        let mut stmt = self.connection.prepare(
+            "SELECT run_id, turn_id, thread_id, user_id, workspace_id, attempt, status,
+                    model, provider, prompt_fingerprint, started_at, completed_at,
+                    terminal_reason, schema_version
+             FROM agent_runs
+             WHERE thread_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+             ORDER BY started_at DESC, attempt DESC",
+        )?;
+        let rows = stmt.query_map(params![thread_id, user_id, workspace_id], |row| {
+            let status: String = row.get(6)?;
+            Ok((
+                AgentRun {
+                    run_id: row.get(0)?, turn_id: row.get(1)?, thread_id: row.get(2)?,
+                    user_id: row.get(3)?, workspace_id: row.get(4)?, attempt: row.get(5)?,
+                    status: AgentRunStatus::parse(&status).unwrap_or(AgentRunStatus::Failed),
+                    model: row.get(7)?, provider: row.get(8)?, prompt_fingerprint: row.get(9)?,
+                    started_at: row.get(10)?, completed_at: row.get(11)?,
+                    terminal_reason: row.get(12)?, schema_version: row.get(13)?,
+                },
+                status,
+            ))
+        })?;
+        let mut runs = Vec::new();
+        for row in rows {
+            let (run, status) = row?;
+            if AgentRunStatus::parse(&status).is_none() {
+                return Err(TaskRuntimeError::Store(format!("unknown agent run status: {status}")));
+            }
+            runs.push(run);
+        }
+        Ok(runs)
+    }
+
+    pub fn workspace_for_agent_run(
+        &self,
+        run_id: &str,
+        user_id: &str,
+    ) -> TaskRuntimeResult<Option<String>> {
+        Ok(self.connection.query_row(
+            "SELECT workspace_id FROM agent_runs WHERE run_id = ?1 AND user_id = ?2",
+            params![run_id, user_id],
+            |row| row.get(0),
+        ).optional()?)
+    }
+
+    pub fn latest_agent_checkpoint(
+        &self,
+        run_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Option<AgentCheckpoint>> {
+        self.connection.query_row(
+            "SELECT c.checkpoint_id, c.run_id, c.turn_id, c.thread_id, c.user_id,
+                    c.workspace_id, c.round, c.state_json, c.fingerprint,
+                    c.resumable, c.created_at
+             FROM agent_checkpoints c
+             JOIN agent_runs r ON r.run_id = c.run_id
+             WHERE c.run_id = ?1 AND r.user_id = ?2 AND r.workspace_id = ?3
+             ORDER BY c.round DESC LIMIT 1",
+            params![run_id, user_id, workspace_id],
+            |row| {
+                let state_json: String = row.get(7)?;
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?, state_json, row.get::<_, String>(8)?,
+                    row.get::<_, i64>(9)?, row.get::<_, i64>(10)?))
+            },
+        ).optional()?.map(|(checkpoint_id, run_id, turn_id, thread_id, user_id,
+                            workspace_id, round, state_json, fingerprint, resumable, created_at)| {
+            Ok(AgentCheckpoint { checkpoint_id, run_id, turn_id, thread_id, user_id, workspace_id,
+                round: round as u32, state_json: serde_json::from_str(&state_json)?, fingerprint,
+                resumable: resumable != 0, created_at })
+        }).transpose()
+    }
+
     pub fn list_agent_run_events(
         &self,
         run_id: &str,

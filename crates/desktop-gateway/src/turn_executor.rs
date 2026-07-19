@@ -15,6 +15,9 @@ use tokio::sync::{Notify, broadcast};
 
 fn finalize_agent_run(
     state: &crate::AppState,
+    thread_id: &str,
+    user_id: &str,
+    workspace_id: &str,
     agent_run: &Option<(String, crate::agent_journal::GatewayExecutionJournal)>,
     status: AgentRunStatus,
     reason: &'static str,
@@ -34,6 +37,13 @@ fn finalize_agent_run(
     if let Ok(store) = state.task_store.lock() {
         if let Err(error) = store.finish_agent_run(run_id, status, Some(reason)) {
             tracing::warn!(target: "agent::journal", %run_id, %error, "could not finalize agent run");
+        }
+        if let Ok(data_dir) = crate::gateway_data_dir() {
+            if let Err(error) = crate::working_ledger::materialize(
+                &store, &data_dir, user_id, workspace_id, thread_id,
+            ) {
+                tracing::warn!(target: "agent::ledger", %run_id, %error, "could not materialize working ledger");
+            }
         }
     }
     crate::agent_journal::unregister(run_id);
@@ -293,6 +303,9 @@ pub fn execute_chat_turn_task(
     let Some(visible_turn) = visible_turn else {
         finalize_agent_run(
             state,
+            thread_id,
+            task.user_id.as_str(),
+            &workspace_id,
             &agent_run,
             AgentRunStatus::Failed,
             "visible_turn_start_failed",
@@ -360,6 +373,9 @@ pub fn execute_chat_turn_task(
     if cancelled {
         finalize_agent_run(
             state,
+            thread_id,
+            task.user_id.as_str(),
+            &workspace_id,
             &agent_run,
             AgentRunStatus::Aborted,
             "cancelled",
@@ -370,6 +386,9 @@ pub fn execute_chat_turn_task(
     } else if generated {
         finalize_agent_run(
             state,
+            thread_id,
+            task.user_id.as_str(),
+            &workspace_id,
             &agent_run,
             AgentRunStatus::Completed,
             "delivered",
@@ -380,6 +399,9 @@ pub fn execute_chat_turn_task(
     } else {
         finalize_agent_run(
             state,
+            thread_id,
+            task.user_id.as_str(),
+            &workspace_id,
             &agent_run,
             AgentRunStatus::Failed,
             "no_reply_generated",

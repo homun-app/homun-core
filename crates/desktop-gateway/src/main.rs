@@ -51,6 +51,7 @@ mod task_registry;
 mod temporal;
 mod template_packs;
 mod vision;
+mod working_ledger;
 mod turn_executor;
 mod ws_gateway;
 mod tool_exec;
@@ -1601,8 +1602,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .route("/api/chat/turns/{turn_id}/events", get(get_turn_events))
         .route("/api/chat/turns/{turn_id}/runs", get(get_agent_runs))
+        .route("/api/chat/threads/{thread_id}/runs", get(get_thread_agent_runs))
+        .route("/api/chat/threads/{thread_id}/runtime-plan", get(get_thread_runtime_plan))
+        .route("/api/chat/threads/{thread_id}/ledger", get(get_thread_working_ledger))
         .route("/api/chat/runs/{run_id}/events", get(get_agent_run_events))
         .route("/api/chat/runs/{run_id}/prompt/latest", get(get_latest_agent_prompt))
+        .route("/api/chat/runs/{run_id}/checkpoint/latest", get(get_latest_agent_checkpoint))
         .route("/api/chat/turns/{turn_id}/stream", get(subscribe_turn_stream));
     let chat_routes = chat_routes.route_layer(middleware::from_fn_with_state(
         state.clone(),
@@ -2732,6 +2737,9 @@ async fn delete_chat_thread(
     let snapshot = lock_store(&state)?
         .delete_thread(&thread_id)
         .map_err(GatewayError::store)?;
+    if let Ok(data_dir) = gateway_data_dir() {
+        let _ = std::fs::remove_file(working_ledger::ledger_path(&data_dir, &thread_id));
+    }
     // Deleting ends the thread → close its warm browser session.
     let st = state.clone();
     let tid = thread_id.clone();
@@ -34546,6 +34554,87 @@ async fn cancel_turn(
 struct TurnSinceQuery {
     #[serde(default)]
     since: Option<i64>,
+}
+
+fn execution_thread_workspace(state: &AppState, thread_id: &str) -> Result<String, GatewayError> {
+    lock_store(state)?
+        .workspace_for_thread(thread_id)
+        .map_err(|_| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_thread_not_found",
+            message: "thread not found".to_string(),
+        })
+}
+
+async fn get_thread_agent_runs(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<local_first_task_runtime::AgentRun>>, GatewayError> {
+    let workspace = execution_thread_workspace(&state, &thread_id)?;
+    let runs = lock_task_store(&state)?
+        .list_agent_runs_for_thread(&thread_id, gateway_user_id().as_str(), &workspace)
+        .map_err(GatewayError::task)?;
+    Ok(Json(runs))
+}
+
+async fn get_thread_runtime_plan(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, GatewayError> {
+    let workspace = execution_thread_workspace(&state, &thread_id)?;
+    let plan = lock_task_store(&state)?
+        .load_runtime_plan(gateway_user_id().as_str(), &workspace, &thread_id)
+        .map_err(GatewayError::task)?;
+    Ok(Json(serde_json::to_value(plan).unwrap_or(Value::Null)))
+}
+
+async fn get_thread_working_ledger(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, GatewayError> {
+    let workspace = execution_thread_workspace(&state, &thread_id)?;
+    let store = lock_task_store(&state)?;
+    let markdown = working_ledger::render(
+        &store,
+        gateway_user_id().as_str(),
+        &workspace,
+        &thread_id,
+    )
+    .map_err(|message| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "working_ledger_render",
+        message,
+    })?;
+    Ok(Json(serde_json::json!({"thread_id": thread_id, "markdown": markdown})))
+}
+
+async fn get_latest_agent_checkpoint(
+    Path(run_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<local_first_task_runtime::AgentCheckpoint>, GatewayError> {
+    let store = lock_task_store(&state)?;
+    let user = gateway_user_id();
+    let workspace = store
+        .workspace_for_agent_run(&run_id, user.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_checkpoint_not_found",
+            message: "checkpoint not found".to_string(),
+        })?;
+    let checkpoint = store
+        .latest_agent_checkpoint(
+            &run_id,
+            user.as_str(),
+            &workspace,
+        )
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_checkpoint_not_found",
+            message: "checkpoint not found".to_string(),
+        })?;
+    Ok(Json(checkpoint))
 }
 
 /// GET /api/chat/turns/{turn_id}/runs — ordered broker attempts for the authenticated scope.
