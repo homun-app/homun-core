@@ -394,7 +394,10 @@ function spawnGateway() {
   child.on("exit", (code, signal) => {
     if (gatewayProcess !== child) return; // stale exit from a replaced child
     gatewayProcess = null;
-    if (isQuitting) return;
+    // A reset-initiated kill is intentional (we killed the gateway ourselves
+    // to reset it), not a crash: skip logging/crash-loop-counting/dialog just
+    // like a normal quit, otherwise the crash dialog can pop up mid-reset.
+    if (isQuitting || isResetting) return;
     const line = `gateway exited unexpectedly (code=${code} signal=${signal})`;
     console.error(line);
     desktopLog.log(line);
