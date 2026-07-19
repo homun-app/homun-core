@@ -1,3 +1,6 @@
+use local_first_desktop_gateway::linked_memory_repair::{
+    LinkedRepairFailureInjection, apply_linked_memory_repair, preview_linked_memory_repair,
+};
 use local_first_memory::{
     DataSensitivity, Exchange, LearnHooks, LinkedMemoryReadRef, MemoryCollectionKey, MemoryFacade,
     MemoryRecord, MemoryRef, MemoryRefKind, MemoryReuseEnvelope, MemorySourceGrant, MemoryStatus,
@@ -5,8 +8,42 @@ use local_first_memory::{
     persist_learn_extraction, prepare_learn_prompt, recall_authorized_sources_on_facade,
 };
 use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
 
 const LINKED_SENTINEL: &str = "NEBULA-7429";
+
+#[test]
+fn linked_memory_repair_runs_on_explicit_real_database_copies() {
+    let (Ok(chat), Ok(memory), Ok(backup)) = (
+        std::env::var("HOMUN_REAL_COPY_CHAT"),
+        std::env::var("HOMUN_REAL_COPY_MEMORY"),
+        std::env::var("HOMUN_REAL_COPY_BACKUP"),
+    ) else {
+        return;
+    };
+    let chat = PathBuf::from(chat);
+    let memory = PathBuf::from(memory);
+    let backup = PathBuf::from(backup);
+    let preview = preview_linked_memory_repair(&chat, &memory).expect("real-copy preview");
+    let encoded = serde_json::to_string(&preview).unwrap();
+    assert!(!encoded.contains("/Users/"));
+    assert!(!encoded.contains("memory.sqlite"));
+
+    let result = apply_linked_memory_repair(
+        &chat,
+        &memory,
+        &backup,
+        &preview,
+        LinkedRepairFailureInjection::None,
+    )
+    .expect("real-copy apply");
+    assert!(result.chat_backup_bytes > 0);
+    assert!(result.memory_backup_bytes > 0);
+    assert_eq!(result.after.assistant_envelopes_to_backfill, 0);
+    assert_eq!(result.after.memories_to_remove, 0);
+    assert_eq!(result.after.episodes_to_remove, 0);
+    assert_eq!(result.after.derived_rows_to_rebuild, 0);
+}
 
 fn insert_memory(
     facade: &MemoryFacade,

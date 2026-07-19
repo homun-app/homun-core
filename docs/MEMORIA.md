@@ -50,9 +50,13 @@ La funzione è attiva di default. Per un rollback locale si può impostare solta
 `HOMUN_MEMORY_SOURCES=0` o `HOMUN_MEMORY_SOURCES=off`. Revocare un grant interrompe
 subito il richiamo; una fonte progetto non presente nel registry persistito, o con
 registry assente/illeggibile/corrotto/vuoto, è esclusa prima di recall, audit e
-aggiornamenti last-used. Il richiamo non pubblica né duplica memoria: la pubblicazione
-mantiene il proprio flusso governato. I candidati filtrati servono a recall e indice;
-non coincidono con l'Advanced picker, che gestisce le fonti non-segrete selezionabili.
+aggiornamenti last-used. Il richiamo non pubblica né duplica memoria. Se una fonte è
+stata collegata in quella direzione, la pubblicazione nel consumer è vietata in modo
+permanente anche dopo revoca/scadenza (`linked_memory_read_only`): chi vuole conservarne
+l'accesso mantiene il grant, senza creare copie. Il controllo usa il ledger storico
+server-side e non dipende dai campi inviati dal client. I candidati filtrati servono a
+recall e indice; non coincidono con l'Advanced picker, che gestisce le fonti non-segrete
+selezionabili.
 
 Smoke verificato in Europe/Rome il 2026-07-17: isolamento, grant/collection/override,
 revoca, filtro delle fonti mancanti e perimetro contatti. Nessun deploy è implicato da
@@ -79,6 +83,31 @@ restituita e non può fare da ponte; il percorso non passa mai da un grant a que
 un'altra fonte. Gli hit espansi conservano il percorso in `graph_path`, oltre a ref,
 workspace, grant e policy version. Le pagine Markdown restano una proiezione leggibile:
 non esiste un catalogo o un “cassetto” persistente parallelo a SQL e grafo.
+
+### Read set, contesto e write firewall
+
+Ogni hit collegato aggiunge al turno una tupla strutturata con workspace source, grant,
+versione policy, ref e revisione canonica del record. Recall automatico e tool esplicito
+confluiscono nello stesso read set; alla finalizzazione il gateway lo persiste
+atomicamente con la risposta in un envelope `memory_reuse`:
+
+- `normal`: nessun hit collegato;
+- `user_input_only`: l'apprendimento riceve solo il testo scritto dall'utente, mai
+  risposta, azioni o risposta precedente;
+- `blocked_unknown`: provenance ambigua/corrotta o finalizzazione incompleta, nessun
+  materiale raggiunge writer ed extractor.
+
+Il transcript non viene cancellato e resta leggibile. Il contesto inviato a un modello è
+invece ricostruito server-side dai messaggi persistiti: ogni tupla viene rivalidata contro
+grant corrente, versione, deny, ref e revisione. Una sola lettura non più valida rende la
+risposta non riusabile nel contesto. Revoca, source indisponibile e riavvio non cambiano
+questa regola.
+
+La policy del turno governa tutti i writer: memoria SQL, episodio `__threads__`, grafo,
+Wiki, briefing e checkpoint di compattazione. Un turno collegato può apprendere un nuovo
+fatto direttamente dichiarato dall'utente, ma non può salvare o riassumere la risposta
+derivata. L'attivazione non usa parole chiave: deriva esclusivamente dagli hit realmente
+autorizzati e usati nel turno.
 
 ## Integrità operativa di Memory, Vault e grafi progetto
 
@@ -114,6 +143,21 @@ essere riparate automaticamente, ma solo nello scope di un progetto registrato. 
 duplicati semantici tra memorie attive sono invece soltanto segnalati per revisione:
 non vengono mai fusi o cancellati dal repair di integrità. Anche il purge di scope non
 registrati richiede una scelta separata e non fa parte della manutenzione ordinaria.
+
+Per i dati legacy eventualmente creati prima del write firewall esiste una bonifica
+dedicata e separata:
+
+1. `POST /api/integrity/linked-memory/repair/preview` produce un report metadata-only
+   (conteggi, checksum e token, nessun testo);
+2. `POST /api/integrity/linked-memory/repair/apply` richiede la stessa preview e
+   `confirm=true`;
+3. vengono creati backup nuovi di `homun.sqlite` e `memory.sqlite` e l'apply aggiorna i
+   due database in una transazione con `quick_check` finale;
+4. vengono backfillati gli envelope e rimossi solo record automatici strutturalmente
+   riconducibili ai thread contaminati, con FTS e viste derivate ricostruite;
+5. memorie manuali, Graphify, grant, audit, source e transcript restano invariati. In
+   caso d'errore entrambi i database tornano allo stato iniziale; il secondo preview è
+   idempotente e non propone ulteriori righe.
 
 ## Tre facce della stessa memoria
 

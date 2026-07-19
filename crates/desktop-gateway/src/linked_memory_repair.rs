@@ -164,6 +164,7 @@ pub fn apply_linked_memory_repair(
     let connection = open_attached(chat_path, memory_path)?;
     connection.execute_batch("begin immediate")?;
     let apply_result = (|| -> Result<(RepairScan, Vec<String>), LinkedRepairError> {
+        ensure_chat_reuse_column(&connection)?;
         let scan = scan_repair(&connection)?;
         if scan.preview() != current {
             return Err(LinkedRepairError::StalePreview);
@@ -250,10 +251,16 @@ fn scan_repair(connection: &Connection) -> Result<RepairScan, LinkedRepairError>
 }
 
 fn scan_chat(connection: &Connection, scan: &mut RepairScan) -> Result<(), LinkedRepairError> {
-    let mut statement = connection.prepare(
-        "select id, thread_id, coalesce(event_parts_json, ''), coalesce(memory_reuse_json, '')
-           from chat_messages where role = 'assistant' order by id",
-    )?;
+    let envelope_column =
+        if column_exists(connection, "main", "chat_messages", "memory_reuse_json")? {
+            "coalesce(memory_reuse_json, '')"
+        } else {
+            "''"
+        };
+    let mut statement = connection.prepare(&format!(
+        "select id, thread_id, coalesce(event_parts_json, ''), {envelope_column}
+           from chat_messages where role = 'assistant' order by id"
+    ))?;
     let mut rows = statement.query([])?;
     while let Some(row) = rows.next()? {
         let message_id: String = row.get(0)?;
@@ -278,6 +285,29 @@ fn scan_chat(connection: &Connection, scan: &mut RepairScan) -> Result<(), Linke
         ));
     }
     Ok(())
+}
+
+fn ensure_chat_reuse_column(connection: &Connection) -> Result<(), LinkedRepairError> {
+    if !column_exists(connection, "main", "chat_messages", "memory_reuse_json")? {
+        connection.execute(
+            "alter table chat_messages add column memory_reuse_json text",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn column_exists(
+    connection: &Connection,
+    database: &str,
+    table: &str,
+    expected: &str,
+) -> Result<bool, LinkedRepairError> {
+    let mut statement = connection.prepare(&format!("pragma {database}.table_info({table})"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(columns.iter().any(|column| column == expected))
 }
 
 fn linked_envelope_from_event_parts(raw: &str) -> Option<MemoryReuseEnvelope> {
