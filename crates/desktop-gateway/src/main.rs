@@ -34687,12 +34687,19 @@ async fn get_agent_run_events(
         message: format!("lock: {error}"),
     })?;
     let user_id = gateway_user_id();
-    let workspace_id = gateway_workspace_id();
+    let workspace_id = store
+        .workspace_for_agent_run(&run_id, user_id.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_run_not_found",
+            message: "agent run not found".to_string(),
+        })?;
     let runs = store
         .list_agent_run_events(
             &run_id,
             user_id.as_str(),
-            workspace_id.as_str(),
+            &workspace_id,
             query.since,
         )
         .map_err(|error| GatewayError {
@@ -34703,7 +34710,7 @@ async fn get_agent_run_events(
     // An empty cursor page is valid only when the run itself exists in this scope.
     if runs.is_empty()
         && store
-            .latest_agent_prompt_snapshot(&run_id, user_id.as_str(), workspace_id.as_str())
+            .latest_agent_prompt_snapshot(&run_id, user_id.as_str(), &workspace_id)
             .map_err(|error| GatewayError {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "agent_run_lookup",
@@ -34712,7 +34719,7 @@ async fn get_agent_run_events(
             .is_none()
     {
         let scoped_run_exists = store
-            .list_agent_run_events(&run_id, user_id.as_str(), workspace_id.as_str(), None)
+            .list_agent_run_events(&run_id, user_id.as_str(), &workspace_id, None)
             .map_err(|error| GatewayError {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "agent_run_lookup",
@@ -34741,11 +34748,20 @@ async fn get_latest_agent_prompt(
         code: "agent_run_store_lock",
         message: format!("lock: {error}"),
     })?;
+    let user = gateway_user_id();
+    let workspace = store
+        .workspace_for_agent_run(&run_id, user.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "agent_run_not_found",
+            message: "agent run not found".to_string(),
+        })?;
     let event = store
         .latest_agent_prompt_snapshot(
             &run_id,
-            gateway_user_id().as_str(),
-            gateway_workspace_id().as_str(),
+            user.as_str(),
+            &workspace,
         )
         .map_err(|error| GatewayError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
