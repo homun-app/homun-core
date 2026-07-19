@@ -35,7 +35,7 @@
 - Modify: `crates/task-runtime/src/lib.rs`
 - Test: `crates/task-runtime/src/store.rs`
 
-- [ ] **Step 1: Write failing runtime-plan tests**
+- [x] **Step 1: Write failing runtime-plan tests**
 
 Add tests proving scope isolation, monotonic revision, settled status, stall bookkeeping and cascade through thread/workspace purge:
 
@@ -50,13 +50,13 @@ fn runtime_plan_is_scoped_and_revisioned() {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `cargo test -p local-first-task-runtime runtime_plan_is_scoped_and_revisioned --quiet`
 
 Expected: compile failure because the methods and record type do not exist.
 
-- [ ] **Step 3: Add schema and typed operations**
+- [x] **Step 3: Add schema and typed operations**
 
 Implement schema v6 plus:
 
@@ -69,13 +69,13 @@ pub fn purge_runtime_plan_for_thread(&self, user: &str, workspace: &str, thread:
 
 Use `TransactionBehavior::Immediate` for revision and stall updates.
 
-- [ ] **Step 4: Run runtime tests and verify GREEN**
+- [x] **Step 4: Run runtime tests and verify GREEN**
 
 Run: `cargo test -p local-first-task-runtime runtime_plan --quiet`
 
 Expected: all runtime-plan and migration tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/task-runtime/src/types.rs crates/task-runtime/src/store.rs crates/task-runtime/src/lib.rs
@@ -88,17 +88,17 @@ git commit -m "feat(runtime): add canonical agent control state"
 - Modify: `crates/desktop-gateway/src/main.rs`
 - Test: `crates/desktop-gateway/src/main.rs`
 
-- [ ] **Step 1: Write failing gateway tests**
+- [x] **Step 1: Write failing gateway tests**
 
 Create a state with no runtime-plan memory, persist a `runtime_plans` row, and assert `load_runtime_plan_from_state` and plan precedence see it. Add a second same-named thread in another workspace and prove isolation.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test -p local-first-desktop-gateway runtime_plan_control_store --quiet`
 
 Expected: test failure because loaders still query memory.
 
-- [ ] **Step 3: Replace authoritative reads/writes**
+- [x] **Step 3: Replace authoritative reads/writes**
 
 Resolve the workspace from `ChatStore::workspace_for_thread`, then use `TaskStore` in:
 
@@ -110,11 +110,11 @@ fn plan_stall_check_and_bump(state: &AppState, thread_id: Option<&str>, plan: &[
 
 `GatewayPlanProgress::persist_plan` writes the canonical store first, then updates the legacy memory/graph projection best-effort. Thread deletion purges both plan and journal.
 
-- [ ] **Step 4: Run gateway plan tests and verify GREEN**
+- [x] **Step 4: Run gateway plan tests and verify GREEN**
 
 Run: `cargo test -p local-first-desktop-gateway runtime_plan --quiet`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/desktop-gateway/src/main.rs
@@ -135,7 +135,7 @@ git commit -m "feat(gateway): make task store authoritative for plans"
 - Modify: `crates/desktop-gateway/src/turn_executor.rs`
 - Modify: `crates/desktop-gateway/src/lib.rs`
 
-- [ ] **Step 1: Write failing checkpoint tests**
+- [x] **Step 1: Write failing checkpoint tests**
 
 Test stable fingerprint, no API key, data-URL removal, round ordering and recovery selection restricted to `aborted/gateway_restart`:
 
@@ -150,11 +150,11 @@ fn checkpoint_roundtrip_excludes_provider_secret() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test -p local-first-engine checkpoint --quiet`
 
-- [ ] **Step 3: Implement the engine checkpoint seam**
+- [x] **Step 3: Implement the engine checkpoint seam**
 
 Add serializable `LoopCheckpoint` and:
 
@@ -166,15 +166,15 @@ pub trait CheckpointSink: Send + Sync {
 
 Emit at the start of each round after pruning/compaction, before the next model call. Restore only engine-safe fields; provider credentials always come from the fresh gateway configuration.
 
-- [ ] **Step 4: Persist checkpoints through the journal writer**
+- [x] **Step 4: Persist checkpoints through the journal writer**
 
 Add `WriterMessage::Checkpoint`, `TaskStore::append_agent_checkpoint`, checksum validation, and `latest_resumable_checkpoint_for_turn`. Redact with the journal policy before persistence.
 
-- [ ] **Step 5: Load recovery into the next broker attempt**
+- [x] **Step 5: Load recovery into the next broker attempt**
 
 `turn_executor` loads a checkpoint before generation and passes it as `agent_checkpoint` in `ChatGenerateStreamRequest`. The gateway restores it before seeding a fresh `LoopState`; invalid checkpoints fall back to the normal seed.
 
-- [ ] **Step 6: Run engine/runtime/gateway checkpoint tests**
+- [x] **Step 6: Run engine/runtime/gateway checkpoint tests**
 
 Run: `cargo test -p local-first-engine checkpoint --quiet`
 
@@ -182,7 +182,7 @@ Run: `cargo test -p local-first-task-runtime checkpoint --quiet`
 
 Run: `cargo test -p local-first-desktop-gateway checkpoint --quiet`
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add crates/engine crates/task-runtime crates/desktop-gateway/src/agent_journal.rs crates/desktop-gateway/src/turn_executor.rs crates/desktop-gateway/src/lib.rs
@@ -197,7 +197,7 @@ git commit -m "feat(agent): resume from durable round checkpoints"
 - Modify: `crates/task-runtime/src/store.rs`
 - Modify: `crates/desktop-gateway/src/main.rs`
 
-- [ ] **Step 1: Write failing receipt tests**
+- [x] **Step 1: Write failing receipt tests**
 
 Test atomic claim, completed replay, uncertain started state and scope-safe cleanup:
 
@@ -210,25 +210,25 @@ fn tool_receipt_never_reclaims_uncertain_started_action() {
 }
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test -p local-first-task-runtime tool_receipt --quiet`
 
-- [ ] **Step 3: Add serializable effects and receipt operations**
+- [x] **Step 3: Add serializable effects and receipt operations**
 
 Derive `Clone`, `Serialize` and `Deserialize` for `LoadedTool` and `ToolEffects`. Implement claim/complete/list operations with an immediate transaction and immutable `(turn_id, idempotency_key)`.
 
-- [ ] **Step 4: Wrap the gateway capability chokepoint**
+- [x] **Step 4: Wrap the gateway capability chokepoint**
 
 For effectful native/connector/MCP tools, hash canonical arguments before dispatch. Replay `completed`; return a visible recovery result for `started`; otherwise execute once and persist redacted result/effects. Read-only tools remain unchanged.
 
-- [ ] **Step 5: Run receipt and executor tests**
+- [x] **Step 5: Run receipt and executor tests**
 
 Run: `cargo test -p local-first-task-runtime tool_receipt --quiet`
 
 Run: `cargo test -p local-first-desktop-gateway tool_receipt --quiet`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/engine/src/contract.rs crates/task-runtime/src crates/desktop-gateway/src/main.rs
@@ -245,29 +245,29 @@ git commit -m "feat(agent): prevent duplicate effectful tool execution"
 - Modify: `crates/engine/src/agent_loop.rs`
 - Modify: `crates/desktop-gateway/src/main.rs`
 
-- [ ] **Step 1: Write failing packet tests**
+- [x] **Step 1: Write failing packet tests**
 
 Cover stable ordering for equal priority, fingerprint changes, 32 KiB project cap and rejection of paths outside the linked root.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test -p local-first-engine prompt_packet --quiet`
 
-- [ ] **Step 3: Implement packet composition**
+- [x] **Step 3: Implement packet composition**
 
 Add `PromptPacketSource`, `PromptPacket`, `PromptPacketMetadata` and `compose_prompt_packets`. Store metadata in `LoopState` and include it in every `PromptSnapshot`.
 
-- [ ] **Step 4: Load project hierarchy**
+- [x] **Step 4: Load project hierarchy**
 
 Read root `AGENTS.md` followed by `.homun/instructions.md` from the authorized project directory, cap each input, and compose them after the existing core packet. Add route/runtime policy as the highest-priority packet.
 
-- [ ] **Step 5: Run packet and prompt-inspector tests**
+- [x] **Step 5: Run packet and prompt-inspector tests**
 
 Run: `cargo test -p local-first-engine prompt --quiet`
 
 Run: `cargo test -p local-first-desktop-gateway prompt --quiet`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/engine/src crates/desktop-gateway/src/main.rs
@@ -282,29 +282,29 @@ git commit -m "feat(prompt): compose hierarchical instruction packets"
 - Modify: `crates/desktop-gateway/src/turn_executor.rs`
 - Modify: `crates/task-runtime/src/store.rs`
 
-- [ ] **Step 1: Write failing ledger tests**
+- [x] **Step 1: Write failing ledger tests**
 
 Seed a plan, two runs, events, checkpoint and receipt; assert deterministic Markdown, redaction, regeneration after file deletion and foreign-scope `404`.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `cargo test -p local-first-desktop-gateway working_ledger --quiet`
 
-- [ ] **Step 3: Add scoped read models and renderer**
+- [x] **Step 3: Add scoped read models and renderer**
 
 Implement recent runs by thread, latest checkpoint, receipts and runtime-plan projection. Render fixed sections and stable ordering without raw payloads.
 
-- [ ] **Step 4: Materialize and expose APIs**
+- [x] **Step 4: Materialize and expose APIs**
 
 Write `ledgers/<sha256(thread_id)>.md` after run finalization. Add thread runs, runtime-plan, ledger and latest checkpoint endpoints under the existing bearer-auth router. Delete the file during thread purge.
 
-- [ ] **Step 5: Run ledger/API tests**
+- [x] **Step 5: Run ledger/API tests**
 
 Run: `cargo test -p local-first-desktop-gateway working_ledger --quiet`
 
 Run: `cargo test -p local-first-desktop-gateway agent_run_api --quiet`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/desktop-gateway/src/working_ledger.rs crates/desktop-gateway/src/main.rs crates/desktop-gateway/src/turn_executor.rs crates/task-runtime/src/store.rs
@@ -322,25 +322,25 @@ git commit -m "feat(agent): generate deterministic working ledger"
 - Modify: `apps/desktop/src/styles.css`
 - Modify: `apps/desktop/package.json`
 
-- [ ] **Step 1: Write failing view-model test**
+- [x] **Step 1: Write failing view-model test**
 
 Test ordering, selected latest run, packet labels, terminal state and empty data using Node's built-in test runner.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `node --test apps/desktop/src/lib/executionInspector.test.mjs`
 
 Expected: module-not-found before the view-model is created.
 
-- [ ] **Step 3: Implement API types and view model**
+- [x] **Step 3: Implement API types and view model**
 
 Add typed fetchers for thread runs, events, prompt, checkpoint and ledger. Normalize them into a stable inspector model without using `any`.
 
-- [ ] **Step 4: Implement the Workbench tab**
+- [x] **Step 4: Implement the Workbench tab**
 
 Add `execution` to `WorkbenchTab`, panel metadata and rendering. The component loads when opened, allows selecting an attempt, and displays status, timeline, packet metadata, redacted messages/tools and ledger.
 
-- [ ] **Step 5: Run UI tests and build**
+- [x] **Step 5: Run UI tests and build**
 
 Run: `node --test apps/desktop/src/lib/executionInspector.test.mjs`
 
@@ -348,7 +348,7 @@ Run: `npm --prefix apps/desktop run typecheck`
 
 Run: `npm --prefix apps/desktop run build`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop/src apps/desktop/package.json
@@ -360,11 +360,11 @@ git commit -m "feat(desktop): add agent execution inspector"
 **Files:**
 - Modify only if verification exposes a regression.
 
-- [ ] **Step 1: Run focused security scans**
+- [x] **Step 1: Run focused security scans**
 
 Run journal/checkpoint/receipt fixtures and assert persisted/API/ledger output omits `sk-test`, bearer values and base64 bodies.
 
-- [ ] **Step 2: Run all relevant Rust suites**
+- [x] **Step 2: Run all relevant Rust suites**
 
 Run:
 
@@ -375,7 +375,7 @@ cargo test -p local-first-task-runtime -p local-first-engine -p local-first-desk
 
 Expected: exit code `0` and no failed tests.
 
-- [ ] **Step 3: Run desktop gates**
+- [x] **Step 3: Run desktop gates**
 
 Run:
 
@@ -385,13 +385,13 @@ npm --prefix apps/desktop run build
 npm --prefix apps/desktop run test:ui-contract
 ```
 
-- [ ] **Step 4: Run repository hygiene checks**
+- [x] **Step 4: Run repository hygiene checks**
 
 Run: `git diff --check main...HEAD`
 
 Confirm the worktree is clean and the main checkout's unrelated `homun-tablet-full.png` remains untouched.
 
-- [ ] **Step 5: Commit final documentation/status changes**
+- [x] **Step 5: Commit final documentation/status changes**
 
 ```bash
 git add docs/superpowers/specs/2026-07-19-agent-loop-roadmap-completion-design.md docs/superpowers/plans/2026-07-19-agent-loop-roadmap-completion.md
