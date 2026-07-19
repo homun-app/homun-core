@@ -27,6 +27,10 @@ const RESOURCES_ROOT =
 let gatewayProcess = null;
 let gatewayRestarts = []; // timestamps of watchdog respawns (see lib/watchdog.cjs)
 let isQuitting = false;
+// Set for the duration of a factory reset (see the `lfpa:factory-reset` handler below):
+// stops the watchdog from respawning the gateway while we're deliberately tearing it
+// down and wiping ~/.homun — a respawn mid-wipe would recreate files we just deleted.
+let isResetting = false;
 const mainWindows = new Set();
 
 // Brand icon (Homun pictogram on a white rounded square). Used as the window
@@ -421,7 +425,7 @@ function spawnGateway() {
     gatewayRestarts.push(Date.now());
     desktopLog.log(`watchdog: respawning gateway in ${delay}ms`);
     setTimeout(() => {
-      if (!isQuitting && !gatewayProcess) spawnGateway();
+      if (!isQuitting && !isResetting && !gatewayProcess) spawnGateway();
     }, delay);
   });
 }
@@ -700,6 +704,42 @@ ipcMain.handle("lfpa:feedback-bundle", async () => {
   } catch (error) {
     return { ok: false, error: String(error?.message ?? error) };
   }
+});
+
+// Factory reset (Settings → danger zone): wipe ALL local state so the app restarts
+// as a fresh install. The Electron main owns this because the gateway holds ~/.homun's
+// SQLite files open and can't delete itself. Each step is best-effort/logged so a
+// secondary failure never leaves the reset half-done — the ~/.homun wipe (step 2) is
+// the one that matters. Onboarding reappears on its own (gateway needs_setup with an
+// empty ~/.homun); no UI flag to clear beyond localStorage.
+ipcMain.handle("lfpa:factory-reset", async () => {
+  isResetting = true; // stop the watchdog from respawning the gateway mid-reset
+  // 1) stop the gateway so it releases ~/.homun's SQLite handles
+  try {
+    if (gatewayProcess && !gatewayProcess.killed) {
+      const child = gatewayProcess;
+      await new Promise((resolve) => {
+        let done = false;
+        const finish = () => { if (!done) { done = true; resolve(); } };
+        child.once("exit", finish);
+        try { child.kill("SIGTERM"); } catch { /* already gone */ }
+        setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* ignore */ } finish(); }, 4000);
+      });
+    }
+    gatewayProcess = null;
+  } catch (e) { desktopLog.log(`factory-reset: gateway stop failed: ${e}`); }
+  // 2) CRITICAL: wipe ~/.homun (chats, memory, vault-wrapped key, brand kit, prefs)
+  try {
+    await fs.promises.rm(path.join(os.homedir(), ".homun"), { recursive: true, force: true });
+  } catch (e) { desktopLog.log(`factory-reset: rm ~/.homun failed: ${e}`); }
+  // 3) clear the UI mirror (language/theme/settings in localStorage)
+  try {
+    await session.defaultSession.clearStorageData({ storages: ["localstorage"] });
+  } catch (e) { desktopLog.log(`factory-reset: clearStorageData failed: ${e}`); }
+  // 4) relaunch into a clean first run
+  app.relaunch();
+  app.exit(0);
+  return { ok: true };
 });
 
 // Bring the window to the front when the user clicks a system notification.
