@@ -45,7 +45,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # PDF AUTHORING (the assistant produces a PDF): the model writes Markdown, we render
 # it in-process to a paginated PDF. printpdf uses the built-in base-14 fonts (no font
 # file to ship) so this ALWAYS works — no Docker/sidecar/UI/network/font dependency.
-printpdf = "0.7"
+printpdf = { version = "0.11.3", default-features = false }
 pulldown-cmark = { version = "0.12", default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 rusqlite = { version = "0.37", features = ["bundled"] }

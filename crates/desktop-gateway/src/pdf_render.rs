@@ -6,7 +6,9 @@
 //! fonts (Helvetica/Courier) — no font file is shipped, no Docker/sidecar/UI/network —
 //! so producing a PDF ALWAYS works.
 
-use printpdf::{BuiltinFont, IndirectFontRef, Mm, PdfDocumentReference, PdfLayerReference};
+use printpdf::{
+    BuiltinFont, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt, TextItem,
+};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 const PAGE_W_MM: f64 = 210.0; // A4
@@ -252,63 +254,60 @@ pub fn markdown_to_pdf(title: &str, markdown: &str) -> Result<Vec<u8>, String> {
     } else {
         title.trim()
     };
-    let (doc, page1, layer1): (PdfDocumentReference, _, _) = printpdf::PdfDocument::new(
-        doc_title,
-        Mm(PAGE_W_MM as f32),
-        Mm(PAGE_H_MM as f32),
-        "Layer 1",
-    );
-
-    let regular: IndirectFontRef = doc
-        .add_builtin_font(BuiltinFont::Helvetica)
-        .map_err(|e| e.to_string())?;
-    let bold: IndirectFontRef = doc
-        .add_builtin_font(BuiltinFont::HelveticaBold)
-        .map_err(|e| e.to_string())?;
-    let mono: IndirectFontRef = doc
-        .add_builtin_font(BuiltinFont::Courier)
-        .map_err(|e| e.to_string())?;
+    let mut doc = PdfDocument::new(doc_title);
 
     let blocks = parse_blocks(markdown);
     let lines = layout(title, &blocks);
 
-    let mut layer: PdfLayerReference = doc.get_page(page1).get_layer(layer1);
+    let mut pages: Vec<PdfPage> = Vec::new();
+    let mut ops: Vec<Op> = Vec::new();
     let mut y = PAGE_H_MM - MARGIN_MM;
 
     for line in &lines {
         y -= line.gap_before;
         let line_height = line.size * 1.2 / PT_PER_MM;
         if y - line_height < MARGIN_MM {
-            let (page, layer_index) =
-                doc.add_page(Mm(PAGE_W_MM as f32), Mm(PAGE_H_MM as f32), "Layer");
-            layer = doc.get_page(page).get_layer(layer_index);
+            pages.push(PdfPage::new(
+                Mm(PAGE_W_MM as f32),
+                Mm(PAGE_H_MM as f32),
+                std::mem::take(&mut ops),
+            ));
             y = PAGE_H_MM - MARGIN_MM;
         }
         y -= line_height;
         if !line.text.is_empty() {
             let font = if line.mono {
-                &mono
+                BuiltinFont::Courier
             } else if line.bold {
-                &bold
+                BuiltinFont::HelveticaBold
             } else {
-                &regular
+                BuiltinFont::Helvetica
             };
-            layer.use_text(
-                &line.text,
-                line.size as f32,
-                Mm(MARGIN_MM as f32),
-                Mm(y as f32),
-                font,
-            );
+            ops.extend([
+                Op::StartTextSection,
+                Op::SetTextCursor {
+                    pos: Point::new(Mm(MARGIN_MM as f32), Mm(y as f32)),
+                },
+                Op::SetFont {
+                    font: PdfFontHandle::Builtin(font),
+                    size: Pt(line.size as f32),
+                },
+                Op::ShowText {
+                    items: vec![TextItem::Text(line.text.clone())],
+                },
+                Op::EndTextSection,
+            ]);
         }
     }
 
-    let mut buffer: Vec<u8> = Vec::new();
-    {
-        let mut writer = std::io::BufWriter::new(&mut buffer);
-        doc.save(&mut writer).map_err(|e| e.to_string())?;
-    }
-    Ok(buffer)
+    pages.push(PdfPage::new(
+        Mm(PAGE_W_MM as f32),
+        Mm(PAGE_H_MM as f32),
+        ops,
+    ));
+    Ok(doc
+        .with_pages(pages)
+        .save(&PdfSaveOptions::default(), &mut Vec::new()))
 }
 
 #[cfg(test)]
