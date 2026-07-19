@@ -52664,6 +52664,9 @@ fn memory_publication_facade_error(error: MemoryError) -> GatewayError {
             "publication_preview_stale" => {
                 (StatusCode::CONFLICT, "publication_preview_stale")
             }
+            "linked_memory_read_only" => {
+                (StatusCode::CONFLICT, "linked_memory_read_only")
+            }
             "publication_conflict" | "publication_already_pending" | "publication_not_pending"
             | "publication_already_published"
             | "publication_source_inactive" | "publication_sensitivity_not_allowed" => {
@@ -52783,6 +52786,24 @@ async fn memory_publication_create(
     let owner = gateway_memory_user_id();
     let reference = parse_publication_reference(&request.source_ref, &owner, &source_workspace_id)?;
     let facade = memory_facade(&state);
+    if facade
+        .has_memory_source_grant_link(
+            &owner,
+            &destination_workspace_id,
+            &source_workspace_id,
+        )
+        .map_err(|_| {
+            memory_publication_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "memory_publication_store_error",
+            )
+        })?
+    {
+        return Err(memory_publication_error(
+            StatusCode::CONFLICT,
+            "linked_memory_read_only",
+        ));
+    }
     let source = facade
         .get_memory_for_ui(&reference, &owner, &source_workspace_id)
         .map_err(|_| {
@@ -56074,6 +56095,113 @@ mod tests {
         let (status, foreign_body) = memory_source_response_json(foreign_response).await;
         assert_eq!(status, axum::http::StatusCode::CONFLICT);
         assert_eq!(foreign_body["error"]["code"], "publication_actor_mismatch");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn publication_rejects_active_revoked_and_expired_linked_sources() {
+        use axum::{body::Body, http::Request};
+        use tower::ServiceExt;
+
+        let dir = isolated_gateway_test_dir("linked-publication-firewall");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data = TestGatewayDataDir::new(&dir);
+        write_memory_source_workspaces(&dir, true);
+        let state = super::AppState::for_tests();
+        let owner = super::gateway_memory_user_id();
+        let facade = super::memory_facade(&state);
+        let source = create_publication_route_memory(
+            facade,
+            owner.clone(),
+            "project-a",
+            "Linked answer cannot be copied",
+            local_first_memory::DataSensitivity::Private,
+        );
+        insert_test_source_grant(
+            facade,
+            &owner,
+            &local_first_memory::WorkspaceId::new("project-b"),
+            &local_first_memory::WorkspaceId::new("project-a"),
+            "grant-linked-publication",
+            local_first_memory::MemoryCollectionKey::Preferences,
+        );
+        let app = memory_publication_route_test_app(state.clone());
+        let request_body = serde_json::json!({
+            "source_ref": source.reference.to_string(),
+            "source_workspace_id": "project-a",
+            "destination_workspace_id": "project-b",
+        })
+        .to_string();
+
+        for expected_state in ["active", "revoked"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/memory/publications")
+                        .header("content-type", "application/json")
+                        .body(Body::from(request_body.clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let (status, body) = memory_source_response_json(response).await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{expected_state}");
+            assert_eq!(body["error"]["code"], "linked_memory_read_only");
+            if expected_state == "active" {
+                facade
+                    .revoke_memory_source_grant(
+                        &owner,
+                        &local_first_memory::WorkspaceId::new("project-b"),
+                        "grant-linked-publication",
+                        2,
+                    )
+                    .unwrap();
+            }
+        }
+
+        facade
+            .upsert_memory_source_grant(&local_first_memory::MemorySourceGrant {
+                id: "grant-expired-publication".to_string(),
+                consumer_user_id: owner.clone(),
+                consumer_workspace_id: local_first_memory::WorkspaceId::new("project-c"),
+                source_user_id: owner.clone(),
+                source_workspace_id: local_first_memory::WorkspaceId::new("project-a"),
+                collections: [local_first_memory::MemoryCollectionKey::Preferences]
+                    .into_iter()
+                    .collect(),
+                max_sensitivity: local_first_memory::DataSensitivity::Private,
+                overrides: std::collections::HashMap::new(),
+                expires_at: Some(1),
+                revoked_at: None,
+                policy_version: 1,
+                created_by: owner.as_str().to_string(),
+                created_at: "unix:1".to_string(),
+                updated_at: "unix:1".to_string(),
+            })
+            .unwrap();
+        let expired_response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/memory/publications")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "source_ref": source.reference.to_string(),
+                            "source_workspace_id": "project-a",
+                            "destination_workspace_id": "project-c",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, body) = memory_source_response_json(expired_response).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT);
+        assert_eq!(body["error"]["code"], "linked_memory_read_only");
         std::fs::remove_dir_all(dir).ok();
     }
 

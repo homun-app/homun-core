@@ -23,6 +23,21 @@ function groupHitsBySource(hits: RecallHitPayload[]): SourceGroup[] {
   return [...groups.values()];
 }
 
+function canPublishRecallHit(
+  hit: RecallHitPayload,
+  consumerWorkspaceId: string | null | undefined,
+) {
+  // This is only a UI affordance gate. The server independently checks the
+  // historical source-grant ledger so omitting provenance cannot bypass it.
+  return Boolean(
+    consumerWorkspaceId?.trim()
+      && consumerWorkspaceId !== "__personal__"
+      && hit.source_workspace_id === consumerWorkspaceId
+      && hit.grant_id === null
+      && hit.ref,
+  );
+}
+
 /**
  * Compact, message-scoped disclosure of the memories actually used for an answer.
  * It is deliberately a popover rather than a persistent transcript: provenance is
@@ -104,10 +119,7 @@ export function MemoryUsagePopover({
                         {hit.grant_id ? ` · ${t("chat.memoryLinked")}` : ""}
                         {hit.conflict ? ` · ${t("chat.memoryConflict")}` : ""}
                       </small>
-                      {consumerWorkspaceId?.trim()
-                        && consumerWorkspaceId !== "__personal__"
-                        && hit.source_workspace_id === consumerWorkspaceId
-                        && hit.grant_id === null ? (
+                      {canPublishRecallHit(hit, consumerWorkspaceId) ? (
                         <button
                           type="button"
                           className="memory-publication-trigger"

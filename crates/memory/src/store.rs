@@ -937,6 +937,34 @@ impl SQLiteMemoryStore {
         Ok(grant)
     }
 
+    /// Returns whether this exact source -> consumer relationship has ever
+    /// been authorized. Revocation and expiry deliberately do not erase the
+    /// ledger entry: disconnecting a source never grants copy rights.
+    pub fn has_memory_source_grant_link(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        source_workspace_id: &WorkspaceId,
+    ) -> MemorySourceGrantStoreResult<bool> {
+        let conn = self.read_conn();
+        conn.query_row(
+            "select exists(
+                select 1 from memory_source_grants
+                where consumer_user_id = ?1
+                  and consumer_workspace_id = ?2
+                  and source_user_id = ?1
+                  and source_workspace_id = ?3
+            )",
+            (
+                consumer_user_id.as_str(),
+                consumer_workspace_id.as_str(),
+                source_workspace_id.as_str(),
+            ),
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(MemorySourceGrantStoreError::store)
+    }
+
     pub fn revoke_memory_source_grant(
         &self,
         consumer_user_id: &UserId,

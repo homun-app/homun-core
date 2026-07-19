@@ -1922,6 +1922,21 @@ impl MemoryFacade {
             .map_err(memory_source_grant_error)
     }
 
+    pub fn has_memory_source_grant_link(
+        &self,
+        consumer_user_id: &UserId,
+        consumer_workspace_id: &WorkspaceId,
+        source_workspace_id: &WorkspaceId,
+    ) -> MemoryResult<bool> {
+        self.store
+            .has_memory_source_grant_link(
+                consumer_user_id,
+                consumer_workspace_id,
+                source_workspace_id,
+            )
+            .map_err(memory_source_grant_error)
+    }
+
     pub fn revoke_memory_source_grant(
         &self,
         consumer_user_id: &UserId,
@@ -1973,6 +1988,13 @@ impl MemoryFacade {
         edit: Option<&MemoryPublicationEditInput>,
     ) -> MemoryResult<MemoryPublicationProposal> {
         self.validate_publication_actor_and_destination(source, destination, actor)?;
+        if self.has_memory_source_grant_link(
+            &destination.user_id,
+            &destination.workspace_id,
+            &source.workspace_id,
+        )? {
+            return Err(MemoryError::policy("linked_memory_read_only"));
+        }
         let source =
             self.load_publication_source(&source.reference, &source.user_id, &source.workspace_id)?;
         self.validate_publication_source(&source)?;

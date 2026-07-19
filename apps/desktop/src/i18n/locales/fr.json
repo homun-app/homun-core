@@ -94,6 +94,7 @@
       "generic": "Impossible de mettre à jour la proposition. Réessayez.",
       "secret_never_shareable": "Les mémoires contenant des secrets ne peuvent pas être publiées.",
       "vault_payload_never_shareable": "Les données du Vault ne peuvent pas être publiées.",
+      "linked_memory_read_only": "Les mémoires liées sont en lecture seule et ne peuvent pas être copiées dans ce projet.",
       "publication_actor_mismatch": "Vous n'êtes pas autorisé à utiliser cette proposition.",
       "publication_decision_required": "Choisissez explicitement comment traiter la mémoire de destination.",
       "publication_conflict": "La proposition n'est plus valide. Vérifiez-la et réessayez.",
