@@ -25,6 +25,17 @@ export function formatCount(value: number, locale = "en-US"): string {
     .format(clampNumber(value));
 }
 
+export function formatProviderSnapshotValue(
+  value: number,
+  unit: string | null | undefined,
+  locale = "en-US",
+): string {
+  const normalizedUnit = String(unit ?? "").trim().toLowerCase();
+  if (normalizedUnit === "microusd") return formatMicrousd(value, locale);
+  const formatted = formatCount(value, locale);
+  return normalizedUnit ? `${formatted} ${normalizedUnit}` : formatted;
+}
+
 export function costLabel(
   value: { reported: number; estimated: number; unknown: number },
   locale = "en-US",

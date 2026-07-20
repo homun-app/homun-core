@@ -107,10 +107,7 @@ assertContains("src/components/UsageSettingsPane.tsx", 'className="reported"', "
 assertContains("src/components/UsageSettingsPane.tsx", 'className="estimated"', "estimated cost must stay separately labeled");
 assertContains("src/components/UsageSettingsPane.tsx", 'className="unknown"', "unknown cost must stay visible");
 assertContains("src/components/UsageSettingsPane.tsx", "usage-coverage", "usage coverage must remain visible");
-assertContains("src/components/UsageSettingsPane.tsx", "latency-p50", "model rows must reserve p50 latency");
-assertContains("src/components/UsageSettingsPane.tsx", "latency-p95", "model rows must reserve p95 latency");
 assertContains("src/components/UsageSettingsPane.tsx", "retry-count", "model rows must expose retries");
-assertContains("src/components/UsageSettingsPane.tsx", "fallback-count", "model rows must expose fallbacks");
 assertContains("src/components/ChatUsageOverview.tsx", 'const WINDOWS: UsageWindow[] = ["7d", "30d", "all"]', "New chat must support all approved windows");
 assertContains("src/components/ChatUsageOverview.tsx", 'aria-live="polite"', "New-chat Usage load state must be announced");
 assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageSummary(selectedWindow)", "New chat must read the canonical summary");
@@ -124,6 +121,13 @@ assertContains("src/components/UsageSuggestion.tsx", "confirmed: true", "Apply r
 assertContains("src/components/UsageSuggestion.tsx", "onDismiss", "Suggestions must be dismissible");
 assertNotContains("src/components/UsageSuggestion.tsx", "useEffect(() => onApply", "Mounting must never apply a suggestion");
 assertContains("src/components/ChatUsageOverview.tsx", ".slice(0, 1)", "Home must render at most one model suggestion");
+assertContains("src/styles.css", "grid-template-columns: minmax(68px, 0.65fr) minmax(132px, 1.35fr)", "New-chat usage must reserve readable width for cost and model values");
+assertContains("src/styles.css", ".app-shell.drawer-open > .workspace {\n    grid-column: 1;", "Narrow Settings content must stay in the visible grid column");
+assertContains("src/styles.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 292px), 292px) + 24px);", "Narrow Settings content must clear the overlay navigation");
+assertContains("src/styles.css", ".active-task-layout.is-empty {\n    grid-template-rows: 58px auto auto minmax(24px, 1fr);", "Narrow empty-chat hero must size its row from content instead of clipping upward");
+assertNotContains("src/components/UsageSettingsPane.tsx", "latency-p50", "Models must not show latency until canonical aggregates expose it");
+assertNotContains("src/components/UsageSettingsPane.tsx", "fallback-count", "Models must not show fallback placeholders as measured data");
+assertContains("src/components/UsageSettingsPane.tsx", "modelCostProvenance", "Per-model cost must disclose reported, estimated, unknown, or not-billed provenance");
 assertContains("src/components/UsageSettingsPane.tsx", "coreBridge.setRole({", "Settings must apply confirmed role instructions through the canonical role API");
 for (const locale of ["en", "it", "es", "fr", "de"]) {
   assertContains(`src/i18n/locales/${locale}.json`, '"use_for_task"', `${locale} must translate the task suggestion action`);

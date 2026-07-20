@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   costLabel,
   coverageState,
+  formatProviderSnapshotValue,
   providerLimitLabel,
   providerSnapshotState,
   remainingBudgetPercent,
@@ -25,6 +26,11 @@ test("manual budget cannot be labeled provider quota", () => {
     providerLimitLabel({ source: "manual_budget", remainingPercent: 40 }),
     "40% of manual budget remaining",
   );
+});
+
+test("provider account values preserve their declared unit", () => {
+  assert.equal(formatProviderSnapshotValue(680, "requests", "en-US"), "680 requests");
+  assert.equal(formatProviderSnapshotValue(12_500_000, "microusd", "en-US"), "$12.50");
 });
 
 test("partial coverage remains visible", () => {

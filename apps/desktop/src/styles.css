@@ -7287,7 +7287,8 @@ body.resizing-drawer {
 }
 .chat-usage-metrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(68px, 0.65fr) minmax(132px, 1.35fr)
+    minmax(68px, 0.6fr) minmax(132px, 1.25fr) minmax(68px, 0.65fr);
 }
 .chat-usage-metrics > div {
   min-width: 0;
@@ -7313,7 +7314,11 @@ body.resizing-drawer {
   color: var(--text);
   font-size: 15px;
   font-weight: 650;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 .chat-usage-metrics small {
   line-height: 1.35;
@@ -7409,6 +7414,13 @@ body.resizing-drawer {
   border-bottom: 1px solid var(--line);
 }
 @media (max-width: 760px) {
+  .active-task-layout.is-empty {
+    grid-template-rows: 58px auto auto minmax(24px, 1fr);
+    overflow-y: auto;
+  }
+  .active-task-layout.is-empty .thread-scroll {
+    justify-content: flex-start;
+  }
   .chat-usage-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     row-gap: 12px;
@@ -10764,6 +10776,19 @@ body.resizing-drawer {
 
   .app-shell.drawer-open {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell.drawer-open > .workspace {
+    grid-column: 1;
+  }
+
+  .app-shell.drawer-open > .settings-workspace {
+    padding-left: calc(min(var(--drawer-width, 292px), 292px) + 24px);
+    padding-right: 20px;
+  }
+
+  .drawer-resizer {
+    display: none;
   }
 
   .nav-drawer {
@@ -16180,6 +16205,8 @@ body.resizing-drawer {
 .usage-table th, .usage-table td { padding: 11px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
 .usage-table th:first-child, .usage-table td:first-child { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .usage-table thead th { color: var(--text-muted); font-weight: 500; }
+.usage-model-cost span, .usage-model-cost small { display: block; }
+.usage-model-cost small { margin-top: 2px; color: var(--text-muted); font-size: 11px; font-weight: 400; }
 .usage-provider-row > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .usage-provider-row button, .usage-policy-editor button { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 7px; padding: 7px 10px; }
 .usage-provider-row button:disabled { opacity: 0.45; cursor: not-allowed; }

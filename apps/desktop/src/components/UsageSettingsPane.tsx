@@ -16,6 +16,7 @@ import {
   clampPercent,
   formatCount,
   formatMicrousd,
+  formatProviderSnapshotValue,
   providerSnapshotState,
   remainingBudgetPercent,
 } from "../lib/usageViewModel";
@@ -254,6 +255,16 @@ function UsageMetric({ label, value }: { label: string; value: string }) {
   return <div className="usage-metric"><span>{label}</span><strong>{value}</strong></div>;
 }
 
+function modelCostProvenance(row: UsageModelRow): Array<"reported" | "estimated" | "notBilled" | "unknown"> {
+  const labels: Array<"reported" | "estimated" | "notBilled" | "unknown"> = [];
+  const cost = row.cost_breakdown;
+  if (cost.provider_reported_microusd > 0) labels.push("reported");
+  if (cost.catalog_estimated_microusd + cost.manual_estimated_microusd > 0) labels.push("estimated");
+  if (cost.not_billed_attempts > 0) labels.push("notBilled");
+  if (cost.unknown_cost_attempts > 0) labels.push("unknown");
+  return labels;
+}
+
 function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string }) {
   const { t } = useTranslation();
   const sorted = [...rows].sort((a, b) => rowTokens(b) - rowTokens(a));
@@ -265,23 +276,19 @@ function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string 
           <th>{t("settings.usage.models.calls")}</th>
           <th aria-sort="descending">{t("settings.usage.models.tokens")}</th>
           <th>{t("settings.usage.models.cost")}</th>
-          <th className="latency-p50">{t("settings.usage.models.p50")}</th>
-          <th className="latency-p95">{t("settings.usage.models.p95")}</th>
           <th>{t("settings.usage.models.success")}</th>
           <th className="retry-count">{t("settings.usage.models.retries")}</th>
-          <th className="fallback-count">{t("settings.usage.models.fallbacks")}</th>
         </tr></thead>
         <tbody>{sorted.map((row) => {
           const success = row.attempts ? Math.round((row.successful_attempts / row.attempts) * 100) : 0;
+          const provenance = modelCostProvenance(row);
           return <tr key={row.key}>
             <th scope="row">{row.key}</th>
             <td>{formatCount(row.logical_calls, locale)}</td>
             <td>{formatCount(rowTokens(row), locale)}</td>
-            <td>{formatMicrousd(row.cost_microusd, locale)}</td>
-            <td className="latency-p50">—</td><td className="latency-p95">—</td>
+            <td className="usage-model-cost"><span>{formatMicrousd(row.cost_microusd, locale)}</span>{provenance.length > 0 && <small>{provenance.map((item) => t(`settings.usage.cost.${item}`)).join(" · ")}</small>}</td>
             <td>{success}%</td>
             <td className="retry-count">{Math.max(0, row.attempts - row.logical_calls)}</td>
-            <td className="fallback-count">—</td>
           </tr>;
         })}</tbody>
       </table>
@@ -325,8 +332,8 @@ function UsageProviders({ rows, locale, onReload }: {
           </dl></div>
           <div><h4>{t("settings.usage.provider.account")}</h4>
             <p className={`usage-account-state ${snapshotView.tone}`}>{t(`settings.usage.account.${snapshot?.status ?? "unsupported"}`)}{snapshotView.stale ? ` · ${t("settings.usage.states.stale")}` : ""}</p>
-            {snapshot?.used_value != null && <p>{formatMicrousd(snapshot.used_value, locale)} {t("settings.usage.provider.used")}</p>}
-            {snapshot?.limit_value != null && <p>{formatMicrousd(snapshot.limit_value, locale)} {t("settings.usage.provider.providerLimit")}</p>}
+            {snapshot?.used_value != null && <p>{formatProviderSnapshotValue(snapshot.used_value, snapshot.unit, locale)} {t("settings.usage.provider.used")}</p>}
+            {snapshot?.limit_value != null && <p>{formatProviderSnapshotValue(snapshot.limit_value, snapshot.unit, locale)} {t("settings.usage.provider.providerLimit")}</p>}
             {snapshot?.observed_at ? <small>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(snapshot.observed_at * 1_000)}</small> : null}
           </div>
           <div><h4>{t("settings.usage.provider.manualBudget")}</h4>
