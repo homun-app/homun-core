@@ -16077,6 +16077,7 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
     let mut content = String::new();
     let mut reasoning = String::new();
     let mut finish_reason: Option<String> = None;
+    let mut usage: Option<serde_json::Value> = None;
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let mut saw_event = false;
     for line in sse.lines() {
@@ -16091,6 +16092,9 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
         let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
             continue;
         };
+        if let Some(reported) = json.get("usage").filter(|value| !value.is_null()) {
+            usage = Some(reported.clone());
+        }
         let Some(choice) = json.get("choices").and_then(|c| c.get(0)) else {
             continue;
         };
@@ -16159,12 +16163,16 @@ fn reassemble_openai_stream(sse: &str) -> serde_json::Value {
     }
     // Canonical assembly (F0 / ADR 0019): the reasoning-fallback + message shape live ONCE in
     // `model_normalize::assistant_response`, shared with the Ollama collector.
-    model_normalize::assistant_response(
+    let mut response = model_normalize::assistant_response(
         content,
         reasoning,
         tool_calls,
         &finish_reason.unwrap_or_default(),
-    )
+    );
+    if let (Some(object), Some(usage)) = (response.as_object_mut(), usage) {
+        object.insert("usage".to_string(), usage);
+    }
+    response
 }
 
 /// Consumes a streamed completion response with a PER-CHUNK idle timeout (reset on
@@ -16713,6 +16721,8 @@ pub(crate) async fn collect_ollama_native_stream(
     let mut markers = local_first_desktop_gateway::markers::StreamMarkerFilter::default();
     let mut got_any = false;
     let mut done = false;
+    let mut prompt_eval_count: Option<u64> = None;
+    let mut eval_count: Option<u64> = None;
     while !done {
         let wait = if got_any { idle } else { first_token };
         match tokio::time::timeout(wait, stream.next()).await {
@@ -16744,6 +16754,14 @@ pub(crate) async fn collect_ollama_native_stream(
                         continue;
                     }
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+                        prompt_eval_count = json
+                            .get("prompt_eval_count")
+                            .and_then(serde_json::Value::as_u64)
+                            .or(prompt_eval_count);
+                        eval_count = json
+                            .get("eval_count")
+                            .and_then(serde_json::Value::as_u64)
+                            .or(eval_count);
                         if process_ollama_line(
                             &json,
                             &mut content,
@@ -16767,6 +16785,14 @@ pub(crate) async fn collect_ollama_native_stream(
     let tail = pending.trim().to_string();
     if !tail.is_empty() {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&tail) {
+            prompt_eval_count = json
+                .get("prompt_eval_count")
+                .and_then(serde_json::Value::as_u64)
+                .or(prompt_eval_count);
+            eval_count = json
+                .get("eval_count")
+                .and_then(serde_json::Value::as_u64)
+                .or(eval_count);
             process_ollama_line(
                 &json,
                 &mut content,
@@ -16786,9 +16812,18 @@ pub(crate) async fn collect_ollama_native_stream(
     // Canonical assembly (F0 / ADR 0019), shared with the OpenAI collector. `reasoning` is the
     // `message.thinking` trace accumulated by `process_ollama_line` (thinking models like
     // deepseek-r1), so the reasoning-fallback recovers an answer when content is empty.
-    Ok(model_normalize::assistant_response(
+    let mut response = model_normalize::assistant_response(
         content, reasoning, tool_calls, "stop",
-    ))
+    );
+    if let Some(object) = response.as_object_mut() {
+        if let Some(count) = prompt_eval_count {
+            object.insert("prompt_eval_count".to_string(), count.into());
+        }
+        if let Some(count) = eval_count {
+            object.insert("eval_count".to_string(), count.into());
+        }
+    }
+    Ok(response)
 }
 
 /// Builds the request body for a chat round, in the right shape for the provider:
@@ -25498,7 +25533,15 @@ impl GatewayBrowseExecutor<'_> {
         let model_client = crate::model_client::GatewayModelClient {
             http: self.http,
             tx: &drain,
+            usage: &crate::model_client::NOOP_USAGE_RECORDER,
         };
+        let mut usage_context = local_first_inference_usage::UsageContext::new(
+            uuid::Uuid::new_v4().to_string(),
+            local_first_inference_usage::InferencePurpose::Subagent,
+            "local",
+        );
+        usage_context.purpose_detail = Some("browse".to_string());
+        usage_context.thread_id = self.thread_id.map(str::to_string);
         // The tool chokepoint is browser-only: the 6 browser tools route through the fresh browser
         // executor below; any non-browser call is refused (defense — none are offered in tool_schemas).
         let capability_executor = BrowseOnlyCapabilityExecutor;
@@ -25542,6 +25585,7 @@ impl GatewayBrowseExecutor<'_> {
         let outcome = local_first_engine::agent_loop::run_turn(
             ls,
             cfg,
+            &usage_context,
             &model_client,
             &capability_executor,
             &mut browser_executor,
@@ -27430,7 +27474,20 @@ async fn run_agent_rounds(
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
     // http+tx locally; the tool chokepoints hold the turn-constant read-only context and get `&mut ls`
     // per call from the engine.
-    let model_client = crate::model_client::GatewayModelClient { http: &http, tx };
+    let model_client = crate::model_client::GatewayModelClient {
+        http: &http,
+        tx,
+        usage: &crate::model_client::NOOP_USAGE_RECORDER,
+    };
+    let mut usage_context = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::ChatResponse,
+        automation_user_id.as_str(),
+    );
+    usage_context.workspace_id = Some(automation_workspace_id.as_str().to_string());
+    usage_context.thread_id = thread_id.clone();
+    usage_context.turn_id = effect_turn_id.clone();
+    usage_context.run_id = effect_run_id.clone();
     let capability_executor = GatewayCapabilityExecutor {
         state: &state_owned,
         tx: &tx,
@@ -27505,6 +27562,7 @@ async fn run_agent_rounds(
     let outcome = local_first_engine::agent_loop::run_turn(
         ls,
         cfg,
+        &usage_context,
         &model_client,
         &capability_executor,
         &mut browser_executor,
@@ -27582,6 +27640,7 @@ async fn run_agent_rounds(
     local_first_engine::agent_loop::run_turn(
         seed_ls,
         seed_cfg,
+        &usage_context,
         &model_client,
         &capability_executor,
         &mut browser_executor,
@@ -69698,10 +69757,13 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Ciao \"}}]}\n\
 data: {\"choices\":[{\"delta\":{\"content\":\"mondo\"}}]}\n\
 data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\
+data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":4}}\n\
 data: [DONE]\n";
         let body = crate::reassemble_openai_stream(sse);
         assert_eq!(body["choices"][0]["message"]["content"], "Ciao mondo");
         assert_eq!(body["choices"][0]["finish_reason"], "stop");
+        assert_eq!(body["usage"]["prompt_tokens"], 11);
+        assert_eq!(body["usage"]["completion_tokens"], 4);
 
         // tool_calls whose JSON arguments arrive as fragments across chunks.
         let sse2 = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\"}}]}}]}\n\

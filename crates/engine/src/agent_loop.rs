@@ -134,6 +134,7 @@ pub async fn try_advance_frontier_from_evidence(
 pub async fn run_turn<M, C, B, P, J, K, Pol, X, E>(
     mut ls: LoopState,
     cfg: TurnConfig,
+    usage_context: &local_first_inference_usage::UsageContext,
     model_client: &M,
     capability_executor: &C,
     browser_executor: &mut B,
@@ -286,6 +287,9 @@ missing, give what you have and note the gap in one short line.",
                 &ls.prompt_packets,
             ),
         });
+        let mut round_usage = usage_context.clone();
+        round_usage.call_id = format!("{}:round:{round}", usage_context.call_id);
+        round_usage.round = u32::try_from(round).ok();
         let out = model_client
             .generate(
                 &crate::ModelCall {
@@ -306,6 +310,7 @@ missing, give what you have and note the gap in one short line.",
                     // round 0 (the post-intake generation call); every later round falls back to auto
                     // so the model can emit its text summary and the turn terminates cleanly.
                     forced_tool: if round == 0 { cfg.forced_tool.as_deref() } else { None },
+                    usage: &round_usage,
                 },
                 &|_tok| {},
             )
@@ -1010,6 +1015,10 @@ to proceed."
                 &ls.prompt_packets,
             ),
         });
+        let mut synthesis_usage = usage_context.clone();
+        synthesis_usage.call_id = format!("{}:forced_synthesis", usage_context.call_id);
+        synthesis_usage.purpose_detail = Some("forced_synthesis".to_string());
+        synthesis_usage.round = u32::try_from(cfg.hard_round_ceiling).ok();
         let synth_out = model_client
             .generate(
                 &crate::ModelCall {
@@ -1023,6 +1032,7 @@ to proceed."
                     // No tools offered on the forced-synthesis call, so forcing is moot — kept
                     // `None` for consistency with every other non-main-round call site.
                     forced_tool: None,
+                    usage: &synthesis_usage,
                 },
                 &|_tok| {},
             )
@@ -1127,6 +1137,9 @@ mod tests {
                     api_key: None,
                 },
                 finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
             })
         }
     }
@@ -1226,6 +1239,14 @@ mod tests {
         }
     }
 
+    fn usage_context() -> local_first_inference_usage::UsageContext {
+        local_first_inference_usage::UsageContext::new(
+            "test-turn",
+            local_first_inference_usage::InferencePurpose::ChatResponse,
+            "test-user",
+        )
+    }
+
     // ⭐ The FIRST actual execution of `run_turn` (everything else is compile-time): drive a full turn
     // with mock seams and no network. Proves the extracted loop runs the happy path (model answers with
     // no tool calls) to completion — no panic, no hang (bounded by hard_round_ceiling), correct outcome.
@@ -1246,6 +1267,7 @@ mod tests {
         let outcome = run_turn(
             ls,
             cfg(),
+            &usage_context(),
             &AnswerModel,
             &NoTools,
             &mut browser,
@@ -1319,6 +1341,9 @@ mod tests {
                     }),
                     provider,
                     finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
                 })
             } else {
                 on_delta("Answer from linked memory.");
@@ -1329,6 +1354,9 @@ mod tests {
                     }),
                     provider,
                     finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
                 })
             }
         }
@@ -1382,6 +1410,7 @@ mod tests {
         let outcome = run_turn(
             ls,
             cfg(),
+            &usage_context(),
             &RecallThenAnswerModel::default(),
             &LinkedRecallTool,
             &mut browser,
@@ -1456,6 +1485,9 @@ mod tests {
                     }),
                     provider,
                     finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
                 })
             } else {
                 // Round ≥1: the delivery already happened — a real model, back on "auto",
@@ -1467,6 +1499,9 @@ mod tests {
                     message: json!({ "role": "assistant", "content": "Document delivered." }),
                     provider,
                     finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
                 })
             }
         }
@@ -1530,6 +1565,7 @@ mod tests {
         let outcome = run_turn(
             ls,
             turn_cfg,
+            &usage_context(),
             &model,
             &tool,
             &mut browser,

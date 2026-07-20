@@ -7,19 +7,275 @@
 use local_first_engine::{
     ModelCall, ModelCallError, ModelClient, ModelRoundOutput, ProviderBinding,
 };
+use local_first_inference_usage::{
+    CostProvenance, Locality, NormalizedUsage, UsageContext, UsageProvenance, UsageRecorder,
+};
 use local_first_subagents::GenerateStreamEvent;
 
 use crate::{
-    auth_fallback_config, build_chat_payload, chat_endpoint, collect_ollama_native_stream,
-    collect_openai_stream, emit_stream_event, is_ollama_base, model_first_token_timeout_secs,
-    model_headers_timeout_secs, model_idle_timeout_secs, model_request_timeout_secs,
-    should_try_tool_compatibility_fallback, tool_compatibility_fallback_config, StreamSink,
+    StreamSink, auth_fallback_config, build_chat_payload, chat_endpoint,
+    collect_ollama_native_stream, collect_openai_stream, emit_stream_event, is_ollama_base,
+    model_first_token_timeout_secs, model_headers_timeout_secs, model_idle_timeout_secs,
+    model_request_timeout_secs, should_try_tool_compatibility_fallback,
+    tool_compatibility_fallback_config,
 };
+
+pub(crate) static NOOP_USAGE_RECORDER: local_first_inference_usage::NoopUsageRecorder =
+    local_first_inference_usage::NoopUsageRecorder;
 
 /// Borrows the turn's reqwest client and stream sink; built once before the ReAct loop.
 pub(crate) struct GatewayModelClient<'a> {
     pub http: &'a reqwest::Client,
     pub tx: &'a StreamSink,
+    pub usage: &'a dyn UsageRecorder,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct RateLimitSnapshot {
+    limit: Option<u64>,
+    remaining: Option<u64>,
+    reset_at: Option<i64>,
+}
+
+fn unix_timestamp() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_secs()).ok())
+        .unwrap_or_default()
+}
+
+fn provider_identity(base_url: &str) -> (String, Locality) {
+    let parsed = reqwest::Url::parse(base_url).ok();
+    let host = parsed
+        .as_ref()
+        .and_then(reqwest::Url::host_str)
+        .unwrap_or("");
+    let locality = if matches!(host, "localhost" | "127.0.0.1" | "::1") {
+        Locality::Local
+    } else {
+        Locality::Cloud
+    };
+    let provider = if is_ollama_base(base_url) {
+        "ollama".to_string()
+    } else if host.contains("openrouter") {
+        "openrouter".to_string()
+    } else if host.contains("openai") {
+        "openai".to_string()
+    } else if host.is_empty() {
+        "openai_compatible".to_string()
+    } else {
+        host.to_string()
+    };
+    (provider, locality)
+}
+
+fn parse_rate_limit_headers(headers: &reqwest::header::HeaderMap) -> RateLimitSnapshot {
+    fn number(headers: &reqwest::header::HeaderMap, names: &[&str]) -> Option<u64> {
+        names.iter().find_map(|name| {
+            headers
+                .get(*name)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.trim().parse().ok())
+        })
+    }
+    fn timestamp(headers: &reqwest::header::HeaderMap, names: &[&str]) -> Option<i64> {
+        names.iter().find_map(|name| {
+            headers
+                .get(*name)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.trim().parse().ok())
+        })
+    }
+    RateLimitSnapshot {
+        limit: number(headers, &["x-ratelimit-limit-requests", "ratelimit-limit"]),
+        remaining: number(
+            headers,
+            &["x-ratelimit-remaining-requests", "ratelimit-remaining"],
+        ),
+        reset_at: timestamp(headers, &["x-ratelimit-reset-requests", "ratelimit-reset"]),
+    }
+}
+
+fn estimate_tokens(value: &serde_json::Value) -> u64 {
+    let chars = serde_json::to_string(value)
+        .ok()
+        .and_then(|text| u64::try_from(text.chars().count()).ok())
+        .unwrap_or_default();
+    chars.div_ceil(4).max(1)
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ParsedTerminalUsage {
+    tokens: NormalizedUsage,
+    provider_cost_microusd: Option<u64>,
+}
+
+fn parse_openai_usage(value: &serde_json::Value) -> ParsedTerminalUsage {
+    let usage = value.get("usage").unwrap_or(value);
+    ParsedTerminalUsage {
+        tokens: NormalizedUsage {
+            input_tokens: usage
+                .get("prompt_tokens")
+                .and_then(serde_json::Value::as_u64),
+            output_tokens: usage
+                .get("completion_tokens")
+                .and_then(serde_json::Value::as_u64),
+            reasoning_tokens: usage
+                .pointer("/completion_tokens_details/reasoning_tokens")
+                .and_then(serde_json::Value::as_u64),
+            cache_read_tokens: usage
+                .pointer("/prompt_tokens_details/cached_tokens")
+                .or_else(|| usage.get("cache_read_input_tokens"))
+                .and_then(serde_json::Value::as_u64),
+            cache_write_tokens: usage
+                .pointer("/prompt_tokens_details/cache_write_tokens")
+                .or_else(|| usage.get("cache_creation_input_tokens"))
+                .and_then(serde_json::Value::as_u64),
+        },
+        provider_cost_microusd: usage.get("cost").and_then(decimal_dollars_to_microusd),
+    }
+}
+
+fn parse_ollama_usage(value: &serde_json::Value) -> ParsedTerminalUsage {
+    ParsedTerminalUsage {
+        tokens: NormalizedUsage {
+            input_tokens: value
+                .get("prompt_eval_count")
+                .and_then(serde_json::Value::as_u64),
+            output_tokens: value.get("eval_count").and_then(serde_json::Value::as_u64),
+            ..NormalizedUsage::default()
+        },
+        provider_cost_microusd: None,
+    }
+}
+
+fn decimal_dollars_to_microusd(value: &serde_json::Value) -> Option<u64> {
+    let owned;
+    let text = if let Some(value) = value.as_str() {
+        value.trim()
+    } else {
+        owned = value.as_number()?.to_string();
+        owned.as_str()
+    };
+    if text.is_empty() || text.starts_with('-') || text.contains(['e', 'E']) {
+        return None;
+    }
+    let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+    let whole = whole.parse::<u64>().ok()?;
+    let mut fractional = 0u64;
+    let mut digits = 0usize;
+    let mut round_up = false;
+    for byte in fraction.bytes() {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        if digits < 6 {
+            fractional = fractional
+                .checked_mul(10)?
+                .checked_add(u64::from(byte - b'0'))?;
+            digits += 1;
+        } else if digits == 6 {
+            round_up = byte >= b'5';
+            digits += 1;
+        }
+    }
+    for _ in digits.min(6)..6 {
+        fractional = fractional.checked_mul(10)?;
+    }
+    let mut microusd = whole.checked_mul(1_000_000)?.checked_add(fractional)?;
+    if round_up {
+        microusd = microusd.checked_add(1)?;
+    }
+    Some(microusd)
+}
+
+struct AttemptLifecycle<'a> {
+    recorder: &'a dyn UsageRecorder,
+    started: local_first_inference_usage::UsageAttemptEvent,
+}
+
+impl<'a> AttemptLifecycle<'a> {
+    #[allow(clippy::too_many_arguments)]
+    fn start(
+        recorder: &'a dyn UsageRecorder,
+        context: &UsageContext,
+        attempt_id: impl Into<String>,
+        provider_id: impl Into<String>,
+        model_id: impl Into<String>,
+        locality: Locality,
+        recorded_at: i64,
+    ) -> Self {
+        let started = local_first_inference_usage::UsageAttemptEvent::started(
+            context.clone(),
+            attempt_id,
+            provider_id,
+            model_id,
+            locality,
+            recorded_at,
+        );
+        recorder.record(started.clone());
+        Self { recorder, started }
+    }
+
+    fn completed(
+        self,
+        recorded_at: i64,
+        usage: ParsedTerminalUsage,
+        provenance: UsageProvenance,
+        latency_ms: Option<u64>,
+        time_to_first_token_ms: Option<u64>,
+        finish_reason: Option<String>,
+        rate_limit: RateLimitSnapshot,
+    ) {
+        let has_usage = usage.tokens.input_tokens.is_some()
+            || usage.tokens.output_tokens.is_some()
+            || usage.tokens.reasoning_tokens.is_some()
+            || usage.tokens.cache_read_tokens.is_some()
+            || usage.tokens.cache_write_tokens.is_some();
+        let mut completed = self.started.completed(recorded_at, usage.tokens);
+        completed.latency_ms = latency_ms;
+        completed.time_to_first_token_ms = time_to_first_token_ms;
+        completed.finish_reason = finish_reason;
+        completed.rate_limit_limit = rate_limit.limit;
+        completed.rate_limit_remaining = rate_limit.remaining;
+        completed.rate_limit_reset_at = rate_limit.reset_at;
+        completed.usage_provenance = if has_usage {
+            provenance
+        } else {
+            UsageProvenance::Unavailable
+        };
+        completed.cost_microusd = usage.provider_cost_microusd;
+        completed.cost_provenance = if usage.provider_cost_microusd.is_some() {
+            CostProvenance::ProviderReported
+        } else if completed.locality == Locality::Local {
+            CostProvenance::NotBilled
+        } else {
+            CostProvenance::Unavailable
+        };
+        self.recorder.record(completed);
+    }
+
+    fn failed(
+        self,
+        recorded_at: i64,
+        error_class: impl Into<String>,
+        upstream_status: Option<u16>,
+        latency_ms: Option<u64>,
+        rate_limit: RateLimitSnapshot,
+    ) {
+        let mut failed = self
+            .started
+            .failed(recorded_at, error_class, upstream_status);
+        failed.latency_ms = latency_ms;
+        failed.rate_limit_limit = rate_limit.limit;
+        failed.rate_limit_remaining = rate_limit.remaining;
+        failed.rate_limit_reset_at = rate_limit.reset_at;
+        if failed.locality == Locality::Local {
+            failed.cost_provenance = CostProvenance::NotBilled;
+        }
+        self.recorder.record(failed);
+    }
 }
 
 /// Outcome of the bounded pre-stream send. `HeadersTimeout` is distinguished from a
@@ -105,14 +361,29 @@ impl ModelClient for GatewayModelClient<'_> {
         let resp = {
             let mut attempt: u32 = 0;
             loop {
+                let attempt_started = std::time::Instant::now();
+                let (provider_id, locality) = provider_identity(&base_url);
+                let lifecycle = AttemptLifecycle::start(
+                    self.usage,
+                    call.usage,
+                    uuid::Uuid::new_v4().to_string(),
+                    provider_id,
+                    model.clone(),
+                    locality,
+                    unix_timestamp(),
+                );
                 let mut builder = self.http.post(&endpoint).timeout(request_timeout);
                 if let Some(key) = api_key.as_ref() {
                     builder = builder.bearer_auth(key);
                 }
                 match send_with_headers_timeout(builder.json(&payload), headers_timeout).await {
-                    SendOutcome::Ready(value) if value.status().is_success() => break value,
+                    SendOutcome::Ready(value) if value.status().is_success() => {
+                        let rate_limit = parse_rate_limit_headers(value.headers());
+                        break (value, lifecycle, attempt_started, rate_limit);
+                    }
                     SendOutcome::Ready(value) => {
                         let code = value.status();
+                        let rate_limit = parse_rate_limit_headers(value.headers());
                         // DIAGNOSTIC (task #105): log the upstream error body —
                         // swallowing it turned a payload bug (400 on the mid-turn
                         // model switch) into a generic, undebuggable fallback.
@@ -123,6 +394,13 @@ impl ModelClient for GatewayModelClient<'_> {
                             .chars()
                             .take(600)
                             .collect();
+                        lifecycle.failed(
+                            unix_timestamp(),
+                            "http_status",
+                            Some(code.as_u16()),
+                            u64::try_from(attempt_started.elapsed().as_millis()).ok(),
+                            rate_limit,
+                        );
                         eprintln!(
                             "[model-error] {code} model={model} endpoint={endpoint} \
 tools={payload_has_tools} tool_count={} body={err_body}",
@@ -164,7 +442,9 @@ tools={payload_has_tools} tool_count={} body={err_body}",
                         // is the problem. The hard-prune (S2 T4) already narrowed the toolset to
                         // the routed tool, so "auto" still finds it: a graceful degrade, not a
                         // dead end.
-                        if code.as_u16() == 400 && forced_tool.is_some() && !forced_tool_fallback_tried
+                        if code.as_u16() == 400
+                            && forced_tool.is_some()
+                            && !forced_tool_fallback_tried
                         {
                             forced_tool_fallback_tried = true;
                             forced_tool = None;
@@ -366,6 +646,24 @@ check/update the key in Settings → Model & Runtime."
                     // HeadersTimeout — a cold-loading upstream withholding headers — is
                     // treated exactly like a reqwest timeout so the same self-heal applies.
                     failure @ (SendOutcome::Transport(_) | SendOutcome::HeadersTimeout) => {
+                        let error_class = match &failure {
+                            SendOutcome::HeadersTimeout => "headers_timeout",
+                            SendOutcome::Transport(error) if error.is_timeout() => {
+                                "transport_timeout"
+                            }
+                            SendOutcome::Transport(error) if error.is_connect() => {
+                                "transport_connect"
+                            }
+                            SendOutcome::Transport(_) => "transport",
+                            SendOutcome::Ready(_) => unreachable!(),
+                        };
+                        lifecycle.failed(
+                            unix_timestamp(),
+                            error_class,
+                            None,
+                            u64::try_from(attempt_started.elapsed().as_millis()).ok(),
+                            RateLimitSnapshot::default(),
+                        );
                         let transient = match &failure {
                             SendOutcome::Transport(error) => {
                                 error.is_timeout() || error.is_connect()
@@ -432,6 +730,7 @@ check/update the key in Settings → Model & Runtime."
                 }
             }
         };
+        let (resp, lifecycle, attempt_started, rate_limit) = resp;
         // Consume the streamed completion with a generous FIRST-token budget +
         // a tight inter-token idle timeout (not a total-time cap), then reassemble
         // it into the non-streaming body shape. Ollama → NDJSON native parser;
@@ -449,6 +748,20 @@ check/update the key in Settings → Model & Runtime."
         let body: serde_json::Value = match collected {
             Ok(value) => value,
             Err(error) => {
+                let error_class = if error.contains("first token") {
+                    "first_token_timeout"
+                } else if error.contains("idle") || error.contains("stalled") {
+                    "idle_timeout"
+                } else {
+                    "stream_decode"
+                };
+                lifecycle.failed(
+                    unix_timestamp(),
+                    error_class,
+                    None,
+                    u64::try_from(attempt_started.elapsed().as_millis()).ok(),
+                    rate_limit,
+                );
                 let _ = emit_stream_event(
                     self.tx,
                     GenerateStreamEvent::Delta {
@@ -476,6 +789,34 @@ check/update the key in Settings → Model & Runtime."
             .and_then(|c| c.get("finish_reason"))
             .and_then(|f| f.as_str())
             .map(str::to_string);
+        let mut terminal_usage = if ollama {
+            parse_ollama_usage(&body)
+        } else {
+            parse_openai_usage(&body)
+        };
+        let provider_reported = terminal_usage.tokens.input_tokens.is_some()
+            || terminal_usage.tokens.output_tokens.is_some()
+            || terminal_usage.tokens.reasoning_tokens.is_some()
+            || terminal_usage.tokens.cache_read_tokens.is_some()
+            || terminal_usage.tokens.cache_write_tokens.is_some();
+        let usage_provenance = if provider_reported {
+            UsageProvenance::ProviderReported
+        } else {
+            terminal_usage.tokens.input_tokens =
+                Some(estimate_tokens(&serde_json::json!(messages)));
+            terminal_usage.tokens.output_tokens = Some(estimate_tokens(&message));
+            UsageProvenance::HomunEstimated
+        };
+        let latency_ms = u64::try_from(attempt_started.elapsed().as_millis()).ok();
+        lifecycle.completed(
+            unix_timestamp(),
+            terminal_usage.clone(),
+            usage_provenance,
+            latency_ms,
+            None,
+            finish_reason.clone(),
+            rate_limit,
+        );
         Ok(ModelRoundOutput {
             message,
             provider: ProviderBinding {
@@ -484,6 +825,9 @@ check/update the key in Settings → Model & Runtime."
                 api_key,
             },
             finish_reason,
+            usage: terminal_usage.tokens,
+            latency_ms,
+            time_to_first_token_ms: None,
         })
     }
 }
@@ -491,6 +835,113 @@ check/update the key in Settings → Model & Runtime."
 #[cfg(test)]
 mod tests {
     use super::*;
+    use local_first_inference_usage::{
+        AttemptEventKind, InferencePurpose, Locality, UsageAttemptEvent, UsageContext,
+        UsageRecorder,
+    };
+    use std::{collections::HashSet, sync::Mutex};
+
+    #[derive(Default)]
+    struct RecordingUsageRecorder {
+        events: Mutex<Vec<UsageAttemptEvent>>,
+    }
+
+    impl UsageRecorder for RecordingUsageRecorder {
+        fn record(&self, event: UsageAttemptEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    impl RecordingUsageRecorder {
+        fn events(&self) -> Vec<UsageAttemptEvent> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    #[test]
+    fn openai_usage_keeps_reasoning_cache_and_exact_cost() {
+        let usage = parse_openai_usage(&serde_json::json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 40,
+            "completion_tokens_details": {"reasoning_tokens": 12},
+            "prompt_tokens_details": {"cached_tokens": 60},
+            "cost": 0.00125
+        }));
+        assert_eq!(usage.tokens.input_tokens, Some(100));
+        assert_eq!(usage.tokens.output_tokens, Some(40));
+        assert_eq!(usage.tokens.reasoning_tokens, Some(12));
+        assert_eq!(usage.tokens.cache_read_tokens, Some(60));
+        assert_eq!(usage.provider_cost_microusd, Some(1_250));
+    }
+
+    #[test]
+    fn ollama_usage_maps_native_terminal_counts() {
+        let usage = parse_ollama_usage(&serde_json::json!({
+            "prompt_eval_count": 81,
+            "eval_count": 23
+        }));
+        assert_eq!(usage.tokens.input_tokens, Some(81));
+        assert_eq!(usage.tokens.output_tokens, Some(23));
+        assert_eq!(usage.provider_cost_microusd, None);
+    }
+
+    #[test]
+    fn retry_records_each_transport_attempt_under_one_call() {
+        let recorder = RecordingUsageRecorder::default();
+        let context = UsageContext::new("call-1", InferencePurpose::ChatResponse, "local");
+
+        let first = AttemptLifecycle::start(
+            &recorder,
+            &context,
+            "attempt-1",
+            "openrouter",
+            "model-a",
+            Locality::Cloud,
+            100,
+        );
+        first.failed(
+            110,
+            "headers_timeout",
+            None,
+            Some(10_000),
+            RateLimitSnapshot::default(),
+        );
+        let second = AttemptLifecycle::start(
+            &recorder,
+            &context,
+            "attempt-2",
+            "openrouter",
+            "model-a",
+            Locality::Cloud,
+            120,
+        );
+        second.completed(
+            150,
+            ParsedTerminalUsage::default(),
+            UsageProvenance::Unavailable,
+            Some(30_000),
+            None,
+            Some("stop".to_string()),
+            RateLimitSnapshot::default(),
+        );
+
+        let events = recorder.events();
+        let terminal_attempts = events
+            .iter()
+            .filter(|event| event.event_kind != AttemptEventKind::AttemptStarted)
+            .count();
+        let call_ids = events
+            .iter()
+            .map(|event| event.call_id.as_str())
+            .collect::<HashSet<_>>();
+        let attempt_ids = events
+            .iter()
+            .map(|event| event.attempt_id.as_str())
+            .collect::<HashSet<_>>();
+        assert_eq!(terminal_attempts, 2);
+        assert_eq!(call_ids.len(), 1);
+        assert_eq!(attempt_ids.len(), 2);
+    }
 
     // Resilience regression (2026-07-09): a cold-loading / wedged model endpoint
     // ACCEPTS the TCP connection but withholds the HTTP response headers until the

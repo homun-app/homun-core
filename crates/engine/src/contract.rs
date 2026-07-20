@@ -37,6 +37,9 @@ pub struct ModelCall<'a> {
     /// on top of the route's hard-prune, `TurnConfig::forced_tool`). `None` = "auto" — today's
     /// behavior, kept during intake and whenever no deterministic routing binding is active.
     pub forced_tool: Option<&'a str>,
+    /// Metadata-only attribution for this logical model call. Prompt and response content are
+    /// deliberately absent from the usage contract.
+    pub usage: &'a local_first_inference_usage::UsageContext,
 }
 
 /// The provider binding a round ran against. Returned so a mid-turn fallback (401/timeout/
@@ -56,6 +59,9 @@ pub struct ModelRoundOutput {
     pub message: Value,
     pub provider: ProviderBinding,
     pub finish_reason: Option<String>,
+    pub usage: local_first_inference_usage::NormalizedUsage,
+    pub latency_ms: Option<u64>,
+    pub time_to_first_token_ms: Option<u64>,
 }
 
 /// Typed failure. Preserves parity: only an UPSTREAM status error should surface as the turn's
@@ -365,6 +371,9 @@ mod tests {
                     api_key: call.api_key.map(str::to_string),
                 },
                 finish_reason: None,
+                usage: Default::default(),
+                latency_ms: Some(12),
+                time_to_first_token_ms: Some(4),
             })
         }
     }
@@ -394,6 +403,11 @@ mod tests {
     async fn seams_are_usable_with_a_mock() {
         use std::sync::Mutex; // the on_delta sink must be Send + Sync (see the trait bound)
         let m = EchoModel;
+        let usage = local_first_inference_usage::UsageContext::new(
+            "test-call",
+            local_first_inference_usage::InferencePurpose::ChatResponse,
+            "test-user",
+        );
         let streamed = Mutex::new(String::new());
         let out = m
             .generate(
@@ -406,6 +420,7 @@ mod tests {
                     temperature: 0.0,
                     is_final_round: false,
                     forced_tool: None,
+                    usage: &usage,
                 },
                 &|d| streamed.lock().unwrap().push_str(d),
             )
@@ -414,6 +429,8 @@ mod tests {
         assert_eq!(out.message["content"], "test-model");
         assert_eq!(out.provider.model, "test-model");
         assert_eq!(out.provider.base_url, "http://x");
+        assert_eq!(out.latency_ms, Some(12));
+        assert_eq!(out.time_to_first_token_ms, Some(4));
         assert_eq!(*streamed.lock().unwrap(), "hi", "on_delta streamed the live token");
 
         let tools = FixedTools;
