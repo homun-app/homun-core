@@ -369,6 +369,26 @@ impl TaskStore {
         Ok(())
     }
 
+    pub fn link_task_to_thread(
+        &self,
+        task_id: &TaskId,
+        user_id: &UserId,
+        workspace_id: &WorkspaceId,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<bool> {
+        let updated = self.connection.execute(
+            "UPDATE tasks SET thread_id = ?1
+             WHERE task_id = ?2 AND user_id = ?3 AND workspace_id = ?4",
+            params![
+                thread_id,
+                task_id.as_str(),
+                user_id.as_str(),
+                workspace_id.as_str(),
+            ],
+        )?;
+        Ok(updated > 0)
+    }
+
     /// Purge ALL tasks, dependencies and resource reservations for a workspace.
     /// Called when a project workspace is deleted. Safe: uses the same
     /// (user_id, workspace_id) composite key the store indexes on.
@@ -1785,7 +1805,7 @@ impl TaskStore {
         // Subagents spawned on this thread (kind `subagent.<role>`). Forward-looking: empty
         // until spawn_subagent actually fires. `subagent.review` → "Review".
         let mut sub_stmt = self.connection.prepare(
-            "SELECT kind, status FROM tasks
+            "SELECT kind, status, task_json, blocked_reason, created_at, updated_at FROM tasks
              WHERE thread_id = ?1 AND kind LIKE 'subagent.%'
              ORDER BY created_at ASC",
         )?;
@@ -1793,9 +1813,26 @@ impl TaskStore {
             .query_map(params![thread_id], |row| {
                 let kind: String = row.get(0)?;
                 let status: String = row.get(1)?;
+                let task_json: String = row.get(2)?;
+                let blocked_reason: Option<String> = row.get(3)?;
+                let created_at: i64 = row.get(4)?;
+                let updated_at: i64 = row.get(5)?;
+                let goal = serde_json::from_str::<Value>(&task_json)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("goal")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .map(str::to_string)
+                    })
+                    .filter(|value| !value.is_empty());
                 Ok(SubagentInfo {
                     name: subagent_name_from_kind(&kind),
                     status,
+                    summary: blocked_reason.or(goal),
+                    created_at,
+                    updated_at,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -2709,6 +2746,42 @@ mod chat_turn_query_tests {
         assert_eq!(p.plan_markdown, None);
         assert_eq!(p.latest_turn_status, None);
         assert_eq!(p.turn_count, 0);
+    }
+
+    #[test]
+    fn project_thread_activity_includes_subagent_summary_and_timestamps() {
+        let s = store();
+        let mut subagent = TaskRecord::new(
+            "subagent-1",
+            UserId::new("u"),
+            WorkspaceId::new("w"),
+            "subagent.review",
+            "Review the inspector implementation",
+            json!({}),
+        );
+        subagent.status = TaskStatus::Completed;
+        subagent.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
+        subagent.updated_at = OffsetDateTime::from_unix_timestamp(120).unwrap();
+        s.insert_task(&subagent).unwrap();
+        assert!(
+            s.link_task_to_thread(
+                &subagent.task_id,
+                &subagent.user_id,
+                &subagent.workspace_id,
+                "thread-subagents",
+            )
+            .unwrap()
+        );
+
+        let projection = s.project_thread_activity("thread-subagents", 200).unwrap();
+        assert_eq!(projection.subagents.len(), 1);
+        assert_eq!(projection.subagents[0].name, "Review");
+        assert_eq!(
+            projection.subagents[0].summary.as_deref(),
+            Some("Review the inspector implementation")
+        );
+        assert_eq!(projection.subagents[0].created_at, 100);
+        assert_eq!(projection.subagents[0].updated_at, 120);
     }
 }
 

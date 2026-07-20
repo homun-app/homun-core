@@ -55,6 +55,10 @@ export const inspectorWorkspaceReducer = implementation.inspectorWorkspaceReduce
   state: InspectorWorkspaceState,
   action: InspectorWorkspaceAction,
 ) => InspectorWorkspaceState;
+export const filterInspectorState = implementation.filterInspectorState as (
+  state: InspectorWorkspaceState,
+  isAllowed: (tab: InspectorTab) => boolean,
+) => InspectorWorkspaceState;
 export const restoreInspectorState = implementation.restoreInspectorState as (
   raw: string | null,
   isAllowed?: (tab: InspectorTab) => boolean,

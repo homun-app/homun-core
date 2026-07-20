@@ -116,6 +116,7 @@ import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../li
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
 import {
+  filterInspectorState,
   inspectorWorkspaceReducer,
   loadInspectorState,
   loadInspectorWidthRatio,
@@ -406,8 +407,16 @@ export function ChatView({
       (tab) => isRestorableInspectorTab(tab, thread.threadId, thread.workspaceId),
     ),
   );
+  const [inspectorResourcesReady, setInspectorResourcesReady] = useState(false);
+  const inspectorRef = useRef(inspector);
+  const inspectorRestoreScopeRef = useRef<string | null>(null);
+  inspectorRef.current = inspector;
   const [inspectorRatio, setInspectorRatio] = useState(loadInspectorWidthRatio);
   const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
+  const [memoryArtifactsLoaded, setMemoryArtifactsLoaded] = useState(false);
+  const [memoryArtifactsLoadError, setMemoryArtifactsLoadError] = useState(false);
+  const [memoryArtifactsRevision, setMemoryArtifactsRevision] = useState(0);
+  const [memoryArtifactsReloadNonce, setMemoryArtifactsReloadNonce] = useState(0);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
   // the "Save as goal" message action + the Obiettivi tab. `goalSeed` pre-fills
   // the Obiettivi compose when promoting a chat message to a goal.
@@ -644,6 +653,9 @@ export function ChatView({
         name,
         kind: isImage ? "image" : "artifact",
         meta: artifact.updated ? "updated" : artifact.source === "project" ? "project" : "artifact",
+        action: "artifact",
+        artifactThread: artifact.thread,
+        artifactName: artifact.name,
       });
     }
     for (const file of uploadedFiles) {
@@ -651,6 +663,7 @@ export function ChatView({
         name: file.title,
         kind: file.kind === "image" ? "image" : "file",
         meta: "uploaded",
+        action: "files",
       });
     }
     return out;
@@ -739,15 +752,91 @@ export function ChatView({
         "artifact",
         artifact.name,
         `artifact:${artifact.thread}:${artifact.name}`,
-        { artifactThread: artifact.thread, name: artifact.name },
+        {
+          artifactThread: artifact.thread,
+          name: artifact.name,
+          artifactSource: artifact.source ?? "conversation",
+          projectPath: artifact.projectPath || artifact.projectRelativePath || "",
+        },
       );
     },
     [openInspectorTab],
   );
 
   useEffect(() => {
+    let cancelled = false;
+    const scope = `${thread.threadId}:${thread.workspaceId ?? ""}`;
+    const firstValidation = inspectorRestoreScopeRef.current !== scope;
+    const restored = firstValidation
+      ? loadInspectorState(
+          thread.threadId,
+          (tab) => isRestorableInspectorTab(tab, thread.threadId, thread.workspaceId),
+        )
+      : inspectorRef.current;
+    if (firstValidation) {
+      inspectorRestoreScopeRef.current = scope;
+      inspectorRef.current = restored;
+      dispatchInspector({ type: "replaceState", state: restored });
+    }
+    if (firstValidation) setInspectorResourcesReady(false);
+
+    void Promise.all(restored.tabs.map(async (tab): Promise<"allowed" | "denied" | "error"> => {
+      if (tab.kind === "artifact") {
+        if (!tab.payload.name) return "allowed";
+        const artifact = workbenchArtifacts.find(
+          (artifact) =>
+            artifact.thread === tab.payload.artifactThread &&
+            artifact.name === tab.payload.name,
+        );
+        const projectPath =
+          artifact?.projectPath || artifact?.projectRelativePath || tab.payload.projectPath;
+        const projectBacked = artifact?.source === "project" || tab.payload.artifactSource === "project";
+        if (!artifact && !projectPath) {
+          return memoryArtifactsLoaded && !memoryArtifactsLoadError ? "denied" : "error";
+        }
+        if (!projectBacked) return "allowed";
+        try {
+          const payload = await coreBridge.fsFile(projectPath || tab.payload.name, thread.threadId);
+          return payload.authorized ? "allowed" : "denied";
+        } catch {
+          return "error";
+        }
+      }
+      if (tab.kind !== "file" || !tab.payload.path) return "allowed";
+      try {
+        const payload = await coreBridge.fsFile(tab.payload.path, thread.threadId);
+        return payload.authorized ? "allowed" : "denied";
+      } catch {
+        return "error";
+      }
+    })).then((outcomes) => {
+      if (cancelled) return;
+      const deniedIds = new Set(
+        restored.tabs.filter((_, index) => outcomes[index] === "denied").map((tab) => tab.id),
+      );
+      const current = inspectorRef.current;
+      dispatchInspector({
+        type: "replaceState",
+        state: filterInspectorState(
+          current,
+          (tab) => !deniedIds.has(tab.id),
+        ),
+      });
+      setInspectorResourcesReady(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // Resource descriptors are restored once per authorization scope. Individual
+    // open tabs revalidate again on window focus, without ever persisting content.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memoryArtifactsLoadError, memoryArtifactsLoaded, memoryArtifactsRevision, thread.threadId, thread.workspaceId]);
+
+  useEffect(() => {
+    if (!inspectorResourcesReady) return;
     saveInspectorState(thread.threadId, inspector);
-  }, [inspector, thread.threadId]);
+  }, [inspector, inspectorResourcesReady, thread.threadId]);
 
   const visibleComputerSession = useMemo(
     () => ({
@@ -1776,15 +1865,24 @@ export function ChatView({
     void coreBridge
       .memoryArtifacts(thread.threadId)
       .then((items) => {
-        if (!cancelled) setMemoryArtifacts(items);
+        if (!cancelled) {
+          setMemoryArtifacts(items);
+          setMemoryArtifactsLoadError(false);
+          setMemoryArtifactsLoaded(true);
+          setMemoryArtifactsRevision((revision) => revision + 1);
+        }
       })
       .catch(() => {
-        if (!cancelled) setMemoryArtifacts([]);
+        if (!cancelled) {
+          setMemoryArtifactsLoadError(true);
+          setMemoryArtifactsLoaded(true);
+          setMemoryArtifactsRevision((revision) => revision + 1);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [thread.threadId, threadMessages]);
+  }, [memoryArtifactsReloadNonce, messages, thread.threadId]);
 
   // Promote a chat message to a project objective: hand the text off to the Obiettivi
   // panel's compose (open Workbench → Obiettivi tab, pre-filled) so the user trims and
@@ -2673,9 +2771,15 @@ export function ChatView({
           saveInspectorWidthRatio(next);
         }}
         renderTab={(tab) => (
-          <InspectorView
+          !inspectorResourcesReady && (tab.kind === "file" || tab.kind === "artifact") ? (
+            <div className="workbench-empty">
+              <Loader2 size={22} className="spin" />
+              <p>{t("chat.loadingActivity")}</p>
+            </div>
+          ) : <InspectorView
             descriptor={tab}
             artifacts={workbenchArtifacts}
+            artifactCatalogError={memoryArtifactsLoadError}
             uploadedFiles={uploadedFiles}
             threadId={thread.threadId}
             goalSeed={goalSeed}
@@ -2685,7 +2789,9 @@ export function ChatView({
             }
             layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}
             onOpenFile={openFileTab}
+            onOpenFilesIndex={() => openUtilityTab("file")}
             onOpenArtifact={openArtifactTab}
+            onRetryArtifactCatalog={() => setMemoryArtifactsReloadNonce((value) => value + 1)}
             sources={islandSources}
             subagents={projectedSubagents}
             activeSurface={activeSurface}
@@ -3938,7 +4044,7 @@ type ArtifactPreview =
   | { kind: "html"; url: string; ext: string }
   | { kind: "pdf-images"; pages: string[]; ext: string }
   | { kind: "markdown" | "code" | "csv" | "text"; text: string; ext: string }
-  | { kind: "binary" | "error"; ext: string };
+  | { kind: "binary" | "missing" | "denied" | "error"; ext: string };
 
 /** Fetches an artifact and builds a renderable preview by type. For image/pdf it
  *  creates an object URL the caller must revoke (preview.url). */
@@ -3950,7 +4056,10 @@ async function buildArtifactPreview(
   if (artifact.source === "project") {
     const path = artifact.projectPath || artifact.projectRelativePath || artifact.name;
     const payload = await coreBridge.fsFile(path, artifact.thread);
-    if (!payload.authorized || payload.error) return { kind: "error", ext };
+    if (!payload.authorized) return { kind: "denied", ext };
+    if (payload.error) {
+      return { kind: isMissingFsError(payload.error) ? "missing" : "error", ext };
+    }
     if (payload.binary) return { kind: "binary", ext };
     if (ext === "md" || ext === "markdown") return { kind: "markdown", text: payload.text, ext };
     if (ext === "csv") return { kind: "csv", text: payload.text, ext };
@@ -4099,12 +4208,19 @@ type InspectorResourceStatus =
   | "unsupported"
   | "error";
 
+function isMissingFsError(message?: string) {
+  return Boolean(message && /not found|no such file|cannot find|enoent|os error 2/i.test(message));
+}
+
 /** A generated artifact or uploaded file, projected into the island's "Sources" section.
  *  `kind` only selects the (monochrome) glyph; `meta` is a one-word provenance hint. */
 export interface IslandSource {
   name: string;
   kind: "artifact" | "file" | "image";
   meta?: string;
+  action: "artifact" | "files";
+  artifactThread?: string;
+  artifactName?: string;
 }
 
 // Shared view metadata for the panel: the header dropdown (chat top-right) and the
@@ -5143,6 +5259,7 @@ export function MemoryGraphPanel({
 function InspectorView({
   descriptor,
   artifacts,
+  artifactCatalogError,
   uploadedFiles,
   threadId,
   goalSeed,
@@ -5150,7 +5267,9 @@ function InspectorView({
   operationalPlanMarkdown,
   layoutSignal,
   onOpenFile,
+  onOpenFilesIndex,
   onOpenArtifact,
+  onRetryArtifactCatalog,
   sources,
   subagents,
   activeSurface,
@@ -5166,6 +5285,7 @@ function InspectorView({
 }: {
   descriptor: InspectorTab;
   artifacts: ParsedArtifact[];
+  artifactCatalogError: boolean;
   uploadedFiles: ChatAttachment[];
   threadId: string;
   goalSeed?: string | null;
@@ -5173,7 +5293,9 @@ function InspectorView({
   operationalPlanMarkdown?: string;
   layoutSignal: string;
   onOpenFile: (path: string) => void;
+  onOpenFilesIndex: () => void;
   onOpenArtifact: (artifact: ParsedArtifact) => void;
+  onRetryArtifactCatalog: () => void;
   sources: IslandSource[];
   subagents: SubagentInfo[];
   activeSurface: ComputerSurfaceKind;
@@ -5214,28 +5336,36 @@ function InspectorView({
   const [openFile, setOpenFile] = useState<FsFilePayload | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [diffOn, setDiffOn] = useState(false);
+  const fileLoadGenerationRef = useRef(0);
+
+  useEffect(() => () => {
+    fileLoadGenerationRef.current += 1;
+  }, []);
 
   const loadFileAt = useCallback(
     async (path: string) => {
+      const generation = ++fileLoadGenerationRef.current;
       setFileLoading(true);
       setDiffOn(false);
       setOpenFile({ authorized: true, path, text: "", old_text: "", in_git: false, modified: false, binary: false });
       try {
         const payload = await coreBridge.fsFile(path, threadId);
-        setOpenFile(payload);
+        if (generation === fileLoadGenerationRef.current) setOpenFile(payload);
       } catch (error) {
-        setOpenFile({
-          authorized: true,
-          path,
-          text: "",
-          old_text: "",
-          in_git: false,
-          modified: false,
-          binary: false,
-          error: (error as Error).message,
-        });
+        if (generation === fileLoadGenerationRef.current) {
+          setOpenFile({
+            authorized: true,
+            path,
+            text: "",
+            old_text: "",
+            in_git: false,
+            modified: false,
+            binary: false,
+            error: (error as Error).message,
+          });
+        }
       } finally {
-        setFileLoading(false);
+        if (generation === fileLoadGenerationRef.current) setFileLoading(false);
       }
     },
     [threadId],
@@ -5285,6 +5415,9 @@ function InspectorView({
   useEffect(() => {
     if (tab !== "files" || !resourceFilePath) return;
     void loadFileAt(resourceFilePath);
+    const revalidate = () => void loadFileAt(resourceFilePath);
+    window.addEventListener("focus", revalidate);
+    return () => window.removeEventListener("focus", revalidate);
   }, [loadFileAt, resourceFilePath, tab]);
   // No auto-redirect: every panel-open path picks a view explicitly (dropdown pick,
   // save-goal → "goals", open-artifact → "artifacts"), and every view has its own
@@ -5330,7 +5463,9 @@ function InspectorView({
         : !openFile.authorized
           ? "denied"
           : openFile.error
-            ? "error"
+            ? isMissingFsError(openFile.error)
+              ? "missing"
+              : "error"
             : openFile.binary
               ? "unsupported"
               : "ready";
@@ -5340,13 +5475,41 @@ function InspectorView({
       <div className="workbench-files inspector-source-view">
         {sources.length > 0 ? (
           <ul className="workbench-file-list">
-            {sources.map((source, index) => (
-              <li key={`${index}:${source.kind}:${source.name}`}>
-                {source.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
-                <span className="wf-name" title={source.name}>{source.name}</span>
-                {source.meta && <small>{source.meta}</small>}
-              </li>
-            ))}
+            {sources.map((source, index) => {
+              const sourceArtifact = artifacts.find(
+                (artifact) =>
+                  source.action === "artifact" &&
+                  artifact.thread === source.artifactThread &&
+                  artifact.name === source.artifactName,
+              );
+              return (
+                <li key={`${index}:${source.kind}:${source.name}`}>
+                  {source.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
+                  {sourceArtifact ? (
+                    <button
+                      type="button"
+                      className="wf-name wf-file"
+                      title={source.name}
+                      onClick={() => onOpenArtifact(sourceArtifact)}
+                    >
+                      {source.name}
+                    </button>
+                  ) : source.action === "files" ? (
+                    <button
+                      type="button"
+                      className="wf-name wf-file"
+                      title={source.name}
+                      onClick={onOpenFilesIndex}
+                    >
+                      {source.name}
+                    </button>
+                  ) : (
+                    <span className="wf-name" title={source.name}>{source.name}</span>
+                  )}
+                  {source.meta && <small>{source.meta}</small>}
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <div className="workbench-empty"><BookMarked size={28} /><p>No sources yet.</p></div>
@@ -5363,8 +5526,14 @@ function InspectorView({
             {subagents.map((subagent, index) => (
               <li key={`${index}:${subagent.name}`}>
                 <Bot size={15} />
-                <span className="wf-name" title={subagent.name}>{subagent.name}</span>
-                <small>{subagent.status}</small>
+                <span className="wf-name inspector-subagent-copy" title={subagent.name}>
+                  <strong>{subagent.name}</strong>
+                  {subagent.summary && <small>{subagent.summary}</small>}
+                </span>
+                <small>
+                  {subagent.status}
+                  {subagent.updated_at ? ` · ${formatMessageTimestamp(String(subagent.updated_at))}` : ""}
+                </small>
               </li>
             ))}
           </ul>
@@ -5437,18 +5606,40 @@ function InspectorView({
                     {t("chat.inspector.closeTab", { title: descriptor.title })}
                   </button>
                 </div>
+              ) : fileStatus === "missing" ? (
+                <div className="workbench-empty">
+                  <AlertCircle size={24} />
+                  <p>{t("chat.inspector.missing")}</p>
+                  <span className="workbench-empty-actions">
+                    <button type="button" onClick={() => void loadFileAt(resourceFilePath)}>
+                      {t("chat.inspector.retry")}
+                    </button>
+                    <button type="button" onClick={onCloseTab}>
+                      {t("chat.inspector.closeTab", { title: descriptor.title })}
+                    </button>
+                  </span>
+                </div>
               ) : fileStatus === "error" ? (
                 <div className="workbench-empty">
                   <AlertCircle size={24} />
                   <p>{openFile.error}</p>
-                  <button type="button" onClick={() => void loadFileAt(resourceFilePath)}>
-                    {t("chat.inspector.retry")}
-                  </button>
+                  <span className="workbench-empty-actions">
+                    <button type="button" onClick={() => void loadFileAt(resourceFilePath)}>
+                      {t("chat.inspector.retry")}
+                    </button>
+                    <button type="button" onClick={onCloseTab}>
+                      {t("chat.inspector.closeTab", { title: descriptor.title })}
+                    </button>
+                  </span>
                 </div>
               ) : fileStatus === "unsupported" ? (
                 <div className="workbench-empty">
                   <FileText size={24} />
                   <p>{t("chat.inspector.unsupported")}</p>
+                  <small>{openFile.path}</small>
+                  <button type="button" onClick={onCloseTab}>
+                    {t("chat.inspector.closeTab", { title: descriptor.title })}
+                  </button>
                 </div>
               ) : diffOn && openFile.modified ? (
                 <DiffView oldText={openFile.old_text} newText={openFile.text} />
@@ -5552,16 +5743,23 @@ function InspectorView({
             <ArtifactsPanel
               artifacts={[resourceArtifact]}
               initialName={resourceArtifact.name}
-              onClose={() => undefined}
+              onClose={onCloseTab}
               embedded
             />
           ) : (
             <div className="workbench-empty">
               <FileText size={28} />
-              <p>{t("chat.inspector.missing")}</p>
-              <button type="button" onClick={onCloseTab}>
-                {t("chat.inspector.closeTab", { title: descriptor.title })}
-              </button>
+              <p>
+                {artifactCatalogError ? t("chat.previewUnavailable") : t("chat.inspector.missing")}
+              </p>
+              <span className="workbench-empty-actions">
+                <button type="button" onClick={onRetryArtifactCatalog}>
+                  {t("chat.inspector.retry")}
+                </button>
+                <button type="button" onClick={onCloseTab}>
+                  {t("chat.inspector.closeTab", { title: descriptor.title })}
+                </button>
+              </span>
             </div>
           ))}
         {tab === "artifacts" && !descriptor.payload.name && (
@@ -5686,6 +5884,7 @@ function ArtifactsPanel({
   const [diffData, setDiffData] = useState<{ oldText: string; newText: string } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const urlRef = useRef<string | null>(null);
+  const artifactActionsRef = useRef<HTMLDetailsElement>(null);
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
 
@@ -5701,6 +5900,9 @@ function ArtifactsPanel({
       return;
     }
     let cancelled = false;
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = null;
+    setPreview(null);
     setLoading(true);
     setEditing(false);
     setShowDiff(false);
@@ -5737,6 +5939,13 @@ function ArtifactsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, reloadKey]);
 
+  useEffect(() => {
+    if (!selected) return undefined;
+    const revalidate = () => setReloadKey((key) => key + 1);
+    window.addEventListener("focus", revalidate);
+    return () => window.removeEventListener("focus", revalidate);
+  }, [selected]);
+
   const editableKind =
     selected?.source !== "project" &&
     (preview?.kind === "markdown" ||
@@ -5745,6 +5954,17 @@ function ArtifactsPanel({
       preview?.kind === "csv");
   const textKind = preview?.kind === "code" || preview?.kind === "text";
   const canDiff = textKind && versions > 0 && slot > 0;
+  const actionsAvailable = Boolean(
+    preview && !["denied", "missing", "error"].includes(preview.kind),
+  );
+  const closeArtifactActions = (restoreFocus = true) => {
+    artifactActionsRef.current?.removeAttribute("open");
+    if (restoreFocus) {
+      window.requestAnimationFrame(() =>
+        artifactActionsRef.current?.querySelector<HTMLElement>("summary")?.focus(),
+      );
+    }
+  };
 
   // Load the diff between the shown version and the previous one when requested.
   useEffect(() => {
@@ -5863,62 +6083,112 @@ function ArtifactsPanel({
                   </button>
                 </div>
               )}
-              {canDiff && (
-                <button
-                  type="button"
-                  className={showDiff ? "active" : ""}
-                  onClick={() => setShowDiff((value) => !value)}
-                  title={t("chat.showVersionDiff")}
-                >
-                  Diff
-                  {showDiff && diffCounts && (
-                    <span className="diff-counts">
-                      <span className="add">+{diffCounts.added}</span>{" "}
-                      <span className="del">−{diffCounts.removed}</span>
-                    </span>
+              {actionsAvailable && <details
+                ref={artifactActionsRef}
+                className="artifact-actions-menu"
+                onToggle={(event) => {
+                  const details = event.currentTarget;
+                  if (details.open) {
+                    window.requestAnimationFrame(() =>
+                      details.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus(),
+                    );
+                  }
+                }}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) closeArtifactActions(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    closeArtifactActions();
+                    return;
+                  }
+                  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+                  if (items.length === 0) return;
+                  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                  const next = event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? items.length - 1
+                      : (current + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
+                  event.preventDefault();
+                  items[next]?.focus();
+                }}
+              >
+                <summary aria-label={t("chat.actions")} title={t("chat.actions")}>
+                  <MoreHorizontal size={16} />
+                </summary>
+                <div className="artifact-actions-popover" role="menu">
+                  {canDiff && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={showDiff ? "active" : ""}
+                      onClick={() => {
+                        setShowDiff((value) => !value);
+                        closeArtifactActions();
+                      }}
+                    >
+                      Diff
+                      {showDiff && diffCounts && (
+                        <span className="diff-counts">
+                          <span className="add">+{diffCounts.added}</span>{" "}
+                          <span className="del">−{diffCounts.removed}</span>
+                        </span>
+                      )}
+                    </button>
                   )}
-                </button>
-              )}
-              {textKind && !showDiff && (
-                <button
-                  type="button"
-                  className={wrap ? "active" : ""}
-                  onClick={() => setWrap((value) => !value)}
-                  title={t("chat.wordWrap")}
-                >
-                  Word wrap
-                </button>
-              )}
-              {editableKind && !editing && slot === versions && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditText(preview && "text" in preview ? preview.text : "");
-                    setEditing(true);
-                  }}
-                >
-                  <Pencil size={14} />
-                  <span>{t("common.edit")}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() =>
-                  void triggerArtifactDownload(selected, slot < versions ? slot : undefined)
-                }
-              >
-                <Download size={14} />
-                <span>{t("chat.action.download")}</span>
-              </button>
-              <button
-                type="button"
-                className="artifact-folder"
-                onClick={() => void openArtifactFolder(selected)}
-                aria-label={t("chat.openFolder")}
-                title={t("chat.openFolder")}
-              >
-                <FolderOpen size={14} />
-              </button>
+                  {textKind && !showDiff && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={wrap ? "active" : ""}
+                      onClick={() => {
+                        setWrap((value) => !value);
+                        closeArtifactActions();
+                      }}
+                    >
+                      {t("chat.wordWrap")}
+                    </button>
+                  )}
+                  {editableKind && !editing && slot === versions && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setEditText(preview && "text" in preview ? preview.text : "");
+                        setEditing(true);
+                        closeArtifactActions();
+                      }}
+                    >
+                      <Pencil size={14} />
+                      <span>{t("common.edit")}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      void triggerArtifactDownload(selected, slot < versions ? slot : undefined);
+                      closeArtifactActions();
+                    }}
+                  >
+                    <Download size={14} />
+                    <span>{t("chat.action.download")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      void openArtifactFolder(selected);
+                      closeArtifactActions();
+                    }}
+                  >
+                    <FolderOpen size={14} />
+                    <span>{t("chat.openFolder")}</span>
+                  </button>
+                </div>
+              </details>}
             </div>
           )}
           <div className="artifacts-preview-body">
@@ -5949,7 +6219,12 @@ function ArtifactsPanel({
             ) : showDiff && diffData ? (
               <DiffView oldText={diffData.oldText} newText={diffData.newText} />
             ) : (
-              <ArtifactPreviewBody preview={preview} wrap={wrap} />
+              <ArtifactPreviewBody
+                preview={preview}
+                wrap={wrap}
+                onRetry={() => setReloadKey((key) => key + 1)}
+                onClose={onClose}
+              />
             )}
           </div>
         </div>
@@ -5961,9 +6236,13 @@ function ArtifactsPanel({
 function ArtifactPreviewBody({
   preview,
   wrap = false,
+  onRetry,
+  onClose,
 }: {
   preview: ArtifactPreview | null;
   wrap?: boolean;
+  onRetry?: () => void;
+  onClose?: () => void;
 }) {
   const { t } = useTranslation();
   if (!preview) return <p className="artifacts-preview-note">{t("chat.selectAFile")}</p>;
@@ -6016,7 +6295,29 @@ function ArtifactPreviewBody({
     case "csv":
       return <ArtifactCsvTable text={preview.text} />;
     case "error":
-      return <p className="artifacts-preview-note">{t("chat.previewUnavailable")}</p>;
+      return (
+        <InspectorFailureState
+          message={t("chat.previewUnavailable")}
+          onRetry={onRetry}
+          onClose={onClose}
+        />
+      );
+    case "missing":
+      return (
+        <InspectorFailureState
+          message={t("chat.inspector.missing")}
+          onRetry={onRetry}
+          onClose={onClose}
+        />
+      );
+    case "denied":
+      return (
+        <InspectorFailureState
+          message={t("chat.inspector.denied")}
+          onRetry={onRetry}
+          onClose={onClose}
+        />
+      );
     default:
       return (
         <p className="artifacts-preview-note">
@@ -6024,6 +6325,30 @@ function ArtifactPreviewBody({
         </p>
       );
   }
+}
+
+function InspectorFailureState({
+  message,
+  onRetry,
+  onClose,
+}: {
+  message: string;
+  onRetry?: () => void;
+  onClose?: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="workbench-empty">
+      <AlertCircle size={24} />
+      <p>{message}</p>
+      {(onRetry || onClose) && (
+        <span className="workbench-empty-actions">
+          {onRetry && <button type="button" onClick={onRetry}>{t("chat.inspector.retry")}</button>}
+          {onClose && <button type="button" onClick={onClose}>{t("common.close")}</button>}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function ArtifactCsvTable({ text }: { text: string }) {

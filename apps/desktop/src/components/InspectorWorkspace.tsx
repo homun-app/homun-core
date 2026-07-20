@@ -1,6 +1,7 @@
 import { ArrowLeft, Maximize2, Minimize2, PanelRightClose } from "lucide-react";
 import {
   useEffect,
+  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
@@ -49,11 +50,23 @@ export function InspectorWorkspace({
 }: InspectorWorkspaceProps) {
   const { t } = useTranslation();
   const [liveRatio, setLiveRatio] = useState(ratio);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => setLiveRatio(ratio), [ratio]);
   useEffect(() => {
+    const node = layoutRef.current;
+    if (!node) return undefined;
+    const update = () => setContainerWidth(node.getBoundingClientRect().width);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [layoutRef]);
+  useEffect(() => {
     layoutRef.current?.style.setProperty("--inspector-ratio", String(liveRatio));
   }, [layoutRef, liveRatio]);
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
 
   function ratioForPointer(clientX: number) {
     const bounds = layoutRef.current?.getBoundingClientRect();
@@ -63,24 +76,44 @@ export function InspectorWorkspace({
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     event.preventDefault();
+    resizeCleanupRef.current?.();
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    handle.setPointerCapture(pointerId);
+    let lastRatio = liveRatio;
+    let finished = false;
     const apply = (clientX: number) => {
       const next = ratioForPointer(clientX);
       setLiveRatio(next);
+      lastRatio = next;
       return next;
     };
     const onMove = (moveEvent: globalThis.PointerEvent) => apply(moveEvent.clientX);
-    const finish = (finishEvent: globalThis.PointerEvent) => {
-      const next = apply(finishEvent.clientX);
-      onRatioCommit(next);
+    const cleanup = () => {
       document.body.classList.remove("resizing-inspector");
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerCancel);
+      window.removeEventListener("blur", onWindowBlur);
+      if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+      if (resizeCleanupRef.current === cleanup) resizeCleanupRef.current = null;
     };
+    const finish = (commit: boolean, clientX?: number) => {
+      if (finished) return;
+      finished = true;
+      if (typeof clientX === "number") apply(clientX);
+      if (commit) onRatioCommit(lastRatio);
+      cleanup();
+    };
+    const onPointerUp = (finishEvent: globalThis.PointerEvent) => finish(true, finishEvent.clientX);
+    const onPointerCancel = () => finish(true);
+    const onWindowBlur = () => finish(true);
     document.body.classList.add("resizing-inspector");
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", finish);
-    window.addEventListener("pointercancel", finish);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerCancel);
+    window.addEventListener("blur", onWindowBlur);
+    resizeCleanupRef.current = cleanup;
   }
 
   function resizeBy(next: number) {
@@ -101,6 +134,9 @@ export function InspectorWorkspace({
   }
 
   if (!state.open) return null;
+  const minRatio = containerWidth >= 840 ? 420 / containerWidth : 0.5;
+  const minPercent = Math.round(minRatio * 100);
+  const maxPercent = Math.round((1 - minRatio) * 100);
 
   return (
     <aside
@@ -114,8 +150,8 @@ export function InspectorWorkspace({
           role="separator"
           aria-label={t("chat.inspector.resize")}
           aria-orientation="vertical"
-          aria-valuemin={0}
-          aria-valuemax={100}
+          aria-valuemin={minPercent}
+          aria-valuemax={maxPercent}
           aria-valuenow={Math.round(liveRatio * 100)}
           tabIndex={0}
           onPointerDown={onPointerDown}

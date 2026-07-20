@@ -3,9 +3,9 @@ import {
   useEffect,
   useRef,
   useState,
-  type DragEvent,
   type KeyboardEvent,
 } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { InspectorTab, InspectorTabKind } from "../lib/inspectorWorkspace";
@@ -37,22 +37,45 @@ export function InspectorTabStrip({
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const draggedIdRef = useRef<string | null>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
+  const overflowButtonRef = useRef<HTMLButtonElement>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
+  const pointerDragRef = useRef<{
+    tabId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
 
   useEffect(() => {
+    const menu = addOpen ? addMenuRef.current : overflowOpen ? overflowMenuRef.current : null;
+    if (!menu) return;
+    window.requestAnimationFrame(() => menu.querySelector<HTMLButtonElement>("button")?.focus());
+  }, [addOpen, overflowOpen]);
+
+  useEffect(() => {
     if (!addOpen && !overflowOpen) return undefined;
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setAddOpen(false);
-        setOverflowOpen(false);
-      }
+      const target = event.target as Node;
+      if (
+        addOpen &&
+        !addMenuRef.current?.contains(target) &&
+        !addButtonRef.current?.contains(target)
+      ) setAddOpen(false);
+      if (
+        overflowOpen &&
+        !overflowMenuRef.current?.contains(target) &&
+        !overflowButtonRef.current?.contains(target)
+      ) setOverflowOpen(false);
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
+        const trigger = addOpen ? addButtonRef.current : overflowButtonRef.current;
         setAddOpen(false);
         setOverflowOpen(false);
+        window.requestAnimationFrame(() => trigger?.focus());
       }
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -67,6 +90,7 @@ export function InspectorTabStrip({
     if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       event.preventDefault();
       onMove(tabs[index].id, index + (event.key === "ArrowLeft" ? -1 : 1));
+      window.requestAnimationFrame(() => document.getElementById(`inspector-tab-${tabs[index].id}`)?.focus());
       return;
     }
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -78,17 +102,83 @@ export function InspectorTabStrip({
     }
   }
 
-  function startDrag(event: DragEvent<HTMLDivElement>, tabId: string) {
-    draggedIdRef.current = tabId;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", tabId);
+  function closeTab(tabId: string, index: number) {
+    const fallbackId =
+      tabId === activeTabId
+        ? (tabs[index + 1]?.id ?? tabs[index - 1]?.id ?? null)
+        : activeTabId;
+    onClose(tabId);
+    window.requestAnimationFrame(() => {
+      if (fallbackId) document.getElementById(`inspector-tab-${fallbackId}`)?.focus();
+      else addButtonRef.current?.focus();
+    });
   }
 
-  function dropAt(event: DragEvent<HTMLDivElement>, targetIndex: number) {
+  function onMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+    if (items.length === 0) return;
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : (current + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
     event.preventDefault();
-    const tabId = draggedIdRef.current ?? event.dataTransfer.getData("text/plain");
-    if (tabId) onMove(tabId, targetIndex);
-    draggedIdRef.current = null;
+    items[next]?.focus();
+  }
+
+  function focusSelectedTabSoon(tabId?: string) {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const target = tabId
+          ? document.getElementById(`inspector-tab-${tabId}`)
+          : rootRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+        (target ?? addButtonRef.current)?.focus();
+      });
+    });
+  }
+
+  function startPointerDrag(event: ReactPointerEvent<HTMLDivElement>, tabId: string) {
+    if (event.button !== 0 || (event.target as HTMLElement).closest(".inspector-tab-close")) return;
+    pointerDragRef.current = {
+      tabId,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function finishPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = pointerDragRef.current;
+    const currentX = event.clientX;
+    const currentY = event.clientY;
+    pointerDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (!drag) return;
+    if (Math.hypot(currentX - drag.x, currentY - drag.y) < 6) {
+      onActivate(drag.tabId);
+      return;
+    }
+    const candidates = [...(rootRef.current?.querySelectorAll<HTMLElement>(".inspector-tab") ?? [])];
+    if (candidates.length === 0) return;
+    let targetIndex = candidates.findIndex((node) => {
+      const bounds = node.getBoundingClientRect();
+      return currentX >= bounds.left && currentX <= bounds.right;
+    });
+    if (targetIndex < 0) {
+      targetIndex = candidates.reduce((closest, node, index) => {
+        const bounds = node.getBoundingClientRect();
+        const distance = Math.abs(currentX - (bounds.left + bounds.right) / 2);
+        return distance < closest.distance ? { index, distance } : closest;
+      }, { index: 0, distance: Number.POSITIVE_INFINITY }).index;
+    }
+    onMove(drag.tabId, targetIndex);
+    window.requestAnimationFrame(() =>
+      document.getElementById(`inspector-tab-${drag.tabId}`)?.focus(),
+    );
   }
 
   return (
@@ -97,14 +187,16 @@ export function InspectorTabStrip({
         {tabs.map((tab, index) => (
           <div
             className={`inspector-tab${tab.id === activeTabId ? " active" : ""}`}
-            draggable
             key={tab.id}
-            onDragStart={(event) => startDrag(event, tab.id)}
-            onDragEnd={() => {
-              draggedIdRef.current = null;
+            data-tab-id={tab.id}
+            onPointerDown={(event) => startPointerDrag(event, tab.id)}
+            onPointerUp={finishPointerDrag}
+            onPointerCancel={(event) => {
+              pointerDragRef.current = null;
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
             }}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => dropAt(event, index)}
           >
             <button
               ref={(node) => {
@@ -128,7 +220,7 @@ export function InspectorTabStrip({
               type="button"
               aria-label={t("chat.inspector.closeTab", { title: tab.title })}
               title={t("chat.inspector.closeTab", { title: tab.title })}
-              onClick={() => onClose(tab.id)}
+              onClick={() => closeTab(tab.id, index)}
             >
               <X size={13} />
             </button>
@@ -138,6 +230,7 @@ export function InspectorTabStrip({
 
       <div className="inspector-tab-menu-wrap">
         <button
+          ref={addButtonRef}
           className="inspector-tab-action"
           type="button"
           aria-label={t("chat.inspector.addTab")}
@@ -152,7 +245,7 @@ export function InspectorTabStrip({
           <Plus size={15} />
         </button>
         {addOpen && (
-          <div className="inspector-tab-menu" role="menu">
+          <div ref={addMenuRef} className="inspector-tab-menu" role="menu" onKeyDown={onMenuKeyDown}>
             {addItems.map((item) => (
               <button
                 key={item.kind}
@@ -161,6 +254,7 @@ export function InspectorTabStrip({
                 onClick={() => {
                   onAdd(item.kind);
                   setAddOpen(false);
+                  focusSelectedTabSoon();
                 }}
               >
                 {item.title}
@@ -172,6 +266,7 @@ export function InspectorTabStrip({
 
       <div className="inspector-tab-menu-wrap">
         <button
+          ref={overflowButtonRef}
           className="inspector-tab-action"
           type="button"
           aria-label={t("chat.inspector.hiddenTabs")}
@@ -187,7 +282,12 @@ export function InspectorTabStrip({
           <ChevronDown size={15} />
         </button>
         {overflowOpen && (
-          <div className="inspector-tab-menu inspector-tab-menu--overflow" role="menu">
+          <div
+            ref={overflowMenuRef}
+            className="inspector-tab-menu inspector-tab-menu--overflow"
+            role="menu"
+            onKeyDown={onMenuKeyDown}
+          >
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -197,6 +297,7 @@ export function InspectorTabStrip({
                 onClick={() => {
                   onActivate(tab.id);
                   setOverflowOpen(false);
+                  focusSelectedTabSoon(tab.id);
                 }}
               >
                 {tab.title}

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   clampInspectorRatio,
+  filterInspectorState,
   inspectorStateKey,
   inspectorWorkspaceReducer,
   loadInspectorState,
@@ -85,6 +86,18 @@ test("restore drops descriptors rejected by current authorization", () => {
     ["ok"],
   );
   assert.equal(restored.activeTabId, "ok");
+});
+
+test("post-restore validation drops resources in one state replacement", () => {
+  const state = {
+    open: true,
+    focused: false,
+    activeTabId: "denied",
+    tabs: [tab("ok"), tab("denied"), tab("missing")],
+  };
+  const validated = filterInspectorState(state, (item) => item.id !== "denied");
+  assert.deepEqual(validated.tabs.map((item) => item.id), ["ok", "missing"]);
+  assert.equal(validated.activeTabId, "ok");
 });
 
 test("ratio starts balanced and clamps both panes to 420px", () => {

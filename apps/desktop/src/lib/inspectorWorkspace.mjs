@@ -57,6 +57,14 @@ export function inspectorWorkspaceReducer(state, action) {
   }
 }
 
+export function filterInspectorState(state, isAllowed) {
+  const tabs = state.tabs.filter(isAllowed);
+  const activeTabId = tabs.some((item) => item.id === state.activeTabId)
+    ? state.activeTabId
+    : (tabs[0]?.id ?? null);
+  return { ...state, tabs, activeTabId };
+}
+
 export function restoreInspectorState(raw, isAllowed = () => true) {
   try {
     const parsed = JSON.parse(raw ?? "null");
@@ -73,15 +81,12 @@ export function restoreInspectorState(raw, isAllowed = () => true) {
             isAllowed(item),
         )
       : [];
-    const activeTabId = tabs.some((item) => item.id === parsed?.activeTabId)
-      ? parsed.activeTabId
-      : (tabs[0]?.id ?? null);
-    return {
+    return filterInspectorState({
       open: Boolean(parsed?.open),
       focused: Boolean(parsed?.focused),
-      activeTabId,
+      activeTabId: parsed?.activeTabId ?? null,
       tabs,
-    };
+    }, () => true);
   } catch {
     return { ...EMPTY_INSPECTOR_STATE, tabs: [] };
   }

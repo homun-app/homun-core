@@ -508,8 +508,16 @@ assertContains(
   "chat header must expose a kebab menu for artifacts/files/screenshots/background activity"
 );
 assertContains("src/components/InspectorTabStrip.tsx", "role=\"tablist\"", "inspector must expose an ARIA tab list");
+assertContains("src/components/InspectorTabStrip.tsx", "startPointerDrag", "inspector tabs must support pointer-based reorder");
+assertContains("src/components/InspectorTabStrip.tsx", "onPointerUp={finishPointerDrag}", "inspector tabs must commit pointer reorder on release");
+assertContains("src/components/InspectorTabStrip.tsx", "const currentX = event.clientX;", "inspector pointer reorder must use the release coordinate even when the platform emits no intermediate move");
+assertContains("src/components/InspectorTabStrip.tsx", "onActivate(drag.tabId);", "captured pointer clicks must still activate the selected inspector tab");
+assertContains("src/styles.css", ".inspector-workspace-header {\n  position: relative;\n  z-index: 201;", "inspector tabs must sit above the native window drag strip");
 assertContains("src/components/InspectorWorkspace.tsx", "role=\"separator\"", "inspector must expose a keyboard resize separator");
 assertContains("src/components/InspectorWorkspace.tsx", "onPointerDown", "inspector resizing must use pointer events");
+assertContains("src/components/InspectorWorkspace.tsx", "setPointerCapture", "inspector resizing must retain the pointer over embedded previews");
+assertContains("src/components/InspectorWorkspace.tsx", "releasePointerCapture", "inspector resizing must release pointer capture when it finishes");
+assertContains("src/components/InspectorWorkspace.tsx", 'window.addEventListener("blur"', "inspector resizing must clean up if the window loses focus");
 assertContains("src/components/InspectorWorkspace.tsx", "onToggleFocus", "inspector must expose focus mode without destroying tabs");
 assertContains("src/components/InspectorWorkspace.tsx", "hidden={tab.id !== state.activeTabId}", "inactive tab panels must remain mounted and hidden");
 assertContains("src/styles.css", "grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));", "chat and inspector must be real sibling columns");
@@ -518,6 +526,9 @@ assertNotContains("src/styles.css", ".workbench {\n  position: absolute", "legac
 assertContains("src/components/ChatView.tsx", "useReducer(inspectorWorkspaceReducer", "chat must use one inspector reducer");
 assertContains("src/components/ChatView.tsx", "loadInspectorState(thread.threadId", "inspector state must be scoped by thread");
 assertContains("src/components/ChatView.tsx", "saveInspectorState(thread.threadId", "inspector state changes must persist by thread");
+assertContains("src/components/ChatView.tsx", "Promise.all(restored.tabs.map", "restored resource tabs must be revalidated as one batch");
+assertContains("src/components/ChatView.tsx", "coreBridge.fsFile(tab.payload.path, thread.threadId)", "restored file tabs must recheck current authorization");
+assertContains("src/components/ChatView.tsx", "inspectorResourcesReady", "restored resources must stay hidden until validation completes");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");
 assertNotContains("src/components/ChatView.tsx", "setWorkbenchTab", "legacy active-tab state must be removed");
 assertContains("src/components/ChatView.tsx", "`file:${normalizedPath}`", "file tabs must dedupe by canonical path");
@@ -527,10 +538,15 @@ assertNotContains("src/components/ChatView.tsx", "detailsOpen && (", "computer d
 assertNotContains("src/styles.css", ".computer-detail-panel {\n  position: absolute", "computer detail must not float separately");
 assertContains("src/styles.css", "@container chat-workspace (max-width: 960px)", "narrow behavior must follow available chat width");
 assertContains("src/components/ChatView.tsx", "descriptor.kind === \"sources\"", "sources must have an inspector adapter");
+assertContains("src/components/ChatView.tsx", "onOpenArtifact(sourceArtifact)", "artifact sources must open their resource tab");
 assertContains("src/components/ChatView.tsx", "descriptor.kind === \"subagents\"", "subagents must have an inspector adapter");
+assertContains("src/components/ChatView.tsx", "subagent.updated_at", "subagent views must expose their latest timestamp");
 assertContains("src/components/InspectorTabStrip.tsx", 't("chat.inspector.closeTab"', "inspector tabs must have a specific localized close label");
 assertContains("src/components/InspectorWorkspace.tsx", 't("chat.inspector.resize"', "inspector separator must have a localized resize label");
 assertContains("src/components/InspectorWorkspace.tsx", "aria-valuenow", "inspector separator must expose its current width to assistive technology");
+assertContains("src/components/InspectorWorkspace.tsx", "aria-valuemin={minPercent}", "inspector separator must expose its reachable minimum");
+assertContains("src/components/InspectorWorkspace.tsx", "aria-valuemax={maxPercent}", "inspector separator must expose its reachable maximum");
+assertContains("src/components/ChatView.tsx", "fileLoadGenerationRef", "file revalidation must ignore stale authorization responses");
 assertContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-surface", "focused inspector must hide the current composer surface");
 assertNotContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-shell", "focused inspector must not target the removed composer shell class");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
@@ -538,9 +554,11 @@ assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar wor
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
 assertContains("src/components/ChatView.tsx", "<ArtifactsPanel", "artifact review must use the rich preview/diff surface in the workbench");
 assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-panel-body", "artifact review workbench must style the embedded artifacts panel directly");
-assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-preview", "artifact review preview must be a bounded card in the workbench");
-assertContains("src/styles.css", ".workbench-artifacts-list .artifact-row-wrap", "artifact review must frame artifacts as cards inside the workbench");
-assertContains("src/styles.css", ".workbench-artifacts-list .artifact-preview-doc", "artifact preview content must be padded and bounded inside the workbench");
+assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-panel-body {\n  min-height: 0;\n  padding: 0;", "embedded artifacts must not add an outer content frame");
+assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-preview {\n  min-width: 0;\n  overflow: hidden;\n  border: 0;", "artifact preview must use the inspector as its only frame");
+assertContains("src/styles.css", ".artifacts-panel.embedded .artifact-preview-doc {\n  padding: 0;\n  border: 0;", "artifact documents must not render as nested cards");
+assertContains("src/styles.css", ".workbench-artifacts-list .artifact-row-wrap {\n  overflow: hidden;\n  border: 0;", "artifact rows must avoid nested card borders");
+assertContains("src/components/ChatView.tsx", "fileStatus === \"missing\"", "missing files must expose a dedicated recoverable state");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
 assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}", "assistant markdown must stay progressive while the message streams");
 assertContains("src/components/ChatView.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
