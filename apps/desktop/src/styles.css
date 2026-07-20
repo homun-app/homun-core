@@ -2672,8 +2672,8 @@ body.resizing-drawer {
 .active-task-layout.inspector-open > .thread-scroll {
   grid-area: thread;
 }
-.active-task-layout.panel-open > .composer-shell,
-.active-task-layout.inspector-open > .composer-shell {
+.active-task-layout.panel-open > .composer-surface,
+.active-task-layout.inspector-open > .composer-surface {
   grid-area: composer;
 }
 .active-task-layout.panel-open > .workbench,
@@ -2690,7 +2690,7 @@ body.resizing-drawer {
 }
 .active-task-layout.inspector-focused > .task-topbar,
 .active-task-layout.inspector-focused > .thread-scroll,
-.active-task-layout.inspector-focused > .composer-shell {
+.active-task-layout.inspector-focused > .composer-surface {
   display: none;
 }
 
@@ -6292,7 +6292,7 @@ body.resizing-drawer {
   }
   .active-task-layout.inspector-open > .task-topbar,
   .active-task-layout.inspector-open > .thread-scroll,
-  .active-task-layout.inspector-open > .composer-shell {
+  .active-task-layout.inspector-open > .composer-surface {
     display: none;
   }
   .active-task-layout.inspector-open .inspector-resize-handle {

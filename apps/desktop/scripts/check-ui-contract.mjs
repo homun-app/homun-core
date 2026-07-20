@@ -531,6 +531,8 @@ assertContains("src/components/ChatView.tsx", "descriptor.kind === \"subagents\"
 assertContains("src/components/InspectorTabStrip.tsx", 't("chat.inspector.closeTab"', "inspector tabs must have a specific localized close label");
 assertContains("src/components/InspectorWorkspace.tsx", 't("chat.inspector.resize"', "inspector separator must have a localized resize label");
 assertContains("src/components/InspectorWorkspace.tsx", "aria-valuenow", "inspector separator must expose its current width to assistive technology");
+assertContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-surface", "focused inspector must hide the current composer surface");
+assertNotContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-shell", "focused inspector must not target the removed composer shell class");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
