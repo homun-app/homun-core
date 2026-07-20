@@ -38,6 +38,39 @@ fn terminal_attempt(
     terminal
 }
 
+fn terminal_attempt_at(
+    attempt_id: &str,
+    provider_id: &str,
+    model_id: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    recorded_at: i64,
+) -> UsageAttemptEvent {
+    let started = UsageAttemptEvent::started(
+        UsageContext::new(
+            format!("call-{attempt_id}"),
+            InferencePurpose::ChatResponse,
+            "local",
+        ),
+        attempt_id,
+        provider_id,
+        model_id,
+        Locality::Cloud,
+        recorded_at.saturating_sub(10),
+    );
+    let mut terminal = started.completed(
+        recorded_at,
+        NormalizedUsage {
+            input_tokens: Some(input_tokens),
+            output_tokens: Some(output_tokens),
+            ..NormalizedUsage::default()
+        },
+    );
+    terminal.usage_provenance = UsageProvenance::ProviderReported;
+    terminal.cost_provenance = CostProvenance::Unavailable;
+    terminal
+}
+
 #[test]
 fn mixed_cost_provenance_and_provider_account_state_remain_separate() {
     let store = UsageStore::open_in_memory().unwrap();
@@ -122,4 +155,55 @@ fn explicitly_not_billed_local_attempts_have_complete_cost_coverage() {
     assert_eq!(summary.cost_breakdown.not_billed_attempts, 1);
     assert_eq!(summary.cost_breakdown.unknown_cost_attempts, 0);
     assert_eq!(summary.cost_breakdown.cost_coverage_percent, 100);
+}
+
+#[test]
+fn compact_summary_reports_active_providers_dominant_model_and_token_trend() {
+    const DAY: i64 = 86_400;
+    let now = 20 * DAY;
+    let store = UsageStore::open_in_memory().unwrap();
+    for event in [
+        terminal_attempt_at("current-a", "openrouter", "model-a", 1_400, 600, now - DAY),
+        terminal_attempt_at("current-b", "anthropic", "model-b", 700, 300, now - 2 * DAY),
+        terminal_attempt_at("previous", "openrouter", "model-a", 1_500, 500, now - 8 * DAY),
+    ] {
+        store.append(&event).unwrap();
+    }
+
+    let summary = store.summary("local", UsageWindow::SevenDays, now).unwrap();
+    assert_eq!(summary.active_providers, 2);
+    assert_eq!(summary.dominant_model.as_deref(), Some("model-a"));
+    assert_eq!(summary.trend_percent, Some(50));
+}
+
+#[test]
+fn compact_summary_omits_unbounded_or_baseless_trends() {
+    const DAY: i64 = 86_400;
+    let now = 20 * DAY;
+    let store = UsageStore::open_in_memory().unwrap();
+    store
+        .append(&terminal_attempt_at(
+            "current",
+            "ollama",
+            "qwen",
+            100,
+            50,
+            now - DAY,
+        ))
+        .unwrap();
+
+    assert_eq!(
+        store
+            .summary("local", UsageWindow::SevenDays, now)
+            .unwrap()
+            .trend_percent,
+        None,
+    );
+    assert_eq!(
+        store
+            .summary("local", UsageWindow::All, now)
+            .unwrap()
+            .trend_percent,
+        None,
+    );
 }

@@ -198,6 +198,9 @@ pub struct UsageSummary {
     pub cost_microusd: u64,
     pub cost_breakdown: UsageCostBreakdown,
     pub coverage_started_at: Option<i64>,
+    pub active_providers: u64,
+    pub dominant_model: Option<String>,
+    pub trend_percent: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
@@ -636,6 +639,9 @@ impl UsageStore {
                             .saturating_add(nonnegative_u64(row.get(18)?, 18)?),
                     ),
                 },
+                active_providers: 0,
+                dominant_model: None,
+                trend_percent: None,
             })
         })?;
         summary.usage_coverage_percent = percentage(
@@ -644,6 +650,56 @@ impl UsageStore {
                 .known_usage_attempts
                 .saturating_add(summary.unknown_usage_attempts),
         );
+        summary.active_providers = self.conn.query_row(
+            "SELECT COUNT(DISTINCT provider_id)
+             FROM inference_usage_events
+             WHERE user_id = ?1 AND event_kind != 'attempt_started'
+               AND recorded_at >= ?2 AND provider_id IS NOT NULL",
+            params![user_id, cutoff],
+            |row| nonnegative_u64(row.get(0)?, 0),
+        )?;
+        summary.dominant_model = self
+            .conn
+            .query_row(
+                "SELECT model_id
+                 FROM inference_usage_events
+                 WHERE user_id = ?1 AND event_kind != 'attempt_started'
+                   AND recorded_at >= ?2 AND model_id IS NOT NULL
+                 GROUP BY model_id
+                 ORDER BY SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
+                              + COALESCE(reasoning_tokens, 0)) DESC,
+                          model_id ASC
+                 LIMIT 1",
+                params![user_id, cutoff],
+                |row| row.get(0),
+            )
+            .optional()?;
+        summary.trend_percent = match window {
+            UsageWindow::All => None,
+            UsageWindow::SevenDays | UsageWindow::ThirtyDays => {
+                let duration = match window {
+                    UsageWindow::SevenDays => 7 * 86_400,
+                    UsageWindow::ThirtyDays => 30 * 86_400,
+                    UsageWindow::All => unreachable!(),
+                };
+                let previous_tokens = self.conn.query_row(
+                    "SELECT COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
+                                         + COALESCE(reasoning_tokens, 0)), 0)
+                     FROM inference_usage_events
+                     WHERE user_id = ?1 AND event_kind != 'attempt_started'
+                       AND recorded_at >= ?2 AND recorded_at < ?3",
+                    params![user_id, cutoff.saturating_sub(duration), cutoff],
+                    |row| nonnegative_u64(row.get(0)?, 0),
+                )?;
+                token_trend_percent(
+                    summary
+                        .input_tokens
+                        .saturating_add(summary.output_tokens)
+                        .saturating_add(summary.reasoning_tokens),
+                    previous_tokens,
+                )
+            }
+        };
         Ok(summary)
     }
 
@@ -1089,6 +1145,15 @@ fn percentage(known: u64, total: u64) -> u8 {
     u8::try_from(known.saturating_mul(100) / total)
         .unwrap_or(100)
         .min(100)
+}
+
+fn token_trend_percent(current: u64, previous: u64) -> Option<i64> {
+    if previous == 0 {
+        return None;
+    }
+    let delta = i128::from(current).saturating_sub(i128::from(previous));
+    let percent = delta.saturating_mul(100) / i128::from(previous);
+    Some(percent.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64)
 }
 
 fn serialization_error(error: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
