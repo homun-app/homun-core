@@ -26,7 +26,11 @@ fn main() {
     };
 
     eprintln!("[smoke] loading {model} (downloads + in-situ quantizes on first run)...");
-    let provider = match MistralRsProvider::load(descriptor, model.clone()) {
+    let provider = match MistralRsProvider::load(
+        descriptor,
+        model.clone(),
+        std::sync::Arc::new(local_first_inference_usage::NoopUsageRecorder),
+    ) {
         Ok(provider) => provider,
         Err(error) => {
             eprintln!("[smoke] LOAD FAILED: {error}");
@@ -40,6 +44,11 @@ fn main() {
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(64);
     let request = GenerateJsonRequest {
+        usage: local_first_inference_usage::UsageContext::new(
+            "mistralrs-smoke",
+            local_first_inference_usage::InferencePurpose::Evaluation,
+            "local",
+        ),
         prompt: "Reply with ONLY a JSON object: {\"ok\": true, \"engine\": \"mistralrs\"}"
             .to_string(),
         max_tokens,

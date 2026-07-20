@@ -156,6 +156,11 @@ mod tests {
 
     fn request() -> GenerateJsonRequest {
         GenerateJsonRequest {
+            usage: local_first_inference_usage::UsageContext::new(
+                "router-test",
+                local_first_inference_usage::InferencePurpose::Evaluation,
+                "test",
+            ),
             prompt: "test".to_string(),
             max_tokens: 16,
             temperature: 0.0,

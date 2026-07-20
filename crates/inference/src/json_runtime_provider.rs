@@ -1,4 +1,4 @@
-use crate::provider::{CapabilityDescriptor, InferenceProvider};
+use crate::provider::{CapabilityDescriptor, InferenceProvider, ProviderAttempt};
 use local_first_subagents::{
     GenerateJsonRequest, GenerateJsonResponse, JsonRuntime, RuntimeClientError,
 };
@@ -9,13 +9,19 @@ use local_first_subagents::{
 pub struct JsonRuntimeProvider<R> {
     descriptor: CapabilityDescriptor,
     runtime: R,
+    usage: std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>,
 }
 
 impl<R> JsonRuntimeProvider<R> {
-    pub fn new(descriptor: CapabilityDescriptor, runtime: R) -> Self {
+    pub fn new(
+        descriptor: CapabilityDescriptor,
+        runtime: R,
+        usage: std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>,
+    ) -> Self {
         Self {
             descriptor,
             runtime,
+            usage,
         }
     }
 }
@@ -29,7 +35,44 @@ impl<R: JsonRuntime> InferenceProvider for JsonRuntimeProvider<R> {
         &self,
         request: &GenerateJsonRequest,
     ) -> Result<GenerateJsonResponse, RuntimeClientError> {
-        self.runtime.generate_json(request)
+        let attempt = ProviderAttempt::start(
+            &self.usage,
+            request,
+            &self.descriptor,
+            &self.descriptor.id,
+        );
+        match self.runtime.generate_json(request) {
+            Ok(response) => {
+                let has_reported = response.metrics.prompt_tokens > 0
+                    || response.metrics.generation_tokens > 0;
+                let usage = if has_reported {
+                    local_first_inference_usage::NormalizedUsage {
+                        input_tokens: Some(response.metrics.prompt_tokens.into()),
+                        output_tokens: Some(response.metrics.generation_tokens.into()),
+                        ..Default::default()
+                    }
+                } else {
+                    local_first_inference_usage::NormalizedUsage {
+                        input_tokens: Some((request.prompt.chars().count() as u64).div_ceil(4).max(1)),
+                        output_tokens: Some((response.raw_output.chars().count() as u64).div_ceil(4).max(1)),
+                        ..Default::default()
+                    }
+                };
+                attempt.completed(
+                    usage,
+                    if has_reported {
+                        local_first_inference_usage::UsageProvenance::ProviderReported
+                    } else {
+                        local_first_inference_usage::UsageProvenance::HomunEstimated
+                    },
+                );
+                Ok(response)
+            }
+            Err(error) => {
+                attempt.failed("runtime", None);
+                Err(error)
+            }
+        }
     }
 }
 
@@ -79,8 +122,14 @@ mod tests {
             FakeRuntime {
                 seen: RefCell::new(None),
             },
+            std::sync::Arc::new(local_first_inference_usage::NoopUsageRecorder),
         );
         let request = GenerateJsonRequest {
+            usage: local_first_inference_usage::UsageContext::new(
+                "runtime-test",
+                local_first_inference_usage::InferencePurpose::Evaluation,
+                "test",
+            ),
             prompt: "hello".to_string(),
             max_tokens: 8,
             temperature: 0.0,

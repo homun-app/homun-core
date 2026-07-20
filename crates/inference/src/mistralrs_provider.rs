@@ -7,7 +7,7 @@
 //! On Apple Silicon enable mistral.rs's `metal` feature; on NVIDIA, `cuda`.
 
 use crate::json_parse::json_response_from_text;
-use crate::provider::{CapabilityDescriptor, InferenceProvider};
+use crate::provider::{CapabilityDescriptor, InferenceProvider, ProviderAttempt};
 use local_first_subagents::{
     GenerateJsonRequest, GenerateJsonResponse, RuntimeClientError, TokenMetrics,
 };
@@ -42,6 +42,7 @@ pub struct MistralRsProvider {
     descriptor: CapabilityDescriptor,
     model: Model,
     runtime: Runtime,
+    usage: std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>,
 }
 
 impl MistralRsProvider {
@@ -50,6 +51,7 @@ impl MistralRsProvider {
     pub fn load(
         descriptor: CapabilityDescriptor,
         model_id: impl Into<String>,
+        usage: std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>,
     ) -> Result<Self, MistralRsError> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -75,6 +77,7 @@ impl MistralRsProvider {
             descriptor,
             model,
             runtime,
+            usage,
         })
     }
 }
@@ -88,14 +91,23 @@ impl InferenceProvider for MistralRsProvider {
         &self,
         request: &GenerateJsonRequest,
     ) -> Result<GenerateJsonResponse, RuntimeClientError> {
+        let attempt = ProviderAttempt::start(
+            &self.usage,
+            request,
+            &self.descriptor,
+            &self.descriptor.id,
+        );
         let messages = TextMessages::new().add_message(TextMessageRole::User, &request.prompt);
-        let response = self
-            .runtime
-            .block_on(self.model.send_chat_request(messages))
-            .map_err(|error| RuntimeClientError::Runtime {
-                code: "mistralrs_error".to_string(),
-                message: error.to_string(),
-            })?;
+        let response = match self.runtime.block_on(self.model.send_chat_request(messages)) {
+            Ok(response) => response,
+            Err(error) => {
+                attempt.failed("runtime", None);
+                return Err(RuntimeClientError::Runtime {
+                    code: "mistralrs_error".to_string(),
+                    message: error.to_string(),
+                });
+            }
+        };
 
         let content = response
             .choices
@@ -109,6 +121,15 @@ impl InferenceProvider for MistralRsProvider {
             generation_tps: response.usage.avg_compl_tok_per_sec as f64,
             ..TokenMetrics::zero()
         };
-        Ok(json_response_from_text(content, request, metrics))
+        let parsed = json_response_from_text(content, request, metrics);
+        attempt.completed(
+            local_first_inference_usage::NormalizedUsage {
+                input_tokens: Some((request.prompt.chars().count() as u64).div_ceil(4).max(1)),
+                output_tokens: Some((parsed.raw_output.chars().count() as u64).div_ceil(4).max(1)),
+                ..Default::default()
+            },
+            local_first_inference_usage::UsageProvenance::HomunEstimated,
+        );
+        Ok(parsed)
     }
 }

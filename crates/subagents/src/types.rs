@@ -252,6 +252,7 @@ pub struct SubagentReview {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GenerateRequest {
+    pub usage: local_first_inference_usage::UsageContext,
     pub prompt: String,
     pub max_tokens: u32,
     pub temperature: f32,
@@ -263,6 +264,7 @@ pub struct GenerateRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GenerateJsonRequest {
+    pub usage: local_first_inference_usage::UsageContext,
     pub prompt: String,
     pub max_tokens: u32,
     pub temperature: f32,
@@ -276,6 +278,7 @@ pub struct GenerateJsonRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IntentClassifyRequest {
+    pub usage: local_first_inference_usage::UsageContext,
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
