@@ -23,6 +23,7 @@ Le decisioni approvate sono:
 - apertura senza duplicati della stessa risorsa;
 - selezione, chiusura e riordinamento delle schede;
 - chiusura del workspace come operazione di nascondimento, non di distruzione;
+- modalità focus esplicita, che usa tutta l'area centrale senza chiudere le schede;
 - passaggio a una vista singola su finestre strette;
 - isolamento e autorizzazione rivalidati durante il ripristino delle schede.
 
@@ -135,6 +136,7 @@ type InspectorTab = {
 
 type InspectorWorkspaceState = {
   open: boolean;
+  focused: boolean;
   activeTabId: string | null;
   tabs: InspectorTab[];
 };
@@ -151,6 +153,7 @@ Il reducer espone almeno:
 - `closeTab(tabId)`: attiva la vicina più prevedibile;
 - `moveTab(tabId, targetIndex)`;
 - `showWorkspace()` e `hideWorkspace()`;
+- `toggleFocus()`;
 - `restoreWorkspace(validatedState)`.
 
 Tutti i punti di ingresso esistenti devono chiamare `openTab`; nessun componente deve
@@ -243,6 +246,10 @@ In modalità singola:
 
 La toolbar interna usa anch'essa la propria larghezza disponibile per spostare azioni
 secondarie nel menu overflow.
+
+La modalità focus applica lo stesso layout a pannello singolo anche su una finestra ampia.
+Uscire dalla modalità focus ripristina il rapporto precedente; non altera ordine, selezione
+o contenuto delle schede.
 
 ## Ridimensionamento e accessibilità
 
