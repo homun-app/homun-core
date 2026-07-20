@@ -339,7 +339,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
               {t("onboarding.site")}
             </a>
             <span>·</span>
-            <a href="https://docs.homun.app" target="_blank" rel="noreferrer">
+            <a href="https://homun.app/docs/" target="_blank" rel="noreferrer">
               {t("onboarding.docs")}
             </a>
           </div>

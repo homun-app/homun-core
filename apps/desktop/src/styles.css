@@ -15600,6 +15600,7 @@ body.resizing-drawer {
   flex-direction: column;
   gap: 6px;
   padding: 14px 18px;
+  color: var(--o-text);
   border: 1px solid var(--o-border);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.012);

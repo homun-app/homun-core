@@ -135,7 +135,7 @@ export function saveCustomAccents(list: string[]): void {
 // Sets data-theme on <html>; the [data-theme="…"] blocks in styles.css do the rest.
 export type ThemeName = "freddo" | "avorio" | "neutro" | "sabbia" | "dark";
 
-export const DEFAULT_THEME: ThemeName = "freddo";
+export const DEFAULT_THEME: ThemeName = "dark";
 
 export const THEME_PRESETS: { name: ThemeName; label: string; hint: string }[] = [
   { name: "freddo", label: "Cold", hint: "Cool gray" },
