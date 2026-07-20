@@ -541,6 +541,26 @@
     "activityProgress": "Progression de l'activité",
     "resizePanel": "Redimensionner le panneau",
     "closePanel": "Fermer le panneau",
+    "inspector": {
+      "addTab": "Ajouter un onglet",
+      "closeTab": "Fermer l'onglet : {{title}}",
+      "closeWorkspace": "Fermer l'inspecteur",
+      "empty": "Ouvrez un fichier ou choisissez une vue pour commencer.",
+      "focus": "Agrandir l'inspecteur",
+      "exitFocus": "Revenir à la vue partagée",
+      "hiddenTabs": "Onglets ouverts",
+      "missing": "Cet élément n'est plus disponible.",
+      "denied": "Vous n'êtes pas autorisé à ouvrir cet élément.",
+      "unsupported": "L'aperçu n'est pas disponible pour ce type de fichier.",
+      "retry": "Réessayer",
+      "resize": "Redimensionner l'inspecteur",
+      "returnToChat": "Revenir au chat",
+      "views": {
+        "review": "Révision", "files": "Fichiers", "activity": "Activité", "plan": "Plan",
+        "execution": "Exécution", "memory": "Mémoire", "goals": "Objectifs", "sources": "Sources",
+        "subagents": "Sous-agents", "computer": "Ordinateur"
+      }
+    },
     "backToFiles": "Retour aux fichiers",
     "parentFolder": "Dossier parent",
     "cancelTask": "Annuler la tâche",

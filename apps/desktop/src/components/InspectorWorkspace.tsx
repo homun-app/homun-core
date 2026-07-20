@@ -112,7 +112,7 @@ export function InspectorWorkspace({
         <div
           className="inspector-resize-handle"
           role="separator"
-          aria-label={t("chat.resizePanel")}
+          aria-label={t("chat.inspector.resize")}
           aria-orientation="vertical"
           aria-valuemin={0}
           aria-valuemax={100}
@@ -137,24 +137,24 @@ export function InspectorWorkspace({
           <button
             className="inspector-mobile-back"
             type="button"
-            aria-label={t("common.back")}
-            title={t("common.back")}
+            aria-label={t("chat.inspector.returnToChat")}
+            title={t("chat.inspector.returnToChat")}
             onClick={onHide}
           >
             <ArrowLeft size={16} />
           </button>
           <button
             type="button"
-            aria-label={state.focused ? t("chat.collapsePanel") : t("chat.fullscreen")}
-            title={state.focused ? t("chat.collapse") : t("chat.fullscreen")}
+            aria-label={state.focused ? t("chat.inspector.exitFocus") : t("chat.inspector.focus")}
+            title={state.focused ? t("chat.inspector.exitFocus") : t("chat.inspector.focus")}
             onClick={onToggleFocus}
           >
             {state.focused ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
           </button>
           <button
             type="button"
-            aria-label={t("chat.closePanel")}
-            title={t("chat.closePanel")}
+            aria-label={t("chat.inspector.closeWorkspace")}
+            title={t("chat.inspector.closeWorkspace")}
             onClick={onHide}
           >
             <PanelRightClose size={16} />
@@ -165,7 +165,7 @@ export function InspectorWorkspace({
       <div className="inspector-workspace-body">
         {state.tabs.length === 0 ? (
           <div className="workbench-empty">
-            <p>{t("chat.selectAFile")}</p>
+            <p>{t("chat.inspector.empty")}</p>
           </div>
         ) : (
           state.tabs.map((tab) => (

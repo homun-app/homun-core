@@ -126,8 +126,8 @@ export function InspectorTabStrip({
             <button
               className="inspector-tab-close"
               type="button"
-              aria-label={`${t("chat.closePanel")}: ${tab.title}`}
-              title={t("chat.closePanel")}
+              aria-label={t("chat.inspector.closeTab", { title: tab.title })}
+              title={t("chat.inspector.closeTab", { title: tab.title })}
               onClick={() => onClose(tab.id)}
             >
               <X size={13} />
@@ -140,7 +140,8 @@ export function InspectorTabStrip({
         <button
           className="inspector-tab-action"
           type="button"
-          aria-label={t("chat.panel")}
+          aria-label={t("chat.inspector.addTab")}
+          title={t("chat.inspector.addTab")}
           aria-haspopup="menu"
           aria-expanded={addOpen}
           onClick={() => {
@@ -173,7 +174,8 @@ export function InspectorTabStrip({
         <button
           className="inspector-tab-action"
           type="button"
-          aria-label={t("chat.panel")}
+          aria-label={t("chat.inspector.hiddenTabs")}
+          title={t("chat.inspector.hiddenTabs")}
           aria-haspopup="menu"
           aria-expanded={overflowOpen}
           disabled={tabs.length === 0}

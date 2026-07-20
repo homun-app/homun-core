@@ -528,6 +528,9 @@ assertNotContains("src/styles.css", ".computer-detail-panel {\n  position: absol
 assertContains("src/styles.css", "@container chat-workspace (max-width: 960px)", "narrow behavior must follow available chat width");
 assertContains("src/components/ChatView.tsx", "descriptor.kind === \"sources\"", "sources must have an inspector adapter");
 assertContains("src/components/ChatView.tsx", "descriptor.kind === \"subagents\"", "subagents must have an inspector adapter");
+assertContains("src/components/InspectorTabStrip.tsx", 't("chat.inspector.closeTab"', "inspector tabs must have a specific localized close label");
+assertContains("src/components/InspectorWorkspace.tsx", 't("chat.inspector.resize"', "inspector separator must have a localized resize label");
+assertContains("src/components/InspectorWorkspace.tsx", "aria-valuenow", "inspector separator must expose its current width to assistive technology");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");

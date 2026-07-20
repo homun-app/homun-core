@@ -715,9 +715,9 @@ export function ChatView({
 
   const openUtilityTab = useCallback(
     (kind: InspectorTabKind) => {
-      openInspectorTab(kind, INSPECTOR_VIEW_LABEL[kind], `${kind}:${thread.threadId}`);
+      openInspectorTab(kind, t(INSPECTOR_VIEW_LABEL_KEY[kind]), `${kind}:${thread.threadId}`);
     },
-    [openInspectorTab, thread.threadId],
+    [openInspectorTab, t, thread.threadId],
   );
 
   const openFileTab = useCallback(
@@ -2658,7 +2658,7 @@ export function ChatView({
         ratio={inspectorRatio}
         addItems={availableInspectorViews.map((view) => ({
           kind: view.key,
-          title: view.label,
+          title: t(INSPECTOR_VIEW_LABEL_KEY[view.key]),
         }))}
         onActivate={(tabId) => dispatchInspector({ type: "activateTab", tabId })}
         onCloseTab={(tabId) => dispatchInspector({ type: "closeTab", tabId })}
@@ -4110,30 +4110,30 @@ export interface IslandSource {
 // Shared view metadata for the panel: the header dropdown (chat top-right) and the
 // in-panel title both read from here, so labels/icons never drift. Mock interaction:
 // toggle → dropdown menu → docked panel with that view + a clean title header.
-const PANEL_VIEWS: { key: InspectorTabKind; label: string; icon: typeof FileText }[] = [
-  { key: "artifact", label: "Review", icon: ClipboardList },
-  { key: "file", label: "Files", icon: FolderOpen },
-  { key: "activity", label: "Activity", icon: Clock3 },
-  { key: "plan", label: "Plan", icon: ListTodo },
-  { key: "execution", label: "Execution", icon: ScanSearch },
-  { key: "graph", label: "Memory", icon: Share2 },
-  { key: "goals", label: "Goals", icon: Target },
-  { key: "sources", label: "Sources", icon: BookMarked },
-  { key: "subagents", label: "Subagents", icon: Bot },
-  { key: "computer", label: "Computer", icon: Monitor },
+const PANEL_VIEWS: { key: InspectorTabKind; icon: typeof FileText }[] = [
+  { key: "artifact", icon: ClipboardList },
+  { key: "file", icon: FolderOpen },
+  { key: "activity", icon: Clock3 },
+  { key: "plan", icon: ListTodo },
+  { key: "execution", icon: ScanSearch },
+  { key: "graph", icon: Share2 },
+  { key: "goals", icon: Target },
+  { key: "sources", icon: BookMarked },
+  { key: "subagents", icon: Bot },
+  { key: "computer", icon: Monitor },
 ];
-const INSPECTOR_VIEW_LABEL: Record<InspectorTabKind, string> = {
-  file: "Files",
-  artifact: "Review",
-  memory: "Memory",
-  graph: "Memory",
-  sources: "Sources",
-  goals: "Goals",
-  activity: "Activity",
-  plan: "Plan",
-  execution: "Execution",
-  subagents: "Subagents",
-  computer: "Computer",
+const INSPECTOR_VIEW_LABEL_KEY: Record<InspectorTabKind, string> = {
+  file: "chat.inspector.views.files",
+  artifact: "chat.inspector.views.review",
+  memory: "chat.inspector.views.memory",
+  graph: "chat.inspector.views.memory",
+  sources: "chat.inspector.views.sources",
+  goals: "chat.inspector.views.goals",
+  activity: "chat.inspector.views.activity",
+  plan: "chat.inspector.views.plan",
+  execution: "chat.inspector.views.execution",
+  subagents: "chat.inspector.views.subagents",
+  computer: "chat.inspector.views.computer",
 };
 
 function legacyTabForInspector(kind: InspectorTabKind): LegacyWorkbenchTab | null {
@@ -5432,21 +5432,23 @@ function InspectorView({
               {fileStatus === "denied" ? (
                 <div className="workbench-empty">
                   <AlertCircle size={24} />
-                  <p>Folder not authorized.</p>
-                  <button type="button" onClick={onCloseTab}>{t("chat.closePanel")}</button>
+                  <p>{t("chat.inspector.denied")}</p>
+                  <button type="button" onClick={onCloseTab}>
+                    {t("chat.inspector.closeTab", { title: descriptor.title })}
+                  </button>
                 </div>
               ) : fileStatus === "error" ? (
                 <div className="workbench-empty">
                   <AlertCircle size={24} />
                   <p>{openFile.error}</p>
                   <button type="button" onClick={() => void loadFileAt(resourceFilePath)}>
-                    {t("common.retry")}
+                    {t("chat.inspector.retry")}
                   </button>
                 </div>
               ) : fileStatus === "unsupported" ? (
                 <div className="workbench-empty">
                   <FileText size={24} />
-                  <p>{t("chat.binaryFileHint")}</p>
+                  <p>{t("chat.inspector.unsupported")}</p>
                 </div>
               ) : diffOn && openFile.modified ? (
                 <DiffView oldText={openFile.old_text} newText={openFile.text} />
@@ -5556,8 +5558,10 @@ function InspectorView({
           ) : (
             <div className="workbench-empty">
               <FileText size={28} />
-              <p>This artifact is no longer available.</p>
-              <button type="button" onClick={onCloseTab}>{t("chat.closePanel")}</button>
+              <p>{t("chat.inspector.missing")}</p>
+              <button type="button" onClick={onCloseTab}>
+                {t("chat.inspector.closeTab", { title: descriptor.title })}
+              </button>
             </div>
           ))}
         {tab === "artifacts" && !descriptor.payload.name && (
