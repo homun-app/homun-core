@@ -140,3 +140,25 @@ export function compactUsageRows(summary: CompactUsageInput, locale = "en-US") {
       || clampPercent(cost.cost_coverage_percent) < 100,
   };
 }
+
+export function suggestionFactLabel(fact: {
+  kind: string;
+  delta_percent?: number | null;
+  value?: number | null;
+  provenance?: string;
+}): string {
+  const delta = Number.isFinite(fact.delta_percent) ? Math.abs(Math.round(fact.delta_percent as number)) : null;
+  const evidence = fact.provenance === "provider_reported"
+    ? "provider-reported"
+    : fact.provenance === "catalog_estimated"
+      ? "catalog estimate"
+      : fact.provenance === "manual_estimated"
+        ? "manual estimate"
+        : fact.provenance === "observed_recent_calls"
+          ? "observed recent calls"
+          : fact.provenance === "not_billed"
+            ? "not billed"
+            : "evidence unavailable";
+  const change = delta == null ? "" : `${delta}% `;
+  return `${change}${fact.kind} · ${evidence}`;
+}

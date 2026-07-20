@@ -826,6 +826,17 @@
     "type": "The browser wants to send text as a submit. Confirm only if the content is correct.",
     "default": "The browser requires confirmation before proceeding."
   },
+  "usageSuggestions": {
+    "title": "Usage suggestion",
+    "confidence": { "low": "low confidence", "medium": "medium confidence", "high": "high confidence" },
+    "actions": { "use_for_task": "Use for this task", "change_role_preference": "Change role preference", "dismiss": "Ignore" },
+    "dismissed": "Suggestion ignored.", "undo": "Undo",
+    "facts": { "cost": "{{percent}}% lower cost · {{provenance}}", "latency": "{{percent}}% lower latency · {{provenance}}", "headroom": "{{percent}} points more headroom · {{provenance}}", "reliability": "Reliability evidence · {{provenance}}", "capability": "Equivalent capabilities · {{provenance}}" },
+    "provenance": { "provider_reported": "provider-reported", "catalog_estimated": "catalog estimate", "manual_estimated": "manual estimate", "observed_recent_calls": "recent calls", "provider_account_or_manual_budget": "account or budget data", "not_billed": "not billed", "unavailable": "evidence unavailable" },
+    "confirm": { "title": "Confirm model change", "body": "Change from {{current}} to {{target}} for: {{scope}}? Nothing changes until you confirm.", "cancel": "Cancel", "apply": "Confirm" },
+    "error": "The suggestion could not be applied",
+    "preferenceChanged": "Preference updated for {{role}}."
+  },
   "settings": {
     "account": "Account",
     "appearance": "Appearance",

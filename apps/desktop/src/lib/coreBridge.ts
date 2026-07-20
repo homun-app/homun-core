@@ -68,6 +68,32 @@ export interface UsageSummaryView {
   trend_percent?: number | null;
 }
 
+export type SuggestionActionScope = "use_for_task" | "change_role_preference";
+
+export interface SuggestionFact {
+  kind: "cost" | "latency" | "headroom" | "reliability" | "capability";
+  delta_percent: number | null;
+  value: number | null;
+  provenance: string;
+}
+
+export interface ModelUsageSuggestion {
+  suggestion_key: string;
+  current_provider: string;
+  current_model: string;
+  target_provider: string;
+  target_model: string;
+  role: string;
+  confidence: "low" | "medium" | "high";
+  facts: SuggestionFact[];
+  action_scopes: SuggestionActionScope[];
+  scoring_policy_version: string;
+}
+
+export type ApplyInstruction =
+  | { kind: "use_for_task"; provider_id: string; model_id: string; thread_id: string | null }
+  | { kind: "change_role_preference"; role: string; provider_id: string; model_id: string };
+
 export interface UsageBreakdownRow {
   key: string;
   logical_calls: number;
@@ -3185,6 +3211,32 @@ function electronUsageProcesses(window: UsageWindow): Promise<UsageProcessRow[]>
   return gatewayGetJson<UsageProcessRow[]>(`/api/usage/processes?window=${window}`);
 }
 
+function electronUsageSuggestions(
+  window: UsageWindow,
+  scope: "home" | "settings",
+): Promise<ModelUsageSuggestion[]> {
+  return gatewayGetJson<ModelUsageSuggestion[]>(
+    `/api/usage/suggestions?window=${window}&scope=${scope}`,
+  );
+}
+
+function electronApplyUsageSuggestion(
+  key: string,
+  body: { confirmed: true; action: SuggestionActionScope; thread_id?: string },
+): Promise<ApplyInstruction> {
+  return gatewayPostJson<ApplyInstruction>(
+    `/api/usage/suggestions/${encodeURIComponent(key)}/apply`,
+    body,
+  );
+}
+
+function electronDismissUsageSuggestion(key: string): Promise<{ ok: boolean }> {
+  return gatewayPostJson<{ ok: boolean }>(
+    `/api/usage/suggestions/${encodeURIComponent(key)}/dismiss`,
+    {},
+  );
+}
+
 function electronRefreshProviderUsage(providerId: string): Promise<ProviderUsageSnapshot[]> {
   return gatewayPostJson<ProviderUsageSnapshot[]>(
     `/api/usage/providers/${encodeURIComponent(providerId)}/refresh`,
@@ -3244,6 +3296,13 @@ export const coreBridge = {
   usageModels: (window: UsageWindow) => electronUsageModels(window),
   usageProviders: (window: UsageWindow) => electronUsageProviders(window),
   usageProcesses: (window: UsageWindow) => electronUsageProcesses(window),
+  usageSuggestions: (window: UsageWindow, scope: "home" | "settings") =>
+    electronUsageSuggestions(window, scope),
+  applyUsageSuggestion: (
+    key: string,
+    body: { confirmed: true; action: SuggestionActionScope; thread_id?: string },
+  ) => electronApplyUsageSuggestion(key, body),
+  dismissUsageSuggestion: (key: string) => electronDismissUsageSuggestion(key),
   refreshProviderUsage: (providerId: string) => electronRefreshProviderUsage(providerId),
   providerUsagePolicy: (providerId: string) => electronProviderUsagePolicy(providerId),
   setProviderUsagePolicy: (providerId: string, policy: SetProviderUsagePolicyInput) =>

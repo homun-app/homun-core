@@ -117,7 +117,19 @@ assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageSummary(
 assertNotContains("src/components/ChatUsageOverview.tsx", "usageModels", "New chat must not load full analytics");
 assertNotContains("src/components/ChatView.tsx", "EMPTY_HERO_CHIPS", "New chat must not keep canned prompt chips");
 assertNotContains("src/components/ChatView.tsx", "chat-hero-chip", "New chat must not render canned prompt buttons");
-assertContains("src/components/ChatView.tsx", "<ChatUsageOverview />", "Empty hero must mount compact usage");
+assertContains("src/components/ChatView.tsx", "<ChatUsageOverview", "Empty hero must mount compact usage");
+assertContains("src/components/ChatView.tsx", "onUseForTask", "Confirmed task suggestions must reach the composer model override");
+assertContains("src/components/UsageSuggestion.tsx", "usage-suggestion-confirm", "Suggestion changes must use an explicit confirmation surface");
+assertContains("src/components/UsageSuggestion.tsx", "confirmed: true", "Apply request must be explicitly confirmed");
+assertContains("src/components/UsageSuggestion.tsx", "onDismiss", "Suggestions must be dismissible");
+assertNotContains("src/components/UsageSuggestion.tsx", "useEffect(() => onApply", "Mounting must never apply a suggestion");
+assertContains("src/components/ChatUsageOverview.tsx", ".slice(0, 1)", "Home must render at most one model suggestion");
+assertContains("src/components/UsageSettingsPane.tsx", "coreBridge.setRole({", "Settings must apply confirmed role instructions through the canonical role API");
+for (const locale of ["en", "it", "es", "fr", "de"]) {
+  assertContains(`src/i18n/locales/${locale}.json`, '"use_for_task"', `${locale} must translate the task suggestion action`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"change_role_preference"', `${locale} must translate the preference suggestion action`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"dismiss"', `${locale} must translate suggestion dismissal`);
+}
 assertMatches(
   "src/styles.css",
   /\.onb-model\s*\{[^}]*color:\s*var\(--o-text\);[^}]*\}/m,

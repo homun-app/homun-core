@@ -826,6 +826,17 @@
     "type": "Il browser vuole inviare testo come submit. Conferma solo se il contenuto è corretto.",
     "default": "Il browser richiede una conferma prima di procedere."
   },
+  "usageSuggestions": {
+    "title": "Suggerimento di utilizzo",
+    "confidence": { "low": "affidabilità bassa", "medium": "affidabilità media", "high": "affidabilità alta" },
+    "actions": { "use_for_task": "Usa per questa attività", "change_role_preference": "Cambia preferenza del ruolo", "dismiss": "Ignora" },
+    "dismissed": "Suggerimento ignorato.", "undo": "Annulla",
+    "facts": { "cost": "Costo inferiore del {{percent}}% · {{provenance}}", "latency": "Latenza inferiore del {{percent}}% · {{provenance}}", "headroom": "{{percent}} punti di margine in più · {{provenance}}", "reliability": "Evidenza di affidabilità · {{provenance}}", "capability": "Capacità equivalenti · {{provenance}}" },
+    "provenance": { "provider_reported": "dichiarato dal provider", "catalog_estimated": "stima da catalogo", "manual_estimated": "stima manuale", "observed_recent_calls": "chiamate recenti", "provider_account_or_manual_budget": "dati account o budget", "not_billed": "non fatturato", "unavailable": "evidenza non disponibile" },
+    "confirm": { "title": "Conferma cambio modello", "body": "Passare da {{current}} a {{target}} per: {{scope}}? Non cambia nulla finché non confermi.", "cancel": "Annulla", "apply": "Conferma" },
+    "error": "Impossibile applicare il suggerimento",
+    "preferenceChanged": "Preferenza aggiornata per {{role}}."
+  },
   "settings": {
     "account": "Account",
     "appearance": "Aspetto",

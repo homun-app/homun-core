@@ -1454,11 +1454,14 @@ export function ChatView({
     }
   }
 
-  // Seed text for the composer (empty-state quick-action chips prefill it; bump the
-  // nonce so the same chip re-applies).
+  // External surfaces can seed text without taking ownership of the composer.
   const [composerSeed, setComposerSeed] = useState<{ text: string; nonce: number } | null>(
     null,
   );
+  const [usageSuggestedModel, setUsageSuggestedModel] = useState<{
+    value: string;
+    nonce: number;
+  } | null>(null);
 
   // External seed (e.g. a proactivity card engaged from the dashboard) → prefill
   // the composer. Keyed by nonce so re-engaging the same card re-applies.
@@ -2418,7 +2421,13 @@ export function ChatView({
         <div className="thread-content">
           <div className="thread-message-list">
           {threadMessages.length === 0 && !promptSubmitting && (
-            <ChatEmptyHero />
+            <ChatEmptyHero
+              threadId={thread.threadId}
+              onUseForTask={(providerId, modelId) => setUsageSuggestedModel({
+                value: `${providerId}::${modelId}`,
+                nonce: Date.now(),
+              })}
+            />
           )}
           {threadMessages.map((message) => {
             const isStreamingMessage = message.id === streamingAssistantId;
@@ -2810,10 +2819,13 @@ export function ChatView({
         error={promptError}
         replyContext={replyContext}
         seed={composerSeed}
+        suggestedModel={usageSuggestedModel}
         streaming={promptSubmitting}
         threadId={thread.threadId}
         onCancelStreaming={cancelActiveStreaming}
         onClearReply={() => setReplyContext(null)}
+        onManualModelSelection={() => setUsageSuggestedModel(null)}
+        onSuggestedModelConsumed={() => setUsageSuggestedModel(null)}
         onSubmit={submitComposerPrompt}
       />
     </section>
@@ -8824,7 +8836,13 @@ function ComputerDetailPanel({
 // Empty-chat hero (design): the Homun mark (the "U" + dot brandmark) + greeting.
 // The mark uses the theme vars
 // (U = --text, dot = --brand) so it adapts to light/dark.
-function ChatEmptyHero() {
+function ChatEmptyHero({
+  threadId,
+  onUseForTask,
+}: {
+  threadId: string;
+  onUseForTask: (providerId: string, modelId: string) => void;
+}) {
   const { t } = useTranslation();
   return (
     <div className="chat-hero">
@@ -8841,7 +8859,7 @@ function ChatEmptyHero() {
       </svg>
       <h1 className="chat-hero-title">{t("chat.emptyHero")}</h1>
       <p className="chat-hero-sub">{t("chat.emptyHeroSub")}</p>
-      <ChatUsageOverview />
+      <ChatUsageOverview threadId={threadId} onUseForTask={onUseForTask} />
     </div>
   );
 }
@@ -8851,20 +8869,26 @@ function Composer({
   error,
   replyContext,
   seed,
+  suggestedModel,
   streaming,
   threadId,
   onCancelStreaming,
   onClearReply,
+  onManualModelSelection,
+  onSuggestedModelConsumed,
   onSubmit,
 }: {
   disabled: boolean;
   error: string | null;
   replyContext: ReplyContext | null;
   seed: { text: string; nonce: number } | null;
+  suggestedModel: { value: string; nonce: number } | null;
   streaming: boolean;
   threadId: string;
   onCancelStreaming: () => void;
   onClearReply: () => void;
+  onManualModelSelection: () => void;
+  onSuggestedModelConsumed: () => void;
   onSubmit: (
     prompt: string,
     attachments: ChatAttachmentInput[],
@@ -8879,7 +8903,7 @@ function Composer({
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
-  // Empty-state chips seed the composer; nonce lets the same chip re-apply.
+  // External task surfaces may seed the composer; nonce lets the same value re-apply.
   useEffect(() => {
     if (seed && seed.text) setValue(seed.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -8903,6 +8927,9 @@ function Composer({
   // composite "<provider_id>::<model>", so the same model id present in two
   // providers resolves to the provider the user actually chose.
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  useEffect(() => {
+    if (suggestedModel?.value) setSelectedModel(suggestedModel.value);
+  }, [suggestedModel?.nonce, suggestedModel?.value]);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   // Interaction mode (composer pill, Cursor-style): agent | plan | ask | debug.
   // Debug is offered only when a project folder is linked (coding context).
@@ -9266,6 +9293,10 @@ function Composer({
       contextText,
       images: images.length > 0 ? images : undefined,
     });
+    if (suggestedModel && modelOverride === suggestedModel.value) {
+      setSelectedModel(null);
+      onSuggestedModelConsumed();
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -9747,6 +9778,7 @@ function Composer({
                       role="menuitem"
                       className={`composer-model-auto ${selectedModel === null ? "active" : ""}`}
                       onClick={() => {
+                        onManualModelSelection();
                         setSelectedModel(null);
                         setModelMenuOpen(false);
                         setModelQuery("");
@@ -9804,6 +9836,7 @@ function Composer({
                                 role="menuitem"
                                 className={picked ? "active" : ""}
                                 onClick={() => {
+                                  onManualModelSelection();
                                   setSelectedModel(value);
                                   setModelMenuOpen(false);
                                   setModelQuery("");

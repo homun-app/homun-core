@@ -6,6 +6,7 @@ import {
   providerLimitLabel,
   providerSnapshotState,
   remainingBudgetPercent,
+  suggestionFactLabel,
 } from "./usageViewModel.mjs";
 
 test("reported and estimated costs are never merged into one unlabeled number", () => {
@@ -44,4 +45,22 @@ test("provider snapshot states distinguish unsupported unauthorized and stale", 
 
 test("unknown cost disables remaining budget arithmetic", () => {
   assert.equal(remainingBudgetPercent(10_000_000, 3_000_000, 0), null);
+});
+
+test("suggestion cost evidence names reported or estimated provenance", () => {
+  assert.match(
+    suggestionFactLabel({ kind: "cost", delta_percent: -40, provenance: "provider_reported" }),
+    /provider-reported/,
+  );
+  assert.match(
+    suggestionFactLabel({ kind: "cost", delta_percent: -25, provenance: "catalog_estimated" }),
+    /catalog estimate/,
+  );
+});
+
+test("suggestion evidence discloses when provenance is unavailable", () => {
+  assert.match(
+    suggestionFactLabel({ kind: "cost", delta_percent: -20, provenance: "unavailable" }),
+    /evidence unavailable/,
+  );
 });

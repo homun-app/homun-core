@@ -99,4 +99,21 @@ export function compactUsageRows(summary, locale = "en-US") {
   };
 }
 
+export function suggestionFactLabel(fact) {
+  const delta = Number.isFinite(fact?.delta_percent) ? Math.abs(Math.round(fact.delta_percent)) : null;
+  const evidence = fact?.provenance === "provider_reported"
+    ? "provider-reported"
+    : fact?.provenance === "catalog_estimated"
+      ? "catalog estimate"
+      : fact?.provenance === "manual_estimated"
+        ? "manual estimate"
+        : fact?.provenance === "observed_recent_calls"
+          ? "observed recent calls"
+          : fact?.provenance === "not_billed"
+            ? "not billed"
+            : "evidence unavailable";
+  const change = delta == null ? "" : `${delta}% `;
+  return `${change}${fact?.kind ?? "fact"} · ${evidence}`;
+}
+
 export { clampNumber, clampPercent };

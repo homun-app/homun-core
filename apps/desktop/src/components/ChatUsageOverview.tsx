@@ -1,17 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { coreBridge, type UsageSummaryView, type UsageWindow } from "../lib/coreBridge";
+import type { ApplyInstruction, ModelUsageSuggestion } from "../lib/coreBridge";
 import { compactUsageRows, formatMicrousd } from "../lib/usageViewModel";
+import { UsageSuggestion } from "./UsageSuggestion";
 
 const WINDOWS: UsageWindow[] = ["7d", "30d", "all"];
 
-export function ChatUsageOverview() {
+export function ChatUsageOverview({
+  threadId,
+  onUseForTask,
+}: {
+  threadId: string;
+  onUseForTask: (providerId: string, modelId: string) => void;
+}) {
   const { t, i18n } = useTranslation();
   const [window, setWindow] = useState<UsageWindow>("30d");
   const [summary, setSummary] = useState<UsageSummaryView | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [suggestions, setSuggestions] = useState<ModelUsageSuggestion[]>([]);
   const generationRef = useRef(0);
+  const suggestionGenerationRef = useRef(0);
 
   const load = useCallback(async (selectedWindow: UsageWindow) => {
     const generation = ++generationRef.current;
@@ -30,6 +40,24 @@ export function ChatUsageOverview() {
     void load(window);
     return () => { generationRef.current += 1; };
   }, [load, window]);
+
+  useEffect(() => {
+    const generation = ++suggestionGenerationRef.current;
+    void coreBridge.usageSuggestions(window, "home")
+      .then((items) => {
+        if (suggestionGenerationRef.current === generation) setSuggestions(items.slice(0, 1));
+      })
+      .catch(() => {
+        if (suggestionGenerationRef.current === generation) setSuggestions([]);
+      });
+    return () => { suggestionGenerationRef.current += 1; };
+  }, [window]);
+
+  function handleInstruction(instruction: ApplyInstruction) {
+    if (instruction.kind === "use_for_task") {
+      onUseForTask(instruction.provider_id, instruction.model_id);
+    }
+  }
 
   const rows = summary ? compactUsageRows(summary, i18n.resolvedLanguage) : null;
   const cost = summary?.cost_breakdown;
@@ -54,6 +82,14 @@ export function ChatUsageOverview() {
       </div>
       {rows.coverageWarning && <p className="chat-usage-coverage">{t("chat.usageOverview.coverage")}</p>}
     </>}
+    {suggestions.map((suggestion) => <UsageSuggestion
+      key={suggestion.suggestion_key}
+      suggestion={suggestion}
+      context="home"
+      threadId={threadId}
+      onInstruction={handleInstruction}
+      onDismiss={(key) => setSuggestions((items) => items.filter((item) => item.suggestion_key !== key))}
+    />)}
   </section>;
 }
 

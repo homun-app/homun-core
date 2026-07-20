@@ -8,7 +8,10 @@ import {
   type UsageSummaryView,
   type UsageWindow,
   type SetProviderUsagePolicyInput,
+  type ApplyInstruction,
+  type ModelUsageSuggestion,
 } from "../lib/coreBridge";
+import { UsageSuggestion } from "./UsageSuggestion";
 import {
   clampPercent,
   formatCount,
@@ -24,6 +27,7 @@ type UsageData = {
   models: UsageModelRow[];
   providers: UsageProviderRow[];
   processes: UsageProcessRow[];
+  suggestions: ModelUsageSuggestion[];
 };
 
 const WINDOWS: UsageWindow[] = ["7d", "30d", "all"];
@@ -36,6 +40,7 @@ export function UsageSettingsPane() {
   const [data, setData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [suggestionStatus, setSuggestionStatus] = useState<string | null>(null);
   const requestGenerationRef = useRef(0);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -44,14 +49,15 @@ export function UsageSettingsPane() {
     setLoading(true);
     setError(null);
     try {
-      const [summary, models, providers, processes] = await Promise.all([
+      const [summary, models, providers, processes, suggestions] = await Promise.all([
         coreBridge.usageSummary(selectedWindow),
         coreBridge.usageModels(selectedWindow),
         coreBridge.usageProviders(selectedWindow),
         coreBridge.usageProcesses(selectedWindow),
+        coreBridge.usageSuggestions(selectedWindow, "settings").catch(() => []),
       ]);
       if (requestGenerationRef.current === generation) {
-        setData({ summary, models, providers, processes });
+        setData({ summary, models, providers, processes, suggestions });
       }
     } catch (reason) {
       if (requestGenerationRef.current === generation) {
@@ -83,6 +89,18 @@ export function UsageSettingsPane() {
   }
 
   const isEmpty = data?.summary.attempts === 0;
+
+  async function handleSuggestionInstruction(instruction: ApplyInstruction) {
+    if (instruction.kind !== "change_role_preference") return;
+    setSuggestionStatus(null);
+    await coreBridge.setRole({
+      role: instruction.role,
+      provider_id: instruction.provider_id,
+      model: instruction.model_id,
+    });
+    setSuggestionStatus(t("usageSuggestions.preferenceChanged", { role: instruction.role }));
+    await load(window);
+  }
 
   return (
     <div className="usage-surface">
@@ -126,7 +144,21 @@ export function UsageSettingsPane() {
         {loading && !data && t("settings.usage.states.loading")}
         {error && <span className="usage-error">{t("settings.usage.states.error")}: {error}</span>}
         {!loading && !error && isEmpty && t("settings.usage.states.empty")}
+        {suggestionStatus && <span className="usage-success">{suggestionStatus}</span>}
       </div>
+
+      {data && data.suggestions.length > 0 && <div className="usage-settings-suggestions">
+        {data.suggestions.map((suggestion) => <UsageSuggestion
+          key={suggestion.suggestion_key}
+          suggestion={suggestion}
+          context="settings"
+          onInstruction={handleSuggestionInstruction}
+          onDismiss={(key) => setData((current) => current ? {
+            ...current,
+            suggestions: current.suggestions.filter((item) => item.suggestion_key !== key),
+          } : current)}
+        />)}
+      </div>}
 
       {data && !isEmpty && (
         <section
