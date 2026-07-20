@@ -5,6 +5,8 @@ pub mod linked_memory_repair;
 pub mod project_graph_commit;
 pub mod usage_store;
 pub mod usage_pricing;
+pub mod model_registry;
+pub mod provider_usage;
 pub mod workspace_delete;
 
 // The single control-marker toolkit (‹‹NAME››…‹‹/NAME›› protocol) moved WHOLE into the engine crate

@@ -17,6 +17,7 @@ mod model_client;
 mod inference_transport;
 mod usage_store;
 mod usage_pricing;
+mod provider_usage;
 // Model-output normalization moved WHOLE into the engine crate (ADR 0024 inc 5e.3, pure serde
 // module); re-exported so `model_normalize::…` call sites are unchanged.
 use local_first_engine::model_normalize;
@@ -1266,6 +1267,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/usage/models", get(get_usage_models))
         .route("/api/usage/providers", get(get_usage_providers))
         .route("/api/usage/processes", get(get_usage_processes))
+        .route(
+            "/api/usage/providers/{provider_id}/refresh",
+            post(refresh_usage_provider),
+        )
+        .route(
+            "/api/usage/providers/{provider_id}/policy",
+            get(get_usage_provider_policy).put(set_usage_provider_policy),
+        )
         .route(
             "/api/prefs/timezone",
             get(get_user_timezone).post(set_user_timezone),
@@ -44091,6 +44100,118 @@ async fn get_usage_processes(
     usage_breakdown(state, query, usage_store::UsageBreakdownDimension::Purpose).await
 }
 
+#[derive(Debug, Deserialize)]
+struct SetProviderUsagePolicyRequest {
+    monthly_budget_microusd: Option<u64>,
+    #[serde(default = "default_usage_currency")]
+    currency: String,
+    reset_day: Option<u8>,
+    timezone: Option<String>,
+    alert_threshold_percent: Option<u8>,
+    #[serde(default)]
+    pricing_overrides: Vec<usage_store::ModelPriceOverride>,
+}
+
+fn default_usage_currency() -> String { "USD".to_string() }
+
+async fn get_usage_provider_policy(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> Result<Json<Option<usage_store::ProviderUsagePolicy>>, GatewayError> {
+    let store = state.usage_store.lock().map_err(|_| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "usage_store_unavailable",
+        message: "usage store unavailable".to_string(),
+    })?;
+    let policy = store
+        .provider_policy(gateway_user_id().as_str(), &provider_id)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "usage_policy_read_failed",
+            message: error.to_string(),
+        })?;
+    Ok(Json(policy))
+}
+
+async fn set_usage_provider_policy(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+    Json(request): Json<SetProviderUsagePolicyRequest>,
+) -> Result<Json<usage_store::ProviderUsagePolicy>, GatewayError> {
+    if load_provider_registry().get(&provider_id).is_none() {
+        return Err(GatewayError {
+            status: StatusCode::NOT_FOUND,
+            code: "provider_not_found",
+            message: format!("provider {provider_id} not configured"),
+        });
+    }
+    let policy = usage_store::ProviderUsagePolicy {
+        user_id: gateway_user_id().as_str().to_string(),
+        provider_id: provider_id.clone(),
+        monthly_budget_microusd: request.monthly_budget_microusd,
+        currency: request.currency,
+        reset_day: request.reset_day,
+        timezone: request.timezone,
+        alert_threshold_percent: request.alert_threshold_percent,
+        pricing_overrides: request.pricing_overrides,
+    };
+    let store = state.usage_store.lock().map_err(|_| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "usage_store_unavailable",
+        message: "usage store unavailable".to_string(),
+    })?;
+    store.upsert_provider_policy(&policy, usage_now_i64()).map_err(|error| GatewayError {
+        status: StatusCode::BAD_REQUEST,
+        code: "usage_policy_invalid",
+        message: error.to_string(),
+    })?;
+    if let Ok(mut pricing) = state.usage_pricing.write() {
+        *pricing = build_usage_pricing_snapshot(&store);
+    }
+    Ok(Json(policy))
+}
+
+async fn refresh_usage_provider(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> Result<Json<Vec<usage_store::ProviderUsageSnapshot>>, GatewayError> {
+    let provider = load_provider_registry().get(&provider_id).cloned().ok_or_else(|| GatewayError {
+        status: StatusCode::NOT_FOUND,
+        code: "provider_not_found",
+        message: format!("provider {provider_id} not configured"),
+    })?;
+    let snapshots = provider_usage::refresh_provider_usage(
+        &state.http,
+        gateway_user_id().as_str(),
+        &provider_id,
+        provider.kind,
+        &provider.base_url,
+        provider_api_key(&provider_id).as_deref(),
+        usage_now_i64(),
+    )
+    .await;
+    let store = state.usage_store.lock().map_err(|_| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "usage_store_unavailable",
+        message: "usage store unavailable".to_string(),
+    })?;
+    for snapshot in &snapshots {
+        store.append_provider_snapshot(snapshot).map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "usage_snapshot_write_failed",
+            message: error.to_string(),
+        })?;
+    }
+    let latest = store
+        .latest_provider_snapshots(gateway_user_id().as_str(), &provider_id)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "usage_snapshot_read_failed",
+            message: error.to_string(),
+        })?;
+    Ok(Json(latest))
+}
+
 // ----------------------------------------------------------------- skills API
 
 /// Resolves the skills directory, creating it on demand so a fresh install has
@@ -45807,9 +45928,6 @@ async fn set_provider_enabled(
         });
     }
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
-    if let (Ok(store), Ok(mut pricing)) = (state.usage_store.lock(), state.usage_pricing.write()) {
-        *pricing = build_usage_pricing_snapshot(&store);
-    }
     Ok(Json(providers_response(&registry)))
 }
 
@@ -45973,6 +46091,9 @@ async fn refresh_provider_models(
             .map(|d| d.as_secs().to_string());
     }
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    if let (Ok(store), Ok(mut pricing)) = (state.usage_store.lock(), state.usage_pricing.write()) {
+        *pricing = build_usage_pricing_snapshot(&store);
+    }
     Ok(Json(providers_response(&registry)))
 }
 
