@@ -43364,6 +43364,30 @@ fn brain_materialize_tasks(
         ids
     };
 
+    // Keep the canonical task-runtime projection linked to the originating chat.
+    // ChatStore has its own task→thread relation for message surfacing, while the
+    // runtime column is what `/activity` uses for subagent status and timestamps.
+    let runtime_user = UserId::new(user.as_str());
+    let runtime_workspace = WorkspaceId::new(workspace.as_str());
+    for task_id in &task_ids {
+        let linked = brain
+            .task_store()
+            .link_task_to_thread(
+                &TaskId::new(task_id),
+                &runtime_user,
+                &runtime_workspace,
+                thread_id,
+            )
+            .map_err(|error| LocalTaskExecutionError {
+                message: format!("task thread linkage: {error}"),
+            })?;
+        if !linked {
+            return Err(LocalTaskExecutionError {
+                message: format!("task thread linkage: task {task_id} was not found"),
+            });
+        }
+    }
+
     // A1.2: bind the materialized task(s) to the originating chat thread so the
     // worker's existing session/chat surfacing (sync_session_for_task_run,
     // append_task_result_to_chat — both keyed on thread_by_task_id) resolves

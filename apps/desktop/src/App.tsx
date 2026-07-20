@@ -50,6 +50,7 @@ import {
 import { wsSubscription } from "./lib/wsSubscription";
 import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
+import { reconcileChatMessages } from "./lib/uiSnapshot";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -706,9 +707,11 @@ export default function App() {
         return current;
       }
       pendingLocalMessageThreadIdsRef.current.delete(threadId);
+      const reconciled = reconcileChatMessages(currentMessages, incomingMessages);
+      if (reconciled === currentMessages) return current;
       return {
         ...current,
-        [threadId]: incomingMessages,
+        [threadId]: reconciled,
       };
     });
   }

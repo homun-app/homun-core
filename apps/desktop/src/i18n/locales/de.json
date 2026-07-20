@@ -556,6 +556,26 @@
     "activityProgress": "Aktivitätsfortschritt",
     "resizePanel": "Panelgröße ändern",
     "closePanel": "Panel schließen",
+    "inspector": {
+      "addTab": "Tab hinzufügen",
+      "closeTab": "Tab schließen: {{title}}",
+      "closeWorkspace": "Inspektor schließen",
+      "empty": "Öffne eine Datei oder wähle eine Ansicht aus.",
+      "focus": "Inspektor vergrößern",
+      "exitFocus": "Zur geteilten Ansicht zurückkehren",
+      "hiddenTabs": "Geöffnete Tabs",
+      "missing": "Dieses Element ist nicht mehr verfügbar.",
+      "denied": "Du hast keine Berechtigung, dieses Element zu öffnen.",
+      "unsupported": "Für diesen Dateityp ist keine Vorschau verfügbar.",
+      "retry": "Erneut versuchen",
+      "resize": "Inspektorgröße ändern",
+      "returnToChat": "Zurück zum Chat",
+      "views": {
+        "review": "Überprüfung", "files": "Dateien", "activity": "Aktivität", "plan": "Plan",
+        "execution": "Ausführung", "memory": "Gedächtnis", "goals": "Ziele", "sources": "Quellen",
+        "subagents": "Subagenten", "computer": "Computer"
+      }
+    },
     "backToFiles": "Zurück zu den Dateien",
     "parentFolder": "Übergeordneter Ordner",
     "cancelTask": "Aufgabe abbrechen",

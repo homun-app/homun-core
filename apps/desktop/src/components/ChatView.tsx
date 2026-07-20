@@ -65,7 +65,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
@@ -116,6 +116,17 @@ import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../li
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
 import {
+  filterInspectorState,
+  inspectorWorkspaceReducer,
+  loadInspectorState,
+  loadInspectorWidthRatio,
+  saveInspectorState,
+  saveInspectorWidthRatio,
+  type InspectorTab,
+  type InspectorTabKind,
+} from "../lib/inspectorWorkspace";
+import { reconcileMemoryArtifacts } from "../lib/uiSnapshot";
+import {
   STRUCTURED_MARKER_DELTA_RE,
   COMPOSIO_CONFIRM_RE,
   MCP_CONFIRM_RE,
@@ -144,6 +155,7 @@ import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import { WorkspaceIsland } from "./WorkspaceIsland";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
+import { InspectorWorkspace } from "./InspectorWorkspace";
 import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import type {
   ChatMessage,
@@ -333,7 +345,6 @@ export function ChatView({
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
     createLoadingComputerSession(computerSessionId),
   );
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [activeSurface, setActiveSurface] = useState<ComputerSurfaceKind>(
     computerSession.activeSurface,
   );
@@ -388,16 +399,24 @@ export function ChatView({
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  // Workbench (right-side panel, Claude-Code style): `artifactsOpen` is the
-  // open/closed flag; `workbenchTab` is the active tab. Phase 1 ships the
-  // "Artefatti" tab; File / Computer / Activity / Piano land in later phases.
-  // The island is a real right COLUMN now: open = it reflows the chat; collapsed = hidden,
-  // chat takes the full width (a header button reopens it). Default open.
+  // The compact working island remains available while the universal inspector is hidden.
+  // Inspector tabs and their ordering are isolated by thread; App keys ChatView by thread id,
+  // so each mount restores only the current activity's validated descriptors.
   const [islandOpen, setIslandOpen] = useState(true);
-  const [artifactsOpen, setArtifactsOpen] = useState(false);
-  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
-  const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
+  const [inspector, dispatchInspector] = useReducer(inspectorWorkspaceReducer,
+    loadInspectorState(thread.threadId,
+      (tab) => isRestorableInspectorTab(tab, thread.threadId, thread.workspaceId),
+    ),
+  );
+  const [inspectorResourcesReady, setInspectorResourcesReady] = useState(false);
+  const inspectorRef = useRef(inspector);
+  const inspectorRestoreScopeRef = useRef<string | null>(null);
+  inspectorRef.current = inspector;
+  const [inspectorRatio, setInspectorRatio] = useState(loadInspectorWidthRatio);
   const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
+  const [memoryArtifactsLoaded, setMemoryArtifactsLoaded] = useState(false);
+  const [memoryArtifactsLoadError, setMemoryArtifactsLoadError] = useState(false);
+  const [memoryArtifactsReloadNonce, setMemoryArtifactsReloadNonce] = useState(0);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
   // the "Save as goal" message action + the Obiettivi tab. `goalSeed` pre-fills
   // the Obiettivi compose when promoting a chat message to a goal.
@@ -418,6 +437,7 @@ export function ChatView({
   const resumedThreadsRef = useRef<Set<string>>(new Set());
   const consumedAutoSubmitIdsRef = useRef<Set<string>>(new Set());
   const conversationRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<HTMLElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const streamingUserPinnedRef = useRef(false);
   const streamingFrameRef = useRef<number | null>(null);
@@ -633,6 +653,9 @@ export function ChatView({
         name,
         kind: isImage ? "image" : "artifact",
         meta: artifact.updated ? "updated" : artifact.source === "project" ? "project" : "artifact",
+        action: "artifact",
+        artifactThread: artifact.thread,
+        artifactName: artifact.name,
       });
     }
     for (const file of uploadedFiles) {
@@ -640,6 +663,7 @@ export function ChatView({
         name: file.title,
         kind: file.kind === "image" ? "image" : "file",
         meta: "uploaded",
+        action: "files",
       });
     }
     return out;
@@ -647,15 +671,20 @@ export function ChatView({
   const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
-  const availableWorkbenchViews = useMemo(
+  const availableInspectorViews = useMemo(
     () =>
       PANEL_VIEWS.filter((view) => {
-        if (view.key === "artifacts") return workbenchArtifacts.length > 0;
-        if (view.key === "files") return uploadedFiles.length > 0;
+        if (view.key === "artifact") return workbenchArtifacts.length > 0;
+        if (view.key === "file") return uploadedFiles.length > 0 || threadIsProject;
         if (view.key === "activity") return conversationActivity.length > 0 || activeApprovels.length > 0;
         if (view.key === "plan") return workspacePlanSteps.length > 0;
         if (view.key === "goals") return projectGoalCount > 0 || Boolean(goalSeed);
-        if (view.key === "memoria") return projectMemoryCount > 0;
+        if (view.key === "graph") return projectMemoryCount > 0;
+        if (view.key === "sources") return islandSources.length > 0;
+        if (view.key === "subagents") return projectedSubagents.length > 0;
+        if (view.key === "computer") {
+          return computerLiveStatus.active || activeApprovels.length > 0;
+        }
         if (view.key === "execution") return true;
         return false;
       }),
@@ -668,9 +697,147 @@ export function ChatView({
       goalSeed,
       projectGoalCount,
       projectMemoryCount,
+      threadIsProject,
+      islandSources.length,
+      projectedSubagents.length,
+      computerLiveStatus.active,
     ],
   );
-  const workbenchOpen = artifactsOpen;
+
+  const openInspectorTab = useCallback(
+    (
+      kind: InspectorTabKind,
+      title: string,
+      resourceKey: string,
+      payload: Record<string, string> = {},
+    ) => {
+      dispatchInspector({
+        type: "openTab",
+        tab: {
+          id: crypto.randomUUID(),
+          kind,
+          resourceKey,
+          title,
+          workspaceId: thread.workspaceId ?? undefined,
+          payload: { ...payload, threadId: thread.threadId },
+        },
+      });
+    },
+    [thread.threadId, thread.workspaceId],
+  );
+
+  const openUtilityTab = useCallback(
+    (kind: InspectorTabKind) => {
+      openInspectorTab(kind, t(INSPECTOR_VIEW_LABEL_KEY[kind]), `${kind}:${thread.threadId}`);
+    },
+    [openInspectorTab, t, thread.threadId],
+  );
+
+  const openFileTab = useCallback(
+    (path: string) => {
+      const normalizedPath = path.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+      openInspectorTab(
+        "file",
+        normalizedPath.split("/").pop() || normalizedPath,
+        `file:${normalizedPath}`,
+        { path: normalizedPath },
+      );
+    },
+    [openInspectorTab],
+  );
+
+  const openArtifactTab = useCallback(
+    (artifact: ParsedArtifact) => {
+      openInspectorTab(
+        "artifact",
+        artifact.name,
+        `artifact:${artifact.thread}:${artifact.name}`,
+        {
+          artifactThread: artifact.thread,
+          name: artifact.name,
+          artifactSource: artifact.source ?? "conversation",
+          projectPath: artifact.projectPath || artifact.projectRelativePath || "",
+        },
+      );
+    },
+    [openInspectorTab],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    const scope = `${thread.threadId}:${thread.workspaceId ?? ""}`;
+    const firstValidation = inspectorRestoreScopeRef.current !== scope;
+    const restored = firstValidation
+      ? loadInspectorState(
+          thread.threadId,
+          (tab) => isRestorableInspectorTab(tab, thread.threadId, thread.workspaceId),
+        )
+      : inspectorRef.current;
+    if (firstValidation) {
+      inspectorRestoreScopeRef.current = scope;
+      inspectorRef.current = restored;
+      dispatchInspector({ type: "replaceState", state: restored });
+    }
+    if (firstValidation) setInspectorResourcesReady(false);
+
+    void Promise.all(restored.tabs.map(async (tab): Promise<"allowed" | "denied" | "error"> => {
+      if (tab.kind === "artifact") {
+        if (!tab.payload.name) return "allowed";
+        const artifact = workbenchArtifacts.find(
+          (artifact) =>
+            artifact.thread === tab.payload.artifactThread &&
+            artifact.name === tab.payload.name,
+        );
+        const projectPath =
+          artifact?.projectPath || artifact?.projectRelativePath || tab.payload.projectPath;
+        const projectBacked = artifact?.source === "project" || tab.payload.artifactSource === "project";
+        if (!artifact && !projectPath) {
+          return memoryArtifactsLoaded && !memoryArtifactsLoadError ? "denied" : "error";
+        }
+        if (!projectBacked) return "allowed";
+        try {
+          const payload = await coreBridge.fsFile(projectPath || tab.payload.name, thread.threadId);
+          return payload.authorized ? "allowed" : "denied";
+        } catch {
+          return "error";
+        }
+      }
+      if (tab.kind !== "file" || !tab.payload.path) return "allowed";
+      try {
+        const payload = await coreBridge.fsFile(tab.payload.path, thread.threadId);
+        return payload.authorized ? "allowed" : "denied";
+      } catch {
+        return "error";
+      }
+    })).then((outcomes) => {
+      if (cancelled) return;
+      const deniedIds = new Set(
+        restored.tabs.filter((_, index) => outcomes[index] === "denied").map((tab) => tab.id),
+      );
+      const current = inspectorRef.current;
+      dispatchInspector({
+        type: "replaceState",
+        state: filterInspectorState(
+          current,
+          (tab) => !deniedIds.has(tab.id),
+        ),
+      });
+      setInspectorResourcesReady(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+    // Resource descriptors are restored once per authorization scope. Individual
+    // open tabs revalidate again on window focus, without ever persisting content.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memoryArtifacts, memoryArtifactsLoadError, memoryArtifactsLoaded, thread.threadId, thread.workspaceId]);
+
+  useEffect(() => {
+    if (!inspectorResourcesReady) return;
+    saveInspectorState(thread.threadId, inspector);
+  }, [inspector, inspectorResourcesReady, thread.threadId]);
+
   const visibleComputerSession = useMemo(
     () => ({
       ...computerSession,
@@ -678,24 +845,6 @@ export function ChatView({
     }),
     [computerSession],
   );
-  const showComputerActivity =
-    activeApprovels.length > 0 ||
-    planStepRunning ||
-    smokeTestRunning ||
-    detailsOpen;
-
-  useEffect(() => {
-    if (availableWorkbenchViews.some((view) => view.key === workbenchTab)) return;
-    if (artifactsOpen) {
-      const next = availableWorkbenchViews[0]?.key;
-      if (next) {
-        setWorkbenchTab(next);
-      } else {
-        setArtifactsOpen(false);
-      }
-    }
-  }, [artifactsOpen, availableWorkbenchViews, workbenchTab]);
-
   function scrollConversationToBottom(behavior: ScrollBehavior) {
     const node = conversationRef.current;
     if (!node) return;
@@ -1716,15 +1865,22 @@ export function ChatView({
     void coreBridge
       .memoryArtifacts(thread.threadId)
       .then((items) => {
-        if (!cancelled) setMemoryArtifacts(items);
+        if (!cancelled) {
+          setMemoryArtifacts((current) => reconcileMemoryArtifacts(current, items));
+          setMemoryArtifactsLoadError(false);
+          setMemoryArtifactsLoaded(true);
+        }
       })
       .catch(() => {
-        if (!cancelled) setMemoryArtifacts([]);
+        if (!cancelled) {
+          setMemoryArtifactsLoadError(true);
+          setMemoryArtifactsLoaded(true);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [thread.threadId, threadMessages]);
+  }, [memoryArtifactsReloadNonce, messages, thread.threadId]);
 
   // Promote a chat message to a project objective: hand the text off to the Obiettivi
   // panel's compose (open Workbench → Obiettivi tab, pre-filled) so the user trims and
@@ -1733,8 +1889,7 @@ export function ChatView({
     const seed = (text ?? "").trim();
     if (!seed) return;
     setGoalSeed(seed);
-    setArtifactsOpen(true);
-    setWorkbenchTab("goals");
+    openUtilityTab("goals");
   }
 
   async function saveMessageToMemory(message: ChatMessage) {
@@ -2137,7 +2292,6 @@ export function ChatView({
     };
   }, [
     threadMessages,
-    detailsOpen,
     streamingAssistantId,
   ]);
 
@@ -2175,10 +2329,13 @@ export function ChatView({
       computerLiveStatus.active ||
       promptSubmitting ||
       Boolean(streamingAssistantId));
-  const islandColumnVisible = islandOpen && islandHasContent;
+  const islandColumnVisible = !inspector.open && islandOpen && islandHasContent;
   return (
     <section
-      className={`chat-view active-task-layout${detailsOpen || workbenchOpen ? " panel-open" : ""}${
+      ref={layoutRef}
+      className={`chat-view active-task-layout${inspector.open ? " inspector-open" : ""}${
+        inspector.focused ? " inspector-focused" : ""
+      }${
         threadMessages.length === 0 ? " is-empty" : ""
       }${islandColumnVisible ? "" : " island-collapsed"}`}
       aria-labelledby="chat-title"
@@ -2225,11 +2382,7 @@ export function ChatView({
             </button>
           )}
           <ChatHeaderMenu
-            onOpenWorkbench={(tab) => {
-              setArtifactsInitial(null);
-              setWorkbenchTab(tab);
-              setArtifactsOpen(true);
-            }}
+            onOpenInspector={openUtilityTab}
             onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
           />
         </span>
@@ -2256,11 +2409,7 @@ export function ChatView({
             onCollapseColumn={() => setIslandOpen(false)}
             onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
             onExportChat={() => void exportChatMarkdown()}
-            onOpenWorkbench={(tab) => {
-              setArtifactsInitial(null);
-              setWorkbenchTab(tab);
-              setArtifactsOpen(true);
-            }}
+            onOpenInspector={openUtilityTab}
           />
         </div>
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
@@ -2311,9 +2460,7 @@ export function ChatView({
                       messageId={displayMessage.id}
                       threadId={thread.threadId}
                       onOpenArtifact={(artifact) => {
-                        setArtifactsInitial(artifact.name);
-                        setWorkbenchTab("artifacts");
-                        setArtifactsOpen(true);
+                        openArtifactTab(artifact);
                       }}
                       onChoose={(answer, purpose) =>
                         purpose
@@ -2367,9 +2514,7 @@ export function ChatView({
                     messageId={displayMessage.id}
                     threadId={thread.threadId}
                     onOpenArtifact={(artifact) => {
-                      setArtifactsInitial(artifact.name);
-                      setWorkbenchTab("artifacts");
-                      setArtifactsOpen(true);
+                      openArtifactTab(artifact);
                     }}
                     onChoose={(answer) => void submitComposerPrompt(answer, [])}
                   />
@@ -2588,21 +2733,6 @@ export function ChatView({
         </div>
       </div>
 
-      {detailsOpen && (
-        <ComputerDetailPanel
-          activeSurface={activeSurface}
-          controlBusy={computerControlBusy}
-          controlError={computerControlError}
-          onClose={() => setDetailsOpen(false)}
-          onPause={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
-          onResume={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
-          onSelectSurface={setActiveSurface}
-          onTakeover={() => runComputerControl(coreBridge.requestLocalComputerTakeover)}
-          previewDataUrl={previewDataUrl}
-          session={computerSession}
-        />
-      )}
-
       {showJumpToBottom && (
         <button
           className="chat-jump-bottom"
@@ -2618,19 +2748,64 @@ export function ChatView({
         </button>
       )}
 
-      <Workbench
-        open={artifactsOpen}
-        tab={workbenchTab}
-        onTab={setWorkbenchTab}
-        onClose={() => setArtifactsOpen(false)}
-        artifacts={workbenchArtifacts}
-        artifactsInitial={artifactsInitial}
-        uploadedFiles={uploadedFiles}
-        threadId={thread.threadId}
-        projectThread={threadIsProject}
-        goalSeed={goalSeed}
-        onGoalSeedConsumed={() => setGoalSeed(null)}
-        operationalPlanMarkdown={conversationPlan ?? visibleComputerSession.operationalPlanMarkdown}
+      <InspectorWorkspace
+        layoutRef={layoutRef}
+        state={inspector}
+        ratio={inspectorRatio}
+        addItems={availableInspectorViews.map((view) => ({
+          kind: view.key,
+          title: t(INSPECTOR_VIEW_LABEL_KEY[view.key]),
+        }))}
+        onActivate={(tabId) => dispatchInspector({ type: "activateTab", tabId })}
+        onCloseTab={(tabId) => dispatchInspector({ type: "closeTab", tabId })}
+        onMoveTab={(tabId, targetIndex) =>
+          dispatchInspector({ type: "moveTab", tabId, targetIndex })
+        }
+        onAdd={openUtilityTab}
+        onHide={() => dispatchInspector({ type: "hideWorkspace" })}
+        onToggleFocus={() => dispatchInspector({ type: "toggleFocus" })}
+        onRatioCommit={(next) => {
+          setInspectorRatio(next);
+          saveInspectorWidthRatio(next);
+        }}
+        renderTab={(tab) => (
+          !inspectorResourcesReady && (tab.kind === "file" || tab.kind === "artifact") ? (
+            <div className="workbench-empty">
+              <Loader2 size={22} className="spin" />
+              <p>{t("chat.loadingActivity")}</p>
+            </div>
+          ) : <InspectorView
+            descriptor={tab}
+            artifacts={workbenchArtifacts}
+            artifactCatalogError={memoryArtifactsLoadError}
+            uploadedFiles={uploadedFiles}
+            threadId={thread.threadId}
+            goalSeed={goalSeed}
+            onGoalSeedConsumed={() => setGoalSeed(null)}
+            operationalPlanMarkdown={
+              conversationPlan ?? visibleComputerSession.operationalPlanMarkdown
+            }
+            layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}
+            onOpenFile={openFileTab}
+            onOpenFilesIndex={() => openUtilityTab("file")}
+            onOpenArtifact={openArtifactTab}
+            onRetryArtifactCatalog={() => setMemoryArtifactsReloadNonce((value) => value + 1)}
+            sources={islandSources}
+            subagents={projectedSubagents}
+            activeSurface={activeSurface}
+            controlBusy={computerControlBusy}
+            controlError={computerControlError}
+            onPauseComputer={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
+            onResumeComputer={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
+            onSelectSurface={setActiveSurface}
+            onTakeoverComputer={() =>
+              runComputerControl(coreBridge.requestLocalComputerTakeover)
+            }
+            previewDataUrl={previewDataUrl}
+            computerSession={computerSession}
+            onCloseTab={() => dispatchInspector({ type: "closeTab", tabId: tab.id })}
+          />
+        )}
       />
 
       <Composer
@@ -3867,7 +4042,7 @@ type ArtifactPreview =
   | { kind: "html"; url: string; ext: string }
   | { kind: "pdf-images"; pages: string[]; ext: string }
   | { kind: "markdown" | "code" | "csv" | "text"; text: string; ext: string }
-  | { kind: "binary" | "error"; ext: string };
+  | { kind: "binary" | "missing" | "denied" | "error"; ext: string };
 
 /** Fetches an artifact and builds a renderable preview by type. For image/pdf it
  *  creates an object URL the caller must revoke (preview.url). */
@@ -3879,7 +4054,10 @@ async function buildArtifactPreview(
   if (artifact.source === "project") {
     const path = artifact.projectPath || artifact.projectRelativePath || artifact.name;
     const payload = await coreBridge.fsFile(path, artifact.thread);
-    if (!payload.authorized || payload.error) return { kind: "error", ext };
+    if (!payload.authorized) return { kind: "denied", ext };
+    if (payload.error) {
+      return { kind: isMissingFsError(payload.error) ? "missing" : "error", ext };
+    }
     if (payload.binary) return { kind: "binary", ext };
     if (ext === "md" || ext === "markdown") return { kind: "markdown", text: payload.text, ext };
     if (ext === "csv") return { kind: "csv", text: payload.text, ext };
@@ -4019,7 +4197,18 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
  *  project directory tree); "artifacts" = generated outputs; "activity" =
  *  background/scheduled tasks; "plan" = the orchestrator's operational plan.
  *  (Computer stays docked above the composer by design.) */
-export type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan" | "execution";
+type LegacyWorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan" | "execution";
+type InspectorResourceStatus =
+  | "loading"
+  | "ready"
+  | "missing"
+  | "denied"
+  | "unsupported"
+  | "error";
+
+function isMissingFsError(message?: string) {
+  return Boolean(message && /not found|no such file|cannot find|enoent|os error 2/i.test(message));
+}
 
 /** A generated artifact or uploaded file, projected into the island's "Sources" section.
  *  `kind` only selects the (monochrome) glyph; `meta` is a one-word provenance hint. */
@@ -4027,29 +4216,60 @@ export interface IslandSource {
   name: string;
   kind: "artifact" | "file" | "image";
   meta?: string;
+  action: "artifact" | "files";
+  artifactThread?: string;
+  artifactName?: string;
 }
 
 // Shared view metadata for the panel: the header dropdown (chat top-right) and the
 // in-panel title both read from here, so labels/icons never drift. Mock interaction:
 // toggle → dropdown menu → docked panel with that view + a clean title header.
-const PANEL_VIEWS: { key: WorkbenchTab; label: string; icon: typeof FileText }[] = [
-  { key: "artifacts", label: "Review", icon: ClipboardList },
-  { key: "files", label: "Files", icon: FolderOpen },
-  { key: "activity", label: "Activity", icon: Clock3 },
-  { key: "plan", label: "Plan", icon: ListTodo },
-  { key: "execution", label: "Execution", icon: ScanSearch },
-  { key: "memoria", label: "Memory", icon: Share2 },
-  { key: "goals", label: "Goals", icon: Target },
+const PANEL_VIEWS: { key: InspectorTabKind; icon: typeof FileText }[] = [
+  { key: "artifact", icon: ClipboardList },
+  { key: "file", icon: FolderOpen },
+  { key: "activity", icon: Clock3 },
+  { key: "plan", icon: ListTodo },
+  { key: "execution", icon: ScanSearch },
+  { key: "graph", icon: Share2 },
+  { key: "goals", icon: Target },
+  { key: "sources", icon: BookMarked },
+  { key: "subagents", icon: Bot },
+  { key: "computer", icon: Monitor },
 ];
-const PANEL_VIEW_LABEL: Record<WorkbenchTab, string> = {
-  files: "Files",
-  artifacts: "Review",
-  memoria: "Memory",
-  goals: "Goals",
-  activity: "Activity",
-  plan: "Plan",
-  execution: "Execution",
+const INSPECTOR_VIEW_LABEL_KEY: Record<InspectorTabKind, string> = {
+  file: "chat.inspector.views.files",
+  artifact: "chat.inspector.views.review",
+  memory: "chat.inspector.views.memory",
+  graph: "chat.inspector.views.memory",
+  sources: "chat.inspector.views.sources",
+  goals: "chat.inspector.views.goals",
+  activity: "chat.inspector.views.activity",
+  plan: "chat.inspector.views.plan",
+  execution: "chat.inspector.views.execution",
+  subagents: "chat.inspector.views.subagents",
+  computer: "chat.inspector.views.computer",
 };
+
+function legacyTabForInspector(kind: InspectorTabKind): LegacyWorkbenchTab | null {
+  if (kind === "file") return "files";
+  if (kind === "artifact") return "artifacts";
+  if (kind === "memory" || kind === "graph") return "memoria";
+  if (kind === "goals" || kind === "activity" || kind === "plan" || kind === "execution") {
+    return kind;
+  }
+  return null;
+}
+
+function isRestorableInspectorTab(
+  tab: InspectorTab,
+  threadId: string,
+  workspaceId?: string | null,
+) {
+  return (
+    tab.payload.threadId === threadId &&
+    (tab.workspaceId ?? null) === (workspaceId ?? null)
+  );
+}
 
 /** The Workbench: one toggle → a docked right panel with tabs, consolidating the
  *  assistant's tools/outputs (Claude-Code / IDE inspector pattern). Replaces the
@@ -5034,57 +5254,77 @@ export function MemoryGraphPanel({
   );
 }
 
-function Workbench({
-  open,
-  tab,
-  onTab,
-  onClose,
+function InspectorView({
+  descriptor,
   artifacts,
-  artifactsInitial,
+  artifactCatalogError,
   uploadedFiles,
   threadId,
-  projectThread,
   goalSeed,
   onGoalSeedConsumed,
   operationalPlanMarkdown,
+  layoutSignal,
+  onOpenFile,
+  onOpenFilesIndex,
+  onOpenArtifact,
+  onRetryArtifactCatalog,
+  sources,
+  subagents,
+  activeSurface,
+  controlBusy,
+  controlError,
+  onPauseComputer,
+  onResumeComputer,
+  onSelectSurface,
+  onTakeoverComputer,
+  previewDataUrl,
+  computerSession,
+  onCloseTab,
 }: {
-  open: boolean;
-  tab: WorkbenchTab;
-  onTab: (tab: WorkbenchTab) => void;
-  onClose: () => void;
+  descriptor: InspectorTab;
   artifacts: ParsedArtifact[];
-  artifactsInitial?: string | null;
+  artifactCatalogError: boolean;
   uploadedFiles: ChatAttachment[];
   threadId: string;
-  projectThread: boolean;
   goalSeed?: string | null;
   onGoalSeedConsumed?: () => void;
   operationalPlanMarkdown?: string;
+  layoutSignal: string;
+  onOpenFile: (path: string) => void;
+  onOpenFilesIndex: () => void;
+  onOpenArtifact: (artifact: ParsedArtifact) => void;
+  onRetryArtifactCatalog: () => void;
+  sources: IslandSource[];
+  subagents: SubagentInfo[];
+  activeSurface: ComputerSurfaceKind;
+  controlBusy: boolean;
+  controlError: string | null;
+  onPauseComputer: () => void;
+  onResumeComputer: () => void;
+  onSelectSurface: (surface: ComputerSurfaceKind) => void;
+  onTakeoverComputer: () => void;
+  previewDataUrl: string | null;
+  computerSession: ComputerSession;
+  onCloseTab: () => void;
 }) {
   const { t } = useTranslation();
+  const open = true;
+  const tab = legacyTabForInspector(descriptor.kind);
+  const resourceFilePath = descriptor.kind === "file" ? descriptor.payload.path : undefined;
+  const resourceArtifact =
+    descriptor.kind === "artifact" && descriptor.payload.name
+      ? artifacts.find(
+          (artifact) =>
+            artifact.name === descriptor.payload.name &&
+            artifact.thread === descriptor.payload.artifactThread,
+        ) ?? null
+      : null;
   // Project-folder browser state (File tab): the thread's linked folder, navigable.
   const [fsRoot, setFsRoot] = useState<string | null>(null);
   const [fsCwd, setFsCwd] = useState<string | null>(null);
   const [fsEntries, setFsEntries] = useState<FsEntry[]>([]);
   const [fsLoading, setFsLoading] = useState(false);
   const [fsError, setFsError] = useState<string | null>(null);
-  // Panel sizing: draggable width + fullscreen toggle (so wide files/diffs read well).
-  const [expanded, setExpanded] = useState(false);
-  const [width, setWidth] = useState(520);
-  const startResize = useCallback((event: ReactMouseEvent) => {
-    event.preventDefault();
-    const onMove = (ev: MouseEvent) => {
-      // Panel is docked right: width grows as the cursor moves left.
-      const next = Math.min(Math.max(window.innerWidth - ev.clientX, 320), window.innerWidth - 120);
-      setWidth(next);
-    };
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  }, []);
   // Background/scheduled tasks (Activity tab), fetched lazily when the tab opens.
   const [tasks, setTasks] = useState<CoreTaskQueueSnapshot | null>(null);
   const [tasksLoading, setTasksLoading] = useState(false);
@@ -5094,19 +5334,36 @@ function Workbench({
   const [openFile, setOpenFile] = useState<FsFilePayload | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [diffOn, setDiffOn] = useState(false);
+  const fileLoadGenerationRef = useRef(0);
 
-  const openFileAt = useCallback(
+  useEffect(() => () => {
+    fileLoadGenerationRef.current += 1;
+  }, []);
+
+  const loadFileAt = useCallback(
     async (path: string) => {
+      const generation = ++fileLoadGenerationRef.current;
       setFileLoading(true);
       setDiffOn(false);
       setOpenFile({ authorized: true, path, text: "", old_text: "", in_git: false, modified: false, binary: false });
       try {
         const payload = await coreBridge.fsFile(path, threadId);
-        setOpenFile(payload);
-      } catch {
-        setOpenFile(null);
+        if (generation === fileLoadGenerationRef.current) setOpenFile(payload);
+      } catch (error) {
+        if (generation === fileLoadGenerationRef.current) {
+          setOpenFile({
+            authorized: true,
+            path,
+            text: "",
+            old_text: "",
+            in_git: false,
+            modified: false,
+            binary: false,
+            error: (error as Error).message,
+          });
+        }
       } finally {
-        setFileLoading(false);
+        if (generation === fileLoadGenerationRef.current) setFileLoading(false);
       }
     },
     [threadId],
@@ -5151,14 +5408,21 @@ function Workbench({
   // Probe the filesystem when the panel opens (not only on the File tab) so we know
   // upfront whether this thread has a project folder → drives File-tab visibility.
   useEffect(() => {
-    if (open && fsCwd === null) void loadFs(null);
-  }, [open, fsCwd, loadFs]);
+    if (open && tab === "files" && !resourceFilePath && fsCwd === null) void loadFs(null);
+  }, [open, tab, resourceFilePath, fsCwd, loadFs]);
+  useEffect(() => {
+    if (tab !== "files" || !resourceFilePath) return;
+    void loadFileAt(resourceFilePath);
+    const revalidate = () => void loadFileAt(resourceFilePath);
+    window.addEventListener("focus", revalidate);
+    return () => window.removeEventListener("focus", revalidate);
+  }, [loadFileAt, resourceFilePath, tab]);
   // No auto-redirect: every panel-open path picks a view explicitly (dropdown pick,
   // save-goal → "goals", open-artifact → "artifacts"), and every view has its own
   // empty state — so an explicitly chosen empty view stays put instead of bouncing.
   // Load project goals (Obiettivi tab) when the panel opens — resolves scope from thread.
   useEffect(() => {
-    if (!open) return;
+    if (!open || tab !== "goals") return;
     let cancelled = false;
     void coreBridge.projectGoals(threadId).then((d) => {
       if (!cancelled) setGoalsData(d);
@@ -5166,7 +5430,7 @@ function Workbench({
     return () => {
       cancelled = true;
     };
-  }, [open, threadId]);
+  }, [open, tab, threadId]);
   // Load the task queue when the Activity tab is shown (and refresh on re-open).
   useEffect(() => {
     if (!open || tab !== "activity") return;
@@ -5188,7 +5452,119 @@ function Workbench({
     };
   }, [open, tab, threadId]);
 
-  if (!open) return null;
+  const fileStatus: InspectorResourceStatus = fileLoading
+    ? "loading"
+    : !resourceFilePath
+      ? "ready"
+      : !openFile
+        ? "loading"
+        : !openFile.authorized
+          ? "denied"
+          : openFile.error
+            ? isMissingFsError(openFile.error)
+              ? "missing"
+              : "error"
+            : openFile.binary
+              ? "unsupported"
+              : "ready";
+
+  if (descriptor.kind === "sources") {
+    return (
+      <div className="workbench-files inspector-source-view">
+        {sources.length > 0 ? (
+          <ul className="workbench-file-list">
+            {sources.map((source, index) => {
+              const sourceArtifact = artifacts.find(
+                (artifact) =>
+                  source.action === "artifact" &&
+                  artifact.thread === source.artifactThread &&
+                  artifact.name === source.artifactName,
+              );
+              return (
+                <li key={`${index}:${source.kind}:${source.name}`}>
+                  {source.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
+                  {sourceArtifact ? (
+                    <button
+                      type="button"
+                      className="wf-name wf-file"
+                      title={source.name}
+                      onClick={() => onOpenArtifact(sourceArtifact)}
+                    >
+                      {source.name}
+                    </button>
+                  ) : source.action === "files" ? (
+                    <button
+                      type="button"
+                      className="wf-name wf-file"
+                      title={source.name}
+                      onClick={onOpenFilesIndex}
+                    >
+                      {source.name}
+                    </button>
+                  ) : (
+                    <span className="wf-name" title={source.name}>{source.name}</span>
+                  )}
+                  {source.meta && <small>{source.meta}</small>}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <div className="workbench-empty"><BookMarked size={28} /><p>No sources yet.</p></div>
+        )}
+      </div>
+    );
+  }
+
+  if (descriptor.kind === "subagents") {
+    return (
+      <div className="workbench-files inspector-subagent-view">
+        {subagents.length > 0 ? (
+          <ul className="workbench-file-list">
+            {subagents.map((subagent, index) => (
+              <li key={`${index}:${subagent.name}`}>
+                <Bot size={15} />
+                <span className="wf-name inspector-subagent-copy" title={subagent.name}>
+                  <strong>{subagent.name}</strong>
+                  {subagent.summary && <small>{subagent.summary}</small>}
+                </span>
+                <small>
+                  {subagent.status}
+                  {subagent.updated_at ? ` · ${formatMessageTimestamp(String(subagent.updated_at))}` : ""}
+                </small>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="workbench-empty"><Bot size={28} /><p>No subagents in this activity.</p></div>
+        )}
+      </div>
+    );
+  }
+
+  if (descriptor.kind === "computer") {
+    return (
+      <ComputerDetailPanel
+        activeSurface={activeSurface}
+        controlBusy={controlBusy}
+        controlError={controlError}
+        onPause={onPauseComputer}
+        onResume={onResumeComputer}
+        onSelectSurface={onSelectSurface}
+        onTakeover={onTakeoverComputer}
+        previewDataUrl={previewDataUrl}
+        session={computerSession}
+      />
+    );
+  }
+
+  if (!tab) {
+    return (
+      <div className="workbench-empty">
+        <p>{descriptor.title}</p>
+      </div>
+    );
+  }
   const refreshGoals = () => {
     void coreBridge.projectGoals(threadId).then(setGoalsData);
   };
@@ -5200,54 +5576,10 @@ function Workbench({
   const cwdLabel = fsCwd ? fsCwd.replace(/\/+$/, "").split("/").pop() || fsCwd : "";
   const parentOf = (path: string) => path.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
   return (
-    <aside
-      className={`workbench${expanded ? " expanded" : ""}`}
-      aria-label={t("chat.workbench")}
-      style={expanded ? undefined : { width }}
-    >
-      {!expanded && (
-        <div
-          className="workbench-resize"
-          role="separator"
-          aria-label={t("chat.resizePanel")}
-          onMouseDown={startResize}
-        />
-      )}
-      <div className="workbench-header">
-        <span className="workbench-title">{PANEL_VIEW_LABEL[tab]}</span>
-        <span className="workbench-header-actions">
-          <button
-            className="workbench-close"
-            type="button"
-            aria-label={expanded ? t("chat.collapsePanel") : t("chat.fullscreen")}
-            title={expanded ? t("chat.collapse") : t("chat.fullscreen")}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-          </button>
-          <button
-            className="workbench-close"
-            type="button"
-            aria-label={t("chat.closePanel")}
-            title={t("chat.closePanel")}
-            onClick={onClose}
-          >
-            <X size={16} />
-          </button>
-        </span>
-      </div>
-      <div className="workbench-body">
-        {tab === "files" && openFile && (
+    <div className="workbench-body inspector-view-body" aria-label={descriptor.title}>
+        {tab === "files" && resourceFilePath && openFile && (
           <div className="workbench-fileview">
             <div className="workbench-breadcrumb">
-              <button
-                type="button"
-                aria-label={t("common.back")}
-                title={t("chat.backToFiles")}
-                onClick={() => setOpenFile(null)}
-              >
-                <ChevronLeft size={14} />
-              </button>
               <span className="wf-name" title={openFile.path}>
                 {openFile.path.split("/").pop()}
               </span>
@@ -5264,15 +5596,48 @@ function Workbench({
               )}
             </div>
             <div className="workbench-fileview-body">
-              {openFile.error ? (
+              {fileStatus === "denied" ? (
+                <div className="workbench-empty">
+                  <AlertCircle size={24} />
+                  <p>{t("chat.inspector.denied")}</p>
+                  <button type="button" onClick={onCloseTab}>
+                    {t("chat.inspector.closeTab", { title: descriptor.title })}
+                  </button>
+                </div>
+              ) : fileStatus === "missing" ? (
+                <div className="workbench-empty">
+                  <AlertCircle size={24} />
+                  <p>{t("chat.inspector.missing")}</p>
+                  <span className="workbench-empty-actions">
+                    <button type="button" onClick={() => void loadFileAt(resourceFilePath)}>
+                      {t("chat.inspector.retry")}
+                    </button>
+                    <button type="button" onClick={onCloseTab}>
+                      {t("chat.inspector.closeTab", { title: descriptor.title })}
+                    </button>
+                  </span>
+                </div>
+              ) : fileStatus === "error" ? (
                 <div className="workbench-empty">
                   <AlertCircle size={24} />
                   <p>{openFile.error}</p>
+                  <span className="workbench-empty-actions">
+                    <button type="button" onClick={() => void loadFileAt(resourceFilePath)}>
+                      {t("chat.inspector.retry")}
+                    </button>
+                    <button type="button" onClick={onCloseTab}>
+                      {t("chat.inspector.closeTab", { title: descriptor.title })}
+                    </button>
+                  </span>
                 </div>
-              ) : openFile.binary ? (
+              ) : fileStatus === "unsupported" ? (
                 <div className="workbench-empty">
                   <FileText size={24} />
-                  <p>{t("chat.binaryFileHint")}</p>
+                  <p>{t("chat.inspector.unsupported")}</p>
+                  <small>{openFile.path}</small>
+                  <button type="button" onClick={onCloseTab}>
+                    {t("chat.inspector.closeTab", { title: descriptor.title })}
+                  </button>
                 </div>
               ) : diffOn && openFile.modified ? (
                 <DiffView oldText={openFile.old_text} newText={openFile.text} />
@@ -5282,7 +5647,13 @@ function Workbench({
             </div>
           </div>
         )}
-        {tab === "files" && !openFile && (
+        {tab === "files" && resourceFilePath && !openFile && (
+          <div className="workbench-empty">
+            <Loader2 size={22} className="spin" />
+            <p>{t("chat.loadingActivity")}</p>
+          </div>
+        )}
+        {tab === "files" && !resourceFilePath && (
           <div className="workbench-files">
             {uploadedFiles.length > 0 && (
               <>
@@ -5339,7 +5710,7 @@ function Workbench({
                           type="button"
                           className="wf-name wf-file"
                           title={entry.name}
-                          onClick={() => void openFileAt(entry.path)}
+                          onClick={() => onOpenFile(entry.path)}
                         >
                           {entry.name}
                         </button>
@@ -5365,21 +5736,58 @@ function Workbench({
             )}
           </div>
         )}
-        {tab === "artifacts" &&
-          (artifacts.length > 0 ? (
+        {tab === "artifacts" && descriptor.payload.name &&
+          (resourceArtifact ? (
             <ArtifactsPanel
-              artifacts={artifacts}
-              initialName={artifactsInitial}
-              onClose={onClose}
+              artifacts={[resourceArtifact]}
+              initialName={resourceArtifact.name}
+              onClose={onCloseTab}
               embedded
             />
           ) : (
             <div className="workbench-empty">
               <FileText size={28} />
-              <p>No artifacts yet. Files generated or created by the assistant appear here.</p>
+              <p>
+                {artifactCatalogError ? t("chat.previewUnavailable") : t("chat.inspector.missing")}
+              </p>
+              <span className="workbench-empty-actions">
+                <button type="button" onClick={onRetryArtifactCatalog}>
+                  {t("chat.inspector.retry")}
+                </button>
+                <button type="button" onClick={onCloseTab}>
+                  {t("chat.inspector.closeTab", { title: descriptor.title })}
+                </button>
+              </span>
             </div>
           ))}
-        {tab === "memoria" && <MemoryGraphPanel threadId={threadId} layoutSignal={`${expanded ? "expanded" : "docked"}:${width}`} />}
+        {tab === "artifacts" && !descriptor.payload.name && (
+          <div className="workbench-files">
+            {artifacts.length > 0 ? (
+              <ul className="workbench-file-list">
+                {artifacts.map((artifact) => (
+                  <li key={`${artifact.thread}:${artifact.name}`}>
+                    <FileText size={15} />
+                    <button
+                      type="button"
+                      className="wf-name wf-file"
+                      title={artifact.name}
+                      onClick={() => onOpenArtifact(artifact)}
+                    >
+                      {artifact.name}
+                    </button>
+                    <small>{artifact.source === "project" ? "project" : "artifact"}</small>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="workbench-empty">
+                <FileText size={28} />
+                <p>No artifacts yet. Files generated or created by the assistant appear here.</p>
+              </div>
+            )}
+          </div>
+        )}
+        {tab === "memoria" && <MemoryGraphPanel threadId={threadId} layoutSignal={layoutSignal} />}
         {tab === "goals" && goalsData && (
           <GoalsPanel
             data={goalsData}
@@ -5440,8 +5848,7 @@ function Workbench({
             </div>
           ))}
         {tab === "execution" && <ExecutionInspector threadId={threadId} />}
-      </div>
-    </aside>
+    </div>
   );
 }
 
@@ -5459,9 +5866,7 @@ function ArtifactsPanel({
   embedded?: boolean;
 }) {
   const { t } = useTranslation();
-  const [selectedName, setSelectedName] = useState<string | null>(
-    initialName ?? artifacts[0]?.name ?? null,
-  );
+  const selectedName = initialName ?? artifacts[0]?.name ?? null;
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [loading, setLoading] = useState(false);
   // Versioning: `versions` = archived count; selectable slots are 0..versions,
@@ -5477,9 +5882,21 @@ function ArtifactsPanel({
   const [diffData, setDiffData] = useState<{ oldText: string; newText: string } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const urlRef = useRef<string | null>(null);
-  const showList = artifacts.length > 1;
+  const artifactActionsRef = useRef<HTMLDetailsElement>(null);
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
+  const selectedResourceRevision = selected
+    ? [
+        selected.thread,
+        selected.name,
+        selected.source ?? "",
+        selected.managed_path ?? "",
+        selected.projectPath ?? "",
+        selected.projectRelativePath ?? "",
+        String(selected.size),
+        selected.updated ? "1" : "0",
+      ].join("\u001f")
+    : "";
 
   function applyPreview(next: ArtifactPreview) {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -5493,6 +5910,9 @@ function ArtifactsPanel({
       return;
     }
     let cancelled = false;
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    urlRef.current = null;
+    setPreview(null);
     setLoading(true);
     setEditing(false);
     setShowDiff(false);
@@ -5527,7 +5947,14 @@ function ArtifactsPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, reloadKey]);
+  }, [selectedResourceRevision, reloadKey]);
+
+  useEffect(() => {
+    if (!selected) return undefined;
+    const revalidate = () => setReloadKey((key) => key + 1);
+    window.addEventListener("focus", revalidate);
+    return () => window.removeEventListener("focus", revalidate);
+  }, [selectedResourceRevision]);
 
   const editableKind =
     selected?.source !== "project" &&
@@ -5537,6 +5964,17 @@ function ArtifactsPanel({
       preview?.kind === "csv");
   const textKind = preview?.kind === "code" || preview?.kind === "text";
   const canDiff = textKind && versions > 0 && slot > 0;
+  const actionsAvailable = Boolean(
+    preview && !["denied", "missing", "error"].includes(preview.kind),
+  );
+  const closeArtifactActions = (restoreFocus = true) => {
+    artifactActionsRef.current?.removeAttribute("open");
+    if (restoreFocus) {
+      window.requestAnimationFrame(() =>
+        artifactActionsRef.current?.querySelector<HTMLElement>("summary")?.focus(),
+      );
+    }
+  };
 
   // Load the diff between the shown version and the previous one when requested.
   useEffect(() => {
@@ -5563,7 +6001,7 @@ function ArtifactsPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showDiff, slot, selected, versions]);
+  }, [showDiff, slot, selectedResourceRevision, versions]);
 
   const diffCounts = diffData ? diffStats(diffData.oldText, diffData.newText) : null;
 
@@ -5627,23 +6065,7 @@ function ArtifactsPanel({
           </button>
         </header>
       )}
-      <div className={`artifacts-panel-body${showList ? "" : " no-list"}`}>
-        {showList && (
-          <ul className="artifacts-list">
-            {artifacts.map((artifact) => (
-              <li key={artifact.name}>
-                <button
-                  type="button"
-                  className={selected?.name === artifact.name ? "active" : ""}
-                  onClick={() => setSelectedName(artifact.name)}
-                >
-                  <FileText size={14} />
-                  <span>{artifact.name}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="artifacts-panel-body no-list">
         <div className="artifacts-preview">
           {selected && (
             <div className="artifacts-preview-bar">
@@ -5671,62 +6093,112 @@ function ArtifactsPanel({
                   </button>
                 </div>
               )}
-              {canDiff && (
-                <button
-                  type="button"
-                  className={showDiff ? "active" : ""}
-                  onClick={() => setShowDiff((value) => !value)}
-                  title={t("chat.showVersionDiff")}
-                >
-                  Diff
-                  {showDiff && diffCounts && (
-                    <span className="diff-counts">
-                      <span className="add">+{diffCounts.added}</span>{" "}
-                      <span className="del">−{diffCounts.removed}</span>
-                    </span>
+              {actionsAvailable && <details
+                ref={artifactActionsRef}
+                className="artifact-actions-menu"
+                onToggle={(event) => {
+                  const details = event.currentTarget;
+                  if (details.open) {
+                    window.requestAnimationFrame(() =>
+                      details.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus(),
+                    );
+                  }
+                }}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) closeArtifactActions(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    closeArtifactActions();
+                    return;
+                  }
+                  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+                  if (items.length === 0) return;
+                  const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                  const next = event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? items.length - 1
+                      : (current + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length;
+                  event.preventDefault();
+                  items[next]?.focus();
+                }}
+              >
+                <summary aria-label={t("chat.actions")} title={t("chat.actions")}>
+                  <MoreHorizontal size={16} />
+                </summary>
+                <div className="artifact-actions-popover" role="menu">
+                  {canDiff && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={showDiff ? "active" : ""}
+                      onClick={() => {
+                        setShowDiff((value) => !value);
+                        closeArtifactActions();
+                      }}
+                    >
+                      Diff
+                      {showDiff && diffCounts && (
+                        <span className="diff-counts">
+                          <span className="add">+{diffCounts.added}</span>{" "}
+                          <span className="del">−{diffCounts.removed}</span>
+                        </span>
+                      )}
+                    </button>
                   )}
-                </button>
-              )}
-              {textKind && !showDiff && (
-                <button
-                  type="button"
-                  className={wrap ? "active" : ""}
-                  onClick={() => setWrap((value) => !value)}
-                  title={t("chat.wordWrap")}
-                >
-                  Word wrap
-                </button>
-              )}
-              {editableKind && !editing && slot === versions && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditText(preview && "text" in preview ? preview.text : "");
-                    setEditing(true);
-                  }}
-                >
-                  <Pencil size={14} />
-                  <span>{t("common.edit")}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() =>
-                  void triggerArtifactDownload(selected, slot < versions ? slot : undefined)
-                }
-              >
-                <Download size={14} />
-                <span>{t("chat.action.download")}</span>
-              </button>
-              <button
-                type="button"
-                className="artifact-folder"
-                onClick={() => void openArtifactFolder(selected)}
-                aria-label={t("chat.openFolder")}
-                title={t("chat.openFolder")}
-              >
-                <FolderOpen size={14} />
-              </button>
+                  {textKind && !showDiff && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={wrap ? "active" : ""}
+                      onClick={() => {
+                        setWrap((value) => !value);
+                        closeArtifactActions();
+                      }}
+                    >
+                      {t("chat.wordWrap")}
+                    </button>
+                  )}
+                  {editableKind && !editing && slot === versions && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setEditText(preview && "text" in preview ? preview.text : "");
+                        setEditing(true);
+                        closeArtifactActions();
+                      }}
+                    >
+                      <Pencil size={14} />
+                      <span>{t("common.edit")}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      void triggerArtifactDownload(selected, slot < versions ? slot : undefined);
+                      closeArtifactActions();
+                    }}
+                  >
+                    <Download size={14} />
+                    <span>{t("chat.action.download")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      void openArtifactFolder(selected);
+                      closeArtifactActions();
+                    }}
+                  >
+                    <FolderOpen size={14} />
+                    <span>{t("chat.openFolder")}</span>
+                  </button>
+                </div>
+              </details>}
             </div>
           )}
           <div className="artifacts-preview-body">
@@ -5757,7 +6229,12 @@ function ArtifactsPanel({
             ) : showDiff && diffData ? (
               <DiffView oldText={diffData.oldText} newText={diffData.newText} />
             ) : (
-              <ArtifactPreviewBody preview={preview} wrap={wrap} />
+              <ArtifactPreviewBody
+                preview={preview}
+                wrap={wrap}
+                onRetry={() => setReloadKey((key) => key + 1)}
+                onClose={onClose}
+              />
             )}
           </div>
         </div>
@@ -5769,9 +6246,13 @@ function ArtifactsPanel({
 function ArtifactPreviewBody({
   preview,
   wrap = false,
+  onRetry,
+  onClose,
 }: {
   preview: ArtifactPreview | null;
   wrap?: boolean;
+  onRetry?: () => void;
+  onClose?: () => void;
 }) {
   const { t } = useTranslation();
   if (!preview) return <p className="artifacts-preview-note">{t("chat.selectAFile")}</p>;
@@ -5824,7 +6305,29 @@ function ArtifactPreviewBody({
     case "csv":
       return <ArtifactCsvTable text={preview.text} />;
     case "error":
-      return <p className="artifacts-preview-note">{t("chat.previewUnavailable")}</p>;
+      return (
+        <InspectorFailureState
+          message={t("chat.previewUnavailable")}
+          onRetry={onRetry}
+          onClose={onClose}
+        />
+      );
+    case "missing":
+      return (
+        <InspectorFailureState
+          message={t("chat.inspector.missing")}
+          onRetry={onRetry}
+          onClose={onClose}
+        />
+      );
+    case "denied":
+      return (
+        <InspectorFailureState
+          message={t("chat.inspector.denied")}
+          onRetry={onRetry}
+          onClose={onClose}
+        />
+      );
     default:
       return (
         <p className="artifacts-preview-note">
@@ -5832,6 +6335,30 @@ function ArtifactPreviewBody({
         </p>
       );
   }
+}
+
+function InspectorFailureState({
+  message,
+  onRetry,
+  onClose,
+}: {
+  message: string;
+  onRetry?: () => void;
+  onClose?: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="workbench-empty">
+      <AlertCircle size={24} />
+      <p>{message}</p>
+      {(onRetry || onClose) && (
+        <span className="workbench-empty-actions">
+          {onRetry && <button type="button" onClick={onRetry}>{t("chat.inspector.retry")}</button>}
+          {onClose && <button type="button" onClick={onClose}>{t("common.close")}</button>}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function ArtifactCsvTable({ text }: { text: string }) {
@@ -8152,7 +8679,6 @@ function ComputerDetailPanel({
   activeSurface,
   controlBusy,
   controlError,
-  onClose,
   onPause,
   onResume,
   onSelectSurface,
@@ -8163,7 +8689,6 @@ function ComputerDetailPanel({
   activeSurface: ComputerSurfaceKind;
   controlBusy: boolean;
   controlError: string | null;
-  onClose: () => void;
   onPause: () => void;
   onResume: () => void;
   onSelectSurface: (surface: ComputerSurfaceKind) => void;
@@ -8174,33 +8699,16 @@ function ComputerDetailPanel({
   const { t } = useTranslation();
   const currentSurface = session.surfaces.find((surface) => surface.id === activeSurface);
   const paused = session.status === "paused";
-  // Fullscreen toggle (design): expand the panel to near-full-window for wide
-  // diffs/browser views, then shrink back. Local UI state — no persistence needed.
-  const [fullscreen, setFullscreen] = useState(false);
 
   return (
-    <aside
-      className={`computer-detail-panel${fullscreen ? " fullscreen" : ""}`}
+    <div
+      className="computer-detail-panel"
       aria-label={t("chat.localComputerDetail")}
     >
       <header>
         <div>
           <strong>{session.title}</strong>
           <small>{session.subtitle}</small>
-        </div>
-        <div className="computer-panel-header-actions">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={fullscreen ? t("chat.collapsePanel") : t("chat.expandPanel")}
-            title={fullscreen ? t("chat.collapse") : t("chat.action.expand")}
-            onClick={() => setFullscreen((value) => !value)}
-          >
-            {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          </button>
-          <button className="icon-button" type="button" aria-label="Close computer" onClick={onClose}>
-            <X size={18} />
-          </button>
         </div>
       </header>
 
@@ -8312,7 +8820,7 @@ function ComputerDetailPanel({
           </button>
         </div>
       </footer>
-    </aside>
+    </div>
   );
 }
 

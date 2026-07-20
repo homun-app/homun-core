@@ -114,7 +114,7 @@ assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.99);", "W
 assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.97);", "Computer dock must not force a light background");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 96%, transparent);", "Workbench chrome must inherit the active surface theme");
 assertContains("src/styles.css", "background: linear-gradient(180deg, var(--surface-muted), var(--surface));", "Workbench body must inherit the active surface theme");
-assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 82%, transparent);", "Embedded artifact list must inherit the active surface theme");
+assertNotContains("src/components/ChatView.tsx", "<ul className=\"artifacts-list\">", "artifact resources must not render a permanent inner sidebar");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--red-soft) 42%, var(--surface));", "Settings danger zone must inherit the active surface theme");
 assertNotContains("src/styles.css", "background: #fffafa;", "Settings danger zone must not force a light background");
 assertNotContains("src/styles.css", "border: 1px solid #f1c4c6;", "Settings danger zone must not force a light border");
@@ -301,15 +301,10 @@ assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity 
 assertNotContains("src/components/ChatComputerPanel.tsx", "cc-dock-activity", "computer island header must show only Computer and LIVE, never prompt/activity text");
 assertNotContains("src/styles.css", ".cc-dock-activity", "computer island must not reserve header space for prompt/activity text");
 assertNotContains("src/components/ChatComputerPanel.tsx", "const ownedByThisThread = !hasLiveActivity", "idle global computer availability must not count as thread ownership");
-assertMatches(
+assertNotContains(
   "src/components/ChatView.tsx",
-  /const showComputerActivity =\s*activeApprovels\.length > 0 \|\|\s*planStepRunning \|\|\s*smokeTestRunning \|\|\s*detailsOpen;/m,
-  "inline computer activity must be driven only by active approvals/runs or explicit details",
-);
-assertNotMatches(
-  "src/components/ChatView.tsx",
-  /const showComputerActivity =[\s\S]*visibleComputerSession\.(timeline|artifacts)\.length > 0[\s\S]*?;/m,
-  "completed computer timeline/artifacts must not reopen the inline Computer card",
+  "const showComputerActivity =",
+  "computer activity must use the shared inspector instead of a second inline panel",
 );
 assertContains("src/components/ChatView.tsx", "approval-scope-options", "approval UI must make temporary vs fixed scope explicit");
 assertContains("src/lib/providerPresets.ts", "https://api.z.ai/api/paas/v4", "Z.ai standard preset must keep the standard GLM endpoint");
@@ -471,7 +466,7 @@ assertContains("src/components/WorkspaceIsland.tsx", "wi-progress", "workspace i
 assertContains("src/components/WorkspaceIsland.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
 assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
 assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
-assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "chat header (island or kebab menu) must wire onOpenWorkbench(tab) to open the docked Workbench");
+assertContains("src/components/ChatView.tsx", "onOpenInspector={openUtilityTab}", "chat header and island must route views through the inspector reducer");
 // The redundant "Plan N/M" row was removed — Progress IS the plan (one section, not two).
 // Sources (artifacts + uploaded files) are fused into the island; each opens the Workbench.
 assertContains("src/components/WorkspaceIsland.tsx", "wi-sources", "workspace island must render the fused Sources section");
@@ -512,19 +507,79 @@ assertContains(
   "<ChatHeaderMenu",
   "chat header must expose a kebab menu for artifacts/files/screenshots/background activity"
 );
-assertContains("src/components/ChatView.tsx", "detailsOpen || workbenchOpen ? \" panel-open\" : \"\"", "right-side panels must reserve layout space instead of covering the chat");
-assertContains("src/styles.css", "top: calc(var(--window-chrome-height, 44px) + 8px);", "workbench island must sit below native chrome with breathing room");
-assertContains("src/styles.css", "right: 12px;", "workbench island must keep a visible margin from the window edge");
-assertContains("src/styles.css", "border-radius: 16px;", "workbench island must share the rounded shell geometry");
-assertContains("src/styles.css", "box-shadow: 0 18px 44px", "workbench island must read as a floating inspector, not a flat column");
+assertContains("src/components/InspectorTabStrip.tsx", "role=\"tablist\"", "inspector must expose an ARIA tab list");
+assertContains("src/components/InspectorTabStrip.tsx", "startPointerDrag", "inspector tabs must support pointer-based reorder");
+assertContains("src/components/InspectorTabStrip.tsx", "onPointerUp={finishPointerDrag}", "inspector tabs must commit pointer reorder on release");
+assertContains("src/components/InspectorTabStrip.tsx", "const currentX = event.clientX;", "inspector pointer reorder must use the release coordinate even when the platform emits no intermediate move");
+assertContains("src/components/InspectorTabStrip.tsx", "onActivate(drag.tabId);", "captured pointer clicks must still activate the selected inspector tab");
+assertContains("src/components/InspectorTabStrip.tsx", "draggingTabId", "inspector drag must expose visible transient state");
+assertContains("src/components/InspectorTabStrip.tsx", 'aria-grabbed={draggingTabId === tab.id}', "inspector drag state must be exposed accessibly");
+assertContains("src/components/InspectorTabStrip.tsx", 'drop-before', "inspector drag must mark the insertion side");
+assertContains("src/components/InspectorTabStrip.tsx", 'window.addEventListener("blur", clearPointerDrag)', "inspector drag must clean up if the window loses focus");
+assertContains("src/components/InspectorTabStrip.tsx", "scrollIntoView", "the active inspector tab must remain visible");
+assertContains("src/components/InspectorTabStrip.tsx", "onWheel={onTabStripWheel}", "vertical wheel input over the tab strip must navigate horizontal overflow");
+assertContains("src/styles.css", ".inspector-workspace-header {\n  position: relative;\n  z-index: 201;", "inspector tabs must sit above the native window drag strip");
+assertContains("src/styles.css", ".inspector-tab {\n  position: relative;", "inspector tabs must provide stable positioning for drag indicators");
+assertContains("src/styles.css", "flex: 0 0 auto;\n  width: clamp(112px, 14vw, 180px);", "inspector tabs must not shrink through their children");
+assertContains("src/styles.css", ".inspector-tab-title {\n  flex: 1 1 auto;\n  min-width: 0;", "inspector tab titles must ellipsize inside their own tab");
+assertContains("src/styles.css", ".inspector-tab.dragging {", "the dragged inspector tab must have visible feedback");
+assertContains("src/styles.css", ".inspector-tab.drop-before::before,", "inspector drag must draw an insertion marker");
+assertContains("src/styles.css", ".dragging-inspector-tab,", "inspector drag must keep a grabbing cursor across the window");
+assertContains("src/components/InspectorWorkspace.tsx", "role=\"separator\"", "inspector must expose a keyboard resize separator");
+assertContains("src/components/InspectorWorkspace.tsx", "onPointerDown", "inspector resizing must use pointer events");
+assertContains("src/components/InspectorWorkspace.tsx", "setPointerCapture", "inspector resizing must retain the pointer over embedded previews");
+assertContains("src/components/InspectorWorkspace.tsx", "releasePointerCapture", "inspector resizing must release pointer capture when it finishes");
+assertContains("src/components/InspectorWorkspace.tsx", 'window.addEventListener("blur"', "inspector resizing must clean up if the window loses focus");
+assertContains("src/components/InspectorWorkspace.tsx", "onToggleFocus", "inspector must expose focus mode without destroying tabs");
+assertContains("src/components/InspectorWorkspace.tsx", "hidden={tab.id !== state.activeTabId}", "inactive tab panels must remain mounted and hidden");
+assertContains("src/components/InspectorWorkspace.tsx", "scrollPositionsRef", "inspector tabs must retain independent reading positions");
+assertContains("src/components/InspectorWorkspace.tsx", "panel.scrollTop = scrollPositionsRef.current.get(state.activeTabId) ?? 0", "the active inspector tab must restore its reading position");
+assertContains("src/components/InspectorWorkspace.tsx", "tab.id === state.activeTabId", "only the visible inspector tab may update its saved reading position");
+assertContains("src/styles.css", ".inspector-tab-panel {\n  min-width: 0;\n  min-height: 0;\n  height: 100%;\n  overflow-y: auto;", "inspector tab panels must own document scrolling");
+assertContains("src/styles.css", ".inspector-tab-panel .artifacts-preview-body {\n  overflow: visible;", "embedded artifact documents must use the tab scroll owner");
+assertContains("src/styles.css", ".inspector-tab-panel .workbench-files {\n  overflow: visible;", "inspector lists must use the tab scroll owner");
+assertContains("src/styles.css", "grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));", "chat and inspector must be real sibling columns");
+assertContains("src/styles.css", ".active-task-layout.inspector-open > .chat-status-stack", "the working island must not create a third column");
+assertNotContains("src/styles.css", ".workbench {\n  position: absolute", "legacy workbench must not float above the chat");
+assertContains("src/components/ChatView.tsx", "useReducer(inspectorWorkspaceReducer", "chat must use one inspector reducer");
+assertContains("src/components/ChatView.tsx", "loadInspectorState(thread.threadId", "inspector state must be scoped by thread");
+assertContains("src/components/ChatView.tsx", "saveInspectorState(thread.threadId", "inspector state changes must persist by thread");
+assertContains("src/components/ChatView.tsx", "Promise.all(restored.tabs.map", "restored resource tabs must be revalidated as one batch");
+assertContains("src/components/ChatView.tsx", "coreBridge.fsFile(tab.payload.path, thread.threadId)", "restored file tabs must recheck current authorization");
+assertContains("src/components/ChatView.tsx", "inspectorResourcesReady", "restored resources must stay hidden until validation completes");
+assertContains("src/components/ChatView.tsx", "reconcileMemoryArtifacts", "artifact polling must preserve an unchanged catalog");
+assertNotContains("src/components/ChatView.tsx", "memoryArtifactsRevision", "artifact validation must not use an unconditional revision counter");
+assertContains("src/components/ChatView.tsx", "selectedResourceRevision", "artifact preview reloads must follow a semantic resource revision");
+assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");
+assertNotContains("src/components/ChatView.tsx", "setWorkbenchTab", "legacy active-tab state must be removed");
+assertContains("src/components/ChatView.tsx", "`file:${normalizedPath}`", "file tabs must dedupe by canonical path");
+assertContains("src/components/ChatView.tsx", "`artifact:${artifact.thread}:${artifact.name}`", "artifact tabs must dedupe by provenance and name");
+assertNotContains("src/styles.css", ".artifacts-panel.embedded .artifacts-panel-body {\n  grid-template-columns:", "artifact preview must not keep a permanent inner sidebar");
+assertNotContains("src/components/ChatView.tsx", "detailsOpen && (", "computer detail must use the shared inspector");
+assertNotContains("src/styles.css", ".computer-detail-panel {\n  position: absolute", "computer detail must not float separately");
+assertContains("src/styles.css", "@container chat-workspace (max-width: 960px)", "narrow behavior must follow available chat width");
+assertContains("src/components/ChatView.tsx", "descriptor.kind === \"sources\"", "sources must have an inspector adapter");
+assertContains("src/components/ChatView.tsx", "onOpenArtifact(sourceArtifact)", "artifact sources must open their resource tab");
+assertContains("src/components/ChatView.tsx", "descriptor.kind === \"subagents\"", "subagents must have an inspector adapter");
+assertContains("src/components/ChatView.tsx", "subagent.updated_at", "subagent views must expose their latest timestamp");
+assertContains("src/components/InspectorTabStrip.tsx", 't("chat.inspector.closeTab"', "inspector tabs must have a specific localized close label");
+assertContains("src/components/InspectorWorkspace.tsx", 't("chat.inspector.resize"', "inspector separator must have a localized resize label");
+assertContains("src/components/InspectorWorkspace.tsx", "aria-valuenow", "inspector separator must expose its current width to assistive technology");
+assertContains("src/components/InspectorWorkspace.tsx", "aria-valuemin={minPercent}", "inspector separator must expose its reachable minimum");
+assertContains("src/components/InspectorWorkspace.tsx", "aria-valuemax={maxPercent}", "inspector separator must expose its reachable maximum");
+assertContains("src/components/ChatView.tsx", "fileLoadGenerationRef", "file revalidation must ignore stale authorization responses");
+assertContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-surface", "focused inspector must hide the current composer surface");
+assertNotContains("src/styles.css", ".active-task-layout.inspector-focused > .composer-shell", "focused inspector must not target the removed composer shell class");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
 assertContains("src/components/ChatView.tsx", "<ArtifactsPanel", "artifact review must use the rich preview/diff surface in the workbench");
 assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-panel-body", "artifact review workbench must style the embedded artifacts panel directly");
-assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-preview", "artifact review preview must be a bounded card in the workbench");
-assertContains("src/styles.css", ".workbench-artifacts-list .artifact-row-wrap", "artifact review must frame artifacts as cards inside the workbench");
-assertContains("src/styles.css", ".workbench-artifacts-list .artifact-preview-doc", "artifact preview content must be padded and bounded inside the workbench");
+assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-panel-body {\n  min-height: 0;\n  padding: 0;", "embedded artifacts must not add an outer content frame");
+assertContains("src/styles.css", ".artifacts-panel.embedded .artifacts-preview {\n  min-width: 0;\n  overflow: hidden;\n  border: 0;", "artifact preview must use the inspector as its only frame");
+assertContains("src/styles.css", ".artifacts-panel.embedded .artifact-preview-doc {\n  padding: 0;\n  border: 0;", "artifact documents must not render as nested cards");
+assertContains("src/styles.css", ".workbench-artifacts-list .artifact-row-wrap {\n  overflow: hidden;\n  border: 0;", "artifact rows must avoid nested card borders");
+assertContains("src/components/ChatView.tsx", "fileStatus === \"missing\"", "missing files must expose a dedicated recoverable state");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
 assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}", "assistant markdown must stay progressive while the message streams");
 assertContains("src/components/ChatView.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
@@ -544,7 +599,7 @@ assertContains("src/components/ChatView.tsx", "dedupeGoalDrafts", "goals manager
 assertContains("src/components/ChatView.tsx", "decideMemory(g.reference, \"delete\")", "goals manager must allow deleting saved project goals");
 assertContains("src/components/ChatView.tsx", "resizeFitTimer", "memory graph must refit after the workbench/canvas changes size");
 assertContains("src/components/ChatView.tsx", "layoutSignal", "memory graph must receive an explicit workbench layout signal");
-assertContains("src/components/ChatView.tsx", "layoutSignal={`${expanded ? \"expanded\" : \"docked\"}:${width}`}", "workbench must refit Memory when fullscreen or width changes");
+assertContains("src/components/ChatView.tsx", "layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}", "inspector must refit Memory when the active tab or width changes");
 assertContains("src/components/ChatView.tsx", "requestAnimationFrame", "memory graph resize refit must wait for the resized canvas to paint");
 assertContains("src/components/ChatView.tsx", "d3ReheatSimulation", "memory graph resize refit must restart layout before fitting");
 assertContains("src/styles.css", ".memory-graph-canvas canvas", "memory graph must size the ForceGraph canvas, not only an svg");

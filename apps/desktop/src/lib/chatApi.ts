@@ -881,6 +881,9 @@ export async function openTurnStream(turnId: string, since: number = 0): Promise
 export interface SubagentInfo {
   name: string;
   status: string;
+  summary?: string;
+  created_at?: number;
+  updated_at?: number;
 }
 export interface ThreadActivityProjection {
   plan_markdown: string | null;

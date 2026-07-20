@@ -2594,6 +2594,7 @@ body.resizing-drawer {
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
+  container: chat-workspace / inline-size;
 }
 
 .workspace:not(:has(.active-task-layout)) {
@@ -2651,11 +2652,46 @@ body.resizing-drawer {
   display: none;
 }
 
-/* "Fake-docked" panel: the panel itself is a flush-right full-height column (see
-   .computer-detail-panel), and here the conversation reflows LEFT by the panel's
-   width so nothing is covered — the docked effect without a layout-grid rebuild. */
-.active-task-layout.panel-open {
-  padding-right: calc(var(--detail-panel-w) + 20px);
+/* Compatibility with the legacy Workbench while ChatView migrates to the inspector
+   reducer: both class names use the same real sibling-column geometry. */
+.active-task-layout.panel-open,
+.active-task-layout.inspector-open {
+  --inspector-width: calc((100% - 1px) * var(--inspector-ratio, 0.5));
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));
+  grid-template-areas:
+    "topbar inspector"
+    "thread inspector"
+    "composer inspector";
+  padding-right: 0;
+}
+.active-task-layout.panel-open > .task-topbar,
+.active-task-layout.inspector-open > .task-topbar {
+  grid-area: topbar;
+}
+.active-task-layout.panel-open > .thread-scroll,
+.active-task-layout.inspector-open > .thread-scroll {
+  grid-area: thread;
+}
+.active-task-layout.panel-open > .composer-surface,
+.active-task-layout.inspector-open > .composer-surface {
+  grid-area: composer;
+}
+.active-task-layout.panel-open > .workbench,
+.active-task-layout.inspector-open > .inspector-workspace {
+  grid-area: inspector;
+}
+.active-task-layout.inspector-open > .chat-status-stack {
+  display: none;
+}
+.active-task-layout.inspector-focused {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "inspector" "inspector" "inspector";
+  padding: 0;
+}
+.active-task-layout.inspector-focused > .task-topbar,
+.active-task-layout.inspector-focused > .thread-scroll,
+.active-task-layout.inspector-focused > .composer-surface {
+  display: none;
 }
 
 /* New-chat layout (mock): the prompt lives in the CENTER with the hero, not docked
@@ -5454,32 +5490,18 @@ body.resizing-drawer {
 }
 
 .computer-detail-panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 12;
-  width: var(--detail-panel-w, min(520px, calc(100% - 48px)));
-  /* Docked look: flush-right full-height column, flat (border-left only, no shadow
-     /radius) — feels part of the frame, not a popup. */
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   border: none;
-  border-left: 1px solid var(--line);
   border-radius: 0;
   background: var(--surface);
   box-shadow: none;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
-  animation: panel-in 170ms ease both;
-}
-
-/* Fullscreen: expand the floating panel to near-full-window (design toggle). */
-.computer-detail-panel.fullscreen {
-  top: 12px;
-  right: 12px;
-  bottom: 12px;
-  left: 12px;
-  width: auto;
 }
 
 .computer-panel-header-actions {
@@ -5998,23 +6020,22 @@ body.resizing-drawer {
 
 /* ---- Workbench: docked right panel with tabs (Claude-Code style) ---------- */
 .workbench {
-  position: absolute;
-  top: calc(var(--window-chrome-height, 44px) + 8px);
-  right: 12px;
-  bottom: 12px;
-  width: clamp(380px, 34%, 540px);
+  position: relative;
+  width: 100% !important;
+  min-width: 0;
+  min-height: 0;
   z-index: 40;
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  box-shadow: var(--shadow-menu);
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
   overflow: hidden;
 }
 .workbench.expanded {
-  width: auto !important;
-  left: 12px;
+  width: 100% !important;
 }
 /* Drag handle on the left edge to resize the panel width. */
 .workbench-resize {
@@ -6071,6 +6092,264 @@ body.resizing-drawer {
   display: flex;
   overflow: hidden;
   background: linear-gradient(180deg, var(--surface-muted), var(--surface));
+}
+
+/* ---- Universal inspector workspace --------------------------------------- */
+.inspector-workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 58px minmax(0, 1fr);
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.inspector-resize-handle {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 10px;
+  cursor: col-resize;
+  outline: none;
+}
+.inspector-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+}
+.inspector-resize-handle:hover::after,
+.inspector-resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
+.inspector-workspace-header {
+  position: relative;
+  z-index: 201;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  -webkit-app-region: no-drag;
+}
+.inspector-workspace-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+}
+.inspector-workspace-actions > button,
+.inspector-tab-action {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+}
+.inspector-workspace-actions > button:hover,
+.inspector-tab-action:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.inspector-mobile-back {
+  display: none !important;
+}
+
+.inspector-tab-strip-shell {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+}
+.inspector-tab-strip {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.inspector-tab-strip::-webkit-scrollbar {
+  display: none;
+}
+.inspector-tab {
+  position: relative;
+  min-width: 0;
+  max-width: 220px;
+  flex: 0 0 auto;
+  width: clamp(112px, 14vw, 180px);
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.inspector-tab.active {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.inspector-tab.dragging {
+  opacity: 0.48;
+  cursor: grabbing;
+}
+.inspector-tab.drop-before::before,
+.inspector-tab.drop-after::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--brand);
+  pointer-events: none;
+}
+.inspector-tab.drop-before::before {
+  left: -3px;
+}
+.inspector-tab.drop-after::after {
+  right: -3px;
+}
+.inspector-tab-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  color: inherit;
+  background: transparent;
+}
+.inspector-tab-title > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-tab-close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  margin-right: 4px;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+}
+.inspector-tab-close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.dragging-inspector-tab,
+.dragging-inspector-tab * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+.inspector-tab-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+.inspector-tab-menu {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  max-width: min(320px, 70vw);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+}
+.inspector-tab-menu > button {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-tab-menu > button:hover,
+.inspector-tab-menu > button.active {
+  background: var(--surface-hover);
+}
+.inspector-workspace-body {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.inspector-tab-panel {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+.inspector-tab-panel:has(.memory-graph),
+.inspector-tab-panel:has(> .computer-detail-panel) {
+  overflow: hidden;
+}
+.inspector-tab-panel[hidden] {
+  display: none;
+}
+
+.resizing-inspector,
+.resizing-inspector * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  transition: none !important;
+}
+
+.active-task-layout.inspector-focused .inspector-resize-handle {
+  display: none;
+}
+.active-task-layout.inspector-focused .inspector-mobile-back {
+  display: inline-flex !important;
+}
+
+@container chat-workspace (max-width: 960px) {
+  .active-task-layout.inspector-open {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "inspector"
+      "inspector"
+      "inspector";
+    padding: 0;
+  }
+  .active-task-layout.inspector-open > .task-topbar,
+  .active-task-layout.inspector-open > .thread-scroll,
+  .active-task-layout.inspector-open > .composer-surface {
+    display: none;
+  }
+  .active-task-layout.inspector-open .inspector-resize-handle {
+    display: none;
+  }
+  .active-task-layout.inspector-open .inspector-mobile-back {
+    display: inline-flex !important;
+  }
 }
 /* ChatView's Workbench placeholders (memory/artifacts/activity/plan/files). A cohesive
    family under one class; aligned to the shared .state-view look (below) so they match the
@@ -6441,35 +6720,25 @@ body.resizing-drawer {
   position: static;
   inset: auto;
   width: 100%;
-  height: 100%;
+  height: auto;
+  min-height: 100%;
   z-index: auto;
   border-left: none;
   box-shadow: none;
   background: transparent;
 }
 .artifacts-panel.embedded .artifacts-panel-body {
-  grid-template-columns: minmax(0, 1fr) minmax(148px, 184px);
-  gap: 12px;
   min-height: 0;
-  padding: 14px;
+  padding: 0;
   box-sizing: border-box;
-  overflow: hidden;
-}
-.artifacts-panel.embedded .artifacts-list {
-  order: 2;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  box-shadow: none;
+  overflow: visible;
 }
 .artifacts-panel.embedded .artifacts-preview {
-  order: 1;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
 }
 .artifacts-panel.embedded .artifacts-preview-bar {
@@ -6478,7 +6747,7 @@ body.resizing-drawer {
   padding: 8px 10px 8px 12px;
 }
 .artifacts-panel.embedded .artifacts-preview-body {
-  padding: 14px;
+  padding: 10px 12px 16px;
   overflow: auto;
   overflow-wrap: anywhere;
 }
@@ -6487,10 +6756,18 @@ body.resizing-drawer {
   line-height: 1.5;
 }
 .artifacts-panel.embedded .artifact-preview-doc {
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.inspector-tab-panel .artifacts-preview-body {
+  overflow: visible;
+  flex: 0 0 auto;
+}
+.inspector-tab-panel .artifacts-panel-body,
+.inspector-tab-panel .artifacts-preview {
+  min-height: 100%;
 }
 .artifacts-panel.embedded .code-view,
 .artifacts-panel.embedded .diff-view,
@@ -6501,11 +6778,32 @@ body.resizing-drawer {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px;
+  padding: 10px 12px;
   /* Flex column so an empty-state (.workbench-empty, flex:1) centers vertically —
      matching the Artefatti/Piano tabs that render the empty directly in the body. */
   display: flex;
   flex-direction: column;
+}
+.inspector-tab-panel .workbench-files {
+  overflow: visible;
+  flex: 0 0 auto;
+  min-height: 100%;
+}
+.workbench-empty-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.inspector-subagent-copy {
+  display: grid;
+  gap: 2px;
+  white-space: normal;
+}
+.inspector-subagent-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .workbench-section-label {
   font-size: 11px;
@@ -6614,6 +6912,24 @@ body.resizing-drawer {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+.inspector-tab-panel .inspector-view-body {
+  min-height: 100%;
+  height: auto;
+  overflow: visible;
+}
+.inspector-tab-panel .workbench-fileview {
+  min-height: 100%;
+  height: auto;
+}
+.inspector-tab-panel .workbench-fileview-body {
+  overflow: visible;
+  flex: 0 0 auto;
+}
+.inspector-tab-panel:has(.memory-graph) .inspector-view-body {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 .workbench-file-list .wf-muted {
   color: var(--muted);
@@ -6741,6 +7057,50 @@ body.resizing-drawer {
   background: var(--surface);
   color: var(--text);
   font-size: 12px;
+}
+.artifact-actions-menu {
+  position: relative;
+  flex: none;
+}
+.artifact-actions-menu > summary {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+}
+.artifact-actions-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.artifact-actions-menu > summary:hover,
+.artifact-actions-menu[open] > summary {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.artifact-actions-popover {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 156px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-elevated, var(--surface));
+  box-shadow: var(--shadow-popover, 0 10px 30px rgb(0 0 0 / 0.18));
+}
+.artifacts-preview-bar .artifact-actions-popover button {
+  justify-content: flex-start;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+.artifacts-preview-bar .artifact-actions-popover button:hover {
+  background: var(--surface-hover);
 }
 .artifact-version-switch {
   display: inline-flex;
@@ -7759,13 +8119,14 @@ body.resizing-drawer {
   max-width: none;
   padding: 0;
   width: 100%;
-  gap: 12px;
+  gap: 0;
 }
 .workbench-artifacts-list .artifact-row-wrap {
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
 }
 .workbench-artifacts-list .artifact-row {
@@ -7785,10 +8146,10 @@ body.resizing-drawer {
 .workbench-artifacts-list .artifact-inline-preview {
   margin: 0;
   max-height: none;
-  padding: 12px;
+  padding: 10px 12px 14px;
   overflow: auto;
   border-top: 1px solid var(--line);
-  background: var(--surface-muted);
+  background: transparent;
 }
 .workbench-artifacts-list .artifact-inline-toolbar {
   margin-bottom: 10px;
@@ -7796,10 +8157,10 @@ body.resizing-drawer {
 }
 .workbench-artifacts-list .artifact-preview-doc {
   min-height: 180px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--surface);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .workbench-artifacts-list .artifact-preview-doc > * {
   max-width: 100%;
@@ -10357,14 +10718,6 @@ body.resizing-drawer {
     height: 58px;
   }
 
-  .computer-detail-panel {
-    top: 86px;
-    left: 12px;
-    right: 12px;
-    bottom: 104px;
-    width: auto;
-  }
-
   .computer-panel-footer {
     align-items: flex-start;
     flex-direction: column;
@@ -10430,10 +10783,6 @@ body.resizing-drawer {
     min-height: 54px;
   }
 
-  .computer-detail-panel {
-    top: 58px;
-    bottom: 94px;
-  }
 }
 
 /* ============================================================================

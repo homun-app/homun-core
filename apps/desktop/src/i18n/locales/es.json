@@ -541,6 +541,26 @@
     "activityProgress": "Progreso de la actividad",
     "resizePanel": "Redimensionar el panel",
     "closePanel": "Cerrar el panel",
+    "inspector": {
+      "addTab": "Añadir pestaña",
+      "closeTab": "Cerrar pestaña: {{title}}",
+      "closeWorkspace": "Cerrar inspector",
+      "empty": "Abre un archivo o elige una vista para empezar.",
+      "focus": "Ampliar inspector",
+      "exitFocus": "Volver a la vista dividida",
+      "hiddenTabs": "Pestañas abiertas",
+      "missing": "Este elemento ya no está disponible.",
+      "denied": "No tienes permiso para abrir este elemento.",
+      "unsupported": "La vista previa no está disponible para este tipo de archivo.",
+      "retry": "Volver a intentar",
+      "resize": "Redimensionar el inspector",
+      "returnToChat": "Volver al chat",
+      "views": {
+        "review": "Revisión", "files": "Archivos", "activity": "Actividad", "plan": "Plan",
+        "execution": "Ejecución", "memory": "Memoria", "goals": "Objetivos", "sources": "Fuentes",
+        "subagents": "Subagentes", "computer": "Ordenador"
+      }
+    },
     "backToFiles": "Volver a los archivos",
     "parentFolder": "Carpeta superior",
     "cancelTask": "Cancelar tarea",

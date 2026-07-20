@@ -541,6 +541,26 @@
     "activityProgress": "Avanzamento attività",
     "resizePanel": "Ridimensiona pannello",
     "closePanel": "Chiudi pannello",
+    "inspector": {
+      "addTab": "Aggiungi scheda",
+      "closeTab": "Chiudi scheda: {{title}}",
+      "closeWorkspace": "Chiudi colonna",
+      "empty": "Apri un file o scegli una vista per iniziare.",
+      "focus": "Espandi la colonna",
+      "exitFocus": "Torna alla vista divisa",
+      "hiddenTabs": "Schede aperte",
+      "missing": "Questo elemento non è più disponibile.",
+      "denied": "Non hai l'autorizzazione per aprire questo elemento.",
+      "unsupported": "L'anteprima non è disponibile per questo tipo di file.",
+      "retry": "Riprova",
+      "resize": "Ridimensiona la colonna",
+      "returnToChat": "Torna alla chat",
+      "views": {
+        "review": "Revisione", "files": "File", "activity": "Attività", "plan": "Piano",
+        "execution": "Esecuzione", "memory": "Memoria", "goals": "Obiettivi", "sources": "Fonti",
+        "subagents": "Subagenti", "computer": "Computer"
+      }
+    },
     "backToFiles": "Torna ai file",
     "parentFolder": "Cartella superiore",
     "cancelTask": "Annulla task",

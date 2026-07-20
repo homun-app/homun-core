@@ -361,6 +361,9 @@ pub struct ThreadActivityProjection {
 pub struct SubagentInfo {
     pub name: String,
     pub status: String,
+    pub summary: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

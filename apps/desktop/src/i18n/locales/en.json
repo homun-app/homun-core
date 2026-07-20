@@ -541,6 +541,26 @@
     "activityProgress": "Activity progress",
     "resizePanel": "Resize panel",
     "closePanel": "Close panel",
+    "inspector": {
+      "addTab": "Add tab",
+      "closeTab": "Close tab: {{title}}",
+      "closeWorkspace": "Close inspector",
+      "empty": "Open a file or choose a view to begin.",
+      "focus": "Focus inspector",
+      "exitFocus": "Return to split view",
+      "hiddenTabs": "Open tabs",
+      "missing": "This item is no longer available.",
+      "denied": "You do not have permission to open this item.",
+      "unsupported": "Preview is not available for this file type.",
+      "retry": "Try again",
+      "resize": "Resize inspector",
+      "returnToChat": "Return to chat",
+      "views": {
+        "review": "Review", "files": "Files", "activity": "Activity", "plan": "Plan",
+        "execution": "Execution", "memory": "Memory", "goals": "Goals", "sources": "Sources",
+        "subagents": "Subagents", "computer": "Computer"
+      }
+    },
     "backToFiles": "Back to files",
     "parentFolder": "Parent folder",
     "cancelTask": "Cancel task",
