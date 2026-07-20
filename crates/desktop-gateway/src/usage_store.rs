@@ -1,5 +1,5 @@
 use local_first_inference_usage::{
-    AttemptEventKind, AttemptOutcome, UsageAttemptEvent, UsageRecorder,
+    AttemptEventKind, AttemptOutcome, CostProvenance, UsageAttemptEvent, UsageRecorder,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, named_params, params, types::Type};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -170,6 +170,7 @@ pub struct UsageBreakdownRow {
     pub cost_microusd: u64,
     pub known_usage_attempts: u64,
     pub unknown_usage_attempts: u64,
+    pub cost_breakdown: UsageCostBreakdown,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -195,7 +196,18 @@ pub struct UsageSummary {
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
     pub cost_microusd: u64,
+    pub cost_breakdown: UsageCostBreakdown,
     pub coverage_started_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct UsageCostBreakdown {
+    pub provider_reported_microusd: u64,
+    pub catalog_estimated_microusd: u64,
+    pub manual_estimated_microusd: u64,
+    pub not_billed_attempts: u64,
+    pub unknown_cost_attempts: u64,
+    pub cost_coverage_percent: u8,
 }
 
 #[cfg(test)]
@@ -584,7 +596,14 @@ impl UsageStore {
                 COALESCE(SUM(cache_read_tokens), 0),
                 COALESCE(SUM(cache_write_tokens), 0),
                 COALESCE(SUM(cost_microusd), 0),
-                MIN(recorded_at)
+                MIN(recorded_at),
+                COALESCE(SUM(CASE WHEN cost_provenance='provider_reported' THEN cost_microusd ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN cost_provenance='catalog_estimated' THEN cost_microusd ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN cost_provenance='manual_estimated' THEN cost_microusd ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN cost_provenance='not_billed' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN cost_provenance='unavailable' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN cost_microusd IS NOT NULL OR cost_provenance='not_billed'
+                                  THEN 1 ELSE 0 END), 0)
              FROM inference_usage_events
              WHERE user_id = ?1 AND event_kind != 'attempt_started' AND recorded_at >= ?2",
         )?;
@@ -605,6 +624,18 @@ impl UsageStore {
                 cost_microusd: nonnegative_u64(row.get(12)?, 12)?,
                 coverage_started_at: row.get(13)?,
                 usage_coverage_percent: 0,
+                cost_breakdown: UsageCostBreakdown {
+                    provider_reported_microusd: nonnegative_u64(row.get(14)?, 14)?,
+                    catalog_estimated_microusd: nonnegative_u64(row.get(15)?, 15)?,
+                    manual_estimated_microusd: nonnegative_u64(row.get(16)?, 16)?,
+                    not_billed_attempts: nonnegative_u64(row.get(17)?, 17)?,
+                    unknown_cost_attempts: nonnegative_u64(row.get(18)?, 18)?,
+                    cost_coverage_percent: percentage(
+                        nonnegative_u64(row.get(19)?, 19)?,
+                        nonnegative_u64(row.get(19)?, 19)?
+                            .saturating_add(nonnegative_u64(row.get(18)?, 18)?),
+                    ),
+                },
             })
         })?;
         summary.usage_coverage_percent = percentage(
@@ -636,6 +667,13 @@ impl UsageStore {
                     SUM(COALESCE(reasoning_tokens, 0)), SUM(COALESCE(cost_microusd, 0)),
                     SUM(CASE WHEN input_tokens IS NOT NULL OR output_tokens IS NOT NULL THEN 1 ELSE 0 END),
                     SUM(CASE WHEN input_tokens IS NULL AND output_tokens IS NULL THEN 1 ELSE 0 END)
+                    , SUM(CASE WHEN cost_provenance='provider_reported' THEN COALESCE(cost_microusd, 0) ELSE 0 END)
+                    , SUM(CASE WHEN cost_provenance='catalog_estimated' THEN COALESCE(cost_microusd, 0) ELSE 0 END)
+                    , SUM(CASE WHEN cost_provenance='manual_estimated' THEN COALESCE(cost_microusd, 0) ELSE 0 END)
+                    , SUM(CASE WHEN cost_provenance='not_billed' THEN 1 ELSE 0 END)
+                    , SUM(CASE WHEN cost_provenance='unavailable' THEN 1 ELSE 0 END)
+                    , SUM(CASE WHEN cost_microusd IS NOT NULL OR cost_provenance='not_billed'
+                               THEN 1 ELSE 0 END)
              FROM inference_usage_events
              WHERE user_id = ?1 AND event_kind != 'attempt_started'
                AND (?2 IS NULL OR recorded_at >= ?2)
@@ -657,6 +695,17 @@ impl UsageStore {
                 cost_microusd: row.get(8)?,
                 known_usage_attempts: row.get(9)?,
                 unknown_usage_attempts: row.get(10)?,
+                cost_breakdown: UsageCostBreakdown {
+                    provider_reported_microusd: row.get(11)?,
+                    catalog_estimated_microusd: row.get(12)?,
+                    manual_estimated_microusd: row.get(13)?,
+                    not_billed_attempts: row.get(14)?,
+                    unknown_cost_attempts: row.get(15)?,
+                    cost_coverage_percent: percentage(
+                        row.get(16)?,
+                        row.get::<_, u64>(16)?.saturating_add(row.get(15)?),
+                    ),
+                },
             })
         })?;
         rows.collect()
@@ -697,8 +746,10 @@ impl UsageStore {
                 COALESCE(SUM(cache_read_tokens), 0),
                 COALESCE(SUM(cache_write_tokens), 0),
                 COALESCE(SUM(cost_microusd), 0),
-                SUM(CASE WHEN cost_microusd IS NOT NULL THEN 1 ELSE 0 END),
-                SUM(CASE WHEN cost_microusd IS NULL THEN 1 ELSE 0 END)
+                SUM(CASE WHEN cost_microusd IS NOT NULL OR cost_provenance='not_billed'
+                         THEN 1 ELSE 0 END),
+                SUM(CASE WHEN cost_microusd IS NULL AND cost_provenance!='not_billed'
+                         THEN 1 ELSE 0 END)
              FROM inference_usage_events
              WHERE event_kind != 'attempt_started'
              GROUP BY (recorded_at / 86400) * 86400, user_id, COALESCE(workspace_id, ''),
@@ -873,6 +924,8 @@ fn upsert_daily_event(
     let success = u64::from(event.outcome == Some(AttemptOutcome::Success));
     let failed = u64::from(event.outcome == Some(AttemptOutcome::Failed));
     let aborted = u64::from(event.outcome == Some(AttemptOutcome::Aborted));
+    let known_cost = event.cost_microusd.is_some()
+        || event.cost_provenance == CostProvenance::NotBilled;
     transaction.execute(
         "INSERT INTO inference_usage_daily (
             day_epoch, user_id, workspace_id, provider_id, model_id, locality, purpose,
@@ -917,8 +970,8 @@ fn upsert_daily_event(
             u64_to_i64(event.cache_read_tokens.unwrap_or(0))?,
             u64_to_i64(event.cache_write_tokens.unwrap_or(0))?,
             u64_to_i64(event.cost_microusd.unwrap_or(0))?,
-            u64_to_i64(u64::from(event.cost_microusd.is_some()))?,
-            u64_to_i64(u64::from(event.cost_microusd.is_none()))?,
+            u64_to_i64(u64::from(known_cost))?,
+            u64_to_i64(u64::from(!known_cost))?,
         ],
     )?;
     Ok(())

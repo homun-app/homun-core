@@ -44086,11 +44086,61 @@ async fn get_usage_models(
     usage_breakdown(state, query, usage_store::UsageBreakdownDimension::Model).await
 }
 
+#[derive(Debug, Serialize)]
+struct ProviderAccountingRow {
+    provider_id: String,
+    homun_usage: usage_store::UsageBreakdownRow,
+    account_snapshot: Vec<usage_store::ProviderUsageSnapshot>,
+    manual_policy: Option<usage_store::ProviderUsagePolicy>,
+}
+
 async fn get_usage_providers(
     State(state): State<AppState>,
     Query(query): Query<UsageWindowQuery>,
-) -> Result<Json<Vec<usage_store::UsageBreakdownRow>>, GatewayError> {
-    usage_breakdown(state, query, usage_store::UsageBreakdownDimension::Provider).await
+) -> Result<Json<Vec<ProviderAccountingRow>>, GatewayError> {
+    let window = parse_usage_window(&query.window)?;
+    let store = state.usage_store.lock().map_err(|_| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "usage_store_unavailable",
+        message: "usage store unavailable".to_string(),
+    })?;
+    let rows = store
+        .breakdown(
+            gateway_user_id().as_str(),
+            window,
+            usage_now_i64(),
+            usage_store::UsageBreakdownDimension::Provider,
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "usage_breakdown_failed",
+            message: error.to_string(),
+        })?;
+    let mut accounting = Vec::with_capacity(rows.len());
+    for homun_usage in rows {
+        let provider_id = homun_usage.key.clone();
+        let account_snapshot = store
+            .latest_provider_snapshots(gateway_user_id().as_str(), &provider_id)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "usage_snapshot_read_failed",
+                message: error.to_string(),
+            })?;
+        let manual_policy = store
+            .provider_policy(gateway_user_id().as_str(), &provider_id)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "usage_policy_read_failed",
+                message: error.to_string(),
+            })?;
+        accounting.push(ProviderAccountingRow {
+            provider_id,
+            homun_usage,
+            account_snapshot,
+            manual_policy,
+        });
+    }
+    Ok(Json(accounting))
 }
 
 async fn get_usage_processes(
