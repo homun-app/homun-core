@@ -6204,6 +6204,28 @@ body.resizing-drawer {
   color: var(--text);
   background: var(--surface-hover);
 }
+.inspector-tab.dragging {
+  opacity: 0.48;
+  cursor: grabbing;
+}
+.inspector-tab.drop-before::before,
+.inspector-tab.drop-after::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--brand);
+  pointer-events: none;
+}
+.inspector-tab.drop-before::before {
+  left: -3px;
+}
+.inspector-tab.drop-after::after {
+  right: -3px;
+}
 .inspector-tab-title {
   flex: 1 1 auto;
   min-width: 0;
@@ -6233,6 +6255,11 @@ body.resizing-drawer {
 .inspector-tab-close:hover {
   color: var(--text);
   background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.dragging-inspector-tab,
+.dragging-inspector-tab * {
+  cursor: grabbing !important;
+  user-select: none !important;
 }
 .inspector-tab-menu-wrap {
   position: relative;

@@ -43,6 +43,18 @@ export interface InspectorStorage {
   setItem(key: string, value: string): void;
 }
 
+export interface InspectorTabBounds {
+  id: string;
+  left: number;
+  right: number;
+}
+
+export interface InspectorDropTarget {
+  index: number;
+  tabId: string | null;
+  side: "before" | "after" | null;
+}
+
 // Node tests and the application share the same pure implementation.
 // @ts-expect-error JavaScript sibling intentionally has no declaration file.
 import * as implementation from "./inspectorWorkspace.mjs";
@@ -51,6 +63,11 @@ export const INSPECTOR_WIDTH_RATIO_KEY = implementation.INSPECTOR_WIDTH_RATIO_KE
 export const EMPTY_INSPECTOR_STATE = implementation.EMPTY_INSPECTOR_STATE as InspectorWorkspaceState;
 
 export const inspectorStateKey = implementation.inspectorStateKey as (threadId: string) => string;
+export const inspectorDropTarget = implementation.inspectorDropTarget as (
+  bounds: InspectorTabBounds[],
+  pointerX: number,
+  draggedId: string,
+) => InspectorDropTarget;
 export const inspectorWorkspaceReducer = implementation.inspectorWorkspaceReducer as (
   state: InspectorWorkspaceState,
   action: InspectorWorkspaceAction,

@@ -1,5 +1,6 @@
 import { ChevronDown, Plus, X } from "lucide-react";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -9,7 +10,12 @@ import {
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { InspectorTab, InspectorTabKind } from "../lib/inspectorWorkspace";
+import {
+  inspectorDropTarget,
+  type InspectorDropTarget,
+  type InspectorTab,
+  type InspectorTabKind,
+} from "../lib/inspectorWorkspace";
 
 export interface InspectorAddItem {
   kind: InspectorTabKind;
@@ -37,6 +43,7 @@ export function InspectorTabStrip({
 }: InspectorTabStripProps) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
+  const tabStripRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const overflowButtonRef = useRef<HTMLButtonElement>(null);
@@ -46,9 +53,25 @@ export function InspectorTabStrip({
     tabId: string;
     x: number;
     y: number;
+    pointerId: number;
+    handle: HTMLDivElement;
+    dragging: boolean;
   } | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<InspectorDropTarget | null>(null);
+
+  const clearPointerDrag = useCallback(() => {
+    const drag = pointerDragRef.current;
+    pointerDragRef.current = null;
+    if (drag?.handle.isConnected && drag.handle.hasPointerCapture(drag.pointerId)) {
+      drag.handle.releasePointerCapture(drag.pointerId);
+    }
+    document.body.classList.remove("dragging-inspector-tab");
+    setDraggingTabId(null);
+    setDropTarget(null);
+  }, []);
 
   useEffect(() => {
     const menu = addOpen ? addMenuRef.current : overflowOpen ? overflowMenuRef.current : null;
@@ -97,6 +120,14 @@ export function InspectorTabStrip({
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [addOpen, overflowOpen]);
+
+  useEffect(() => {
+    window.addEventListener("blur", clearPointerDrag);
+    return () => {
+      window.removeEventListener("blur", clearPointerDrag);
+      clearPointerDrag();
+    };
+  }, [clearPointerDrag]);
 
   function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
     if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
@@ -162,41 +193,60 @@ export function InspectorTabStrip({
 
   function startPointerDrag(event: ReactPointerEvent<HTMLDivElement>, tabId: string) {
     if (event.button !== 0 || (event.target as HTMLElement).closest(".inspector-tab-close")) return;
+    clearPointerDrag();
     pointerDragRef.current = {
       tabId,
       x: event.clientX,
       y: event.clientY,
+      pointerId: event.pointerId,
+      handle: event.currentTarget,
+      dragging: false,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function currentDropTarget(pointerX: number, draggedId: string) {
+    const bounds = [...(rootRef.current?.querySelectorAll<HTMLElement>(".inspector-tab") ?? [])]
+      .map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { id: node.dataset.tabId ?? "", left: rect.left, right: rect.right };
+      })
+      .filter((item) => item.id.length > 0);
+    return inspectorDropTarget(bounds, pointerX, draggedId);
+  }
+
+  function trackPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag.dragging && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 6) return;
+    if (!drag.dragging) {
+      drag.dragging = true;
+      document.body.classList.add("dragging-inspector-tab");
+      setDraggingTabId(drag.tabId);
+    }
+    const strip = tabStripRef.current;
+    if (strip) {
+      const bounds = strip.getBoundingClientRect();
+      if (event.clientX < bounds.left + 28) strip.scrollLeft -= 12;
+      else if (event.clientX > bounds.right - 28) strip.scrollLeft += 12;
+    }
+    setDropTarget(currentDropTarget(event.clientX, drag.tabId));
   }
 
   function finishPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = pointerDragRef.current;
     const currentX = event.clientX;
     const currentY = event.clientY;
-    pointerDragRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
     if (!drag) return;
-    if (Math.hypot(currentX - drag.x, currentY - drag.y) < 6) {
+    const wasDragging = drag.dragging || Math.hypot(currentX - drag.x, currentY - drag.y) >= 6;
+    if (!wasDragging) {
+      clearPointerDrag();
       onActivate(drag.tabId);
       return;
     }
-    const candidates = [...(rootRef.current?.querySelectorAll<HTMLElement>(".inspector-tab") ?? [])];
-    if (candidates.length === 0) return;
-    let targetIndex = candidates.findIndex((node) => {
-      const bounds = node.getBoundingClientRect();
-      return currentX >= bounds.left && currentX <= bounds.right;
-    });
-    if (targetIndex < 0) {
-      targetIndex = candidates.reduce((closest, node, index) => {
-        const bounds = node.getBoundingClientRect();
-        const distance = Math.abs(currentX - (bounds.left + bounds.right) / 2);
-        return distance < closest.distance ? { index, distance } : closest;
-      }, { index: 0, distance: Number.POSITIVE_INFINITY }).index;
-    }
-    onMove(drag.tabId, targetIndex);
+    const target = currentDropTarget(currentX, drag.tabId);
+    clearPointerDrag();
+    onMove(drag.tabId, target.index);
     window.requestAnimationFrame(() =>
       document.getElementById(`inspector-tab-${drag.tabId}`)?.focus(),
     );
@@ -205,53 +255,56 @@ export function InspectorTabStrip({
   return (
     <div className="inspector-tab-strip-shell" ref={rootRef}>
       <div
+        ref={tabStripRef}
         className="inspector-tab-strip"
         role="tablist"
         aria-label={t("chat.workbench")}
         onWheel={onTabStripWheel}
       >
-        {tabs.map((tab, index) => (
-          <div
-            className={`inspector-tab${tab.id === activeTabId ? " active" : ""}`}
-            key={tab.id}
-            data-tab-id={tab.id}
-            onPointerDown={(event) => startPointerDrag(event, tab.id)}
-            onPointerUp={finishPointerDrag}
-            onPointerCancel={(event) => {
-              pointerDragRef.current = null;
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
-            }}
-          >
-            <button
-              ref={(node) => {
-                tabRefs.current[index] = node;
-              }}
-              className="inspector-tab-title"
-              type="button"
-              role="tab"
-              id={`inspector-tab-${tab.id}`}
-              aria-controls={`inspector-panel-${tab.id}`}
-              aria-selected={tab.id === activeTabId}
-              tabIndex={tab.id === activeTabId ? 0 : -1}
-              title={tab.title}
-              onClick={() => onActivate(tab.id)}
-              onKeyDown={(event) => onTabKeyDown(event, index)}
+        {tabs.map((tab, index) => {
+          const dropSide = dropTarget?.tabId === tab.id ? dropTarget.side : null;
+          const dropClass =
+            dropSide === "before" ? " drop-before" : dropSide === "after" ? " drop-after" : "";
+          return (
+            <div
+              className={`inspector-tab${tab.id === activeTabId ? " active" : ""}${draggingTabId === tab.id ? " dragging" : ""}${dropClass}`}
+              key={tab.id}
+              data-tab-id={tab.id}
+              aria-grabbed={draggingTabId === tab.id}
+              onPointerDown={(event) => startPointerDrag(event, tab.id)}
+              onPointerMove={trackPointerDrag}
+              onPointerUp={finishPointerDrag}
+              onPointerCancel={clearPointerDrag}
             >
-              <span>{tab.title}</span>
-            </button>
-            <button
-              className="inspector-tab-close"
-              type="button"
-              aria-label={t("chat.inspector.closeTab", { title: tab.title })}
-              title={t("chat.inspector.closeTab", { title: tab.title })}
-              onClick={() => closeTab(tab.id, index)}
-            >
-              <X size={13} />
-            </button>
-          </div>
-        ))}
+              <button
+                ref={(node) => {
+                  tabRefs.current[index] = node;
+                }}
+                className="inspector-tab-title"
+                type="button"
+                role="tab"
+                id={`inspector-tab-${tab.id}`}
+                aria-controls={`inspector-panel-${tab.id}`}
+                aria-selected={tab.id === activeTabId}
+                tabIndex={tab.id === activeTabId ? 0 : -1}
+                title={tab.title}
+                onClick={() => onActivate(tab.id)}
+                onKeyDown={(event) => onTabKeyDown(event, index)}
+              >
+                <span>{tab.title}</span>
+              </button>
+              <button
+                className="inspector-tab-close"
+                type="button"
+                aria-label={t("chat.inspector.closeTab", { title: tab.title })}
+                title={t("chat.inspector.closeTab", { title: tab.title })}
+                onClick={() => closeTab(tab.id, index)}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <div className="inspector-tab-menu-wrap">

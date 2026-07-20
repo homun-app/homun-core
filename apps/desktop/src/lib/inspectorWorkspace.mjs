@@ -12,6 +12,19 @@ export function inspectorStateKey(threadId) {
   return `${STATE_PREFIX}${encodeURIComponent(threadId)}`;
 }
 
+export function inspectorDropTarget(bounds, pointerX, draggedId) {
+  const candidates = bounds.filter((item) => item.id !== draggedId);
+  if (candidates.length === 0) return { index: 0, tabId: null, side: null };
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    if (pointerX < (candidate.left + candidate.right) / 2) {
+      return { index, tabId: candidate.id, side: "before" };
+    }
+  }
+  const last = candidates[candidates.length - 1];
+  return { index: candidates.length, tabId: last.id, side: "after" };
+}
+
 export function inspectorWorkspaceReducer(state, action) {
   switch (action.type) {
     case "openTab": {

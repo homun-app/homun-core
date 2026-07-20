@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   clampInspectorRatio,
   filterInspectorState,
+  inspectorDropTarget,
   inspectorStateKey,
   inspectorWorkspaceReducer,
   loadInspectorState,
@@ -60,6 +61,46 @@ test("moveTab reorders without changing the active tab", () => {
     ["c", "a", "b"],
   );
   assert.equal(moved.activeTabId, "b");
+});
+
+test("drop geometry distinguishes before and after a tab midpoint", () => {
+  const bounds = [
+    { id: "a", left: 0, right: 100 },
+    { id: "b", left: 100, right: 200 },
+  ];
+  assert.deepEqual(inspectorDropTarget(bounds, 120, "a"), {
+    index: 0,
+    tabId: "b",
+    side: "before",
+  });
+  assert.deepEqual(inspectorDropTarget(bounds, 180, "a"), {
+    index: 1,
+    tabId: "b",
+    side: "after",
+  });
+});
+
+test("drop geometry handles strip edges and excludes the dragged source", () => {
+  const bounds = [
+    { id: "a", left: 0, right: 100 },
+    { id: "b", left: 100, right: 200 },
+    { id: "c", left: 200, right: 300 },
+  ];
+  assert.deepEqual(inspectorDropTarget(bounds, -20, "b"), {
+    index: 0,
+    tabId: "a",
+    side: "before",
+  });
+  assert.deepEqual(inspectorDropTarget(bounds, 340, "b"), {
+    index: 2,
+    tabId: "c",
+    side: "after",
+  });
+  assert.deepEqual(inspectorDropTarget([{ id: "only", left: 0, right: 100 }], 50, "only"), {
+    index: 0,
+    tabId: null,
+    side: null,
+  });
 });
 
 test("toggleFocus expands and restores without changing tabs", () => {
