@@ -35,13 +35,35 @@ pub enum UsageWindow {
 }
 
 impl UsageWindow {
-    fn cutoff(self, now: i64) -> Option<i64> {
+    pub fn cutoff(self, now: i64) -> Option<i64> {
         match self {
             Self::SevenDays => Some(now.saturating_sub(7 * 86_400)),
             Self::ThirtyDays => Some(now.saturating_sub(30 * 86_400)),
             Self::All => None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UsageBreakdownRow {
+    pub key: String,
+    pub logical_calls: u64,
+    pub attempts: u64,
+    pub successful_attempts: u64,
+    pub failed_attempts: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub cost_microusd: u64,
+    pub known_usage_attempts: u64,
+    pub unknown_usage_attempts: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UsageBreakdownDimension {
+    Model,
+    Provider,
+    Purpose,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
@@ -323,6 +345,52 @@ impl UsageStore {
                 .saturating_add(summary.unknown_usage_attempts),
         );
         Ok(summary)
+    }
+
+    pub fn breakdown(
+        &self,
+        user_id: &str,
+        window: UsageWindow,
+        now: i64,
+        dimension: UsageBreakdownDimension,
+    ) -> rusqlite::Result<Vec<UsageBreakdownRow>> {
+        let column = match dimension {
+            UsageBreakdownDimension::Model => "model_id",
+            UsageBreakdownDimension::Provider => "provider_id",
+            UsageBreakdownDimension::Purpose => "purpose",
+        };
+        let sql = format!(
+            "SELECT COALESCE({column}, 'unknown'), COUNT(DISTINCT call_id), COUNT(*),
+                    SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN outcome = 'failed' THEN 1 ELSE 0 END),
+                    SUM(COALESCE(input_tokens, 0)), SUM(COALESCE(output_tokens, 0)),
+                    SUM(COALESCE(reasoning_tokens, 0)), SUM(COALESCE(cost_microusd, 0)),
+                    SUM(CASE WHEN input_tokens IS NOT NULL OR output_tokens IS NOT NULL THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN input_tokens IS NULL AND output_tokens IS NULL THEN 1 ELSE 0 END)
+             FROM inference_usage_events
+             WHERE user_id = ?1 AND event_kind != 'attempt_started'
+               AND (?2 IS NULL OR recorded_at >= ?2)
+             GROUP BY COALESCE({column}, 'unknown')
+             ORDER BY SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)) DESC"
+        );
+        let cutoff = window.cutoff(now);
+        let mut statement = self.conn.prepare(&sql)?;
+        let rows = statement.query_map(params![user_id, cutoff], |row| {
+            Ok(UsageBreakdownRow {
+                key: row.get(0)?,
+                logical_calls: row.get(1)?,
+                attempts: row.get(2)?,
+                successful_attempts: row.get(3)?,
+                failed_attempts: row.get(4)?,
+                input_tokens: row.get(5)?,
+                output_tokens: row.get(6)?,
+                reasoning_tokens: row.get(7)?,
+                cost_microusd: row.get(8)?,
+                known_usage_attempts: row.get(9)?,
+                unknown_usage_attempts: row.get(10)?,
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn rebuild_daily_rollups(&self) -> rusqlite::Result<usize> {

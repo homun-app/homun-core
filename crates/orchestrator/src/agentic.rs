@@ -110,6 +110,17 @@ where
             step, goal, contract, &upstream, gather_tools, &history_text, force_finish,
         );
         let request = GenerateJsonRequest {
+            usage: {
+                let mut usage = local_first_inference_usage::UsageContext::new(
+                    uuid::Uuid::new_v4().to_string(),
+                    local_first_inference_usage::InferencePurpose::Planning,
+                    "local",
+                );
+                usage.purpose_detail = Some("plan_repair".to_string());
+                usage.task_id = Some(step.step_id.clone());
+                usage.round = Some(round as u32);
+                usage
+            },
             prompt,
             max_tokens: step.max_tokens.unwrap_or(AGENTIC_MAX_TOKENS),
             temperature: 0.0,

@@ -29,6 +29,11 @@ fn runtime_client_builds_local_endpoint_without_double_slashes() {
 #[test]
 fn generate_request_serializes_as_plain_chat_payload() {
     let request = GenerateRequest {
+        usage: local_first_inference_usage::UsageContext::new(
+            "generate-request-test",
+            local_first_inference_usage::InferencePurpose::Evaluation,
+            "test",
+        ),
         prompt: "Ciao, spiegami cosa sai fare.".to_string(),
         max_tokens: 512,
         temperature: 0.2,
@@ -229,6 +234,11 @@ fn generate_stream_event_deserializes_structured_card_events() {
 #[test]
 fn classify_intent_request_serializes_without_schema_or_repair_payload() {
     let request = IntentClassifyRequest {
+        usage: local_first_inference_usage::UsageContext::new(
+            "intent-request-test",
+            local_first_inference_usage::InferencePurpose::Evaluation,
+            "test",
+        ),
         text: "quanto fa 6*3".to_string(),
         locale: Some("it-IT".to_string()),
         max_tokens: 96,

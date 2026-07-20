@@ -61,6 +61,12 @@ impl UsageContext {
     }
 }
 
+impl Default for UsageContext {
+    fn default() -> Self {
+        Self::new("unattributed", InferencePurpose::Other, "local")
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NormalizedUsage {
     pub input_tokens: Option<u64>,

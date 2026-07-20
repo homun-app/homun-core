@@ -6,6 +6,7 @@ pub enum WorkspaceDeleteError {
     Chat(String),
     Task(String),
     Memory(String),
+    Usage(String),
     GraphCache(String),
     Registry(String),
 }
@@ -16,6 +17,7 @@ impl fmt::Display for WorkspaceDeleteError {
             Self::Chat(error) => write!(formatter, "chat purge failed: {error}"),
             Self::Task(error) => write!(formatter, "task purge failed: {error}"),
             Self::Memory(error) => write!(formatter, "memory purge failed: {error}"),
+            Self::Usage(error) => write!(formatter, "usage purge failed: {error}"),
             Self::GraphCache(error) => write!(formatter, "graph cache purge failed: {error}"),
             Self::Registry(error) => write!(formatter, "workspace registry write failed: {error}"),
         }
@@ -29,13 +31,15 @@ pub struct GatewayWorkspacePurgeReport {
     pub chat_threads: usize,
     pub tasks: usize,
     pub memory_rows: usize,
+    pub usage_events: usize,
     pub graph_cache_removed: bool,
 }
 
-pub fn coordinate_workspace_delete<Chat, Task, Memory, Graph, Registry>(
+pub fn coordinate_workspace_delete<Chat, Task, Memory, Usage, Graph, Registry>(
     purge_chat: Chat,
     purge_tasks: Task,
     purge_memory: Memory,
+    purge_usage: Usage,
     purge_graph_cache: Graph,
     save_registry: Registry,
 ) -> Result<GatewayWorkspacePurgeReport, WorkspaceDeleteError>
@@ -43,18 +47,21 @@ where
     Chat: FnOnce() -> Result<usize, WorkspaceDeleteError>,
     Task: FnOnce() -> Result<usize, WorkspaceDeleteError>,
     Memory: FnOnce() -> Result<usize, WorkspaceDeleteError>,
+    Usage: FnOnce() -> Result<usize, WorkspaceDeleteError>,
     Graph: FnOnce() -> Result<bool, WorkspaceDeleteError>,
     Registry: FnOnce() -> Result<(), WorkspaceDeleteError>,
 {
     let chat_threads = purge_chat()?;
     let tasks = purge_tasks()?;
     let memory_rows = purge_memory()?;
+    let usage_events = purge_usage()?;
     let graph_cache_removed = purge_graph_cache()?;
     save_registry()?;
     Ok(GatewayWorkspacePurgeReport {
         chat_threads,
         tasks,
         memory_rows,
+        usage_events,
         graph_cache_removed,
     })
 }

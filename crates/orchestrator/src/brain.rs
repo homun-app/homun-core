@@ -362,6 +362,17 @@ impl<R: JsonRuntime, M: MemoryContextProvider> OrchestratorBrain<R, M> {
         // weak model from cramming arguments into the name. Empty → free string (planner.rs).
         let tool_names: Vec<&str> = loaded_tools.iter().map(|tool| tool.name.as_str()).collect();
         let planner_request = GenerateJsonRequest {
+            usage: {
+                let mut usage = local_first_inference_usage::UsageContext::new(
+                    uuid::Uuid::new_v4().to_string(),
+                    local_first_inference_usage::InferencePurpose::Planning,
+                    request.policy_context.user_id.as_str(),
+                );
+                usage.purpose_detail = Some("plan_proposal".to_string());
+                usage.workspace_id = Some(request.policy_context.workspace_id.as_str().to_string());
+                usage.task_id = Some(request.request_id.clone());
+                usage
+            },
             prompt: prompt.prompt,
             max_tokens: request.budgets.max_planner_tokens,
             temperature: 0.0,

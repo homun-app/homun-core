@@ -3696,6 +3696,7 @@ version = "0.1.0"
 dependencies = [
  "local-first-capabilities",
  "local-first-context-compression",
+ "local-first-inference-usage",
  "local-first-memory",
  "local-first-subagents",
  "local-first-task-runtime",
@@ -3703,6 +3704,7 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
+ "uuid 1.23.1",
 ]
 
 [[package]]

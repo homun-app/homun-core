@@ -421,10 +421,6 @@ pub(crate) async fn generate_document_content(
     skeleton: &[DocBlockSlot],
     design_directives: &str,
 ) -> Result<Value, String> {
-    // Same reasoning as generate_deck_content: hit the OpenAI-compat endpoint
-    // DIRECTLY, not chat_endpoint() (which rewrites to Ollama's native /api/chat,
-    // a different request/response shape).
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let lang = if language.trim().is_empty() {
         "the SAME language as the user's brief below".to_string()
     } else {
@@ -446,6 +442,13 @@ pub(crate) async fn generate_document_content(
         crate::structured_response_format("homun_document", Some(&schema)),
         crate::structured_response_format("homun_document", None),
     ];
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::ArtifactGeneration,
+        crate::gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("templated_document_content".to_string());
+    usage.workspace_id = Some(crate::gateway_workspace_id().as_str().to_string());
     let mut content = String::new();
     let mut last_err = "document content request failed".to_string();
     for (i, rf) in attempts.iter().enumerate() {
@@ -455,30 +458,34 @@ pub(crate) async fn generate_document_content(
             "messages": messages.clone(),
             "response_format": rf.clone(),
         });
-        let mut req = http
-            .post(endpoint.as_str())
-            .timeout(std::time::Duration::from_secs(120))
-            .json(&body);
-        if let Some(k) = api_key {
-            req = req.bearer_auth(k);
-        }
-        match req.send().await {
+        match crate::inference_transport::send_openai_json(
+            http,
+            crate::global_usage_recorder(),
+            &usage,
+            &crate::inference_provider_id(base_url),
+            model,
+            crate::inference_locality(base_url),
+            base_url,
+            api_key,
+            &body,
+            Some(std::time::Duration::from_secs(120)),
+            system.chars().count().saturating_add(brief.chars().count()),
+        )
+        .await
+        {
             Ok(resp) => {
-                let code = resp.status().as_u16();
+                let code = resp.status;
                 if code == 400 && i == 0 {
                     continue; // endpoint rejects strict json_schema → retry json_object
                 }
-                if !resp.status().is_success() {
+                if !(200..300).contains(&code) {
                     return Err(format!(
                         "document content HTTP {code} from model «{model}» — the inference \
                          provider rejected the request. Check it is reachable and authenticated \
                          (API key / `ollama signin`), or switch the chat model to a working one."
                     ));
                 }
-                let json: Value = resp
-                    .json()
-                    .await
-                    .map_err(|e| format!("bad document content response: {e}"))?;
+                let json = resp.body;
                 content = json
                     .get("choices")
                     .and_then(|c| c.as_array())

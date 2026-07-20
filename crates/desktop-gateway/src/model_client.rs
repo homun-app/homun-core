@@ -13,15 +13,25 @@ use local_first_inference_usage::{
 use local_first_subagents::GenerateStreamEvent;
 
 use crate::{
-    StreamSink, auth_fallback_config, build_chat_payload, chat_endpoint,
+    StreamSink, auth_fallback_config, build_chat_payload,
     collect_ollama_native_stream, collect_openai_stream, emit_stream_event, is_ollama_base,
     model_first_token_timeout_secs, model_headers_timeout_secs, model_idle_timeout_secs,
     model_request_timeout_secs, should_try_tool_compatibility_fallback,
     tool_compatibility_fallback_config,
 };
 
-pub(crate) static NOOP_USAGE_RECORDER: local_first_inference_usage::NoopUsageRecorder =
-    local_first_inference_usage::NoopUsageRecorder;
+pub(crate) fn chat_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if is_ollama_base(base_url) {
+        let root = trimmed
+            .strip_suffix("/v1")
+            .unwrap_or(trimmed)
+            .trim_end_matches('/');
+        format!("{root}/api/chat")
+    } else {
+        format!("{trimmed}/chat/completions")
+    }
+}
 
 /// Borrows the turn's reqwest client and stream sink; built once before the ReAct loop.
 pub(crate) struct GatewayModelClient<'a> {

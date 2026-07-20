@@ -14,6 +14,8 @@ mod db_migrate;
 mod document_content;
 // The concrete engine::ModelClient (ADR 0024): owns the per-round model HTTP call.
 mod model_client;
+mod inference_transport;
+mod usage_store;
 // Model-output normalization moved WHOLE into the engine crate (ADR 0024 inc 5e.3, pure serde
 // module); re-exported so `model_normalize::…` call sites are unchanged.
 use local_first_engine::model_normalize;
@@ -228,6 +230,8 @@ const TASK_EXECUTOR_DEFAULT_WORKER_COUNT: usize = 3;
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) http: reqwest::Client,
+    usage_store: Arc<Mutex<usage_store::UsageStore>>,
+    usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder>,
     chat_store: Arc<Mutex<ChatStore>>,
     task_store: Arc<Mutex<TaskStore>>,
     computer_store: Arc<Mutex<LocalComputerSessionStore>>,
@@ -455,6 +459,10 @@ impl AppState {
         .expect("open test secret store");
         let state = AppState {
             http: reqwest::Client::new(),
+            usage_store: Arc::new(Mutex::new(
+                usage_store::UsageStore::open_in_memory().expect("in-memory usage store"),
+            )),
+            usage_recorder: Arc::new(local_first_inference_usage::NoopUsageRecorder),
             chat_store: Arc::new(Mutex::new(
                 ChatStore::in_memory().expect("in-memory chat store"),
             )),
@@ -976,8 +984,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // hand the same Arc to AppState. Clones below are cheap Arc clones.
     let ws_registry_arc = std::sync::Arc::new(ws_gateway::WsRegistry::new());
     let _ = ws_registry().set(ws_registry_arc.clone());
+    let usage_path = gateway_database_path()?;
+    let usage_store = usage_store::UsageStore::open(&usage_path).map_err(std::io::Error::other)?;
+    usage_store
+        .abort_orphaned_attempts(i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX))
+        .map_err(std::io::Error::other)?;
+    usage_store.rebuild_daily_rollups().map_err(std::io::Error::other)?;
+    let usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> = Arc::new(
+        usage_store::BufferedUsageRecorder::start(&usage_path, 4_096)
+            .map_err(std::io::Error::other)?,
+    );
+    let _ = usage_recorder_registry().set(usage_recorder.clone());
     let mut state = AppState {
         http: build_gateway_http_client(),
+        usage_store: Arc::new(Mutex::new(usage_store)),
+        usage_recorder,
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
         task_store: Arc::new(Mutex::new(TaskStore::open(gateway_task_database_path()?)?)),
         computer_store: Arc::new(Mutex::new(LocalComputerSessionStore::open(
@@ -1228,6 +1249,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/runtime/llm-concurrency",
             get(get_llm_concurrency).post(set_llm_concurrency),
         )
+        .route("/api/usage/summary", get(get_usage_summary))
+        .route("/api/usage/models", get(get_usage_models))
+        .route("/api/usage/providers", get(get_usage_providers))
+        .route("/api/usage/processes", get(get_usage_processes))
         .route(
             "/api/prefs/timezone",
             get(get_user_timezone).post(set_user_timezone),
@@ -3744,25 +3769,99 @@ fn embed_base() -> String {
     env::var("HOMUN_EMBED_BASE").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
 }
 
+fn inference_locality(base_url: &str) -> local_first_inference_usage::Locality {
+    if base_url.contains("127.0.0.1") || base_url.contains("localhost") {
+        local_first_inference_usage::Locality::Local
+    } else {
+        local_first_inference_usage::Locality::Cloud
+    }
+}
+
+fn inference_provider_id(base_url: &str) -> String {
+    let canonical = canonical_provider_base_url(base_url);
+    if let Some(provider) = load_provider_registry().providers.into_iter().find(|provider| {
+        canonical_provider_base_url(&provider.base_url) == canonical
+    }) {
+        return provider.id;
+    }
+    let lower = canonical.to_ascii_lowercase();
+    if lower.contains("anthropic.com") {
+        "anthropic".to_string()
+    } else if lower.contains("ollama.com") || provider_endpoint_is_local(&canonical) {
+        "ollama".to_string()
+    } else if lower.contains("openai.com") {
+        "openai".to_string()
+    } else if lower.contains("openrouter.ai") {
+        "openrouter".to_string()
+    } else if lower.contains("z.ai") {
+        "zai".to_string()
+    } else {
+        "openai-compatible".to_string()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn recorded_openai_value(
+    http: &reqwest::Client,
+    base_url: &str,
+    model: &str,
+    api_key: Option<&str>,
+    payload: &serde_json::Value,
+    timeout: std::time::Duration,
+    purpose: local_first_inference_usage::InferencePurpose,
+    detail: &str,
+    estimated_input_chars: usize,
+) -> Option<inference_transport::RecordedJsonResponse> {
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        purpose,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some(detail.to_string());
+    usage.workspace_id = Some(gateway_workspace_id().as_str().to_string());
+    inference_transport::send_openai_json(
+        http,
+        global_usage_recorder(),
+        &usage,
+        &inference_provider_id(base_url),
+        model,
+        inference_locality(base_url),
+        base_url,
+        api_key,
+        payload,
+        Some(timeout),
+        estimated_input_chars,
+    )
+    .await
+    .ok()
+}
+
 /// Embed one text via Ollama `/api/embed`. Best-effort: `None` on any failure (the
 /// caller falls back to lexical), so embeddings never break a turn.
-async fn embed_text(http: &reqwest::Client, text: &str) -> Option<Vec<f32>> {
+async fn embed_text(
+    http: &reqwest::Client,
+    text: &str,
+    usage: &local_first_inference_usage::UsageContext,
+) -> Option<Vec<f32>> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let url = format!("{}/api/embed", embed_base().trim_end_matches('/'));
-    let resp = http
-        .post(&url)
-        .timeout(std::time::Duration::from_secs(30))
-        .json(&serde_json::json!({ "model": embed_model(), "input": trimmed }))
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
+    let response = inference_transport::send_ollama_embed(
+        http,
+        global_usage_recorder(),
+        usage,
+        &embed_base(),
+        &embed_model(),
+        trimmed,
+        Some(std::time::Duration::from_secs(30)),
+    )
+    .await
+    .ok()?;
+    if !(200..300).contains(&response.status) {
         return None;
     }
-    let body: serde_json::Value = resp.json().await.ok()?;
+    let body = response.body;
     let arr = body
         .get("embeddings")
         .and_then(|e| e.get(0))
@@ -5691,18 +5790,32 @@ impl local_first_memory::LlmClient for GatewayLlmClient {
                     { "role": "user", "content": user_content },
                 ],
             });
-            let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-            let mut builder = http
-                .post(&endpoint)
-                .timeout(std::time::Duration::from_secs(120));
-            if let Some(key) = api_key.as_ref() {
-                builder = builder.bearer_auth(key);
-            }
-            let resp = builder.json(&payload).send().await.ok()?;
-            if !resp.status().is_success() {
+            let mut usage = local_first_inference_usage::UsageContext::new(
+                uuid::Uuid::new_v4().to_string(),
+                local_first_inference_usage::InferencePurpose::MemoryExtraction,
+                gateway_user_id().as_str(),
+            );
+            usage.purpose_detail = Some("learn_extraction".to_string());
+            usage.workspace_id = Some(gateway_memory_workspace_id().as_str().to_string());
+            let response = inference_transport::send_openai_json(
+                &http,
+                global_usage_recorder(),
+                &usage,
+                &inference_provider_id(&base_url),
+                &model,
+                inference_locality(&base_url),
+                &base_url,
+                api_key.as_deref(),
+                &payload,
+                Some(std::time::Duration::from_secs(120)),
+                system.chars().count().saturating_add(user_content.chars().count()),
+            )
+            .await
+            .ok()?;
+            if !(200..300).contains(&response.status) {
                 return None;
             }
-            let body = resp.json::<serde_json::Value>().await.ok()?;
+            let body = response.body;
             body.get("choices")
                 .and_then(|c| c.get(0))
                 .and_then(|c| c.get("message"))
@@ -6050,19 +6163,32 @@ async fn call_memory_json(
             { "role": "user", "content": user_content },
         ],
     });
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut builder = state
-        .http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(150));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let resp = builder.json(&payload).send().await.ok()?;
-    if !resp.status().is_success() {
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::MemoryExtraction,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("memory_json".to_string());
+    usage.workspace_id = Some(gateway_memory_workspace_id().as_str().to_string());
+    let response = inference_transport::send_openai_json(
+        &state.http,
+        state.usage_recorder.clone(),
+        &usage,
+        &inference_provider_id(&base_url),
+        &model,
+        inference_locality(&base_url),
+        &base_url,
+        api_key.as_deref(),
+        &payload,
+        Some(std::time::Duration::from_secs(150)),
+        system.chars().count().saturating_add(user_content.chars().count()),
+    )
+    .await
+    .ok()?;
+    if !(200..300).contains(&response.status) {
         return None;
     }
-    let body = resp.json::<serde_json::Value>().await.ok()?;
+    let body = response.body;
     let content = body
         .get("choices")
         .and_then(|c| c.get(0))
@@ -14049,9 +14175,18 @@ async fn embed_query_for_memory_recall(
     }
 
     let embedding_start = std::time::Instant::now();
-    let result =
-        match tokio::time::timeout(memory_query_embedding_timeout(), embed_text(http, query)).await
-        {
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::MemoryRecall,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("query_embedding".to_string());
+    usage.workspace_id = Some(workspace.as_str().to_string());
+    let result = match tokio::time::timeout(
+        memory_query_embedding_timeout(),
+        embed_text(http, query, &usage),
+    )
+    .await {
             Ok(vector) => vector,
             Err(_) => {
                 timing.query_embedding_timed_out = true;
@@ -14392,7 +14527,6 @@ async fn improve_prompt(
         code: "no_inference_provider",
         message: "No provider configured.".to_string(),
     })?;
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let system = "You are an assistant that REWRITES prompts to make them clearer, more specific \
 and complete, WITHOUT executing them and without answering the request. Keep the SAME language \
 and the user's intent; make criteria, constraints and expected format explicit only if implicit. \
@@ -14412,21 +14546,30 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
             { "role": "user", "content": format!("Rewrite this prompt:\n\n{draft}") },
         ],
     });
-    let mut builder = state
-        .http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(30));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let resp = builder
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|error| {
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::Other,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("prompt_improvement".to_string());
+    let response = inference_transport::send_openai_json(
+        &state.http,
+        state.usage_recorder.clone(),
+        &usage,
+        &inference_provider_id(&base_url),
+        &model,
+        inference_locality(&base_url),
+        &base_url,
+        api_key.as_deref(),
+        &payload,
+        Some(std::time::Duration::from_secs(30)),
+        system.chars().count().saturating_add(draft.chars().count()),
+    )
+    .await
+    .map_err(|error| {
             tracing::warn!(
                 target: "chat::improve_prompt",
-                %error, model = %model, %endpoint,
+                %error, model = %model, %base_url,
                 "improve-prompt LLM request errored"
             );
             GatewayError {
@@ -14435,12 +14578,12 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
                 message: format!("Provider unreachable: {error}"),
             }
         })?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+    if !(200..300).contains(&response.status) {
+        let status = response.status;
+        let body: String = response.body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "chat::improve_prompt",
-            %status, model = %model, %endpoint, body = %body,
+            %status, model = %model, %base_url, body = %body,
             "improve-prompt LLM call failed"
         );
         return Err(GatewayError {
@@ -14449,11 +14592,7 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
             message: format!("Provider responded {status}"),
         });
     }
-    let body: serde_json::Value = resp.json().await.map_err(|error| GatewayError {
-        status: StatusCode::BAD_GATEWAY,
-        code: "improve_prompt_failed",
-        message: format!("Invalid response: {error}"),
-    })?;
+    let body = response.body;
     let improved = body
         .get("choices")
         .and_then(|c| c.get(0))
@@ -14470,7 +14609,7 @@ Return ONLY the rewritten prompt, as plain text, without preamble, quotes or exp
         let snippet: String = body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "chat::improve_prompt",
-            model = %model, %endpoint, body = %snippet,
+            model = %model, %base_url, body = %snippet,
             "improve-prompt LLM returned 2xx but no content — keeping the original draft"
         );
         draft.to_string()
@@ -14507,7 +14646,6 @@ async fn chat_suggestions(
     if request.answer.trim().is_empty() {
         return empty;
     }
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let system = "Propose 3 SHORT follow-up questions the user might ask AFTER this answer. Rules: \
 one per line, max ~7 words, in the SAME language as the user, phrased as if written by the user, \
 without numbering, dashes or quotes. Return ONLY the 3 lines.";
@@ -14530,37 +14668,47 @@ without numbering, dashes or quotes. Return ONLY the 3 lines.";
             { "role": "user", "content": user },
         ],
     });
-    let mut builder = state
-        .http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(25));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let resp = match builder.json(&payload).send().await {
-        Ok(resp) => resp,
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::Other,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("follow_up_suggestions".to_string());
+    let response = match inference_transport::send_openai_json(
+        &state.http,
+        state.usage_recorder.clone(),
+        &usage,
+        &inference_provider_id(&base_url),
+        &model,
+        inference_locality(&base_url),
+        &base_url,
+        api_key.as_deref(),
+        &payload,
+        Some(std::time::Duration::from_secs(25)),
+        system.chars().count().saturating_add(user.chars().count()),
+    )
+    .await {
+        Ok(response) => response,
         Err(error) => {
             tracing::warn!(
                 target: "chat::suggestions",
-                %error, model = %model, %endpoint,
+                %error, model = %model, %base_url,
                 "suggestions LLM request errored — showing no suggestions"
             );
             return empty;
         }
     };
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+    if !(200..300).contains(&response.status) {
+        let status = response.status;
+        let body: String = response.body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "chat::suggestions",
-            %status, model = %model, %endpoint, body = %body,
+            %status, model = %model, %base_url, body = %body,
             "suggestions LLM call failed — showing no suggestions"
         );
         return empty;
     }
-    let Ok(body) = resp.json::<serde_json::Value>().await else {
-        return empty;
-    };
+    let body = response.body;
     let content = body
         .get("choices")
         .and_then(|c| c.get(0))
@@ -14574,7 +14722,7 @@ without numbering, dashes or quotes. Return ONLY the 3 lines.";
         let snippet: String = body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "chat::suggestions",
-            model = %model, %endpoint, body = %snippet,
+            model = %model, %base_url, body = %snippet,
             "suggestions LLM returned 2xx but no content — showing no suggestions"
         );
     }
@@ -14636,7 +14784,6 @@ async fn generate_thread_title(state: &AppState, prompt: &str, answer: &str) -> 
         );
         return fallback();
     };
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let system = "Generate a very short TITLE (max 5 words) for this conversation, in the same \
 language as the user. Only the title, without quotes, final punctuation or prefixes.";
     let user = format!(
@@ -14660,24 +14807,33 @@ language as the user. Only the title, without quotes, final punctuation or prefi
             { "role": "user", "content": user },
         ],
     });
-    let mut builder = state
-        .http
-        .post(&endpoint)
-        // Reasoning models now think before emitting the title (see max_tokens note),
-        // so allow more headroom than the old 20s before falling back.
-        .timeout(std::time::Duration::from_secs(30));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::TitleGeneration,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("thread_title".to_string());
     // Errors here were previously swallowed into an empty string, silently degrading
     // to the raw-truncation fallback (a title cut mid-word). Log the actual reason —
     // status + body on an HTTP error, the transport error otherwise — so a broken
     // title model (e.g. an unsigned `:cloud` Ollama model returning 401) is visible.
-    let title = match builder.json(&payload).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            let body = resp.json::<serde_json::Value>().await.ok();
-            let extracted = body
-                .as_ref()
+    let title = match inference_transport::send_openai_json(
+        &state.http,
+        state.usage_recorder.clone(),
+        &usage,
+        &inference_provider_id(&base_url),
+        &model,
+        inference_locality(&base_url),
+        &base_url,
+        api_key.as_deref(),
+        &payload,
+        Some(std::time::Duration::from_secs(30)),
+        system.chars().count().saturating_add(user.chars().count()),
+    )
+    .await {
+        Ok(response) if (200..300).contains(&response.status) => {
+            let body = response.body;
+            let extracted = Some(&body)
                 .and_then(|b| {
                     b.get("choices")
                         .and_then(|c| c.get(0))
@@ -14697,31 +14853,24 @@ language as the user. Only the title, without quotes, final punctuation or prefi
                 .unwrap_or_default();
             if extracted.trim().is_empty() {
                 let snippet: String = body
-                    .map(|b| b.to_string())
-                    .unwrap_or_default()
+                    .to_string()
                     .chars()
                     .take(300)
                     .collect();
                 tracing::warn!(
                     target: "chat::autotitle",
-                    model = %model, %endpoint, body = %snippet,
+                    model = %model, %base_url, body = %snippet,
                     "title LLM returned 2xx but no usable content — falling back to prompt truncation"
                 );
             }
             extracted
         }
-        Ok(resp) => {
-            let status = resp.status();
-            let body: String = resp
-                .text()
-                .await
-                .unwrap_or_default()
-                .chars()
-                .take(300)
-                .collect();
+        Ok(response) => {
+            let status = response.status;
+            let body: String = response.body.to_string().chars().take(300).collect();
             tracing::warn!(
                 target: "chat::autotitle",
-                %status, model = %model, %endpoint, body = %body,
+                %status, model = %model, %base_url, body = %body,
                 "title LLM call failed — falling back to prompt truncation"
             );
             String::new()
@@ -14729,7 +14878,7 @@ language as the user. Only the title, without quotes, final punctuation or prefi
         Err(err) => {
             tracing::warn!(
                 target: "chat::autotitle",
-                error = %err, model = %model, %endpoint,
+                error = %err, model = %model, %base_url,
                 "title LLM request errored — falling back to prompt truncation"
             );
             String::new()
@@ -15357,7 +15506,6 @@ async fn classify_sensitive_input_with_privacy_guard_model(
     text: &str,
 ) -> Option<privacy_guard::PrivacyGuardDecision> {
     let (base_url, model, api_key) = privacy_guard_openai_config()?;
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let system = "You are Homun Privacy Guard. Classify the user's message BEFORE the main assistant sees it. Detect sensitive personal data in any language, including payment cards, CVV, identity documents, tax IDs, license plates, health data, credentials, API keys, private addresses, and other secrets. Return STRICT JSON only: {\"has_sensitive_data\": boolean, \"items\": [{\"category\": \"payments|identity|health|vehicles|credentials|private_notes\", \"kind\": \"short_snake_case\", \"label\": \"short user-visible label\", \"secret_value\": \"exact substring from the user message\", \"confidence\": 0.0-1.0}]}. Use exact substrings only; do not infer or invent values.";
     // Generous ceiling for REASONING models: they spend the budget on a hidden
     // `reasoning` field before emitting `content`. A tight cap (fine for an
@@ -15375,46 +15523,41 @@ async fn classify_sensitive_input_with_privacy_guard_model(
             { "role": "user", "content": text },
         ],
     });
-    let mut builder = http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(20));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
     // Every failure below fails OPEN (returns None → caller treats the input as
     // clean). Log the reason so a broken guard model is never silently trusted.
-    let resp = match builder.json(&payload).send().await {
-        Ok(resp) => resp,
-        Err(error) => {
+    let response = match recorded_openai_value(
+        http,
+        &base_url,
+        &model,
+        api_key.as_deref(),
+        &payload,
+        std::time::Duration::from_secs(20),
+        local_first_inference_usage::InferencePurpose::Evaluation,
+        "privacy_guard",
+        system.chars().count().saturating_add(text.chars().count()),
+    )
+    .await {
+        Some(response) => response,
+        None => {
             tracing::warn!(
                 target: "privacy::guard",
-                %error, model = %model, %endpoint,
+                model = %model, %base_url,
                 "privacy-guard LLM request errored — input NOT classified (failing open)"
             );
             return None;
         }
     };
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+    if !(200..300).contains(&response.status) {
+        let status = response.status;
+        let body: String = response.body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "privacy::guard",
-            %status, model = %model, %endpoint, body = %body,
+            %status, model = %model, %base_url, body = %body,
             "privacy-guard LLM call failed — input NOT classified (failing open)"
         );
         return None;
     }
-    let body = match resp.json::<serde_json::Value>().await {
-        Ok(body) => body,
-        Err(error) => {
-            tracing::warn!(
-                target: "privacy::guard",
-                %error, model = %model, %endpoint,
-                "privacy-guard LLM returned an unparseable body — input NOT classified (failing open)"
-            );
-            return None;
-        }
-    };
+    let body = response.body;
     let content = body
         .pointer("/choices/0/message/content")
         .and_then(|c| c.as_str())
@@ -15423,7 +15566,7 @@ async fn classify_sensitive_input_with_privacy_guard_model(
         let snippet: String = body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "privacy::guard",
-            model = %model, %endpoint, body = %snippet,
+            model = %model, %base_url, body = %snippet,
             "privacy-guard LLM returned 2xx but no content (e.g. reasoning-budget starvation) — input NOT classified (failing open)"
         );
     }
@@ -15493,7 +15636,6 @@ async fn verify_step_complete(
     let Some((base_url, model, api_key)) = role_openai_config("memory") else {
         return (true, String::new());
     };
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let system = "You are a STRICT completion verifier for an autonomous agent. Given a task \
 STEP, its CRITERION, and the EVIDENCE of what the agent actually did, decide if the step is \
 genuinely complete. Be skeptical: a claim with no supporting evidence is NOT complete, and a \
@@ -15523,36 +15665,39 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
             { "role": "user", "content": user },
         ],
     });
-    let mut builder = http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(45));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let resp = match builder.json(&payload).send().await {
-        Ok(resp) => resp,
-        Err(error) => {
+    let response = match recorded_openai_value(
+        http,
+        &base_url,
+        &model,
+        api_key.as_deref(),
+        &payload,
+        std::time::Duration::from_secs(45),
+        local_first_inference_usage::InferencePurpose::Evaluation,
+        "step_completion",
+        system.chars().count().saturating_add(user.chars().count()),
+    )
+    .await {
+        Some(response) => response,
+        None => {
             tracing::warn!(
                 target: "orchestration::verify_step",
-                %error, model = %model, %endpoint,
+                model = %model, %base_url,
                 "step-verify LLM request errored — passing the step (fail-open)"
             );
             return (true, String::new());
         }
     };
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+    if !(200..300).contains(&response.status) {
+        let status = response.status;
+        let body: String = response.body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "orchestration::verify_step",
-            %status, model = %model, %endpoint, body = %body,
+            %status, model = %model, %base_url, body = %body,
             "step-verify LLM call failed — passing the step (fail-open)"
         );
         return (true, String::new());
     }
-    let Ok(body) = resp.json::<serde_json::Value>().await else {
-        return (true, String::new());
-    };
+    let body = response.body;
     let content = body
         .pointer("/choices/0/message/content")
         .and_then(|c| c.as_str())
@@ -15564,7 +15709,7 @@ failed or error-laden tool result is NOT complete. Reply with STRICT JSON only, 
             let snippet: String = body.to_string().chars().take(300).collect();
             tracing::warn!(
                 target: "orchestration::verify_step",
-                model = %model, %endpoint, body = %snippet,
+                model = %model, %base_url, body = %snippet,
                 "step-verify LLM returned no JSON object (e.g. reasoning-budget starvation) — passing the step (fail-open)"
             );
             return (true, String::new());
@@ -15594,7 +15739,6 @@ async fn task_appears_incomplete(http: &reqwest::Client, request: &str, work: &s
     let Some((base_url, model, api_key)) = role_openai_config("memory") else {
         return false;
     };
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let system = "You judge whether an autonomous agent has FINISHED a user's request. Given the \
 REQUEST and the agent's FINAL MESSAGE (what it did/said right before stopping), decide if the \
 request is fully handled or there is clearly remaining work the agent skipped. A multi-part \
@@ -15621,36 +15765,39 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
             { "role": "user", "content": user },
         ],
     });
-    let mut builder = http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(45));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let resp = match builder.json(&payload).send().await {
-        Ok(resp) => resp,
-        Err(error) => {
+    let response = match recorded_openai_value(
+        http,
+        &base_url,
+        &model,
+        api_key.as_deref(),
+        &payload,
+        std::time::Duration::from_secs(45),
+        local_first_inference_usage::InferencePurpose::Evaluation,
+        "completion_judge",
+        system.chars().count().saturating_add(user.chars().count()),
+    )
+    .await {
+        Some(response) => response,
+        None => {
             tracing::warn!(
                 target: "orchestration::task_complete",
-                %error, model = %model, %endpoint,
+                model = %model, %base_url,
                 "task-complete judge request errored — assuming complete (fail-open)"
             );
             return false;
         }
     };
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body: String = resp.text().await.unwrap_or_default().chars().take(300).collect();
+    if !(200..300).contains(&response.status) {
+        let status = response.status;
+        let body: String = response.body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "orchestration::task_complete",
-            %status, model = %model, %endpoint, body = %body,
+            %status, model = %model, %base_url, body = %body,
             "task-complete judge call failed — assuming complete (fail-open)"
         );
         return false;
     }
-    let Ok(body) = resp.json::<serde_json::Value>().await else {
-        return false;
-    };
+    let body = response.body;
     let content = body
         .pointer("/choices/0/message/content")
         .and_then(|c| c.as_str())
@@ -15662,7 +15809,7 @@ request is COMPLETE. Reply with STRICT JSON only, no prose: \
             let snippet: String = body.to_string().chars().take(300).collect();
             tracing::warn!(
                 target: "orchestration::task_complete",
-                model = %model, %endpoint, body = %snippet,
+                model = %model, %base_url, body = %snippet,
                 "task-complete judge returned no JSON object (e.g. reasoning-budget starvation) — assuming complete (fail-open)"
             );
             return false;
@@ -15768,7 +15915,6 @@ async fn summarize_message_slice(
         return None;
     }
     let (base_url, model, api_key) = role_openai_config("memory")?;
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     // Compaction must NOT destroy the task's raw material OR its state. A 150-word gist
     // drops the concrete rows (standings, schedules, flight options) a LATER step reports
     // and the decisions/open-questions the turn still depends on — so preserve DATA
@@ -15789,17 +15935,22 @@ No preamble, no headings.";
             { "role": "user", "content": buf.chars().take(24000).collect::<String>() },
         ],
     });
-    let mut builder = http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(45));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let resp = builder.json(&payload).send().await.ok()?;
-    if !resp.status().is_success() {
+    let response = recorded_openai_value(
+        http,
+        &base_url,
+        &model,
+        api_key.as_deref(),
+        &payload,
+        std::time::Duration::from_secs(45),
+        local_first_inference_usage::InferencePurpose::MemoryCompaction,
+        "context_compaction",
+        system.chars().count().saturating_add(buf.chars().count()),
+    )
+    .await?;
+    if !(200..300).contains(&response.status) {
         return None;
     }
-    let body = resp.json::<serde_json::Value>().await.ok()?;
+    let body = response.body;
     let summary = body
         .pointer("/choices/0/message/content")
         .and_then(|c| c.as_str())
@@ -16313,21 +16464,6 @@ fn zai_thinking_enabled() -> bool {
     env::var("HOMUN_ZAI_THINKING")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
-}
-
-/// The chat completions endpoint for a provider: Ollama → native `/api/chat`
-/// (strip a trailing `/v1`); everyone else → OpenAI-compat `/chat/completions`.
-pub(crate) fn chat_endpoint(base_url: &str) -> String {
-    let trimmed = base_url.trim_end_matches('/');
-    if is_ollama_base(base_url) {
-        let root = trimmed
-            .strip_suffix("/v1")
-            .unwrap_or(trimmed)
-            .trim_end_matches('/');
-        format!("{root}/api/chat")
-    } else {
-        format!("{trimmed}/chat/completions")
-    }
 }
 
 /// The Ollama native root (strip a trailing `/v1`) for non-chat endpoints like `/api/show`.
@@ -18829,7 +18965,6 @@ async fn generate_deck_content(
     // `choices[].message.content`). We build an OpenAI-compat body + parse
     // `choices[0]`, so we MUST hit the OpenAI-compat endpoint (this is exactly the
     // path the deck-content eval validates, 5/5 on gemma).
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     // Robust, model-independent language: if the caller didn't pass one, tell the
     // model to MATCH the brief's language (the brief is always present and in the
     // user's language) instead of a vague "the user's language" that defaults to
@@ -18887,6 +19022,13 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
         structured_response_format("deck", Some(&deck_content_schema())),
         structured_response_format("deck", None),
     ];
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::ArtifactGeneration,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("deck_content".to_string());
+    usage.workspace_id = Some(gateway_workspace_id().as_str().to_string());
     let mut content = String::new();
     let mut last_err = "deck content request failed".to_string();
     for (i, rf) in attempts.iter().enumerate() {
@@ -18896,30 +19038,34 @@ any other key such as \"presentation\" or \"deck\", and add no extra top-level k
             "messages": messages.clone(),
             "response_format": rf.clone(),
         });
-        let mut req = http
-            .post(endpoint.as_str())
-            .timeout(std::time::Duration::from_secs(120))
-            .json(&body);
-        if let Some(k) = api_key {
-            req = req.bearer_auth(k);
-        }
-        match req.send().await {
+        match inference_transport::send_openai_json(
+            http,
+            global_usage_recorder(),
+            &usage,
+            &inference_provider_id(base_url),
+            model,
+            inference_locality(base_url),
+            base_url,
+            api_key,
+            &body,
+            Some(std::time::Duration::from_secs(120)),
+            system.chars().count().saturating_add(brief.chars().count()),
+        )
+        .await
+        {
             Ok(resp) => {
-                let code = resp.status().as_u16();
+                let code = resp.status;
                 if code == 400 && i == 0 {
                     continue; // endpoint rejects strict json_schema → retry json_object
                 }
-                if !resp.status().is_success() {
+                if !(200..300).contains(&code) {
                     return Err(format!(
                         "deck content HTTP {code} from model «{model}» — the inference provider \
                          rejected the request. Check it is reachable and authenticated (API key / \
                          `ollama signin`), or switch the chat model to a working one."
                     ));
                 }
-                let json: serde_json::Value = resp
-                    .json()
-                    .await
-                    .map_err(|e| format!("bad deck content response: {e}"))?;
+                let json = resp.body;
                 content = json
                     .get("choices")
                     .and_then(|c| c.as_array())
@@ -19226,7 +19372,6 @@ async fn generate_document_markdown(
     language: &str,
     options: &DocumentGenerationOptions,
 ) -> Result<String, String> {
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let lang = if language.trim().is_empty() {
         "the SAME language as the user's brief below".to_string()
     } else {
@@ -19247,27 +19392,26 @@ an AI. The output must be ready to save as a deliverable artifact.{directives}"
             { "role": "user", "content": brief },
         ],
     });
-    let mut req = http
-        .post(endpoint.as_str())
-        .timeout(std::time::Duration::from_secs(120))
-        .json(&body);
-    if let Some(k) = api_key {
-        req = req.bearer_auth(k);
-    }
-    let resp = req
-        .send()
+    let resp = recorded_openai_value(
+        http,
+        base_url,
+        model,
+        api_key,
+        &body,
+        std::time::Duration::from_secs(120),
+        local_first_inference_usage::InferencePurpose::ArtifactGeneration,
+        "document_markdown",
+        system.chars().count().saturating_add(brief.chars().count()),
+    )
         .await
-        .map_err(|error| format!("document provider unreachable: {error}"))?;
-    let code = resp.status().as_u16();
-    if !resp.status().is_success() {
+        .ok_or_else(|| "document provider unreachable".to_string())?;
+    let code = resp.status;
+    if !(200..300).contains(&code) {
         return Err(format!(
             "document generation HTTP {code} from model «{model}» — check the provider or switch model."
         ));
     }
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|error| format!("bad document response: {error}"))?;
+    let json = resp.body;
     let content = json
         .get("choices")
         .and_then(|choices| choices.as_array())
@@ -20743,11 +20887,20 @@ async fn auto_retrieve_composio(
     // embed latency until measured); bounded to a few local embed calls.
     let dense_rank: std::collections::HashMap<usize, usize> =
         if std::env::var("HOMUN_COMPOSIO_DENSE").is_ok() {
-            match embed_text(http, query).await {
+            let dense_usage = || {
+                let mut usage = local_first_inference_usage::UsageContext::new(
+                    uuid::Uuid::new_v4().to_string(),
+                    local_first_inference_usage::InferencePurpose::Embedding,
+                    gateway_user_id().as_str(),
+                );
+                usage.purpose_detail = Some("dense_tool_ranking".to_string());
+                usage
+            };
+            match embed_text(http, query, &dense_usage()).await {
                 Some(q_vec) => {
                     let mut scored: Vec<(usize, f32)> = Vec::new();
                     for (i, _) in keyword.iter().take(8) {
-                        if let Some(v) = embed_text(http, &catalog[*i].1).await {
+                        if let Some(v) = embed_text(http, &catalog[*i].1, &dense_usage()).await {
                             scored.push((*i, cosine(&q_vec, &v)));
                         }
                     }
@@ -25533,7 +25686,7 @@ impl GatewayBrowseExecutor<'_> {
         let model_client = crate::model_client::GatewayModelClient {
             http: self.http,
             tx: &drain,
-            usage: &crate::model_client::NOOP_USAGE_RECORDER,
+            usage: self.state.usage_recorder.as_ref(),
         };
         let mut usage_context = local_first_inference_usage::UsageContext::new(
             uuid::Uuid::new_v4().to_string(),
@@ -27477,7 +27630,7 @@ async fn run_agent_rounds(
     let model_client = crate::model_client::GatewayModelClient {
         http: &http,
         tx,
-        usage: &crate::model_client::NOOP_USAGE_RECORDER,
+        usage: state_owned.usage_recorder.as_ref(),
     };
     let mut usage_context = local_first_inference_usage::UsageContext::new(
         uuid::Uuid::new_v4().to_string(),
@@ -33063,13 +33216,28 @@ answer text.";
             { "role": "user", "content": format!("Message from {sender_name}:\n{content}") },
         ],
     });
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::Automation,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("channel_reply".to_string());
+    usage.workspace_id = Some(gateway_workspace_id().as_str().to_string());
 
     // Cloud reasoning models are slow (tens of seconds) and occasionally return
     // an empty completion. Retry once on any transient failure, logging the
     // precise reason so an empty reply is never silently swallowed.
     for attempt in 1..=2u8 {
-        match channel_reply_once(state, &endpoint, api_key.as_deref(), &payload).await {
+        match channel_reply_once(
+            state,
+            &base_url,
+            &model,
+            api_key.as_deref(),
+            &payload,
+            &usage,
+        )
+        .await
+        {
             Ok(reply) => return Some(reply),
             Err(reason) => {
                 eprintln!("channel/whatsapp: reply attempt {attempt}/2 failed: {reason}");
@@ -33086,32 +33254,32 @@ answer text.";
 /// empty completion with its finish_reason) so the logs are actionable.
 async fn channel_reply_once(
     state: &AppState,
-    endpoint: &str,
+    base_url: &str,
+    model: &str,
     api_key: Option<&str>,
     payload: &serde_json::Value,
+    usage: &local_first_inference_usage::UsageContext,
 ) -> Result<String, String> {
-    let mut builder = state
-        .http
-        .post(endpoint)
-        .timeout(std::time::Duration::from_secs(120));
-    if let Some(key) = api_key {
-        builder = builder.bearer_auth(key);
-    }
-    let response = builder.json(payload).send().await.map_err(|error| {
-        if error.is_timeout() {
-            "timeout (120s)".to_string()
-        } else {
-            format!("network: {error}")
-        }
-    })?;
-    let status = response.status();
-    if !status.is_success() {
+    let response = inference_transport::send_openai_json(
+        &state.http,
+        state.usage_recorder.clone(),
+        usage,
+        &inference_provider_id(base_url),
+        model,
+        inference_locality(base_url),
+        base_url,
+        api_key,
+        payload,
+        Some(std::time::Duration::from_secs(120)),
+        serde_json::to_string(payload).map(|body| body.chars().count()).unwrap_or(0),
+    )
+    .await
+    .map_err(|error| format!("network: {error}"))?;
+    let status = response.status;
+    if !(200..300).contains(&status) {
         return Err(format!("HTTP {status}"));
     }
-    let body = response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|error| format!("body not JSON: {error}"))?;
+    let body = response.body;
     let choice = body.get("choices").and_then(|c| c.get(0));
     let reply = choice
         .and_then(|c| c.get("message"))
@@ -35396,6 +35564,22 @@ fn ws_registry() -> &'static std::sync::OnceLock<std::sync::Arc<ws_gateway::WsRe
     static CELL: std::sync::OnceLock<std::sync::Arc<ws_gateway::WsRegistry>> =
         std::sync::OnceLock::new();
     &CELL
+}
+
+fn usage_recorder_registry() -> &'static std::sync::OnceLock<
+    std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>,
+> {
+    static CELL: std::sync::OnceLock<
+        std::sync::Arc<dyn local_first_inference_usage::UsageRecorder>,
+    > = std::sync::OnceLock::new();
+    &CELL
+}
+
+fn global_usage_recorder() -> std::sync::Arc<dyn local_first_inference_usage::UsageRecorder> {
+    usage_recorder_registry()
+        .get()
+        .cloned()
+        .unwrap_or_else(|| std::sync::Arc::new(local_first_inference_usage::NoopUsageRecorder))
 }
 
 /// Publish a UI event (JSON) to all connected /api/events listeners AND to all
@@ -43609,7 +43793,12 @@ fn build_router_from(
             context_window,
             approx_tokens_per_second: None,
         };
-        let provider = AnthropicProvider::new(descriptor, model.to_string(), api_key);
+        let provider = AnthropicProvider::new(
+            descriptor,
+            model.to_string(),
+            api_key,
+            global_usage_recorder(),
+        );
         return ModelRouter::new(PrivacyPolicy::allowing_cloud()).with_provider(Box::new(provider));
     }
     let locality = if is_local {
@@ -43625,8 +43814,13 @@ fn build_router_from(
         context_window,
         approx_tokens_per_second: None,
     };
-    let provider =
-        OpenAiCompatProvider::new(descriptor, base_url.to_string(), model.to_string(), api_key);
+    let provider = OpenAiCompatProvider::new(
+        descriptor,
+        base_url.to_string(),
+        model.to_string(),
+        api_key,
+        global_usage_recorder(),
+    );
     let policy = if is_local {
         PrivacyPolicy::local_only()
     } else {
@@ -43729,6 +43923,95 @@ fn now_epoch_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[derive(Debug, Deserialize)]
+struct UsageWindowQuery {
+    #[serde(default = "default_usage_window")]
+    window: String,
+}
+
+fn default_usage_window() -> String {
+    "30d".to_string()
+}
+
+fn parse_usage_window(value: &str) -> Result<usage_store::UsageWindow, GatewayError> {
+    match value {
+        "7d" => Ok(usage_store::UsageWindow::SevenDays),
+        "30d" => Ok(usage_store::UsageWindow::ThirtyDays),
+        "all" => Ok(usage_store::UsageWindow::All),
+        _ => Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "usage_window_invalid",
+            message: "usage window must be 7d, 30d, or all".to_string(),
+        }),
+    }
+}
+
+fn usage_now_i64() -> i64 {
+    i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX)
+}
+
+async fn get_usage_summary(
+    State(state): State<AppState>,
+    Query(query): Query<UsageWindowQuery>,
+) -> Result<Json<usage_store::UsageSummary>, GatewayError> {
+    let window = parse_usage_window(&query.window)?;
+    let store = state.usage_store.lock().map_err(|_| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "usage_store_unavailable",
+        message: "usage store unavailable".to_string(),
+    })?;
+    let summary = store
+        .summary(gateway_user_id().as_str(), window, usage_now_i64())
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "usage_summary_failed",
+            message: error.to_string(),
+        })?;
+    Ok(Json(summary))
+}
+
+async fn usage_breakdown(
+    state: AppState,
+    query: UsageWindowQuery,
+    dimension: usage_store::UsageBreakdownDimension,
+) -> Result<Json<Vec<usage_store::UsageBreakdownRow>>, GatewayError> {
+    let window = parse_usage_window(&query.window)?;
+    let store = state.usage_store.lock().map_err(|_| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "usage_store_unavailable",
+        message: "usage store unavailable".to_string(),
+    })?;
+    let rows = store
+        .breakdown(gateway_user_id().as_str(), window, usage_now_i64(), dimension)
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "usage_breakdown_failed",
+            message: error.to_string(),
+        })?;
+    Ok(Json(rows))
+}
+
+async fn get_usage_models(
+    State(state): State<AppState>,
+    Query(query): Query<UsageWindowQuery>,
+) -> Result<Json<Vec<usage_store::UsageBreakdownRow>>, GatewayError> {
+    usage_breakdown(state, query, usage_store::UsageBreakdownDimension::Model).await
+}
+
+async fn get_usage_providers(
+    State(state): State<AppState>,
+    Query(query): Query<UsageWindowQuery>,
+) -> Result<Json<Vec<usage_store::UsageBreakdownRow>>, GatewayError> {
+    usage_breakdown(state, query, usage_store::UsageBreakdownDimension::Provider).await
+}
+
+async fn get_usage_processes(
+    State(state): State<AppState>,
+    Query(query): Query<UsageWindowQuery>,
+) -> Result<Json<Vec<usage_store::UsageBreakdownRow>>, GatewayError> {
+    usage_breakdown(state, query, usage_store::UsageBreakdownDimension::Purpose).await
 }
 
 // ----------------------------------------------------------------- skills API
@@ -44799,6 +45082,15 @@ fn resolve_role_for_task(goal: &str, role: &str) -> Option<ResolvedRole> {
              Reply ONLY with JSON: {{\"model_id\": \"<exactly one of the listed ids>\"}}."
         );
         let request = GenerateJsonRequest {
+            usage: {
+                let mut usage = local_first_inference_usage::UsageContext::new(
+                    uuid::Uuid::new_v4().to_string(),
+                    local_first_inference_usage::InferencePurpose::IntentRouting,
+                    gateway_user_id().as_str(),
+                );
+                usage.purpose_detail = Some(format!("semantic_model_router:{role}"));
+                usage
+            },
             prompt,
             // Generous ceiling: the role's heuristic model runs this selection and
             // may be a REASONING model that spends the budget "thinking" before
@@ -45688,6 +45980,15 @@ async fn generate_provider_profiles(
          Reply ONLY with JSON: {{\"profiles\": [{{\"id\":\"<exact id>\",\"tier\":\"...\",\"strengths\":\"...\"}}]}}."
     );
     let request = GenerateJsonRequest {
+        usage: {
+            let mut usage = local_first_inference_usage::UsageContext::new(
+                uuid::Uuid::new_v4().to_string(),
+                local_first_inference_usage::InferencePurpose::Evaluation,
+                gateway_user_id().as_str(),
+            );
+            usage.purpose_detail = Some("model_profile_generation".to_string());
+            usage
+        },
         prompt,
         max_tokens: 1_200,
         temperature: 0.0,
@@ -49978,23 +50279,34 @@ language of the messages. If nothing important, {\"facts\":[]}.";
             { "role": "user", "content": format!("Today is {today}. Person: {name}\n\nDated messages:\n{joined}") },
         ],
     });
-    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut builder = state
-        .http
-        .post(&endpoint)
-        .timeout(std::time::Duration::from_secs(120));
-    if let Some(key) = api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let Ok(response) = builder.json(&payload).send().await else {
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::MemoryExtraction,
+        gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("contact_profile".to_string());
+    usage.workspace_id = Some(gateway_memory_workspace_id().as_str().to_string());
+    let Ok(response) = inference_transport::send_openai_json(
+        &state.http,
+        state.usage_recorder.clone(),
+        &usage,
+        &inference_provider_id(&base_url),
+        &model,
+        inference_locality(&base_url),
+        &base_url,
+        api_key.as_deref(),
+        &payload,
+        Some(std::time::Duration::from_secs(120)),
+        system.chars().count().saturating_add(joined.chars().count()),
+    )
+    .await
+    else {
         return Vec::new();
     };
-    if !response.status().is_success() {
+    if !(200..300).contains(&response.status) {
         return Vec::new();
     }
-    let Ok(body) = response.json::<serde_json::Value>().await else {
-        return Vec::new();
-    };
+    let body = response.body;
     let content = body
         .get("choices")
         .and_then(|c| c.get(0))
@@ -54910,6 +55222,14 @@ where
                 .map_err(|error| WorkspaceDeleteError::Memory(error.to_string()))
         },
         || {
+            let store = state.usage_store.lock().map_err(|error| {
+                WorkspaceDeleteError::Usage(format!("usage store lock poisoned: {error}"))
+            })?;
+            store
+                .purge_workspace(gateway_user_id().as_str(), workspace_id)
+                .map_err(|error| WorkspaceDeleteError::Usage(error.to_string()))
+        },
+        || {
             let graph_cache = graphify_out_dir(workspace_id);
             if !graph_cache.exists() {
                 return Ok(false);
@@ -54944,6 +55264,11 @@ fn vacuum_all_stores(state: &AppState) {
         let facade = memory_facade(state);
         if let Err(error) = facade.vacuum() {
             eprintln!("VACUUM memory store: {error}");
+        }
+    }
+    if let Ok(store) = state.usage_store.lock() {
+        if let Err(error) = store.vacuum() {
+            eprintln!("VACUUM usage store: {error}");
         }
     }
 }
@@ -66553,6 +66878,12 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         .expect("secret store");
         super::AppState {
             http: reqwest::Client::new(),
+            usage_store: std::sync::Arc::new(std::sync::Mutex::new(
+                super::usage_store::UsageStore::open_in_memory().expect("usage store"),
+            )),
+            usage_recorder: std::sync::Arc::new(
+                local_first_inference_usage::NoopUsageRecorder,
+            ),
             chat_store: std::sync::Arc::new(std::sync::Mutex::new(
                 super::ChatStore::in_memory().expect("chat store"),
             )),
@@ -69791,19 +70122,19 @@ data: [DONE]\n";
         assert!(!crate::is_ollama_base("https://api.openai.com/v1"));
         // Endpoint: Ollama strips /v1 → native /api/chat; others → /chat/completions.
         assert_eq!(
-            crate::chat_endpoint("http://127.0.0.1:11434/v1"),
+            crate::model_client::chat_endpoint("http://127.0.0.1:11434/v1"),
             "http://127.0.0.1:11434/api/chat"
         );
         assert_eq!(
-            crate::chat_endpoint("https://ollama.com/v1"),
+            crate::model_client::chat_endpoint("https://ollama.com/v1"),
             "https://ollama.com/api/chat"
         );
         assert_eq!(
-            crate::chat_endpoint("https://api.z.ai/api/coding/paas/v4"),
+            crate::model_client::chat_endpoint("https://api.z.ai/api/coding/paas/v4"),
             "https://api.z.ai/api/coding/paas/v4/chat/completions"
         );
         assert_eq!(
-            crate::chat_endpoint("https://api.z.ai/api/paas/v4"),
+            crate::model_client::chat_endpoint("https://api.z.ai/api/paas/v4"),
             "https://api.z.ai/api/paas/v4/chat/completions"
         );
         // Message conversion: assistant tool_calls arguments STRING → OBJECT (native).

@@ -214,10 +214,6 @@ async fn describe_one_image(
     image_url: &str,
     goal: &str,
 ) -> Option<String> {
-    let endpoint = format!(
-        "{}/chat/completions",
-        vision.base_url.trim_end_matches('/')
-    );
     let system = "You are the eyes of an assistant that cannot see images. Look at the image and \
 report what it actually shows, in service of the request. Transcribe any text verbatim; give the \
 numbers, labels, layout and colors that matter. Be concrete and complete — the assistant will answer \
@@ -237,24 +233,39 @@ Reply in the language of the request.";
             ]},
         ],
     });
-    let mut builder = http
-        .post(&endpoint)
+    let mut usage = local_first_inference_usage::UsageContext::new(
+        uuid::Uuid::new_v4().to_string(),
+        local_first_inference_usage::InferencePurpose::VisionAnalysis,
+        crate::gateway_user_id().as_str(),
+    );
+    usage.purpose_detail = Some("attachment_description".to_string());
+    usage.workspace_id = Some(crate::gateway_workspace_id().as_str().to_string());
+    let response = match crate::inference_transport::send_openai_json(
+        http,
+        crate::global_usage_recorder(),
+        &usage,
+        &crate::inference_provider_id(&vision.base_url),
+        &vision.model,
+        crate::inference_locality(&vision.base_url),
+        &vision.base_url,
+        vision.api_key.as_deref(),
+        &payload,
         // Vision on a local model is slow (encode + prefill on a large image); the browser loop's
         // screenshot budget is the closest precedent.
-        .timeout(std::time::Duration::from_secs(90));
-    if let Some(key) = vision.api_key.as_ref() {
-        builder = builder.bearer_auth(key);
-    }
-    let response = match builder.json(&payload).send().await {
+        Some(std::time::Duration::from_secs(90)),
+        system.chars().count().saturating_add(goal.chars().count()),
+    )
+    .await
+    {
         Ok(response) => response,
         Err(error) => {
             eprintln!("[gateway] vision describe: transport error ({error})");
             return None;
         }
     };
-    if !response.status().is_success() {
-        let code = response.status();
-        let body = response.text().await.unwrap_or_default();
+    if !(200..300).contains(&response.status) {
+        let code = response.status;
+        let body = response.body.to_string();
         // Loud on purpose: a misconfigured vision role must never look like "the image was blank".
         eprintln!(
             "[gateway] vision describe: «{}» failed ({code}): {}",
@@ -263,7 +274,7 @@ Reply in the language of the request.";
         );
         return None;
     }
-    let body: serde_json::Value = response.json().await.ok()?;
+    let body = response.body;
     let text = body
         .get("choices")?
         .get(0)?

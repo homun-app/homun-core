@@ -210,6 +210,16 @@ pub fn fill_arguments<R: JsonRuntime>(
         upstream = upstream_digest(step, completed),
     );
     let request = GenerateJsonRequest {
+        usage: {
+            let mut usage = local_first_inference_usage::UsageContext::new(
+                uuid::Uuid::new_v4().to_string(),
+                local_first_inference_usage::InferencePurpose::Planning,
+                "local",
+            );
+            usage.purpose_detail = Some("argument_fill".to_string());
+            usage.task_id = Some(step.step_id.clone());
+            usage
+        },
         prompt,
         max_tokens: step.max_tokens.unwrap_or(ARG_FILL_MAX_TOKENS),
         temperature: 0.0,

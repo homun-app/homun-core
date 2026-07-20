@@ -7,9 +7,11 @@ edition = "2024"
 local-first-capabilities = { path = "../capabilities" }
 local-first-context-compression = { path = "../context-compression" }
 local-first-memory = { path = "../memory" }
+local-first-inference-usage = { path = "../inference-usage" }
 local-first-subagents = { path = "../subagents" }
 local-first-task-runtime = { path = "../task-runtime" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 time = { version = "0.3", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
