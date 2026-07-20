@@ -53,6 +53,18 @@ impl ProviderKind {
 /// (Phase 2) role auto-matcher. Flags are inferred heuristically on import and
 /// can be overridden by the user later.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelPrice {
+    pub input_microusd_per_million: Option<u64>,
+    pub output_microusd_per_million: Option<u64>,
+    pub reasoning_microusd_per_million: Option<u64>,
+    pub cache_read_microusd_per_million: Option<u64>,
+    pub cache_write_microusd_per_million: Option<u64>,
+    pub source: String,
+    pub version: String,
+    pub effective_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelEntry {
     pub id: String,
     #[serde(default)]
@@ -71,6 +83,8 @@ pub struct ModelEntry {
     /// models. Optional so old catalogs still load.
     #[serde(default)]
     pub profile: Option<ModelProfile>,
+    #[serde(default)]
+    pub price: Option<ModelPrice>,
 }
 
 fn default_modality() -> String {
@@ -236,6 +250,7 @@ impl ModelEntry {
             modality: modality.to_string(),
             context_window,
             profile: Some(infer_profile(&lower, modality)),
+            price: None,
         }
     }
 }
@@ -843,15 +858,27 @@ pub fn slugify(label: &str) -> String {
 /// Parses a provider model-list HTTP response body into bare model ids,
 /// according to the provider kind. Tolerant of missing fields.
 pub fn parse_models_response(kind: ProviderKind, body: &serde_json::Value) -> Vec<String> {
+    let mut out = parse_model_entries(kind, body, None)
+        .into_iter()
+        .map(|model| model.id)
+        .collect::<Vec<_>>();
+    out.sort();
+    out.dedup();
+    out
+}
+
+pub fn parse_model_entries(
+    kind: ProviderKind,
+    body: &serde_json::Value,
+    provider_id: Option<&str>,
+) -> Vec<ModelEntry> {
     let mut out = Vec::new();
     match kind {
         ProviderKind::Ollama => {
             if let Some(models) = body.get("models").and_then(|v| v.as_array()) {
                 for m in models {
-                    if let Some(name) = m.get("name").and_then(|v| v.as_str()) {
-                        out.push(name.to_string());
-                    } else if let Some(model) = m.get("model").and_then(|v| v.as_str()) {
-                        out.push(model.to_string());
+                    if let Some(model) = parse_model_entry(kind, m, provider_id) {
+                        out.push(model);
                     }
                 }
             }
@@ -859,16 +886,84 @@ pub fn parse_models_response(kind: ProviderKind, body: &serde_json::Value) -> Ve
         ProviderKind::OpenaiCompat | ProviderKind::Anthropic => {
             if let Some(data) = body.get("data").and_then(|v| v.as_array()) {
                 for entry in data {
-                    if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
-                        out.push(id.to_string());
+                    if let Some(model) = parse_model_entry(kind, entry, provider_id) {
+                        out.push(model);
                     }
                 }
             }
         }
     }
-    out.sort();
-    out.dedup();
+    out.sort_by(|left, right| left.id.cmp(&right.id));
+    out.dedup_by(|left, right| left.id == right.id);
     out
+}
+
+pub fn parse_model_entry(
+    kind: ProviderKind,
+    entry: &serde_json::Value,
+    provider_id: Option<&str>,
+) -> Option<ModelEntry> {
+    let id = match kind {
+        ProviderKind::Ollama => entry
+            .get("name")
+            .or_else(|| entry.get("model"))
+            .and_then(serde_json::Value::as_str),
+        ProviderKind::OpenaiCompat | ProviderKind::Anthropic => {
+            entry.get("id").and_then(serde_json::Value::as_str)
+        }
+    }?;
+    let mut model = ModelEntry::inferred(id);
+    if provider_id == Some("openrouter") {
+        model.price = parse_openrouter_price(entry);
+    }
+    Some(model)
+}
+
+fn parse_openrouter_price(entry: &serde_json::Value) -> Option<ModelPrice> {
+    let pricing = entry.get("pricing")?;
+    let rate = |name: &str| {
+        pricing
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .and_then(decimal_usd_per_token_to_microusd_per_million)
+    };
+    let price = ModelPrice {
+        input_microusd_per_million: rate("prompt"),
+        output_microusd_per_million: rate("completion"),
+        reasoning_microusd_per_million: rate("internal_reasoning"),
+        cache_read_microusd_per_million: rate("input_cache_read"),
+        cache_write_microusd_per_million: rate("input_cache_write"),
+        source: "provider_catalog".to_string(),
+        version: "openrouter-catalog-v1".to_string(),
+        effective_at: 0,
+    };
+    (price.input_microusd_per_million.is_some()
+        || price.output_microusd_per_million.is_some()
+        || price.reasoning_microusd_per_million.is_some()
+        || price.cache_read_microusd_per_million.is_some()
+        || price.cache_write_microusd_per_million.is_some())
+        .then_some(price)
+}
+
+fn decimal_usd_per_token_to_microusd_per_million(value: &str) -> Option<u64> {
+    let value = value.trim();
+    if value.is_empty() || value.starts_with('-') {
+        return None;
+    }
+    let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+    if !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.len() > 12
+    {
+        return None;
+    }
+    let whole = whole.parse::<u128>().ok()?;
+    let fraction = if fraction.is_empty() {
+        0
+    } else {
+        fraction.parse::<u128>().ok()? * 10u128.checked_pow((12 - fraction.len()) as u32)?
+    };
+    u64::try_from(whole.checked_mul(1_000_000_000_000)?.checked_add(fraction)?).ok()
 }
 
 #[cfg(test)]
@@ -899,6 +994,34 @@ mod tests {
         let chat = ModelEntry::inferred("minimax-m2.7:cloud");
         assert!(chat.tools && !chat.vision);
         assert_eq!(chat.context_window, Some(200_000));
+    }
+
+    #[test]
+    fn openrouter_catalog_price_converts_per_token_strings_to_microusd_per_million() {
+        let model = parse_model_entry(
+            ProviderKind::OpenaiCompat,
+            &serde_json::json!({
+                "id": "vendor/model",
+                "pricing": {"prompt": "0.00000015", "completion": "0.00000060"}
+            }),
+            Some("openrouter"),
+        )
+        .unwrap();
+        let price = model.price.unwrap();
+        assert_eq!(price.input_microusd_per_million, Some(150_000));
+        assert_eq!(price.output_microusd_per_million, Some(600_000));
+        assert_eq!(price.source, "provider_catalog");
+    }
+
+    #[test]
+    fn generic_catalog_without_price_keeps_cost_unknown() {
+        let model = parse_model_entry(
+            ProviderKind::OpenaiCompat,
+            &serde_json::json!({"id":"custom/model"}),
+            Some("custom"),
+        )
+        .unwrap();
+        assert!(model.price.is_none());
     }
 
     #[test]

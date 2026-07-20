@@ -45548,6 +45548,11 @@ struct ProviderModelView {
     strengths: Option<String>,
     profile_source: Option<String>,
     profile_confidence: Option<u8>,
+    input_microusd_per_million: Option<u64>,
+    output_microusd_per_million: Option<u64>,
+    price_source: Option<String>,
+    price_version: Option<String>,
+    price_effective_at: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45592,6 +45597,17 @@ fn provider_view(entry: &ProviderEntry) -> ProviderView {
                 strengths: m.profile.as_ref().map(|p| p.strengths.clone()),
                 profile_source: m.profile.as_ref().map(|p| p.source.clone()),
                 profile_confidence: m.profile.as_ref().map(|p| p.confidence),
+                input_microusd_per_million: m
+                    .price
+                    .as_ref()
+                    .and_then(|price| price.input_microusd_per_million),
+                output_microusd_per_million: m
+                    .price
+                    .as_ref()
+                    .and_then(|price| price.output_microusd_per_million),
+                price_source: m.price.as_ref().map(|price| price.source.clone()),
+                price_version: m.price.as_ref().map(|price| price.version.clone()),
+                price_effective_at: m.price.as_ref().map(|price| price.effective_at),
             })
             .collect(),
         models_fetched_at: entry.models_fetched_at.clone(),
@@ -45769,7 +45785,18 @@ async fn refresh_provider_models(
             code: "provider_models_decode_failed",
             message: error.to_string(),
         })?;
-    let ids = model_registry::parse_models_response(entry.kind, &body);
+    let mut catalog_models = model_registry::parse_model_entries(entry.kind, &body, Some(&entry.id));
+    let fetched_at = i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX);
+    for model in &mut catalog_models {
+        if let Some(price) = model.price.as_mut() {
+            price.effective_at = fetched_at;
+        }
+    }
+    let ids = catalog_models.iter().map(|model| model.id.clone()).collect::<Vec<_>>();
+    let catalog_by_id = catalog_models
+        .into_iter()
+        .map(|model| (model.id.clone(), model))
+        .collect::<std::collections::HashMap<_, _>>();
 
     // Ask each model what it can DO. Ollama answers on `/api/show`, so the name heuristic has no
     // business deciding here — it is the fallback for providers that stay SILENT, and using it where
@@ -45829,10 +45856,18 @@ async fn refresh_provider_models(
                     .map(|p| (m.id.clone(), p.clone()))
             })
             .collect();
+        let old_prices = stored
+            .models
+            .iter()
+            .filter_map(|model| model.price.clone().map(|price| (model.id.clone(), price)))
+            .collect::<std::collections::HashMap<_, _>>();
         stored.models = ids
             .iter()
             .map(|model_id| {
-                let mut entry = model_registry::ModelEntry::inferred(model_id);
+                let mut entry = catalog_by_id
+                    .get(model_id)
+                    .cloned()
+                    .unwrap_or_else(|| model_registry::ModelEntry::inferred(model_id));
                 // The provider's own report wins over the name heuristic wherever we got one. A retired
                 // model is reported as having no capabilities at all → it drops out of every role's
                 // eligible set, instead of being recommended on the strength of its name.
@@ -45845,6 +45880,9 @@ async fn refresh_provider_models(
                 }
                 if let Some(profile) = user_profiles.get(model_id) {
                     entry.profile = Some(profile.clone());
+                }
+                if entry.price.is_none() {
+                    entry.price = old_prices.get(model_id).cloned();
                 }
                 entry
             })
