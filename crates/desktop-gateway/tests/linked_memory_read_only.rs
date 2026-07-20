@@ -1,6 +1,9 @@
 use local_first_desktop_gateway::linked_memory_repair::{
     LinkedRepairFailureInjection, apply_linked_memory_repair, preview_linked_memory_repair,
 };
+use local_first_desktop_gateway::{
+    ChatMessage, chat_message_for_existing_thread_context,
+};
 use local_first_memory::{
     DataSensitivity, Exchange, LearnHooks, LinkedMemoryReadRef, MemoryCollectionKey, MemoryFacade,
     MemoryRecord, MemoryRef, MemoryRefKind, MemoryReuseEnvelope, MemorySourceGrant, MemoryStatus,
@@ -201,6 +204,34 @@ fn linked_recall_remains_read_only_across_learning_revocation_and_other_projects
             .validate_linked_memory_read(&user, &consumer, &read, 1_800_000_001)
             .unwrap()
     );
+
+    let historical_answer = ChatMessage {
+        id: "assistant-linked-answer".to_string(),
+        role: "assistant".to_string(),
+        text: format!("Il codice collegato e {LINKED_SENTINEL}"),
+        timestamp: "unix:1800000000".to_string(),
+        metadata: None,
+        metrics: None,
+        feedback: None,
+        saved_memory_ref: None,
+        linked_task_id: None,
+        linked_automation_ref: None,
+        attachments: Vec::new(),
+        event_parts: Vec::new(),
+        memory_reuse: Some(MemoryReuseEnvelope::user_input_only(vec![read.clone()])),
+    };
+    let same_thread_context = chat_message_for_existing_thread_context(&historical_answer)
+        .expect("historical assistant context");
+    assert!(same_thread_context.text.contains(LINKED_SENTINEL));
+    assert_eq!(
+        historical_answer
+            .memory_reuse
+            .as_ref()
+            .expect("persisted provenance")
+            .linked_reads,
+        vec![read.clone()]
+    );
+
     let after_revoke = recall_authorized_sources_on_facade(
         &facade,
         &user,

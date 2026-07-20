@@ -61,7 +61,7 @@ pub type SystemBlock = Option<String>;
 /// objective/brief/recent_work sono sempre `None` nello scope Personale (non è
 /// una "memoria di lavoro" cross-chat). Questo realizza l'invariant P1 senza
 /// cambiare il behaviour esistente.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct BriefingPack {
     /// Profile memory + open loops (personal preferences / project scope memory),
     /// già budgetizzato. Sempre presente per entrambi gli scope.
@@ -72,6 +72,9 @@ pub struct BriefingPack {
     pub brief: SystemBlock,
     /// Ultimi commit del progetto. `None` per `Personal`.
     pub recent_work: SystemBlock,
+    /// Linked records that actually entered the budgeted profile block. Local
+    /// records are intentionally absent because they need no grant attestation.
+    pub linked_hits: Vec<RecallHit>,
 }
 
 impl BriefingPack {
@@ -319,6 +322,26 @@ impl MemoryReuseEnvelope {
             linked_reads: Vec::new(),
         }
     }
+
+    /// Validates only the persisted attestation shape. It deliberately does
+    /// not re-authorize a historical read against current grants.
+    pub fn is_structurally_valid(&self) -> bool {
+        match self.write_policy {
+            MemoryWritePolicy::Normal | MemoryWritePolicy::BlockedUnknown => {
+                self.linked_reads.is_empty()
+            }
+            MemoryWritePolicy::UserInputOnly => {
+                !self.linked_reads.is_empty()
+                    && self.linked_reads.iter().all(|read| {
+                        read.policy_version > 0
+                            && !read.source_workspace_id.trim().is_empty()
+                            && !read.grant_id.trim().is_empty()
+                            && !read.memory_ref.trim().is_empty()
+                            && !read.source_revision.trim().is_empty()
+                    })
+            }
+        }
+    }
 }
 
 impl Default for MemoryReuseEnvelope {
@@ -555,6 +578,7 @@ mod cache_tests {
             objective: None,
             brief: None,
             recent_work: None,
+            linked_hits: Vec::new(),
         }
     }
 
@@ -720,6 +744,40 @@ mod cache_tests {
 mod tests {
     use super::*;
     use crate::WorkspaceId;
+
+    fn complete_linked_read() -> LinkedMemoryReadRef {
+        LinkedMemoryReadRef {
+            source_workspace_id: "source-a".to_string(),
+            grant_id: "grant-a".to_string(),
+            policy_version: 1,
+            memory_ref: "memory:owner:source-a:fact-a".to_string(),
+            source_revision: "sha256:rev-a".to_string(),
+        }
+    }
+
+    #[test]
+    fn memory_reuse_envelope_validates_its_structural_contract() {
+        assert!(MemoryReuseEnvelope::normal().is_structurally_valid());
+        assert!(MemoryReuseEnvelope::user_input_only(vec![complete_linked_read()])
+            .is_structurally_valid());
+        assert!(MemoryReuseEnvelope::blocked_unknown().is_structurally_valid());
+
+        let mut normal_with_read = MemoryReuseEnvelope::normal();
+        normal_with_read.linked_reads.push(complete_linked_read());
+        assert!(!normal_with_read.is_structurally_valid());
+
+        let missing_reads = MemoryReuseEnvelope::user_input_only(Vec::new());
+        assert!(!missing_reads.is_structurally_valid());
+
+        let mut incomplete = complete_linked_read();
+        incomplete.source_revision.clear();
+        assert!(!MemoryReuseEnvelope::user_input_only(vec![incomplete])
+            .is_structurally_valid());
+
+        let mut blocked_with_read = MemoryReuseEnvelope::blocked_unknown();
+        blocked_with_read.linked_reads.push(complete_linked_read());
+        assert!(!blocked_with_read.is_structurally_valid());
+    }
     /// L'ordine canonico di `ordered_blocks()` deve essere [profile, objective,
     /// brief, recent_work] — identico all'assemblaggio del system prompt nel
     /// gateway. È il prerequisito del test di parità Tappa 1: se cambia l'ordine,
@@ -731,6 +789,7 @@ mod tests {
             objective: Some("OBJECTIVE".to_string()),
             brief: Some("BRIEF".to_string()),
             recent_work: Some("RECENT".to_string()),
+            linked_hits: Vec::new(),
         };
         let ordered: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
         assert_eq!(ordered, vec!["PROFILE", "OBJECTIVE", "BRIEF", "RECENT"]);
@@ -749,6 +808,7 @@ mod tests {
             objective: None,
             brief: None,
             recent_work: None,
+            linked_hits: Vec::new(),
         };
         // Per Personal, solo il profile_block contribuisce al prompt.
         let non_empty: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
@@ -769,6 +829,7 @@ mod tests {
             objective: Some("OBJECTIVE".to_string()),
             brief: None,
             recent_work: Some("RECENT".to_string()),
+            linked_hits: Vec::new(),
         };
         let ordered: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
         assert_eq!(ordered, vec!["OBJECTIVE", "RECENT"]);

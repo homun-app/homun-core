@@ -1,6 +1,6 @@
 use local_first_desktop_gateway::{
     ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, LinkedMemoryReadRef,
-    MemoryReuseEnvelope, MemoryWritePolicy, compact_thread_title, seeded_ready_message,
+    MemoryReuseEnvelope, compact_thread_title, seeded_ready_message,
 };
 // The generic marker parsers live in the single `markers` module now; aliased so the local
 // call sites read unchanged.
@@ -3678,23 +3678,6 @@ fn memory_reuse_from_event_parts(event_parts: &[serde_json::Value]) -> MemoryReu
     }
 }
 
-fn valid_memory_reuse_envelope(envelope: &MemoryReuseEnvelope) -> bool {
-    match envelope.write_policy {
-        MemoryWritePolicy::Normal => envelope.linked_reads.is_empty(),
-        MemoryWritePolicy::UserInputOnly => {
-            !envelope.linked_reads.is_empty()
-                && envelope.linked_reads.iter().all(|read| {
-                    read.policy_version > 0
-                        && !read.source_workspace_id.trim().is_empty()
-                        && !read.grant_id.trim().is_empty()
-                        && !read.memory_ref.trim().is_empty()
-                        && !read.source_revision.trim().is_empty()
-                })
-        }
-        MemoryWritePolicy::BlockedUnknown => true,
-    }
-}
-
 fn push_text_marker_part(
     text: &str,
     parts: &mut Vec<serde_json::Value>,
@@ -3758,7 +3741,7 @@ fn memory_reuse_from_row(
         return Ok(Some(
             serde_json::from_str::<MemoryReuseEnvelope>(&encoded)
                 .ok()
-                .filter(valid_memory_reuse_envelope)
+                .filter(MemoryReuseEnvelope::is_structurally_valid)
                 .unwrap_or_else(MemoryReuseEnvelope::blocked_unknown),
         ));
     }
@@ -3819,6 +3802,7 @@ fn monotonic_suffix() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use local_first_desktop_gateway::MemoryWritePolicy;
 
     fn linked_read() -> local_first_desktop_gateway::LinkedMemoryReadRef {
         local_first_desktop_gateway::LinkedMemoryReadRef {
