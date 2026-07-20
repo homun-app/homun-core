@@ -1279,7 +1279,22 @@
     "starting": "Avvio…",
     "localComputerDockerOff": "Il computer contenuto richiede Docker, non disponibile su questo deploy.",
     "localComputerAutostartTitle": "Avvia all'avvio",
-    "localComputerAutostartDesc": "Avvia il local computer quando parte l'app, aprendo Docker se è chiuso. Disattivalo se non vuoi che Docker parta a ogni avvio."
+    "localComputerAutostartDesc": "Avvia il local computer quando parte l'app, aprendo Docker se è chiuso. Disattivalo se non vuoi che Docker parta a ogni avvio.",
+    "usage": {
+      "title": "Utilizzo", "windowLabel": "Periodo di utilizzo",
+      "windows": { "7d": "7 giorni", "30d": "30 giorni", "all": "Tutto" },
+      "tabs": { "label": "Viste utilizzo", "overview": "Panoramica", "models": "Modelli", "providers": "Provider", "processes": "Processi" },
+      "states": { "loading": "Caricamento utilizzo…", "empty": "Nessun utilizzo misurato in questo periodo.", "error": "Impossibile caricare l'utilizzo", "stale": "Non aggiornato" },
+      "metrics": { "calls": "Chiamate", "attempts": "Tentativi", "inputTokens": "Token in ingresso", "outputTokens": "Token in uscita", "reasoningTokens": "Token di ragionamento", "cacheTokens": "Token cache", "providers": "Provider attivi", "dominantModel": "Modello più usato" },
+      "cost": { "title": "Provenienza dei costi", "reported": "Dichiarato", "estimated": "Stimato", "unknown": "Non disponibile", "notBilled": "Non fatturato" },
+      "coverage": { "title": "Copertura", "usage": "Copertura utilizzo", "cost": "Copertura costi", "incomplete": "Copertura incompleta", "authoritativeSince": "Dati autorevoli dal {{date}}" },
+      "models": { "model": "Modello", "calls": "Chiamate", "tokens": "Token", "cost": "Costo", "p50": "Latenza mediana", "p95": "Latenza P95", "success": "Successo", "retries": "Nuovi tentativi", "fallbacks": "Fallback" },
+      "provider": { "measured": "Misurato da Homun", "account": "Account provider", "used": "utilizzati", "providerLimit": "limite provider", "manualBudget": "Budget manuale", "notSet": "Non impostato", "coverageRequired": "Serve una copertura costi completa per calcolare il budget residuo.", "manualRemaining": "Rimane il {{percent}}% del budget manuale" },
+      "account": { "available": "Disponibile", "unsupported": "Non supportato con la chiave standard", "unauthorized": "La chiave normale non può accedere a questa informazione", "error": "Errore del provider" },
+      "actions": { "refresh": "Aggiorna", "editBudget": "Modifica budget", "save": "Salva", "saving": "Salvataggio…" },
+      "policy": { "monthlyBudget": "Budget mensile (USD)", "resetDay": "Giorno di rinnovo (1–28)", "timezone": "Fuso orario", "threshold": "Soglia di avviso (%)", "invalid": "Controlla budget, giorno di rinnovo, fuso orario e soglia." },
+      "processes": { "chat": "Chat", "memory": "Memoria", "planning": "Pianificazione", "subagents": "Subagenti", "automations": "Automazioni", "artifacts": "Artefatti", "other": "Altro", "details": "Processi esatti" }
+    }
   },
   "error": {
     "model": {

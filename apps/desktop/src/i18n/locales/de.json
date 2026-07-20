@@ -1294,7 +1294,22 @@
     "starting": "Wird gestartet…",
     "localComputerDockerOff": "Der isolierte Computer benötigt Docker, das in dieser Installation nicht verfügbar ist.",
     "localComputerAutostartTitle": "Automatisch starten",
-    "localComputerAutostartDesc": "Wärmt den lokalen Computer beim Start der App vor und öffnet dabei Docker, falls es geschlossen ist. Deaktivieren Sie dies, wenn Docker nicht bei jedem Start automatisch gestartet werden soll."
+    "localComputerAutostartDesc": "Wärmt den lokalen Computer beim Start der App vor und öffnet dabei Docker, falls es geschlossen ist. Deaktivieren Sie dies, wenn Docker nicht bei jedem Start automatisch gestartet werden soll.",
+    "usage": {
+      "title": "Nutzung", "windowLabel": "Nutzungszeitraum",
+      "windows": { "7d": "7 Tage", "30d": "30 Tage", "all": "Gesamt" },
+      "tabs": { "label": "Nutzungsansichten", "overview": "Übersicht", "models": "Modelle", "providers": "Anbieter", "processes": "Prozesse" },
+      "states": { "loading": "Nutzung wird geladen…", "empty": "In diesem Zeitraum wurde keine Nutzung gemessen.", "error": "Nutzung konnte nicht geladen werden", "stale": "Veraltet" },
+      "metrics": { "calls": "Aufrufe", "attempts": "Versuche", "inputTokens": "Eingabe-Token", "outputTokens": "Ausgabe-Token", "reasoningTokens": "Reasoning-Token", "cacheTokens": "Cache-Token", "providers": "Aktive Anbieter", "dominantModel": "Meistgenutztes Modell" },
+      "cost": { "title": "Kostenherkunft", "reported": "Gemeldet", "estimated": "Geschätzt", "unknown": "Nicht verfügbar", "notBilled": "Nicht berechnet" },
+      "coverage": { "title": "Abdeckung", "usage": "Nutzungsabdeckung", "cost": "Kostenabdeckung", "incomplete": "Unvollständige Abdeckung", "authoritativeSince": "Verlässliche Daten seit {{date}}" },
+      "models": { "model": "Modell", "calls": "Aufrufe", "tokens": "Token", "cost": "Kosten", "p50": "Median-Latenz", "p95": "P95-Latenz", "success": "Erfolg", "retries": "Wiederholungen", "fallbacks": "Fallbacks" },
+      "provider": { "measured": "Von Homun gemessen", "account": "Anbieterkonto", "used": "verwendet", "providerLimit": "Anbieterlimit", "manualBudget": "Manuelles Budget", "notSet": "Nicht festgelegt", "coverageRequired": "Für die Berechnung des Restbudgets ist eine vollständige Kostenabdeckung erforderlich.", "manualRemaining": "{{percent}} % des manuellen Budgets verbleiben" },
+      "account": { "available": "Verfügbar", "unsupported": "Mit Standardschlüssel nicht unterstützt", "unauthorized": "Der normale Schlüssel kann auf diese Information nicht zugreifen", "error": "Anbieterfehler" },
+      "actions": { "refresh": "Aktualisieren", "editBudget": "Budget bearbeiten", "save": "Speichern", "saving": "Speichern…" },
+      "policy": { "monthlyBudget": "Monatsbudget (USD)", "resetDay": "Rücksetztag (1–28)", "timezone": "Zeitzone", "threshold": "Warnschwelle (%)", "invalid": "Prüfen Sie Budget, Rücksetztag, Zeitzone und Schwellenwert." },
+      "processes": { "chat": "Chat", "memory": "Speicher", "planning": "Planung", "subagents": "Subagenten", "automations": "Automatisierungen", "artifacts": "Artefakte", "other": "Sonstiges", "details": "Exakte Prozesse" }
+    }
   },
   "error": {
     "model": {

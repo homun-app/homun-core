@@ -39,3 +39,15 @@ for (const cat of CATALOGS) {
     });
   }
 }
+
+const coreEnglishUsage = load("i18n/locales/en.json").settings.usage;
+for (const lng of ["it", "es", "fr", "de"]) {
+  test(`i18n/locales/${lng}.json has complete Settings Usage copy`, () => {
+    const usage = load(`i18n/locales/${lng}.json`).settings.usage;
+    assert.deepEqual(
+      keyPaths(usage),
+      keyPaths(coreEnglishUsage),
+      `settings.usage key set differs in ${lng}`,
+    );
+  });
+}

@@ -1279,7 +1279,22 @@
     "starting": "Starting…",
     "localComputerDockerOff": "The contained computer needs Docker, which isn't available on this deployment.",
     "localComputerAutostartTitle": "Start on launch",
-    "localComputerAutostartDesc": "Warm up the local computer when the app starts, opening Docker if it's closed. Turn off if you don't want Docker started every launch."
+    "localComputerAutostartDesc": "Warm up the local computer when the app starts, opening Docker if it's closed. Turn off if you don't want Docker started every launch.",
+    "usage": {
+      "title": "Usage", "windowLabel": "Usage period",
+      "windows": { "7d": "7 days", "30d": "30 days", "all": "All" },
+      "tabs": { "label": "Usage views", "overview": "Overview", "models": "Models", "providers": "Providers", "processes": "Processes" },
+      "states": { "loading": "Loading usage…", "empty": "No measured usage in this period.", "error": "Usage could not be loaded", "stale": "Stale" },
+      "metrics": { "calls": "Calls", "attempts": "Attempts", "inputTokens": "Input tokens", "outputTokens": "Output tokens", "reasoningTokens": "Reasoning tokens", "cacheTokens": "Cache tokens", "providers": "Active providers", "dominantModel": "Most used model" },
+      "cost": { "title": "Cost provenance", "reported": "Reported", "estimated": "Estimated", "unknown": "Unknown", "notBilled": "Not billed" },
+      "coverage": { "title": "Coverage", "usage": "Usage coverage", "cost": "Cost coverage", "incomplete": "Incomplete coverage", "authoritativeSince": "Authoritative data since {{date}}" },
+      "models": { "model": "Model", "calls": "Calls", "tokens": "Tokens", "cost": "Cost", "p50": "Median latency", "p95": "P95 latency", "success": "Success", "retries": "Retries", "fallbacks": "Fallbacks" },
+      "provider": { "measured": "Measured by Homun", "account": "Provider account", "used": "used", "providerLimit": "provider limit", "manualBudget": "Manual budget", "notSet": "Not set", "coverageRequired": "Complete cost coverage is required to calculate the remaining budget.", "manualRemaining": "{{percent}}% of manual budget remaining" },
+      "account": { "available": "Available", "unsupported": "Unsupported with the standard key", "unauthorized": "The normal key cannot access this information", "error": "Provider error" },
+      "actions": { "refresh": "Refresh", "editBudget": "Edit budget", "save": "Save", "saving": "Saving…" },
+      "policy": { "monthlyBudget": "Monthly budget (USD)", "resetDay": "Reset day (1–28)", "timezone": "Timezone", "threshold": "Alert threshold (%)", "invalid": "Check the budget, reset day, timezone and threshold." },
+      "processes": { "chat": "Chat", "memory": "Memory", "planning": "Planning", "subagents": "Subagents", "automations": "Automations", "artifacts": "Artifacts", "other": "Other", "details": "Exact processes" }
+    }
   },
   "error": {
     "model": {

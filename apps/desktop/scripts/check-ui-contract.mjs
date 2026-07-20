@@ -103,6 +103,14 @@ assertContains("src/data/mockData.ts", 'id: "usage"', "Settings drawer must list
 assertContains("src/components/SettingsView.tsx", "<UsageSettingsPane />", "Settings must render Usage");
 assertContains("src/components/UsageSettingsPane.tsx", 'role="tablist"', "Usage views must be keyboard-addressable tabs");
 assertContains("src/components/UsageSettingsPane.tsx", 'aria-live="polite"', "Usage loading and errors must be announced");
+assertContains("src/components/UsageSettingsPane.tsx", 'className="reported"', "reported cost must stay separately labeled");
+assertContains("src/components/UsageSettingsPane.tsx", 'className="estimated"', "estimated cost must stay separately labeled");
+assertContains("src/components/UsageSettingsPane.tsx", 'className="unknown"', "unknown cost must stay visible");
+assertContains("src/components/UsageSettingsPane.tsx", "usage-coverage", "usage coverage must remain visible");
+assertContains("src/components/UsageSettingsPane.tsx", "latency-p50", "model rows must reserve p50 latency");
+assertContains("src/components/UsageSettingsPane.tsx", "latency-p95", "model rows must reserve p95 latency");
+assertContains("src/components/UsageSettingsPane.tsx", "retry-count", "model rows must expose retries");
+assertContains("src/components/UsageSettingsPane.tsx", "fallback-count", "model rows must expose fallbacks");
 assertMatches(
   "src/styles.css",
   /\.onb-model\s*\{[^}]*color:\s*var\(--o-text\);[^}]*\}/m,
