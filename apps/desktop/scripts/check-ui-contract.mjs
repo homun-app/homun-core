@@ -94,6 +94,15 @@ assertContains("src/styles.css", "--window-drag-height", "Electron shell must re
 assertContains("src/styles.css", "-webkit-app-region: drag", "Electron shell must expose a draggable titlebar region");
 assertContains("src/styles.css", "-webkit-app-region: no-drag", "interactive controls must remain clickable inside Electron");
 assertContains("src/lib/accent.ts", "\"dark\"", "appearance surface themes must include a dark preset");
+assertContains("src/components/OnboardingWizard.tsx", 'href="https://homun.app/docs/"', "onboarding must link to the canonical documentation site");
+assertNotContains("src/components/OnboardingWizard.tsx", "https://docs.homun.app", "onboarding must not use the retired documentation host");
+assertContains("src/lib/accent.ts", 'export const DEFAULT_THEME: ThemeName = "dark";', "fresh installs must default to the dark surface theme");
+assertContains("src/lib/accent.ts", 'export const DEFAULT_ACCENT = "#157a6e";', "fresh installs must keep the Homun teal accent");
+assertMatches(
+  "src/styles.css",
+  /\.onb-model\s*\{[^}]*color:\s*var\(--o-text\);[^}]*\}/m,
+  "onboarding model buttons must explicitly use readable foreground text",
+);
 assertMatches(
   "src/lib/accent.ts",
   /value === "freddo" \|\| value === "avorio" \|\| value === "neutro" \|\| value === "sabbia" \|\| value === "dark"/,
