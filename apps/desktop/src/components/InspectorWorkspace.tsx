@@ -1,6 +1,7 @@
 import { ArrowLeft, Maximize2, Minimize2, PanelRightClose } from "lucide-react";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -52,6 +53,8 @@ export function InspectorWorkspace({
   const [liveRatio, setLiveRatio] = useState(ratio);
   const [containerWidth, setContainerWidth] = useState(0);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const panelRefs = useRef(new Map<string, HTMLElement>());
+  const scrollPositionsRef = useRef(new Map<string, number>());
 
   useEffect(() => setLiveRatio(ratio), [ratio]);
   useEffect(() => {
@@ -67,6 +70,20 @@ export function InspectorWorkspace({
     layoutRef.current?.style.setProperty("--inspector-ratio", String(liveRatio));
   }, [layoutRef, liveRatio]);
   useEffect(() => () => resizeCleanupRef.current?.(), []);
+
+  useLayoutEffect(() => {
+    if (!state.activeTabId) return;
+    const panel = panelRefs.current.get(state.activeTabId);
+    if (!panel) return;
+    panel.scrollTop = scrollPositionsRef.current.get(state.activeTabId) ?? 0;
+  }, [state.activeTabId]);
+
+  useEffect(() => {
+    const openTabIds = new Set(state.tabs.map((tab) => tab.id));
+    for (const tabId of scrollPositionsRef.current.keys()) {
+      if (!openTabIds.has(tabId)) scrollPositionsRef.current.delete(tabId);
+    }
+  }, [state.tabs]);
 
   function ratioForPointer(clientX: number) {
     const bounds = layoutRef.current?.getBoundingClientRect();
@@ -208,10 +225,19 @@ export function InspectorWorkspace({
             <section
               className="inspector-tab-panel"
               key={tab.id}
+              ref={(node) => {
+                if (node) panelRefs.current.set(tab.id, node);
+                else panelRefs.current.delete(tab.id);
+              }}
               id={`inspector-panel-${tab.id}`}
               role="tabpanel"
               aria-labelledby={`inspector-tab-${tab.id}`}
               hidden={tab.id !== state.activeTabId}
+              onScroll={(event) => {
+                if (tab.id === state.activeTabId) {
+                  scrollPositionsRef.current.set(tab.id, event.currentTarget.scrollTop);
+                }
+              }}
             >
               {renderTab(tab)}
             </section>
