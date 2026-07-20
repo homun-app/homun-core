@@ -1,8 +1,8 @@
 use local_first_inference_usage::{
     AttemptEventKind, AttemptOutcome, UsageAttemptEvent, UsageRecorder,
 };
-use rusqlite::{Connection, Row, Transaction, named_params, params, types::Type};
-use serde::{Serialize, de::DeserializeOwned};
+use rusqlite::{Connection, OptionalExtension, Row, Transaction, named_params, params, types::Type};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     path::Path,
     sync::{
@@ -25,6 +25,119 @@ cost_provenance, pricing_source, pricing_version, started_at, recorded_at, schem
 pub enum AppendOutcome {
     Inserted,
     Duplicate,
+}
+
+#[derive(Debug)]
+pub enum UsageStoreError {
+    Database(rusqlite::Error),
+    Invalid(String),
+    Json(serde_json::Error),
+}
+
+impl std::fmt::Display for UsageStoreError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Database(error) => write!(formatter, "{error}"),
+            Self::Invalid(error) => write!(formatter, "{error}"),
+            Self::Json(error) => write!(formatter, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for UsageStoreError {}
+
+impl From<rusqlite::Error> for UsageStoreError {
+    fn from(value: rusqlite::Error) -> Self { Self::Database(value) }
+}
+
+impl From<serde_json::Error> for UsageStoreError {
+    fn from(value: serde_json::Error) -> Self { Self::Json(value) }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelPriceOverride {
+    pub model_id: String,
+    pub input_microusd_per_million: Option<u64>,
+    pub output_microusd_per_million: Option<u64>,
+    pub reasoning_microusd_per_million: Option<u64>,
+    pub cache_read_microusd_per_million: Option<u64>,
+    pub cache_write_microusd_per_million: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderUsagePolicy {
+    pub user_id: String,
+    pub provider_id: String,
+    pub monthly_budget_microusd: Option<u64>,
+    pub currency: String,
+    pub reset_day: Option<u8>,
+    pub timezone: Option<String>,
+    pub alert_threshold_percent: Option<u8>,
+    #[serde(default)]
+    pub pricing_overrides: Vec<ModelPriceOverride>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LimitSource {
+    ManualBudget,
+    None,
+}
+
+impl ProviderUsagePolicy {
+    pub fn limit_source(&self) -> LimitSource {
+        if self.monthly_budget_microusd.is_some() { LimitSource::ManualBudget } else { LimitSource::None }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderSnapshotStatus {
+    Available,
+    Unsupported,
+    Unauthorized,
+    Error,
+}
+
+impl ProviderSnapshotStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Unsupported => "unsupported",
+            Self::Unauthorized => "unauthorized",
+            Self::Error => "error",
+        }
+    }
+
+    fn parse(value: &str) -> rusqlite::Result<Self> {
+        match value {
+            "available" => Ok(Self::Available),
+            "unsupported" => Ok(Self::Unsupported),
+            "unauthorized" => Ok(Self::Unauthorized),
+            "error" => Ok(Self::Error),
+            _ => Err(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                Type::Text,
+                format!("invalid provider snapshot status: {value}").into(),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderUsageSnapshot {
+    pub snapshot_id: String,
+    pub user_id: String,
+    pub provider_id: String,
+    pub status: ProviderSnapshotStatus,
+    pub metric: String,
+    pub used_value: Option<u64>,
+    pub limit_value: Option<u64>,
+    pub remaining_value: Option<u64>,
+    pub unit: Option<String>,
+    pub source: String,
+    pub observed_at: i64,
+    pub error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +299,33 @@ impl UsageStore {
                 known_cost_attempts INTEGER NOT NULL,
                 unknown_cost_attempts INTEGER NOT NULL,
                 PRIMARY KEY(day_epoch, user_id, workspace_id, provider_id, model_id, locality, purpose)
+            );
+            CREATE TABLE IF NOT EXISTS provider_usage_policies (
+                user_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                monthly_budget_microusd INTEGER,
+                currency TEXT NOT NULL,
+                reset_day INTEGER,
+                timezone TEXT,
+                alert_threshold_percent INTEGER,
+                pricing_overrides_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY(user_id, provider_id)
+            );
+            CREATE TABLE IF NOT EXISTS provider_usage_snapshots (
+                snapshot_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                used_value INTEGER,
+                limit_value INTEGER,
+                remaining_value INTEGER,
+                unit TEXT,
+                source TEXT NOT NULL,
+                observed_at INTEGER NOT NULL,
+                error_code TEXT,
+                PRIMARY KEY(snapshot_id, metric)
             );",
         )
     }
@@ -287,6 +427,135 @@ impl UsageStore {
         )?;
         transaction.commit()?;
         Ok(deleted)
+    }
+
+    pub fn upsert_provider_policy(
+        &self,
+        policy: &ProviderUsagePolicy,
+        now: i64,
+    ) -> Result<(), UsageStoreError> {
+        validate_policy(policy)?;
+        let overrides = serde_json::to_string(&policy.pricing_overrides)?;
+        self.conn.execute(
+            "INSERT INTO provider_usage_policies (
+                user_id, provider_id, monthly_budget_microusd, currency, reset_day, timezone,
+                alert_threshold_percent, pricing_overrides_json, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(user_id, provider_id) DO UPDATE SET
+                monthly_budget_microusd=excluded.monthly_budget_microusd,
+                currency=excluded.currency, reset_day=excluded.reset_day,
+                timezone=excluded.timezone, alert_threshold_percent=excluded.alert_threshold_percent,
+                pricing_overrides_json=excluded.pricing_overrides_json, updated_at=excluded.updated_at",
+            params![
+                policy.user_id,
+                policy.provider_id,
+                policy.monthly_budget_microusd,
+                policy.currency,
+                policy.reset_day,
+                policy.timezone,
+                policy.alert_threshold_percent,
+                overrides,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn provider_policy(
+        &self,
+        user_id: &str,
+        provider_id: &str,
+    ) -> Result<Option<ProviderUsagePolicy>, UsageStoreError> {
+        let mut statement = self.conn.prepare(
+            "SELECT monthly_budget_microusd, currency, reset_day, timezone,
+                    alert_threshold_percent, pricing_overrides_json
+             FROM provider_usage_policies WHERE user_id=?1 AND provider_id=?2",
+        )?;
+        let row = statement.query_row(params![user_id, provider_id], |row| {
+            Ok((
+                row.get::<_, Option<u64>>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<u8>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<u8>>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        });
+        let Some((monthly_budget_microusd, currency, reset_day, timezone, alert_threshold_percent, overrides)) =
+            row.optional()?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(ProviderUsagePolicy {
+            user_id: user_id.to_string(),
+            provider_id: provider_id.to_string(),
+            monthly_budget_microusd,
+            currency,
+            reset_day,
+            timezone,
+            alert_threshold_percent,
+            pricing_overrides: serde_json::from_str(&overrides)?,
+        }))
+    }
+
+    pub fn append_provider_snapshot(
+        &self,
+        snapshot: &ProviderUsageSnapshot,
+    ) -> Result<AppendOutcome, UsageStoreError> {
+        validate_snapshot(snapshot)?;
+        let inserted = self.conn.execute(
+            "INSERT OR IGNORE INTO provider_usage_snapshots (
+                snapshot_id, user_id, provider_id, status, metric, used_value, limit_value,
+                remaining_value, unit, source, observed_at, error_code
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                snapshot.snapshot_id,
+                snapshot.user_id,
+                snapshot.provider_id,
+                snapshot.status.as_str(),
+                snapshot.metric,
+                snapshot.used_value,
+                snapshot.limit_value,
+                snapshot.remaining_value,
+                snapshot.unit,
+                snapshot.source,
+                snapshot.observed_at,
+                snapshot.error_code,
+            ],
+        )?;
+        Ok(if inserted == 1 { AppendOutcome::Inserted } else { AppendOutcome::Duplicate })
+    }
+
+    pub fn latest_provider_snapshots(
+        &self,
+        user_id: &str,
+        provider_id: &str,
+    ) -> Result<Vec<ProviderUsageSnapshot>, UsageStoreError> {
+        let mut statement = self.conn.prepare(
+            "SELECT snapshot_id, user_id, provider_id, status, metric, used_value, limit_value,
+                    remaining_value, unit, source, observed_at, error_code
+             FROM provider_usage_snapshots
+             WHERE user_id=?1 AND provider_id=?2
+               AND observed_at=(SELECT MAX(observed_at) FROM provider_usage_snapshots
+                                WHERE user_id=?1 AND provider_id=?2)
+             ORDER BY metric ASC",
+        )?;
+        let rows = statement.query_map(params![user_id, provider_id], snapshot_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn provider_snapshot_count(
+        &self,
+        user_id: &str,
+        provider_id: &str,
+    ) -> Result<u64, UsageStoreError> {
+        let count = self.conn.query_row(
+            "SELECT COUNT(*) FROM provider_usage_snapshots WHERE user_id=?1 AND provider_id=?2",
+            params![user_id, provider_id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 
     pub fn summary(
@@ -464,6 +733,66 @@ impl UsageStore {
             })?
             .collect()
     }
+}
+
+fn validate_policy(policy: &ProviderUsagePolicy) -> Result<(), UsageStoreError> {
+    if policy.user_id.trim().is_empty() || policy.provider_id.trim().is_empty() {
+        return Err(UsageStoreError::Invalid("user and provider are required".to_string()));
+    }
+    if policy.currency != "USD" {
+        return Err(UsageStoreError::Invalid("currency must be USD".to_string()));
+    }
+    if policy.reset_day.is_some_and(|day| !(1..=28).contains(&day)) {
+        return Err(UsageStoreError::Invalid("reset day must be between 1 and 28".to_string()));
+    }
+    if policy.alert_threshold_percent.is_some_and(|value| !(1..=100).contains(&value)) {
+        return Err(UsageStoreError::Invalid("alert threshold must be between 1 and 100".to_string()));
+    }
+    if policy.timezone.as_ref().is_some_and(|timezone| {
+        timezone.trim().is_empty() || timezone.chars().count() > 80
+    }) {
+        return Err(UsageStoreError::Invalid("timezone must contain 1 to 80 characters".to_string()));
+    }
+    let mut models = std::collections::HashSet::new();
+    for price in &policy.pricing_overrides {
+        let model = price.model_id.trim();
+        if model.is_empty() || model.chars().count() > 240 {
+            return Err(UsageStoreError::Invalid("model id must contain 1 to 240 characters".to_string()));
+        }
+        if !models.insert(model) {
+            return Err(UsageStoreError::Invalid(format!("duplicate model override: {model}")));
+        }
+    }
+    Ok(())
+}
+
+fn validate_snapshot(snapshot: &ProviderUsageSnapshot) -> Result<(), UsageStoreError> {
+    if snapshot.snapshot_id.trim().is_empty()
+        || snapshot.user_id.trim().is_empty()
+        || snapshot.provider_id.trim().is_empty()
+        || snapshot.metric.trim().is_empty()
+        || snapshot.source.trim().is_empty()
+    {
+        return Err(UsageStoreError::Invalid("snapshot identity fields are required".to_string()));
+    }
+    Ok(())
+}
+
+fn snapshot_from_row(row: &Row<'_>) -> rusqlite::Result<ProviderUsageSnapshot> {
+    Ok(ProviderUsageSnapshot {
+        snapshot_id: row.get(0)?,
+        user_id: row.get(1)?,
+        provider_id: row.get(2)?,
+        status: ProviderSnapshotStatus::parse(&row.get::<_, String>(3)?)?,
+        metric: row.get(4)?,
+        used_value: row.get(5)?,
+        limit_value: row.get(6)?,
+        remaining_value: row.get(7)?,
+        unit: row.get(8)?,
+        source: row.get(9)?,
+        observed_at: row.get(10)?,
+        error_code: row.get(11)?,
+    })
 }
 
 fn insert_event(
@@ -890,6 +1219,72 @@ mod tests {
         );
         completed.usage_provenance = UsageProvenance::ProviderReported;
         completed
+    }
+
+    fn snapshot(snapshot_id: &str, provider_id: &str, observed_at: i64) -> ProviderUsageSnapshot {
+        ProviderUsageSnapshot {
+            snapshot_id: snapshot_id.to_string(),
+            user_id: "local".to_string(),
+            provider_id: provider_id.to_string(),
+            status: ProviderSnapshotStatus::Available,
+            metric: "credits".to_string(),
+            used_value: Some(12_500_000),
+            limit_value: Some(50_000_000),
+            remaining_value: Some(37_500_000),
+            unit: Some("microusd".to_string()),
+            source: "provider_standard_key".to_string(),
+            observed_at,
+            error_code: None,
+        }
+    }
+
+    #[test]
+    fn manual_budget_round_trips_without_becoming_provider_quota() {
+        let store = UsageStore::open_in_memory().unwrap();
+        let policy = ProviderUsagePolicy {
+            user_id: "local".into(),
+            provider_id: "anthropic".into(),
+            monthly_budget_microusd: Some(20_000_000),
+            currency: "USD".into(),
+            reset_day: Some(1),
+            timezone: Some("Europe/Rome".into()),
+            alert_threshold_percent: Some(80),
+            pricing_overrides: vec![],
+        };
+        store.upsert_provider_policy(&policy, 100).unwrap();
+        let loaded = store.provider_policy("local", "anthropic").unwrap().unwrap();
+        assert_eq!(loaded.monthly_budget_microusd, Some(20_000_000));
+        assert_eq!(loaded.limit_source(), LimitSource::ManualBudget);
+    }
+
+    #[test]
+    fn latest_snapshot_is_provider_scoped_and_append_only() {
+        let store = UsageStore::open_in_memory().unwrap();
+        store.append_provider_snapshot(&snapshot("first", "openrouter", 100)).unwrap();
+        store.append_provider_snapshot(&snapshot("second", "openrouter", 200)).unwrap();
+        let latest = store.latest_provider_snapshots("local", "openrouter").unwrap();
+        assert_eq!(latest[0].snapshot_id, "second");
+        assert_eq!(store.provider_snapshot_count("local", "openrouter").unwrap(), 2);
+    }
+
+    #[test]
+    fn workspace_purge_keeps_user_level_provider_accounting() {
+        let store = UsageStore::open_in_memory().unwrap();
+        let policy = ProviderUsagePolicy {
+            user_id: "local".into(),
+            provider_id: "openrouter".into(),
+            monthly_budget_microusd: Some(5_000_000),
+            currency: "USD".into(),
+            reset_day: None,
+            timezone: None,
+            alert_threshold_percent: None,
+            pricing_overrides: vec![],
+        };
+        store.upsert_provider_policy(&policy, 100).unwrap();
+        store.append_provider_snapshot(&snapshot("one", "openrouter", 100)).unwrap();
+        store.purge_workspace("local", "workspace-a").unwrap();
+        assert!(store.provider_policy("local", "openrouter").unwrap().is_some());
+        assert_eq!(store.provider_snapshot_count("local", "openrouter").unwrap(), 1);
     }
 
     #[test]
