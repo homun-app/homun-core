@@ -1813,10 +1813,17 @@ fn recall_collection_token(collection: MemoryCollectionKey) -> &'static str {
 }
 
 fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::RecallStreamPayload {
+    recall_stream_payload_from_hits(&pack.query, &pack.scope, &pack.hits)
+}
+
+fn recall_stream_payload_from_hits(
+    query: &str,
+    scope: &MemoryScope,
+    hits: &[RecallHit],
+) -> local_first_subagents::RecallStreamPayload {
     local_first_subagents::RecallStreamPayload {
-        query: pack.query.clone(),
-        hits: pack
-            .hits
+        query: query.to_string(),
+        hits: hits
             .iter()
             .map(|hit| local_first_subagents::RecallStreamHit {
                 r#ref: hit.memory_ref.clone(),
@@ -1836,10 +1843,32 @@ fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::
                 graph_path: hit.graph_path.clone(),
             })
             .collect(),
-        scope: match &pack.scope {
+        scope: match scope {
             MemoryScope::Personal => "personal".to_string(),
             MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
         },
+    }
+}
+
+fn merge_automatic_recall_payload(
+    target: &mut Option<local_first_subagents::RecallStreamPayload>,
+    incoming: local_first_subagents::RecallStreamPayload,
+) {
+    let Some(current) = target.as_mut() else {
+        *target = Some(incoming);
+        return;
+    };
+    for hit in incoming.hits {
+        let duplicate = current.hits.iter().any(|existing| {
+            existing.r#ref == hit.r#ref
+                && existing.source_workspace_id == hit.source_workspace_id
+                && existing.grant_id == hit.grant_id
+                && existing.policy_version == hit.policy_version
+                && existing.source_revision == hit.source_revision
+        });
+        if !duplicate {
+            current.hits.push(hit);
+        }
     }
 }
 
@@ -26193,6 +26222,16 @@ save/export a file to a folder, call save_artifact(file, destination)."
         let system = if let Some(service) = state.memory_service.as_ref() {
             let scope = scope_from_active_workspace();
             let pack = service.brief(&scope, &request.prompt);
+            if !pack.linked_hits.is_empty() {
+                merge_automatic_recall_payload(
+                    &mut automatic_recall_payload,
+                    recall_stream_payload_from_hits(
+                        &request.prompt,
+                        &scope,
+                        &pack.linked_hits,
+                    ),
+                );
+            }
             // ordered_blocks() = [profile, objective, brief, recent_work] — stesso
             // ordine dell'assemblaggio inline qui sotto. Mantiene la parità.
             let mut system = system;
@@ -26204,18 +26243,30 @@ save/export a file to a folder, call save_artifact(file, destination)."
             system
         } else {
             let (memory_personal, memory_project) =
-                gather_profile_memory_for_prompt(state, &request.prompt);
+                gather_profile_memory_for_prompt_with_provenance(state, &request.prompt);
             let memory_open_loops = if should_inject_open_loops_for_prompt(&request.prompt) {
                 gather_open_loops(state, 6)
             } else {
                 Vec::new()
             };
-            let system = match format_memory_block(
+            let formatted_profile = format_memory_block_with_provenance(
                 &memory_open_loops,
                 &memory_personal,
                 &memory_project,
                 CHAT_MEMORY_BUDGET_CHARS,
-            ) {
+            );
+            if !formatted_profile.linked_hits.is_empty() {
+                let scope = scope_from_active_workspace();
+                merge_automatic_recall_payload(
+                    &mut automatic_recall_payload,
+                    recall_stream_payload_from_hits(
+                        &request.prompt,
+                        &scope,
+                        &formatted_profile.linked_hits,
+                    ),
+                );
+            }
+            let system = match formatted_profile.block {
                 Some(block) => format!("{system}\n\n{block}"),
                 None => system,
             };
@@ -26267,7 +26318,10 @@ normal answers."
             if let Some(service) = state.memory_service.as_ref() {
                 let scope = scope_from_active_workspace();
                 let pack = service.recall(&request.prompt, &scope).await;
-                automatic_recall_payload = Some(recall_stream_payload_from_pack(&pack));
+                merge_automatic_recall_payload(
+                    &mut automatic_recall_payload,
+                    recall_stream_payload_from_pack(&pack),
+                );
                 match pack.block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
@@ -26301,7 +26355,10 @@ normal answers."
                         graph_context,
                     )
                 };
-                automatic_recall_payload = Some(recall_stream_payload_from_pack(&block));
+                merge_automatic_recall_payload(
+                    &mut automatic_recall_payload,
+                    recall_stream_payload_from_pack(&block),
+                );
                 match block.block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
@@ -64997,6 +65054,49 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     }
 
     #[test]
+    fn briefing_and_recall_hits_share_one_deduplicated_turn_attestation() {
+        let briefing_hit = test_linked_briefing_hit("briefing", "Linked preference");
+        let scope = local_first_memory::MemoryScope::Project(
+            local_first_memory::WorkspaceId::new("project-a"),
+        );
+        let mut payload = None;
+
+        super::merge_automatic_recall_payload(
+            &mut payload,
+            super::recall_stream_payload_from_hits(
+                "current prompt",
+                &scope,
+                std::slice::from_ref(&briefing_hit),
+            ),
+        );
+        super::merge_automatic_recall_payload(
+            &mut payload,
+            super::recall_stream_payload_from_hits(
+                "current prompt",
+                &scope,
+                std::slice::from_ref(&briefing_hit),
+            ),
+        );
+        super::merge_automatic_recall_payload(&mut payload, linked_recall_payload_for_turn());
+
+        let payload = payload.expect("merged payload");
+        assert_eq!(payload.hits.len(), 2, "duplicate briefing hit is removed");
+
+        let mut loop_state = local_first_engine::LoopState::new();
+        super::seed_loop_memory_reads(&mut loop_state, Some(&payload));
+        assert_eq!(loop_state.memory_reads.linked.len(), 2);
+
+        let line = serde_json::json!({ "type": "recall", "payload": payload }).to_string();
+        let mut collector = super::StreamMemoryReuseCollector::default();
+        collector.observe_line(&line);
+        assert_eq!(collector.envelope().linked_reads.len(), 2);
+        assert_eq!(
+            collector.envelope().write_policy,
+            local_first_memory::MemoryWritePolicy::UserInputOnly
+        );
+    }
+
+    #[test]
     fn explicit_recall_payload_becomes_tool_memory_read_effects() {
         let payload = linked_recall_payload_for_turn();
 
@@ -65022,6 +65122,41 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         );
         assert_eq!(envelope.linked_reads.len(), 1);
         assert_eq!(envelope.linked_reads[0].grant_id, "grant-a");
+    }
+
+    #[test]
+    fn briefing_attestation_survives_atomic_assistant_finalization() {
+        let payload = linked_recall_payload_for_turn();
+        let line = serde_json::json!({ "type": "recall", "payload": payload }).to_string();
+        let mut collector = super::StreamMemoryReuseCollector::default();
+        collector.observe_line(&line);
+
+        let store = super::ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("project-a").unwrap();
+        let assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            format!("unix:{}.000000000", super::now_epoch_secs()),
+        );
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let saved = store
+            .finalize_assistant_message(
+                &thread.thread_id,
+                &assistant.id,
+                "Answer informed by linked briefing",
+                collector.event_parts(),
+                &collector.envelope(),
+            )
+            .unwrap();
+
+        let envelope = saved.memory_reuse.expect("reuse envelope");
+        assert_eq!(
+            envelope.write_policy,
+            local_first_memory::MemoryWritePolicy::UserInputOnly
+        );
+        assert_eq!(envelope.linked_reads.len(), 1);
     }
 
     #[test]
