@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type WheelEvent,
 } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -54,6 +55,17 @@ export function InspectorTabStrip({
     if (!menu) return;
     window.requestAnimationFrame(() => menu.querySelector<HTMLButtonElement>("button")?.focus());
   }, [addOpen, overflowOpen]);
+
+  useEffect(() => {
+    if (!activeTabId) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`inspector-tab-${activeTabId}`)?.scrollIntoView({
+        block: "nearest",
+        inline: "nearest",
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTabId, tabs]);
 
   useEffect(() => {
     if (!addOpen && !overflowOpen) return undefined;
@@ -139,6 +151,15 @@ export function InspectorTabStrip({
     });
   }
 
+  function onTabStripWheel(event: WheelEvent<HTMLDivElement>) {
+    const strip = event.currentTarget;
+    if (strip.scrollWidth <= strip.clientWidth || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+      return;
+    }
+    strip.scrollLeft += event.deltaY;
+    event.preventDefault();
+  }
+
   function startPointerDrag(event: ReactPointerEvent<HTMLDivElement>, tabId: string) {
     if (event.button !== 0 || (event.target as HTMLElement).closest(".inspector-tab-close")) return;
     pointerDragRef.current = {
@@ -183,7 +204,12 @@ export function InspectorTabStrip({
 
   return (
     <div className="inspector-tab-strip-shell" ref={rootRef}>
-      <div className="inspector-tab-strip" role="tablist" aria-label={t("chat.workbench")}>
+      <div
+        className="inspector-tab-strip"
+        role="tablist"
+        aria-label={t("chat.workbench")}
+        onWheel={onTabStripWheel}
+      >
         {tabs.map((tab, index) => (
           <div
             className={`inspector-tab${tab.id === activeTabId ? " active" : ""}`}

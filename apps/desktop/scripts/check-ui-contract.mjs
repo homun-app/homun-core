@@ -512,7 +512,12 @@ assertContains("src/components/InspectorTabStrip.tsx", "startPointerDrag", "insp
 assertContains("src/components/InspectorTabStrip.tsx", "onPointerUp={finishPointerDrag}", "inspector tabs must commit pointer reorder on release");
 assertContains("src/components/InspectorTabStrip.tsx", "const currentX = event.clientX;", "inspector pointer reorder must use the release coordinate even when the platform emits no intermediate move");
 assertContains("src/components/InspectorTabStrip.tsx", "onActivate(drag.tabId);", "captured pointer clicks must still activate the selected inspector tab");
+assertContains("src/components/InspectorTabStrip.tsx", "scrollIntoView", "the active inspector tab must remain visible");
+assertContains("src/components/InspectorTabStrip.tsx", "onWheel={onTabStripWheel}", "vertical wheel input over the tab strip must navigate horizontal overflow");
 assertContains("src/styles.css", ".inspector-workspace-header {\n  position: relative;\n  z-index: 201;", "inspector tabs must sit above the native window drag strip");
+assertContains("src/styles.css", ".inspector-tab {\n  position: relative;", "inspector tabs must provide stable positioning for drag indicators");
+assertContains("src/styles.css", "flex: 0 0 auto;\n  width: clamp(112px, 14vw, 180px);", "inspector tabs must not shrink through their children");
+assertContains("src/styles.css", ".inspector-tab-title {\n  flex: 1 1 auto;\n  min-width: 0;", "inspector tab titles must ellipsize inside their own tab");
 assertContains("src/components/InspectorWorkspace.tsx", "role=\"separator\"", "inspector must expose a keyboard resize separator");
 assertContains("src/components/InspectorWorkspace.tsx", "onPointerDown", "inspector resizing must use pointer events");
 assertContains("src/components/InspectorWorkspace.tsx", "setPointerCapture", "inspector resizing must retain the pointer over embedded previews");

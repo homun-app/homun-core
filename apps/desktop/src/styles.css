@@ -6187,9 +6187,11 @@ body.resizing-drawer {
   display: none;
 }
 .inspector-tab {
+  position: relative;
   min-width: 0;
   max-width: 220px;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  width: clamp(112px, 14vw, 180px);
   display: flex;
   align-items: center;
   border-radius: 8px;
@@ -6203,8 +6205,9 @@ body.resizing-drawer {
   background: var(--surface-hover);
 }
 .inspector-tab-title {
-  min-width: 72px;
-  max-width: 180px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
   height: 32px;
   padding: 0 6px 0 10px;
   color: inherit;
