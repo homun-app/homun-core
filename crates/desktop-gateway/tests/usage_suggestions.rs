@@ -40,6 +40,19 @@ fn dismissed_equivalent_suggestion_is_suppressed_for_thirty_days() {
 }
 
 #[test]
+fn failed_client_preference_change_can_remain_actionable() {
+    let store = UsageStore::open_in_memory().unwrap();
+    store
+        .append_suggestion_action(&action("key-role", "preference_changed", 100))
+        .unwrap();
+    assert!(
+        !store
+            .is_suggestion_suppressed("local", "key-role", 101)
+            .unwrap()
+    );
+}
+
+#[test]
 fn suggestion_history_contains_metadata_only() {
     let store = UsageStore::open_in_memory().unwrap();
     store

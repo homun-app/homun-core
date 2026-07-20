@@ -537,7 +537,7 @@ impl UsageStore {
         let count: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM usage_suggestion_actions
              WHERE user_id = ?1 AND suggestion_key = ?2
-               AND action IN ('dismissed', 'preference_changed')
+               AND action = 'dismissed'
                AND created_at >= ?3 AND created_at <= ?4",
             params![user_id, suggestion_key, now.saturating_sub(30 * 86_400), now],
             |row| row.get(0),

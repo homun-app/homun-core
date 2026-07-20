@@ -44468,7 +44468,7 @@ async fn apply_usage_suggestion(
 async fn dismiss_usage_suggestion(
     State(state): State<AppState>,
     Path(suggestion_key): Path<String>,
-) -> Result<StatusCode, GatewayError> {
+) -> Result<Json<serde_json::Value>, GatewayError> {
     let store = state.usage_store.lock().map_err(|_| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "usage_store_unavailable",
@@ -44496,7 +44496,7 @@ async fn dismiss_usage_suggestion(
             created_at: usage_now_i64(),
         })
         .map_err(usage_suggestion_read_error)?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 #[derive(Debug, Deserialize)]
