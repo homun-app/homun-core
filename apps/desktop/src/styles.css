@@ -2651,11 +2651,45 @@ body.resizing-drawer {
   display: none;
 }
 
-/* "Fake-docked" panel: the panel itself is a flush-right full-height column (see
-   .computer-detail-panel), and here the conversation reflows LEFT by the panel's
-   width so nothing is covered — the docked effect without a layout-grid rebuild. */
-.active-task-layout.panel-open {
-  padding-right: calc(var(--detail-panel-w) + 20px);
+/* Compatibility with the legacy Workbench while ChatView migrates to the inspector
+   reducer: both class names use the same real sibling-column geometry. */
+.active-task-layout.panel-open,
+.active-task-layout.inspector-open {
+  --inspector-width: calc((100% - 1px) * var(--inspector-ratio, 0.5));
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));
+  grid-template-areas:
+    "topbar inspector"
+    "thread inspector"
+    "composer inspector";
+  padding-right: 0;
+}
+.active-task-layout.panel-open > .task-topbar,
+.active-task-layout.inspector-open > .task-topbar {
+  grid-area: topbar;
+}
+.active-task-layout.panel-open > .thread-scroll,
+.active-task-layout.inspector-open > .thread-scroll {
+  grid-area: thread;
+}
+.active-task-layout.panel-open > .composer-shell,
+.active-task-layout.inspector-open > .composer-shell {
+  grid-area: composer;
+}
+.active-task-layout.panel-open > .workbench,
+.active-task-layout.inspector-open > .inspector-workspace {
+  grid-area: inspector;
+}
+.active-task-layout.inspector-open > .chat-status-stack {
+  display: none;
+}
+.active-task-layout.inspector-focused {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "inspector" "inspector" "inspector";
+}
+.active-task-layout.inspector-focused > .task-topbar,
+.active-task-layout.inspector-focused > .thread-scroll,
+.active-task-layout.inspector-focused > .composer-shell {
+  display: none;
 }
 
 /* New-chat layout (mock): the prompt lives in the CENTER with the hero, not docked
@@ -5998,23 +6032,22 @@ body.resizing-drawer {
 
 /* ---- Workbench: docked right panel with tabs (Claude-Code style) ---------- */
 .workbench {
-  position: absolute;
-  top: calc(var(--window-chrome-height, 44px) + 8px);
-  right: 12px;
-  bottom: 12px;
-  width: clamp(380px, 34%, 540px);
+  position: relative;
+  width: 100% !important;
+  min-width: 0;
+  min-height: 0;
   z-index: 40;
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  box-shadow: var(--shadow-menu);
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
   overflow: hidden;
 }
 .workbench.expanded {
-  width: auto !important;
-  left: 12px;
+  width: 100% !important;
 }
 /* Drag handle on the left edge to resize the panel width. */
 .workbench-resize {
@@ -6071,6 +6104,186 @@ body.resizing-drawer {
   display: flex;
   overflow: hidden;
   background: linear-gradient(180deg, var(--surface-muted), var(--surface));
+}
+
+/* ---- Universal inspector workspace --------------------------------------- */
+.inspector-workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 58px minmax(0, 1fr);
+  border-left: 1px solid var(--line);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.inspector-resize-handle {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 10px;
+  cursor: col-resize;
+  outline: none;
+}
+.inspector-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+}
+.inspector-resize-handle:hover::after,
+.inspector-resize-handle:focus-visible::after {
+  background: var(--accent);
+}
+
+.inspector-workspace-header {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.inspector-workspace-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+}
+.inspector-workspace-actions > button,
+.inspector-tab-action {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--muted);
+  background: transparent;
+}
+.inspector-workspace-actions > button:hover,
+.inspector-tab-action:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.inspector-mobile-back {
+  display: none !important;
+}
+
+.inspector-tab-strip-shell {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+}
+.inspector-tab-strip {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.inspector-tab-strip::-webkit-scrollbar {
+  display: none;
+}
+.inspector-tab {
+  min-width: 0;
+  max-width: 220px;
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.inspector-tab.active {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.inspector-tab-title {
+  min-width: 72px;
+  max-width: 180px;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  color: inherit;
+  background: transparent;
+}
+.inspector-tab-title > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-tab-close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  margin-right: 4px;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+}
+.inspector-tab-close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.inspector-tab-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+.inspector-tab-menu {
+  position: absolute;
+  z-index: 70;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  max-width: min(320px, 70vw);
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+}
+.inspector-tab-menu > button {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 7px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.inspector-tab-menu > button:hover,
+.inspector-tab-menu > button.active {
+  background: var(--surface-hover);
+}
+.inspector-workspace-body,
+.inspector-tab-panel {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.inspector-tab-panel[hidden] {
+  display: none;
+}
+
+.resizing-inspector,
+.resizing-inspector * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  transition: none !important;
 }
 /* ChatView's Workbench placeholders (memory/artifacts/activity/plan/files). A cohesive
    family under one class; aligned to the shared .state-view look (below) so they match the

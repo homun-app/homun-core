@@ -512,11 +512,14 @@ assertContains(
   "<ChatHeaderMenu",
   "chat header must expose a kebab menu for artifacts/files/screenshots/background activity"
 );
-assertContains("src/components/ChatView.tsx", "detailsOpen || workbenchOpen ? \" panel-open\" : \"\"", "right-side panels must reserve layout space instead of covering the chat");
-assertContains("src/styles.css", "top: calc(var(--window-chrome-height, 44px) + 8px);", "workbench island must sit below native chrome with breathing room");
-assertContains("src/styles.css", "right: 12px;", "workbench island must keep a visible margin from the window edge");
-assertContains("src/styles.css", "border-radius: 16px;", "workbench island must share the rounded shell geometry");
-assertContains("src/styles.css", "box-shadow: 0 18px 44px", "workbench island must read as a floating inspector, not a flat column");
+assertContains("src/components/InspectorTabStrip.tsx", "role=\"tablist\"", "inspector must expose an ARIA tab list");
+assertContains("src/components/InspectorWorkspace.tsx", "role=\"separator\"", "inspector must expose a keyboard resize separator");
+assertContains("src/components/InspectorWorkspace.tsx", "onPointerDown", "inspector resizing must use pointer events");
+assertContains("src/components/InspectorWorkspace.tsx", "onToggleFocus", "inspector must expose focus mode without destroying tabs");
+assertContains("src/components/InspectorWorkspace.tsx", "hidden={tab.id !== state.activeTabId}", "inactive tab panels must remain mounted and hidden");
+assertContains("src/styles.css", "grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));", "chat and inspector must be real sibling columns");
+assertContains("src/styles.css", ".active-task-layout.inspector-open > .chat-status-stack", "the working island must not create a third column");
+assertNotContains("src/styles.css", ".workbench {\n  position: absolute", "legacy workbench must not float above the chat");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
