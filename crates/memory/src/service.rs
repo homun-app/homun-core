@@ -319,6 +319,26 @@ impl MemoryReuseEnvelope {
             linked_reads: Vec::new(),
         }
     }
+
+    /// Validates only the persisted attestation shape. It deliberately does
+    /// not re-authorize a historical read against current grants.
+    pub fn is_structurally_valid(&self) -> bool {
+        match self.write_policy {
+            MemoryWritePolicy::Normal | MemoryWritePolicy::BlockedUnknown => {
+                self.linked_reads.is_empty()
+            }
+            MemoryWritePolicy::UserInputOnly => {
+                !self.linked_reads.is_empty()
+                    && self.linked_reads.iter().all(|read| {
+                        read.policy_version > 0
+                            && !read.source_workspace_id.trim().is_empty()
+                            && !read.grant_id.trim().is_empty()
+                            && !read.memory_ref.trim().is_empty()
+                            && !read.source_revision.trim().is_empty()
+                    })
+            }
+        }
+    }
 }
 
 impl Default for MemoryReuseEnvelope {
@@ -720,6 +740,40 @@ mod cache_tests {
 mod tests {
     use super::*;
     use crate::WorkspaceId;
+
+    fn complete_linked_read() -> LinkedMemoryReadRef {
+        LinkedMemoryReadRef {
+            source_workspace_id: "source-a".to_string(),
+            grant_id: "grant-a".to_string(),
+            policy_version: 1,
+            memory_ref: "memory:owner:source-a:fact-a".to_string(),
+            source_revision: "sha256:rev-a".to_string(),
+        }
+    }
+
+    #[test]
+    fn memory_reuse_envelope_validates_its_structural_contract() {
+        assert!(MemoryReuseEnvelope::normal().is_structurally_valid());
+        assert!(MemoryReuseEnvelope::user_input_only(vec![complete_linked_read()])
+            .is_structurally_valid());
+        assert!(MemoryReuseEnvelope::blocked_unknown().is_structurally_valid());
+
+        let mut normal_with_read = MemoryReuseEnvelope::normal();
+        normal_with_read.linked_reads.push(complete_linked_read());
+        assert!(!normal_with_read.is_structurally_valid());
+
+        let missing_reads = MemoryReuseEnvelope::user_input_only(Vec::new());
+        assert!(!missing_reads.is_structurally_valid());
+
+        let mut incomplete = complete_linked_read();
+        incomplete.source_revision.clear();
+        assert!(!MemoryReuseEnvelope::user_input_only(vec![incomplete])
+            .is_structurally_valid());
+
+        let mut blocked_with_read = MemoryReuseEnvelope::blocked_unknown();
+        blocked_with_read.linked_reads.push(complete_linked_read());
+        assert!(!blocked_with_read.is_structurally_valid());
+    }
     /// L'ordine canonico di `ordered_blocks()` deve essere [profile, objective,
     /// brief, recent_work] — identico all'assemblaggio del system prompt nel
     /// gateway. È il prerequisito del test di parità Tappa 1: se cambia l'ordine,

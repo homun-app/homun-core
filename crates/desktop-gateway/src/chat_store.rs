@@ -3678,23 +3678,6 @@ fn memory_reuse_from_event_parts(event_parts: &[serde_json::Value]) -> MemoryReu
     }
 }
 
-fn valid_memory_reuse_envelope(envelope: &MemoryReuseEnvelope) -> bool {
-    match envelope.write_policy {
-        MemoryWritePolicy::Normal => envelope.linked_reads.is_empty(),
-        MemoryWritePolicy::UserInputOnly => {
-            !envelope.linked_reads.is_empty()
-                && envelope.linked_reads.iter().all(|read| {
-                    read.policy_version > 0
-                        && !read.source_workspace_id.trim().is_empty()
-                        && !read.grant_id.trim().is_empty()
-                        && !read.memory_ref.trim().is_empty()
-                        && !read.source_revision.trim().is_empty()
-                })
-        }
-        MemoryWritePolicy::BlockedUnknown => true,
-    }
-}
-
 fn push_text_marker_part(
     text: &str,
     parts: &mut Vec<serde_json::Value>,
@@ -3758,7 +3741,7 @@ fn memory_reuse_from_row(
         return Ok(Some(
             serde_json::from_str::<MemoryReuseEnvelope>(&encoded)
                 .ok()
-                .filter(valid_memory_reuse_envelope)
+                .filter(MemoryReuseEnvelope::is_structurally_valid)
                 .unwrap_or_else(MemoryReuseEnvelope::blocked_unknown),
         ));
     }
