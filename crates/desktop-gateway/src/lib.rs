@@ -225,6 +225,40 @@ pub struct ChatMessage {
     pub memory_reuse: Option<MemoryReuseEnvelope>,
 }
 
+pub const LINKED_MEMORY_CONTEXT_OMITTED: &str =
+    "[Previous assistant response omitted because its linked memory attestation is unavailable.]";
+
+/// Projects one persisted message into the context of the conversation that
+/// already owns it. Authorization is checked when a linked read happens; this
+/// boundary only validates the durable attestation that controls later reuse.
+pub fn chat_message_for_existing_thread_context(
+    message: &ChatMessage,
+) -> Option<ChatContextMessage> {
+    let role = match message.role.as_str() {
+        "user" => ChatContextRole::User,
+        "assistant" => ChatContextRole::Assistant,
+        _ => return None,
+    };
+    if message.role == "user" {
+        return Some(ChatContextMessage {
+            role,
+            text: message.text.clone(),
+        });
+    }
+    let allowed = message.memory_reuse.as_ref().is_some_and(|envelope| {
+        envelope.is_structurally_valid()
+            && envelope.write_policy != MemoryWritePolicy::BlockedUnknown
+    });
+    Some(ChatContextMessage {
+        role,
+        text: if allowed {
+            message.text.clone()
+        } else {
+            LINKED_MEMORY_CONTEXT_OMITTED.to_string()
+        },
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessagesSnapshot {
     pub thread_id: String,

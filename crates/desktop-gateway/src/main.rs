@@ -32345,42 +32345,13 @@ fn start_visible_conversation_turn(
     Some(turn)
 }
 
-const LINKED_MEMORY_CONTEXT_OMITTED: &str =
-    "[Previous assistant response omitted because its linked memory authorization is unavailable.]";
-
 fn context_message_for_model(
     _facade: &MemoryFacade,
     _consumer: (&MemoryUserId, &MemoryWorkspaceId),
     message: &ChatMessage,
     _now_unix: i64,
 ) -> Option<ChatContextMessage> {
-    let role = match message.role.as_str() {
-        "user" => ChatContextRole::User,
-        "assistant" => ChatContextRole::Assistant,
-        _ => return None,
-    };
-    if message.role == "user" {
-        return Some(ChatContextMessage {
-            role,
-            text: message.text.clone(),
-        });
-    }
-    // A linked read is authorized when it happens. Once its result has entered
-    // this conversation, the persisted provenance attests how the response may
-    // be reused: visible in this thread, never learnable as project memory.
-    // Current grants still gate every fresh briefing/recall read.
-    let allowed = message.memory_reuse.as_ref().is_some_and(|envelope| {
-        envelope.is_structurally_valid()
-            && envelope.write_policy != local_first_memory::MemoryWritePolicy::BlockedUnknown
-    });
-    Some(ChatContextMessage {
-        role,
-        text: if allowed {
-            message.text.clone()
-        } else {
-            LINKED_MEMORY_CONTEXT_OMITTED.to_string()
-        },
-    })
+    local_first_desktop_gateway::chat_message_for_existing_thread_context(message)
 }
 
 fn thread_context_for_model(
