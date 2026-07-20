@@ -67,4 +67,36 @@ export function remainingBudgetPercent(budgetMicrousd, spentMicrousd, costCovera
   return clampPercent((remaining / budget) * 100);
 }
 
+export function compactUsageRows(summary, locale = "en-US") {
+  if (clampNumber(summary?.logical_calls) === 0) return { kind: "empty" };
+  const cost = summary?.cost ?? summary?.cost_breakdown ?? {};
+  const reported = clampNumber(cost.provider_reported_microusd);
+  const estimated = clampNumber(cost.catalog_estimated_microusd)
+    + clampNumber(cost.manual_estimated_microusd);
+  const unknown = Math.round(clampNumber(cost.unknown_cost_attempts));
+  const secondary = [
+    `${formatMicrousd(estimated, locale)} estimated`,
+    unknown ? `${unknown} unknown` : null,
+  ].filter(Boolean).join(" · ");
+  const trend = Number.isFinite(summary?.trend_percent) ? Math.round(summary.trend_percent) : null;
+  return {
+    kind: "ready",
+    tokens: formatCount(
+      clampNumber(summary?.input_tokens)
+        + clampNumber(summary?.output_tokens)
+        + clampNumber(summary?.reasoning_tokens),
+      locale,
+    ),
+    cost: {
+      primary: `${formatMicrousd(reported, locale)} reported`,
+      secondary,
+    },
+    providers: Math.round(clampNumber(summary?.active_providers)),
+    model: summary?.dominant_model || "—",
+    trend,
+    coverageWarning: clampPercent(summary?.usage_coverage_percent) < 100
+      || clampPercent(cost.cost_coverage_percent) < 100,
+  };
+}
+
 export { clampNumber, clampPercent };
