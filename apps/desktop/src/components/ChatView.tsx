@@ -713,6 +713,31 @@ export function ChatView({
     [openInspectorTab, thread.threadId],
   );
 
+  const openFileTab = useCallback(
+    (path: string) => {
+      const normalizedPath = path.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+      openInspectorTab(
+        "file",
+        normalizedPath.split("/").pop() || normalizedPath,
+        `file:${normalizedPath}`,
+        { path: normalizedPath },
+      );
+    },
+    [openInspectorTab],
+  );
+
+  const openArtifactTab = useCallback(
+    (artifact: ParsedArtifact) => {
+      openInspectorTab(
+        "artifact",
+        artifact.name,
+        `artifact:${artifact.thread}:${artifact.name}`,
+        { artifactThread: artifact.thread, name: artifact.name },
+      );
+    },
+    [openInspectorTab],
+  );
+
   useEffect(() => {
     saveInspectorState(thread.threadId, inspector);
   }, [inspector, thread.threadId]);
@@ -2339,12 +2364,7 @@ export function ChatView({
                       messageId={displayMessage.id}
                       threadId={thread.threadId}
                       onOpenArtifact={(artifact) => {
-                        openInspectorTab(
-                          "artifact",
-                          INSPECTOR_VIEW_LABEL.artifact,
-                          `artifact:${thread.threadId}:index`,
-                          { initialName: artifact.name },
-                        );
+                        openArtifactTab(artifact);
                       }}
                       onChoose={(answer, purpose) =>
                         purpose
@@ -2398,12 +2418,7 @@ export function ChatView({
                     messageId={displayMessage.id}
                     threadId={thread.threadId}
                     onOpenArtifact={(artifact) => {
-                      openInspectorTab(
-                        "artifact",
-                        INSPECTOR_VIEW_LABEL.artifact,
-                        `artifact:${thread.threadId}:index`,
-                        { initialName: artifact.name },
-                      );
+                      openArtifactTab(artifact);
                     }}
                     onChoose={(answer) => void submitComposerPrompt(answer, [])}
                   />
@@ -2684,6 +2699,8 @@ export function ChatView({
               conversationPlan ?? visibleComputerSession.operationalPlanMarkdown
             }
             layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}
+            onOpenFile={openFileTab}
+            onOpenArtifact={openArtifactTab}
           />
         )}
       />
@@ -5123,6 +5140,8 @@ function InspectorView({
   onGoalSeedConsumed,
   operationalPlanMarkdown,
   layoutSignal,
+  onOpenFile,
+  onOpenArtifact,
 }: {
   descriptor: InspectorTab;
   artifacts: ParsedArtifact[];
@@ -5132,11 +5151,21 @@ function InspectorView({
   onGoalSeedConsumed?: () => void;
   operationalPlanMarkdown?: string;
   layoutSignal: string;
+  onOpenFile: (path: string) => void;
+  onOpenArtifact: (artifact: ParsedArtifact) => void;
 }) {
   const { t } = useTranslation();
   const open = true;
   const tab = legacyTabForInspector(descriptor.kind);
-  const artifactsInitial = descriptor.payload.initialName ?? null;
+  const resourceFilePath = descriptor.kind === "file" ? descriptor.payload.path : undefined;
+  const resourceArtifact =
+    descriptor.kind === "artifact" && descriptor.payload.name
+      ? artifacts.find(
+          (artifact) =>
+            artifact.name === descriptor.payload.name &&
+            artifact.thread === descriptor.payload.artifactThread,
+        ) ?? null
+      : null;
   // Project-folder browser state (File tab): the thread's linked folder, navigable.
   const [fsRoot, setFsRoot] = useState<string | null>(null);
   const [fsCwd, setFsCwd] = useState<string | null>(null);
@@ -5153,7 +5182,7 @@ function InspectorView({
   const [fileLoading, setFileLoading] = useState(false);
   const [diffOn, setDiffOn] = useState(false);
 
-  const openFileAt = useCallback(
+  const loadFileAt = useCallback(
     async (path: string) => {
       setFileLoading(true);
       setDiffOn(false);
@@ -5161,8 +5190,17 @@ function InspectorView({
       try {
         const payload = await coreBridge.fsFile(path, threadId);
         setOpenFile(payload);
-      } catch {
-        setOpenFile(null);
+      } catch (error) {
+        setOpenFile({
+          authorized: true,
+          path,
+          text: "",
+          old_text: "",
+          in_git: false,
+          modified: false,
+          binary: false,
+          error: (error as Error).message,
+        });
       } finally {
         setFileLoading(false);
       }
@@ -5209,14 +5247,18 @@ function InspectorView({
   // Probe the filesystem when the panel opens (not only on the File tab) so we know
   // upfront whether this thread has a project folder → drives File-tab visibility.
   useEffect(() => {
-    if (open && fsCwd === null) void loadFs(null);
-  }, [open, fsCwd, loadFs]);
+    if (open && tab === "files" && !resourceFilePath && fsCwd === null) void loadFs(null);
+  }, [open, tab, resourceFilePath, fsCwd, loadFs]);
+  useEffect(() => {
+    if (tab !== "files" || !resourceFilePath) return;
+    void loadFileAt(resourceFilePath);
+  }, [loadFileAt, resourceFilePath, tab]);
   // No auto-redirect: every panel-open path picks a view explicitly (dropdown pick,
   // save-goal → "goals", open-artifact → "artifacts"), and every view has its own
   // empty state — so an explicitly chosen empty view stays put instead of bouncing.
   // Load project goals (Obiettivi tab) when the panel opens — resolves scope from thread.
   useEffect(() => {
-    if (!open) return;
+    if (!open || tab !== "goals") return;
     let cancelled = false;
     void coreBridge.projectGoals(threadId).then((d) => {
       if (!cancelled) setGoalsData(d);
@@ -5224,7 +5266,7 @@ function InspectorView({
     return () => {
       cancelled = true;
     };
-  }, [open, threadId]);
+  }, [open, tab, threadId]);
   // Load the task queue when the Activity tab is shown (and refresh on re-open).
   useEffect(() => {
     if (!open || tab !== "activity") return;
@@ -5265,17 +5307,9 @@ function InspectorView({
   const parentOf = (path: string) => path.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
   return (
     <div className="workbench-body inspector-view-body" aria-label={descriptor.title}>
-        {tab === "files" && openFile && (
+        {tab === "files" && resourceFilePath && openFile && (
           <div className="workbench-fileview">
             <div className="workbench-breadcrumb">
-              <button
-                type="button"
-                aria-label={t("common.back")}
-                title={t("chat.backToFiles")}
-                onClick={() => setOpenFile(null)}
-              >
-                <ChevronLeft size={14} />
-              </button>
               <span className="wf-name" title={openFile.path}>
                 {openFile.path.split("/").pop()}
               </span>
@@ -5292,7 +5326,12 @@ function InspectorView({
               )}
             </div>
             <div className="workbench-fileview-body">
-              {openFile.error ? (
+              {!openFile.authorized ? (
+                <div className="workbench-empty">
+                  <AlertCircle size={24} />
+                  <p>Folder not authorized.</p>
+                </div>
+              ) : openFile.error ? (
                 <div className="workbench-empty">
                   <AlertCircle size={24} />
                   <p>{openFile.error}</p>
@@ -5310,7 +5349,13 @@ function InspectorView({
             </div>
           </div>
         )}
-        {tab === "files" && !openFile && (
+        {tab === "files" && resourceFilePath && !openFile && (
+          <div className="workbench-empty">
+            <Loader2 size={22} className="spin" />
+            <p>{t("chat.loadingActivity")}</p>
+          </div>
+        )}
+        {tab === "files" && !resourceFilePath && (
           <div className="workbench-files">
             {uploadedFiles.length > 0 && (
               <>
@@ -5367,7 +5412,7 @@ function InspectorView({
                           type="button"
                           className="wf-name wf-file"
                           title={entry.name}
-                          onClick={() => void openFileAt(entry.path)}
+                          onClick={() => onOpenFile(entry.path)}
                         >
                           {entry.name}
                         </button>
@@ -5393,20 +5438,47 @@ function InspectorView({
             )}
           </div>
         )}
-        {tab === "artifacts" &&
-          (artifacts.length > 0 ? (
+        {tab === "artifacts" && descriptor.payload.name &&
+          (resourceArtifact ? (
             <ArtifactsPanel
-              artifacts={artifacts}
-              initialName={artifactsInitial}
+              artifacts={[resourceArtifact]}
+              initialName={resourceArtifact.name}
               onClose={() => undefined}
               embedded
             />
           ) : (
             <div className="workbench-empty">
               <FileText size={28} />
-              <p>No artifacts yet. Files generated or created by the assistant appear here.</p>
+              <p>This artifact is no longer available.</p>
             </div>
           ))}
+        {tab === "artifacts" && !descriptor.payload.name && (
+          <div className="workbench-files">
+            {artifacts.length > 0 ? (
+              <ul className="workbench-file-list">
+                {artifacts.map((artifact) => (
+                  <li key={`${artifact.thread}:${artifact.name}`}>
+                    <FileText size={15} />
+                    <button
+                      type="button"
+                      className="wf-name wf-file"
+                      title={artifact.name}
+                      onClick={() => onOpenArtifact(artifact)}
+                    >
+                      {artifact.name}
+                    </button>
+                    <small>{artifact.source === "project" ? "project" : "artifact"}</small>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="workbench-empty">
+                <FileText size={28} />
+                <p>No artifacts yet. Files generated or created by the assistant appear here.</p>
+              </div>
+            )}
+          </div>
+        )}
         {tab === "memoria" && <MemoryGraphPanel threadId={threadId} layoutSignal={layoutSignal} />}
         {tab === "goals" && goalsData && (
           <GoalsPanel
@@ -5486,9 +5558,7 @@ function ArtifactsPanel({
   embedded?: boolean;
 }) {
   const { t } = useTranslation();
-  const [selectedName, setSelectedName] = useState<string | null>(
-    initialName ?? artifacts[0]?.name ?? null,
-  );
+  const selectedName = initialName ?? artifacts[0]?.name ?? null;
   const [preview, setPreview] = useState<ArtifactPreview | null>(null);
   const [loading, setLoading] = useState(false);
   // Versioning: `versions` = archived count; selectable slots are 0..versions,
@@ -5504,7 +5574,6 @@ function ArtifactsPanel({
   const [diffData, setDiffData] = useState<{ oldText: string; newText: string } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const urlRef = useRef<string | null>(null);
-  const showList = artifacts.length > 1;
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
 
@@ -5654,23 +5723,7 @@ function ArtifactsPanel({
           </button>
         </header>
       )}
-      <div className={`artifacts-panel-body${showList ? "" : " no-list"}`}>
-        {showList && (
-          <ul className="artifacts-list">
-            {artifacts.map((artifact) => (
-              <li key={artifact.name}>
-                <button
-                  type="button"
-                  className={selected?.name === artifact.name ? "active" : ""}
-                  onClick={() => setSelectedName(artifact.name)}
-                >
-                  <FileText size={14} />
-                  <span>{artifact.name}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="artifacts-panel-body no-list">
         <div className="artifacts-preview">
           {selected && (
             <div className="artifacts-preview-bar">

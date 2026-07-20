@@ -114,7 +114,7 @@ assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.99);", "W
 assertNotContains("src/styles.css", "background: rgba(255, 255, 255, 0.97);", "Computer dock must not force a light background");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 96%, transparent);", "Workbench chrome must inherit the active surface theme");
 assertContains("src/styles.css", "background: linear-gradient(180deg, var(--surface-muted), var(--surface));", "Workbench body must inherit the active surface theme");
-assertContains("src/styles.css", "background: color-mix(in srgb, var(--surface) 82%, transparent);", "Embedded artifact list must inherit the active surface theme");
+assertNotContains("src/components/ChatView.tsx", "<ul className=\"artifacts-list\">", "artifact resources must not render a permanent inner sidebar");
 assertContains("src/styles.css", "background: color-mix(in srgb, var(--red-soft) 42%, var(--surface));", "Settings danger zone must inherit the active surface theme");
 assertNotContains("src/styles.css", "background: #fffafa;", "Settings danger zone must not force a light background");
 assertNotContains("src/styles.css", "border: 1px solid #f1c4c6;", "Settings danger zone must not force a light border");
@@ -525,6 +525,9 @@ assertContains("src/components/ChatView.tsx", "loadInspectorState(thread.threadI
 assertContains("src/components/ChatView.tsx", "saveInspectorState(thread.threadId", "inspector state changes must persist by thread");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");
 assertNotContains("src/components/ChatView.tsx", "setWorkbenchTab", "legacy active-tab state must be removed");
+assertContains("src/components/ChatView.tsx", "`file:${normalizedPath}`", "file tabs must dedupe by canonical path");
+assertContains("src/components/ChatView.tsx", "`artifact:${artifact.thread}:${artifact.name}`", "artifact tabs must dedupe by provenance and name");
+assertNotContains("src/styles.css", ".artifacts-panel.embedded .artifacts-panel-body {\n  grid-template-columns:", "artifact preview must not keep a permanent inner sidebar");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");

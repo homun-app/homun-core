@@ -6661,23 +6661,12 @@ body.resizing-drawer {
   background: transparent;
 }
 .artifacts-panel.embedded .artifacts-panel-body {
-  grid-template-columns: minmax(0, 1fr) minmax(148px, 184px);
-  gap: 12px;
   min-height: 0;
   padding: 14px;
   box-sizing: border-box;
   overflow: hidden;
 }
-.artifacts-panel.embedded .artifacts-list {
-  order: 2;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  box-shadow: none;
-}
 .artifacts-panel.embedded .artifacts-preview {
-  order: 1;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
