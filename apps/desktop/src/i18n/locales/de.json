@@ -832,7 +832,7 @@
     "actions": { "use_for_task": "Für diese Aufgabe verwenden", "change_role_preference": "Rollenpräferenz ändern", "dismiss": "Ignorieren" },
     "dismissed": "Vorschlag ignoriert.", "undo": "Rückgängig",
     "facts": { "cost": "{{percent}} % geringere Kosten · {{provenance}}", "latency": "{{percent}} % geringere Latenz · {{provenance}}", "headroom": "{{percent}} Punkte mehr Spielraum · {{provenance}}", "reliability": "Zuverlässigkeitsnachweis · {{provenance}}", "capability": "Gleichwertige Fähigkeiten · {{provenance}}" },
-    "provenance": { "provider_reported": "vom Anbieter gemeldet", "catalog_estimated": "Katalogschätzung", "manual_estimated": "manuelle Schätzung", "observed_recent_calls": "letzte Aufrufe", "provider_account_or_manual_budget": "Konto- oder Budgetdaten", "not_billed": "nicht berechnet", "unavailable": "Nachweis nicht verfügbar" },
+    "provenance": { "provider_reported": "vom Anbieter gemeldet", "catalog_estimated": "Katalogschätzung", "manual_estimated": "manuelle Schätzung", "observed_recent_calls": "letzte Aufrufe", "provider_account": "Anbieterkontodaten", "not_billed": "nicht berechnet", "unavailable": "Nachweis nicht verfügbar" },
     "confirm": { "title": "Modellwechsel bestätigen", "body": "Von {{current}} zu {{target}} wechseln für: {{scope}}? Vor Ihrer Bestätigung ändert sich nichts.", "cancel": "Abbrechen", "apply": "Bestätigen" },
     "error": "Der Vorschlag konnte nicht angewendet werden",
     "preferenceChanged": "Präferenz für {{role}} aktualisiert."

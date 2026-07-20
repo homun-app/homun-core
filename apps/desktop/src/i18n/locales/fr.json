@@ -832,7 +832,7 @@
     "actions": { "use_for_task": "Utiliser pour cette tâche", "change_role_preference": "Changer la préférence du rôle", "dismiss": "Ignorer" },
     "dismissed": "Suggestion ignorée.", "undo": "Annuler",
     "facts": { "cost": "Coût inférieur de {{percent}} % · {{provenance}}", "latency": "Latence inférieure de {{percent}} % · {{provenance}}", "headroom": "{{percent}} points de marge en plus · {{provenance}}", "reliability": "Preuve de fiabilité · {{provenance}}", "capability": "Capacités équivalentes · {{provenance}}" },
-    "provenance": { "provider_reported": "déclaré par le fournisseur", "catalog_estimated": "estimation du catalogue", "manual_estimated": "estimation manuelle", "observed_recent_calls": "appels récents", "provider_account_or_manual_budget": "données du compte ou du budget", "not_billed": "non facturé", "unavailable": "preuve indisponible" },
+    "provenance": { "provider_reported": "déclaré par le fournisseur", "catalog_estimated": "estimation du catalogue", "manual_estimated": "estimation manuelle", "observed_recent_calls": "appels récents", "provider_account": "données du compte fournisseur", "not_billed": "non facturé", "unavailable": "preuve indisponible" },
     "confirm": { "title": "Confirmer le changement de modèle", "body": "Passer de {{current}} à {{target}} pour : {{scope}} ? Rien ne change avant votre confirmation.", "cancel": "Annuler", "apply": "Confirmer" },
     "error": "La suggestion n’a pas pu être appliquée",
     "preferenceChanged": "Préférence mise à jour pour {{role}}."

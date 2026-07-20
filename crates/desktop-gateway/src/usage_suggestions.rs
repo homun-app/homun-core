@@ -249,7 +249,7 @@ fn scored_candidate(
                 kind: SuggestionFactKind::Headroom,
                 delta_percent: Some(i64::from(candidate_headroom) - i64::from(current_headroom)),
                 value: Some(u64::from(candidate_headroom)),
-                provenance: "provider_account_or_manual_budget".into(),
+                provenance: "provider_account".into(),
             });
         }
     }

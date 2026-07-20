@@ -832,7 +832,7 @@
     "actions": { "use_for_task": "Usar para esta tarea", "change_role_preference": "Cambiar preferencia del rol", "dismiss": "Ignorar" },
     "dismissed": "Sugerencia ignorada.", "undo": "Deshacer",
     "facts": { "cost": "Coste un {{percent}}% menor · {{provenance}}", "latency": "Latencia un {{percent}}% menor · {{provenance}}", "headroom": "{{percent}} puntos más de margen · {{provenance}}", "reliability": "Evidencia de fiabilidad · {{provenance}}", "capability": "Capacidades equivalentes · {{provenance}}" },
-    "provenance": { "provider_reported": "declarado por el proveedor", "catalog_estimated": "estimación de catálogo", "manual_estimated": "estimación manual", "observed_recent_calls": "llamadas recientes", "provider_account_or_manual_budget": "datos de cuenta o presupuesto", "not_billed": "no facturado", "unavailable": "evidencia no disponible" },
+    "provenance": { "provider_reported": "declarado por el proveedor", "catalog_estimated": "estimación de catálogo", "manual_estimated": "estimación manual", "observed_recent_calls": "llamadas recientes", "provider_account": "datos de la cuenta del proveedor", "not_billed": "no facturado", "unavailable": "evidencia no disponible" },
     "confirm": { "title": "Confirmar cambio de modelo", "body": "¿Cambiar de {{current}} a {{target}} para: {{scope}}? Nada cambia hasta que confirmes.", "cancel": "Cancelar", "apply": "Confirmar" },
     "error": "No se pudo aplicar la sugerencia",
     "preferenceChanged": "Preferencia actualizada para {{role}}."
