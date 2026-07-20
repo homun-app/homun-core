@@ -395,10 +395,14 @@ export function WorkspaceIsland({
 
           {subagentList.length > 0 && (
             <div className="wi-section wi-subagents">
-              <div className="wi-section-head">
+              <button
+                className="wi-section-head wi-section-toggle"
+                type="button"
+                onClick={() => onOpenInspector("subagents")}
+              >
                 <span>Subagents</span>
                 <em>{subagentList.length}</em>
-              </div>
+              </button>
               <ul className="wi-steps">
                 {subagentList.map((subagent, index) => (
                   <li key={`${index}-${subagent.name}`} className={subagent.status}>
@@ -440,10 +444,14 @@ export function WorkspaceIsland({
 
           {sourceList.length > 0 && (
             <div className="wi-section wi-sources">
-              <div className="wi-section-head">
+              <button
+                className="wi-section-head wi-section-toggle"
+                type="button"
+                onClick={() => onOpenInspector("sources")}
+              >
                 <span>Sources</span>
                 <em>{sourceList.length}</em>
-              </div>
+              </button>
               {sourceList.slice(0, 6).map((source, index) => (
                 <button
                   key={`${index}-${source.name}`}

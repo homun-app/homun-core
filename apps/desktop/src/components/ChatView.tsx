@@ -343,7 +343,6 @@ export function ChatView({
   const [computerSession, setComputerSession] = useState<ComputerSession>(() =>
     createLoadingComputerSession(computerSessionId),
   );
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [activeSurface, setActiveSurface] = useState<ComputerSurfaceKind>(
     computerSession.activeSurface,
   );
@@ -668,6 +667,11 @@ export function ChatView({
         if (view.key === "plan") return workspacePlanSteps.length > 0;
         if (view.key === "goals") return projectGoalCount > 0 || Boolean(goalSeed);
         if (view.key === "graph") return projectMemoryCount > 0;
+        if (view.key === "sources") return islandSources.length > 0;
+        if (view.key === "subagents") return projectedSubagents.length > 0;
+        if (view.key === "computer") {
+          return computerLiveStatus.active || activeApprovels.length > 0;
+        }
         if (view.key === "execution") return true;
         return false;
       }),
@@ -681,6 +685,9 @@ export function ChatView({
       projectGoalCount,
       projectMemoryCount,
       threadIsProject,
+      islandSources.length,
+      projectedSubagents.length,
+      computerLiveStatus.active,
     ],
   );
 
@@ -749,12 +756,6 @@ export function ChatView({
     }),
     [computerSession],
   );
-  const showComputerActivity =
-    activeApprovels.length > 0 ||
-    planStepRunning ||
-    smokeTestRunning ||
-    detailsOpen;
-
   function scrollConversationToBottom(behavior: ScrollBehavior) {
     const node = conversationRef.current;
     if (!node) return;
@@ -2195,7 +2196,6 @@ export function ChatView({
     };
   }, [
     threadMessages,
-    detailsOpen,
     streamingAssistantId,
   ]);
 
@@ -2237,9 +2237,9 @@ export function ChatView({
   return (
     <section
       ref={layoutRef}
-      className={`chat-view active-task-layout${detailsOpen ? " panel-open" : ""}${
-        inspector.open ? " inspector-open" : ""
-      }${inspector.focused ? " inspector-focused" : ""}${
+      className={`chat-view active-task-layout${inspector.open ? " inspector-open" : ""}${
+        inspector.focused ? " inspector-focused" : ""
+      }${
         threadMessages.length === 0 ? " is-empty" : ""
       }${islandColumnVisible ? "" : " island-collapsed"}`}
       aria-labelledby="chat-title"
@@ -2637,21 +2637,6 @@ export function ChatView({
         </div>
       </div>
 
-      {detailsOpen && (
-        <ComputerDetailPanel
-          activeSurface={activeSurface}
-          controlBusy={computerControlBusy}
-          controlError={computerControlError}
-          onClose={() => setDetailsOpen(false)}
-          onPause={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
-          onResume={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
-          onSelectSurface={setActiveSurface}
-          onTakeover={() => runComputerControl(coreBridge.requestLocalComputerTakeover)}
-          previewDataUrl={previewDataUrl}
-          session={computerSession}
-        />
-      )}
-
       {showJumpToBottom && (
         <button
           className="chat-jump-bottom"
@@ -2701,6 +2686,20 @@ export function ChatView({
             layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}
             onOpenFile={openFileTab}
             onOpenArtifact={openArtifactTab}
+            sources={islandSources}
+            subagents={projectedSubagents}
+            activeSurface={activeSurface}
+            controlBusy={computerControlBusy}
+            controlError={computerControlError}
+            onPauseComputer={() => runComputerControl(coreBridge.pauseLocalComputerSession)}
+            onResumeComputer={() => runComputerControl(coreBridge.resumeLocalComputerSession)}
+            onSelectSurface={setActiveSurface}
+            onTakeoverComputer={() =>
+              runComputerControl(coreBridge.requestLocalComputerTakeover)
+            }
+            previewDataUrl={previewDataUrl}
+            computerSession={computerSession}
+            onCloseTab={() => dispatchInspector({ type: "closeTab", tabId: tab.id })}
           />
         )}
       />
@@ -4092,6 +4091,13 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
  *  background/scheduled tasks; "plan" = the orchestrator's operational plan.
  *  (Computer stays docked above the composer by design.) */
 type LegacyWorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan" | "execution";
+type InspectorResourceStatus =
+  | "loading"
+  | "ready"
+  | "missing"
+  | "denied"
+  | "unsupported"
+  | "error";
 
 /** A generated artifact or uploaded file, projected into the island's "Sources" section.
  *  `kind` only selects the (monochrome) glyph; `meta` is a one-word provenance hint. */
@@ -4112,6 +4118,9 @@ const PANEL_VIEWS: { key: InspectorTabKind; label: string; icon: typeof FileText
   { key: "execution", label: "Execution", icon: ScanSearch },
   { key: "graph", label: "Memory", icon: Share2 },
   { key: "goals", label: "Goals", icon: Target },
+  { key: "sources", label: "Sources", icon: BookMarked },
+  { key: "subagents", label: "Subagents", icon: Bot },
+  { key: "computer", label: "Computer", icon: Monitor },
 ];
 const INSPECTOR_VIEW_LABEL: Record<InspectorTabKind, string> = {
   file: "Files",
@@ -5142,6 +5151,18 @@ function InspectorView({
   layoutSignal,
   onOpenFile,
   onOpenArtifact,
+  sources,
+  subagents,
+  activeSurface,
+  controlBusy,
+  controlError,
+  onPauseComputer,
+  onResumeComputer,
+  onSelectSurface,
+  onTakeoverComputer,
+  previewDataUrl,
+  computerSession,
+  onCloseTab,
 }: {
   descriptor: InspectorTab;
   artifacts: ParsedArtifact[];
@@ -5153,6 +5174,18 @@ function InspectorView({
   layoutSignal: string;
   onOpenFile: (path: string) => void;
   onOpenArtifact: (artifact: ParsedArtifact) => void;
+  sources: IslandSource[];
+  subagents: SubagentInfo[];
+  activeSurface: ComputerSurfaceKind;
+  controlBusy: boolean;
+  controlError: string | null;
+  onPauseComputer: () => void;
+  onResumeComputer: () => void;
+  onSelectSurface: (surface: ComputerSurfaceKind) => void;
+  onTakeoverComputer: () => void;
+  previewDataUrl: string | null;
+  computerSession: ComputerSession;
+  onCloseTab: () => void;
 }) {
   const { t } = useTranslation();
   const open = true;
@@ -5288,6 +5321,76 @@ function InspectorView({
     };
   }, [open, tab, threadId]);
 
+  const fileStatus: InspectorResourceStatus = fileLoading
+    ? "loading"
+    : !resourceFilePath
+      ? "ready"
+      : !openFile
+        ? "loading"
+        : !openFile.authorized
+          ? "denied"
+          : openFile.error
+            ? "error"
+            : openFile.binary
+              ? "unsupported"
+              : "ready";
+
+  if (descriptor.kind === "sources") {
+    return (
+      <div className="workbench-files inspector-source-view">
+        {sources.length > 0 ? (
+          <ul className="workbench-file-list">
+            {sources.map((source, index) => (
+              <li key={`${index}:${source.kind}:${source.name}`}>
+                {source.kind === "image" ? <FileImage size={15} /> : <FileText size={15} />}
+                <span className="wf-name" title={source.name}>{source.name}</span>
+                {source.meta && <small>{source.meta}</small>}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="workbench-empty"><BookMarked size={28} /><p>No sources yet.</p></div>
+        )}
+      </div>
+    );
+  }
+
+  if (descriptor.kind === "subagents") {
+    return (
+      <div className="workbench-files inspector-subagent-view">
+        {subagents.length > 0 ? (
+          <ul className="workbench-file-list">
+            {subagents.map((subagent, index) => (
+              <li key={`${index}:${subagent.name}`}>
+                <Bot size={15} />
+                <span className="wf-name" title={subagent.name}>{subagent.name}</span>
+                <small>{subagent.status}</small>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="workbench-empty"><Bot size={28} /><p>No subagents in this activity.</p></div>
+        )}
+      </div>
+    );
+  }
+
+  if (descriptor.kind === "computer") {
+    return (
+      <ComputerDetailPanel
+        activeSurface={activeSurface}
+        controlBusy={controlBusy}
+        controlError={controlError}
+        onPause={onPauseComputer}
+        onResume={onResumeComputer}
+        onSelectSurface={onSelectSurface}
+        onTakeover={onTakeoverComputer}
+        previewDataUrl={previewDataUrl}
+        session={computerSession}
+      />
+    );
+  }
+
   if (!tab) {
     return (
       <div className="workbench-empty">
@@ -5326,17 +5429,21 @@ function InspectorView({
               )}
             </div>
             <div className="workbench-fileview-body">
-              {!openFile.authorized ? (
+              {fileStatus === "denied" ? (
                 <div className="workbench-empty">
                   <AlertCircle size={24} />
                   <p>Folder not authorized.</p>
+                  <button type="button" onClick={onCloseTab}>{t("chat.closePanel")}</button>
                 </div>
-              ) : openFile.error ? (
+              ) : fileStatus === "error" ? (
                 <div className="workbench-empty">
                   <AlertCircle size={24} />
                   <p>{openFile.error}</p>
+                  <button type="button" onClick={() => void loadFileAt(resourceFilePath)}>
+                    {t("common.retry")}
+                  </button>
                 </div>
-              ) : openFile.binary ? (
+              ) : fileStatus === "unsupported" ? (
                 <div className="workbench-empty">
                   <FileText size={24} />
                   <p>{t("chat.binaryFileHint")}</p>
@@ -5450,6 +5557,7 @@ function InspectorView({
             <div className="workbench-empty">
               <FileText size={28} />
               <p>This artifact is no longer available.</p>
+              <button type="button" onClick={onCloseTab}>{t("chat.closePanel")}</button>
             </div>
           ))}
         {tab === "artifacts" && !descriptor.payload.name && (
@@ -8232,7 +8340,6 @@ function ComputerDetailPanel({
   activeSurface,
   controlBusy,
   controlError,
-  onClose,
   onPause,
   onResume,
   onSelectSurface,
@@ -8243,7 +8350,6 @@ function ComputerDetailPanel({
   activeSurface: ComputerSurfaceKind;
   controlBusy: boolean;
   controlError: string | null;
-  onClose: () => void;
   onPause: () => void;
   onResume: () => void;
   onSelectSurface: (surface: ComputerSurfaceKind) => void;
@@ -8254,33 +8360,16 @@ function ComputerDetailPanel({
   const { t } = useTranslation();
   const currentSurface = session.surfaces.find((surface) => surface.id === activeSurface);
   const paused = session.status === "paused";
-  // Fullscreen toggle (design): expand the panel to near-full-window for wide
-  // diffs/browser views, then shrink back. Local UI state — no persistence needed.
-  const [fullscreen, setFullscreen] = useState(false);
 
   return (
-    <aside
-      className={`computer-detail-panel${fullscreen ? " fullscreen" : ""}`}
+    <div
+      className="computer-detail-panel"
       aria-label={t("chat.localComputerDetail")}
     >
       <header>
         <div>
           <strong>{session.title}</strong>
           <small>{session.subtitle}</small>
-        </div>
-        <div className="computer-panel-header-actions">
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={fullscreen ? t("chat.collapsePanel") : t("chat.expandPanel")}
-            title={fullscreen ? t("chat.collapse") : t("chat.action.expand")}
-            onClick={() => setFullscreen((value) => !value)}
-          >
-            {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          </button>
-          <button className="icon-button" type="button" aria-label="Close computer" onClick={onClose}>
-            <X size={18} />
-          </button>
         </div>
       </header>
 
@@ -8392,7 +8481,7 @@ function ComputerDetailPanel({
           </button>
         </div>
       </footer>
-    </aside>
+    </div>
   );
 }
 

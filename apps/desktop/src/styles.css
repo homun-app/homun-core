@@ -2594,6 +2594,7 @@ body.resizing-drawer {
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
+  container: chat-workspace / inline-size;
 }
 
 .workspace:not(:has(.active-task-layout)) {
@@ -2685,6 +2686,7 @@ body.resizing-drawer {
 .active-task-layout.inspector-focused {
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas: "inspector" "inspector" "inspector";
+  padding: 0;
 }
 .active-task-layout.inspector-focused > .task-topbar,
 .active-task-layout.inspector-focused > .thread-scroll,
@@ -5488,32 +5490,18 @@ body.resizing-drawer {
 }
 
 .computer-detail-panel {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 12;
-  width: var(--detail-panel-w, min(520px, calc(100% - 48px)));
-  /* Docked look: flush-right full-height column, flat (border-left only, no shadow
-     /radius) — feels part of the frame, not a popup. */
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   border: none;
-  border-left: 1px solid var(--line);
   border-radius: 0;
   background: var(--surface);
   box-shadow: none;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
-  animation: panel-in 170ms ease both;
-}
-
-/* Fullscreen: expand the floating panel to near-full-window (design toggle). */
-.computer-detail-panel.fullscreen {
-  top: 12px;
-  right: 12px;
-  bottom: 12px;
-  left: 12px;
-  width: auto;
 }
 
 .computer-panel-header-actions {
@@ -6284,6 +6272,35 @@ body.resizing-drawer {
   cursor: col-resize !important;
   user-select: none !important;
   transition: none !important;
+}
+
+.active-task-layout.inspector-focused .inspector-resize-handle {
+  display: none;
+}
+.active-task-layout.inspector-focused .inspector-mobile-back {
+  display: inline-flex !important;
+}
+
+@container chat-workspace (max-width: 960px) {
+  .active-task-layout.inspector-open {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "inspector"
+      "inspector"
+      "inspector";
+    padding: 0;
+  }
+  .active-task-layout.inspector-open > .task-topbar,
+  .active-task-layout.inspector-open > .thread-scroll,
+  .active-task-layout.inspector-open > .composer-shell {
+    display: none;
+  }
+  .active-task-layout.inspector-open .inspector-resize-handle {
+    display: none;
+  }
+  .active-task-layout.inspector-open .inspector-mobile-back {
+    display: inline-flex !important;
+  }
 }
 /* ChatView's Workbench placeholders (memory/artifacts/activity/plan/files). A cohesive
    family under one class; aligned to the shared .state-view look (below) so they match the
@@ -10559,14 +10576,6 @@ body.resizing-drawer {
     height: 58px;
   }
 
-  .computer-detail-panel {
-    top: 86px;
-    left: 12px;
-    right: 12px;
-    bottom: 104px;
-    width: auto;
-  }
-
   .computer-panel-footer {
     align-items: flex-start;
     flex-direction: column;
@@ -10632,10 +10641,6 @@ body.resizing-drawer {
     min-height: 54px;
   }
 
-  .computer-detail-panel {
-    top: 58px;
-    bottom: 94px;
-  }
 }
 
 /* ============================================================================

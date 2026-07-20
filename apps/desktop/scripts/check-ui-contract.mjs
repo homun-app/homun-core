@@ -301,15 +301,10 @@ assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity 
 assertNotContains("src/components/ChatComputerPanel.tsx", "cc-dock-activity", "computer island header must show only Computer and LIVE, never prompt/activity text");
 assertNotContains("src/styles.css", ".cc-dock-activity", "computer island must not reserve header space for prompt/activity text");
 assertNotContains("src/components/ChatComputerPanel.tsx", "const ownedByThisThread = !hasLiveActivity", "idle global computer availability must not count as thread ownership");
-assertMatches(
+assertNotContains(
   "src/components/ChatView.tsx",
-  /const showComputerActivity =\s*activeApprovels\.length > 0 \|\|\s*planStepRunning \|\|\s*smokeTestRunning \|\|\s*detailsOpen;/m,
-  "inline computer activity must be driven only by active approvals/runs or explicit details",
-);
-assertNotMatches(
-  "src/components/ChatView.tsx",
-  /const showComputerActivity =[\s\S]*visibleComputerSession\.(timeline|artifacts)\.length > 0[\s\S]*?;/m,
-  "completed computer timeline/artifacts must not reopen the inline Computer card",
+  "const showComputerActivity =",
+  "computer activity must use the shared inspector instead of a second inline panel",
 );
 assertContains("src/components/ChatView.tsx", "approval-scope-options", "approval UI must make temporary vs fixed scope explicit");
 assertContains("src/lib/providerPresets.ts", "https://api.z.ai/api/paas/v4", "Z.ai standard preset must keep the standard GLM endpoint");
@@ -528,6 +523,11 @@ assertNotContains("src/components/ChatView.tsx", "setWorkbenchTab", "legacy acti
 assertContains("src/components/ChatView.tsx", "`file:${normalizedPath}`", "file tabs must dedupe by canonical path");
 assertContains("src/components/ChatView.tsx", "`artifact:${artifact.thread}:${artifact.name}`", "artifact tabs must dedupe by provenance and name");
 assertNotContains("src/styles.css", ".artifacts-panel.embedded .artifacts-panel-body {\n  grid-template-columns:", "artifact preview must not keep a permanent inner sidebar");
+assertNotContains("src/components/ChatView.tsx", "detailsOpen && (", "computer detail must use the shared inspector");
+assertNotContains("src/styles.css", ".computer-detail-panel {\n  position: absolute", "computer detail must not float separately");
+assertContains("src/styles.css", "@container chat-workspace (max-width: 960px)", "narrow behavior must follow available chat width");
+assertContains("src/components/ChatView.tsx", "descriptor.kind === \"sources\"", "sources must have an inspector adapter");
+assertContains("src/components/ChatView.tsx", "descriptor.kind === \"subagents\"", "subagents must have an inspector adapter");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
