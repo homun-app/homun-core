@@ -520,6 +520,9 @@ assertContains("src/components/InspectorWorkspace.tsx", "releasePointerCapture",
 assertContains("src/components/InspectorWorkspace.tsx", 'window.addEventListener("blur"', "inspector resizing must clean up if the window loses focus");
 assertContains("src/components/InspectorWorkspace.tsx", "onToggleFocus", "inspector must expose focus mode without destroying tabs");
 assertContains("src/components/InspectorWorkspace.tsx", "hidden={tab.id !== state.activeTabId}", "inactive tab panels must remain mounted and hidden");
+assertContains("src/styles.css", ".inspector-tab-panel {\n  min-width: 0;\n  min-height: 0;\n  height: 100%;\n  overflow-y: auto;", "inspector tab panels must own document scrolling");
+assertContains("src/styles.css", ".inspector-tab-panel .artifacts-preview-body {\n  overflow: visible;", "embedded artifact documents must use the tab scroll owner");
+assertContains("src/styles.css", ".inspector-tab-panel .workbench-files {\n  overflow: visible;", "inspector lists must use the tab scroll owner");
 assertContains("src/styles.css", "grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));", "chat and inspector must be real sibling columns");
 assertContains("src/styles.css", ".active-task-layout.inspector-open > .chat-status-stack", "the working island must not create a third column");
 assertNotContains("src/styles.css", ".workbench {\n  position: absolute", "legacy workbench must not float above the chat");

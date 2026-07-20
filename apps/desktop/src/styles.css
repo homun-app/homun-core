@@ -6262,11 +6262,24 @@ body.resizing-drawer {
 .inspector-tab-menu > button.active {
   background: var(--surface-hover);
 }
-.inspector-workspace-body,
+.inspector-workspace-body {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
 .inspector-tab-panel {
   min-width: 0;
   min-height: 0;
   height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+.inspector-tab-panel:has(.memory-graph),
+.inspector-tab-panel:has(> .computer-detail-panel) {
   overflow: hidden;
 }
 .inspector-tab-panel[hidden] {
@@ -6677,7 +6690,8 @@ body.resizing-drawer {
   position: static;
   inset: auto;
   width: 100%;
-  height: 100%;
+  height: auto;
+  min-height: 100%;
   z-index: auto;
   border-left: none;
   box-shadow: none;
@@ -6687,7 +6701,7 @@ body.resizing-drawer {
   min-height: 0;
   padding: 0;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
 }
 .artifacts-panel.embedded .artifacts-preview {
   min-width: 0;
@@ -6717,6 +6731,14 @@ body.resizing-drawer {
   border-radius: 0;
   background: transparent;
 }
+.inspector-tab-panel .artifacts-preview-body {
+  overflow: visible;
+  flex: 0 0 auto;
+}
+.inspector-tab-panel .artifacts-panel-body,
+.inspector-tab-panel .artifacts-preview {
+  min-height: 100%;
+}
 .artifacts-panel.embedded .code-view,
 .artifacts-panel.embedded .diff-view,
 .artifacts-panel.embedded .artifact-preview-table-wrap {
@@ -6731,6 +6753,11 @@ body.resizing-drawer {
      matching the Artefatti/Piano tabs that render the empty directly in the body. */
   display: flex;
   flex-direction: column;
+}
+.inspector-tab-panel .workbench-files {
+  overflow: visible;
+  flex: 0 0 auto;
+  min-height: 100%;
 }
 .workbench-empty-actions {
   display: inline-flex;
@@ -6855,6 +6882,24 @@ body.resizing-drawer {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+.inspector-tab-panel .inspector-view-body {
+  min-height: 100%;
+  height: auto;
+  overflow: visible;
+}
+.inspector-tab-panel .workbench-fileview {
+  min-height: 100%;
+  height: auto;
+}
+.inspector-tab-panel .workbench-fileview-body {
+  overflow: visible;
+  flex: 0 0 auto;
+}
+.inspector-tab-panel:has(.memory-graph) .inspector-view-body {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 .workbench-file-list .wf-muted {
   color: var(--muted);
