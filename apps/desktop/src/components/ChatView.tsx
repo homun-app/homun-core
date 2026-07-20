@@ -125,6 +125,7 @@ import {
   type InspectorTab,
   type InspectorTabKind,
 } from "../lib/inspectorWorkspace";
+import { reconcileMemoryArtifacts } from "../lib/uiSnapshot";
 import {
   STRUCTURED_MARKER_DELTA_RE,
   COMPOSIO_CONFIRM_RE,
@@ -415,7 +416,6 @@ export function ChatView({
   const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
   const [memoryArtifactsLoaded, setMemoryArtifactsLoaded] = useState(false);
   const [memoryArtifactsLoadError, setMemoryArtifactsLoadError] = useState(false);
-  const [memoryArtifactsRevision, setMemoryArtifactsRevision] = useState(0);
   const [memoryArtifactsReloadNonce, setMemoryArtifactsReloadNonce] = useState(0);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
   // the "Save as goal" message action + the Obiettivi tab. `goalSeed` pre-fills
@@ -831,7 +831,7 @@ export function ChatView({
     // Resource descriptors are restored once per authorization scope. Individual
     // open tabs revalidate again on window focus, without ever persisting content.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [memoryArtifactsLoadError, memoryArtifactsLoaded, memoryArtifactsRevision, thread.threadId, thread.workspaceId]);
+  }, [memoryArtifacts, memoryArtifactsLoadError, memoryArtifactsLoaded, thread.threadId, thread.workspaceId]);
 
   useEffect(() => {
     if (!inspectorResourcesReady) return;
@@ -1866,17 +1866,15 @@ export function ChatView({
       .memoryArtifacts(thread.threadId)
       .then((items) => {
         if (!cancelled) {
-          setMemoryArtifacts(items);
+          setMemoryArtifacts((current) => reconcileMemoryArtifacts(current, items));
           setMemoryArtifactsLoadError(false);
           setMemoryArtifactsLoaded(true);
-          setMemoryArtifactsRevision((revision) => revision + 1);
         }
       })
       .catch(() => {
         if (!cancelled) {
           setMemoryArtifactsLoadError(true);
           setMemoryArtifactsLoaded(true);
-          setMemoryArtifactsRevision((revision) => revision + 1);
         }
       });
     return () => {
@@ -5887,6 +5885,18 @@ function ArtifactsPanel({
   const artifactActionsRef = useRef<HTMLDetailsElement>(null);
 
   const selected = artifacts.find((a) => a.name === selectedName) ?? artifacts[0] ?? null;
+  const selectedResourceRevision = selected
+    ? [
+        selected.thread,
+        selected.name,
+        selected.source ?? "",
+        selected.managed_path ?? "",
+        selected.projectPath ?? "",
+        selected.projectRelativePath ?? "",
+        String(selected.size),
+        selected.updated ? "1" : "0",
+      ].join("\u001f")
+    : "";
 
   function applyPreview(next: ArtifactPreview) {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -5937,14 +5947,14 @@ function ArtifactsPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, reloadKey]);
+  }, [selectedResourceRevision, reloadKey]);
 
   useEffect(() => {
     if (!selected) return undefined;
     const revalidate = () => setReloadKey((key) => key + 1);
     window.addEventListener("focus", revalidate);
     return () => window.removeEventListener("focus", revalidate);
-  }, [selected]);
+  }, [selectedResourceRevision]);
 
   const editableKind =
     selected?.source !== "project" &&
@@ -5991,7 +6001,7 @@ function ArtifactsPanel({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showDiff, slot, selected, versions]);
+  }, [showDiff, slot, selectedResourceRevision, versions]);
 
   const diffCounts = diffData ? diffStats(diffData.oldText, diffData.newText) : null;
 

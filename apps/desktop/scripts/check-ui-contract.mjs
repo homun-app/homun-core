@@ -529,6 +529,9 @@ assertContains("src/components/ChatView.tsx", "saveInspectorState(thread.threadI
 assertContains("src/components/ChatView.tsx", "Promise.all(restored.tabs.map", "restored resource tabs must be revalidated as one batch");
 assertContains("src/components/ChatView.tsx", "coreBridge.fsFile(tab.payload.path, thread.threadId)", "restored file tabs must recheck current authorization");
 assertContains("src/components/ChatView.tsx", "inspectorResourcesReady", "restored resources must stay hidden until validation completes");
+assertContains("src/components/ChatView.tsx", "reconcileMemoryArtifacts", "artifact polling must preserve an unchanged catalog");
+assertNotContains("src/components/ChatView.tsx", "memoryArtifactsRevision", "artifact validation must not use an unconditional revision counter");
+assertContains("src/components/ChatView.tsx", "selectedResourceRevision", "artifact preview reloads must follow a semantic resource revision");
 assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");
 assertNotContains("src/components/ChatView.tsx", "setWorkbenchTab", "legacy active-tab state must be removed");
 assertContains("src/components/ChatView.tsx", "`file:${normalizedPath}`", "file tabs must dedupe by canonical path");
