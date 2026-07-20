@@ -22,6 +22,7 @@
     "test:execution-inspector": "node --test src/lib/executionInspector.test.mjs",
     "test:inspector-workspace": "node --test src/lib/inspectorWorkspace.test.mjs",
     "test:inspector-stability": "node --test src/lib/uiSnapshot.test.mjs",
+    "test:usage-ui": "node --test src/lib/usageViewModel.test.mjs",
     "refresh-models": "node scripts/refresh-models-catalog.mjs",
     "typecheck": "tsc --noEmit"
   },

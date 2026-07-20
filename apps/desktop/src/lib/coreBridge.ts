@@ -35,6 +35,98 @@ export interface CoreBridgeStatus {
   }>;
 }
 
+export type UsageWindow = "7d" | "30d" | "all";
+
+export interface UsageCostBreakdown {
+  provider_reported_microusd: number;
+  catalog_estimated_microusd: number;
+  manual_estimated_microusd: number;
+  not_billed_attempts: number;
+  unknown_cost_attempts: number;
+  cost_coverage_percent: number;
+}
+
+export interface UsageSummaryView {
+  logical_calls: number;
+  attempts: number;
+  successful_attempts: number;
+  failed_attempts: number;
+  aborted_attempts: number;
+  known_usage_attempts: number;
+  unknown_usage_attempts: number;
+  usage_coverage_percent: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_microusd: number;
+  cost_breakdown: UsageCostBreakdown;
+  coverage_started_at: number | null;
+}
+
+export interface UsageBreakdownRow {
+  key: string;
+  logical_calls: number;
+  attempts: number;
+  successful_attempts: number;
+  failed_attempts: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  cost_microusd: number;
+  known_usage_attempts: number;
+  unknown_usage_attempts: number;
+  cost_breakdown: UsageCostBreakdown;
+}
+
+export type UsageModelRow = UsageBreakdownRow;
+export type UsageProcessRow = UsageBreakdownRow;
+
+export interface ModelPriceOverride {
+  model_id: string;
+  input_microusd_per_million: number | null;
+  output_microusd_per_million: number | null;
+  reasoning_microusd_per_million: number | null;
+  cache_read_microusd_per_million: number | null;
+  cache_write_microusd_per_million: number | null;
+}
+
+export interface ProviderUsagePolicy {
+  user_id: string;
+  provider_id: string;
+  monthly_budget_microusd: number | null;
+  currency: "USD";
+  reset_day: number | null;
+  timezone: string | null;
+  alert_threshold_percent: number | null;
+  pricing_overrides: ModelPriceOverride[];
+}
+
+export interface ProviderUsageSnapshot {
+  snapshot_id: string;
+  user_id: string;
+  provider_id: string;
+  status: "available" | "unsupported" | "unauthorized" | "error";
+  metric: string;
+  used_value: number | null;
+  limit_value: number | null;
+  remaining_value: number | null;
+  unit: string | null;
+  source: string;
+  observed_at: number;
+  error_code: string | null;
+}
+
+export interface UsageProviderRow {
+  provider_id: string;
+  homun_usage: UsageBreakdownRow;
+  account_snapshot: ProviderUsageSnapshot[];
+  manual_policy: ProviderUsagePolicy | null;
+}
+
+export type SetProviderUsagePolicyInput = Omit<ProviderUsagePolicy, "user_id" | "provider_id">;
+
 export interface CoreChatThread {
   thread_id: string;
   workspace_id?: string | null;
@@ -3074,6 +3166,45 @@ export async function factoryReset(): Promise<{ ok: boolean }> {
   return api.factoryReset();
 }
 
+function electronUsageSummary(window: UsageWindow): Promise<UsageSummaryView> {
+  return gatewayGetJson<UsageSummaryView>(`/api/usage/summary?window=${window}`);
+}
+
+function electronUsageModels(window: UsageWindow): Promise<UsageModelRow[]> {
+  return gatewayGetJson<UsageModelRow[]>(`/api/usage/models?window=${window}`);
+}
+
+function electronUsageProviders(window: UsageWindow): Promise<UsageProviderRow[]> {
+  return gatewayGetJson<UsageProviderRow[]>(`/api/usage/providers?window=${window}`);
+}
+
+function electronUsageProcesses(window: UsageWindow): Promise<UsageProcessRow[]> {
+  return gatewayGetJson<UsageProcessRow[]>(`/api/usage/processes?window=${window}`);
+}
+
+function electronRefreshProviderUsage(providerId: string): Promise<ProviderUsageSnapshot[]> {
+  return gatewayPostJson<ProviderUsageSnapshot[]>(
+    `/api/usage/providers/${encodeURIComponent(providerId)}/refresh`,
+    {},
+  );
+}
+
+function electronProviderUsagePolicy(providerId: string): Promise<ProviderUsagePolicy | null> {
+  return gatewayGetJson<ProviderUsagePolicy | null>(
+    `/api/usage/providers/${encodeURIComponent(providerId)}/policy`,
+  );
+}
+
+function electronSetProviderUsagePolicy(
+  providerId: string,
+  policy: SetProviderUsagePolicyInput,
+): Promise<ProviderUsagePolicy> {
+  return gatewayPutJson<ProviderUsagePolicy>(
+    `/api/usage/providers/${encodeURIComponent(providerId)}/policy`,
+    policy,
+  );
+}
+
 export const coreBridge = {
   status: () => Promise.resolve(electronCoreStatus()),
   runtimeModel: () => electronRuntimeModel(),
@@ -3106,6 +3237,14 @@ export const coreBridge = {
   setProviderEnabled: (id: string, enabled: boolean) =>
     electronSetProviderEnabled(id, enabled),
   refreshProviderModels: (id: string) => electronRefreshProviderModels(id),
+  usageSummary: (window: UsageWindow) => electronUsageSummary(window),
+  usageModels: (window: UsageWindow) => electronUsageModels(window),
+  usageProviders: (window: UsageWindow) => electronUsageProviders(window),
+  usageProcesses: (window: UsageWindow) => electronUsageProcesses(window),
+  refreshProviderUsage: (providerId: string) => electronRefreshProviderUsage(providerId),
+  providerUsagePolicy: (providerId: string) => electronProviderUsagePolicy(providerId),
+  setProviderUsagePolicy: (providerId: string, policy: SetProviderUsagePolicyInput) =>
+    electronSetProviderUsagePolicy(providerId, policy),
   setModelProfile: (input: SetModelProfileInput) => electronSetModelProfile(input),
   generateProviderProfiles: (id: string) => electronGenerateProviderProfiles(id),
   llmConcurrency: () => electronLlmConcurrency(),
