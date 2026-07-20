@@ -37,6 +37,7 @@ import type { PluginState } from "../lib/coreBridge";
 import { ContactsView } from "./ContactsView";
 import { MemoryView } from "./MemoryView";
 import { SandboxSettingsView } from "./SandboxSettingsView";
+import { UsageSettingsPane } from "./UsageSettingsPane";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -147,6 +148,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   general: "settings.general",
   appearance: "settings.appearance",
   runtime: "settings.runtime",
+  usage: "settings.usage.title",
   privacy: "settings.privacy",
   sandbox: "settings.sandbox",
   vault: "settings.vault",
@@ -231,6 +233,7 @@ export function SettingsView({ section, sub, onPluginsChanged }: SettingsViewPro
             sub={sub === "providers" ? sub : "routing"}
           />
         )}
+        {section === "usage" && <UsageSettingsPane />}
         {section === "privacy" && <PrivacyPane />}
         {section === "sandbox" && <SandboxSettingsView />}
         {section === "vault" && <VaultPane />}

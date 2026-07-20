@@ -98,6 +98,11 @@ assertContains("src/components/OnboardingWizard.tsx", 'href="https://homun.app/d
 assertNotContains("src/components/OnboardingWizard.tsx", "https://docs.homun.app", "onboarding must not use the retired documentation host");
 assertContains("src/lib/accent.ts", 'export const DEFAULT_THEME: ThemeName = "dark";', "fresh installs must default to the dark surface theme");
 assertContains("src/lib/accent.ts", 'export const DEFAULT_ACCENT = "#157a6e";', "fresh installs must keep the Homun teal accent");
+assertContains("src/types.ts", '  | "usage"', "Settings must expose a Usage section");
+assertContains("src/data/mockData.ts", 'id: "usage"', "Settings drawer must list Usage");
+assertContains("src/components/SettingsView.tsx", "<UsageSettingsPane />", "Settings must render Usage");
+assertContains("src/components/UsageSettingsPane.tsx", 'role="tablist"', "Usage views must be keyboard-addressable tabs");
+assertContains("src/components/UsageSettingsPane.tsx", 'aria-live="polite"', "Usage loading and errors must be announced");
 assertMatches(
   "src/styles.css",
   /\.onb-model\s*\{[^}]*color:\s*var\(--o-text\);[^}]*\}/m,

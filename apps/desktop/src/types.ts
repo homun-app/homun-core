@@ -18,6 +18,7 @@ export type SettingsSectionId =
   | "general"
   | "appearance"
   | "runtime"
+  | "usage"
   | "privacy"
   | "sandbox"
   | "vault"
