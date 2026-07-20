@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/inference-usage",
     "crates/memory",
     "crates/subagents",
     "crates/capabilities",

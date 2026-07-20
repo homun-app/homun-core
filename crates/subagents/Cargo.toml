@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 local-first-engine = { path = "../engine" }
+local-first-inference-usage = { path = "../inference-usage" }
 local-first-capabilities = { path = "../capabilities" }
 local-first-memory = { path = "../memory" }
 local-first-task-runtime = { path = "../task-runtime" }

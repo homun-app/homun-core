@@ -3601,6 +3601,7 @@ dependencies = [
  "local-first-context-compression",
  "local-first-engine",
  "local-first-inference",
+ "local-first-inference-usage",
  "local-first-local-computer-session",
  "local-first-memory",
  "local-first-orchestrator",
@@ -3632,6 +3633,7 @@ dependencies = [
 name = "local-first-engine"
 version = "0.1.0"
 dependencies = [
+ "local-first-inference-usage",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3642,12 +3644,21 @@ dependencies = [
 name = "local-first-inference"
 version = "0.1.0"
 dependencies = [
+ "local-first-inference-usage",
  "local-first-subagents",
  "mistralrs",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "local-first-inference-usage"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3748,6 +3759,7 @@ version = "0.1.0"
 dependencies = [
  "local-first-capabilities",
  "local-first-engine",
+ "local-first-inference-usage",
  "local-first-memory",
  "local-first-task-runtime",
  "reqwest 0.12.28",
