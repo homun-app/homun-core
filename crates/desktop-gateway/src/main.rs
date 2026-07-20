@@ -16,6 +16,7 @@ mod document_content;
 mod model_client;
 mod inference_transport;
 mod usage_store;
+mod usage_pricing;
 // Model-output normalization moved WHOLE into the engine crate (ADR 0024 inc 5e.3, pure serde
 // module); re-exported so `model_normalize::…` call sites are unchanged.
 use local_first_engine::model_normalize;
@@ -232,6 +233,7 @@ pub(crate) struct AppState {
     pub(crate) http: reqwest::Client,
     usage_store: Arc<Mutex<usage_store::UsageStore>>,
     usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder>,
+    usage_pricing: Arc<std::sync::RwLock<usage_pricing::PricingSnapshot>>,
     chat_store: Arc<Mutex<ChatStore>>,
     task_store: Arc<Mutex<TaskStore>>,
     computer_store: Arc<Mutex<LocalComputerSessionStore>>,
@@ -463,6 +465,9 @@ impl AppState {
                 usage_store::UsageStore::open_in_memory().expect("in-memory usage store"),
             )),
             usage_recorder: Arc::new(local_first_inference_usage::NoopUsageRecorder),
+            usage_pricing: Arc::new(std::sync::RwLock::new(
+                usage_pricing::PricingSnapshot::default(),
+            )),
             chat_store: Arc::new(Mutex::new(
                 ChatStore::in_memory().expect("in-memory chat store"),
             )),
@@ -990,15 +995,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .abort_orphaned_attempts(i64::try_from(now_epoch_secs()).unwrap_or(i64::MAX))
         .map_err(std::io::Error::other)?;
     usage_store.rebuild_daily_rollups().map_err(std::io::Error::other)?;
-    let usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> = Arc::new(
+    let buffered_usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> = Arc::new(
         usage_store::BufferedUsageRecorder::start(&usage_path, 4_096)
             .map_err(std::io::Error::other)?,
+    );
+    let usage_pricing = Arc::new(std::sync::RwLock::new(build_usage_pricing_snapshot(&usage_store)));
+    let usage_recorder: Arc<dyn local_first_inference_usage::UsageRecorder> = Arc::new(
+        usage_pricing::CostEnrichingUsageRecorder::new(
+            buffered_usage_recorder,
+            usage_pricing.clone(),
+        ),
     );
     let _ = usage_recorder_registry().set(usage_recorder.clone());
     let mut state = AppState {
         http: build_gateway_http_client(),
         usage_store: Arc::new(Mutex::new(usage_store)),
         usage_recorder,
+        usage_pricing,
         chat_store: Arc::new(Mutex::new(ChatStore::open(gateway_database_path()?)?)),
         task_store: Arc::new(Mutex::new(TaskStore::open(gateway_task_database_path()?)?)),
         computer_store: Arc::new(Mutex::new(LocalComputerSessionStore::open(
@@ -15362,6 +15375,70 @@ fn load_provider_registry() -> ProviderRegistry {
         return registry;
     }
     seed_registry_from_legacy()
+}
+
+fn build_usage_pricing_snapshot(store: &usage_store::UsageStore) -> usage_pricing::PricingSnapshot {
+    let mut snapshot = usage_pricing::PricingSnapshot::default();
+    for provider in load_provider_registry().providers {
+        let manual = store
+            .provider_policy(gateway_user_id().as_str(), &provider.id)
+            .ok()
+            .flatten()
+            .map(|policy| {
+                policy
+                    .pricing_overrides
+                    .into_iter()
+                    .map(|price| (price.model_id.clone(), price))
+                    .collect::<std::collections::HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+        for model in provider.models {
+            let catalog = model.price.map(|price| usage_pricing::UsagePrice {
+                input_microusd_per_million: price.input_microusd_per_million,
+                output_microusd_per_million: price.output_microusd_per_million,
+                reasoning_microusd_per_million: price.reasoning_microusd_per_million,
+                cache_read_microusd_per_million: price.cache_read_microusd_per_million,
+                cache_write_microusd_per_million: price.cache_write_microusd_per_million,
+                source: price.source,
+                version: price.version,
+            });
+            let manual_price = manual.get(&model.id).map(|price| usage_pricing::UsagePrice {
+                input_microusd_per_million: price.input_microusd_per_million,
+                output_microusd_per_million: price.output_microusd_per_million,
+                reasoning_microusd_per_million: price.reasoning_microusd_per_million,
+                cache_read_microusd_per_million: price.cache_read_microusd_per_million,
+                cache_write_microusd_per_million: price.cache_write_microusd_per_million,
+                source: "manual_policy".to_string(),
+                version: "manual-policy-v1".to_string(),
+            });
+            snapshot.insert(
+                provider.id.clone(),
+                model.id,
+                usage_pricing::ModelPricing { catalog, manual: manual_price },
+            );
+        }
+        for (model_id, price) in manual {
+            if snapshot.get(&provider.id, &model_id).is_none() {
+                snapshot.insert(
+                    provider.id.clone(),
+                    model_id,
+                    usage_pricing::ModelPricing {
+                        catalog: None,
+                        manual: Some(usage_pricing::UsagePrice {
+                            input_microusd_per_million: price.input_microusd_per_million,
+                            output_microusd_per_million: price.output_microusd_per_million,
+                            reasoning_microusd_per_million: price.reasoning_microusd_per_million,
+                            cache_read_microusd_per_million: price.cache_read_microusd_per_million,
+                            cache_write_microusd_per_million: price.cache_write_microusd_per_million,
+                            source: "manual_policy".to_string(),
+                            version: "manual-policy-v1".to_string(),
+                        }),
+                    },
+                );
+            }
+        }
+    }
+    snapshot
 }
 
 /// Builds a one-provider registry from the legacy persisted base URL / env, so
@@ -45730,6 +45807,9 @@ async fn set_provider_enabled(
         });
     }
     save_provider_registry(&registry).map_err(provider_registry_persist_error)?;
+    if let (Ok(store), Ok(mut pricing)) = (state.usage_store.lock(), state.usage_pricing.write()) {
+        *pricing = build_usage_pricing_snapshot(&store);
+    }
     Ok(Json(providers_response(&registry)))
 }
 
@@ -66922,6 +67002,9 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             usage_recorder: std::sync::Arc::new(
                 local_first_inference_usage::NoopUsageRecorder,
             ),
+            usage_pricing: std::sync::Arc::new(std::sync::RwLock::new(
+                super::usage_pricing::PricingSnapshot::default(),
+            )),
             chat_store: std::sync::Arc::new(std::sync::Mutex::new(
                 super::ChatStore::in_memory().expect("chat store"),
             )),
