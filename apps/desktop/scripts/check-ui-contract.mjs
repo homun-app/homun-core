@@ -471,7 +471,7 @@ assertContains("src/components/WorkspaceIsland.tsx", "wi-progress", "workspace i
 assertContains("src/components/WorkspaceIsland.tsx", "if (!hasWorkspaceState && !hadWorkspaceState) return null", "workspace island must stay hidden when a thread has no real workspace state, while preserving completed state after a run");
 assertContains("src/components/ChatView.tsx", "threadHasMessages={threadMessages.length > 0}", "workspace island must not treat project memory artifacts as state for an empty new chat");
 assertContains("src/components/WorkspaceIsland.tsx", "(threadHasMessages || streaming || computerLive) &&", "workspace island must appear for thread-owned content, stream, or owned live computer work");
-assertContains("src/components/ChatView.tsx", "onOpenWorkbench={(tab) =>", "chat header (island or kebab menu) must wire onOpenWorkbench(tab) to open the docked Workbench");
+assertContains("src/components/ChatView.tsx", "onOpenInspector={openUtilityTab}", "chat header and island must route views through the inspector reducer");
 // The redundant "Plan N/M" row was removed — Progress IS the plan (one section, not two).
 // Sources (artifacts + uploaded files) are fused into the island; each opens the Workbench.
 assertContains("src/components/WorkspaceIsland.tsx", "wi-sources", "workspace island must render the fused Sources section");
@@ -520,6 +520,11 @@ assertContains("src/components/InspectorWorkspace.tsx", "hidden={tab.id !== stat
 assertContains("src/styles.css", "grid-template-columns: minmax(420px, 1fr) minmax(420px, var(--inspector-width));", "chat and inspector must be real sibling columns");
 assertContains("src/styles.css", ".active-task-layout.inspector-open > .chat-status-stack", "the working island must not create a third column");
 assertNotContains("src/styles.css", ".workbench {\n  position: absolute", "legacy workbench must not float above the chat");
+assertContains("src/components/ChatView.tsx", "useReducer(inspectorWorkspaceReducer", "chat must use one inspector reducer");
+assertContains("src/components/ChatView.tsx", "loadInspectorState(thread.threadId", "inspector state must be scoped by thread");
+assertContains("src/components/ChatView.tsx", "saveInspectorState(thread.threadId", "inspector state changes must persist by thread");
+assertNotContains("src/components/ChatView.tsx", "setArtifactsOpen", "legacy open boolean must not compete with inspector state");
+assertNotContains("src/components/ChatView.tsx", "setWorkbenchTab", "legacy active-tab state must be removed");
 assertNotContains("src/components/ChatView.tsx", "panel-menu-wrap--corner", "chat topbar must not expose a second workbench launcher");
 assertNotContains("src/styles.css", ".panel-menu-wrap--corner", "chat topbar workbench launcher must not compete with the workspace island");
 assertNotContains("src/styles.css", "z-index: 220;", "chat header workspace/review menu must not overlay native window controls");
@@ -547,7 +552,7 @@ assertContains("src/components/ChatView.tsx", "dedupeGoalDrafts", "goals manager
 assertContains("src/components/ChatView.tsx", "decideMemory(g.reference, \"delete\")", "goals manager must allow deleting saved project goals");
 assertContains("src/components/ChatView.tsx", "resizeFitTimer", "memory graph must refit after the workbench/canvas changes size");
 assertContains("src/components/ChatView.tsx", "layoutSignal", "memory graph must receive an explicit workbench layout signal");
-assertContains("src/components/ChatView.tsx", "layoutSignal={`${expanded ? \"expanded\" : \"docked\"}:${width}`}", "workbench must refit Memory when fullscreen or width changes");
+assertContains("src/components/ChatView.tsx", "layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}", "inspector must refit Memory when the active tab or width changes");
 assertContains("src/components/ChatView.tsx", "requestAnimationFrame", "memory graph resize refit must wait for the resized canvas to paint");
 assertContains("src/components/ChatView.tsx", "d3ReheatSimulation", "memory graph resize refit must restart layout before fitting");
 assertContains("src/styles.css", ".memory-graph-canvas canvas", "memory graph must size the ForceGraph canvas, not only an svg");

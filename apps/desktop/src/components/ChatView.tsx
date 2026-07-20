@@ -65,7 +65,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
@@ -116,6 +116,15 @@ import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../li
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
 import {
+  inspectorWorkspaceReducer,
+  loadInspectorState,
+  loadInspectorWidthRatio,
+  saveInspectorState,
+  saveInspectorWidthRatio,
+  type InspectorTab,
+  type InspectorTabKind,
+} from "../lib/inspectorWorkspace";
+import {
   STRUCTURED_MARKER_DELTA_RE,
   COMPOSIO_CONFIRM_RE,
   MCP_CONFIRM_RE,
@@ -144,6 +153,7 @@ import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import { WorkspaceIsland } from "./WorkspaceIsland";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
+import { InspectorWorkspace } from "./InspectorWorkspace";
 import { MemoryUsagePopover } from "./MemoryUsagePopover";
 import type {
   ChatMessage,
@@ -388,15 +398,16 @@ export function ChatView({
   const [streamHasVisibleText, setStreamHasVisibleText] = useState(false);
   const [autoContinueMessageId, setAutoContinueMessageId] = useState<string | null>(null);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  // Workbench (right-side panel, Claude-Code style): `artifactsOpen` is the
-  // open/closed flag; `workbenchTab` is the active tab. Phase 1 ships the
-  // "Artefatti" tab; File / Computer / Activity / Piano land in later phases.
-  // The island is a real right COLUMN now: open = it reflows the chat; collapsed = hidden,
-  // chat takes the full width (a header button reopens it). Default open.
+  // The compact working island remains available while the universal inspector is hidden.
+  // Inspector tabs and their ordering are isolated by thread; App keys ChatView by thread id,
+  // so each mount restores only the current activity's validated descriptors.
   const [islandOpen, setIslandOpen] = useState(true);
-  const [artifactsOpen, setArtifactsOpen] = useState(false);
-  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
-  const [artifactsInitial, setArtifactsInitial] = useState<string | null>(null);
+  const [inspector, dispatchInspector] = useReducer(inspectorWorkspaceReducer,
+    loadInspectorState(thread.threadId,
+      (tab) => isRestorableInspectorTab(tab, thread.threadId, thread.workspaceId),
+    ),
+  );
+  const [inspectorRatio, setInspectorRatio] = useState(loadInspectorWidthRatio);
   const [memoryArtifacts, setMemoryArtifacts] = useState<MemoryArtifactView[]>([]);
   // Is this thread a project? Reliable context signal (not keyword-detection) that gates
   // the "Save as goal" message action + the Obiettivi tab. `goalSeed` pre-fills
@@ -418,6 +429,7 @@ export function ChatView({
   const resumedThreadsRef = useRef<Set<string>>(new Set());
   const consumedAutoSubmitIdsRef = useRef<Set<string>>(new Set());
   const conversationRef = useRef<HTMLDivElement>(null);
+  const layoutRef = useRef<HTMLElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const streamingUserPinnedRef = useRef(false);
   const streamingFrameRef = useRef<number | null>(null);
@@ -647,15 +659,15 @@ export function ChatView({
   const activeApprovels = approvals.filter((approval) =>
     approval.requestedBy.includes(computerSessionId),
   );
-  const availableWorkbenchViews = useMemo(
+  const availableInspectorViews = useMemo(
     () =>
       PANEL_VIEWS.filter((view) => {
-        if (view.key === "artifacts") return workbenchArtifacts.length > 0;
-        if (view.key === "files") return uploadedFiles.length > 0;
+        if (view.key === "artifact") return workbenchArtifacts.length > 0;
+        if (view.key === "file") return uploadedFiles.length > 0 || threadIsProject;
         if (view.key === "activity") return conversationActivity.length > 0 || activeApprovels.length > 0;
         if (view.key === "plan") return workspacePlanSteps.length > 0;
         if (view.key === "goals") return projectGoalCount > 0 || Boolean(goalSeed);
-        if (view.key === "memoria") return projectMemoryCount > 0;
+        if (view.key === "graph") return projectMemoryCount > 0;
         if (view.key === "execution") return true;
         return false;
       }),
@@ -668,9 +680,43 @@ export function ChatView({
       goalSeed,
       projectGoalCount,
       projectMemoryCount,
+      threadIsProject,
     ],
   );
-  const workbenchOpen = artifactsOpen;
+
+  const openInspectorTab = useCallback(
+    (
+      kind: InspectorTabKind,
+      title: string,
+      resourceKey: string,
+      payload: Record<string, string> = {},
+    ) => {
+      dispatchInspector({
+        type: "openTab",
+        tab: {
+          id: crypto.randomUUID(),
+          kind,
+          resourceKey,
+          title,
+          workspaceId: thread.workspaceId ?? undefined,
+          payload: { ...payload, threadId: thread.threadId },
+        },
+      });
+    },
+    [thread.threadId, thread.workspaceId],
+  );
+
+  const openUtilityTab = useCallback(
+    (kind: InspectorTabKind) => {
+      openInspectorTab(kind, INSPECTOR_VIEW_LABEL[kind], `${kind}:${thread.threadId}`);
+    },
+    [openInspectorTab, thread.threadId],
+  );
+
+  useEffect(() => {
+    saveInspectorState(thread.threadId, inspector);
+  }, [inspector, thread.threadId]);
+
   const visibleComputerSession = useMemo(
     () => ({
       ...computerSession,
@@ -683,18 +729,6 @@ export function ChatView({
     planStepRunning ||
     smokeTestRunning ||
     detailsOpen;
-
-  useEffect(() => {
-    if (availableWorkbenchViews.some((view) => view.key === workbenchTab)) return;
-    if (artifactsOpen) {
-      const next = availableWorkbenchViews[0]?.key;
-      if (next) {
-        setWorkbenchTab(next);
-      } else {
-        setArtifactsOpen(false);
-      }
-    }
-  }, [artifactsOpen, availableWorkbenchViews, workbenchTab]);
 
   function scrollConversationToBottom(behavior: ScrollBehavior) {
     const node = conversationRef.current;
@@ -1733,8 +1767,7 @@ export function ChatView({
     const seed = (text ?? "").trim();
     if (!seed) return;
     setGoalSeed(seed);
-    setArtifactsOpen(true);
-    setWorkbenchTab("goals");
+    openUtilityTab("goals");
   }
 
   async function saveMessageToMemory(message: ChatMessage) {
@@ -2175,10 +2208,13 @@ export function ChatView({
       computerLiveStatus.active ||
       promptSubmitting ||
       Boolean(streamingAssistantId));
-  const islandColumnVisible = islandOpen && islandHasContent;
+  const islandColumnVisible = !inspector.open && islandOpen && islandHasContent;
   return (
     <section
-      className={`chat-view active-task-layout${detailsOpen || workbenchOpen ? " panel-open" : ""}${
+      ref={layoutRef}
+      className={`chat-view active-task-layout${detailsOpen ? " panel-open" : ""}${
+        inspector.open ? " inspector-open" : ""
+      }${inspector.focused ? " inspector-focused" : ""}${
         threadMessages.length === 0 ? " is-empty" : ""
       }${islandColumnVisible ? "" : " island-collapsed"}`}
       aria-labelledby="chat-title"
@@ -2225,11 +2261,7 @@ export function ChatView({
             </button>
           )}
           <ChatHeaderMenu
-            onOpenWorkbench={(tab) => {
-              setArtifactsInitial(null);
-              setWorkbenchTab(tab);
-              setArtifactsOpen(true);
-            }}
+            onOpenInspector={openUtilityTab}
             onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
           />
         </span>
@@ -2256,11 +2288,7 @@ export function ChatView({
             onCollapseColumn={() => setIslandOpen(false)}
             onCaptureScreenshot={IS_DESKTOP ? () => void captureScreenshot() : undefined}
             onExportChat={() => void exportChatMarkdown()}
-            onOpenWorkbench={(tab) => {
-              setArtifactsInitial(null);
-              setWorkbenchTab(tab);
-              setArtifactsOpen(true);
-            }}
+            onOpenInspector={openUtilityTab}
           />
         </div>
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
@@ -2311,9 +2339,12 @@ export function ChatView({
                       messageId={displayMessage.id}
                       threadId={thread.threadId}
                       onOpenArtifact={(artifact) => {
-                        setArtifactsInitial(artifact.name);
-                        setWorkbenchTab("artifacts");
-                        setArtifactsOpen(true);
+                        openInspectorTab(
+                          "artifact",
+                          INSPECTOR_VIEW_LABEL.artifact,
+                          `artifact:${thread.threadId}:index`,
+                          { initialName: artifact.name },
+                        );
                       }}
                       onChoose={(answer, purpose) =>
                         purpose
@@ -2367,9 +2398,12 @@ export function ChatView({
                     messageId={displayMessage.id}
                     threadId={thread.threadId}
                     onOpenArtifact={(artifact) => {
-                      setArtifactsInitial(artifact.name);
-                      setWorkbenchTab("artifacts");
-                      setArtifactsOpen(true);
+                      openInspectorTab(
+                        "artifact",
+                        INSPECTOR_VIEW_LABEL.artifact,
+                        `artifact:${thread.threadId}:index`,
+                        { initialName: artifact.name },
+                      );
                     }}
                     onChoose={(answer) => void submitComposerPrompt(answer, [])}
                   />
@@ -2618,19 +2652,40 @@ export function ChatView({
         </button>
       )}
 
-      <Workbench
-        open={artifactsOpen}
-        tab={workbenchTab}
-        onTab={setWorkbenchTab}
-        onClose={() => setArtifactsOpen(false)}
-        artifacts={workbenchArtifacts}
-        artifactsInitial={artifactsInitial}
-        uploadedFiles={uploadedFiles}
-        threadId={thread.threadId}
-        projectThread={threadIsProject}
-        goalSeed={goalSeed}
-        onGoalSeedConsumed={() => setGoalSeed(null)}
-        operationalPlanMarkdown={conversationPlan ?? visibleComputerSession.operationalPlanMarkdown}
+      <InspectorWorkspace
+        layoutRef={layoutRef}
+        state={inspector}
+        ratio={inspectorRatio}
+        addItems={availableInspectorViews.map((view) => ({
+          kind: view.key,
+          title: view.label,
+        }))}
+        onActivate={(tabId) => dispatchInspector({ type: "activateTab", tabId })}
+        onCloseTab={(tabId) => dispatchInspector({ type: "closeTab", tabId })}
+        onMoveTab={(tabId, targetIndex) =>
+          dispatchInspector({ type: "moveTab", tabId, targetIndex })
+        }
+        onAdd={openUtilityTab}
+        onHide={() => dispatchInspector({ type: "hideWorkspace" })}
+        onToggleFocus={() => dispatchInspector({ type: "toggleFocus" })}
+        onRatioCommit={(next) => {
+          setInspectorRatio(next);
+          saveInspectorWidthRatio(next);
+        }}
+        renderTab={(tab) => (
+          <InspectorView
+            descriptor={tab}
+            artifacts={workbenchArtifacts}
+            uploadedFiles={uploadedFiles}
+            threadId={thread.threadId}
+            goalSeed={goalSeed}
+            onGoalSeedConsumed={() => setGoalSeed(null)}
+            operationalPlanMarkdown={
+              conversationPlan ?? visibleComputerSession.operationalPlanMarkdown
+            }
+            layoutSignal={`${inspector.activeTabId}:${inspectorRatio}`}
+          />
+        )}
       />
 
       <Composer
@@ -4019,7 +4074,7 @@ function InlineArtifactPreview({ artifact }: { artifact: ParsedArtifact }) {
  *  project directory tree); "artifacts" = generated outputs; "activity" =
  *  background/scheduled tasks; "plan" = the orchestrator's operational plan.
  *  (Computer stays docked above the composer by design.) */
-export type WorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan" | "execution";
+type LegacyWorkbenchTab = "files" | "artifacts" | "memoria" | "goals" | "activity" | "plan" | "execution";
 
 /** A generated artifact or uploaded file, projected into the island's "Sources" section.
  *  `kind` only selects the (monochrome) glyph; `meta` is a one-word provenance hint. */
@@ -4032,24 +4087,49 @@ export interface IslandSource {
 // Shared view metadata for the panel: the header dropdown (chat top-right) and the
 // in-panel title both read from here, so labels/icons never drift. Mock interaction:
 // toggle → dropdown menu → docked panel with that view + a clean title header.
-const PANEL_VIEWS: { key: WorkbenchTab; label: string; icon: typeof FileText }[] = [
-  { key: "artifacts", label: "Review", icon: ClipboardList },
-  { key: "files", label: "Files", icon: FolderOpen },
+const PANEL_VIEWS: { key: InspectorTabKind; label: string; icon: typeof FileText }[] = [
+  { key: "artifact", label: "Review", icon: ClipboardList },
+  { key: "file", label: "Files", icon: FolderOpen },
   { key: "activity", label: "Activity", icon: Clock3 },
   { key: "plan", label: "Plan", icon: ListTodo },
   { key: "execution", label: "Execution", icon: ScanSearch },
-  { key: "memoria", label: "Memory", icon: Share2 },
+  { key: "graph", label: "Memory", icon: Share2 },
   { key: "goals", label: "Goals", icon: Target },
 ];
-const PANEL_VIEW_LABEL: Record<WorkbenchTab, string> = {
-  files: "Files",
-  artifacts: "Review",
-  memoria: "Memory",
+const INSPECTOR_VIEW_LABEL: Record<InspectorTabKind, string> = {
+  file: "Files",
+  artifact: "Review",
+  memory: "Memory",
+  graph: "Memory",
+  sources: "Sources",
   goals: "Goals",
   activity: "Activity",
   plan: "Plan",
   execution: "Execution",
+  subagents: "Subagents",
+  computer: "Computer",
 };
+
+function legacyTabForInspector(kind: InspectorTabKind): LegacyWorkbenchTab | null {
+  if (kind === "file") return "files";
+  if (kind === "artifact") return "artifacts";
+  if (kind === "memory" || kind === "graph") return "memoria";
+  if (kind === "goals" || kind === "activity" || kind === "plan" || kind === "execution") {
+    return kind;
+  }
+  return null;
+}
+
+function isRestorableInspectorTab(
+  tab: InspectorTab,
+  threadId: string,
+  workspaceId?: string | null,
+) {
+  return (
+    tab.payload.threadId === threadId &&
+    (tab.workspaceId ?? null) === (workspaceId ?? null)
+  );
+}
 
 /** The Workbench: one toggle → a docked right panel with tabs, consolidating the
  *  assistant's tools/outputs (Claude-Code / IDE inspector pattern). Replaces the
@@ -5034,57 +5114,35 @@ export function MemoryGraphPanel({
   );
 }
 
-function Workbench({
-  open,
-  tab,
-  onTab,
-  onClose,
+function InspectorView({
+  descriptor,
   artifacts,
-  artifactsInitial,
   uploadedFiles,
   threadId,
-  projectThread,
   goalSeed,
   onGoalSeedConsumed,
   operationalPlanMarkdown,
+  layoutSignal,
 }: {
-  open: boolean;
-  tab: WorkbenchTab;
-  onTab: (tab: WorkbenchTab) => void;
-  onClose: () => void;
+  descriptor: InspectorTab;
   artifacts: ParsedArtifact[];
-  artifactsInitial?: string | null;
   uploadedFiles: ChatAttachment[];
   threadId: string;
-  projectThread: boolean;
   goalSeed?: string | null;
   onGoalSeedConsumed?: () => void;
   operationalPlanMarkdown?: string;
+  layoutSignal: string;
 }) {
   const { t } = useTranslation();
+  const open = true;
+  const tab = legacyTabForInspector(descriptor.kind);
+  const artifactsInitial = descriptor.payload.initialName ?? null;
   // Project-folder browser state (File tab): the thread's linked folder, navigable.
   const [fsRoot, setFsRoot] = useState<string | null>(null);
   const [fsCwd, setFsCwd] = useState<string | null>(null);
   const [fsEntries, setFsEntries] = useState<FsEntry[]>([]);
   const [fsLoading, setFsLoading] = useState(false);
   const [fsError, setFsError] = useState<string | null>(null);
-  // Panel sizing: draggable width + fullscreen toggle (so wide files/diffs read well).
-  const [expanded, setExpanded] = useState(false);
-  const [width, setWidth] = useState(520);
-  const startResize = useCallback((event: ReactMouseEvent) => {
-    event.preventDefault();
-    const onMove = (ev: MouseEvent) => {
-      // Panel is docked right: width grows as the cursor moves left.
-      const next = Math.min(Math.max(window.innerWidth - ev.clientX, 320), window.innerWidth - 120);
-      setWidth(next);
-    };
-    const onUp = () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  }, []);
   // Background/scheduled tasks (Activity tab), fetched lazily when the tab opens.
   const [tasks, setTasks] = useState<CoreTaskQueueSnapshot | null>(null);
   const [tasksLoading, setTasksLoading] = useState(false);
@@ -5188,7 +5246,13 @@ function Workbench({
     };
   }, [open, tab, threadId]);
 
-  if (!open) return null;
+  if (!tab) {
+    return (
+      <div className="workbench-empty">
+        <p>{descriptor.title}</p>
+      </div>
+    );
+  }
   const refreshGoals = () => {
     void coreBridge.projectGoals(threadId).then(setGoalsData);
   };
@@ -5200,43 +5264,7 @@ function Workbench({
   const cwdLabel = fsCwd ? fsCwd.replace(/\/+$/, "").split("/").pop() || fsCwd : "";
   const parentOf = (path: string) => path.replace(/\/+$/, "").split("/").slice(0, -1).join("/");
   return (
-    <aside
-      className={`workbench${expanded ? " expanded" : ""}`}
-      aria-label={t("chat.workbench")}
-      style={expanded ? undefined : { width }}
-    >
-      {!expanded && (
-        <div
-          className="workbench-resize"
-          role="separator"
-          aria-label={t("chat.resizePanel")}
-          onMouseDown={startResize}
-        />
-      )}
-      <div className="workbench-header">
-        <span className="workbench-title">{PANEL_VIEW_LABEL[tab]}</span>
-        <span className="workbench-header-actions">
-          <button
-            className="workbench-close"
-            type="button"
-            aria-label={expanded ? t("chat.collapsePanel") : t("chat.fullscreen")}
-            title={expanded ? t("chat.collapse") : t("chat.fullscreen")}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-          </button>
-          <button
-            className="workbench-close"
-            type="button"
-            aria-label={t("chat.closePanel")}
-            title={t("chat.closePanel")}
-            onClick={onClose}
-          >
-            <X size={16} />
-          </button>
-        </span>
-      </div>
-      <div className="workbench-body">
+    <div className="workbench-body inspector-view-body" aria-label={descriptor.title}>
         {tab === "files" && openFile && (
           <div className="workbench-fileview">
             <div className="workbench-breadcrumb">
@@ -5370,7 +5398,7 @@ function Workbench({
             <ArtifactsPanel
               artifacts={artifacts}
               initialName={artifactsInitial}
-              onClose={onClose}
+              onClose={() => undefined}
               embedded
             />
           ) : (
@@ -5379,7 +5407,7 @@ function Workbench({
               <p>No artifacts yet. Files generated or created by the assistant appear here.</p>
             </div>
           ))}
-        {tab === "memoria" && <MemoryGraphPanel threadId={threadId} layoutSignal={`${expanded ? "expanded" : "docked"}:${width}`} />}
+        {tab === "memoria" && <MemoryGraphPanel threadId={threadId} layoutSignal={layoutSignal} />}
         {tab === "goals" && goalsData && (
           <GoalsPanel
             data={goalsData}
@@ -5440,8 +5468,7 @@ function Workbench({
             </div>
           ))}
         {tab === "execution" && <ExecutionInspector threadId={threadId} />}
-      </div>
-    </aside>
+    </div>
   );
 }
 

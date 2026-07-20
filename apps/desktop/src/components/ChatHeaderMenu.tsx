@@ -1,17 +1,17 @@
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { WorkbenchTab } from "./ChatView";
+import type { InspectorTabKind } from "../lib/inspectorWorkspace";
 
 // Header kebab menu: the island was slimmed down (artifacts/files/activity rows
 // dropped), so this is the one entry point that reopens the docked Workbench on a
 // specific tab, plus a screenshot shortcut. Kept separate from ChatView's own
 // per-message action menu (different trigger, different item set).
 export function ChatHeaderMenu({
-  onOpenWorkbench,
+  onOpenInspector,
   onCaptureScreenshot,
 }: {
-  onOpenWorkbench: (tab: WorkbenchTab) => void;
+  onOpenInspector: (tab: InspectorTabKind) => void;
   onCaptureScreenshot?: () => void;
 }) {
   const { t } = useTranslation();
@@ -54,10 +54,10 @@ export function ChatHeaderMenu({
       </button>
       {open && (
         <div className="chat-header-menu-popover" role="menu">
-          <button role="menuitem" type="button" onClick={() => pick(() => onOpenWorkbench("artifacts"))}>
+          <button role="menuitem" type="button" onClick={() => pick(() => onOpenInspector("artifact"))}>
             {t("chat.headerMenuArtifacts")}
           </button>
-          <button role="menuitem" type="button" onClick={() => pick(() => onOpenWorkbench("files"))}>
+          <button role="menuitem" type="button" onClick={() => pick(() => onOpenInspector("file"))}>
             {t("chat.headerMenuFiles")}
           </button>
           {onCaptureScreenshot && (
@@ -65,7 +65,7 @@ export function ChatHeaderMenu({
               {t("chat.captureScreenshot")}
             </button>
           )}
-          <button role="menuitem" type="button" onClick={() => pick(() => onOpenWorkbench("activity"))}>
+          <button role="menuitem" type="button" onClick={() => pick(() => onOpenInspector("activity"))}>
             {t("chat.headerMenuActivity")}
           </button>
         </div>

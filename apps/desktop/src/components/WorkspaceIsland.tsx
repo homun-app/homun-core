@@ -18,7 +18,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { currentStepIndex, threeStepWindow } from "../lib/islandPlan";
 import type { SubagentInfo } from "../lib/chatApi";
-import type { ChatStreamStatus, IslandSource, PlanStep, WorkbenchTab } from "./ChatView";
+import type { InspectorTabKind } from "../lib/inspectorWorkspace";
+import type { ChatStreamStatus, IslandSource, PlanStep } from "./ChatView";
 
 // Subagent status → monochrome glyph (running = spinner, done = the single green check,
 // failed/cancelled = alert, otherwise a hollow todo circle).
@@ -95,7 +96,7 @@ export function WorkspaceIsland({
   onCollapseColumn,
   onCaptureScreenshot,
   onExportChat,
-  onOpenWorkbench,
+  onOpenInspector,
 }: {
   threadId: string;
   /** North-star objective text (top of the Objective → Progress hierarchy). null when
@@ -120,7 +121,7 @@ export function WorkspaceIsland({
   onCollapseColumn?: () => void;
   onCaptureScreenshot?: () => void;
   onExportChat: () => void;
-  onOpenWorkbench: (tab: WorkbenchTab) => void;
+  onOpenInspector: (tab: InspectorTabKind) => void;
 }) {
   const { t } = useTranslation();
   const [mode, setModeState] = useState<WorkspaceIslandMode>(() => loadWorkspaceIslandMode());
@@ -317,7 +318,7 @@ export function WorkspaceIsland({
                     className="wi-menu-item"
                     onClick={() => {
                       setMenuOpen(false);
-                      onOpenWorkbench("activity");
+                      onOpenInspector("activity");
                     }}
                   >
                     <Layers size={15} />
@@ -448,7 +449,7 @@ export function WorkspaceIsland({
                   key={`${index}-${source.name}`}
                   type="button"
                   className="wi-source"
-                  onClick={() => onOpenWorkbench(source.kind === "file" ? "files" : "artifacts")}
+                  onClick={() => onOpenInspector(source.kind === "file" ? "file" : "artifact")}
                 >
                   <span className="wi-source-icon">{sourceIcon(source.kind)}</span>
                   <span className="wi-source-name">{source.name}</span>
