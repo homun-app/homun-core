@@ -32176,10 +32176,10 @@ const LINKED_MEMORY_CONTEXT_OMITTED: &str =
     "[Previous assistant response omitted because its linked memory authorization is unavailable.]";
 
 fn context_message_for_model(
-    facade: &MemoryFacade,
-    consumer: (&MemoryUserId, &MemoryWorkspaceId),
+    _facade: &MemoryFacade,
+    _consumer: (&MemoryUserId, &MemoryWorkspaceId),
     message: &ChatMessage,
-    now_unix: i64,
+    _now_unix: i64,
 ) -> Option<ChatContextMessage> {
     let role = match message.role.as_str() {
         "user" => ChatContextRole::User,
@@ -32192,25 +32192,14 @@ fn context_message_for_model(
             text: message.text.clone(),
         });
     }
-    let allowed = match message.memory_reuse.as_ref() {
-        Some(envelope)
-            if envelope.write_policy == local_first_memory::MemoryWritePolicy::Normal
-                && envelope.linked_reads.is_empty() =>
-        {
-            true
-        }
-        Some(envelope)
-            if envelope.write_policy == local_first_memory::MemoryWritePolicy::UserInputOnly
-                && !envelope.linked_reads.is_empty() =>
-        {
-            envelope.linked_reads.iter().all(|read| {
-                facade
-                    .validate_linked_memory_read(consumer.0, consumer.1, read, now_unix)
-                    .unwrap_or(false)
-            })
-        }
-        _ => false,
-    };
+    // A linked read is authorized when it happens. Once its result has entered
+    // this conversation, the persisted provenance attests how the response may
+    // be reused: visible in this thread, never learnable as project memory.
+    // Current grants still gate every fresh briefing/recall read.
+    let allowed = message.memory_reuse.as_ref().is_some_and(|envelope| {
+        envelope.is_structurally_valid()
+            && envelope.write_policy != local_first_memory::MemoryWritePolicy::BlockedUnknown
+    });
     Some(ChatContextMessage {
         role,
         text: if allowed {
@@ -64937,7 +64926,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     }
 
     #[test]
-    fn revoked_linked_answer_stays_visible_but_is_not_model_context() {
+    fn revoked_linked_answer_stays_available_in_its_existing_thread_context() {
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -64966,11 +64955,11 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         )
         .unwrap();
 
-        assert!(!context.text.contains("NEBULA-7429"));
+        assert!(context.text.contains("NEBULA-7429"));
     }
 
     #[test]
-    fn one_invalid_linked_read_excludes_the_whole_assistant_message() {
+    fn multiple_attested_linked_reads_remain_available_as_one_historical_message() {
         let facade = local_first_memory::MemoryFacade::new(
             local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
         );
@@ -65004,7 +64993,31 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             1_800_000_000,
         )
         .unwrap();
-        assert!(!context.text.contains("MULTI-GRANT-SENTINEL"));
+        assert!(context.text.contains("MULTI-GRANT-SENTINEL"));
+    }
+
+    #[test]
+    fn malformed_linked_attestation_is_omitted_from_model_context() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let mut message = super::channel_chat_message("assistant", "MALFORMED-SENTINEL");
+        message.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::user_input_only(
+            Vec::new(),
+        ));
+
+        let context = super::context_message_for_model(
+            &facade,
+            (
+                &local_first_memory::UserId::new("owner"),
+                &local_first_memory::WorkspaceId::new("project-a"),
+            ),
+            &message,
+            1_800_000_000,
+        )
+        .unwrap();
+
+        assert!(!context.text.contains("MALFORMED-SENTINEL"));
     }
 
     #[test]
