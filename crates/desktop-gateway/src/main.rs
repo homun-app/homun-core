@@ -167,10 +167,11 @@ use local_first_memory::{
     MemoryPublicationResolution, MemoryPublicationResult, MemoryRecord, MemoryRef, MemoryRefKind, MemoryRelation, MemoryScope, MemorySearchRequest,
     MemorySourceCandidateProjection, MemorySourceGrant, MemoryStatus, MemoryUiReadModel,
     MemoryUpdatePatch, MemoryWikiProjection, PERSONAL_WORKSPACE, PrivacyDomain,
-    ProjectGraphImportReport, RecallPack,
+    ProjectGraphImportReport, RecallHit, RecallPack,
     SQLiteMemoryStore, UserId as MemoryUserId, WikiFileStore, WikiPage,
     WorkspaceId as MemoryWorkspaceId, MEMORY_SOURCE_CANDIDATE_PAGE_MAX, briefing_cache,
-    contains_secret, prompt_fingerprint, redact_text as redact_memory_text,
+    contains_secret, memory_record_revision, prompt_fingerprint,
+    redact_text as redact_memory_text,
 };
 use local_first_orchestrator::{
     ExecutionPlan, MemoryContextProvider, MemoryContextSnippet, OrchestratorBrain,
@@ -3156,11 +3157,17 @@ where
         .then_some(cached)
 }
 
+#[derive(Debug, Clone)]
+struct BriefingMemoryItem {
+    text: String,
+    linked_hit: Option<RecallHit>,
+}
+
 fn briefing_items_for_authorized_source(
     facade: &MemoryFacade,
     source: &local_first_memory::AuthorizedMemorySource,
     preferences_only: bool,
-) -> Vec<String> {
+) -> Vec<BriefingMemoryItem> {
     let mut records = facade
         .list_memories_for_ui(&source.source_user_id, &source.source_workspace_id)
         .unwrap_or_default()
@@ -3193,7 +3200,41 @@ fn briefing_items_for_authorized_source(
                 || low.starts_with("runtime plan state")
                 || low.starts_with("validation test:"))
         })
-        .map(|memory| memory.text)
+        .map(|memory| {
+            let linked_hit = source.grant_id.as_ref().map(|grant_id| RecallHit {
+                memory_ref: memory.reference.to_string(),
+                text: memory.text.clone(),
+                score: memory.confidence as f32,
+                kind: memory.memory_type.clone(),
+                source_user_id: source.source_user_id.clone(),
+                source_workspace_id: source.source_workspace_id.clone(),
+                source_label: source.source_label.clone(),
+                collection: MemoryCollectionKey::for_memory(&memory)
+                    .unwrap_or(MemoryCollectionKey::Knowledge),
+                grant_id: Some(grant_id.clone()),
+                policy_version: Some(source.policy_version),
+                source_revision: memory_record_revision(&memory),
+                sensitivity: memory.sensitivity,
+                status: memory.status,
+                updated_at: memory.updated_at.clone(),
+                subject_key: memory
+                    .metadata
+                    .get("subject_key")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                conflict: false,
+                publication_link: memory
+                    .metadata
+                    .get("publication_link")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                graph_path: Vec::new(),
+            });
+            BriefingMemoryItem {
+                text: memory.text,
+                linked_hit,
+            }
+        })
         .collect()
 }
 
@@ -3211,6 +3252,16 @@ fn gather_profile_memory_for_prompt(
     )
 }
 
+fn gather_profile_memory_for_prompt_with_provenance(
+    state: &AppState,
+    user_message: &str,
+) -> (Vec<BriefingMemoryItem>, Vec<BriefingMemoryItem>) {
+    gather_profile_memory_with_provenance(
+        state,
+        profile_memory_personal_preferences_only_for_prompt(user_message),
+    )
+}
+
 fn profile_memory_personal_preferences_only_for_prompt(user_message: &str) -> bool {
     !should_inject_cross_thread_memory_for_prompt(user_message)
 }
@@ -3219,6 +3270,18 @@ fn gather_profile_memory_with_options(
     state: &AppState,
     personal_preferences_only_override: bool,
 ) -> (Vec<String>, Vec<String>) {
+    let (personal, project) =
+        gather_profile_memory_with_provenance(state, personal_preferences_only_override);
+    (
+        personal.into_iter().map(|item| item.text).collect(),
+        project.into_iter().map(|item| item.text).collect(),
+    )
+}
+
+fn gather_profile_memory_with_provenance(
+    state: &AppState,
+    personal_preferences_only_override: bool,
+) -> (Vec<BriefingMemoryItem>, Vec<BriefingMemoryItem>) {
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
@@ -3257,31 +3320,45 @@ fn gather_profile_memory_with_options(
     (personal, project)
 }
 
-/// Formats the personal + project memories into a compact, budgeted prompt block.
-/// Pure (testable): one item per line, sections labelled, truncated to `budget`
-/// with a marker. Returns `None` when there is nothing to inject.
-fn format_memory_block(
+#[derive(Debug, Default)]
+struct FormattedMemoryBlock {
+    block: Option<String>,
+    linked_hits: Vec<RecallHit>,
+}
+
+fn format_memory_block_with_provenance(
     open_loops: &[String],
-    personal: &[String],
-    project: &[String],
+    personal: &[BriefingMemoryItem],
+    project: &[BriefingMemoryItem],
     budget: usize,
-) -> Option<String> {
+) -> FormattedMemoryBlock {
     if budget == 0 {
-        return None;
+        return FormattedMemoryBlock::default();
     }
-    // OPEN LOOPS first → guaranteed budget priority (unfinished work must never fall off).
+    let open_loop_items = open_loops
+        .iter()
+        .cloned()
+        .map(|text| BriefingMemoryItem {
+            text,
+            linked_hit: None,
+        })
+        .collect::<Vec<_>>();
     let sections = [
-        ("OPEN LOOPS — unfinished work, resume from here", open_loops),
+        (
+            "OPEN LOOPS — unfinished work, resume from here",
+            open_loop_items.as_slice(),
+        ),
         ("Personal", personal),
         ("Project", project),
     ];
     let mut body = String::new();
     let mut used = 0usize;
     let mut truncated = false;
+    let mut linked_hits = Vec::new();
     for (title, items) in sections {
         let mut section = String::new();
-        for raw in items {
-            let one = raw.trim().replace('\n', " ");
+        for item in items {
+            let one = item.text.trim().replace('\n', " ");
             if one.is_empty() {
                 continue;
             }
@@ -3297,6 +3374,9 @@ fn format_memory_block(
             }
             used += line.len();
             section.push_str(&line);
+            if let Some(hit) = &item.linked_hit {
+                linked_hits.push(hit.clone());
+            }
         }
         if !section.is_empty() {
             body.push_str(title);
@@ -3308,17 +3388,47 @@ fn format_memory_block(
         }
     }
     if body.trim().is_empty() {
-        return None;
+        return FormattedMemoryBlock::default();
     }
     let mut block = String::from(
-        "PROFILE AND MEMORY — what you remember about the user and the project. Use it if \
-relevant; don't list it back verbatim and don't invent anything that isn't here.\n",
+        "PROFILE AND MEMORY — what you remember about the user and the project. Use it if relevant; don't list it back verbatim and don't invent anything that isn't here.\n",
     );
     block.push_str(&body);
     if truncated {
         block.push_str("- … (more available in memory)\n");
     }
-    Some(block.trim_end().to_string())
+    FormattedMemoryBlock {
+        block: Some(block.trim_end().to_string()),
+        linked_hits,
+    }
+}
+
+/// Formats the personal + project memories into a compact, budgeted prompt block.
+/// Pure (testable): one item per line, sections labelled, truncated to `budget`
+/// with a marker. Returns `None` when there is nothing to inject.
+fn format_memory_block(
+    open_loops: &[String],
+    personal: &[String],
+    project: &[String],
+    budget: usize,
+) -> Option<String> {
+    let personal = personal
+        .iter()
+        .cloned()
+        .map(|text| BriefingMemoryItem {
+            text,
+            linked_hit: None,
+        })
+        .collect::<Vec<_>>();
+    let project = project
+        .iter()
+        .cloned()
+        .map(|text| BriefingMemoryItem {
+            text,
+            linked_hit: None,
+        })
+        .collect::<Vec<_>>();
+    format_memory_block_with_provenance(open_loops, &personal, &project, budget).block
 }
 
 /// Is this exchange worth mining for memory? Skips trivial turns (greetings,
@@ -5612,22 +5722,25 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                     objective: cached.objective,
                     brief: cached.brief,
                     recent_work,
+                    linked_hits: cached.linked_hits,
                 };
             }
 
             let (memory_personal, memory_project) =
-                gather_profile_memory_for_prompt(&self.state, user_message);
+                gather_profile_memory_for_prompt_with_provenance(&self.state, user_message);
             let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
                 gather_open_loops(&self.state, 6)
             } else {
                 Vec::new()
             };
-            let profile_block = format_memory_block(
+            let formatted_profile = format_memory_block_with_provenance(
                 &memory_open_loops,
                 &memory_personal,
                 &memory_project,
                 CHAT_MEMORY_BUDGET_CHARS,
             );
+            let profile_block = formatted_profile.block;
+            let linked_hits = formatted_profile.linked_hits;
             let objective = project_objective_block(&self.state);
             let brief = project_brief_block(&self.state);
             let current_generation =
@@ -5648,6 +5761,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                     objective,
                     brief,
                     recent_work,
+                    linked_hits: Vec::new(),
                 };
             }
 
@@ -5662,6 +5776,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                         objective: objective.clone(),
                         brief: brief.clone(),
                         recent_work: None,
+                        linked_hits: linked_hits.clone(),
                     },
                 },
             );
@@ -5670,6 +5785,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                 objective,
                 brief,
                 recent_work,
+                linked_hits,
             };
         }
         unreachable!("bounded briefing rebuild loop always returns")
@@ -66111,6 +66227,57 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         );
     }
 
+    fn test_linked_briefing_hit(key: &str, text: &str) -> local_first_memory::RecallHit {
+        local_first_memory::RecallHit {
+            memory_ref: format!("memory:owner:personal:{key}"),
+            text: text.to_string(),
+            score: 1.0,
+            kind: "preference".to_string(),
+            source_user_id: local_first_memory::UserId::new("owner"),
+            source_workspace_id: local_first_memory::WorkspaceId::new("personal"),
+            source_label: "Personal".to_string(),
+            collection: local_first_memory::MemoryCollectionKey::Preferences,
+            grant_id: Some("grant-a".to_string()),
+            policy_version: Some(3),
+            source_revision: format!("sha256:{key}"),
+            sensitivity: local_first_memory::DataSensitivity::Private,
+            status: local_first_memory::MemoryStatus::Confirmed,
+            updated_at: "unix:1.000000000".to_string(),
+            subject_key: None,
+            conflict: false,
+            publication_link: None,
+            graph_path: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn budgeted_briefing_attests_only_linked_items_that_enter_the_prompt() {
+        let first_text = "First linked preference";
+        let second_text = "Second linked preference that must not fit";
+        let personal = vec![
+            super::BriefingMemoryItem {
+                text: first_text.to_string(),
+                linked_hit: Some(test_linked_briefing_hit("first", first_text)),
+            },
+            super::BriefingMemoryItem {
+                text: second_text.to_string(),
+                linked_hit: Some(test_linked_briefing_hit("second", second_text)),
+            },
+        ];
+        let budget = format!("- {first_text}\n").len();
+
+        let formatted =
+            super::format_memory_block_with_provenance(&[], &personal, &[], budget);
+
+        assert!(formatted.block.as_deref().is_some_and(|block| block.contains(first_text)));
+        assert!(formatted
+            .block
+            .as_deref()
+            .is_some_and(|block| !block.contains(second_text)));
+        assert_eq!(formatted.linked_hits.len(), 1);
+        assert!(formatted.linked_hits[0].memory_ref.ends_with(":first"));
+    }
+
     /// ADR 0022 — Tappa 1: parità strutturale del briefing.
     ///
     /// Verifica il wiring dell'invariant P1 (cross-chat = solo progetti):
@@ -66403,6 +66570,8 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
 
     #[test]
     fn project_briefing_requires_personal_preferences_grant() {
+        use local_first_memory::MemoryRecallService as _;
+
         let _flag = TestMemorySourcesFlag::set(Some("on"));
         let previous_user = std::env::var("HOMUN_USER_ID").ok();
         unsafe {
@@ -66438,9 +66607,41 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert!(before.is_empty());
         assert!(project_before.is_empty());
 
+        insert_briefing_memory(
+            super::memory_facade(&state),
+            &user,
+            &project,
+            "local-project-fact",
+            "fact",
+            "Project-local fact",
+        );
         insert_preferences_grant(super::memory_facade(&state), &user, &project, "prefs-grant");
         let (after, _) = super::gather_profile_memory_with_options(&state, true);
         assert_eq!(after, vec!["Prefers Italian".to_string()]);
+        let (structured, structured_project) =
+            super::gather_profile_memory_with_provenance(&state, true);
+        let hit = structured[0].linked_hit.as_ref().expect("linked provenance");
+        assert_eq!(hit.source_workspace_id, personal);
+        assert_eq!(hit.grant_id.as_deref(), Some("prefs-grant"));
+        assert_eq!(hit.policy_version, Some(1));
+        assert_eq!(
+            hit.memory_ref,
+            "memory:local:briefing-grant-user:__personal__:pref"
+        );
+        assert!(hit.source_revision.starts_with("sha256:"));
+        assert_eq!(structured_project.len(), 1);
+        assert!(structured_project[0].linked_hit.is_none());
+
+        let service = super::InProcessMemoryRecallService::new(
+            state.clone(),
+            std::sync::Arc::new(NoopEmbeddingClient),
+            std::sync::Arc::new(NoopLlmClient),
+        );
+        let scope = local_first_memory::MemoryScope::Project(project.clone());
+        let first = service.brief(&scope, "Review the project status");
+        let cached = service.brief(&scope, "Review the project status");
+        assert_eq!(first.linked_hits, cached.linked_hits);
+        assert_eq!(cached.linked_hits.len(), 1);
 
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
         match previous_user {
@@ -66704,6 +66905,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
                     objective: None,
                     brief: None,
                     recent_work: None,
+                    linked_hits: Vec::new(),
                 },
             },
         );

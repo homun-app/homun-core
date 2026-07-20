@@ -61,7 +61,7 @@ pub type SystemBlock = Option<String>;
 /// objective/brief/recent_work sono sempre `None` nello scope Personale (non è
 /// una "memoria di lavoro" cross-chat). Questo realizza l'invariant P1 senza
 /// cambiare il behaviour esistente.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct BriefingPack {
     /// Profile memory + open loops (personal preferences / project scope memory),
     /// già budgetizzato. Sempre presente per entrambi gli scope.
@@ -72,6 +72,9 @@ pub struct BriefingPack {
     pub brief: SystemBlock,
     /// Ultimi commit del progetto. `None` per `Personal`.
     pub recent_work: SystemBlock,
+    /// Linked records that actually entered the budgeted profile block. Local
+    /// records are intentionally absent because they need no grant attestation.
+    pub linked_hits: Vec<RecallHit>,
 }
 
 impl BriefingPack {
@@ -575,6 +578,7 @@ mod cache_tests {
             objective: None,
             brief: None,
             recent_work: None,
+            linked_hits: Vec::new(),
         }
     }
 
@@ -785,6 +789,7 @@ mod tests {
             objective: Some("OBJECTIVE".to_string()),
             brief: Some("BRIEF".to_string()),
             recent_work: Some("RECENT".to_string()),
+            linked_hits: Vec::new(),
         };
         let ordered: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
         assert_eq!(ordered, vec!["PROFILE", "OBJECTIVE", "BRIEF", "RECENT"]);
@@ -803,6 +808,7 @@ mod tests {
             objective: None,
             brief: None,
             recent_work: None,
+            linked_hits: Vec::new(),
         };
         // Per Personal, solo il profile_block contribuisce al prompt.
         let non_empty: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
@@ -823,6 +829,7 @@ mod tests {
             objective: Some("OBJECTIVE".to_string()),
             brief: None,
             recent_work: Some("RECENT".to_string()),
+            linked_hits: Vec::new(),
         };
         let ordered: Vec<String> = pack.ordered_blocks().into_iter().flatten().collect();
         assert_eq!(ordered, vec!["OBJECTIVE", "RECENT"]);
