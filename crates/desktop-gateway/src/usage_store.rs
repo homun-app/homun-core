@@ -140,6 +140,23 @@ pub struct ProviderUsageSnapshot {
     pub error_code: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SuggestionAction {
+    pub action_id: String,
+    pub suggestion_key: String,
+    pub user_id: String,
+    pub workspace_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub current_provider: String,
+    pub current_model: String,
+    pub target_provider: String,
+    pub target_model: String,
+    pub role: String,
+    pub action: String,
+    pub scoring_policy_version: String,
+    pub created_at: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageWindow {
     SevenDays,
@@ -171,6 +188,20 @@ pub struct UsageBreakdownRow {
     pub known_usage_attempts: u64,
     pub unknown_usage_attempts: u64,
     pub cost_breakdown: UsageCostBreakdown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelUsageFacts {
+    pub successful_sample_count: u64,
+    pub terminal_attempts: u64,
+    pub known_cost_attempts: u64,
+    pub average_cost_microusd: Option<u64>,
+    pub average_input_tokens: u64,
+    pub average_output_tokens: u64,
+    pub average_reasoning_tokens: u64,
+    pub median_latency_ms: Option<u64>,
+    pub success_rate_basis_points: Option<u16>,
+    pub cost_provenance: CostProvenance,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -341,7 +372,26 @@ impl UsageStore {
                 observed_at INTEGER NOT NULL,
                 error_code TEXT,
                 PRIMARY KEY(snapshot_id, metric)
-            );",
+            );
+            CREATE TABLE IF NOT EXISTS usage_suggestion_actions (
+                action_id TEXT PRIMARY KEY,
+                suggestion_key TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT,
+                thread_id TEXT,
+                current_provider TEXT NOT NULL,
+                current_model TEXT NOT NULL,
+                target_provider TEXT NOT NULL,
+                target_model TEXT NOT NULL,
+                role TEXT NOT NULL,
+                action TEXT NOT NULL CHECK(action IN ('dismissed', 'used_for_task', 'preference_changed')),
+                scoring_policy_version TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_usage_suggestion_suppression
+                ON usage_suggestion_actions(user_id, suggestion_key, action, created_at);
+            CREATE INDEX IF NOT EXISTS idx_usage_suggestion_scope
+                ON usage_suggestion_actions(user_id, workspace_id, thread_id, created_at);",
         )
     }
 
@@ -440,8 +490,66 @@ impl UsageStore {
             "DELETE FROM inference_usage_daily WHERE user_id = ?1 AND workspace_id = ?2",
             params![user_id, workspace_id],
         )?;
+        transaction.execute(
+            "DELETE FROM usage_suggestion_actions WHERE user_id = ?1 AND workspace_id = ?2",
+            params![user_id, workspace_id],
+        )?;
         transaction.commit()?;
         Ok(deleted)
+    }
+
+    pub fn append_suggestion_action(
+        &self,
+        action: &SuggestionAction,
+    ) -> Result<(), UsageStoreError> {
+        validate_suggestion_action(action)?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO usage_suggestion_actions (
+                action_id, suggestion_key, user_id, workspace_id, thread_id,
+                current_provider, current_model, target_provider, target_model,
+                role, action, scoring_policy_version, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                action.action_id,
+                action.suggestion_key,
+                action.user_id,
+                action.workspace_id,
+                action.thread_id,
+                action.current_provider,
+                action.current_model,
+                action.target_provider,
+                action.target_model,
+                action.role,
+                action.action,
+                action.scoring_policy_version,
+                action.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_suggestion_suppressed(
+        &self,
+        user_id: &str,
+        suggestion_key: &str,
+        now: i64,
+    ) -> rusqlite::Result<bool> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM usage_suggestion_actions
+             WHERE user_id = ?1 AND suggestion_key = ?2
+               AND action IN ('dismissed', 'preference_changed')
+               AND created_at >= ?3 AND created_at <= ?4",
+            params![user_id, suggestion_key, now.saturating_sub(30 * 86_400), now],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn suggestion_action_columns(&self) -> rusqlite::Result<Vec<String>> {
+        let mut statement = self.conn.prepare("PRAGMA table_info(usage_suggestion_actions)")?;
+        statement
+            .query_map([], |row| row.get(1))?
+            .collect::<rusqlite::Result<Vec<_>>>()
     }
 
     pub fn upsert_provider_policy(
@@ -767,6 +875,91 @@ impl UsageStore {
         rows.collect()
     }
 
+    pub fn model_usage_facts(
+        &self,
+        user_id: &str,
+        provider_id: &str,
+        model_id: &str,
+        window: UsageWindow,
+        now: i64,
+    ) -> rusqlite::Result<Option<ModelUsageFacts>> {
+        let cutoff = window.cutoff(now).unwrap_or(i64::MIN);
+        let aggregate = self.conn.query_row(
+            "SELECT
+                COUNT(*),
+                COALESCE(SUM(CASE WHEN outcome='success' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN cost_microusd IS NOT NULL THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(cost_microusd), 0),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0),
+                COALESCE(SUM(reasoning_tokens), 0)
+             FROM inference_usage_events
+             WHERE user_id=?1 AND provider_id=?2 AND model_id=?3
+               AND event_kind!='attempt_started' AND recorded_at>=?4",
+            params![user_id, provider_id, model_id, cutoff],
+            |row| {
+                Ok((
+                    nonnegative_u64(row.get(0)?, 0)?,
+                    nonnegative_u64(row.get(1)?, 1)?,
+                    nonnegative_u64(row.get(2)?, 2)?,
+                    nonnegative_u64(row.get(3)?, 3)?,
+                    nonnegative_u64(row.get(4)?, 4)?,
+                    nonnegative_u64(row.get(5)?, 5)?,
+                    nonnegative_u64(row.get(6)?, 6)?,
+                ))
+            },
+        )?;
+        let (terminal, successful, known_cost, total_cost, input, output, reasoning) = aggregate;
+        if terminal == 0 {
+            return Ok(None);
+        }
+        let mut latency_statement = self.conn.prepare(
+            "SELECT latency_ms FROM inference_usage_events
+             WHERE user_id=?1 AND provider_id=?2 AND model_id=?3
+               AND event_kind!='attempt_started' AND outcome='success'
+               AND latency_ms IS NOT NULL AND recorded_at>=?4
+             ORDER BY latency_ms ASC",
+        )?;
+        let latencies = latency_statement
+            .query_map(params![user_id, provider_id, model_id, cutoff], |row| {
+                nonnegative_u64(row.get(0)?, 0)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let median_latency_ms = if latencies.is_empty() {
+            None
+        } else {
+            Some(latencies[latencies.len() / 2])
+        };
+        let cost_provenance = self
+            .conn
+            .query_row(
+                "SELECT cost_provenance FROM inference_usage_events
+                 WHERE user_id=?1 AND provider_id=?2 AND model_id=?3
+                   AND event_kind!='attempt_started' AND cost_microusd IS NOT NULL
+                   AND recorded_at>=?4
+                 GROUP BY cost_provenance ORDER BY COUNT(*) DESC, cost_provenance ASC LIMIT 1",
+                params![user_id, provider_id, model_id, cutoff],
+                |row| enum_from_sql(&row.get::<_, String>(0)?),
+            )
+            .optional()?
+            .unwrap_or(CostProvenance::Unavailable);
+        Ok(Some(ModelUsageFacts {
+            successful_sample_count: successful,
+            terminal_attempts: terminal,
+            known_cost_attempts: known_cost,
+            average_cost_microusd: (known_cost > 0).then(|| total_cost / known_cost),
+            average_input_tokens: input / terminal,
+            average_output_tokens: output / terminal,
+            average_reasoning_tokens: reasoning / terminal,
+            median_latency_ms,
+            success_rate_basis_points: u16::try_from(
+                successful.saturating_mul(10_000) / terminal,
+            )
+            .ok(),
+            cost_provenance,
+        }))
+    }
+
     pub fn rebuild_daily_rollups(&self) -> rusqlite::Result<usize> {
         let transaction = self.conn.unchecked_transaction()?;
         transaction.execute("DELETE FROM inference_usage_daily", [])?;
@@ -881,6 +1074,36 @@ fn validate_snapshot(snapshot: &ProviderUsageSnapshot) -> Result<(), UsageStoreE
         || snapshot.source.trim().is_empty()
     {
         return Err(UsageStoreError::Invalid("snapshot identity fields are required".to_string()));
+    }
+    Ok(())
+}
+
+fn validate_suggestion_action(action: &SuggestionAction) -> Result<(), UsageStoreError> {
+    if [
+        action.action_id.as_str(),
+        action.suggestion_key.as_str(),
+        action.user_id.as_str(),
+        action.current_provider.as_str(),
+        action.current_model.as_str(),
+        action.target_provider.as_str(),
+        action.target_model.as_str(),
+        action.role.as_str(),
+        action.scoring_policy_version.as_str(),
+    ]
+    .iter()
+    .any(|value| value.trim().is_empty())
+    {
+        return Err(UsageStoreError::Invalid(
+            "suggestion action metadata is required".to_string(),
+        ));
+    }
+    if !matches!(
+        action.action.as_str(),
+        "dismissed" | "used_for_task" | "preference_changed"
+    ) {
+        return Err(UsageStoreError::Invalid(
+            "suggestion action is invalid".to_string(),
+        ));
     }
     Ok(())
 }

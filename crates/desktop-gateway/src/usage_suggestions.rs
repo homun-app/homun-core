@@ -77,6 +77,57 @@ pub enum SuggestionActionScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApplyUsageSuggestionRequest {
+    pub confirmed: bool,
+    pub action: SuggestionActionScope,
+    pub thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ApplyInstruction {
+    UseForTask {
+        provider_id: String,
+        model_id: String,
+        thread_id: Option<String>,
+    },
+    ChangeRolePreference {
+        role: String,
+        provider_id: String,
+        model_id: String,
+    },
+}
+
+pub fn validate_apply_request(
+    request: &ApplyUsageSuggestionRequest,
+    allowed: &[SuggestionActionScope],
+    target_provider: &str,
+    target_model: &str,
+    role: &str,
+) -> Result<ApplyInstruction, &'static str> {
+    if !request.confirmed {
+        return Err("usage_suggestion_confirmation_required");
+    }
+    if !allowed.contains(&request.action) {
+        return Err("usage_suggestion_scope_invalid");
+    }
+    match request.action {
+        SuggestionActionScope::UseForTask => Ok(ApplyInstruction::UseForTask {
+            provider_id: target_provider.to_string(),
+            model_id: target_model.to_string(),
+            thread_id: request.thread_id.clone(),
+        }),
+        SuggestionActionScope::ChangeRolePreference => {
+            Ok(ApplyInstruction::ChangeRolePreference {
+                role: role.to_string(),
+                provider_id: target_provider.to_string(),
+                model_id: target_model.to_string(),
+            })
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelSuggestion {
     pub suggestion_key: String,
     pub current_provider: String,
