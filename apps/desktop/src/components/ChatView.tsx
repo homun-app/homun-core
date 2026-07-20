@@ -2,10 +2,8 @@ import {
   ArrowUp,
   AlertCircle,
   AtSign,
-  BarChart3,
   BookMarked,
   ClipboardList,
-  Presentation,
   Check,
   CalendarClock,
   ChevronDown,
@@ -67,6 +65,7 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChatUsageOverview } from "./ChatUsageOverview";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
   ChangeEvent,
@@ -2419,9 +2418,7 @@ export function ChatView({
         <div className="thread-content">
           <div className="thread-message-list">
           {threadMessages.length === 0 && !promptSubmitting && (
-            <ChatEmptyHero
-              onPick={(text) => setComposerSeed({ text, nonce: Date.now() })}
-            />
+            <ChatEmptyHero />
           )}
           {threadMessages.map((message) => {
             const isStreamingMessage = message.id === streamingAssistantId;
@@ -8824,22 +8821,10 @@ function ComputerDetailPanel({
   );
 }
 
-// Quick-action chips on the empty-chat hero: the DELIVERABLE utilities Homun can create
-// (Manus-style discovery — so the user sees what's possible instead of guessing) + search.
-// `key` drives both the i18n label and the composer seed; the seed is a natural prompt
-// that triggers the matching skill (create-presentations / create-documents / etc.).
-const EMPTY_HERO_CHIPS: { key: string; icon: typeof Search }[] = [
-  { key: "presentation", icon: Presentation },
-  { key: "document", icon: FileText },
-  { key: "research", icon: BarChart3 },
-  { key: "meeting", icon: ClipboardList },
-  { key: "search", icon: Search },
-];
-
-// Empty-chat hero (design): the Homun mark (the "U" + dot brandmark) + "Cosa facciamo
-// oggi?" + quick-action chips that seed the composer. The mark uses the theme vars
+// Empty-chat hero (design): the Homun mark (the "U" + dot brandmark) + greeting.
+// The mark uses the theme vars
 // (U = --text, dot = --brand) so it adapts to light/dark.
-function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
+function ChatEmptyHero() {
   const { t } = useTranslation();
   return (
     <div className="chat-hero">
@@ -8856,22 +8841,7 @@ function ChatEmptyHero({ onPick }: { onPick: (text: string) => void }) {
       </svg>
       <h1 className="chat-hero-title">{t("chat.emptyHero")}</h1>
       <p className="chat-hero-sub">{t("chat.emptyHeroSub")}</p>
-      <div className="chat-hero-chips">
-        {EMPTY_HERO_CHIPS.map((chip) => {
-          const Icon = chip.icon;
-          return (
-            <button
-              key={chip.key}
-              type="button"
-              className="chat-hero-chip"
-              onClick={() => onPick(t(`chat.heroChip.${chip.key}.seed`))}
-            >
-              <Icon size={13} />
-              {t(`chat.heroChip.${chip.key}.label`)}
-            </button>
-          );
-        })}
-      </div>
+      <ChatUsageOverview />
     </div>
   );
 }

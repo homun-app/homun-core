@@ -466,12 +466,20 @@
   "chat": {
     "newTask": "Nouvelle tâche",
     "emptyHero": "Comment puis-je vous aider ?",
-    "heroChip": {
-      "presentation": { "label": "Créer une présentation", "seed": "Fais-moi une présentation sur " },
-      "document": { "label": "Rédiger un document", "seed": "Rédige-moi un document : " },
-      "research": { "label": "Recherche et rapport", "seed": "Recherche et rédige-moi un rapport sur " },
-      "meeting": { "label": "Compte rendu de réunion", "seed": "Rédige le compte rendu de cette réunion :\n" },
-      "search": { "label": "Rechercher quelque chose", "seed": "Recherche " }
+    "usageOverview": {
+      "title": "Aperçu de l’utilisation",
+      "period": "Période d’utilisation",
+      "windows": { "7d": "7 jours", "30d": "30 jours", "all": "Tout" },
+      "loading": "Chargement de l’utilisation…",
+      "error": "Les données d’utilisation sont temporairement indisponibles.",
+      "retry": "Réessayer",
+      "empty": "Les données d’utilisation commenceront avec le premier appel enregistré.",
+      "tokens": "Jetons",
+      "cost": "Coût",
+      "providers": "Fournisseurs",
+      "model": "Modèle principal",
+      "trend": "Tendance des jetons",
+      "coverage": "Certaines données d’utilisation ou de coût sont incomplètes."
     },
     "composerPlaceholder": "Écrivez un message…",
     "action": {

@@ -7205,12 +7205,15 @@ body.resizing-drawer {
 }
 /* Clean, document-style PDF preview: pages as white sheets stacked top-to-bottom,
    fitting the panel width — no dark native-viewer chrome. */
-/* Empty-chat hero: serif headline + quick-action chips. */
+/* Empty-chat hero: identity, compact usage, then the composer. */
 .chat-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
+  width: min(100%, 760px);
+  box-sizing: border-box;
+  margin-inline: auto;
   padding: 11vh 24px 0;
 }
 /* "Living mark" (design): a teal gradient orb — Homun's identity, brand-teal even if
@@ -7233,35 +7236,111 @@ body.resizing-drawer {
 .chat-hero-sub {
   font-size: 14px;
   color: var(--muted);
-  margin: 0 0 26px;
+  margin: 0 0 22px;
 }
-.chat-hero-chips {
+.chat-usage-overview {
+  width: 100%;
+  padding: 14px 0;
+  border-block: 1px solid var(--line);
+  text-align: left;
+}
+.chat-usage-window {
   display: flex;
-  flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
-  max-width: 520px;
+  gap: 2px;
+  margin-bottom: 14px;
 }
-.chat-hero-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--muted-strong, var(--text));
-  border-radius: var(--radius-pill);
-  padding: 7px 14px;
-  font-size: var(--text-sm);
+.chat-usage-window button,
+.chat-usage-status button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 7px;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
-.chat-hero-chip svg {
-  color: var(--brand);
-  flex: none;
+.chat-usage-window button:hover,
+.chat-usage-status button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
 }
-.chat-hero-chip:hover {
-  border-color: var(--brand);
-  background: var(--brand-soft);
+.chat-usage-window button[aria-pressed="true"] {
   color: var(--brand-strong);
+  background: var(--brand-soft);
+}
+.chat-usage-status,
+.chat-usage-empty,
+.chat-usage-coverage {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.chat-usage-status:empty {
+  display: none;
+}
+.chat-usage-status button {
+  color: var(--brand-strong);
+  padding-block: 2px;
+}
+.chat-usage-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.chat-usage-metrics > div {
+  min-width: 0;
+  padding: 2px 14px;
+}
+.chat-usage-metrics > div + div {
+  border-left: 1px solid var(--line);
+}
+.chat-usage-metrics span,
+.chat-usage-metrics strong,
+.chat-usage-metrics small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-usage-metrics span,
+.chat-usage-metrics small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.chat-usage-metrics strong {
+  margin: 3px 0 1px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.chat-usage-metrics small {
+  line-height: 1.35;
+}
+.chat-usage-coverage {
+  margin-top: 10px;
+  color: var(--warning, var(--muted));
+}
+@media (max-width: 760px) {
+  .chat-usage-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+  .chat-usage-metrics > div:nth-child(odd) {
+    border-left: 0;
+  }
+}
+@media (max-width: 520px) {
+  .chat-hero {
+    padding-inline: 16px;
+  }
+  .chat-usage-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chat-usage-metrics > div + div {
+    border-left: 0;
+  }
 }
 .rail-button {
   position: relative;

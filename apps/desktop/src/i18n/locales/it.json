@@ -466,12 +466,20 @@
   "chat": {
     "newTask": "New task",
     "emptyHero": "Come posso aiutarti?",
-    "heroChip": {
-      "presentation": { "label": "Crea una presentazione", "seed": "Fammi una presentazione su " },
-      "document": { "label": "Scrivi un documento", "seed": "Scrivimi un documento: " },
-      "research": { "label": "Analisi & report", "seed": "Fai una ricerca e fammi un report su " },
-      "meeting": { "label": "Verbale riunione", "seed": "Fammi il verbale di questa riunione:\n" },
-      "search": { "label": "Cerca qualcosa", "seed": "Cerca " }
+    "usageOverview": {
+      "title": "Panoramica utilizzo",
+      "period": "Periodo di utilizzo",
+      "windows": { "7d": "7 giorni", "30d": "30 giorni", "all": "Tutto" },
+      "loading": "Caricamento utilizzo…",
+      "error": "I dati di utilizzo non sono momentaneamente disponibili.",
+      "retry": "Riprova",
+      "empty": "I dati di utilizzo inizieranno dalla prima chiamata registrata.",
+      "tokens": "Token",
+      "cost": "Costo",
+      "providers": "Provider",
+      "model": "Modello principale",
+      "trend": "Trend token",
+      "coverage": "Alcuni dati di utilizzo o costo sono incompleti."
     },
     "composerPlaceholder": "Scrivi un messaggio…",
     "action": {

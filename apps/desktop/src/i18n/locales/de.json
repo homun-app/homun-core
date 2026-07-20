@@ -466,27 +466,20 @@
   "chat": {
     "newTask": "Neue Aufgabe",
     "emptyHero": "Wie kann ich Ihnen helfen?",
-    "heroChip": {
-      "presentation": {
-        "label": "Präsentation erstellen",
-        "seed": "Erstellen Sie mir eine Präsentation über "
-      },
-      "document": {
-        "label": "Dokument schreiben",
-        "seed": "Schreiben Sie mir ein Dokument: "
-      },
-      "research": {
-        "label": "Recherche & Bericht",
-        "seed": "Recherchieren Sie und schreiben Sie mir einen Bericht über "
-      },
-      "meeting": {
-        "label": "Sitzungsprotokoll",
-        "seed": "Schreiben Sie das Protokoll dieser Besprechung:\n"
-      },
-      "search": {
-        "label": "Etwas suchen",
-        "seed": "Suchen Sie "
-      }
+    "usageOverview": {
+      "title": "Nutzungsübersicht",
+      "period": "Nutzungszeitraum",
+      "windows": { "7d": "7 Tage", "30d": "30 Tage", "all": "Gesamt" },
+      "loading": "Nutzung wird geladen…",
+      "error": "Nutzungsdaten sind vorübergehend nicht verfügbar.",
+      "retry": "Erneut versuchen",
+      "empty": "Nutzungsdaten beginnen mit dem ersten erfassten Aufruf.",
+      "tokens": "Token",
+      "cost": "Kosten",
+      "providers": "Anbieter",
+      "model": "Hauptmodell",
+      "trend": "Token-Trend",
+      "coverage": "Einige Nutzungs- oder Kostendaten sind unvollständig."
     },
     "composerPlaceholder": "Nachricht schreiben…",
     "action": {

@@ -63,6 +63,9 @@ export interface UsageSummaryView {
   cost_microusd: number;
   cost_breakdown: UsageCostBreakdown;
   coverage_started_at: number | null;
+  active_providers?: number;
+  dominant_model?: string | null;
+  trend_percent?: number | null;
 }
 
 export interface UsageBreakdownRow {

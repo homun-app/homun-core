@@ -466,12 +466,20 @@
   "chat": {
     "newTask": "New task",
     "emptyHero": "How can I help you?",
-    "heroChip": {
-      "presentation": { "label": "Create a presentation", "seed": "Make me a presentation about " },
-      "document": { "label": "Write a document", "seed": "Write me a document: " },
-      "research": { "label": "Research & report", "seed": "Research and write me a report on " },
-      "meeting": { "label": "Meeting minutes", "seed": "Write the minutes of this meeting:\n" },
-      "search": { "label": "Search something", "seed": "Search " }
+    "usageOverview": {
+      "title": "Usage overview",
+      "period": "Usage period",
+      "windows": { "7d": "7 days", "30d": "30 days", "all": "All" },
+      "loading": "Loading usage…",
+      "error": "Usage is temporarily unavailable.",
+      "retry": "Retry",
+      "empty": "Usage data will begin with the first recorded call.",
+      "tokens": "Tokens",
+      "cost": "Cost",
+      "providers": "Providers",
+      "model": "Top model",
+      "trend": "Token trend",
+      "coverage": "Some usage or cost data is incomplete."
     },
     "composerPlaceholder": "Write a message…",
     "action": {

@@ -466,12 +466,20 @@
   "chat": {
     "newTask": "Nueva tarea",
     "emptyHero": "¿En qué puedo ayudarte?",
-    "heroChip": {
-      "presentation": { "label": "Crear una presentación", "seed": "Hazme una presentación sobre " },
-      "document": { "label": "Escribir un documento", "seed": "Escríbeme un documento: " },
-      "research": { "label": "Investigar e informar", "seed": "Investiga y escríbeme un informe sobre " },
-      "meeting": { "label": "Acta de reunión", "seed": "Escribe el acta de esta reunión:\n" },
-      "search": { "label": "Buscar algo", "seed": "Busca " }
+    "usageOverview": {
+      "title": "Resumen de uso",
+      "period": "Periodo de uso",
+      "windows": { "7d": "7 días", "30d": "30 días", "all": "Todo" },
+      "loading": "Cargando uso…",
+      "error": "Los datos de uso no están disponibles temporalmente.",
+      "retry": "Reintentar",
+      "empty": "Los datos de uso comenzarán con la primera llamada registrada.",
+      "tokens": "Tokens",
+      "cost": "Coste",
+      "providers": "Proveedores",
+      "model": "Modelo principal",
+      "trend": "Tendencia de tokens",
+      "coverage": "Algunos datos de uso o coste están incompletos."
     },
     "composerPlaceholder": "Escribe un mensaje…",
     "action": {

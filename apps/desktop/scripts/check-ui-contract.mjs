@@ -111,6 +111,13 @@ assertContains("src/components/UsageSettingsPane.tsx", "latency-p50", "model row
 assertContains("src/components/UsageSettingsPane.tsx", "latency-p95", "model rows must reserve p95 latency");
 assertContains("src/components/UsageSettingsPane.tsx", "retry-count", "model rows must expose retries");
 assertContains("src/components/UsageSettingsPane.tsx", "fallback-count", "model rows must expose fallbacks");
+assertContains("src/components/ChatUsageOverview.tsx", 'const WINDOWS: UsageWindow[] = ["7d", "30d", "all"]', "New chat must support all approved windows");
+assertContains("src/components/ChatUsageOverview.tsx", 'aria-live="polite"', "New-chat Usage load state must be announced");
+assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageSummary(selectedWindow)", "New chat must read the canonical summary");
+assertNotContains("src/components/ChatUsageOverview.tsx", "usageModels", "New chat must not load full analytics");
+assertNotContains("src/components/ChatView.tsx", "EMPTY_HERO_CHIPS", "New chat must not keep canned prompt chips");
+assertNotContains("src/components/ChatView.tsx", "chat-hero-chip", "New chat must not render canned prompt buttons");
+assertContains("src/components/ChatView.tsx", "<ChatUsageOverview />", "Empty hero must mount compact usage");
 assertMatches(
   "src/styles.css",
   /\.onb-model\s*\{[^}]*color:\s*var\(--o-text\);[^}]*\}/m,
