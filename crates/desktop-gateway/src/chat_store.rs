@@ -1,6 +1,6 @@
 use local_first_desktop_gateway::{
     ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, LinkedMemoryReadRef,
-    MemoryReuseEnvelope, MemoryWritePolicy, compact_thread_title, seeded_ready_message,
+    MemoryReuseEnvelope, compact_thread_title, seeded_ready_message,
 };
 // The generic marker parsers live in the single `markers` module now; aliased so the local
 // call sites read unchanged.
@@ -3802,6 +3802,7 @@ fn monotonic_suffix() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use local_first_desktop_gateway::MemoryWritePolicy;
 
     fn linked_read() -> local_first_desktop_gateway::LinkedMemoryReadRef {
         local_first_desktop_gateway::LinkedMemoryReadRef {

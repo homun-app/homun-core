@@ -3271,6 +3271,7 @@ fn briefing_items_for_authorized_source(
 /// Every item crosses the same authorized-source policy used by recall; linked
 /// Personal additionally remains a strict Preferences-only always-on tier.
 /// Returns `(personal, project)` summaries. Best-effort: failures yield empties.
+#[cfg(test)]
 fn gather_profile_memory_for_prompt(
     state: &AppState,
     user_message: &str,
@@ -3295,6 +3296,7 @@ fn profile_memory_personal_preferences_only_for_prompt(user_message: &str) -> bo
     !should_inject_cross_thread_memory_for_prompt(user_message)
 }
 
+#[cfg(test)]
 fn gather_profile_memory_with_options(
     state: &AppState,
     personal_preferences_only_override: bool,
@@ -3435,6 +3437,7 @@ fn format_memory_block_with_provenance(
 /// Formats the personal + project memories into a compact, budgeted prompt block.
 /// Pure (testable): one item per line, sections labelled, truncated to `budget`
 /// with a marker. Returns `None` when there is nothing to inject.
+#[cfg(test)]
 fn format_memory_block(
     open_loops: &[String],
     personal: &[String],
@@ -65275,7 +65278,9 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
             .any(|message| message.text.contains("SERVER-ONLY-SENTINEL")));
         assert!(context
             .iter()
-            .any(|message| message.text == super::LINKED_MEMORY_CONTEXT_OMITTED));
+            .any(|message| {
+                message.text == local_first_desktop_gateway::LINKED_MEMORY_CONTEXT_OMITTED
+            }));
     }
 
     #[test]
@@ -67637,7 +67642,6 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     #[test]
     fn briefing_cache_invalidates_after_memory_write() {
         let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        use super::MemoryRecallService;
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
         unsafe { std::env::set_var("HOMUN_USER_ID", "invalidate-user"); }
 
