@@ -1070,14 +1070,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     backfill_contacts(&state);
     backfill_mentions(&state);
     unify_owner_identity(&state);
-    // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. With a
-    // whole-project code graph (tens of thousands of entities) a synchronous sweep here
-    // would delay startup by minutes. Eventual consistency is fine: the graph projection
-    // reads whatever is current, and the regen settles shortly after boot.
-    {
-        let st = state.clone();
-        tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
-    }
     // One-time (flag-guarded): retire proactivity cards whose date already passed but
     // that predate the `relevant_until` field (e.g. a 30 June trip card still on the
     // board in July). Background — it makes one model call. New cards carry an expiry
@@ -1125,6 +1117,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             recovered.len()
         );
         drop(store);
+    }
+    // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
+    // only after the lease-aware broker recovery above has completed its critical write to
+    // the unified database; starting it earlier can race bump_process_generation and make a
+    // fresh desktop launch crash once before the watchdog recovers it.
+    {
+        let st = state.clone();
+        tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
     }
     // VACUUM all SQLite stores in background to reclaim free space from
     // deleted workspaces/tasks/memories. Runs at boot (not on every delete)
