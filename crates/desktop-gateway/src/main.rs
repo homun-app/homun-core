@@ -8056,6 +8056,124 @@ fn native_workflow_capability_entries() -> Vec<CapabilityEntry> {
         .collect()
 }
 
+fn semantic_capability_registry() -> Vec<semantic_decision::CapabilitySemanticEntry> {
+    native_workflow_capabilities()
+        .iter()
+        .map(|capability| semantic_decision::CapabilitySemanticEntry {
+            key: capability.tool_name.to_string(),
+            description: capability.description.to_string(),
+            effects: vec![
+                semantic_decision::EffectClass::ArtifactCreation,
+                semantic_decision::EffectClass::FilesystemWrite,
+            ],
+            enabled: true,
+        })
+        .collect()
+}
+
+fn bounded_thread_context(state: &AppState, thread_id: Option<&str>) -> Option<String> {
+    let thread_id = thread_id?;
+    let snapshot = lock_store(state).ok()?.messages(thread_id).ok()?;
+    let mut lines = snapshot
+        .messages
+        .iter()
+        .rev()
+        .take(8)
+        .map(|message| {
+            format!(
+                "{}: {}",
+                message.role,
+                message.text.chars().take(600).collect::<String>()
+            )
+        })
+        .collect::<Vec<_>>();
+    lines.reverse();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+pub(crate) fn resolve_semantic_decision(
+    state: &AppState,
+    thread_id: Option<&str>,
+    prompt: &str,
+    active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
+    binding: Option<&RoutingBinding>,
+) -> semantic_decision::ValidatedSemanticDecision {
+    let capabilities = semantic_capability_registry();
+    let recent_thread_context = bounded_thread_context(state, thread_id);
+    let input = semantic_decision::SemanticDecisionInput {
+        latest_message: prompt,
+        active_objective: active,
+        recent_thread_context: recent_thread_context.as_deref(),
+        explicit_binding: binding.and_then(|value| serde_json::to_value(value).ok()),
+        capabilities: &capabilities,
+    };
+    let semantic_prompt = semantic_decision::semantic_decision_prompt(&input);
+    let resolved = resolve_role_for_task(prompt, "orchestrator");
+    let router = resolved
+        .as_ref()
+        .map(build_router_for_resolved)
+        .unwrap_or_else(|| router_for_role("orchestrator"));
+    let request = GenerateJsonRequest {
+        usage: {
+            let mut usage = local_first_inference_usage::UsageContext::new(
+                uuid::Uuid::new_v4().to_string(),
+                local_first_inference_usage::InferencePurpose::IntentRouting,
+                gateway_user_id().as_str(),
+            );
+            usage.purpose_detail = Some("semantic_turn_decision".to_string());
+            usage.workspace_id = Some(gateway_memory_workspace_id().as_str().to_string());
+            usage
+        },
+        prompt: semantic_prompt,
+        max_tokens: 2_500,
+        temperature: 0.0,
+        wait_if_busy: true,
+        request_timeout_seconds: Some(45.0),
+        json_schema: Some(semantic_decision::semantic_decision_schema()),
+        required_keys: vec![
+            "objective".to_string(),
+            "relationship_to_active_objective".to_string(),
+            "mode".to_string(),
+            "scope".to_string(),
+            "allowed_effect_classes".to_string(),
+            "forbidden_effect_classes".to_string(),
+            "deliverable".to_string(),
+            "execution_shape".to_string(),
+            "memory_intent".to_string(),
+            "requires_user_confirmation".to_string(),
+            "confidence".to_string(),
+            "rationale".to_string(),
+        ],
+        repair: true,
+    };
+    let model_value = match router.generate_json_with(&Requirements::default(), &request) {
+        Ok(response) if response.valid => Ok(response.json),
+        Ok(response) => {
+            tracing::warn!(
+                target: "semantic::decision",
+                errors = ?response.errors,
+                "semantic decision did not satisfy the structured contract"
+            );
+            Err("invalid_model_output".to_string())
+        }
+        Err(error) => {
+            tracing::warn!(
+                target: "semantic::decision",
+                ?error,
+                "semantic decision model unavailable; using safe fallback"
+            );
+            Err("model_unavailable".to_string())
+        }
+    };
+    semantic_decision::resolve_model_value(
+        model_value,
+        &capabilities,
+        active,
+        resolved.as_ref().map(|value| value.provider_id.as_str()),
+        resolved.as_ref().map(|value| value.model.as_str()),
+    )
+}
+
 // Test-only fixture builder: its last production caller was the hardcoded
 // built-in template seed (Task 7 deleted it). Gate it out of the shipped
 // binary so it doesn't linger as dead_code there while it keeps serving test
