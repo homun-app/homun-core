@@ -16,6 +16,10 @@ pub struct LoopCheckpoint {
     pub tool_trace: Vec<String>,
     pub last_round_sig: String,
     pub repeat_count: u32,
+    #[serde(default)]
+    pub last_no_progress_family: String,
+    #[serde(default)]
+    pub no_progress_count: u32,
     pub progress_anchor_round: usize,
     pub progress_verify_anchor: usize,
     pub step_evidence: Vec<String>,
@@ -34,12 +38,19 @@ impl LoopCheckpoint {
         Self {
             schema_version: 1,
             round,
-            messages: state.messages.iter().cloned().map(sanitize_data_urls).collect(),
+            messages: state
+                .messages
+                .iter()
+                .cloned()
+                .map(sanitize_data_urls)
+                .collect(),
             step_messages_start: state.step_messages_start,
             accumulated: state.accumulated.clone(),
             tool_trace: state.tool_trace.clone(),
             last_round_sig: state.last_round_sig.clone(),
             repeat_count: state.repeat_count,
+            last_no_progress_family: state.last_no_progress_family.clone(),
+            no_progress_count: state.no_progress_count,
             progress_anchor_round: state.progress_anchor_round,
             progress_verify_anchor: state.progress_verify_anchor,
             step_evidence: state.step_evidence.clone(),
@@ -61,6 +72,8 @@ impl LoopCheckpoint {
         state.tool_trace = self.tool_trace;
         state.last_round_sig = self.last_round_sig;
         state.repeat_count = self.repeat_count;
+        state.last_no_progress_family = self.last_no_progress_family;
+        state.no_progress_count = self.no_progress_count;
         state.progress_anchor_round = self.progress_anchor_round;
         state.progress_verify_anchor = self.progress_verify_anchor;
         state.step_evidence = self.step_evidence;
@@ -88,7 +101,10 @@ fn sanitize_data_urls(value: Value) -> Value {
         }
         Value::Array(values) => Value::Array(values.into_iter().map(sanitize_data_urls).collect()),
         Value::Object(values) => Value::Object(
-            values.into_iter().map(|(key, value)| (key, sanitize_data_urls(value))).collect(),
+            values
+                .into_iter()
+                .map(|(key, value)| (key, sanitize_data_urls(value)))
+                .collect(),
         ),
         other => other,
     }

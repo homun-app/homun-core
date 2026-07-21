@@ -1,10 +1,12 @@
 use local_first_desktop_gateway::{
     ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, LinkedMemoryReadRef,
-    MemoryReuseEnvelope, compact_thread_title, seeded_ready_message,
+    MemoryReuseEnvelope, compact_thread_title, seeded_ready_message, strip_display_markers,
 };
 // The generic marker parsers live in the single `markers` module now; aliased so the local
 // call sites read unchanged.
-use local_first_desktop_gateway::markers::{bodies as marker_bodies, strip_blocks as strip_marker_blocks};
+use local_first_desktop_gateway::markers::{
+    bodies as marker_bodies, strip_blocks as strip_marker_blocks,
+};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::{
     collections::{HashMap, HashSet},
@@ -448,6 +450,22 @@ impl ChatStore {
     }
 
     pub fn create_thread(&self, workspace_id: &str) -> rusqlite::Result<ChatThread> {
+        // A brand-new profile already owns one seeded starter task. Reuse that
+        // exact task on the first explicit "New task" action instead of showing
+        // two indistinguishable empty conversations after onboarding. Once the
+        // starter contains user input, normal thread creation resumes.
+        if let Some(starter) = self.thread("thread_active_prompt")? {
+            let user_messages: i64 = self.conn.query_row(
+                "select count(*) from chat_messages where thread_id = ?1 and role = 'user'",
+                params![starter.thread_id],
+                |row| row.get(0),
+            )?;
+            if self.workspace_for_thread(&starter.thread_id)? == workspace_id && user_messages == 0
+            {
+                self.set_active_thread(workspace_id, &starter.thread_id)?;
+                return Ok(starter);
+            }
+        }
         let timestamp = current_timestamp_seconds();
         let thread_id = format!("thread_{}_{}", timestamp, monotonic_suffix());
         let thread = ChatThread {
@@ -675,8 +693,10 @@ impl ChatStore {
     }
 
     pub fn set_tag_color(&self, id: &str, color: &str) -> rusqlite::Result<()> {
-        self.conn
-            .execute("update tags set color = ?1 where id = ?2", params![color, id])?;
+        self.conn.execute(
+            "update tags set color = ?1 where id = ?2",
+            params![color, id],
+        )?;
         Ok(())
     }
 
@@ -684,10 +704,8 @@ impl ChatStore {
     /// is on (it isn't relied on elsewhere here), so purge assignments explicitly — same
     /// belt-and-suspenders pattern as `delete_thread`.
     pub fn delete_tag(&self, id: &str) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "delete from tag_assignments where tag_id = ?1",
-            params![id],
-        )?;
+        self.conn
+            .execute("delete from tag_assignments where tag_id = ?1", params![id])?;
         self.conn
             .execute("delete from tags where id = ?1", params![id])?;
         Ok(())
@@ -1294,6 +1312,10 @@ impl ChatStore {
         event_parts: &[serde_json::Value],
         requested_envelope: &MemoryReuseEnvelope,
     ) -> rusqlite::Result<ChatMessage> {
+        // Internal reasoning/activity/plan protocol blocks are represented by
+        // event_parts. Persist only the readable answer in the transcript so a
+        // later prompt cannot reinterpret UI/control metadata as conversation.
+        let clean_text = strip_display_markers(text).trim().to_string();
         let event_parts_json = serde_json::to_string(event_parts).map_err(json_error)?;
         let derived = memory_reuse_from_event_parts(event_parts);
         let envelope = if &derived == requested_envelope {
@@ -1308,7 +1330,7 @@ impl ChatStore {
                 set text = ?1, event_parts_json = ?2, memory_reuse_json = ?3
               where thread_id = ?4 and id = ?5 and role = 'assistant'",
             params![
-                text,
+                clean_text,
                 event_parts_json,
                 memory_reuse_json,
                 thread_id,
@@ -3132,11 +3154,17 @@ impl ChatStore {
             return Ok(());
         }
 
-        // First-ever seed keeps the legacy fixed ids in the 'default' project.
+        // Keep the legacy fixed ids, but seed them into the same base workspace
+        // used by the gateway. This prevents a hidden `default` conversation
+        // plus a second visible `local-workspace` conversation after reset.
+        let workspace_id = std::env::var("HOMUN_WORKSPACE_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "local-workspace".to_string());
         let timestamp = current_timestamp_seconds();
         let thread = ChatThread {
             thread_id: "thread_active_prompt".to_string(),
-            workspace_id: Some("default".to_string()),
+            workspace_id: Some(workspace_id.clone()),
             title: "New task".to_string(),
             subtitle: "Local chat".to_string(),
             status: "active".to_string(),
@@ -3148,12 +3176,12 @@ impl ChatStore {
             source: None,
             channel_recipient: None,
         };
-        self.insert_thread(&thread, "default")?;
+        self.insert_thread(&thread, &workspace_id)?;
         self.insert_message(
             &thread.thread_id,
             &seeded_ready_message(&thread.thread_id, timestamp),
         )?;
-        self.set_active_thread("default", &thread.thread_id)
+        self.set_active_thread(&workspace_id, &thread.thread_id)
     }
 
     /// Reseeds a fresh default thread for a specific project — used when its
@@ -3617,9 +3645,7 @@ fn memory_reuse_to_json(message: &ChatMessage) -> rusqlite::Result<Option<String
         .map_err(json_error)
 }
 
-fn linked_read_from_legacy_hit(
-    hit: &serde_json::Value,
-) -> Result<Option<LinkedMemoryReadRef>, ()> {
+fn linked_read_from_legacy_hit(hit: &serde_json::Value) -> Result<Option<LinkedMemoryReadRef>, ()> {
     let Some(hit) = hit.as_object() else {
         return Err(());
     };
@@ -3714,7 +3740,10 @@ fn attachments_from_row(
     index: usize,
 ) -> rusqlite::Result<Vec<serde_json::Value>> {
     let attachments_json: Option<String> = row.get(index)?;
-    Ok(parse_optional_json_array(attachments_json.as_deref(), "attachments_json"))
+    Ok(parse_optional_json_array(
+        attachments_json.as_deref(),
+        "attachments_json",
+    ))
 }
 
 fn event_parts_from_row(
@@ -3722,7 +3751,10 @@ fn event_parts_from_row(
     index: usize,
 ) -> rusqlite::Result<Vec<serde_json::Value>> {
     let event_parts_json: Option<String> = row.get(index)?;
-    Ok(parse_optional_json_array(event_parts_json.as_deref(), "event_parts_json"))
+    Ok(parse_optional_json_array(
+        event_parts_json.as_deref(),
+        "event_parts_json",
+    ))
 }
 
 fn memory_reuse_from_row(
@@ -3750,7 +3782,10 @@ fn memory_reuse_from_row(
     // parts; malformed JSON must never collapse to Normal through the display
     // parser's intentional fail-open behavior.
     let raw_event_parts: Option<String> = row.get(11)?;
-    if let Some(raw) = raw_event_parts.as_deref().map(str::trim).filter(|raw| !raw.is_empty())
+    if let Some(raw) = raw_event_parts
+        .as_deref()
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
         && serde_json::from_str::<Vec<serde_json::Value>>(raw).is_err()
     {
         return Ok(Some(MemoryReuseEnvelope::blocked_unknown()));
@@ -3824,9 +3859,8 @@ mod tests {
         );
         assistant.id = "assistant_atomic".to_string();
         assistant.text = "…".to_string();
-        assistant.memory_reuse = Some(
-            local_first_desktop_gateway::MemoryReuseEnvelope::blocked_unknown(),
-        );
+        assistant.memory_reuse =
+            Some(local_first_desktop_gateway::MemoryReuseEnvelope::blocked_unknown());
         store
             .append_assistant_message(&thread.thread_id, &assistant)
             .unwrap();
@@ -3845,15 +3879,14 @@ mod tests {
                 }]
             }
         });
-        let envelope = local_first_desktop_gateway::MemoryReuseEnvelope::user_input_only(vec![
-            linked_read(),
-        ]);
+        let envelope =
+            local_first_desktop_gateway::MemoryReuseEnvelope::user_input_only(vec![linked_read()]);
 
         let saved = store
             .finalize_assistant_message(
                 &thread.thread_id,
                 &assistant.id,
-                "Answer",
+                "‹‹REASONING››private trace‹‹/REASONING››\nAnswer\n‹‹ACT››tool detail‹‹/ACT››",
                 std::slice::from_ref(&recall_part),
                 &envelope,
             )
@@ -3862,6 +3895,31 @@ mod tests {
         assert_eq!(saved.text, "Answer");
         assert_eq!(saved.event_parts, vec![recall_part]);
         assert_eq!(saved.memory_reuse, Some(envelope));
+    }
+
+    #[test]
+    fn fresh_store_seeds_the_real_base_workspace_and_reuses_its_starter_once() {
+        let store = ChatStore::in_memory().unwrap();
+        let starter = store.thread("thread_active_prompt").unwrap().unwrap();
+        assert_eq!(
+            store.workspace_for_thread(&starter.thread_id).unwrap(),
+            "local-workspace"
+        );
+
+        let reused = store.create_thread("local-workspace").unwrap();
+        assert_eq!(reused.thread_id, "thread_active_prompt");
+
+        let mut user_message =
+            seeded_ready_message(&starter.thread_id, current_timestamp_seconds());
+        user_message.id = "starter_user_message".to_string();
+        user_message.role = "user".to_string();
+        user_message.text = "Ciao".to_string();
+        store
+            .insert_message(&starter.thread_id, &user_message)
+            .unwrap();
+
+        let created = store.create_thread("local-workspace").unwrap();
+        assert_ne!(created.thread_id, "thread_active_prompt");
     }
 
     #[test]
@@ -3933,8 +3991,12 @@ mod tests {
                 "source_revision": null
             }] }
         })];
-        store.append_assistant_message(&thread.thread_id, &linked).unwrap();
-        store.append_assistant_message(&thread.thread_id, &local).unwrap();
+        store
+            .append_assistant_message(&thread.thread_id, &linked)
+            .unwrap();
+        store
+            .append_assistant_message(&thread.thread_id, &local)
+            .unwrap();
         store
             .conn
             .execute(
@@ -3943,8 +4005,14 @@ mod tests {
             )
             .unwrap();
 
-        let linked = store.message(&thread.thread_id, &linked.id).unwrap().unwrap();
-        let local = store.message(&thread.thread_id, &local.id).unwrap().unwrap();
+        let linked = store
+            .message(&thread.thread_id, &linked.id)
+            .unwrap()
+            .unwrap();
+        let local = store
+            .message(&thread.thread_id, &local.id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             linked.memory_reuse.unwrap().write_policy,
             MemoryWritePolicy::UserInputOnly
@@ -3962,7 +4030,9 @@ mod tests {
         let mut assistant = seeded_ready_message(&thread.thread_id, current_timestamp_seconds());
         assistant.id = "assistant_mismatch".to_string();
         assistant.memory_reuse = Some(MemoryReuseEnvelope::blocked_unknown());
-        store.append_assistant_message(&thread.thread_id, &assistant).unwrap();
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
         let linked_part = serde_json::json!({
             "type": "recall",
             "payload": { "hits": [{
@@ -3995,7 +4065,10 @@ mod tests {
                 params![assistant.id],
             )
             .unwrap();
-        let corrupted = store.message(&thread.thread_id, &assistant.id).unwrap().unwrap();
+        let corrupted = store
+            .message(&thread.thread_id, &assistant.id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             corrupted.memory_reuse.unwrap().write_policy,
             MemoryWritePolicy::BlockedUnknown
@@ -4007,7 +4080,9 @@ mod tests {
         // The channel-reply bug: a legacy row stored a bare `msg_…` parent-id in
         // attachments_json. Reading it MUST NOT error (that aborted the whole turn via
         // messages() → "could not persist the turn" → no reply) — it degrades to empty.
-        assert!(parse_optional_json_array(Some("msg_1782421837_abc"), "attachments_json").is_empty());
+        assert!(
+            parse_optional_json_array(Some("msg_1782421837_abc"), "attachments_json").is_empty()
+        );
         assert!(parse_optional_json_array(Some("browser_user_123"), "attachments_json").is_empty());
         assert!(parse_optional_json_array(None, "attachments_json").is_empty());
         assert!(parse_optional_json_array(Some(""), "attachments_json").is_empty());
@@ -4048,13 +4123,17 @@ mod tests {
         assert!(entities.contains(&("project".to_string(), "workspace_x".to_string())));
 
         // tags_for_entity is scoped to the (type, id).
-        let on_thread = store.tags_for_entity(TagEntity::Thread, "thread_a").unwrap();
+        let on_thread = store
+            .tags_for_entity(TagEntity::Thread, "thread_a")
+            .unwrap();
         assert_eq!(on_thread.len(), 1);
         assert_eq!(on_thread[0].id, "t_red");
-        assert!(store
-            .tags_for_entity(TagEntity::Thread, "workspace_x")
-            .unwrap()
-            .is_empty()); // wrong type → no match
+        assert!(
+            store
+                .tags_for_entity(TagEntity::Thread, "workspace_x")
+                .unwrap()
+                .is_empty()
+        ); // wrong type → no match
 
         // rename + recolor.
         store.rename_tag("t_red", "Critical").unwrap();
@@ -4268,7 +4347,9 @@ mod tests {
         let store = ChatStore::in_memory().unwrap();
         let workspace_id = "workspace-purge-test";
         let thread = store.create_thread(workspace_id).unwrap();
-        store.create_tag("purge-tag", "Temporary", "#000000").unwrap();
+        store
+            .create_tag("purge-tag", "Temporary", "#000000")
+            .unwrap();
         store
             .assign_tag("purge-tag", TagEntity::Thread, &thread.thread_id)
             .unwrap();
@@ -4277,9 +4358,24 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.purge_workspace(workspace_id).unwrap(), 1);
-        assert!(store.setting(&active_thread_setting_key(workspace_id)).unwrap().is_none());
-        assert!(store.tags_for_entity(TagEntity::Thread, &thread.thread_id).unwrap().is_empty());
-        assert!(store.tags_for_entity(TagEntity::Project, workspace_id).unwrap().is_empty());
+        assert!(
+            store
+                .setting(&active_thread_setting_key(workspace_id))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .tags_for_entity(TagEntity::Thread, &thread.thread_id)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .tags_for_entity(TagEntity::Project, workspace_id)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(store.purge_workspace(workspace_id).unwrap(), 0);
     }
 
@@ -4525,22 +4621,30 @@ mod tests {
             event_parts: vec![serde_json::json!({ "type": "activity", "text": "Thinking" })],
             memory_reuse: None,
         };
-        store.append_assistant_message(&thread.thread_id, &assistant).unwrap();
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
         let recall = serde_json::json!({
             "type": "recall",
             "payload": { "query": "launch", "hits": [], "scope": "project" }
         });
 
-        assert!(store
-            .append_assistant_event_part(&other_thread.thread_id, &assistant.id, &recall)
-            .unwrap()
-            == false);
-        assert!(store
-            .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
-            .unwrap());
-        assert!(!store
-            .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
-            .unwrap());
+        assert!(
+            store
+                .append_assistant_event_part(&other_thread.thread_id, &assistant.id, &recall)
+                .unwrap()
+                == false
+        );
+        assert!(
+            store
+                .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
+                .unwrap()
+        );
+        assert!(
+            !store
+                .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
+                .unwrap()
+        );
 
         let persisted = store
             .message(&thread.thread_id, &assistant.id)
@@ -4568,9 +4672,11 @@ mod tests {
             "payload": { "query": "none", "hits": [], "scope": "project" }
         });
 
-        assert!(store
-            .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
-            .unwrap());
+        assert!(
+            store
+                .append_assistant_event_part(&thread.thread_id, &assistant.id, &recall)
+                .unwrap()
+        );
     }
 
     #[test]

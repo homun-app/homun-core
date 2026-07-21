@@ -375,6 +375,9 @@ pub struct Exchange {
     pub actions: String,
     /// Thread/conversazione di appartenenza, quando noto.
     pub thread_id: Option<String>,
+    /// Turno/run di origine, quando noto. Usato soltanto come provenance
+    /// strutturata; non viene esposto al modello come contenuto semantico.
+    pub turn_id: Option<String>,
     /// Attribuzione canale/contatto (es. messaggio in arrivo), quando applicabile.
     pub speaker: Option<String>,
     /// Risposta assistente del turno precedente, per groundare le conferme.
@@ -758,8 +761,10 @@ mod tests {
     #[test]
     fn memory_reuse_envelope_validates_its_structural_contract() {
         assert!(MemoryReuseEnvelope::normal().is_structurally_valid());
-        assert!(MemoryReuseEnvelope::user_input_only(vec![complete_linked_read()])
-            .is_structurally_valid());
+        assert!(
+            MemoryReuseEnvelope::user_input_only(vec![complete_linked_read()])
+                .is_structurally_valid()
+        );
         assert!(MemoryReuseEnvelope::blocked_unknown().is_structurally_valid());
 
         let mut normal_with_read = MemoryReuseEnvelope::normal();
@@ -771,8 +776,7 @@ mod tests {
 
         let mut incomplete = complete_linked_read();
         incomplete.source_revision.clear();
-        assert!(!MemoryReuseEnvelope::user_input_only(vec![incomplete])
-            .is_structurally_valid());
+        assert!(!MemoryReuseEnvelope::user_input_only(vec![incomplete]).is_structurally_valid());
 
         let mut blocked_with_read = MemoryReuseEnvelope::blocked_unknown();
         blocked_with_read.linked_reads.push(complete_linked_read());

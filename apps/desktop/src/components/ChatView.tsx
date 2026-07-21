@@ -115,6 +115,10 @@ import { captureAppScreenshot, fileLocalPathFromBridge, IS_DESKTOP } from "../li
 import { copyText } from "../lib/clipboard";
 import { connectComposioToolkit } from "../lib/composioConnect";
 import {
+  isLocalOllamaProvider,
+  RUNTIME_MODELS_CHANGED_EVENT,
+} from "../lib/providerPresets";
+import {
   filterInspectorState,
   inspectorWorkspaceReducer,
   loadInspectorState,
@@ -8948,12 +8952,19 @@ function Composer({
   async function refreshModels(): Promise<number> {
     try {
       let list = await coreBridge.runtimeModels(threadId);
-      if ((list.available ?? []).length === 0 && !modelsSelfHealedRef.current) {
+      if (!modelsSelfHealedRef.current) {
         modelsSelfHealedRef.current = true;
         const provs = await coreBridge.providers().catch(() => null);
-        const stale = (provs?.providers ?? []).filter((p) => p.enabled && p.models.length === 0);
-        if (stale.length > 0) {
-          await Promise.all(stale.map((p) => coreBridge.refreshProviderModels(p.id).catch(() => null)));
+        const catalogsMissingModels = (provs?.providers ?? []).filter(
+          (provider) =>
+            provider.enabled &&
+            provider.models.length === 0 &&
+            isLocalOllamaProvider(provider.kind, provider.base_url),
+        );
+        if (catalogsMissingModels.length > 0) {
+          for (const provider of catalogsMissingModels) {
+            await coreBridge.refreshProviderModels(provider.id).catch(() => null);
+          }
           list = await coreBridge.runtimeModels(threadId);
         }
       }
@@ -9060,6 +9071,16 @@ function Composer({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const refreshAfterProviderChange = () => {
+      modelsSelfHealedRef.current = false;
+      void refreshModels();
+    };
+    window.addEventListener(RUNTIME_MODELS_CHANGED_EVENT, refreshAfterProviderChange);
+    return () =>
+      window.removeEventListener(RUNTIME_MODELS_CHANGED_EVENT, refreshAfterProviderChange);
+  }, [threadId]);
 
   async function startDictation() {
     setDictationError(null);

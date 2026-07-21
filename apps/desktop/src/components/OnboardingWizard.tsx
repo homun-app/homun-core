@@ -4,7 +4,12 @@ import { coreBridge } from "../lib/coreBridge";
 import type { PullProgress, SetupStatus } from "../lib/coreBridge";
 import { getSystemSpecs } from "../lib/gatewayConfig";
 import { ProviderLogo, providerLogoKey } from "./providerLogos";
-import { PROVIDER_PRESETS, type ProviderPreset } from "../lib/providerPresets";
+import {
+  isLocalOllamaProvider,
+  notifyRuntimeModelsChanged,
+  PROVIDER_PRESETS,
+  type ProviderPreset,
+} from "../lib/providerPresets";
 import homunWordmark from "../assets/homun-wordmark-dark.svg";
 import modelsCatalog from "../assets/models-catalog.json";
 
@@ -172,7 +177,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       // default model, so the user lands on Gemma straight away. Then refresh the
       // provider's model list so Settings shows all local models without a manual
       // Refresh.
-      const providerId = crypto.randomUUID();
+      const providerId = "ollama";
       await coreBridge.upsertProvider({
         id: providerId,
         kind: "ollama",
@@ -181,6 +186,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
         active_model: selected.model,
       });
       await coreBridge.refreshProviderModels(providerId).catch(() => undefined);
+      notifyRuntimeModelsChanged();
       setStep("done");
     } catch (error) {
       setPullError((error as Error).message || t("onboarding.pullFailed"));
@@ -412,24 +418,28 @@ function ProviderSlideOver({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState(0);
+  const localOllama = isLocalOllamaProvider(kind, baseUrl);
 
   async function save() {
     setBusy(true);
     setError(null);
     try {
-      const result = await coreBridge.validateLlm(kind, baseUrl, apiKey || null);
+      const result = await coreBridge.validateLlm(kind, baseUrl, localOllama ? null : apiKey || null);
       if (!result.valid) {
         setError(t("onboarding.validationFailed"));
         return;
       }
       setModels(result.models_count);
+      const providerId = isCustom ? crypto.randomUUID() : preset.id;
       await coreBridge.upsertProvider({
-        id: crypto.randomUUID(),
+        id: providerId,
         kind,
         label: label || preset.label || "Provider",
         base_url: baseUrl,
-        api_key: apiKey || undefined,
+        api_key: localOllama ? undefined : apiKey || undefined,
       });
+      await coreBridge.refreshProviderModels(providerId);
+      notifyRuntimeModelsChanged();
       onSaved();
     } catch (e) {
       setError((e as Error).message || t("onboarding.validationFailed"));
@@ -455,16 +465,20 @@ function ProviderSlideOver({
             <span>{t("onboarding.baseUrl")}</span>
             <input className="set-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           </label>
-          <label className="onb-field">
-            <span>{t("onboarding.apiKey")}</span>
-            <input
-              className="set-input"
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-            />
-          </label>
+          {localOllama ? (
+            <p className="onb-slideover-hint">{t("onboarding.localOllamaNoKey")}</p>
+          ) : (
+            <label className="onb-field">
+              <span>{t("onboarding.apiKey")}</span>
+              <input
+                className="set-input"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-..."
+              />
+            </label>
+          )}
           {isCustom && (
             <label className="onb-field">
               <span>{t("onboarding.providerKind")}</span>
@@ -475,7 +489,9 @@ function ProviderSlideOver({
               </select>
             </label>
           )}
-          <p className="onb-slideover-hint">{preset.hint ?? t("onboarding.providerHint")}</p>
+          {!localOllama && (
+            <p className="onb-slideover-hint">{preset.hint ?? t("onboarding.providerHint")}</p>
+          )}
           {models > 0 && (
             <p className="onb-ok">
               <Check size={13} /> {t("onboarding.modelsFound", { count: models })}

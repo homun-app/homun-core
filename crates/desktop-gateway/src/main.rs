@@ -6031,8 +6031,6 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         let llm = self.llm.clone();
         let state = self.state.clone();
         let exchange = exchange.clone();
-        let thread_id = exchange.thread_id.clone();
-        let write_policy = exchange.reuse_envelope.write_policy;
         Box::pin(async move {
             let active = workspace.clone();
             let project_name = if active.as_str() != PERSONAL_WORKSPACE {
@@ -6074,8 +6072,7 @@ impl MemoryRecallService for InProcessMemoryRecallService {
                 &user,
                 &active,
                 &content,
-                thread_id.as_deref(),
-                write_policy,
+                &exchange,
                 hooks,
             );
         })
@@ -6094,6 +6091,7 @@ fn learn_via_service_or_inline(
     assistant_message: &str,
     actions: &str,
     thread_id: Option<&str>,
+    turn_id: Option<&str>,
     speaker: Option<&str>,
     prev_assistant: Option<&str>,
     reuse_envelope: local_first_memory::MemoryReuseEnvelope,
@@ -6105,6 +6103,7 @@ fn learn_via_service_or_inline(
             assistant_message: assistant_message.to_string(),
             actions: actions.to_string(),
             thread_id: thread_id.map(str::to_string),
+            turn_id: turn_id.map(str::to_string),
             speaker: speaker.map(str::to_string),
             prev_assistant: prev_assistant.map(str::to_string),
             reuse_envelope,
@@ -6117,6 +6116,7 @@ fn learn_via_service_or_inline(
         let assistant_message = assistant_message.to_string();
         let actions = actions.to_string();
         let thread_id = thread_id.map(str::to_string);
+        let turn_id = turn_id.map(str::to_string);
         let speaker = speaker.map(str::to_string);
         let prev_assistant = prev_assistant.map(str::to_string);
         let exchange = Exchange {
@@ -6124,6 +6124,7 @@ fn learn_via_service_or_inline(
             assistant_message,
             actions,
             thread_id: thread_id.clone(),
+            turn_id,
             speaker,
             prev_assistant,
             reuse_envelope,
@@ -6172,8 +6173,7 @@ fn learn_via_service_or_inline(
                 &user,
                 &active,
                 &content,
-                thread_id.as_deref(),
-                exchange.reuse_envelope.write_policy,
+                &exchange,
                 hooks,
             );
         })
@@ -6293,69 +6293,69 @@ fn persist_graph(
     facade: &MemoryFacade,
     user_id: &MemoryUserId,
     workspace: &MemoryWorkspaceId,
-    mut entities: Vec<ExtractedEntity>,
+    entities: Vec<ExtractedEntity>,
     relations: Vec<ExtractedRelation>,
     project_ws: Option<&MemoryWorkspaceId>,
 ) {
-    // Scope routing (G1): entities tagged scope=project (files, libraries, tools of
-    // the current work) belong to the PROJECT's graph, not the personal one — this
-    // is how `main.py`/`pytest` stopped leaking into the personal entity list.
+    let (mut project_entities, personal_entities): (Vec<_>, Vec<_>) = entities
+        .into_iter()
+        .partition(|entity| {
+            project_ws.is_some()
+                && entity.metadata.get("scope").and_then(serde_json::Value::as_str)
+                    == Some("project")
+        });
+    let (project_relations, personal_relations): (Vec<_>, Vec<_>) = relations
+        .into_iter()
+        .partition(|relation| {
+            project_ws.is_some()
+                && relation.metadata.get("scope").and_then(serde_json::Value::as_str)
+                    == Some("project")
+        });
     if let Some(project) = project_ws {
-        let project_entities: Vec<ExtractedEntity> = {
-            let (to_project, to_personal): (Vec<_>, Vec<_>) = entities
-                .drain(..)
-                .partition(|e| e.metadata.get("scope").and_then(|s| s.as_str()) == Some("project"));
-            entities = to_personal;
-            normalize_project_scope_entities(project, to_project)
-        };
-        // Resolve existing refs by canonical_key (the UNIQUE spine) so re-seeing an
-        // entity updates it instead of colliding on the index.
-        let mut project_keys: std::collections::HashMap<String, MemoryRef> =
-            std::collections::HashMap::new();
-        if let Ok(existing) = facade.list_entities_for_ui(user_id, project) {
-            for entity in existing {
-                project_keys.insert(entity.canonical_key.clone(), entity.reference);
-            }
-        }
-        for extracted in project_entities {
-            if extracted.canonical_key.trim().is_empty() {
-                continue;
-            }
-            let reference = project_keys
-                .get(&extracted.canonical_key)
-                .cloned()
-                .unwrap_or_else(|| {
-                    MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), project.clone())
-                });
-            let entity = MemoryEntity {
-                reference,
-                user_id: user_id.clone(),
-                workspace_id: project.clone(),
-                entity_type: extracted.entity_type,
-                name: extracted.name,
-                canonical_key: extracted.canonical_key,
-                aliases: extracted.aliases,
-                privacy_domain: PrivacyDomain::new("personal"),
-                sensitivity: extracted.sensitivity,
-                metadata: extracted.metadata,
-            };
-            let _ = facade.upsert_entity(&entity);
-        }
+        project_entities = normalize_project_scope_entities(project, project_entities);
+        persist_graph_scope(
+            facade,
+            user_id,
+            project,
+            project_entities,
+            project_relations,
+        );
     }
+    persist_graph_scope(
+        facade,
+        user_id,
+        workspace,
+        personal_entities,
+        personal_relations,
+    );
+}
+
+fn persist_graph_scope(
+    facade: &MemoryFacade,
+    user_id: &MemoryUserId,
+    workspace: &MemoryWorkspaceId,
+    entities: Vec<ExtractedEntity>,
+    relations: Vec<ExtractedRelation>,
+) {
     if entities.is_empty() && relations.is_empty() {
         return;
     }
     let mut key_to_ref: std::collections::HashMap<String, MemoryRef> =
         std::collections::HashMap::new();
+    let mut existing_relations = facade
+        .list_relations_for_ui(user_id, workspace)
+        .unwrap_or_default();
     if let Ok(existing) = facade.list_entities_for_ui(user_id, workspace) {
         for entity in existing {
             key_to_ref.insert(entity.canonical_key.clone(), entity.reference);
         }
     }
-    // Ensure a stable "self" node so relations to the user (canonical_key
-    // "person:self", which the extractor is told to use) resolve instead of being
-    // dropped — e.g. "ho una figlia Sara" → parent_of(person:self → person:sara).
-    if !key_to_ref.contains_key("person:self") {
+    // `person:self` exists only when an admitted relation actually needs it. This
+    // avoids an orphan user node on unrelated technical analyses.
+    let needs_self = relations.iter().any(|relation| {
+        relation.source_ref == "person:self" || relation.target_ref == "person:self"
+    });
+    if needs_self && !key_to_ref.contains_key("person:self") {
         let reference =
             MemoryRef::generated(MemoryRefKind::Entity, user_id.clone(), workspace.clone());
         let entity = MemoryEntity {
@@ -6407,12 +6407,27 @@ fn persist_graph(
         ) else {
             continue;
         };
+        let evidence = extracted
+            .evidence_refs
+            .iter()
+            .filter_map(|reference| reference.parse::<MemoryRef>().ok())
+            .filter(|reference| {
+                reference.user_id == *user_id && reference.workspace_id == *workspace
+            })
+            .collect();
+        let reference = existing_relations
+            .iter()
+            .find(|relation| {
+                relation.source_ref == *source
+                    && relation.target_ref == *target
+                    && relation.relation_type == extracted.relation_type
+            })
+            .map(|relation| relation.reference.clone())
+            .unwrap_or_else(|| {
+                MemoryRef::generated(MemoryRefKind::Relation, user_id.clone(), workspace.clone())
+            });
         let relation = MemoryRelation {
-            reference: MemoryRef::generated(
-                MemoryRefKind::Relation,
-                user_id.clone(),
-                workspace.clone(),
-            ),
+            reference,
             user_id: user_id.clone(),
             workspace_id: workspace.clone(),
             source_ref: source.clone(),
@@ -6421,10 +6436,16 @@ fn persist_graph(
             confidence: extracted.confidence,
             privacy_domain: PrivacyDomain::new("personal"),
             sensitivity: extracted.sensitivity,
-            evidence: Vec::new(),
+            evidence,
             metadata: extracted.metadata,
         };
-        let _ = facade.upsert_relation(&relation);
+        if facade.upsert_relation(&relation).is_ok()
+            && !existing_relations
+                .iter()
+                .any(|existing| existing.reference == relation.reference)
+        {
+            existing_relations.push(relation);
+        }
     }
 }
 
@@ -7456,6 +7477,8 @@ fn compose_gateway_prompt_packets(
     state: &AppState,
     thread_id: Option<&str>,
     core: String,
+    workspace: String,
+    runtime: String,
 ) -> (String, Vec<local_first_engine::PromptPacketMetadata>) {
     let mut packets = vec![local_first_engine::PromptPacket {
         id: "homun-core".to_string(),
@@ -7463,6 +7486,14 @@ fn compose_gateway_prompt_packets(
         priority: 10,
         content: core,
     }];
+    if !workspace.trim().is_empty() {
+        packets.push(local_first_engine::PromptPacket {
+            id: "workspace-context".to_string(),
+            source: local_first_engine::PromptPacketSource::Workspace,
+            priority: 20,
+            content: workspace,
+        });
+    }
     if let Some(root) = project_root_for_thread(state, thread_id) {
         for (id, relative, priority) in [
             ("project-agents", "AGENTS.md", 30),
@@ -7478,11 +7509,40 @@ fn compose_gateway_prompt_packets(
             }
         }
     }
+    if let Some(thread_id) = thread_id {
+        let thread = lock_store(state)
+            .ok()
+            .and_then(|store| store.thread(thread_id).ok().flatten());
+        let binding = active_routing_binding(state, Some(thread_id));
+        let mut lines = Vec::new();
+        if let Some(source) = thread.and_then(|thread| thread.source) {
+            lines.push(format!(
+                "THREAD PERIMETER: this conversation originates from the {source} channel; keep its configured contact and permission boundary."
+            ));
+        }
+        if let Some(binding) = binding {
+            lines.push(format!(
+                "THREAD ROUTING: preserve the explicit plugin route {}/{} until the binding is removed.",
+                binding.plugin_id, binding.route_id
+            ));
+        }
+        if !lines.is_empty() {
+            packets.push(local_first_engine::PromptPacket {
+                id: "thread-context".to_string(),
+                source: local_first_engine::PromptPacketSource::Thread,
+                priority: 40,
+                content: lines.join("\n"),
+            });
+        }
+    }
     packets.push(local_first_engine::PromptPacket {
         id: "runtime-control".to_string(),
         source: local_first_engine::PromptPacketSource::Runtime,
         priority: 100,
-        content: "RUNTIME CONTROL: preserve verified plan progress, do not repeat an effect whose receipt is uncertain, and obey the currently offered tool surface.".to_string(),
+        content: format!(
+            "{}\n\nRUNTIME CONTROL: preserve verified plan progress, do not repeat an effect whose receipt is uncertain, and obey the currently offered tool surface.",
+            runtime.trim()
+        ),
     });
     local_first_engine::compose_prompt_packets(&packets)
 }
@@ -15540,14 +15600,14 @@ fn role_openai_config(role: &str) -> Option<(String, String, Option<String>)> {
     chat_openai_stream_config()
 }
 
-fn privacy_guard_openai_config() -> Option<(String, String, Option<String>)> {
-    let registry = load_provider_registry();
+fn resolve_privacy_guard_role(
+    registry: &ProviderRegistry,
+) -> Option<model_registry::ResolvedRole> {
     if let Some(resolved) = registry.resolve_role("privacy_guard")
         && provider_endpoint_is_local(&resolved.base_url)
         && !model_id_is_cloud(&resolved.model)
     {
-        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
-        return Some((resolved.base_url, resolved.model, api_key));
+        return Some(resolved);
     }
 
     let mut candidates = registry
@@ -15585,8 +15645,22 @@ fn privacy_guard_openai_config() -> Option<(String, String, Option<String>)> {
             .then(model_a.id.cmp(&model_b.id))
     });
     let (provider, model) = candidates.first()?;
-    let api_key = provider_api_key(&provider.id).or_else(env_inference_api_key);
-    Some((provider.base_url.clone(), model.id.clone(), api_key))
+    Some(model_registry::ResolvedRole {
+        role: "privacy_guard".to_string(),
+        provider_id: provider.id.clone(),
+        model: model.id.clone(),
+        kind: provider.kind,
+        base_url: provider.base_url.clone(),
+        auto: true,
+        tier: registry.tier_for(&provider.id, &model.id),
+    })
+}
+
+fn privacy_guard_openai_config() -> Option<(String, String, Option<String>)> {
+    let registry = load_provider_registry();
+    let resolved = resolve_privacy_guard_role(&registry)?;
+    let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+    Some((resolved.base_url, resolved.model, api_key))
 }
 
 fn provider_endpoint_is_local(base_url: &str) -> bool {
@@ -16090,18 +16164,15 @@ async fn compact_completed_step(
     *start = messages.len();
 }
 
-/// Token-budget auto-compaction (Fase 1.1) — the MEMORY-CHECKPOINT path. When the messages
-/// approach the model's context window, WRITE the older span to the one memory engine
-/// (durable + recallable — nothing lost even if the summary drops something; ADR 0022),
-/// then replace it in-context with one salience-preserving note. Harness-driven — no model
-/// tool (ADR 0021). BEST-EFFORT: any failure leaves `messages` intact. Safe only at a round
-/// boundary (complete tool-call/result groups), like `compact_completed_step`.
+/// Token-budget auto-compaction (Fase 1.1). The durable transcript and execution journal
+/// remain canonical; compaction only replaces the model-visible older span with a bounded
+/// summary. It must never feed a mixed-role transcript back into semantic memory.
 async fn compact_for_context_budget(
     state: &AppState,
     messages: &mut Vec<serde_json::Value>,
     context_window: Option<usize>,
-    thread_id: Option<&str>,
-    memory_reads: &local_first_engine::events::TurnMemoryReadSet,
+    _thread_id: Option<&str>,
+    _memory_reads: &local_first_engine::events::TurnMemoryReadSet,
 ) {
     if !needs_context_compaction(
         estimate_tokens(messages),
@@ -16122,40 +16193,18 @@ async fn compact_for_context_budget(
         return;
     };
     let slice: Vec<serde_json::Value> = messages[from..to].to_vec();
-    // Memory checkpoint (the core): flush the span to the ONE memory engine BEFORE
-    // collapsing it — durable, recallable, off-path, fire-and-forget. The safety net that
-    // makes even an aggressive summary lossless.
-    let span_text = render_slice_text(&slice);
-    if !span_text.trim().is_empty() && compaction_checkpoint_allowed(memory_reads) {
-        tokio::spawn(learn_via_service_or_inline(
-            state,
-            &span_text,
-            "",
-            "context-compaction",
-            thread_id,
-            None,
-            None,
-            local_first_memory::MemoryReuseEnvelope::normal(),
-        ));
-    }
     // Salience-preserving summary replaces the span in-context. Best-effort: on failure
-    // leave messages intact (the write-back above already captured the content durably).
+    // leave messages intact; nothing durable depends on this projection.
     let Some(summary) = summarize_message_slice(&state.http, &slice).await else {
         return;
     };
     let note = serde_json::json!({
         "role": "assistant",
         "content": format!(
-            "[Earlier conversation — context compacted to fit the window; full detail saved to memory]\n{summary}"
+            "[Earlier conversation — context compacted to fit the window; the transcript and execution journal remain canonical]\n{summary}"
         ),
     });
     messages.splice(from..to, std::iter::once(note));
-}
-
-fn compaction_checkpoint_allowed(
-    memory_reads: &local_first_engine::events::TurnMemoryReadSet,
-) -> bool {
-    !memory_reads.has_linked_reads() && !memory_reads.is_blocked_unknown()
 }
 
 /// Whether the active orchestrator provider runs locally (loopback base_url).
@@ -16682,6 +16731,37 @@ fn apply_reported_capabilities(
     if let Some(tokens) = context_length {
         entry.context_window = u32::try_from(tokens).ok();
     }
+}
+
+fn refreshed_catalog_models(
+    ids: &[String],
+    catalog_by_id: &std::collections::HashMap<String, model_registry::ModelEntry>,
+    reported: &std::collections::HashMap<String, ModelReport>,
+    user_profiles: &std::collections::HashMap<String, model_registry::ModelProfile>,
+    old_prices: &std::collections::HashMap<String, model_registry::ModelPrice>,
+) -> Vec<model_registry::ModelEntry> {
+    ids.iter()
+        // A provider-confirmed retirement is not a weak capability profile: the
+        // endpoint no longer exists. Keeping it as a plain text model would let
+        // generic roles select it and fail every request with HTTP 410.
+        .filter(|model_id| !matches!(reported.get(*model_id), Some(ModelReport::Retired)))
+        .map(|model_id| {
+            let mut entry = catalog_by_id
+                .get(model_id)
+                .cloned()
+                .unwrap_or_else(|| model_registry::ModelEntry::inferred(model_id));
+            if let Some(ModelReport::Capabilities(caps, context_length)) = reported.get(model_id) {
+                apply_reported_capabilities(&mut entry, caps, *context_length);
+            }
+            if let Some(profile) = user_profiles.get(model_id) {
+                entry.profile = Some(profile.clone());
+            }
+            if entry.price.is_none() {
+                entry.price = old_prices.get(model_id).cloned();
+            }
+            entry
+        })
+        .collect()
 }
 
 fn ollama_capabilities_cache()
@@ -26452,6 +26532,11 @@ AUTHORIZED by the user with the `save_artifact` tool: {labels}. When the user as
 save/export a file to a folder, call save_artifact(file, destination)."
         )
     };
+    // Layer boundary: everything added below through the end of recall assembly
+    // is workspace/thread knowledge, not a core instruction. Keep the provider
+    // prompt text-compatible while exposing the real content boundary to the
+    // Prompt Inspector and independent budgets.
+    let prompt_core = system.clone();
     // Memory scope. Perimeter "contact_only" (the default for channel contacts) is a
     // HARD gate: the user's personal profile + RAG are NOT injected — the turn only
     // sees the conversation history with THIS contact. "personal" opts a trusted
@@ -26670,6 +26755,12 @@ normal answers."
             None => system,
         }
     };
+    let prompt_workspace = system
+        .strip_prefix(&prompt_core)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let system = prompt_core.clone();
     let system = format!(
         "{system}\n\nMEMORY: you have a long-term memory of the user. If you need a personal \
 or project detail you may have already learned (a name, a preference, a fact, a \
@@ -26913,8 +27004,18 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         ),
         _ => system,
     };
-    let (system, prompt_packets) =
-        compose_gateway_prompt_packets(state, request.thread_id.as_deref(), system);
+    let prompt_runtime = system
+        .strip_prefix(&prompt_core)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let (system, prompt_packets) = compose_gateway_prompt_packets(
+        state,
+        request.thread_id.as_deref(),
+        prompt_core,
+        prompt_workspace,
+        prompt_runtime,
+    );
     let system = system.as_str();
     // (The 401/tool-compat/timeout fallback flags moved into GatewayModelClient::generate,
     // which now owns the per-round provider swap — ADR 0024.)
@@ -27581,6 +27682,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
         let tail_state = state_owned.clone();
         let tail_user = memory_user_message.clone();
         let tail_thread = thread_id.clone();
+        let tail_turn_id = request.request_id.clone();
         // 5.D1c.9: resolve the trace-dump dir gateway-side (armed only when HOMUN_TRACE_DUMP=1) and
         // inject it, so the engine loop appends without calling the gateway's path resolver.
         let trace_dir = local_first_engine::trace::dump_enabled()
@@ -27629,6 +27731,7 @@ this list, ask them to attach it (don't look for it in the sandbox or folders).\
                     &learn_answer,
                     &learn_actions,
                     learn_thread.as_deref(),
+                    Some(&tail_turn_id),
                     None,
                     learn_prev.as_deref(),
                     learn_envelope,
@@ -31668,6 +31771,7 @@ async fn handle_channel_inbound(
                 "",
                 "",
                 None,
+                None,
                 speaker.as_deref(),
                 None,
                 local_first_memory::MemoryReuseEnvelope::normal(),
@@ -32859,7 +32963,10 @@ fn finalize_streamed_assistant_message(
                 %error,
                 "atomic assistant finalization failed; retaining fail-closed placeholder envelope"
             );
-            let _ = store.set_message_text(thread_id, message_id, text);
+            // Even the degraded path must not turn private stream protocol into
+            // durable conversation context. Keep the fail-closed envelope and
+            // persist only the user-visible answer.
+            let _ = store.set_message_text(thread_id, message_id, &strip_chat_markers(text));
         }
     }
     publish_app_event(serde_json::json!({
@@ -32933,8 +33040,7 @@ async fn drain_agent_stream_into_message(
         }
     }
 
-    let final_text = final_text.unwrap_or(streamed_text);
-    let final_text = final_text.trim().to_string();
+    let final_text = strip_chat_markers(&final_text.unwrap_or(streamed_text));
     if final_text.is_empty() {
         return None;
     }
@@ -33107,8 +33213,7 @@ async fn drain_agent_stream_into_message_with_fanout(
         }
     }
 
-    let final_text = final_text.unwrap_or(streamed_text);
-    let final_text = final_text.trim().to_string();
+    let final_text = strip_chat_markers(&final_text.unwrap_or(streamed_text));
     if final_text.is_empty() {
         return None;
     }
@@ -46458,32 +46563,13 @@ async fn refresh_provider_models(
             .iter()
             .filter_map(|model| model.price.clone().map(|price| (model.id.clone(), price)))
             .collect::<std::collections::HashMap<_, _>>();
-        stored.models = ids
-            .iter()
-            .map(|model_id| {
-                let mut entry = catalog_by_id
-                    .get(model_id)
-                    .cloned()
-                    .unwrap_or_else(|| model_registry::ModelEntry::inferred(model_id));
-                // The provider's own report wins over the name heuristic wherever we got one. A retired
-                // model is reported as having no capabilities at all → it drops out of every role's
-                // eligible set, instead of being recommended on the strength of its name.
-                match reported.get(model_id) {
-                    Some(ModelReport::Capabilities(caps, context_length)) => {
-                        apply_reported_capabilities(&mut entry, caps, *context_length);
-                    }
-                    Some(ModelReport::Retired) => apply_reported_capabilities(&mut entry, &[], None),
-                    Some(ModelReport::Unknown) | None => {}
-                }
-                if let Some(profile) = user_profiles.get(model_id) {
-                    entry.profile = Some(profile.clone());
-                }
-                if entry.price.is_none() {
-                    entry.price = old_prices.get(model_id).cloned();
-                }
-                entry
-            })
-            .collect();
+        stored.models = refreshed_catalog_models(
+            &ids,
+            &catalog_by_id,
+            &reported,
+            &user_profiles,
+            &old_prices,
+        );
         stored.models_fetched_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .ok()
@@ -46724,7 +46810,11 @@ fn roles_response(registry: &ProviderRegistry) -> RolesResponse {
         .iter()
         .map(|info| {
             let binding = registry.roles.get(info.key);
-            let resolved = registry.resolve_role(info.key);
+            let resolved = if info.key == "privacy_guard" {
+                resolve_privacy_guard_role(registry)
+            } else {
+                registry.resolve_role(info.key)
+            };
             RoleView {
                 key: info.key,
                 label: info.label,
@@ -49658,9 +49748,10 @@ async fn memory_wiki_save(
     tokio::spawn(async move {
         learn_via_service_or_inline(
             &st,
-            "Manual correction of the project memory wiki",
             &body,
+            "",
             "The user manually corrected a project memory wiki page",
+            None,
             None,
             None,
             None,
@@ -58823,30 +58914,6 @@ mod tests {
     }
 
     #[test]
-    fn linked_or_unknown_turns_never_create_compaction_checkpoints() {
-        let empty = local_first_engine::events::TurnMemoryReadSet::default();
-        assert!(super::compaction_checkpoint_allowed(&empty));
-
-        let linked = local_first_engine::events::TurnMemoryReadSet {
-            linked: vec![local_first_engine::events::LinkedMemoryRead {
-                source_workspace_id: "source-a".to_string(),
-                grant_id: "grant-a".to_string(),
-                policy_version: 1,
-                memory_ref: "memory:owner:source-a:fact-a".to_string(),
-                source_revision: "sha256:rev-a".to_string(),
-            }],
-            blocked_unknown: false,
-        };
-        assert!(!super::compaction_checkpoint_allowed(&linked));
-
-        let blocked = local_first_engine::events::TurnMemoryReadSet {
-            linked: Vec::new(),
-            blocked_unknown: true,
-        };
-        assert!(!super::compaction_checkpoint_allowed(&blocked));
-    }
-
-    #[test]
     fn danger_mode_resolves_to_danger_full_access_but_the_os_fence_is_separate() {
         // The APP-LEVEL resolver yields DangerFullAccess under `danger`. This asserts the
         // app-level verdict ONLY — the OS kernel fence around subprocesses is resolved
@@ -66611,6 +66678,57 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
     }
 
     #[test]
+    fn retired_models_are_removed_from_the_refreshed_catalog() {
+        use super::ModelReport;
+        let ids = vec!["deepseek-v4-pro:cloud".to_string(), "ministral-3:14b-cloud".to_string()];
+        let catalog = ids
+            .iter()
+            .map(|id| (id.clone(), super::model_registry::ModelEntry::inferred(id)))
+            .collect::<std::collections::HashMap<_, _>>();
+        let reported = std::collections::HashMap::from([
+            (
+                "deepseek-v4-pro:cloud".to_string(),
+                ModelReport::Capabilities(vec!["completion".into(), "thinking".into()], None),
+            ),
+            ("ministral-3:14b-cloud".to_string(), ModelReport::Retired),
+        ]);
+
+        let refreshed = super::refreshed_catalog_models(
+            &ids,
+            &catalog,
+            &reported,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+
+        assert_eq!(refreshed.len(), 1);
+        assert_eq!(refreshed[0].id, "deepseek-v4-pro:cloud");
+        assert!(refreshed[0].reasoning);
+    }
+
+    #[test]
+    fn privacy_guard_auto_resolution_reports_the_local_model_it_really_uses() {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut ollama = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        ollama.models = vec![
+            super::model_registry::ModelEntry::inferred("minimax-m3:cloud"),
+            super::model_registry::ModelEntry::inferred("gemma4:12b"),
+        ];
+        registry.upsert(ollama);
+
+        let resolved = super::resolve_privacy_guard_role(&registry).unwrap();
+
+        assert_eq!(resolved.provider_id, "ollama");
+        assert_eq!(resolved.model, "gemma4:12b");
+        assert!(resolved.auto);
+    }
+
+    #[test]
     fn ollama_native_root_strips_v1() {
         assert_eq!(
             super::ollama_native_root("http://127.0.0.1:11434/v1"),
@@ -69932,6 +70050,89 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
         assert_eq!(entities[0].canonical_key, "topic:homun");
         assert_eq!(entities[1].entity_type, "project");
         assert_eq!(entities[1].canonical_key, "workspace:workspace_homun");
+    }
+
+    #[test]
+    fn extracted_project_graph_stays_in_project_scope_with_evidence_and_deduplicates() {
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
+        );
+        let user = local_first_memory::UserId::new("local");
+        let personal =
+            local_first_memory::WorkspaceId::new(local_first_memory::PERSONAL_WORKSPACE);
+        let project = local_first_memory::WorkspaceId::new("workspace_homun");
+        let evidence = local_first_memory::MemoryRef::generated(
+            local_first_memory::MemoryRefKind::Event,
+            user.clone(),
+            project.clone(),
+        );
+        facade
+            .record_event(&local_first_memory::MemoryEvent {
+                reference: evidence.clone(),
+                user_id: user.clone(),
+                workspace_id: project.clone(),
+                timestamp: "2026-07-21T00:00:00Z".to_string(),
+                source: "test".to_string(),
+                event_type: "admission".to_string(),
+                payload: serde_json::json!({"bounded": true}),
+                privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+                sensitivity: local_first_memory::DataSensitivity::Internal,
+            })
+            .unwrap();
+        let entities = vec![
+            local_first_memory::ExtractedEntity {
+                entity_type: "tool".to_string(),
+                name: "Rust".to_string(),
+                canonical_key: "tool:rust".to_string(),
+                aliases: Vec::new(),
+                privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+                sensitivity: local_first_memory::DataSensitivity::Internal,
+                metadata: serde_json::json!({"scope":"project"}),
+            },
+            local_first_memory::ExtractedEntity {
+                entity_type: "topic".to_string(),
+                name: "Memory engine".to_string(),
+                canonical_key: "topic:memory-engine".to_string(),
+                aliases: Vec::new(),
+                privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+                sensitivity: local_first_memory::DataSensitivity::Internal,
+                metadata: serde_json::json!({"scope":"project"}),
+            },
+        ];
+        let relations = vec![local_first_memory::ExtractedRelation {
+            source_ref: "tool:rust".to_string(),
+            relation_type: "relates_to".to_string(),
+            target_ref: "topic:memory-engine".to_string(),
+            confidence: 0.9,
+            privacy_domain: local_first_memory::PrivacyDomain::new("work"),
+            sensitivity: local_first_memory::DataSensitivity::Internal,
+            evidence_refs: vec![evidence.to_string()],
+            metadata: serde_json::json!({"scope":"project"}),
+        }];
+
+        super::persist_graph(
+            &facade,
+            &user,
+            &personal,
+            entities.clone(),
+            relations.clone(),
+            Some(&project),
+        );
+        super::persist_graph(
+            &facade,
+            &user,
+            &personal,
+            entities,
+            relations,
+            Some(&project),
+        );
+
+        assert!(facade.list_entities_for_ui(&user, &personal).unwrap().is_empty());
+        assert!(facade.list_relations_for_ui(&user, &personal).unwrap().is_empty());
+        assert_eq!(facade.list_entities_for_ui(&user, &project).unwrap().len(), 2);
+        let project_relations = facade.list_relations_for_ui(&user, &project).unwrap();
+        assert_eq!(project_relations.len(), 1);
+        assert_eq!(project_relations[0].evidence, vec![evidence]);
     }
 
     #[test]

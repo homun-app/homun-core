@@ -58,6 +58,10 @@ pub struct LoopState {
     pub last_round_sig: String,
     /// How many consecutive rounds produced the identical tool-call signature.
     pub repeat_count: u32,
+    /// Last tool family that returned a structured no-progress outcome.
+    pub last_no_progress_family: String,
+    /// Consecutive structured failures/empty results in the same tool family.
+    pub no_progress_count: u32,
     /// F1 long-horizon budget anchor: the round at which the last plan step closed. The
     /// per-step round budget is measured from here, not from round 0.
     pub progress_anchor_round: usize,
@@ -114,12 +118,34 @@ impl LoopState {
         Self::default()
     }
 
+    /// Track consecutive structured no-progress outcomes within one tool family.
+    /// Returns the current streak; a successful/unknown outcome resets it.
+    pub fn observe_tool_outcome(&mut self, family: &str, outcome: &str) -> u32 {
+        if matches!(outcome, "empty" | "error" | "blocked" | "no_progress") {
+            if self.last_no_progress_family == family {
+                self.no_progress_count = self.no_progress_count.saturating_add(1);
+            } else {
+                self.last_no_progress_family = family.to_string();
+                self.no_progress_count = 1;
+            }
+        } else {
+            self.last_no_progress_family.clear();
+            self.no_progress_count = 0;
+        }
+        self.no_progress_count
+    }
+
     /// Apply a tool's returned loop-state effects (ADR 0024 inc 5d.1b; relocated to a method in
     /// 5.D1c.2). The executor stopped mutating a `ctx` inline; the loop calls this right after the
     /// call so the net state matches the old inline mutation exactly. Each branch mirrors one former
     /// `ctx.<field>` write. `pending_confirm` is the per-ROUND approval flag (reset each iteration, so
     /// it stays a loop local, not a field); `round` is the F1 progress anchor.
-    pub fn apply_effects(&mut self, pending_confirm: &mut bool, round: usize, effects: ToolEffects) {
+    pub fn apply_effects(
+        &mut self,
+        pending_confirm: &mut bool,
+        round: usize,
+        effects: ToolEffects,
+    ) {
         for line in &effects.append_output {
             self.accumulated.push_str(line);
         }
@@ -164,6 +190,8 @@ impl LoopState {
             self.progress_anchor_round = round;
             self.repeat_count = 0;
             self.last_round_sig.clear();
+            self.no_progress_count = 0;
+            self.last_no_progress_family.clear();
         }
     }
 }
@@ -189,6 +217,8 @@ mod tests {
         assert!(!ls.memory_reads.is_blocked_unknown());
         assert!(ls.last_round_sig.is_empty());
         assert_eq!(ls.repeat_count, 0);
+        assert_eq!(ls.no_progress_count, 0);
+        assert!(ls.last_no_progress_family.is_empty());
         assert_eq!(ls.progress_anchor_round, 0);
         assert_eq!(ls.progress_verify_anchor, 0);
         assert!(ls.step_evidence.is_empty());
@@ -196,11 +226,24 @@ mod tests {
         assert!(ls.loaded_tools.is_empty());
         assert!(ls.tool_schemas.is_empty());
         assert!(ls.active_sensitive.is_empty());
-        assert!(ls.plan.is_null(), "plan starts as Null until the gateway seeds it");
+        assert!(
+            ls.plan.is_null(),
+            "plan starts as Null until the gateway seeds it"
+        );
         assert!(ls.provider.model.is_empty() && ls.provider.base_url.is_empty());
         assert!(!ls.browser_used);
         assert!(ls.pending_browser_image.is_none());
         assert!(ls.browser_tool_call_ids.is_empty());
+    }
+
+    #[test]
+    fn structured_no_progress_streak_is_family_scoped_and_success_resets_it() {
+        let mut ls = LoopState::new();
+        assert_eq!(ls.observe_tool_outcome("browser", "empty"), 1);
+        assert_eq!(ls.observe_tool_outcome("browser", "blocked"), 2);
+        assert_eq!(ls.observe_tool_outcome("shell", "error"), 1);
+        assert_eq!(ls.observe_tool_outcome("shell", "success"), 0);
+        assert!(ls.last_no_progress_family.is_empty());
     }
 
     #[test]

@@ -1,14 +1,12 @@
 use local_first_desktop_gateway::linked_memory_repair::{
     LinkedRepairFailureInjection, apply_linked_memory_repair, preview_linked_memory_repair,
 };
-use local_first_desktop_gateway::{
-    ChatMessage, chat_message_for_existing_thread_context,
-};
+use local_first_desktop_gateway::{ChatMessage, chat_message_for_existing_thread_context};
 use local_first_memory::{
     DataSensitivity, Exchange, LearnHooks, LinkedMemoryReadRef, MemoryCollectionKey, MemoryFacade,
     MemoryRecord, MemoryRef, MemoryRefKind, MemoryReuseEnvelope, MemorySourceGrant, MemoryStatus,
-    MemoryWritePolicy, PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId,
-    persist_learn_extraction, prepare_learn_prompt, recall_authorized_sources_on_facade,
+    PrivacyDomain, SQLiteMemoryStore, UserId, WorkspaceId, persist_learn_extraction,
+    prepare_learn_prompt, recall_authorized_sources_on_facade,
 };
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
@@ -150,6 +148,7 @@ fn linked_recall_remains_read_only_across_learning_revocation_and_other_projects
         user_message: "Nel consumer il colore locale e verde".to_string(),
         assistant_message: format!("Il codice collegato e {LINKED_SENTINEL}"),
         actions: format!("recall_memory returned {LINKED_SENTINEL}"),
+        thread_id: Some("thread-linked".to_string()),
         reuse_envelope: MemoryReuseEnvelope::user_input_only(vec![read.clone()]),
         ..Exchange::default()
     };
@@ -176,8 +175,7 @@ fn linked_recall_remains_read_only_across_learning_revocation_and_other_projects
         &user,
         &consumer,
         &extracted_user_input.to_string(),
-        Some("thread-linked"),
-        MemoryWritePolicy::UserInputOnly,
+        &exchange,
         LearnHooks {
             persist_graph: None,
             store_episode: None,

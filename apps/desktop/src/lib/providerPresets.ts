@@ -12,6 +12,24 @@ export type ProviderPreset = {
   hint?: string;
 };
 
+export const RUNTIME_MODELS_CHANGED_EVENT = "homun:runtime-models-changed";
+
+export function notifyRuntimeModelsChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(RUNTIME_MODELS_CHANGED_EVENT));
+  }
+}
+
+export function isLocalOllamaProvider(kind: string, baseUrl: string): boolean {
+  if (kind !== "ollama") return false;
+  try {
+    const url = new URL(baseUrl);
+    return ["127.0.0.1", "localhost", "::1"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", kind: "openai_compat" },
   { id: "anthropic", label: "Anthropic", baseUrl: "https://api.anthropic.com", kind: "anthropic" },

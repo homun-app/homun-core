@@ -11,13 +11,17 @@
 //! unconditionally (per "converge, don't duplicate"). ADR 0025 (browse-as-recursion) invokes this same
 //! loop recursively for the browser sub-agent.
 
-use crate::browser::{is_browser_granular_tool, prune_browser_history, resolve_browser_chat_tool_name};
-use crate::contract::{
-    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal, ModelClient,
-    PlanProgress, TurnCompletionJudge, TurnPolicy,
+use crate::browser::{
+    is_browser_granular_tool, prune_browser_history, resolve_browser_chat_tool_name,
 };
-use crate::execution_journal::AgentExecutionEvent;
+use crate::contract::{
+    BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal,
+    ModelClient, PlanProgress, TurnCompletionJudge, TurnPolicy,
+};
 use crate::events::{GenerateStreamEvent, TokenMetrics};
+use crate::execution_journal::{
+    AgentExecutionEvent, classify_tool_result, tool_family, tool_result_fingerprint,
+};
 use crate::markers::{
     append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
     should_force_synthesis_for_empty_visible_answer,
@@ -25,7 +29,8 @@ use crate::markers::{
 use crate::model_normalize;
 use crate::plan::{
     advance_plan_frontier, answer_concludes_plan, build_plan_markdown, collapse_plan_markers,
-    plan_next_open, plan_step_status, plan_step_title, plan_value_steps, replace_latest_plan_marker,
+    plan_next_open, plan_step_status, plan_step_title, plan_value_steps,
+    replace_latest_plan_marker,
 };
 use crate::text::{extract_source_urls, fonti_section, is_low_value_source_url};
 use crate::tools::{connected_capability_execution_trace_line, summarize_tool_action};
@@ -87,8 +92,9 @@ pub async fn try_advance_frontier_from_evidence(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let (ok, _reason) =
-            plan_progress.verify_step_complete(&title, &criterion, &batch_evidence).await;
+        let (ok, _reason) = plan_progress
+            .verify_step_complete(&title, &criterion, &batch_evidence)
+            .await;
         if !ok {
             return; // frontier step not proven done yet → leave it doing
         }
@@ -113,7 +119,9 @@ pub async fn try_advance_frontier_from_evidence(
         // The canonical live plan card (→ plan_update event) + durable runtime plan, exactly like
         // the model's own step_advance path.
         let plan_mark = format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
-        event_sink.emit(GenerateStreamEvent::Delta { text: plan_mark }).await;
+        event_sink
+            .emit(GenerateStreamEvent::Delta { text: plan_mark })
+            .await;
         plan_progress.persist_plan(thread_id, &plan_steps).await;
         execution_journal.record(AgentExecutionEvent::PlanUpdated {
             round,
@@ -197,19 +205,19 @@ where
         // navigations for the CURRENT step only. Restores 64f08e4d's budget control
         // for the distinct-URL case (cold-context consent walls → wander → burn).
         if ls.browser_used {
-            let step_navs = ls.step_evidence
+            let step_navs = ls
+                .step_evidence
                 .iter()
                 .filter(|e| e.starts_with("browser_navigate"))
                 .count();
             if step_navs >= cfg.browser_nav_cap {
-                let _ = event_sink.emit(
-                    GenerateStreamEvent::Delta {
+                let _ = event_sink
+                    .emit(GenerateStreamEvent::Delta {
                         text: "‹‹ACT››⏹️ Enough sources visited — synthesizing from what I \
 gathered‹‹/ACT››"
                             .to_string(),
-                    },
-                )
-                .await;
+                    })
+                    .await;
                 break;
             }
         }
@@ -226,7 +234,9 @@ gathered‹‹/ACT››"
                 round,
                 reason: "verified_step_boundary".to_string(),
             });
-            compactor.compact(&mut ls.messages, &mut ls.step_messages_start).await;
+            compactor
+                .compact(&mut ls.messages, &mut ls.step_messages_start)
+                .await;
         }
         // Fase 1.1: token-budget auto-compaction (the memory-checkpoint path) — independent of
         // plan steps. Fires when the conversation approaches the model's context window, flushing
@@ -283,7 +293,11 @@ missing, give what you have and note the gap in one short line.",
                 &ls.messages,
                 &ls.tool_schemas,
                 is_final_round,
-                if round == 0 { cfg.forced_tool.as_deref() } else { None },
+                if round == 0 {
+                    cfg.forced_tool.as_deref()
+                } else {
+                    None
+                },
                 &ls.prompt_packets,
             ),
         });
@@ -309,7 +323,11 @@ missing, give what you have and note the gap in one short line.",
                     // the duplicate would render GENERIC instead of from the template). Force only on
                     // round 0 (the post-intake generation call); every later round falls back to auto
                     // so the model can emit its text summary and the turn terminates cleanly.
-                    forced_tool: if round == 0 { cfg.forced_tool.as_deref() } else { None },
+                    forced_tool: if round == 0 {
+                        cfg.forced_tool.as_deref()
+                    } else {
+                        None
+                    },
                     usage: &round_usage,
                 },
                 &|_tok| {},
@@ -363,7 +381,8 @@ missing, give what you have and note the gap in one short line.",
                 if is_final_round {
                     return None;
                 }
-                let known: Vec<String> = ls.tool_schemas
+                let known: Vec<String> = ls
+                    .tool_schemas
                     .iter()
                     .filter_map(|t| {
                         t.get("function")
@@ -434,10 +453,13 @@ missing, give what you have and note the gap in one short line.",
             if !round_sig.is_empty() && round_sig == ls.last_round_sig {
                 ls.repeat_count += 1;
                 if ls.repeat_count >= 2 {
-                    let _ = event_sink.emit(GenerateStreamEvent::Delta {
-                        text: "‹‹ACT››⏹️ Same actions repeated: stopping and summarizing‹‹/ACT››".to_string(),
-                    })
-                    .await;
+                    let _ = event_sink
+                        .emit(GenerateStreamEvent::Delta {
+                            text:
+                                "‹‹ACT››⏹️ Same actions repeated: stopping and summarizing‹‹/ACT››"
+                                    .to_string(),
+                        })
+                        .await;
                     break;
                 }
             } else {
@@ -455,63 +477,221 @@ missing, give what you have and note the gap in one short line.",
             // Set when a write tool needs confirmation: we stop the loop and let
             // the user run it from the card instead of looping/hallucinating.
             let mut pending_confirm = false;
+            let mut stop_for_no_progress = false;
+            let mut nudge_no_progress = false;
             // Bundle the turn-level state the dispatch loop touches into `ctx` so
             // the loop body addresses it via `ctx.<field>` (the seam a later refactor
             // extracts into a function). Built once per round; its block ends right
             // after the dispatch loop so the borrows release before the post-loop
             // reads (screenshot push, `if pending_confirm`) touch the raw locals.
             {
-            for (idx, call) in calls.iter().enumerate() {
-                // Parity-harness snapshots (see `tool_trace_dump`): capture the
-                // pre-dispatch state so the record built after the tool push can
-                // measure the deltas. Zero cost beyond three cheap reads when the
-                // dump is disarmed; the record itself is fully gated below.
-                // `pc_before` lets us attribute `pending_confirm` to the call that
-                // RAISED it (the flag lives outside the loop and is never reset).
-                let acc_before = ls.accumulated.len();
-                let msgs_before = ls.messages.len();
-                let pc_before = pending_confirm;
-                let name = call
-                    .get("function")
-                    .and_then(|f| f.get("name"))
-                    .and_then(|n| n.as_str())
-                    .unwrap_or("");
-                let args_raw = call
-                    .get("function")
-                    .and_then(|f| f.get("arguments"))
-                    .and_then(|a| a.as_str())
-                    .unwrap_or("{}");
-                let call_id = call
-                    .get("id")
-                    .and_then(|i| i.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                // Recover a typo'd native browser tool name (e.g. "browser_tavigate")
-                // BEFORE dispatch, so it matches the native browser arm instead of
-                // falling through to the Composio catch-all (404 → model loops). The
-                // `browser_` namespace is reserved for native tools. No-op for any
-                // non-browser tool name.
-                let name = match resolve_browser_chat_tool_name(name) {
-                    Some(canonical) => canonical,
-                    None => name,
-                };
+                for (idx, call) in calls.iter().enumerate() {
+                    // Parity-harness snapshots (see `tool_trace_dump`): capture the
+                    // pre-dispatch state so the record built after the tool push can
+                    // measure the deltas. Zero cost beyond three cheap reads when the
+                    // dump is disarmed; the record itself is fully gated below.
+                    // `pc_before` lets us attribute `pending_confirm` to the call that
+                    // RAISED it (the flag lives outside the loop and is never reset).
+                    let acc_before = ls.accumulated.len();
+                    let msgs_before = ls.messages.len();
+                    let pc_before = pending_confirm;
+                    let name = call
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("");
+                    let args_raw = call
+                        .get("function")
+                        .and_then(|f| f.get("arguments"))
+                        .and_then(|a| a.as_str())
+                        .unwrap_or("{}");
+                    let call_id = call
+                        .get("id")
+                        .and_then(|i| i.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    // Recover a typo'd native browser tool name (e.g. "browser_tavigate")
+                    // BEFORE dispatch, so it matches the native browser arm instead of
+                    // falling through to the Composio catch-all (404 → model loops). The
+                    // `browser_` namespace is reserved for native tools. No-op for any
+                    // non-browser tool name.
+                    let name = match resolve_browser_chat_tool_name(name) {
+                        Some(canonical) => canonical,
+                        None => name,
+                    };
 
-                if let Some(blocked) = turn_policy.route_blocked(name) {
-                    // Parity harness: the blocked arm pushes a tool message then
-                    // `continue`s, jumping over the normal record block below. The
-                    // upcoming extraction handles this arm specially, so it MUST be
-                    // visible to the oracle — emit a record here with `blocked:true`.
-                    // Compute the `blocked`-derived fingerprint fields BEFORE the
-                    // push moves `blocked` into the message. Fully gated → no cost
-                    // when disarmed.
-                    let blocked_trace = if crate::trace::dump_enabled() {
-                        let normalized = crate::trace::normalize(&blocked);
+                    if let Some(blocked) = turn_policy.route_blocked(name) {
+                        // Parity harness: the blocked arm pushes a tool message then
+                        // `continue`s, jumping over the normal record block below. The
+                        // upcoming extraction handles this arm specially, so it MUST be
+                        // visible to the oracle — emit a record here with `blocked:true`.
+                        // Compute the `blocked`-derived fingerprint fields BEFORE the
+                        // push moves `blocked` into the message. Fully gated → no cost
+                        // when disarmed.
+                        let blocked_trace = if crate::trace::dump_enabled() {
+                            let normalized = crate::trace::normalize(&blocked);
+                            Some((
+                                crate::trace::hash_hex(&crate::trace::normalize(args_raw)),
+                                crate::trace::hash_hex(&normalized),
+                                blocked.chars().count(),
+                                normalized.chars().take(120).collect::<String>(),
+                            ))
+                        } else {
+                            None
+                        };
+                        ls.messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": blocked,
+                        }));
+                        if let Some((args_hash, result_hash, result_len, result_head)) =
+                            blocked_trace
+                        {
+                            let rec = crate::trace::ToolTraceRecord {
+                                round: round,
+                                idx,
+                                name: name.to_string(),
+                                args_hash,
+                                result_hash,
+                                result_len,
+                                result_head,
+                                acc_delta_len: ls.accumulated.len().saturating_sub(acc_before),
+                                acc_markers: crate::trace::extract_markers(
+                                    acc_before,
+                                    &ls.accumulated,
+                                ),
+                                pending_confirm_raised: pending_confirm && !pc_before,
+                                msgs_pushed: ls.messages.len().saturating_sub(msgs_before),
+                                blocked: true,
+                                browser_image_set: ls.pending_browser_image.is_some(),
+                            };
+                            if let Some(dir) = trace_dir.as_deref() {
+                                crate::trace::append(dir, &rec);
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Record consequential actions (any domain) for decision memory.
+                    if ls.tool_trace.len() < 20 {
+                        if let Some(line) = summarize_tool_action(name, args_raw) {
+                            ls.tool_trace.push(line);
+                        } else if let Some(line) =
+                            connected_capability_execution_trace_line(name, &catalog_index)
+                        {
+                            ls.tool_trace.push(line);
+                        } else if composio_writes.contains(name) {
+                            // A write on a connected service (Composio/MCP).
+                            ls.tool_trace
+                                .push(format!("capability execution connector:{name}"));
+                        }
+                    }
+
+                    execution_journal.record(AgentExecutionEvent::ToolCallStarted {
+                        round,
+                        call_id: call_id.clone(),
+                        name: name.to_string(),
+                    });
+                    let (result, tool_effects) = if is_browser_granular_tool(name) {
+                        // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
+                        // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
+                        // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
+                        // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
+                        let r = browser_executor
+                            .execute_browser(name, args_raw, &call_id, &mut ls)
+                            .await;
+                        (r, crate::ToolEffects::default())
+                    } else {
+                        // Non-browser: through the CapabilityExecutor seam (ADR 0026). The executor builds
+                        // the per-call ChatToolCtx from `&mut ls` + its held read-only context. `args_raw`
+                        // (the model's exact JSON string) is passed through unchanged — no round-trip.
+                        match capability_executor
+                            .execute_tool(name, args_raw, &call_id, &mut ls)
+                            .await
+                        {
+                            Ok(o) => (o.result, o.effects),
+                            Err(e) => (e, crate::ToolEffects::default()),
+                        }
+                    };
+                    let outcome = classify_tool_result(&result);
+                    let result_fingerprint = tool_result_fingerprint(&result);
+                    execution_journal.record(AgentExecutionEvent::ToolCallCompleted {
+                        round,
+                        call_id: call_id.clone(),
+                        name: name.to_string(),
+                        result_chars: result.chars().count(),
+                        outcome: outcome.to_string(),
+                        result_fingerprint,
+                    });
+                let no_progress_count = ls.observe_tool_outcome(&tool_family(name), outcome);
+                if no_progress_count > 0 {
+                    if no_progress_count == 2 {
+                        nudge_no_progress = true;
+                    } else if no_progress_count >= 3 {
+                        stop_for_no_progress = true;
+                    }
+                }
+                    if matches!(name, "update_plan" | "step_advance") {
+                        execution_journal.record(AgentExecutionEvent::PlanUpdated {
+                            round,
+                            source: name.to_string(),
+                        });
+                    }
+                    // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
+                    // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
+                    ls.apply_effects(&mut pending_confirm, round, tool_effects);
+
+                    // Collect source URLs from browser results so the final
+                    // answer can carry a deterministic "Fonti" section. The
+                    // granular browser_navigate result embeds the visited page URL.
+                    if name == "browser_navigate" {
+                        // Capture ONLY the VISITED page URL (the first URL in the result,
+                        // from "Page opened (URL). Snapshot: …"), not every link scraped
+                        // from the page body — otherwise the content snapshot's footer
+                        // chrome (Wikipedia donate/edit/history, wikimedia/mediawiki footer
+                        // links) lands in the "Sources" footer. The page visited IS the
+                        // source. `is_low_value_source_url` stays as a defensive net.
+                        if let Some(url) = extract_source_urls(&result).into_iter().next() {
+                            if !is_low_value_source_url(&url) && !browse_sources.contains(&url) {
+                                browse_sources.push(url);
+                            }
+                        }
+                    }
+                    if name == "recall_memory" {
+                        ls.pending_vault_reveal_marker = extract_vault_reveal_marker(&result)
+                            .or(ls.pending_vault_reveal_marker.take());
+                    }
+                    // F2: record this tool's outcome as evidence for the current plan
+                    // step (the verifier's input). Skip the plan tool itself so the
+                    // evidence reflects the actual WORK, not the bookkeeping. Bounded.
+                    if name != "update_plan" {
+                        let snippet: String = result.chars().take(400).collect();
+                        ls.step_evidence.push(format!("{name} → {snippet}"));
+                        if ls.step_evidence.len() > 60 {
+                            ls.step_evidence.remove(0);
+                        }
+                        // Harness-derived progress: advance the plan frontier when the gathered
+                        // evidence VERIFIES the current step (the weak browser model never does).
+                        try_advance_frontier_from_evidence(
+                            &mut ls,
+                            plan_progress,
+                            execution_journal,
+                            event_sink,
+                            &cfg,
+                            thread_id.as_deref(),
+                            round,
+                        )
+                        .await;
+                    }
+                    // Parity harness: compute the result-derived fingerprint fields
+                    // from `&result` BEFORE the push moves `result` into the message.
+                    // Gated on `dump_enabled()` so there is no cost when disarmed.
+                    let trace_fields = if crate::trace::dump_enabled() {
+                        let normalized = crate::trace::normalize(&result);
                         Some((
-                            crate::trace::hash_hex(
-                                &crate::trace::normalize(args_raw),
-                            ),
+                            crate::trace::hash_hex(&crate::trace::normalize(args_raw)),
                             crate::trace::hash_hex(&normalized),
-                            blocked.chars().count(),
+                            result.chars().count(),
                             normalized.chars().take(120).collect::<String>(),
                         ))
                     } else {
@@ -520,11 +700,14 @@ missing, give what you have and note the gap in one short line.",
                     ls.messages.push(serde_json::json!({
                         "role": "tool",
                         "tool_call_id": call_id,
-                        "content": blocked,
+                        "content": result,
                     }));
-                    if let Some((args_hash, result_hash, result_len, result_head)) =
-                        blocked_trace
-                    {
+                    // Build + append the record AFTER the tool push so `msgs_pushed`
+                    // counts this push. A browser screenshot pushes a SECOND message
+                    // later (outside this loop), which `msgs_pushed` cannot see; that
+                    // side effect is instead fingerprinted by `browser_image_set`
+                    // below.
+                    if let Some((args_hash, result_hash, result_len, result_head)) = trace_fields {
                         let rec = crate::trace::ToolTraceRecord {
                             round: round,
                             idx,
@@ -534,174 +717,27 @@ missing, give what you have and note the gap in one short line.",
                             result_len,
                             result_head,
                             acc_delta_len: ls.accumulated.len().saturating_sub(acc_before),
-                            acc_markers: crate::trace::extract_markers(
-                                acc_before,
-                                &ls.accumulated,
-                            ),
+                            acc_markers: crate::trace::extract_markers(acc_before, &ls.accumulated),
                             pending_confirm_raised: pending_confirm && !pc_before,
                             msgs_pushed: ls.messages.len().saturating_sub(msgs_before),
-                            blocked: true,
+                            blocked: false,
+                            // Set by the browser_screenshot arm (if it ran) to queue a
+                            // SECOND message pushed AFTER this loop — invisible to
+                            // `msgs_pushed`, so we fingerprint the side effect here.
                             browser_image_set: ls.pending_browser_image.is_some(),
                         };
                         if let Some(dir) = trace_dir.as_deref() {
                             crate::trace::append(dir, &rec);
                         }
                     }
-                    continue;
                 }
-
-                // Record consequential actions (any domain) for decision memory.
-                if ls.tool_trace.len() < 20 {
-                    if let Some(line) = summarize_tool_action(name, args_raw) {
-                        ls.tool_trace.push(line);
-                    } else if let Some(line) =
-                        connected_capability_execution_trace_line(name, &catalog_index)
-                    {
-                        ls.tool_trace.push(line);
-                    } else if composio_writes.contains(name) {
-                        // A write on a connected service (Composio/MCP).
-                        ls.tool_trace.push(format!("capability execution connector:{name}"));
-                    }
-                }
-
-                execution_journal.record(AgentExecutionEvent::ToolCallStarted {
-                    round,
-                    call_id: call_id.clone(),
-                    name: name.to_string(),
-                });
-                let (result, tool_effects) = if is_browser_granular_tool(name) {
-                    // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
-                    // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
-                    // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
-                    // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
-                    let r = browser_executor
-                        .execute_browser(name, args_raw, &call_id, &mut ls)
-                        .await;
-                    (r, crate::ToolEffects::default())
-                } else {
-                    // Non-browser: through the CapabilityExecutor seam (ADR 0026). The executor builds
-                    // the per-call ChatToolCtx from `&mut ls` + its held read-only context. `args_raw`
-                    // (the model's exact JSON string) is passed through unchanged — no round-trip.
-                    match capability_executor
-                        .execute_tool(name, args_raw, &call_id, &mut ls)
-                        .await
-                    {
-                        Ok(o) => (o.result, o.effects),
-                        Err(e) => (e, crate::ToolEffects::default()),
-                    }
-                };
-                execution_journal.record(AgentExecutionEvent::ToolCallCompleted {
-                    round,
-                    call_id: call_id.clone(),
-                    name: name.to_string(),
-                    result_chars: result.chars().count(),
-                });
-                if matches!(name, "update_plan" | "step_advance") {
-                    execution_journal.record(AgentExecutionEvent::PlanUpdated {
-                        round,
-                        source: name.to_string(),
-                    });
-                }
-                // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
-                // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
-                ls.apply_effects(&mut pending_confirm, round, tool_effects);
-
-                // Collect source URLs from browser results so the final
-                // answer can carry a deterministic "Fonti" section. The
-                // granular browser_navigate result embeds the visited page URL.
-                if name == "browser_navigate" {
-                    // Capture ONLY the VISITED page URL (the first URL in the result,
-                    // from "Page opened (URL). Snapshot: …"), not every link scraped
-                    // from the page body — otherwise the content snapshot's footer
-                    // chrome (Wikipedia donate/edit/history, wikimedia/mediawiki footer
-                    // links) lands in the "Sources" footer. The page visited IS the
-                    // source. `is_low_value_source_url` stays as a defensive net.
-                    if let Some(url) = extract_source_urls(&result).into_iter().next() {
-                        if !is_low_value_source_url(&url) && !browse_sources.contains(&url) {
-                            browse_sources.push(url);
-                        }
-                    }
-                }
-                if name == "recall_memory" {
-                    ls.pending_vault_reveal_marker =
-                        extract_vault_reveal_marker(&result).or(ls.pending_vault_reveal_marker.take());
-                }
-                // F2: record this tool's outcome as evidence for the current plan
-                // step (the verifier's input). Skip the plan tool itself so the
-                // evidence reflects the actual WORK, not the bookkeeping. Bounded.
-                if name != "update_plan" {
-                    let snippet: String = result.chars().take(400).collect();
-                    ls.step_evidence.push(format!("{name} → {snippet}"));
-                    if ls.step_evidence.len() > 60 {
-                        ls.step_evidence.remove(0);
-                    }
-                    // Harness-derived progress: advance the plan frontier when the gathered
-                    // evidence VERIFIES the current step (the weak browser model never does).
-                    try_advance_frontier_from_evidence(
-                        &mut ls,
-                        plan_progress,
-                        execution_journal,
-                        event_sink,
-                        &cfg,
-                        thread_id.as_deref(),
-                        round,
-                    )
-                    .await;
-                }
-                // Parity harness: compute the result-derived fingerprint fields
-                // from `&result` BEFORE the push moves `result` into the message.
-                // Gated on `dump_enabled()` so there is no cost when disarmed.
-                let trace_fields = if crate::trace::dump_enabled() {
-                    let normalized = crate::trace::normalize(&result);
-                    Some((
-                        crate::trace::hash_hex(
-                            &crate::trace::normalize(args_raw),
-                        ),
-                        crate::trace::hash_hex(&normalized),
-                        result.chars().count(),
-                        normalized.chars().take(120).collect::<String>(),
-                    ))
-                } else {
-                    None
-                };
-                ls.messages.push(serde_json::json!({
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "content": result,
-                }));
-                // Build + append the record AFTER the tool push so `msgs_pushed`
-                // counts this push. A browser screenshot pushes a SECOND message
-                // later (outside this loop), which `msgs_pushed` cannot see; that
-                // side effect is instead fingerprinted by `browser_image_set`
-                // below.
-                if let Some((args_hash, result_hash, result_len, result_head)) = trace_fields {
-                    let rec = crate::trace::ToolTraceRecord {
-                        round: round,
-                        idx,
-                        name: name.to_string(),
-                        args_hash,
-                        result_hash,
-                        result_len,
-                        result_head,
-                        acc_delta_len: ls.accumulated.len().saturating_sub(acc_before),
-                        acc_markers: crate::trace::extract_markers(
-                            acc_before,
-                            &ls.accumulated,
-                        ),
-                        pending_confirm_raised: pending_confirm && !pc_before,
-                        msgs_pushed: ls.messages.len().saturating_sub(msgs_before),
-                        blocked: false,
-                        // Set by the browser_screenshot arm (if it ran) to queue a
-                        // SECOND message pushed AFTER this loop — invisible to
-                        // `msgs_pushed`, so we fingerprint the side effect here.
-                        browser_image_set: ls.pending_browser_image.is_some(),
-                    };
-                    if let Some(dir) = trace_dir.as_deref() {
-                        crate::trace::append(dir, &rec);
-                    }
-                }
-            }
             } // end ctx scope → borrows freed before the post-loop reads below
+            if nudge_no_progress {
+                ls.messages.push(serde_json::json!({
+                    "role": "system",
+                    "content": "Two consecutive tools in the same family produced no usable progress. Change strategy and do not repeat that tool family unless new evidence makes it necessary."
+                }));
+            }
             // A browser screenshot this round → feed the image to the (vision)
             // model as a SEPARATE user message. It MUST come AFTER every tool
             // result of this round (OpenAI-compat requires each assistant
@@ -736,16 +772,28 @@ missing, give what you have and note the gap in one short line.",
                     collapse_plan_markers(&ls.accumulated),
                     ls.pending_vault_reveal_marker.as_deref(),
                 );
-                let _ = event_sink.emit(
-                    GenerateStreamEvent::Done {
+                let _ = event_sink
+                    .emit(GenerateStreamEvent::Done {
                         text: final_text.clone(),
                         metrics: TokenMetrics::zero(),
                         redacted_user_text: None,
-                    },
-                )
-                .await;
+                    })
+                    .await;
                 memory_answer = final_text;
                 final_done = true;
+                break;
+            }
+            if stop_for_no_progress {
+                let _ = event_sink
+                    .emit(GenerateStreamEvent::Delta {
+                        text: "‹‹ACT››⏹️ Nessun progresso dopo più tentativi: cambio strategia e sintetizzo‹‹/ACT››"
+                            .to_string(),
+                    })
+                    .await;
+                execution_journal.record(AgentExecutionEvent::ForcedSynthesis {
+                    round: Some(round),
+                    reason: "structured_no_progress".to_string(),
+                });
                 break;
             }
             continue;
@@ -787,9 +835,8 @@ missing, give what you have and note the gap in one short line.",
                         next_step: step.clone(),
                     });
                     if !content.trim().is_empty() {
-                        ls.messages.push(
-                            serde_json::json!({ "role": "assistant", "content": content }),
-                        );
+                        ls.messages
+                            .push(serde_json::json!({ "role": "assistant", "content": content }));
                     }
                     // DIRECTIVE nudge: name the exact next step and forbid redoing work —
                     // weak-agentic models otherwise re-run the skill / regenerate images
@@ -804,15 +851,14 @@ missing, give what you have and note the gap in one short line.",
                              complete. No confirmation, no summary yet."
                         ),
                     }));
-                    let _ = event_sink.emit(
-                        GenerateStreamEvent::Delta {
+                    let _ = event_sink
+                        .emit(GenerateStreamEvent::Delta {
                             text: format!(
                                 "‹‹ACT››▶ Proseguo: {}‹‹/ACT››",
                                 step.chars().take(50).collect::<String>()
                             ),
-                        },
-                    )
-                    .await;
+                        })
+                        .await;
                     continue;
                 }
                 // The answer is substantial and the plan is all-but-closed → finalize with
@@ -834,7 +880,9 @@ missing, give what you have and note the gap in one short line.",
                         let reconcile_delivered = content.trim().chars().count();
                         plan_steps[open_index]["status"] = serde_json::json!("done");
                         content = replace_latest_plan_marker(&content, &plan_steps);
-                        plan_progress.persist_plan(thread_id.as_deref(), &plan_steps).await;
+                        plan_progress
+                            .persist_plan(thread_id.as_deref(), &plan_steps)
+                            .await;
                         if std::env::var("HOMUN_DEBUG").is_ok() {
                             eprintln!(
                                 "[plan] reconciled last open step to done on delivery: «{step}»"
@@ -879,12 +927,11 @@ missing, give what you have and note the gap in one short line.",
                         anything you already produced, do not redo work. Mark steps done with \
                         update_plan/step_advance as you go. No summary yet.",
                 }));
-                let _ = event_sink.emit(
-                    GenerateStreamEvent::Delta {
+                let _ = event_sink
+                    .emit(GenerateStreamEvent::Delta {
                         text: "‹‹ACT››▶ Pianifico il lavoro rimanente‹‹/ACT››".to_string(),
-                    },
-                )
-                .await;
+                    })
+                    .await;
                 continue;
             }
         }
@@ -911,7 +958,8 @@ missing, give what you have and note the gap in one short line.",
             });
             // Keep the reasoning trace in context so the synthesis builds on it.
             if !content.trim().is_empty() {
-                ls.messages.push(serde_json::json!({ "role": "assistant", "content": content }));
+                ls.messages
+                    .push(serde_json::json!({ "role": "assistant", "content": content }));
             }
             break;
         }
@@ -922,7 +970,9 @@ missing, give what you have and note the gap in one short line.",
         ls.accumulated.push_str(&content);
         if let Some(fonti) = fonti_section(&browse_sources, &ls.accumulated) {
             ls.accumulated.push_str(&fonti);
-            let _ = event_sink.emit(GenerateStreamEvent::Delta { text: fonti }).await;
+            let _ = event_sink
+                .emit(GenerateStreamEvent::Delta { text: fonti })
+                .await;
         }
         // Anti-churn: the live stream carried one ‹‹PLAN›› block per plan tool call;
         // the PERSISTED answer keeps the plan card exactly once (latest state).
@@ -939,7 +989,9 @@ missing, give what you have and note the gap in one short line.",
         let final_delivered_chars = delivered.trim().chars().count();
         let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
-                plan_progress.persist_plan(thread_id.as_deref(), &reconciled).await;
+                plan_progress
+                    .persist_plan(thread_id.as_deref(), &reconciled)
+                    .await;
                 turn_trace.record(crate::turn_trace::TurnEvent::Reconcile {
                     fired: true,
                     step: String::new(), // the whole plan is reconciled here, not a single named step
@@ -951,17 +1003,18 @@ missing, give what you have and note the gap in one short line.",
             }
             None => delivered,
         };
-        let final_answer =
-            append_vault_reveal_marker_if_missing(delivered, ls.pending_vault_reveal_marker.as_deref());
+        let final_answer = append_vault_reveal_marker_if_missing(
+            delivered,
+            ls.pending_vault_reveal_marker.as_deref(),
+        );
         memory_answer = final_answer.clone();
-        let _ = event_sink.emit(
-            GenerateStreamEvent::Done {
+        let _ = event_sink
+            .emit(GenerateStreamEvent::Done {
                 text: final_answer,
                 metrics: TokenMetrics::zero(),
                 redacted_user_text: None,
-            },
-        )
-        .await;
+            })
+            .await;
         final_done = true;
         break;
     }
@@ -989,10 +1042,10 @@ missing, give what you have and note the gap in one short line.",
         ls.messages.push(serde_json::json!({
             "role": "user",
             "content": "No more tools are available. Write the FINAL ANSWER NOW for \
-the user, synthesizing what you did and found in the previous steps: for a coding task \
-say what you created/modified and how it's used/run; for a search report the results with \
-details. Be complete and concrete. If something failed, say so clearly and propose how \
-to proceed."
+        the user, synthesizing what you did and found in the previous steps: for a coding task \
+        say what you created/modified and how it's used/run; for a search report the results with \
+        details. Be complete and concrete. If something failed, say so clearly and propose how \
+        to proceed."
         }));
         // ADR 0024 inc 5 (P2b): the forced synthesis now goes through the SAME
         // engine::ModelClient seam as the per-round call — `is_final_round: true` (no
@@ -1077,22 +1130,25 @@ Tell me if you want me to retry or rephrase."
         let delivered = collapse_plan_markers(&final_text);
         let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
             Some(reconciled) => {
-                plan_progress.persist_plan(thread_id.as_deref(), &reconciled).await;
+                plan_progress
+                    .persist_plan(thread_id.as_deref(), &reconciled)
+                    .await;
                 replace_latest_plan_marker(&delivered, &reconciled)
             }
             None => delivered,
         };
-        let final_text =
-            append_vault_reveal_marker_if_missing(delivered, ls.pending_vault_reveal_marker.as_deref());
+        let final_text = append_vault_reveal_marker_if_missing(
+            delivered,
+            ls.pending_vault_reveal_marker.as_deref(),
+        );
         memory_answer = final_text.clone();
-        let _ = event_sink.emit(
-            GenerateStreamEvent::Done {
+        let _ = event_sink
+            .emit(GenerateStreamEvent::Done {
                 text: final_text,
                 metrics: TokenMetrics::zero(),
                 redacted_user_text: None,
-            },
-        )
-        .await;
+            })
+            .await;
     }
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
     // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
@@ -1117,7 +1173,7 @@ mod tests {
         ModelCall, ModelCallError, ModelRoundOutput, ProviderBinding, ToolEffects, ToolOutcome,
     };
     use crate::events::{LinkedMemoryRead, TurnMemoryReadSet};
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use std::sync::Mutex;
 
     // Minimal seam mocks: the model answers immediately (no tool calls); everything else is a no-op.
@@ -1152,12 +1208,21 @@ mod tests {
             _c: &str,
             _s: &mut LoopState,
         ) -> Result<ToolOutcome, String> {
-            Ok(ToolOutcome { result: format!("ran {name}"), effects: ToolEffects::default() })
+            Ok(ToolOutcome {
+                result: format!("ran {name}"),
+                effects: ToolEffects::default(),
+            })
         }
     }
     struct NoBrowser;
     impl BrowserExecutor for NoBrowser {
-        async fn execute_browser(&mut self, _n: &str, _a: &str, _c: &str, _s: &mut LoopState) -> String {
+        async fn execute_browser(
+            &mut self,
+            _n: &str,
+            _a: &str,
+            _c: &str,
+            _s: &mut LoopState,
+        ) -> String {
             String::new()
         }
         async fn close_session(&mut self, _b: bool) {}
@@ -1220,7 +1285,10 @@ mod tests {
     struct CollectJournal(Mutex<Vec<String>>);
     impl crate::ExecutionJournal for CollectJournal {
         fn record(&self, event: crate::AgentExecutionEvent) {
-            self.0.lock().unwrap().push(event.into_parts().0.to_string());
+            self.0
+                .lock()
+                .unwrap()
+                .push(event.into_parts().0.to_string());
         }
     }
 
@@ -1307,7 +1375,11 @@ mod tests {
         assert!(!outcome.memory_reads.has_linked_reads());
         // A terminal Done event was emitted.
         assert!(
-            sink.0.lock().unwrap().iter().any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
             "expected a Done event"
         );
     }
@@ -1438,12 +1510,14 @@ mod tests {
 
         assert_eq!(outcome.memory_reads.linked.len(), 1);
         assert_eq!(outcome.memory_reads.linked[0].grant_id, "grant-a");
-        assert!(compactor
-            .0
-            .lock()
-            .unwrap()
-            .iter()
-            .any(TurnMemoryReadSet::has_linked_reads));
+        assert!(
+            compactor
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(TurnMemoryReadSet::has_linked_reads)
+        );
     }
 
     // Round-0-only mock: returns a `make_document` tool call on the FIRST `generate` invocation,
@@ -1524,9 +1598,13 @@ mod tests {
             _s: &mut LoopState,
         ) -> Result<ToolOutcome, String> {
             if name == "make_document" {
-                self.make_document_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.make_document_calls
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
-            Ok(ToolOutcome { result: format!("ran {name}"), effects: ToolEffects::default() })
+            Ok(ToolOutcome {
+                result: format!("ran {name}"),
+                effects: ToolEffects::default(),
+            })
         }
     }
 
@@ -1593,7 +1671,8 @@ mod tests {
 
         // The tool ran exactly once — no duplicate render on round 1.
         assert_eq!(
-            tool.make_document_calls.load(std::sync::atomic::Ordering::SeqCst),
+            tool.make_document_calls
+                .load(std::sync::atomic::Ordering::SeqCst),
             1,
             "make_document must execute exactly once, not once per round"
         );
@@ -1622,6 +1701,9 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, GenerateStreamEvent::Done { .. }))
             .count();
-        assert_eq!(done_count, 1, "expected exactly one Done event (clean termination)");
+        assert_eq!(
+            done_count, 1,
+            "expected exactly one Done event (clean termination)"
+        );
     }
 }

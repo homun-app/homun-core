@@ -60,6 +60,8 @@ pub enum AgentExecutionEvent {
         call_id: String,
         name: String,
         result_chars: usize,
+        outcome: String,
+        result_fingerprint: String,
     },
     PlanUpdated {
         round: usize,
@@ -121,10 +123,18 @@ impl AgentExecutionEvent {
                 call_id,
                 name,
                 result_chars,
+                outcome,
+                result_fingerprint,
             } => (
                 "tool_call_completed",
                 Some(round),
-                json!({"call_id": call_id, "name": name, "result_chars": result_chars}),
+                json!({
+                    "call_id": call_id,
+                    "name": name,
+                    "result_chars": result_chars,
+                    "outcome": outcome,
+                    "result_fingerprint": result_fingerprint,
+                }),
             ),
             Self::PlanUpdated { round, source } => {
                 ("plan_updated", Some(round), json!({"source": source}))
@@ -140,6 +150,64 @@ impl AgentExecutionEvent {
             Self::RunAborted { reason } => ("run_aborted", None, json!({"reason": reason})),
         }
     }
+}
+
+/// Compact, non-secret execution evidence for the journal and convergence guard.
+/// Classification uses structured result fields when available; unknown prose is
+/// treated as progress so a legitimate tool chain is never stopped heuristically.
+pub fn classify_tool_result(result: &str) -> &'static str {
+    let trimmed = result.trim();
+    if trimmed.is_empty() {
+        return "empty";
+    }
+    let Ok(value) = serde_json::from_str::<Value>(trimmed) else {
+        return "success";
+    };
+    if value.get("ok").and_then(Value::as_bool) == Some(false)
+        || value.get("success").and_then(Value::as_bool) == Some(false)
+        || value.get("error").is_some_and(|error| !error.is_null())
+    {
+        return "error";
+    }
+    if let Some(status) = value.get("status").and_then(Value::as_str) {
+        if matches!(status.to_ascii_lowercase().as_str(), "blocked" | "denied") {
+            return "blocked";
+        }
+        if matches!(
+            status.to_ascii_lowercase().as_str(),
+            "error" | "failed" | "failure"
+        ) {
+            return "error";
+        }
+        if matches!(
+            status.to_ascii_lowercase().as_str(),
+            "no_progress" | "unchanged"
+        ) {
+            return "no_progress";
+        }
+    }
+    if value.as_array().is_some_and(Vec::is_empty)
+        || ["items", "results", "data"].into_iter().any(|key| {
+            value
+                .get(key)
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+        })
+    {
+        return "empty";
+    }
+    "success"
+}
+
+pub fn tool_result_fingerprint(result: &str) -> String {
+    format!("{:x}", Sha256::digest(result.as_bytes()))
+}
+
+pub fn tool_family(name: &str) -> String {
+    name.split_once('_')
+        .map(|(family, _)| family)
+        .unwrap_or(name)
+        .to_string()
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -158,7 +226,13 @@ pub fn build_prompt_snapshot(
     forced_tool: Option<&str>,
 ) -> PromptSnapshot {
     build_prompt_snapshot_with_packets(
-        model, provider, messages, tools, is_final_round, forced_tool, &[],
+        model,
+        provider,
+        messages,
+        tools,
+        is_final_round,
+        forced_tool,
+        &[],
     )
 }
 
@@ -360,5 +434,22 @@ mod tests {
         assert_eq!(kind, "prompt_snapshot");
         assert_eq!(round, Some(7));
         assert_eq!(payload["fingerprint"], expected);
+    }
+
+    #[test]
+    fn tool_outcomes_use_structured_signals_and_fingerprints_hide_content() {
+        assert_eq!(classify_tool_result(""), "empty");
+        assert_eq!(
+            classify_tool_result(r#"{"ok":false,"error":"denied"}"#),
+            "error"
+        );
+        assert_eq!(classify_tool_result(r#"{"status":"blocked"}"#), "blocked");
+        assert_eq!(classify_tool_result(r#"{"results":[]}"#), "empty");
+        assert_eq!(classify_tool_result("ordinary useful prose"), "success");
+        let fingerprint = tool_result_fingerprint("secret result");
+        assert_eq!(fingerprint.len(), 64);
+        assert!(!fingerprint.contains("secret"));
+        assert_eq!(tool_family("browser_navigate"), "browser");
+        assert_eq!(tool_family("shell"), "shell");
     }
 }

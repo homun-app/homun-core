@@ -100,8 +100,11 @@ fn blocked_policy_cannot_reach_memory_or_future_writer_hooks() {
         &user,
         &workspace,
         &content.to_string(),
-        Some("thread-a"),
-        MemoryWritePolicy::BlockedUnknown,
+        &Exchange {
+            thread_id: Some("thread-a".to_string()),
+            reuse_envelope: MemoryReuseEnvelope::blocked_unknown(),
+            ..Exchange::default()
+        },
         LearnHooks {
             persist_graph: None,
             store_episode: None,

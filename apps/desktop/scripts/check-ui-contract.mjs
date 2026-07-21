@@ -663,6 +663,13 @@ assertContains("src/components/ChatView.tsx", "value.trim() && (", "composer imp
 assertNotContains("src/components/ChatView.tsx", "/^fn\\s+", "code-specific message actions must not rely on fragile plain-text Rust heuristics");
 assertNotContains("src/components/ChatView.tsx", "/^let\\s+", "code-specific message actions must not rely on fragile plain-text variable heuristics");
 assertContains("src/components/ChatView.tsx", "cancelStreamingRequestRef", "chat must allow users to stop a visible streaming response");
+assertContains("src/components/ChatView.tsx", "catalogsMissingModels", "chat must refresh an empty provider catalog even when an active model is already known");
+assertContains("src/components/ChatView.tsx", "RUNTIME_MODELS_CHANGED_EVENT", "chat model picker must react immediately to provider changes without a page refresh");
+assertContains("src/components/SettingsView.tsx", "refreshEmptyLocalOllamaCatalogs", "settings must discover local Ollama models automatically when its catalog is empty");
+assertContains("src/components/SettingsView.tsx", "isLocalOllamaProvider", "settings must distinguish keyless local Ollama from authenticated cloud endpoints");
+assertContains("src/components/OnboardingWizard.tsx", "isLocalOllamaProvider", "onboarding must not ask for an API key when a custom local Ollama endpoint is selected");
+assertContains("src/components/OnboardingWizard.tsx", "const providerId = \"ollama\"", "onboarding must update the canonical local Ollama provider instead of creating duplicates");
+assertContains("src/components/OnboardingWizard.tsx", "await coreBridge.refreshProviderModels(providerId)", "onboarding provider setup must persist the discovered catalog before entering chat");
 assertNotContains(
   "src/components/ChatView.tsx",
   "PLAN_PROPOSE››([\\s\\S]*?)(?:‹‹\\/PLAN_PROPOSE››|$)",

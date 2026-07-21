@@ -89,6 +89,12 @@ import {
 import { useSetting } from "../lib/settingsStore";
 import { ProviderLogo, providerLogoKey } from "./providerLogos";
 import {
+  isLocalOllamaProvider,
+  notifyRuntimeModelsChanged,
+  PROVIDER_PRESETS,
+  type ProviderPreset,
+} from "../lib/providerPresets";
+import {
   notificationPermission,
   requestNotificationPermission,
   showSystemNotification,
@@ -126,7 +132,6 @@ const THEME_SWATCH: Record<ThemeName, { bg: string; panel: string; line: string 
   dark: { bg: "#111214", panel: "#1a1c20", line: "#343841" },
 };
 import { copyText } from "../lib/clipboard";
-import { PROVIDER_PRESETS, type ProviderPreset } from "../lib/providerPresets";
 import type {
   ConnectionItem,
   SettingsSectionId,
@@ -1615,6 +1620,25 @@ function RuntimePane({
     setProviders(snapshot.providers);
   };
 
+  const refreshEmptyLocalOllamaCatalogs = async (snapshot: {
+    providers: ProviderView[];
+    active_provider_id: string | null;
+  }) => {
+    let latest = snapshot;
+    const emptyLocalProviders = snapshot.providers.filter(
+      (provider) =>
+        provider.enabled &&
+        provider.models.length === 0 &&
+        isLocalOllamaProvider(provider.kind, provider.base_url),
+    );
+    for (const provider of emptyLocalProviders) {
+      latest = await coreBridge.refreshProviderModels(provider.id).catch(() => latest);
+      apply(latest);
+    }
+    if (emptyLocalProviders.length > 0) notifyRuntimeModelsChanged();
+    return latest;
+  };
+
   const reloadRoles = async () => {
     try {
       setRoles((await coreBridge.roles()).roles);
@@ -1626,7 +1650,9 @@ function RuntimePane({
   useEffect(() => {
     void (async () => {
       try {
-        apply(await coreBridge.providers());
+        const snapshot = await coreBridge.providers();
+        apply(snapshot);
+        await refreshEmptyLocalOllamaCatalogs(snapshot);
       } catch {
         /* leave empty */
       }
@@ -1641,6 +1667,7 @@ function RuntimePane({
       const result = (await action()) as { providers: ProviderView[]; active_provider_id: string | null };
       if (result?.providers) apply(result);
       await reloadRoles();
+      notifyRuntimeModelsChanged();
       if (ok) setNote(ok);
     } catch (error) {
       setNote(t("settings.operationFailed", { message: (error as Error).message }));
@@ -1702,6 +1729,7 @@ function RuntimePane({
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? PROVIDER_PRESETS[0];
   const isCustomPreset = preset.id === "custom";
   const modalProvider = modal && modal !== "add" ? providers.find((p) => p.id === modal) : undefined;
+  const addUsesLocalOllama = isLocalOllamaProvider(preset.kind, baseUrl);
 
   // Per-role options, gated by what the role actually REQUIRES of a model (mirrors the backend's
   // `role_requirements`): image-generation lists only image-modality models (a chat model can't draw),
@@ -1930,10 +1958,14 @@ function RuntimePane({
                       <label>{t("settings.endpoint")}</label>
                       <input className="set-input" placeholder="https://api.openai.com/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
                     </div>
-                    <div className="mdl-field">
-                      <label>API key (optional for local endpoints)</label>
-                      <input className="set-input" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-                    </div>
+                    {addUsesLocalOllama ? (
+                      <p className="mdl-detail-sub">{t("settings.localOllamaNoKey")}</p>
+                    ) : (
+                      <div className="mdl-field">
+                        <label>API key</label>
+                        <input className="set-input" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                      </div>
+                    )}
                     <button
                       className="set-btn primary"
                       type="button"
@@ -1948,7 +1980,7 @@ function RuntimePane({
                               label: (label || preset.label).trim(),
                               kind: preset.kind,
                               base_url: baseUrl.trim(),
-                              ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+                              ...(!addUsesLocalOllama && apiKey.trim() ? { api_key: apiKey.trim() } : {}),
                             });
                             setApiKey("");
                             const added = result.providers.find((p) => p.base_url === baseUrl.trim().replace(/\/$/, ""));
@@ -2104,6 +2136,7 @@ function ProviderDetailView({
 }) {
   const { t } = useTranslation();
   const acting = busy === provider.id;
+  const localOllama = isLocalOllamaProvider(provider.kind, editBaseUrl || provider.base_url);
   const hasInferred = provider.models.some((m) => m.profile_source === "inferred" || !m.profile_source);
   // Which model row is open in the editor, plus its draft.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -2141,7 +2174,9 @@ function ProviderDetailView({
           </button>
         </div>
       </div>
-      <p className="mdl-detail-sub">{provider.kind} · {provider.has_key ? t("settings.keyConfigured") : t("settings.noKey")}</p>
+      <p className="mdl-detail-sub">
+        {provider.kind} · {localOllama ? t("settings.localOllamaNoKey") : provider.has_key ? t("settings.keyConfigured") : t("settings.noKey")}
+      </p>
 
       <div className="mdl-field">
         <label>API address</label>
@@ -2151,21 +2186,23 @@ function ProviderDetailView({
           onChange={(event) => setEditBaseUrl(event.target.value)}
         />
       </div>
-      <div className="mdl-field">
-        <label>API key</label>
-        <div className="mdl-key">
-          <input
-            className="set-input"
-            type={showKey ? "text" : "password"}
-            placeholder={provider.has_key ? "•••• (leave empty to keep)" : "sk-…"}
-            value={editKey}
-            onChange={(event) => setEditKey(event.target.value)}
-          />
-          <button className="mdl-icon-btn" type="button" aria-label={t("settings.showHide")} onClick={() => setShowKey(!showKey)}>
-            {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
-          </button>
+      {!localOllama && (
+        <div className="mdl-field">
+          <label>API key</label>
+          <div className="mdl-key">
+            <input
+              className="set-input"
+              type={showKey ? "text" : "password"}
+              placeholder={provider.has_key ? "•••• (leave empty to keep)" : "sk-…"}
+              value={editKey}
+              onChange={(event) => setEditKey(event.target.value)}
+            />
+            <button className="mdl-icon-btn" type="button" aria-label={t("settings.showHide")} onClick={() => setShowKey(!showKey)}>
+              {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
       <button
         className="set-btn"
         type="button"
