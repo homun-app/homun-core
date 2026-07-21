@@ -1,0 +1,222 @@
+import Foundation
+
+public let hostComputerProtocolVersion = 1
+
+public enum JSONRPCVersion: String, Codable, Sendable {
+    case v2 = "2.0"
+}
+
+public enum HostComputerMethod: String, Codable, Sendable {
+    case handshake
+    case permissionStatus = "permission_status"
+}
+
+public struct RequestMeta: Codable, Equatable, Sendable {
+    public var protocolVersion: Int
+    public var turnID: String?
+    public var deadlineUnixMs: Int64
+    public var sessionToken: String
+
+    public init(
+        protocolVersion: Int,
+        turnID: String?,
+        deadlineUnixMs: Int64,
+        sessionToken: String
+    ) {
+        self.protocolVersion = protocolVersion
+        self.turnID = turnID
+        self.deadlineUnixMs = deadlineUnixMs
+        self.sessionToken = sessionToken
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "protocol_version"
+        case turnID = "turn_id"
+        case deadlineUnixMs = "deadline_unix_ms"
+        case sessionToken = "session_token"
+    }
+}
+
+public struct RPCRequest: Codable, Equatable, Sendable, CustomDebugStringConvertible {
+    public var jsonrpc: JSONRPCVersion
+    public var id: UInt64
+    public var method: HostComputerMethod
+    public var params: JSONValue
+    public var meta: RequestMeta
+
+    public init(
+        jsonrpc: JSONRPCVersion,
+        id: UInt64,
+        method: HostComputerMethod,
+        params: JSONValue,
+        meta: RequestMeta
+    ) {
+        self.jsonrpc = jsonrpc
+        self.id = id
+        self.method = method
+        self.params = params
+        self.meta = meta
+    }
+
+    public var debugDescription: String {
+        "RPCRequest(jsonrpc: \(jsonrpc.rawValue), id: \(id), method: \(method.rawValue), "
+            + "meta: RequestMeta(protocolVersion: \(meta.protocolVersion), turnID: \(String(describing: meta.turnID)), "
+            + "deadlineUnixMs: \(meta.deadlineUnixMs), sessionToken: [REDACTED]))"
+    }
+
+    public func validateProtocolVersion() throws {
+        guard meta.protocolVersion == hostComputerProtocolVersion else {
+            throw ProtocolFailure.protocolMismatch
+        }
+    }
+}
+
+public enum JSONValue: Codable, Equatable, Sendable {
+    case null
+    case bool(Bool)
+    case number(Double)
+    case string(String)
+    case array([JSONValue])
+    case object([String: JSONValue])
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else {
+            self = .object(try container.decode([String: JSONValue].self))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null:
+            try container.encodeNil()
+        case let .bool(value):
+            try container.encode(value)
+        case let .number(value):
+            try container.encode(value)
+        case let .string(value):
+            try container.encode(value)
+        case let .array(value):
+            try container.encode(value)
+        case let .object(value):
+            try container.encode(value)
+        }
+    }
+}
+
+public enum HostComputerErrorCode: String, Codable, Sendable {
+    case authenticationFailed = "authentication_failed"
+    case protocolMismatch = "protocol_mismatch"
+    case invalidRequest = "invalid_request"
+    case permissionMissing = "permission_missing"
+    case appNotGranted = "app_not_granted"
+    case approvalRequired = "approval_required"
+    case secureInputBlocked = "secure_input_blocked"
+    case terminalInputBlocked = "terminal_input_blocked"
+    case staleSnapshot = "stale_snapshot"
+    case targetNotFound = "target_not_found"
+    case deadlineExceeded = "deadline_exceeded"
+    case payloadTooLarge = "payload_too_large"
+    case helperUnavailable = "helper_unavailable"
+    case hostLocked = "host_locked"
+    case unsupportedPlatform = "unsupported_platform"
+}
+
+public struct RPCErrorPayload: Codable, Equatable, Sendable {
+    public var code: HostComputerErrorCode
+    public var message: String
+    public var data: JSONValue?
+
+    public init(code: HostComputerErrorCode, message: String, data: JSONValue? = nil) {
+        self.code = code
+        self.message = message
+        self.data = data
+    }
+}
+
+public struct RPCResponse: Codable, Equatable, Sendable {
+    public var jsonrpc: JSONRPCVersion
+    public var id: UInt64
+    public var result: JSONValue?
+    public var error: RPCErrorPayload?
+
+    public static func success(id: UInt64, result: JSONValue) -> RPCResponse {
+        RPCResponse(jsonrpc: .v2, id: id, result: result, error: nil)
+    }
+
+    public static func failure(
+        id: UInt64,
+        code: HostComputerErrorCode,
+        message: String
+    ) -> RPCResponse {
+        RPCResponse(
+            jsonrpc: .v2,
+            id: id,
+            result: nil,
+            error: RPCErrorPayload(code: code, message: message)
+        )
+    }
+}
+
+public enum ProtocolFailure: Error, Equatable, Sendable {
+    case authenticationFailed
+    case protocolMismatch
+    case invalidRequest
+    case deadlineExceeded
+    case payloadTooLarge
+
+    public var errorCode: HostComputerErrorCode {
+        switch self {
+        case .authenticationFailed: .authenticationFailed
+        case .protocolMismatch: .protocolMismatch
+        case .invalidRequest: .invalidRequest
+        case .deadlineExceeded: .deadlineExceeded
+        case .payloadTooLarge: .payloadTooLarge
+        }
+    }
+}
+
+public struct SessionAuthenticator: Sendable {
+    private let expectedToken: [UInt8]
+
+    public init(expectedToken: String) {
+        self.expectedToken = Array(expectedToken.utf8)
+    }
+
+    public func accepts(_ candidate: String) -> Bool {
+        let candidateBytes = Array(candidate.utf8)
+        var difference = UInt8(expectedToken.count ^ candidateBytes.count)
+        let count = max(expectedToken.count, candidateBytes.count)
+        for index in 0..<count {
+            let expected = index < expectedToken.count ? expectedToken[index] : 0
+            let actual = index < candidateBytes.count ? candidateBytes[index] : 0
+            difference |= expected ^ actual
+        }
+        return difference == 0
+    }
+}
+
+public extension JSONDecoder {
+    static var hostComputer: JSONDecoder {
+        JSONDecoder()
+    }
+}
+
+public extension JSONEncoder {
+    static var hostComputer: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
+    }
+}

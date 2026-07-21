@@ -1,0 +1,64 @@
+import Darwin
+import Foundation
+import HomunComputerServiceCore
+
+struct ServiceConfiguration {
+    let socketPath: String
+    let tokenFile: String
+    let parentPID: pid_t
+
+    init(arguments: [String]) throws {
+        func value(after flag: String) -> String? {
+            guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else {
+                return nil
+            }
+            return arguments[index + 1]
+        }
+
+        guard
+            let socketPath = value(after: "--socket"),
+            let tokenFile = value(after: "--auth-token-file"),
+            let parent = value(after: "--parent-pid"),
+            let parentPID = pid_t(parent)
+        else { throw ServiceFailure.invalidArguments }
+
+        self.socketPath = socketPath
+        self.tokenFile = tokenFile
+        self.parentPID = parentPID
+    }
+}
+
+func consumeTokenFile(at path: String) throws -> String {
+    var fileInfo = stat()
+    var parentInfo = stat()
+    let parent = URL(fileURLWithPath: path).deletingLastPathComponent().path
+    guard lstat(path, &fileInfo) == 0, lstat(parent, &parentInfo) == 0 else {
+        throw ServiceFailure.unsafePath
+    }
+    guard
+        fileInfo.st_uid == geteuid(),
+        parentInfo.st_uid == geteuid(),
+        fileInfo.st_mode & 0o077 == 0,
+        parentInfo.st_mode & 0o077 == 0
+    else { throw ServiceFailure.unsafePath }
+
+    let token = try String(contentsOfFile: path, encoding: .utf8)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !token.isEmpty else { throw ServiceFailure.unsafePath }
+    guard unlink(path) == 0 else { throw ServiceFailure.systemCall("unlink token") }
+    return token
+}
+
+do {
+    signal(SIGPIPE, SIG_IGN)
+    let configuration = try ServiceConfiguration(arguments: CommandLine.arguments)
+    guard kill(configuration.parentPID, 0) == 0 else { throw ServiceFailure.invalidArguments }
+    let token = try consumeTokenFile(at: configuration.tokenFile)
+    try SocketServer(
+        socketPath: configuration.socketPath,
+        router: RequestRouter(sessionToken: token)
+    ).run()
+} catch {
+    FileHandle.standardError.write(Data("Homun Computer Service failed to start\n".utf8))
+    exit(1)
+}
