@@ -68,7 +68,7 @@ A release candidate is acceptable only if the actual packaged `.app` passes:
 
 ```bash
 cd apps/desktop
-npm run verify:host-computer-package -- "/path/to/Homun.app"
+npm run verify:host-computer-package -- --app "/path/to/Homun.app" --expected-arch arm64
 ```
 
 The CI release job must run the same verifier after electron-builder and notarization.
@@ -85,25 +85,25 @@ both architectures.
 
 Verified on an Apple Silicon Mac from the `fabio/host-computer-control` worktree:
 
-- 49 host-computer Rust integration tests passed;
+- 51 host-computer Rust integration tests passed;
 - 9 local-computer-session tests passed;
-- 2 focused gateway host-computer tests passed;
+- 8 focused gateway host-computer tests passed;
 - 95 engine tests passed;
 - 35 Swift helper tests passed;
-- 17 desktop/package/reset/signing tests passed, including a real helper bundle
+- 41 Electron tests passed, including the package, reset, and signing contracts, a real helper bundle
   launch and authenticated Unix-socket handshake;
-- UI contract, TypeScript typecheck, and gateway `cargo check` passed;
+- UI contract, TypeScript typecheck, production frontend build, and gateway `cargo check` passed;
+- `npm run package:prepare` produced an `arm64` gateway and an `arm64` nested helper
+  under `.package/resources`;
+- the complete `scripts/pre_release_gate.py` finished green; its deck-renderer suite
+  reported 4 explicit environment skips, which are recorded rather than counted as passes;
 - gateway check retained 44 pre-existing gateway warnings and one pre-existing
   memory warning, so this result is not described as warning-free;
-- rendered Settings inspection passed at 1280 x 800, 1440 x 900, and 1728 x 1117
-  with both unavailable and live-helper states and zero stable-page console errors;
-- a live helper status call returned version `0.1.0`; protected password-manager
-  apps were absent from the returned app list, and a direct protected grant request
-  was rejected with HTTP 403;
 - the factory-reset test removed every host-control state path from a temporary data
   root and rejected broad/unrelated roots.
 
-Not claimed by this local run: granting real TCC permissions, executing actions in
-third-party apps, physical takeover on a live action, an actual Developer ID signed
-and notarized release candidate, or Intel/universal compatibility. Those rows remain
-mandatory external release gates rather than silently passing placeholders.
+Not claimed by this automated run: the fresh rendered Settings inspection, granting
+real TCC permissions, executing actions in third-party apps, physical takeover on a
+live action, an actual Developer ID signed and notarized release candidate, or
+Intel/universal compatibility. Those rows remain mandatory gates rather than silently
+passing placeholders.
