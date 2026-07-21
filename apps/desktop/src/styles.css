@@ -7205,53 +7205,49 @@ body.resizing-drawer {
 }
 /* Clean, document-style PDF preview: pages as white sheets stacked top-to-bottom,
    fitting the panel width — no dark native-viewer chrome. */
-/* Empty-chat hero: identity, compact usage, then the composer. */
+/* Empty chat: one typographic greeting and a compact, real-data usage graphic. */
 .chat-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  width: min(100%, 760px);
+  width: min(100%, 820px);
   box-sizing: border-box;
   margin-inline: auto;
-  padding: 11vh 24px 0;
-}
-/* "Living mark" (design): a teal gradient orb — Homun's identity, brand-teal even if
-   the UI accent changes. */
-.chat-hero-mark {
-  /* The Homun brandmark (U + dot), drawn inline so it themes via --text / --brand. */
-  width: 52px;
-  height: 52px;
-  margin-bottom: 18px;
+  padding: clamp(48px, 9vh, 104px) 24px 0;
 }
 .chat-hero-title {
   font-family: var(--font-sans);
-  font-weight: 700;
-  font-size: 26px;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
+  font-weight: 620;
+  font-size: clamp(23px, 2.2vw, 29px);
+  letter-spacing: -0.025em;
+  line-height: 1.2;
   color: var(--text);
-  margin: 0 0 6px;
-}
-.chat-hero-sub {
-  font-size: 14px;
-  color: var(--muted);
-  margin: 0 0 22px;
+  margin: 0 0 24px;
+  text-wrap: balance;
 }
 .chat-usage-overview {
   width: 100%;
-  padding: 14px 0;
-  border-block: 1px solid var(--line);
+  padding: 14px 16px 12px;
+  box-sizing: border-box;
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--surface-muted) 64%, transparent);
   text-align: left;
+}
+.chat-usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 .chat-usage-window {
   display: flex;
-  justify-content: center;
   gap: 2px;
-  margin-bottom: 14px;
 }
 .chat-usage-window button,
-.chat-usage-status button {
+.chat-usage-status button,
+.chat-usage-open {
   border: 0;
   background: transparent;
   color: var(--muted);
@@ -7262,13 +7258,19 @@ body.resizing-drawer {
   cursor: pointer;
 }
 .chat-usage-window button:hover,
-.chat-usage-status button:hover {
+.chat-usage-status button:hover,
+.chat-usage-open:hover {
   color: var(--text);
   background: var(--surface-hover);
 }
 .chat-usage-window button[aria-pressed="true"] {
   color: var(--brand-strong);
   background: var(--brand-soft);
+}
+.chat-usage-open {
+  padding-inline: 8px;
+  white-space: nowrap;
+  cursor: pointer;
 }
 .chat-usage-status,
 .chat-usage-empty,
@@ -7285,48 +7287,145 @@ body.resizing-drawer {
   color: var(--brand-strong);
   padding-block: 2px;
 }
-.chat-usage-metrics {
+.chat-usage-infographic {
   display: grid;
-  grid-template-columns: minmax(68px, 0.65fr) minmax(132px, 1.35fr)
-    minmax(68px, 0.6fr) minmax(132px, 1.25fr) minmax(68px, 0.65fr);
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.48fr);
+  align-items: center;
+  gap: 20px;
 }
-.chat-usage-metrics > div {
+.chat-usage-summary {
   min-width: 0;
-  padding: 2px 14px;
-}
-.chat-usage-metrics > div + div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  padding-left: 18px;
   border-left: 1px solid var(--line);
 }
-.chat-usage-metrics span,
-.chat-usage-metrics strong,
-.chat-usage-metrics small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.chat-usage-metric,
+.chat-usage-route {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
 }
-.chat-usage-metrics span,
-.chat-usage-metrics small {
+.chat-usage-route {
+  grid-column: 1 / -1;
+}
+.chat-usage-metric span,
+.chat-usage-route span {
   color: var(--muted);
   font-size: 11px;
 }
-.chat-usage-metrics strong {
-  margin: 3px 0 1px;
+.chat-usage-metric strong,
+.chat-usage-route strong {
+  min-width: 0;
   color: var(--text);
-  font-size: 15px;
-  font-weight: 650;
-  line-height: 1.25;
-  overflow: visible;
-  overflow-wrap: anywhere;
-  text-overflow: clip;
+  font-size: 14px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: normal;
 }
-.chat-usage-metrics small {
-  line-height: 1.35;
+.chat-usage-metric.is-warning strong {
+  color: var(--warning, #d89a2b);
 }
 .chat-usage-coverage {
-  margin-top: 10px;
+  margin-top: 9px;
   color: var(--warning, var(--muted));
 }
+
+/* Shared GitHub-like activity calendar. The tooltip is viewport-positioned so it
+   cannot be clipped by Settings or chat scroll containers. */
+.usage-calendar {
+  --usage-cell: 12px;
+  --usage-gap: 4px;
+  min-width: 0;
+}
+.usage-calendar--compact {
+  --usage-cell: 11px;
+  --usage-gap: 3px;
+}
+.usage-calendar-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  padding: 2px;
+}
+.usage-calendar-grid {
+  width: max-content;
+  display: grid;
+  grid-template-rows: repeat(7, var(--usage-cell));
+  grid-auto-flow: column;
+  grid-auto-columns: var(--usage-cell);
+  gap: var(--usage-gap);
+}
+.usage-calendar-day,
+.usage-calendar-pad,
+.usage-calendar-legend i {
+  width: var(--usage-cell);
+  height: var(--usage-cell);
+  box-sizing: border-box;
+  border-radius: 3px;
+}
+.usage-calendar-day {
+  border: 0;
+  padding: 0;
+  background: var(--surface-hover);
+  cursor: default;
+}
+.usage-calendar-day.is-unavailable {
+  opacity: 0.32;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.usage-calendar-day.is-zero,
+.usage-calendar-legend .level-0 { background: var(--surface-hover); }
+.usage-calendar-day.level-1,
+.usage-calendar-legend .level-1 { background: color-mix(in srgb, var(--brand) 30%, var(--surface)); }
+.usage-calendar-day.level-2,
+.usage-calendar-legend .level-2 { background: color-mix(in srgb, var(--brand) 50%, var(--surface)); }
+.usage-calendar-day.level-3,
+.usage-calendar-legend .level-3 { background: color-mix(in srgb, var(--brand) 72%, var(--surface)); }
+.usage-calendar-day.level-4,
+.usage-calendar-legend .level-4 { background: var(--brand); }
+.usage-calendar-day:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+  position: relative;
+  z-index: 1;
+}
+.usage-calendar-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.usage-calendar-tooltip {
+  position: fixed;
+  z-index: 120;
+  width: min(296px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-menu);
+  color: var(--text);
+  pointer-events: none;
+}
+.usage-calendar-tooltip.is-above { transform: translateY(-100%); }
+.usage-calendar-tooltip > strong { display: block; margin-bottom: 8px; font-size: 13px; }
+.usage-calendar-tooltip p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.usage-calendar-tooltip dl { margin: 0 0 8px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.usage-calendar-tooltip dl > div { display: grid; gap: 2px; }
+.usage-calendar-tooltip dt { color: var(--muted); font-size: 10px; }
+.usage-calendar-tooltip dd { margin: 0; font-size: 12px; font-weight: 620; font-variant-numeric: tabular-nums; }
+.usage-calendar-tooltip .usage-calendar-route { color: var(--text); overflow-wrap: anywhere; }
+.usage-calendar-tooltip small { display: block; margin-top: 7px; color: var(--warning, var(--muted)); font-size: 10px; }
 .usage-suggestion {
   position: relative;
   margin-top: 14px;
@@ -7421,12 +7520,14 @@ body.resizing-drawer {
   .active-task-layout.is-empty .thread-scroll {
     justify-content: flex-start;
   }
-  .chat-usage-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    row-gap: 12px;
+  .chat-usage-infographic {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
   }
-  .chat-usage-metrics > div:nth-child(odd) {
+  .chat-usage-summary {
+    padding: 12px 0 0;
     border-left: 0;
+    border-top: 1px solid var(--line);
   }
   .usage-suggestion,
   .usage-settings-suggestions .usage-suggestion {
@@ -7441,11 +7542,13 @@ body.resizing-drawer {
   .chat-hero {
     padding-inline: 16px;
   }
-  .chat-usage-metrics {
-    grid-template-columns: minmax(0, 1fr);
+  .chat-usage-overview {
+    padding-inline: 12px;
   }
-  .chat-usage-metrics > div + div {
-    border-left: 0;
+  .chat-usage-open {
+    max-width: 112px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 .rail-button {

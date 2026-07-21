@@ -121,7 +121,9 @@ assertContains("src/components/UsageSuggestion.tsx", "confirmed: true", "Apply r
 assertContains("src/components/UsageSuggestion.tsx", "onDismiss", "Suggestions must be dismissible");
 assertNotContains("src/components/UsageSuggestion.tsx", "useEffect(() => onApply", "Mounting must never apply a suggestion");
 assertContains("src/components/ChatUsageOverview.tsx", ".slice(0, 1)", "Home must render at most one model suggestion");
-assertContains("src/styles.css", "grid-template-columns: minmax(68px, 0.65fr) minmax(132px, 1.35fr)", "New-chat usage must reserve readable width for cost and model values");
+assertContains("src/styles.css", ".chat-usage-infographic", "New-chat usage must provide a dedicated infographic layout");
+assertContains("src/styles.css", ".usage-calendar-grid", "Usage calendar must use a shared compact grid");
+assertContains("src/styles.css", ".usage-calendar-tooltip", "Usage calendar must provide an unclipped callout");
 assertContains("src/styles.css", ".app-shell.drawer-open > .workspace {\n    grid-column: 1;", "Narrow Settings content must stay in the visible grid column");
 assertContains("src/styles.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 292px), 292px) + 24px);", "Narrow Settings content must clear the overlay navigation");
 assertContains("src/styles.css", ".active-task-layout.is-empty {\n    grid-template-rows: 58px auto auto minmax(24px, 1fr);", "Narrow empty-chat hero must size its row from content instead of clipping upward");
@@ -134,6 +136,13 @@ assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calenda
 assertContains("src/components/UsageCalendar.tsx", 'role="gridcell"', "Usage days must be keyboard reachable");
 assertContains("src/components/UsageCalendar.tsx", "onFocus", "Keyboard focus must reveal day details");
 assertContains("src/components/UsageCalendar.tsx", "dominant_provider", "Usage callouts must preserve provider provenance");
+assertNotContains("src/components/ChatView.tsx", "chat-hero-mark", "New chat must not keep the decorative brandmark");
+assertNotContains("src/components/ChatView.tsx", "chat.emptyHeroSub", "New chat must not keep the fixed subtitle");
+assertContains("src/components/ChatView.tsx", "selectGreetingKey", "New chat must select a stable curated greeting");
+assertContains("src/components/ChatUsageOverview.tsx", "<UsageCalendar", "New chat must render the real activity calendar");
+assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageDaily", "New chat must load real daily usage");
+assertContains("src/components/ChatUsageOverview.tsx", "dominant_provider", "New chat must render provider-qualified routes");
+assertContains("src/components/ChatUsageOverview.tsx", "onOpenUsageSettings", "New chat must open the complete Usage workspace");
 for (const locale of ["en", "it", "es", "fr", "de"]) {
   assertContains(`src/i18n/locales/${locale}.json`, '"use_for_task"', `${locale} must translate the task suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"change_role_preference"', `${locale} must translate the preference suggestion action`);

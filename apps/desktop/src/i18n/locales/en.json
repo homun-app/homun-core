@@ -466,6 +466,33 @@
   "chat": {
     "newTask": "New task",
     "emptyHero": "How can I help you?",
+    "greetings": {
+      "period": { "morning": "Good morning", "afternoon": "Good afternoon", "evening": "Good evening" },
+      "named": {
+        "0": "{{salutation}}, {{name}}. Where should we start?",
+        "1": "{{salutation}}, {{name}}. What should we set in motion?",
+        "2": "{{salutation}}, {{name}}. What's the next idea?",
+        "3": "{{salutation}}, {{name}}. What are we working on?"
+      },
+      "anonymous": {
+        "0": "{{salutation}}. Where should we start?",
+        "1": "{{salutation}}. What should we set in motion?",
+        "2": "{{salutation}}. What's the next idea?",
+        "3": "{{salutation}}. What are we working on?"
+      },
+      "project": {
+        "0": "{{salutation}}. Shall we pick up the project?",
+        "1": "{{salutation}}. Let's move the project forward.",
+        "2": "{{salutation}}. What's the next step?",
+        "3": "{{salutation}}. Where should we focus?"
+      },
+      "returning": {
+        "0": "{{salutation}}. Shall we continue where we left off?",
+        "1": "{{salutation}}. Ready to continue?",
+        "2": "{{salutation}}. Let's get things moving again.",
+        "3": "{{salutation}}. What's the priority now?"
+      }
+    },
     "usageOverview": {
       "title": "Usage overview",
       "period": "Usage period",
@@ -479,6 +506,9 @@
       "providers": "Providers",
       "model": "Top model",
       "trend": "Token trend",
+      "route": "Top route",
+      "dataQuality": "Data quality",
+      "openSettings": "Open Usage",
       "coverage": "Some usage or cost data is incomplete."
     },
     "composerPlaceholder": "Write a message…",
@@ -1305,6 +1335,7 @@
       "windows": { "7d": "7 days", "30d": "30 days", "all": "All" },
       "tabs": { "label": "Usage views", "overview": "Overview", "models": "Models", "providers": "Providers", "processes": "Processes" },
       "states": { "loading": "Loading usage…", "empty": "No measured usage in this period.", "error": "Usage could not be loaded", "stale": "Stale" },
+      "calendar": { "ariaLabel": "Daily activity", "unavailable": "Not covered", "unavailableDetail": "Tracking was not active on this date.", "noActivity": "No recorded activity", "daySummary": "{{calls}} calls, {{tokens}} tokens", "less": "Less", "more": "More", "unknownRoute": "Route unavailable", "coverage": "Usage coverage {{usage}}%, cost {{cost}}%" },
       "metrics": { "calls": "Calls", "attempts": "Attempts", "inputTokens": "Input tokens", "outputTokens": "Output tokens", "reasoningTokens": "Reasoning tokens", "cacheTokens": "Cache tokens", "providers": "Active providers", "dominantModel": "Most used model" },
       "cost": { "title": "Cost provenance", "reported": "Reported", "estimated": "Estimated", "unknown": "Unknown", "notBilled": "Not billed" },
       "coverage": { "title": "Coverage", "usage": "Usage coverage", "cost": "Cost coverage", "incomplete": "Incomplete coverage", "authoritativeSince": "Authoritative data since {{date}}" },

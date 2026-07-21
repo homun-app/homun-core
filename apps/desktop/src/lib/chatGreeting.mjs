@@ -17,7 +17,7 @@ export function selectGreetingKey({
   const period = greetingPeriod(hour);
   const context = hasProject ? "project" : returning ? "returning" : hasName ? "named" : "anonymous";
   const index = stableHash(`${period}:${context}:${seed}`) % CATALOG_SIZE;
-  return `chat.greetings.${period}.${context}.${index}`;
+  return `chat.greetings.${context}.${index}`;
 }
 
 function stableHash(value) {

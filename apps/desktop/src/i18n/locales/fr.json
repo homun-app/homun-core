@@ -466,6 +466,13 @@
   "chat": {
     "newTask": "Nouvelle tâche",
     "emptyHero": "Comment puis-je vous aider ?",
+    "greetings": {
+      "period": { "morning": "Bonjour", "afternoon": "Bon après-midi", "evening": "Bonsoir" },
+      "named": { "0": "{{salutation}}, {{name}}. Par où commençons-nous ?", "1": "{{salutation}}, {{name}}. Que mettons-nous en route ?", "2": "{{salutation}}, {{name}}. Quelle est la prochaine idée ?", "3": "{{salutation}}, {{name}}. Sur quoi travaillons-nous ?" },
+      "anonymous": { "0": "{{salutation}}. Par où commençons-nous ?", "1": "{{salutation}}. Que mettons-nous en route ?", "2": "{{salutation}}. Quelle est la prochaine idée ?", "3": "{{salutation}}. Sur quoi travaillons-nous ?" },
+      "project": { "0": "{{salutation}}. Reprenons-nous le projet ?", "1": "{{salutation}}. Faisons avancer le projet.", "2": "{{salutation}}. Quelle est la prochaine étape ?", "3": "{{salutation}}. Où concentrons-nous le travail ?" },
+      "returning": { "0": "{{salutation}}. Reprenons-nous là où nous en étions ?", "1": "{{salutation}}. Continuons-nous le travail ?", "2": "{{salutation}}. Remettons les choses en mouvement.", "3": "{{salutation}}. Quelle est la priorité maintenant ?" }
+    },
     "usageOverview": {
       "title": "Aperçu de l’utilisation",
       "period": "Période d’utilisation",
@@ -479,6 +486,9 @@
       "providers": "Fournisseurs",
       "model": "Modèle principal",
       "trend": "Tendance des jetons",
+      "route": "Route principale",
+      "dataQuality": "Qualité des données",
+      "openSettings": "Ouvrir Utilisation",
       "coverage": "Certaines données d’utilisation ou de coût sont incomplètes."
     },
     "composerPlaceholder": "Écrivez un message…",
@@ -1305,6 +1315,7 @@
       "windows": { "7d": "7 jours", "30d": "30 jours", "all": "Tout" },
       "tabs": { "label": "Vues d'utilisation", "overview": "Vue d'ensemble", "models": "Modèles", "providers": "Fournisseurs", "processes": "Processus" },
       "states": { "loading": "Chargement de l'utilisation…", "empty": "Aucune utilisation mesurée sur cette période.", "error": "Impossible de charger l'utilisation", "stale": "Obsolète" },
+      "calendar": { "ariaLabel": "Activité quotidienne", "unavailable": "Période non couverte", "unavailableDetail": "Le suivi n’était pas encore actif à cette date.", "noActivity": "Aucune activité enregistrée", "daySummary": "{{calls}} appels, {{tokens}} jetons", "less": "Moins", "more": "Plus", "unknownRoute": "Route indisponible", "coverage": "Couverture utilisation {{usage}}%, coût {{cost}}%" },
       "metrics": { "calls": "Appels", "attempts": "Tentatives", "inputTokens": "Jetons d'entrée", "outputTokens": "Jetons de sortie", "reasoningTokens": "Jetons de raisonnement", "cacheTokens": "Jetons en cache", "providers": "Fournisseurs actifs", "dominantModel": "Modèle le plus utilisé" },
       "cost": { "title": "Provenance des coûts", "reported": "Déclaré", "estimated": "Estimé", "unknown": "Indisponible", "notBilled": "Non facturé" },
       "coverage": { "title": "Couverture", "usage": "Couverture d'utilisation", "cost": "Couverture des coûts", "incomplete": "Couverture incomplète", "authoritativeSince": "Données fiables depuis le {{date}}" },
