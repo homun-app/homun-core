@@ -3646,9 +3646,11 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "libc",
+ "rand 0.8.6",
  "secrecy",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
 ]

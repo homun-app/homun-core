@@ -27,7 +27,7 @@ impl SecretToken {
         }
     }
 
-    fn encoded(&self) -> String {
+    pub(crate) fn encoded(&self) -> String {
         const HEX: &[u8; 16] = b"0123456789abcdef";
         let bytes = self.bytes.expose_secret();
         let mut output = String::with_capacity(bytes.len() * 2);

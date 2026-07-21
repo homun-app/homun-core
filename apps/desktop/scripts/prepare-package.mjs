@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, rmSync, mkdirSync, cpSync, chmodSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildHostComputerHelper } from "./build-host-computer-helper.mjs";
 
 const appRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = resolve(appRoot, "../..");
@@ -10,6 +11,8 @@ const resourcesDir = resolve(
     join(appRoot, ".package", "resources"),
 );
 const skipBuild = process.argv.includes("--skip-build");
+const helperBuildDir = join(appRoot, ".package", "host-computer-build");
+let helperBundle = join(helperBuildDir, "HomunComputerService.app");
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, {
@@ -36,10 +39,30 @@ if (!skipBuild) {
   // `npm run start` (tsx src/server.ts). Install its deps per-platform so the
   // bundled node_modules (esbuild/tsx native bits) match the target OS.
   run("npm", ["ci"], join(repoRoot, "runtimes", "browser-automation"));
+  if (process.platform === "darwin") {
+    helperBundle = (await buildHostComputerHelper({
+      configuration: "release",
+      outputDir: helperBuildDir,
+    })).bundle;
+  }
 }
 
 rmSync(resourcesDir, { recursive: true, force: true });
 mkdirSync(join(resourcesDir, "bin"), { recursive: true });
+
+if (process.platform === "darwin") {
+  if (!existsSync(helperBundle)) {
+    throw new Error(
+      `Host-computer helper not found: ${helperBundle} (run npm run build:host-computer)`,
+    );
+  }
+  const helperTarget = join(
+    resourcesDir,
+    "host-computer",
+    "HomunComputerService.app",
+  );
+  cpSync(helperBundle, helperTarget, { recursive: true });
+}
 
 const executable = process.platform === "win32"
   ? "local-first-desktop-gateway.exe"

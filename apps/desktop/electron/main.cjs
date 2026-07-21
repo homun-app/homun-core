@@ -344,6 +344,32 @@ function spawnGateway() {
     if (fs.existsSync(baDir)) env.HOMUN_BROWSER_AUTOMATION_DIR = baDir;
   }
 
+  // The native helper is opt-in until the complete permission/policy/UI rollout
+  // is enabled. Electron passes only its public bundle path; the Rust supervisor
+  // owns the socket and single-use authentication secret.
+  if (
+    process.platform === "darwin" &&
+    env.HOMUN_HOST_COMPUTER === "1" &&
+    !env.HOMUN_HOST_COMPUTER_HELPER_PATH
+  ) {
+    const helperCandidates = [
+      path.join(
+        RESOURCES_ROOT,
+        "host-computer",
+        "HomunComputerService.app",
+      ),
+      path.join(
+        __dirname,
+        "..",
+        ".package",
+        "host-computer-build",
+        "HomunComputerService.app",
+      ),
+    ];
+    const helperBundle = helperCandidates.find((candidate) => fs.existsSync(candidate));
+    if (helperBundle) env.HOMUN_HOST_COMPUTER_HELPER_PATH = helperBundle;
+  }
+
   if (gatewayBin) {
     // Packaged: capture the gateway's stdout/stderr into a rotating file —
     // "ignore" made every field bug unreproducible (no trail at all). Dev
