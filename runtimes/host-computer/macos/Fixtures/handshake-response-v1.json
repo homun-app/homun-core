@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 41,
+  "result": {
+    "protocol_version": 1,
+    "helper_build": "0.1.0-test",
+    "helper_pid": 4242,
+    "host_os_version": "14.5",
+    "capabilities": ["permission_status"]
+  }
+}
