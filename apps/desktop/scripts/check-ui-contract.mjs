@@ -143,6 +143,10 @@ assertContains("src/components/ChatUsageOverview.tsx", "<UsageCalendar", "New ch
 assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageDaily", "New chat must load real daily usage");
 assertContains("src/components/ChatUsageOverview.tsx", "dominant_provider", "New chat must render provider-qualified routes");
 assertContains("src/components/ChatUsageOverview.tsx", "onOpenUsageSettings", "New chat must open the complete Usage workspace");
+assertContains("src/components/UsageSettingsPane.tsx", "coreBridge.usageDaily", "Settings Usage must load the same real daily series as Home");
+assertContains("src/components/UsageSettingsPane.tsx", "<UsageCalendar", "Settings Overview must lead with the shared activity calendar");
+assertContains("src/components/UsageSettingsPane.tsx", "dominant_provider", "Settings Overview must preserve provider-qualified model identity");
+assertNotContains("src/components/UsageSettingsPane.tsx", "usage-metrics", "Settings Overview must not keep the old KPI tile grid");
 for (const locale of ["en", "it", "es", "fr", "de"]) {
   assertContains(`src/i18n/locales/${locale}.json`, '"use_for_task"', `${locale} must translate the task suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"change_role_preference"', `${locale} must translate the preference suggestion action`);
