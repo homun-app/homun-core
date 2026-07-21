@@ -43,6 +43,7 @@ public struct HostApplication: Codable, Equatable, Sendable {
     public var identity: ApplicationIdentity
     public var displayName: String
     public var bundleID: String?
+    public var signingIdentity: AppSigningIdentity?
     public var activationPolicy: HostActivationPolicy
     public var isActive: Bool
     public var isHidden: Bool
@@ -51,6 +52,7 @@ public struct HostApplication: Codable, Equatable, Sendable {
         identity: ApplicationIdentity,
         displayName: String,
         bundleID: String?,
+        signingIdentity: AppSigningIdentity? = nil,
         activationPolicy: HostActivationPolicy,
         isActive: Bool,
         isHidden: Bool
@@ -58,6 +60,7 @@ public struct HostApplication: Codable, Equatable, Sendable {
         self.identity = identity
         self.displayName = displayName
         self.bundleID = bundleID
+        self.signingIdentity = signingIdentity
         self.activationPolicy = activationPolicy
         self.isActive = isActive
         self.isHidden = isHidden
@@ -67,9 +70,25 @@ public struct HostApplication: Codable, Equatable, Sendable {
         case identity
         case displayName = "display_name"
         case bundleID = "bundle_id"
+        case signingIdentity = "signing_identity"
         case activationPolicy = "activation_policy"
         case isActive = "is_active"
         case isHidden = "is_hidden"
+    }
+}
+
+public struct AppSigningIdentity: Codable, Equatable, Sendable {
+    public var teamID: String
+    public var designatedRequirementSHA256: String
+
+    public init(teamID: String, designatedRequirementSHA256: String) {
+        self.teamID = teamID
+        self.designatedRequirementSHA256 = designatedRequirementSHA256
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case teamID = "team_id"
+        case designatedRequirementSHA256 = "designated_requirement_sha256"
     }
 }
 

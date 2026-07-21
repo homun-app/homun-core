@@ -45,9 +45,17 @@ pub struct HostApplication {
     pub identity: ApplicationIdentity,
     pub display_name: String,
     pub bundle_id: Option<String>,
+    pub signing_identity: Option<AppSigningIdentity>,
     pub activation_policy: ActivationPolicy,
     pub is_active: bool,
     pub is_hidden: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppSigningIdentity {
+    pub team_id: String,
+    pub designated_requirement_sha256: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
