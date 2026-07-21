@@ -9991,6 +9991,97 @@ body.resizing-drawer {
   color: var(--muted);
 }
 
+.cc-source-badge,
+.host-computer-phase {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.host-computer-stage {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.host-computer-app {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.host-computer-app > div {
+  display: grid;
+  min-width: 0;
+}
+
+.host-computer-app span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.host-computer-observation {
+  min-height: 150px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--surface-muted), var(--surface));
+  color: var(--text-muted);
+  text-align: center;
+  padding: 18px;
+}
+
+.host-computer-approval,
+.host-computer-takeover,
+.host-computer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.host-computer-approval p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.host-computer-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.host-computer-takeover {
+  background: color-mix(in srgb, var(--brand-soft) 26%, var(--surface));
+}
+
+.host-computer-footer {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  .host-computer-approval,
+  .host-computer-takeover,
+  .host-computer-footer { align-items: stretch; flex-direction: column; }
+  .host-computer-actions { width: 100%; }
+}
+
 /* Terminal view (CLI skill execution) — a dark scrollable console. */
 .cc-term {
   max-height: 260px;
@@ -12953,6 +13044,11 @@ body.resizing-drawer {
 .contacts-facts li .fact-forget:hover { color: var(--danger, #d23); background: var(--surface-muted); }
 
 .set-btn.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+.set-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+.set-btn:disabled:hover { opacity: 0.42; }
 .contacts-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.32); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .contacts-modal { background: var(--bg); border-radius: 12px; padding: 20px 22px; max-width: 420px; box-shadow: 0 18px 50px rgba(0,0,0,0.25); }
 .contacts-modal h3 { margin: 0 0 8px; font-size: 16px; }
@@ -15012,6 +15108,77 @@ body.resizing-drawer {
    (var(--s4)) is kept for content cards; the .rows modifier turns the card into a
    divider-split list with NO own padding (rows carry the ~15px inset padding). */
 .set-card { border-radius: var(--radius-card); }
+
+.host-computer-settings {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+
+.host-computer-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.host-computer-opt-in {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.host-computer-opt-in > div { min-width: 0; }
+.host-computer-beta-copy { max-width: 72ch; }
+.host-computer-disabled,
+.host-computer-unsupported { margin-top: 12px; }
+
+.host-computer-permissions,
+.host-computer-settings > .set-rows {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.host-computer-grant-picker {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(130px, 0.7fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin: 10px 0;
+}
+
+.host-computer-grant-picker label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.host-computer-grant-picker select {
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-muted);
+  padding: 0 10px;
+}
+
+.host-computer-identity {
+  overflow-wrap: anywhere;
+}
+
+.host-computer-privacy,
+.host-computer-restrictions {
+  max-width: 78ch;
+}
+
+@media (max-width: 760px) {
+  .host-computer-grant-picker { grid-template-columns: 1fr; }
+  .host-computer-opt-in { align-items: flex-start; }
+}
 .set-card.rows { padding: 0; overflow: hidden; }
 .set-card.rows > .set-row,
 .set-card.rows > .set-trow { padding: 15px var(--s5); }

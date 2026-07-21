@@ -1,0 +1,11 @@
+[
+  "fixture.button",
+  "fixture.checkbox",
+  "fixture.text",
+  "fixture.secure",
+  "fixture.popup",
+  "fixture.scroll",
+  "fixture.secondary",
+  "fixture.drag-source",
+  "fixture.drag-destination"
+]

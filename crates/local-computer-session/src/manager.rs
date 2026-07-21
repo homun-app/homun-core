@@ -321,6 +321,7 @@ fn default_surfaces(now: OffsetDateTime) -> Vec<ComputerSurfaceRecord> {
         (SurfaceKind::Shell, "Terminale"),
         (SurfaceKind::Files, "File"),
         (SurfaceKind::Logs, "Log"),
+        (SurfaceKind::HostApps, "Mac Apps"),
     ]
     .into_iter()
     .map(|(surface, label)| ComputerSurfaceRecord {

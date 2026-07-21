@@ -1051,6 +1051,8 @@ export interface RuntimeSettings {
   /** Auto-start the local computer (contained Docker sandbox) at app launch, opening Docker
    *  if closed. Default true. */
   local_computer_autostart?: boolean;
+  /** Apple Silicon Mac Apps beta. Absent in legacy files means disabled. */
+  mac_apps_beta_enabled?: boolean;
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {
@@ -5168,3 +5170,44 @@ function currentTimestampSeconds() {
 function roundedSeconds(value: number) {
   return Math.round(value * 1000) / 1000;
 }
+
+export type HostComputerPermissionState = "granted" | "denied" | "not_determined" | "restricted";
+export interface HostComputerStatus {
+  available: boolean;
+  supported: boolean;
+  enabled: boolean;
+  state: "unsupported" | "disabled" | "setup" | "ready" | "active" | "paused" | "error";
+  helper_version: string | null;
+  accessibility: HostComputerPermissionState;
+  screen_recording: HostComputerPermissionState;
+  ready: boolean;
+  reason?: string;
+  host_session?: HostComputerWireEvent | null;
+}
+export interface HostComputerSigningIdentity { team_id: string; designated_requirement_sha256: string; }
+export interface HostComputerApp { bundle_id: string; display_name: string; pid: number; granted_level: "observe" | "control" | null; signing_identity?: HostComputerSigningIdentity | null; }
+export interface HostComputerGrant { grant_id: string; bundle_id: string; display_name: string; level: "observe" | "control"; }
+export interface GrantHostComputerAppInput { bundle_id: string; level: "observe" | "control"; }
+export interface HostComputerWireEvent {
+  type: string;
+  sequence: number;
+  session_id: string;
+  generation: number;
+  phase: "observing" | "awaiting_approval" | "acting" | "paused_by_user" | "suspended" | "done" | "failed" | "cancelled";
+  app: string;
+  artifact_ref?: string | null;
+  approval?: { category: string; summary: string; action_digest: string; expires_at_unix_ms?: number } | null;
+  error_code?: string | null;
+}
+
+export const hostComputerStatus = () => gatewayGetJson<HostComputerStatus>("/api/host-computer/status");
+export const hostComputerApps = () => gatewayGetJson<HostComputerApp[]>("/api/host-computer/apps");
+export const hostComputerGrants = () => gatewayGetJson<HostComputerGrant[]>("/api/host-computer/grants");
+export const grantHostComputerApp = (input: GrantHostComputerAppInput) => gatewayPostJson<HostComputerGrant>("/api/host-computer/grants", input);
+export const revokeHostComputerGrant = (grantId: string) => gatewayDeleteJson<void>(`/api/host-computer/grants/${encodeURIComponent(grantId)}`);
+export const presentHostComputerPermission = (permission: "accessibility" | "screen_recording") => gatewayPostJson<void>("/api/host-computer/permissions/present", { permission });
+export const approveHostComputerAction = (sessionId: string, actionDigest: string) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/approve`, { action_digest: actionDigest });
+export const denyHostComputerAction = (sessionId: string, actionDigest: string) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/deny`, { action_digest: actionDigest });
+export const pauseHostComputerSession = (sessionId: string) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/pause`, {});
+export const resumeHostComputerSession = (sessionId: string, generation: number) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/resume`, { generation });
+export const cancelHostComputerSession = (sessionId: string) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/cancel`, {});

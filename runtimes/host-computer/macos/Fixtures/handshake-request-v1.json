@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 41,
+  "method": "handshake",
+  "params": {},
+  "meta": {
+    "protocol_version": 1,
+    "turn_id": "turn_test",
+    "deadline_unix_ms": 1784650000000,
+    "session_token": "test-session-token-32-bytes-long"
+  }
+}

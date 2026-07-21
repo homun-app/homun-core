@@ -4,6 +4,7 @@ mod apply_patch;
 mod attachments;
 mod agent_journal;
 mod browser_safety;
+mod host_computer_gateway;
 mod chat_store;
 // One-shot fuse of the two legacy SQLite files into the unified homun.sqlite.
 mod db_migrate;
@@ -1072,14 +1073,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     backfill_contacts(&state);
     backfill_mentions(&state);
     unify_owner_identity(&state);
-    // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. With a
-    // whole-project code graph (tens of thousands of entities) a synchronous sweep here
-    // would delay startup by minutes. Eventual consistency is fine: the graph projection
-    // reads whatever is current, and the regen settles shortly after boot.
-    {
-        let st = state.clone();
-        tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
-    }
     // One-time (flag-guarded): retire proactivity cards whose date already passed but
     // that predate the `relevant_until` field (e.g. a 30 June trip card still on the
     // board in July). Background — it makes one model call. New cards carry an expiry
@@ -1127,6 +1120,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             recovered.len()
         );
         drop(store);
+    }
+    // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
+    // only after the lease-aware broker recovery above has completed its critical write to
+    // the unified database; starting it earlier can race bump_process_generation and make a
+    // fresh desktop launch crash once before the watchdog recovers it.
+    {
+        let st = state.clone();
+        tokio::task::spawn_blocking(move || sweep_graph_on_startup(&st));
     }
     // VACUUM all SQLite stores in background to reclaim free space from
     // deleted workspaces/tasks/memories. Runs at boot (not on every delete)
@@ -1410,6 +1411,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/local-computer/live", get(contained_computer_live))
         .route("/api/local-computer/start", post(local_computer_start))
         .route("/api/local-computer/stop", post(local_computer_stop))
+        .route("/api/host-computer/status", get(host_computer_gateway::status))
+        .route("/api/host-computer/apps", get(host_computer_gateway::apps))
+        .route("/api/host-computer/grants", get(host_computer_gateway::list_grants).post(host_computer_gateway::create_grant))
+        .route("/api/host-computer/grants/{grant_id}", axum::routing::delete(host_computer_gateway::revoke_grant))
+        .route("/api/host-computer/permissions/present", post(host_computer_gateway::present_permission))
+        .route("/api/host-computer/sessions/{session_id}/approve", post(host_computer_gateway::approve_session))
+        .route("/api/host-computer/sessions/{session_id}/deny", post(host_computer_gateway::deny_session))
+        .route("/api/host-computer/sessions/{session_id}/pause", post(host_computer_gateway::pause_session))
+        .route("/api/host-computer/sessions/{session_id}/resume", post(host_computer_gateway::resume_session))
+        .route("/api/host-computer/sessions/{session_id}/cancel", post(host_computer_gateway::cancel_session))
         // Bearer-authed: mint a short-lived ticket for the noVNC live-view proxy
         // (the iframe + WS that follow can't send the Bearer header).
         .route(
@@ -17531,6 +17542,45 @@ fn browse_tool_schema() -> serde_json::Value {
     })
 }
 
+fn use_computer_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "use_computer",
+            "description": "Use an application explicitly approved by the user on this Mac to accomplish one bounded goal. The work runs in an isolated computer worker; secure fields, password managers, authorization UI, and Terminal input are always blocked.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["goal"],
+                "properties": {
+                    "goal": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                    "app": { "type": "string", "maxLength": 200 }
+                }
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+mod host_computer_tool_contract_tests {
+    use super::*;
+
+    #[test]
+    fn manager_schema_is_single_bounded_delegate() {
+        let schema = use_computer_tool_schema();
+        assert_eq!(schema.pointer("/function/name").and_then(serde_json::Value::as_str), Some("use_computer"));
+        assert_eq!(schema.pointer("/function/parameters/additionalProperties"), Some(&serde_json::Value::Bool(false)));
+        let serialized = schema.to_string();
+        for granular in ["computer_list_apps", "computer_get_state", "computer_action"] {
+            assert!(!serialized.contains(granular));
+        }
+    }
+}
+
+fn computer_list_apps_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_list_apps","description":"List only Mac applications granted for this workspace.","parameters":{"type":"object","additionalProperties":false,"properties":{}}}}) }
+fn computer_get_state_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_get_state","description":"Read a fresh bounded accessibility snapshot for a granted running app.","parameters":{"type":"object","additionalProperties":false,"required":["pid"],"properties":{"pid":{"type":"integer","minimum":1}}}}}) }
+fn computer_action_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_action","description":"Perform one semantic action using an element from the latest snapshot. After success, read a new snapshot. Text entry and consequential actions stop for user approval.","parameters":{"type":"object","additionalProperties":false,"required":["target","action"],"properties":{"target":{"type":"object","additionalProperties":false,"required":["snapshot_id","generation","index"],"properties":{"snapshot_id":{"type":"string"},"generation":{"type":"integer"},"index":{"type":"integer"}}},"action":{"type":"string","enum":["press","set_value","show_menu","increment","decrement","confirm","cancel","raise","scroll_up","scroll_down"]},"value":{"type":["string","null"],"maxLength":20000}}}}}) }
+
 fn browser_navigate_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -20846,6 +20896,7 @@ fn save_artifact_tool_schema(destinations: &[ArtifactDestination]) -> serde_json
 /// Common across most turns: memory, dates, planning, skills, project code/files, discovery.
 const CORE_TOOL_NAMES: &[&str] = &[
     "find_capability",
+    "use_computer",
     "suggest_capabilities",
     // GitHub search is common + the system prompt steers toward it over the browser, so it
     // must be always-loaded (not behind find_capability) to actually be callable.
@@ -25623,6 +25674,51 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 effects: Default::default(),
             });
         }
+        if name == "use_computer" {
+            if !host_computer_gateway::manager_ready() {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: serde_json::json!({
+                        "found": false,
+                        "error": "mac_apps_not_ready"
+                    })
+                    .to_string(),
+                    effects: Default::default(),
+                });
+            }
+            let value: serde_json::Value =
+                serde_json::from_str(args_raw).unwrap_or_default();
+            let goal = value
+                .get("goal")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .trim();
+            if goal.is_empty() {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: "use_computer needs a non-empty goal.".into(),
+                    effects: Default::default(),
+                });
+            }
+            let app = value
+                .get("app")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let delegated_goal = if app.is_empty() {
+                goal.to_string()
+            } else {
+                format!("{goal}\nPreferred app: {app}")
+            };
+            let outcome = GatewayComputerExecutor {
+                state: self.state,
+                http: &self.state.http,
+                thread_id: self.thread_id,
+            }
+            .run(&delegated_goal)
+            .await;
+            return Ok(local_first_engine::ToolOutcome {
+                result: local_first_engine::browse::browse_result_for_manager(&outcome),
+                effects: Default::default(),
+            });
+        }
         // ADR 0025 slice 2: `browse` is delegated, not a normal capability. Intercept it BEFORE the
         // ChatToolCtx path and route it to the isolated recursive sub-turn (GatewayBrowseExecutor). The
         // engine dispatch sees `browse` as a plain non-browser tool → it arrives here; the recursion runs
@@ -26091,6 +26187,91 @@ impl GatewayBrowseExecutor<'_> {
 /// call — which it can't legitimately do (none are offered). Refuse it with a corrective message rather
 /// than executing anything, keeping the sub-agent inside its browser sandbox.
 struct BrowseOnlyCapabilityExecutor;
+
+struct GatewayComputerExecutor<'a> {
+    state: &'a AppState,
+    http: &'a reqwest::Client,
+    thread_id: Option<&'a str>,
+}
+
+impl GatewayComputerExecutor<'_> {
+    async fn run(&self, goal: &str) -> local_first_engine::BrowseResult {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        if let Err(error) = host_computer_gateway::start_worker_session(&session_id, "Mac Apps") {
+            return local_first_engine::BrowseResult::not_found(error);
+        }
+        let (base_url, model, api_key) = chat_openai_stream_config().unwrap_or_default();
+        let system = format!("You control explicitly approved Mac applications for ONE bounded goal. {now}\nUse only computer_list_apps, computer_get_state, and computer_action. Start by listing apps. Use only element indices from the latest snapshot; after every action fetch a fresh snapshot. Never guess a target. If a tool reports approval_required, paused_by_user, hard_denied, or unavailable, stop and report it plainly. Never attempt Terminal, password managers, secure fields, authorization UI, credentials, purchases, sends, deletion, or settings changes. Finish with a concise factual result.", now=now_block());
+        let mut ls = local_first_engine::LoopState::new();
+        ls.messages = local_first_engine::browse::seed_browse_messages(&system, goal);
+        ls.tool_schemas = vec![computer_list_apps_tool_schema(), computer_get_state_tool_schema(), computer_action_tool_schema()];
+        ls.provider = local_first_engine::ProviderBinding { model, base_url, api_key };
+        let drain = drain_stream_sink();
+        let model_client = crate::model_client::GatewayModelClient {
+            http: self.http,
+            tx: &drain,
+            usage: self.state.usage_recorder.as_ref(),
+            steering: None,
+        };
+        let mut usage_context = local_first_inference_usage::UsageContext::new(
+            uuid::Uuid::new_v4().to_string(), local_first_inference_usage::InferencePurpose::Subagent, "local");
+        usage_context.purpose_detail = Some("host_computer".into());
+        usage_context.thread_id = self.thread_id.map(str::to_string);
+        let capability_executor = ComputerOnlyCapabilityExecutor { session_id: session_id.clone() };
+        let mut browser_executor = ComputerNoBrowserExecutor;
+        let outcome = local_first_engine::agent_loop::run_turn(
+            ls,
+            local_first_engine::TurnConfig {
+                hard_round_ceiling: 24, max_rounds: 16, browser_max_rounds: 0, browser_nav_cap: 0,
+                context_window: None, reconcile_on_delivery: false, autoadvance_from_evidence: false,
+                step_verification: false, verbose: verbose_debug(), forced_tool: None,
+            },
+            &usage_context, &model_client, &capability_executor, &mut browser_executor,
+            &NoPlanProgress, &NeverIncompleteJudge, &NoContextCompactor, &OpenTurnPolicy,
+            &local_first_engine::NoopExecutionJournal, &drain, 0.1, self.thread_id,
+            &std::collections::BTreeSet::new(), &[], goal.to_string(), String::new(), None,
+            false, 0, false, Vec::new(), None, &local_first_engine::turn_trace::TurnTrace::disabled(),
+        ).await;
+        let result = local_first_engine::browse::browse_result_from_outcome(&outcome);
+        host_computer_gateway::finish_worker_session(&session_id, result.found);
+        result
+    }
+}
+
+struct ComputerOnlyCapabilityExecutor {
+    session_id: String,
+}
+impl local_first_engine::CapabilityExecutor for ComputerOnlyCapabilityExecutor {
+    async fn execute_tool(&self, name: &str, args_raw: &str, _call_id: &str,
+        _state: &mut local_first_engine::LoopState) -> Result<local_first_engine::ToolOutcome, String> {
+        let result = match name {
+            "computer_list_apps" => host_computer_gateway::worker_list_apps(&self.session_id).await,
+            "computer_get_state" => {
+                let value: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_default();
+                match value.get("pid").and_then(|value| value.as_u64()).and_then(|pid| u32::try_from(pid).ok()) {
+                    Some(pid) => host_computer_gateway::worker_get_state(&self.session_id, pid).await,
+                    None => Err("invalid_pid".into()),
+                }
+            }
+            "computer_action" => match serde_json::from_str(args_raw) {
+                Ok(request) => host_computer_gateway::worker_execute_action(&self.session_id, request).await,
+                Err(error) => Err(format!("invalid_action:{error}")),
+            },
+            _ => Err(format!("tool_not_available:{name}")),
+        };
+        Ok(local_first_engine::ToolOutcome {
+            result: match result { Ok(value) => value.to_string(), Err(error) => serde_json::json!({"error":error}).to_string() },
+            effects: Default::default(),
+        })
+    }
+}
+
+struct ComputerNoBrowserExecutor;
+impl local_first_engine::BrowserExecutor for ComputerNoBrowserExecutor {
+    async fn execute_browser(&mut self, name: &str, _args_raw: &str, _call_id: &str,
+        _state: &mut local_first_engine::LoopState) -> String { format!("browser tool unavailable: {name}") }
+    async fn close_session(&mut self, _browser_used: bool) {}
+}
 
 impl local_first_engine::CapabilityExecutor for BrowseOnlyCapabilityExecutor {
     async fn execute_tool(
@@ -27163,6 +27344,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         resolve_datetime_tool_schema(),
     ]);
     if !read_only {
+        if host_computer_gateway::manager_ready() {
+            base_tools.push(use_computer_tool_schema());
+        }
         base_tools.push(create_artifact_tool_schema());
         base_tools.push(generate_image_tool_schema());
         base_tools.push(render_deck_tool_schema());
@@ -30704,6 +30888,11 @@ struct RuntimeSettings {
     /// (warm up only if Docker is already running). `#[serde(default = …)]` = legacy files → ON.
     #[serde(default = "default_local_computer_autostart")]
     local_computer_autostart: bool,
+
+    /// Optional Apple Silicon Mac Apps beta. Legacy settings files omit this field,
+    /// which must remain equivalent to an explicit opt-out.
+    #[serde(default)]
+    mac_apps_beta_enabled: bool,
 }
 
 /// Default persisted sandbox mode = `workspace-write` (see `resolved_sandbox_mode`:
@@ -30730,6 +30919,7 @@ impl Default for RuntimeSettings {
             writable_roots: Vec::new(),
             skill_confirmations: Vec::new(),
             local_computer_autostart: default_local_computer_autostart(),
+            mac_apps_beta_enabled: false,
         }
     }
 }
@@ -30745,6 +30935,10 @@ fn load_runtime_settings() -> RuntimeSettings {
         .and_then(|p| fs::read_to_string(p).ok())
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default()
+}
+
+pub(crate) fn mac_apps_beta_enabled() -> bool {
+    load_runtime_settings().mac_apps_beta_enabled
 }
 
 fn save_runtime_settings(settings: &RuntimeSettings) -> Result<(), String> {
@@ -30786,12 +30980,16 @@ async fn set_runtime_settings(
     // PATCH semantics: merge the caller's partial patch onto the persisted settings so one
     // Settings control never clobbers another (see `merge_runtime_settings`). The full,
     // normalized object is persisted and returned.
-    let merged = merge_runtime_settings(&load_runtime_settings(), &patch);
+    let current = load_runtime_settings();
+    let merged = merge_runtime_settings(&current, &patch);
     save_runtime_settings(&merged).map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "runtime_settings_save",
         message,
     })?;
+    if current.mac_apps_beta_enabled && !merged.mac_apps_beta_enabled {
+        host_computer_gateway::disable().await;
+    }
     Ok(Json(merged))
 }
 
@@ -59044,6 +59242,7 @@ mod tests {
             writable_roots: Vec::new(),
             skill_confirmations: Vec::new(),
             local_computer_autostart: true,
+            mac_apps_beta_enabled: false,
         };
         // Patch only sandbox_mode → the other axes are preserved.
         let merged = super::merge_runtime_settings(
@@ -59075,6 +59274,24 @@ mod tests {
             &serde_json::json!({ "sandbox_mode": "bogus", "unrelated": 1 }),
         );
         assert_eq!(merged3.sandbox_mode, "workspace-write", "unknown → safe default");
+    }
+
+    #[test]
+    fn mac_apps_beta_is_off_for_legacy_settings_and_survives_partial_patches() {
+        let legacy: super::RuntimeSettings = serde_json::from_str("{}").unwrap();
+        assert!(!legacy.mac_apps_beta_enabled);
+
+        let enabled = super::merge_runtime_settings(
+            &legacy,
+            &serde_json::json!({ "mac_apps_beta_enabled": true }),
+        );
+        assert!(enabled.mac_apps_beta_enabled);
+
+        let after_unrelated_patch = super::merge_runtime_settings(
+            &enabled,
+            &serde_json::json!({ "sandbox_mode": "read-only" }),
+        );
+        assert!(after_unrelated_patch.mac_apps_beta_enabled);
     }
 
     #[test]

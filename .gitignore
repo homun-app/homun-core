@@ -24,5 +24,7 @@ last_response_*.txt
 apps/desktop/.package/
 # installers produced by electron-builder (dmg/nsis/AppImage/deb)
 apps/desktop/dist-installers/
+runtimes/host-computer/macos/.build/
+runtimes/host-computer/macos/.swiftpm/
 # graphify code-graph output — regenerated at runtime
 graphify-out/

@@ -8,6 +8,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { createLogWriter, resolveLogsDir, pipeChildStream } = require("./lib/logging.cjs");
 const { nextRestartDelay } = require("./lib/watchdog.cjs");
+const { performFactoryReset } = require("./lib/factory-reset.cjs");
 
 // Shell-side diagnostics (~/.homun/logs/desktop.log). Created eagerly so even
 // a failure during startup leaves a trail.
@@ -342,6 +343,36 @@ function spawnGateway() {
   if (!env.HOMUN_BROWSER_AUTOMATION_DIR) {
     const baDir = path.join(RESOURCES_ROOT, "browser-automation");
     if (fs.existsSync(baDir)) env.HOMUN_BROWSER_AUTOMATION_DIR = baDir;
+  }
+
+  // The signed native helper is available by default when it is part of the macOS
+  // package. HOMUN_HOST_COMPUTER=0 remains an explicit emergency opt-out. Electron
+  // passes only the public bundle path; the Rust supervisor owns the private socket
+  // and single-use authentication secret.
+  if (
+    process.platform === "darwin" &&
+    process.arch === "arm64" &&
+    env.HOMUN_HOST_COMPUTER !== "0"
+  ) {
+    if (!env.HOMUN_HOST_COMPUTER_HELPER_PATH) {
+      const helperCandidates = [
+        path.join(
+          RESOURCES_ROOT,
+          "host-computer",
+          "HomunComputerService.app",
+        ),
+        path.join(
+          __dirname,
+          "..",
+          ".package",
+          "host-computer-build",
+          "HomunComputerService.app",
+        ),
+      ];
+      const helperBundle = helperCandidates.find((candidate) => fs.existsSync(candidate));
+      if (helperBundle) env.HOMUN_HOST_COMPUTER_HELPER_PATH = helperBundle;
+    }
+    if (env.HOMUN_HOST_COMPUTER_HELPER_PATH) env.HOMUN_HOST_COMPUTER = "1";
   }
 
   if (gatewayBin) {
@@ -717,28 +748,29 @@ ipcMain.handle("lfpa:feedback-bundle", async () => {
 // empty ~/.homun); no UI flag to clear beyond localStorage.
 ipcMain.handle("lfpa:factory-reset", async () => {
   isResetting = true; // stop the watchdog from respawning the gateway mid-reset
-  // 1) stop the gateway so it releases ~/.homun's SQLite handles
   try {
-    if (gatewayProcess && !gatewayProcess.killed) {
-      const child = gatewayProcess;
-      await new Promise((resolve) => {
-        let done = false;
-        const finish = () => { if (!done) { done = true; resolve(); } };
-        child.once("exit", finish);
-        try { child.kill("SIGTERM"); } catch { /* already gone */ }
-        setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* ignore */ } finish(); }, 4000);
-      });
-    }
-    gatewayProcess = null;
-  } catch (e) { desktopLog.log(`factory-reset: gateway stop failed: ${e}`); }
-  // 2) CRITICAL: wipe ~/.homun (chats, memory, vault-wrapped key, brand kit, prefs)
-  try {
-    await fs.promises.rm(path.join(os.homedir(), ".homun"), { recursive: true, force: true });
-  } catch (e) { desktopLog.log(`factory-reset: rm ~/.homun failed: ${e}`); }
-  // 3) clear the UI mirror (language/theme/settings in localStorage)
-  try {
-    await session.defaultSession.clearStorageData({ storages: ["localstorage"] });
-  } catch (e) { desktopLog.log(`factory-reset: clearStorageData failed: ${e}`); }
+    await performFactoryReset({
+      homunRoot: path.join(os.homedir(), ".homun"),
+      stopManagedProcesses: async () => {
+        if (gatewayProcess && !gatewayProcess.killed) {
+          const child = gatewayProcess;
+          await new Promise((resolve) => {
+            let done = false;
+            const finish = () => { if (!done) { done = true; resolve(); } };
+            child.once("exit", finish);
+            try { child.kill("SIGTERM"); } catch { /* already gone */ }
+            setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* ignore */ } finish(); }, 4000);
+          });
+        }
+        gatewayProcess = null;
+      },
+      clearStorage: () => session.defaultSession.clearStorageData({ storages: ["localstorage"] }),
+    });
+  } catch (e) {
+    desktopLog.log(`factory-reset failed: ${e}`);
+    isResetting = false;
+    return { ok: false, error: String(e?.message ?? e) };
+  }
   // 4) relaunch into a clean first run
   app.relaunch();
   app.exit(0);

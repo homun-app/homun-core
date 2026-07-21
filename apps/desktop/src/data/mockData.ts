@@ -419,7 +419,7 @@ export const settingsSections: Array<{
   { id: "connections", label: "settings.connectors", icon: Plug, group: "capabilities" },
   { id: "skills", label: "settings.skills", icon: Sparkles, group: "capabilities" },
   { id: "addon", label: "settings.addon", icon: Blocks, group: "capabilities" },
-  { id: "computer", label: "settings.computer", icon: MonitorPlay, group: "capabilities" },
+  { id: "computer", label: "settings.computer.title", icon: MonitorPlay, group: "capabilities" },
 ];
 
 export const settingsGroupLabels: Record<"account" | "capabilities", string> = {

@@ -188,7 +188,21 @@ for (const locale of ["en", "it", "es", "fr", "de"]) {
   assertContains(`src/i18n/locales/${locale}.json`, '"use_for_task"', `${locale} must translate the task suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"change_role_preference"', `${locale} must translate the preference suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"dismiss"', `${locale} must translate suggestion dismissal`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"macAppsTitle"', `${locale} must translate Mac Apps settings`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"macAppsBeta"', `${locale} must label Mac Apps as beta`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"macAppsOptIn"', `${locale} must translate the explicit beta opt-in`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"macAppsLocalScreenshot"', `${locale} must explain the local-only screenshot policy`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"restrictions"', `${locale} must explain host control restrictions`);
 }
+assertContains("src/components/SettingsView.tsx", "settings.computer.containedTitle", "contained computer must remain explicit");
+assertContains("src/components/SettingsView.tsx", "settings.computer.macAppsTitle", "host apps need a separate section");
+assertContains("src/components/SettingsView.tsx", "mac_apps_beta_enabled", "Mac Apps must expose an explicit persisted opt-in");
+assertContains("src/components/SettingsView.tsx", 'window.addEventListener("focus", refreshWhenVisible)', "Mac Apps must refresh after returning from System Settings");
+assertContains("src/components/SettingsView.tsx", 'document.addEventListener("visibilitychange", refreshWhenVisible)', "Mac Apps must refresh when the app becomes visible");
+assertContains("src/lib/coreBridge.ts", 'state: "unsupported" | "disabled" | "setup" | "ready" | "active" | "paused" | "error"', "host status must expose the canonical beta state machine");
+assertContains("src/components/SettingsView.tsx", "revokeHostComputerGrant", "host app grants must be revocable");
+assertContains("src/components/SettingsView.tsx", "presentHostComputerPermission", "TCC prompts must require a local button click");
+assertNotContains("src/components/SettingsView.tsx", "grantHostComputerApp(session", "an agent session must never create grants");
 assertMatches(
   "src/styles.css",
   /\.onb-model\s*\{[^}]*color:\s*var\(--o-text\);[^}]*\}/m,
@@ -393,7 +407,7 @@ assertContains("src/components/SettingsView.tsx", "t(\"settings.vaultEncrypted\"
 assertContains("src/i18n/locales/it.json", "\"vaultEncrypted\": \"Cifrato\"", "Italian locale must translate the Vault encrypted badge");
 assertContains("src/i18n/locales/en.json", "\"vaultEncrypted\": \"Encrypted\"", "English locale must translate the Vault encrypted badge");
 assertContains("src/data/mockData.ts", "label: \"settings.vault\"", "Settings sidebar Vault label must use i18n");
-assertContains("src/data/mockData.ts", "label: \"settings.computer\"", "Settings sidebar Local computer label must use i18n");
+assertContains("src/data/mockData.ts", "label: \"settings.computer.title\"", "Settings sidebar Computer label must use i18n");
 assertContains("src/lib/coreBridge.ts", "secret_value?: string", "Vault bridge must expose optional raw secret material only for the encrypted accept path");
 assertContains("src/components/ChatComputerPanel.tsx", "const browserRunning = Boolean(live?.active && live?.novnc_url)", "live computer browser state must distinguish running activity from idle availability");
 assertContains("src/components/ChatComputerPanel.tsx", "const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running))", "terminal dock must be driven by running terminal activity, not completed history");
@@ -401,6 +415,11 @@ assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity 
 assertNotContains("src/components/ChatComputerPanel.tsx", "cc-dock-activity", "computer island header must show only Computer and LIVE, never prompt/activity text");
 assertNotContains("src/styles.css", ".cc-dock-activity", "computer island must not reserve header space for prompt/activity text");
 assertNotContains("src/components/ChatComputerPanel.tsx", "const ownedByThisThread = !hasLiveActivity", "idle global computer availability must not count as thread ownership");
+assertContains("src/components/ChatComputerPanel.tsx", "hostComputerSession", "computer panel must consume host state");
+assertContains("src/components/ChatComputerPanel.tsx", "approveHostComputerAction", "pending host actions need explicit consent");
+assertContains("src/components/ChatComputerPanel.tsx", "resumeHostComputerSession", "physical takeover must be explicitly resumable");
+assertContains("src/components/ChatComputerPanel.tsx", "cancelHostComputerSession", "host sessions must be cancellable");
+assertNotContains("src/components/ChatComputerPanel.tsx", "pendingAction.params", "sensitive action parameters must never render");
 assertNotContains(
   "src/components/ChatView.tsx",
   "const showComputerActivity =",
