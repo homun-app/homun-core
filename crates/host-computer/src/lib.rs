@@ -2,6 +2,7 @@ pub mod artifact;
 pub mod client;
 pub mod framing;
 pub mod grants;
+pub mod policy;
 pub mod protocol;
 pub mod service;
 pub mod supervisor;
