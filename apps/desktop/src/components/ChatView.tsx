@@ -8865,13 +8865,18 @@ function ChatEmptyHero({
       period: greetingPeriod(hour),
     };
   });
-  const greeting = t(greetingKey, {
+  const interpolation = {
     name: displayName.trim(),
     salutation: t(`chat.greetings.period.${period}`),
-  });
+  };
+  const greetingHeadline = t(`${greetingKey}.headline`, interpolation);
+  const greetingPrompt = t(`${greetingKey}.prompt`, interpolation);
   return (
     <div className="chat-hero">
-      <h1 className="chat-hero-title">{greeting}</h1>
+      <div className="chat-hero-welcome">
+        <h1 className="chat-hero-headline">{greetingHeadline}</h1>
+        <p className="chat-hero-prompt">{greetingPrompt}</p>
+      </div>
       <ChatUsageOverview
         threadId={thread.threadId}
         onOpenUsageSettings={onOpenUsageSettings}

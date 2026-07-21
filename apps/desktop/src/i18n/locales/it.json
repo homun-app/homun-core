@@ -469,28 +469,28 @@
     "greetings": {
       "period": { "morning": "Buongiorno", "afternoon": "Buon pomeriggio", "evening": "Buonasera" },
       "named": {
-        "0": "{{salutation}}, {{name}}. Da dove cominciamo?",
-        "1": "{{salutation}}, {{name}}. Cosa mettiamo in moto?",
-        "2": "{{salutation}}, {{name}}. Qual è la prossima idea?",
-        "3": "{{salutation}}, {{name}}. Su cosa lavoriamo?"
+        "0": { "headline": "{{salutation}}, {{name}}.", "prompt": "Da dove cominciamo?" },
+        "1": { "headline": "{{salutation}}, {{name}}.", "prompt": "Cosa mettiamo in moto?" },
+        "2": { "headline": "{{salutation}}, {{name}}.", "prompt": "Qual è la prossima idea?" },
+        "3": { "headline": "{{salutation}}, {{name}}.", "prompt": "Su cosa lavoriamo?" }
       },
       "anonymous": {
-        "0": "{{salutation}}. Da dove cominciamo?",
-        "1": "{{salutation}}. Cosa mettiamo in moto?",
-        "2": "{{salutation}}. Qual è la prossima idea?",
-        "3": "{{salutation}}. Su cosa lavoriamo?"
+        "0": { "headline": "{{salutation}}.", "prompt": "Da dove cominciamo?" },
+        "1": { "headline": "{{salutation}}.", "prompt": "Cosa mettiamo in moto?" },
+        "2": { "headline": "{{salutation}}.", "prompt": "Qual è la prossima idea?" },
+        "3": { "headline": "{{salutation}}.", "prompt": "Su cosa lavoriamo?" }
       },
       "project": {
-        "0": "{{salutation}}. Riprendiamo il progetto?",
-        "1": "{{salutation}}. Facciamo avanzare il progetto.",
-        "2": "{{salutation}}. Qual è il prossimo passo?",
-        "3": "{{salutation}}. Dove concentriamo il lavoro?"
+        "0": { "headline": "{{salutation}}.", "prompt": "Riprendiamo il progetto?" },
+        "1": { "headline": "{{salutation}}.", "prompt": "Facciamo avanzare il progetto." },
+        "2": { "headline": "{{salutation}}.", "prompt": "Qual è il prossimo passo?" },
+        "3": { "headline": "{{salutation}}.", "prompt": "Dove concentriamo il lavoro?" }
       },
       "returning": {
-        "0": "{{salutation}}. Riprendiamo da dove eravamo rimasti?",
-        "1": "{{salutation}}. Continuiamo il lavoro?",
-        "2": "{{salutation}}. Rimettiamo le cose in movimento.",
-        "3": "{{salutation}}. Qual è la priorità adesso?"
+        "0": { "headline": "{{salutation}}.", "prompt": "Riprendiamo da dove eravamo rimasti?" },
+        "1": { "headline": "{{salutation}}.", "prompt": "Continuiamo il lavoro?" },
+        "2": { "headline": "{{salutation}}.", "prompt": "Rimettiamo le cose in movimento." },
+        "3": { "headline": "{{salutation}}.", "prompt": "Qual è la priorità adesso?" }
       }
     },
     "usageOverview": {

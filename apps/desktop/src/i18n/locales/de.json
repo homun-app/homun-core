@@ -468,10 +468,10 @@
     "emptyHero": "Wie kann ich Ihnen helfen?",
     "greetings": {
       "period": { "morning": "Guten Morgen", "afternoon": "Guten Tag", "evening": "Guten Abend" },
-      "named": { "0": "{{salutation}}, {{name}}. Wo fangen wir an?", "1": "{{salutation}}, {{name}}. Was bringen wir in Gang?", "2": "{{salutation}}, {{name}}. Was ist die nächste Idee?", "3": "{{salutation}}, {{name}}. Woran arbeiten wir?" },
-      "anonymous": { "0": "{{salutation}}. Wo fangen wir an?", "1": "{{salutation}}. Was bringen wir in Gang?", "2": "{{salutation}}. Was ist die nächste Idee?", "3": "{{salutation}}. Woran arbeiten wir?" },
-      "project": { "0": "{{salutation}}. Nehmen wir das Projekt wieder auf?", "1": "{{salutation}}. Bringen wir das Projekt voran.", "2": "{{salutation}}. Was ist der nächste Schritt?", "3": "{{salutation}}. Worauf konzentrieren wir uns?" },
-      "returning": { "0": "{{salutation}}. Machen wir dort weiter, wo wir aufgehört haben?", "1": "{{salutation}}. Setzen wir die Arbeit fort?", "2": "{{salutation}}. Bringen wir die Dinge wieder in Gang.", "3": "{{salutation}}. Was hat jetzt Priorität?" }
+      "named": { "0": { "headline": "{{salutation}}, {{name}}.", "prompt": "Wo fangen wir an?" }, "1": { "headline": "{{salutation}}, {{name}}.", "prompt": "Was bringen wir in Gang?" }, "2": { "headline": "{{salutation}}, {{name}}.", "prompt": "Was ist die nächste Idee?" }, "3": { "headline": "{{salutation}}, {{name}}.", "prompt": "Woran arbeiten wir?" } },
+      "anonymous": { "0": { "headline": "{{salutation}}.", "prompt": "Wo fangen wir an?" }, "1": { "headline": "{{salutation}}.", "prompt": "Was bringen wir in Gang?" }, "2": { "headline": "{{salutation}}.", "prompt": "Was ist die nächste Idee?" }, "3": { "headline": "{{salutation}}.", "prompt": "Woran arbeiten wir?" } },
+      "project": { "0": { "headline": "{{salutation}}.", "prompt": "Nehmen wir das Projekt wieder auf?" }, "1": { "headline": "{{salutation}}.", "prompt": "Bringen wir das Projekt voran." }, "2": { "headline": "{{salutation}}.", "prompt": "Was ist der nächste Schritt?" }, "3": { "headline": "{{salutation}}.", "prompt": "Worauf konzentrieren wir uns?" } },
+      "returning": { "0": { "headline": "{{salutation}}.", "prompt": "Machen wir dort weiter, wo wir aufgehört haben?" }, "1": { "headline": "{{salutation}}.", "prompt": "Setzen wir die Arbeit fort?" }, "2": { "headline": "{{salutation}}.", "prompt": "Bringen wir die Dinge wieder in Gang." }, "3": { "headline": "{{salutation}}.", "prompt": "Was hat jetzt Priorität?" } }
     },
     "usageOverview": {
       "title": "Nutzungsübersicht",
