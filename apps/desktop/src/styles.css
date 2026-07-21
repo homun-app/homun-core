@@ -2703,6 +2703,9 @@ body.resizing-drawer {
   overflow-y: auto;
   overflow-x: hidden;
 }
+.active-task-layout.is-empty .thread-content {
+  width: min(100%, 960px);
+}
 
 .task-topbar {
   position: relative;
@@ -7525,6 +7528,30 @@ body.resizing-drawer {
   grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.4fr) auto;
   padding-block: 10px;
   border-bottom: 1px solid var(--line);
+}
+@container chat-workspace (max-width: 860px) {
+  .chat-usage-infographic {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .chat-usage-summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 12px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .chat-usage-route {
+    grid-column: 1 / -1;
+  }
+}
+@container chat-workspace (max-width: 560px) {
+  .chat-usage-infographic .usage-calendar--compact {
+    --usage-cell: 11px;
+    --usage-gap: 3px;
+  }
+  .chat-usage-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media (max-width: 760px) {
   .active-task-layout.is-empty {

@@ -148,6 +148,9 @@ assertContains("src/styles.css", ".app-shell.drawer-open > .workspace {\n    gri
 assertContains("src/styles.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 292px), 292px) + 24px);", "Narrow Settings content must clear the overlay navigation");
 assertContains("src/styles.css", ".active-task-layout.is-empty {\n  grid-template-rows: 58px minmax(0, 1fr) auto;", "Empty chat must keep the composer in the same bottom row as active conversations");
 assertNotContains("src/styles.css", "grid-template-rows: 58px 1fr auto 1fr", "Empty chat must not vertically center the composer with spacer rows");
+assertContains("src/styles.css", ".active-task-layout.is-empty .thread-content {\n  width: min(100%, 960px);", "Empty chat must give the six-month heatmap enough desktop width");
+assertContains("src/styles.css", "@container chat-workspace (max-width: 860px) {\n  .chat-usage-infographic {", "The heatmap summary must stack before horizontal scrolling is needed");
+assertContains("src/styles.css", ".chat-usage-infographic .usage-calendar--compact {\n    --usage-cell: 11px;\n    --usage-gap: 3px;", "Compact windows must shrink the Home cells before exposing horizontal scroll");
 assertNotContains("src/components/UsageSettingsPane.tsx", "latency-p50", "Models must not show latency until canonical aggregates expose it");
 assertNotContains("src/components/UsageSettingsPane.tsx", "fallback-count", "Models must not show fallback placeholders as measured data");
 assertContains("src/components/UsageSettingsPane.tsx", "modelCostProvenance", "Per-model cost must disclose reported, estimated, unknown, or not-billed provenance");
