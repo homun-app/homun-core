@@ -5,6 +5,7 @@ public struct RequestRouter: Sendable {
     private let authenticator: SessionAuthenticator
     private let permissionProbe: any PermissionProbing
     private let inventory: any AppInventoryProviding
+    private let snapshotProvider: SystemSnapshotProvider
 
     public init(
         sessionToken: String,
@@ -13,6 +14,7 @@ public struct RequestRouter: Sendable {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
         self.permissionProbe = permissionProbe
         inventory = SystemAppInventory()
+        snapshotProvider = SystemSnapshotProvider()
     }
 
     init(
@@ -23,6 +25,7 @@ public struct RequestRouter: Sendable {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
         self.permissionProbe = permissionProbe
         self.inventory = inventory
+        snapshotProvider = SystemSnapshotProvider()
     }
 
     public func route(_ body: Data) -> Data {
@@ -67,6 +70,7 @@ public struct RequestRouter: Sendable {
                     .string("permission_present"),
                     .string("list_apps"),
                     .string("list_windows"),
+                    .string("get_app_state"),
                 ]),
             ]))
         case .permissionStatus:
@@ -102,6 +106,19 @@ public struct RequestRouter: Sendable {
                 "windows": try encodeJSONValue(resolved.items),
                 "truncated": .bool(resolved.truncated),
             ]))
+        case .getAppState:
+            guard
+                case let .object(params) = request.params,
+                case let .number(rawPID)? = params["pid"],
+                rawPID.rounded() == rawPID,
+                rawPID > 0,
+                rawPID <= Double(Int32.max)
+            else { throw ProtocolFailure.invalidRequest }
+            let snapshot = snapshotProvider.snapshot(
+                pid: Int32(rawPID),
+                sessionID: request.meta.turnID ?? "default"
+            )
+            return .success(id: request.id, result: try encodeJSONValue(snapshot))
         }
     }
 

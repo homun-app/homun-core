@@ -61,6 +61,7 @@ impl HostComputerTransport for RecordingTransport {
             HostComputerMethod::ListWindows => {
                 serde_json::json!({"windows": [], "truncated": false})
             }
+            HostComputerMethod::GetAppState => empty_snapshot(),
         };
         Ok(RpcResponse::Success(RpcSuccessResponse {
             jsonrpc: JsonRpcVersion::V2,
@@ -68,6 +69,20 @@ impl HostComputerTransport for RecordingTransport {
             result,
         }))
     }
+}
+
+fn empty_snapshot() -> serde_json::Value {
+    serde_json::json!({
+        "snapshot_id": "00000000-0000-0000-0000-000000000001",
+        "generation": 1,
+        "captured_at_unix_ms": 0,
+        "tree_mode": "full",
+        "base_snapshot_id": null,
+        "elements": [],
+        "focused_element_index": null,
+        "screenshot_ref": null,
+        "truncated": false
+    })
 }
 
 fn future_context() -> RequestContext {
@@ -108,6 +123,26 @@ async fn a_successful_handshake_is_reused() {
             HostComputerMethod::Handshake,
             HostComputerMethod::PermissionStatus,
             HostComputerMethod::PermissionStatus
+        ]
+    );
+}
+
+#[tokio::test]
+async fn client_decodes_a_bounded_app_snapshot() {
+    let transport = RecordingTransport::default();
+    let client = HostComputerClient::new(transport.clone(), SecretToken::from_bytes([9; 32]));
+
+    let snapshot = client
+        .get_app_state(123, None, future_context())
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot.generation, 1);
+    assert_eq!(
+        transport.methods(),
+        [
+            HostComputerMethod::Handshake,
+            HostComputerMethod::GetAppState
         ]
     );
 }

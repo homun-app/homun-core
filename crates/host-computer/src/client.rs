@@ -10,8 +10,9 @@ use tokio::sync::Mutex;
 
 use crate::{
     protocol::{
-        HandshakeResult, HostComputerErrorCode, HostComputerMethod, JsonRpcVersion, ListAppsResult,
-        ListWindowsResult, PROTOCOL_VERSION, PermissionStatus, RequestMeta, RpcError, RpcRequest,
+        AppSnapshot, HandshakeResult, HostComputerErrorCode, HostComputerMethod, JsonRpcVersion,
+        ListAppsResult, ListWindowsResult, PROTOCOL_VERSION, PermissionStatus, RequestMeta,
+        RpcError, RpcRequest,
     },
     transport::HostComputerTransport,
 };
@@ -133,6 +134,24 @@ where
         self.call(
             HostComputerMethod::ListWindows,
             serde_json::json!({}),
+            context,
+        )
+        .await
+    }
+
+    pub async fn get_app_state(
+        &self,
+        pid: u32,
+        base_snapshot_id: Option<String>,
+        context: RequestContext,
+    ) -> Result<AppSnapshot, HostComputerClientError> {
+        self.ensure_handshake(&context).await?;
+        self.call(
+            HostComputerMethod::GetAppState,
+            serde_json::json!({
+                "pid": pid,
+                "base_snapshot_id": base_snapshot_id,
+            }),
             context,
         )
         .await

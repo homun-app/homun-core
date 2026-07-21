@@ -12,6 +12,7 @@ public enum HostComputerMethod: String, Codable, Sendable {
     case permissionPresent = "permission_present"
     case listApps = "list_apps"
     case listWindows = "list_windows"
+    case getAppState = "get_app_state"
 }
 
 public struct ApplicationIdentity: Codable, Equatable, Hashable, Sendable {
@@ -127,6 +128,145 @@ public struct HostWindow: Codable, Equatable, Sendable {
         case isMinimized = "is_minimized"
         case isOnScreen = "is_on_screen"
         case displayID = "display_id"
+    }
+}
+
+public enum SemanticAction: String, Codable, Equatable, Hashable, Sendable {
+    case press
+    case setValue = "set_value"
+    case showMenu = "show_menu"
+    case increment
+    case decrement
+    case confirm
+    case cancel
+    case raise
+    case scrollUp = "scroll_up"
+    case scrollDown = "scroll_down"
+}
+
+public enum SnapshotTreeMode: String, Codable, Equatable, Sendable {
+    case full
+    case diff
+}
+
+public struct HostElement: Codable, Equatable, Sendable {
+    public var index: UInt32
+    public var role: String
+    public var subrole: String?
+    public var label: String?
+    public var help: String?
+    public var value: String?
+    public var bounds: HostRect?
+    public var enabled: Bool
+    public var focused: Bool
+    public var selected: Bool?
+    public var expanded: Bool?
+    public var sensitive: Bool
+    public var actions: [SemanticAction]
+    public var parentIndex: UInt32?
+    public var childIndices: [UInt32]
+
+    public init(
+        index: UInt32,
+        role: String,
+        subrole: String? = nil,
+        label: String? = nil,
+        help: String? = nil,
+        value: String? = nil,
+        bounds: HostRect? = nil,
+        enabled: Bool = true,
+        focused: Bool = false,
+        selected: Bool? = nil,
+        expanded: Bool? = nil,
+        sensitive: Bool = false,
+        actions: [SemanticAction] = [],
+        parentIndex: UInt32? = nil,
+        childIndices: [UInt32] = []
+    ) {
+        self.index = index
+        self.role = role
+        self.subrole = subrole
+        self.label = label
+        self.help = help
+        self.value = value
+        self.bounds = bounds
+        self.enabled = enabled
+        self.focused = focused
+        self.selected = selected
+        self.expanded = expanded
+        self.sensitive = sensitive
+        self.actions = actions
+        self.parentIndex = parentIndex
+        self.childIndices = childIndices
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case index, role, subrole, label, help, value, bounds, enabled, focused, selected, expanded, sensitive, actions
+        case parentIndex = "parent_index"
+        case childIndices = "child_indices"
+    }
+}
+
+public struct SnapshotDiff: Codable, Equatable, Sendable {
+    public var inserted: [HostElement]
+    public var updated: [HostElement]
+    public var removedIndices: [UInt32]
+
+    public init(inserted: [HostElement], updated: [HostElement], removedIndices: [UInt32]) {
+        self.inserted = inserted
+        self.updated = updated
+        self.removedIndices = removedIndices
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case inserted, updated
+        case removedIndices = "removed_indices"
+    }
+}
+
+public struct AppSnapshot: Codable, Equatable, Sendable {
+    public var snapshotID: String
+    public var generation: UInt64
+    public var capturedAtUnixMs: Int64
+    public var treeMode: SnapshotTreeMode
+    public var baseSnapshotID: String?
+    public var elements: [HostElement]
+    public var focusedElementIndex: UInt32?
+    public var screenshotRef: String?
+    public var truncated: Bool
+
+    public init(
+        snapshotID: String,
+        generation: UInt64,
+        capturedAtUnixMs: Int64,
+        treeMode: SnapshotTreeMode = .full,
+        baseSnapshotID: String? = nil,
+        elements: [HostElement],
+        focusedElementIndex: UInt32?,
+        screenshotRef: String? = nil,
+        truncated: Bool
+    ) {
+        self.snapshotID = snapshotID
+        self.generation = generation
+        self.capturedAtUnixMs = capturedAtUnixMs
+        self.treeMode = treeMode
+        self.baseSnapshotID = baseSnapshotID
+        self.elements = elements
+        self.focusedElementIndex = focusedElementIndex
+        self.screenshotRef = screenshotRef
+        self.truncated = truncated
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotID = "snapshot_id"
+        case generation
+        case capturedAtUnixMs = "captured_at_unix_ms"
+        case treeMode = "tree_mode"
+        case baseSnapshotID = "base_snapshot_id"
+        case elements
+        case focusedElementIndex = "focused_element_index"
+        case screenshotRef = "screenshot_ref"
+        case truncated
     }
 }
 

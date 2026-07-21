@@ -18,6 +18,7 @@ pub enum HostComputerMethod {
     PermissionPresent,
     ListApps,
     ListWindows,
+    GetAppState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +85,70 @@ pub struct HostWindow {
 #[serde(deny_unknown_fields)]
 pub struct ListWindowsResult {
     pub windows: Vec<HostWindow>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SemanticAction {
+    Press,
+    SetValue,
+    ShowMenu,
+    Increment,
+    Decrement,
+    Confirm,
+    Cancel,
+    Raise,
+    ScrollUp,
+    ScrollDown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotTreeMode {
+    Full,
+    Diff,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostElement {
+    pub index: u32,
+    pub role: String,
+    pub subrole: Option<String>,
+    pub label: Option<String>,
+    pub help: Option<String>,
+    pub value: Option<String>,
+    pub bounds: Option<HostRect>,
+    pub enabled: bool,
+    pub focused: bool,
+    pub selected: Option<bool>,
+    pub expanded: Option<bool>,
+    pub sensitive: bool,
+    pub actions: Vec<SemanticAction>,
+    pub parent_index: Option<u32>,
+    pub child_indices: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotDiff {
+    pub inserted: Vec<HostElement>,
+    pub updated: Vec<HostElement>,
+    pub removed_indices: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppSnapshot {
+    pub snapshot_id: String,
+    pub generation: u64,
+    pub captured_at_unix_ms: i64,
+    pub tree_mode: SnapshotTreeMode,
+    pub base_snapshot_id: Option<String>,
+    pub elements: Vec<HostElement>,
+    pub focused_element_index: Option<u32>,
+    pub screenshot_ref: Option<String>,
     pub truncated: bool,
 }
 

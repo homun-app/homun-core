@@ -1,0 +1,29 @@
+{
+  "snapshot_id": "00000000-0000-0000-0000-000000000001",
+  "generation": 1,
+  "captured_at_unix_ms": 1784650000000,
+  "tree_mode": "full",
+  "base_snapshot_id": null,
+  "elements": [
+    {
+      "index": 0,
+      "role": "AXSecureTextField",
+      "subrole": null,
+      "label": "Password",
+      "help": null,
+      "value": null,
+      "bounds": null,
+      "enabled": true,
+      "focused": true,
+      "selected": null,
+      "expanded": null,
+      "sensitive": true,
+      "actions": ["press"],
+      "parent_index": null,
+      "child_indices": []
+    }
+  ],
+  "focused_element_index": 0,
+  "screenshot_ref": null,
+  "truncated": false
+}
