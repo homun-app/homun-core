@@ -30711,6 +30711,11 @@ struct RuntimeSettings {
     /// (warm up only if Docker is already running). `#[serde(default = …)]` = legacy files → ON.
     #[serde(default = "default_local_computer_autostart")]
     local_computer_autostart: bool,
+
+    /// Optional Apple Silicon Mac Apps beta. Legacy settings files omit this field,
+    /// which must remain equivalent to an explicit opt-out.
+    #[serde(default)]
+    mac_apps_beta_enabled: bool,
 }
 
 /// Default persisted sandbox mode = `workspace-write` (see `resolved_sandbox_mode`:
@@ -30737,6 +30742,7 @@ impl Default for RuntimeSettings {
             writable_roots: Vec::new(),
             skill_confirmations: Vec::new(),
             local_computer_autostart: default_local_computer_autostart(),
+            mac_apps_beta_enabled: false,
         }
     }
 }
@@ -30752,6 +30758,10 @@ fn load_runtime_settings() -> RuntimeSettings {
         .and_then(|p| fs::read_to_string(p).ok())
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default()
+}
+
+pub(crate) fn mac_apps_beta_enabled() -> bool {
+    load_runtime_settings().mac_apps_beta_enabled
 }
 
 fn save_runtime_settings(settings: &RuntimeSettings) -> Result<(), String> {
@@ -58923,6 +58933,7 @@ mod tests {
             writable_roots: Vec::new(),
             skill_confirmations: Vec::new(),
             local_computer_autostart: true,
+            mac_apps_beta_enabled: false,
         };
         // Patch only sandbox_mode → the other axes are preserved.
         let merged = super::merge_runtime_settings(
@@ -58954,6 +58965,24 @@ mod tests {
             &serde_json::json!({ "sandbox_mode": "bogus", "unrelated": 1 }),
         );
         assert_eq!(merged3.sandbox_mode, "workspace-write", "unknown → safe default");
+    }
+
+    #[test]
+    fn mac_apps_beta_is_off_for_legacy_settings_and_survives_partial_patches() {
+        let legacy: super::RuntimeSettings = serde_json::from_str("{}").unwrap();
+        assert!(!legacy.mac_apps_beta_enabled);
+
+        let enabled = super::merge_runtime_settings(
+            &legacy,
+            &serde_json::json!({ "mac_apps_beta_enabled": true }),
+        );
+        assert!(enabled.mac_apps_beta_enabled);
+
+        let after_unrelated_patch = super::merge_runtime_settings(
+            &enabled,
+            &serde_json::json!({ "sandbox_mode": "read-only" }),
+        );
+        assert!(after_unrelated_patch.mac_apps_beta_enabled);
     }
 
     #[test]

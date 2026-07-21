@@ -1049,6 +1049,8 @@ export interface RuntimeSettings {
   /** Auto-start the local computer (contained Docker sandbox) at app launch, opening Docker
    *  if closed. Default true. */
   local_computer_autostart?: boolean;
+  /** Apple Silicon Mac Apps beta. Absent in legacy files means disabled. */
+  mac_apps_beta_enabled?: boolean;
 }
 
 async function electronRuntimeSettings(): Promise<RuntimeSettings> {
