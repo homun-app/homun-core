@@ -1,4 +1,5 @@
 const DAY_SECONDS = 86_400;
+const HOME_WEEK_COLUMNS = 26;
 
 export function totalTokens(point = {}) {
   return [
@@ -51,11 +52,16 @@ export function buildCalendarDays(series, window, nowMs = Date.now()) {
   const coverageEpoch = series?.coverage_started_at == null
     ? null
     : localDayEpoch(series.coverage_started_at, offsetSeconds);
+  const weekday = new Date(todayEpoch * 1_000).getUTCDay();
+  const homeStartEpoch = todayEpoch
+    - (weekday + (HOME_WEEK_COLUMNS - 1) * 7) * DAY_SECONDS;
   const startEpoch = window === "7d"
     ? todayEpoch - 6 * DAY_SECONDS
     : window === "30d"
       ? todayEpoch - 29 * DAY_SECONDS
-      : coverageEpoch ?? todayEpoch;
+      : window === "home-26w"
+        ? homeStartEpoch
+        : coverageEpoch ?? todayEpoch;
   const points = new Map((series?.days ?? []).map((point) => [point.day_epoch, point]));
   const days = [];
   for (let dayEpoch = startEpoch; dayEpoch <= todayEpoch; dayEpoch += DAY_SECONDS) {

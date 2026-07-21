@@ -84,3 +84,18 @@ test("all window starts at the first covered local day", () => {
   const days = buildCalendarDays(series, "all", (jul21 + DAY) * 1_000);
   assert.equal(days[0].day_epoch, jul17);
 });
+
+test("home calendar occupies 26 Sunday-based week columns and ends today", () => {
+  const days = buildCalendarDays(seriesFixture, "home-26w", jul21 * 1_000);
+  assert.equal(new Date(days[0].day_epoch * 1_000).getUTCDay(), 0);
+  assert.equal(days.at(-1).day_epoch, jul21);
+  assert.equal(Math.ceil(days.length / 7), 26);
+  assert.ok(days.every((day) => day.day_epoch <= jul21));
+});
+
+test("home calendar preserves unavailable and covered zero days", () => {
+  const days = buildCalendarDays(seriesFixture, "home-26w", jul21 * 1_000);
+  assert.equal(days[0].state, "unavailable");
+  assert.equal(days.find((day) => day.day_epoch === jul17).state, "zero");
+  assert.equal(days.at(-1).state, "active");
+});

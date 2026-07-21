@@ -1,4 +1,5 @@
 export type UsageWindowLike = "7d" | "30d" | "all";
+export type UsageCalendarWindowLike = UsageWindowLike | "home-26w";
 
 export interface UsageCostLike {
   provider_reported_microusd?: number;
@@ -39,6 +40,7 @@ export type CalendarDay = Required<Omit<UsageDailyPointLike, "dominant_provider"
   & { state: "unavailable" | "zero" | "active"; intensity: number };
 
 const DAY_SECONDS = 86_400;
+const HOME_WEEK_COLUMNS = 26;
 
 export function totalTokens(point: UsageDailyPointLike = { day_epoch: 0 }): number {
   return [point.input_tokens, point.output_tokens, point.reasoning_tokens, point.cache_read_tokens, point.cache_write_tokens]
@@ -86,12 +88,15 @@ export function usageIntensityLevels(values: number[]): number[] {
   });
 }
 
-export function buildCalendarDays(series: UsageDailySeriesLike, window: UsageWindowLike, nowMs = Date.now()): CalendarDay[] {
+export function buildCalendarDays(series: UsageDailySeriesLike, window: UsageCalendarWindowLike, nowMs = Date.now()): CalendarDay[] {
   const offsetSeconds = clampOffset(series.timezone_offset_minutes) * 60;
   const todayEpoch = localDayEpoch(Math.floor(nowMs / 1_000), offsetSeconds);
   const coverageEpoch = series.coverage_started_at == null ? null : localDayEpoch(series.coverage_started_at, offsetSeconds);
+  const weekday = new Date(todayEpoch * 1_000).getUTCDay();
+  const homeStartEpoch = todayEpoch - (weekday + (HOME_WEEK_COLUMNS - 1) * 7) * DAY_SECONDS;
   const startEpoch = window === "7d" ? todayEpoch - 6 * DAY_SECONDS
-    : window === "30d" ? todayEpoch - 29 * DAY_SECONDS : coverageEpoch ?? todayEpoch;
+    : window === "30d" ? todayEpoch - 29 * DAY_SECONDS
+      : window === "home-26w" ? homeStartEpoch : coverageEpoch ?? todayEpoch;
   const points = new Map((series.days ?? []).map((point) => [point.day_epoch, point]));
   const days: CalendarDay[] = [];
   for (let dayEpoch = startEpoch; dayEpoch <= todayEpoch; dayEpoch += DAY_SECONDS) {
