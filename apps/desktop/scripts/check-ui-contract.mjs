@@ -129,6 +129,11 @@ assertNotContains("src/components/UsageSettingsPane.tsx", "latency-p50", "Models
 assertNotContains("src/components/UsageSettingsPane.tsx", "fallback-count", "Models must not show fallback placeholders as measured data");
 assertContains("src/components/UsageSettingsPane.tsx", "modelCostProvenance", "Per-model cost must disclose reported, estimated, unknown, or not-billed provenance");
 assertContains("src/components/UsageSettingsPane.tsx", "coreBridge.setRole({", "Settings must apply confirmed role instructions through the canonical role API");
+assertContains("src/lib/coreBridge.ts", "usageDaily:", "Usage must expose the real daily series");
+assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calendar must expose an accessible grid");
+assertContains("src/components/UsageCalendar.tsx", 'role="gridcell"', "Usage days must be keyboard reachable");
+assertContains("src/components/UsageCalendar.tsx", "onFocus", "Keyboard focus must reveal day details");
+assertContains("src/components/UsageCalendar.tsx", "dominant_provider", "Usage callouts must preserve provider provenance");
 for (const locale of ["en", "it", "es", "fr", "de"]) {
   assertContains(`src/i18n/locales/${locale}.json`, '"use_for_task"', `${locale} must translate the task suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"change_role_preference"', `${locale} must translate the preference suggestion action`);

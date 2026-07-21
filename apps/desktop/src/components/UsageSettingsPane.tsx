@@ -211,7 +211,10 @@ function UsageOverview({ data, locale }: { data: UsageData; locale?: string }) {
   const { t } = useTranslation();
   const cost = data.summary.cost_breakdown;
   const estimated = cost.catalog_estimated_microusd + cost.manual_estimated_microusd;
-  const dominantModel = [...data.models].sort((a, b) => rowTokens(b) - rowTokens(a))[0]?.key;
+  const dominantRoute = [...data.models].sort((a, b) => rowTokens(b) - rowTokens(a))[0];
+  const dominantModel = dominantRoute
+    ? `${dominantRoute.provider_id} → ${dominantRoute.model_id}`
+    : null;
   const coverageDate = data.summary.coverage_started_at
     ? new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(data.summary.coverage_started_at * 1_000)
     : null;
@@ -282,8 +285,8 @@ function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string 
         <tbody>{sorted.map((row) => {
           const success = row.attempts ? Math.round((row.successful_attempts / row.attempts) * 100) : 0;
           const provenance = modelCostProvenance(row);
-          return <tr key={row.key}>
-            <th scope="row">{row.key}</th>
+          return <tr key={`${row.provider_id}:${row.model_id}`}>
+            <th scope="row">{row.provider_id} → {row.model_id}</th>
             <td>{formatCount(row.logical_calls, locale)}</td>
             <td>{formatCount(rowTokens(row), locale)}</td>
             <td className="usage-model-cost"><span>{formatMicrousd(row.cost_microusd, locale)}</span>{provenance.length > 0 && <small>{provenance.map((item) => t(`settings.usage.cost.${item}`)).join(" · ")}</small>}</td>

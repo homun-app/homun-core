@@ -52,7 +52,10 @@ export function totalKnownCost(point: UsageDailyPointLike = { day_epoch: 0 }): n
     + finiteNonnegative(cost.manual_estimated_microusd);
 }
 
-export function routeLabel(point: UsageDailyPointLike = { day_epoch: 0 }, unknownLabel = "Unknown route"): string {
+export function routeLabel(
+  point: Pick<UsageDailyPointLike, "dominant_provider" | "dominant_model"> = {},
+  unknownLabel = "Unknown route",
+): string {
   const provider = cleanLabel(point.dominant_provider);
   const model = cleanLabel(point.dominant_model);
   if (provider && model) return `${provider} → ${model}`;

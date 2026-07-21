@@ -64,6 +64,7 @@ export interface UsageSummaryView {
   cost_breakdown: UsageCostBreakdown;
   coverage_started_at: number | null;
   active_providers?: number;
+  dominant_provider?: string | null;
   dominant_model?: string | null;
   trend_percent?: number | null;
 }
@@ -109,8 +110,37 @@ export interface UsageBreakdownRow {
   cost_breakdown: UsageCostBreakdown;
 }
 
-export type UsageModelRow = UsageBreakdownRow;
+export type UsageModelRow = Omit<UsageBreakdownRow, "key"> & {
+  provider_id: string;
+  model_id: string;
+};
 export type UsageProcessRow = UsageBreakdownRow;
+
+export interface UsageDailyPoint {
+  day_epoch: number;
+  logical_calls: number;
+  attempts: number;
+  successful_attempts: number;
+  failed_attempts: number;
+  aborted_attempts: number;
+  known_usage_attempts: number;
+  unknown_usage_attempts: number;
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_breakdown: UsageCostBreakdown;
+  dominant_provider: string | null;
+  dominant_model: string | null;
+}
+
+export interface UsageDailySeries {
+  coverage_started_at: number | null;
+  generated_at: number;
+  timezone_offset_minutes: number;
+  days: UsageDailyPoint[];
+}
 
 export interface ModelPriceOverride {
   model_id: string;
@@ -3199,6 +3229,17 @@ function electronUsageSummary(window: UsageWindow): Promise<UsageSummaryView> {
   return gatewayGetJson<UsageSummaryView>(`/api/usage/summary?window=${window}`);
 }
 
+function electronUsageDaily(
+  window: UsageWindow,
+  timezoneOffsetMinutes: number,
+): Promise<UsageDailySeries> {
+  const query = new URLSearchParams({
+    window,
+    timezone_offset_minutes: String(Math.trunc(timezoneOffsetMinutes)),
+  });
+  return gatewayGetJson<UsageDailySeries>(`/api/usage/daily?${query.toString()}`);
+}
+
 function electronUsageModels(window: UsageWindow): Promise<UsageModelRow[]> {
   return gatewayGetJson<UsageModelRow[]>(`/api/usage/models?window=${window}`);
 }
@@ -3293,6 +3334,8 @@ export const coreBridge = {
     electronSetProviderEnabled(id, enabled),
   refreshProviderModels: (id: string) => electronRefreshProviderModels(id),
   usageSummary: (window: UsageWindow) => electronUsageSummary(window),
+  usageDaily: (window: UsageWindow, timezoneOffsetMinutes: number) =>
+    electronUsageDaily(window, timezoneOffsetMinutes),
   usageModels: (window: UsageWindow) => electronUsageModels(window),
   usageProviders: (window: UsageWindow) => electronUsageProviders(window),
   usageProcesses: (window: UsageWindow) => electronUsageProcesses(window),
