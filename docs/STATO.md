@@ -5,6 +5,33 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-21.**
 
+## ⭐ CHECKPOINT 2026-07-21 — Adaptive scaffolding floor ritirato
+
+Rimosso l'esperimento adaptive-floor perché parziale, default-off e fuorviante come controllo
+utente. Non era il pavimento di sicurezza di Homun: memoria, contesto, tool envelope, stop
+conditions, approval, plan-precedence e verifica restano nel percorso canonico per ogni modello.
+
+Sono stati eliminati il toggle da Settings, il campo `adaptive_floor` dall'API e dal file runtime,
+la variabile ambiente, i profili/trace dedicati e il rilassamento dei workflow per tier. I vecchi
+`runtime-settings.json` restano leggibili: Serde ignora il campo storico e il salvataggio successivo
+lo elimina. `ModelTier` resta vivo per selezione dei modelli per ruolo e osservabilità, senza
+modificare il control-flow del turno. ADR 0018 è marcata superseded per questa sola parte; i principi
+indipendenti su envelope, sub-agent e memoria restano validi.
+
+I checkpoint più in basso che descrivono `adaptive_floor=shadow|on` sono **storici** e non
+rappresentano più il runtime corrente.
+
+**Gate eseguiti (sessione 2026-07-21):**
+| Gate | Esito |
+| --- | --- |
+| Test TDD contratto UI | rosso prima della rimozione, poi OK |
+| Test migrazione `runtime-settings.json` | rosso prima della rimozione, poi OK |
+| `cargo test -p local-first-desktop-gateway` | lib 53 + main 742 + integrazioni, 0 failed; 6 ignored |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 26/26 |
+| `npm run typecheck` + `npm run build` | OK |
+| `git diff --check` | OK |
+
 ## ⭐ CHECKPOINT 2026-07-21 — ODT analizzabile direttamente in chat
 
 Corretto il percorso canonico degli allegati che aveva portato Homun a trattare

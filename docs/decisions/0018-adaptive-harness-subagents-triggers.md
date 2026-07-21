@@ -4,7 +4,14 @@ Date: 2026-06-26
 
 ## Status
 
-Proposed. Estende e **corregge un'assunzione implicita** della
+**Superseded in parte (2026-07-21).** La parte runtime "adaptive scaffolding floor" è stata
+ritirata: toggle, setting, profili, telemetria e ramificazioni per tier sono stati rimossi in favore
+di un solo agent loop canonico. Vedi
+[`2026-07-21-remove-adaptive-scaffolding-floor-design.md`](../superpowers/specs/2026-07-21-remove-adaptive-scaffolding-floor-design.md).
+Restano validi come principi indipendenti l'envelope uniforme di sicurezza, le scritture
+single-threaded dei sub-agent e la memoria come substrato di apprendimento.
+
+La decisione originale estendeva e **correggeva un'assunzione implicita** della
 [0016](0016-harness-owned-task-engine-cross-model.md): la 0016 ha reso il floor di
 orchestrazione **uniforme** (vincola tutti per proteggere i modelli deboli). Questa
 ADR aggiunge il pezzo mancante: **il vincolo dentro l'inner loop deve scalare

@@ -559,10 +559,8 @@ pub struct ResolvedRole {
     pub kind: ProviderKind,
     pub base_url: String,
     pub auto: bool,
-    /// Capability tier of the resolved model. Drives the adaptive scaffolding
-    /// floor (ADR 0018): the harness keeps everything AROUND the loop uniform but
-    /// scales the IN-loop constraint inverse to this tier. Selection is unchanged;
-    /// this just carries the tier the picker already knew downstream.
+    /// Capability tier of the resolved model. Used to rank eligible models for a role
+    /// and exposed for observability/evaluation; it does not alter agent-loop control flow.
     pub tier: ModelTier,
 }
 
@@ -654,7 +652,7 @@ impl ProviderRegistry {
 
     /// The capability tier of a (provider, model): the catalog profile if present,
     /// else inferred from the model id. Unknown → Balanced (safe middle). Used to
-    /// stamp `ResolvedRole.tier` so the adaptive floor (ADR 0018) can read it.
+    /// stamp `ResolvedRole.tier` for role ranking and observability.
     pub fn tier_for(&self, provider_id: &str, model_id: &str) -> ModelTier {
         if let Some(provider) = self.get(provider_id)
             && let Some(entry) = provider.models.iter().find(|m| m.id == model_id)
@@ -1042,18 +1040,16 @@ mod tests {
     }
 
     #[test]
-    fn adaptive_floor_input_tiers_for_models_in_use() {
-        // The adaptive floor (ADR 0018) keys off these tier classifications. Pin the models
-        // actually in use so a heuristic change can't silently re-tier them and quietly
-        // change how much the floor scaffolds. Validated against the live setup.
+    fn model_profiles_classify_models_in_use() {
+        // Pin the models actually in use so a heuristic change cannot silently re-tier
+        // role selection. Validated against the live setup.
         let tier = |id: &str| ModelEntry::inferred(id).profile.as_ref().unwrap().tier;
-        // Weak LOCAL tier → Fast: the caposaldo #2 case the floor exists to protect.
+        // Small local models remain eligible for fast extraction/classification roles.
         assert_eq!(tier("gemma4:latest"), ModelTier::Fast);
         assert_eq!(tier("gemma4:12b"), ModelTier::Fast);
-        // Cloud general-purpose model currently configured → Balanced (less scaffolding
-        // than Fast, more than a dedicated reasoner).
+        // Cloud general-purpose model currently configured → Balanced.
         assert_eq!(tier("deepseek-v4-pro:cloud"), ModelTier::Balanced);
-        // A genuine reasoning model → Reasoning (the floor sheds scaffolding entirely).
+        // A genuine reasoning model → Reasoning.
         assert_eq!(tier("deepseek-r1:cloud"), ModelTier::Reasoning);
     }
 

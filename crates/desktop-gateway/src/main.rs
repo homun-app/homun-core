@@ -23,7 +23,6 @@ mod provider_usage;
 // module); re-exported so `model_normalize::…` call sites are unchanged.
 use local_first_engine::model_normalize;
 mod model_registry;
-mod scaffold;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
 mod skills;
 // Skill catalog (ClawHub/OpenClaw) — cached + searchable, ported from Homun.
@@ -7355,7 +7354,7 @@ fn plan_stall_abort_enabled() -> bool {
 // `MIN_DELIVERED_CHARS_TO_CONCLUDE` + `answer_concludes_plan` moved to `engine::plan`
 // (ADR 0024 inc 5e.3); imported below.
 
-/// F2.2 (ADR 0018, Pavimento): when the over-running guard accepts the answer with the last
+/// When the over-running guard accepts the answer with the last
 /// step still open, reconcile that step to `done` so the PERSISTED runtime plan reflects the
 /// delivered work. Without it the plan stays "active" and the NEXT turn falsely resumes it
 /// (`thread_has_active_runtime_plan` only goes quiet when the plan is complete→Stale) — the
@@ -9284,28 +9283,6 @@ fn capability_route_trace_line(decision: &CapabilityRouteDecision) -> Option<Str
     }
 }
 
-/// Adaptive floor (ADR 0018, Fase 2): relax a Workflow route to AgentLoop for a
-/// CAPABLE model so it is not forced into the one-shot workflow box. The workflow
-/// tool stays OFFERED elsewhere; this only drops the pruning + "exactly once"
-/// binding + blocked-tool guard. Weak/Balanced or `floor_on == false` are
-/// unchanged; AtomicTool is never relaxed. Pure so it can be unit-tested.
-fn relax_route_for_tier(
-    route: CapabilityRouteDecision,
-    bias: scaffold::WorkflowBias,
-    floor_on: bool,
-) -> CapabilityRouteDecision {
-    if floor_on
-        && bias == scaffold::WorkflowBias::AllowAgentic
-        && matches!(route, CapabilityRouteDecision::Workflow { .. })
-    {
-        return CapabilityRouteDecision::AgentLoop {
-            reason: "Adaptive floor: capable model kept on the agent loop with the workflow tool still available."
-                .to_string(),
-        };
-    }
-    route
-}
-
 fn prune_tools_for_workflow_route(
     tools: &mut Vec<serde_json::Value>,
     route: &WorkflowRouteDecision,
@@ -9395,11 +9372,11 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
 /// Stale (see `upsert_runtime_plan_memory`) and excluded by `runtime_plan_memory_matches`,
 /// so this only fires while a plan is genuinely open.
 ///
-/// The plan is harness-owned control flow (Pavimento — see docs/architecture/agent-loop.md
-/// and ADR 0018): an active plan must take precedence over the workflow-bias *manopola*.
+/// The plan is harness-owned control flow (see docs/architecture/agent-loop.md): an active
+/// plan must take precedence over heuristic workflow routing.
 /// Without this, a continuation turn can be routed into a one-shot workflow (`make_deck`),
 /// which prunes the plan's own tools (`update_plan`, `browser_navigate`) and dead-ends it.
-/// Tier- and flag-independent: it holds even with the adaptive floor off.
+/// This behavior is model- and provider-independent.
 fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> bool {
     let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
     else {
@@ -9571,7 +9548,7 @@ fn prompt_requests_planning_or_research(prompt: &str) -> bool {
     PHRASE_SIGNALS.iter().any(|s| t.contains(s))
 }
 
-/// The two CHEAP, prompt-only doors into plan-precedence (ADR 0018): a bare
+/// The two CHEAP, prompt-only doors into plan-precedence: a bare
 /// continuation/approval resuming a plan, OR an explicit first-turn plan/research
 /// request. The third door — a thread that already has an active runtime plan — is a
 /// memory lookup checked separately at the call site to keep it short-circuited.
@@ -15753,29 +15730,6 @@ fn step_verification_enabled() -> bool {
     )
 }
 
-/// Effective adaptive-floor mode (ADR 0018): `off` | `shadow` | `on`. The
-/// `HOMUN_ADAPTIVE_FLOOR` env var OVERRIDES the persisted user setting (for
-/// dev/testing); otherwise the setting from `runtime-settings.json` applies;
-/// default `off` so behaviour is unchanged out of the box. `on` = the tier
-/// modulates the in-loop knobs; `shadow` = compute + log the decision without
-/// acting (A/B on the trace before flipping on). Resolved ONCE per turn (not per
-/// call) by the chat path to keep the file read out of the hot loop.
-fn adaptive_floor_mode() -> &'static str {
-    fn normalize(raw: &str) -> &'static str {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "on" | "1" | "true" => "on",
-            "shadow" => "shadow",
-            _ => "off",
-        }
-    }
-    if let Ok(env) = std::env::var("HOMUN_ADAPTIVE_FLOOR")
-        && !env.trim().is_empty()
-    {
-        return normalize(&env);
-    }
-    normalize(&load_runtime_settings().adaptive_floor)
-}
-
 fn orchestration_completion_judge_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "object",
@@ -21404,8 +21358,6 @@ struct ChatToolCtx<'a> {
     capability_corpus: &'a [CapabilityEntry],
     automation_user_id: &'a UserId,
     automation_workspace_id: &'a WorkspaceId,
-    turn_scaffold: &'a scaffold::ScaffoldProfile,
-    floor_acting: bool,
     // Readable per-turn observability sink (ported). Used by the `update_plan`/`step_advance` arm to
     // record the Plan event; no-op when disabled. See `engine::turn_trace`.
     turn_trace: &'a local_first_engine::turn_trace::TurnTrace,
@@ -21460,7 +21412,7 @@ confirmation card in the interface. Do NOT say it was executed."
 
 // ============================================================================
 // ADR 0023 — single resolution of the two policy axes (caposaldo #5: ONE policy,
-// ONE resolution, ONE chokepoint). Precedence mirrors `adaptive_floor_mode`:
+// ONE resolution, ONE chokepoint). Precedence is:
 // env-override > persisted RuntimeSettings > default.
 //
 // ⭐ RECONCILIATION INVARIANT (this line ≠ Codex/source): the OS process fence
@@ -24471,27 +24423,14 @@ an uncertain date.",
         } else {
             // F2 gate: verify each newly-claimed-done step before it counts
             // (using the evidence gathered since the last completed step).
-            // Adaptive floor (ADR 0018): when ON, the model tier modulates
-            // depth — capable models skip the extra verify round on steps
-            // with NO external action (nothing to verify against, low risk);
-            // weak models (Always) still verify everything. OFF → unchanged.
-            let verify = step_verification_enabled()
-                && if ctx.floor_acting {
-                    match ctx.turn_scaffold.verify_depth {
-                        scaffold::VerifyDepth::Always => true,
-                        scaffold::VerifyDepth::OnRisk => !ctx.step_evidence.is_empty(),
-                    }
-                } else {
-                    true
-                };
+            let verify = step_verification_enabled();
             // Snapshot the step evidence ONCE for the whole batch of claims. Previously
             // the first verified step cleared `step_evidence` mid-loop, so the REST of a
             // batch saw "(no tool activity)" and the strict judge rejected them — leaving
             // steps the model actually finished stuck at "doing" (the real reason
             // "progress never advances" even on a strong model). And with NO evidence to
             // verify against, don't hold a step hostage: trust the claim (there is nothing
-            // to check) — the adaptive OnRisk intent, applied even while the floor is in
-            // shadow mode.
+            // to check). This evidence-based rule is uniform for every model.
             let batch_evidence = ctx.step_evidence.join("\n");
             let has_evidence = !batch_evidence.is_empty();
             let mut any_verified = false;
@@ -25532,8 +25471,6 @@ struct GatewayCapabilityExecutor<'a> {
     capability_corpus: &'a [CapabilityEntry],
     automation_user_id: &'a UserId,
     automation_workspace_id: &'a WorkspaceId,
-    turn_scaffold: &'a scaffold::ScaffoldProfile,
-    floor_acting: bool,
     // ADR 0025: the extra turn-constants a recursive `browse(goal)` sub-turn needs (the granular browser
     // executor's ctx wants them). Held here so the manager's `browse` interception can build a
     // `GatewayBrowseExecutor` without threading them through the whole ChatToolCtx.
@@ -25696,8 +25633,6 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             capability_corpus: self.capability_corpus,
             automation_user_id: self.automation_user_id,
             automation_workspace_id: self.automation_workspace_id,
-            turn_scaffold: self.turn_scaffold,
-            floor_acting: self.floor_acting,
             turn_trace: self.turn_trace,
             active_sensitive,
         };
@@ -26159,25 +26094,6 @@ async fn stream_chat_via_openai(
         mode: request.mode.as_deref().unwrap_or("agent").to_string(),
         model: model.clone(),
     });
-    // Adaptive scaffolding floor (ADR 0018): resolve the turn model's capability
-    // tier ONCE, so the in-loop knobs (verify depth now; format/workflow-bias in
-    // later phases) can scale with it. Behind HOMUN_ADAPTIVE_FLOOR: `off` (default)
-    // keeps the old uniform behaviour, `shadow` logs the decision without acting,
-    // `on` lets it modulate. The Pavimento (memory, context, tool envelope, stop)
-    // stays uniform regardless.
-    let turn_tier = load_provider_registry().tier_for_model(&model);
-    let turn_scaffold = scaffold::scaffold_for(turn_tier);
-    // Resolve the floor mode ONCE per turn (env override > user setting > off).
-    let floor_mode = adaptive_floor_mode();
-    let floor_acting = floor_mode == "on";
-    let floor_observing = floor_mode != "off";
-    // The floor telemetry line for this turn (`None` when `off`). Computed once and used by
-    // both sinks: the dev-time stderr echo here, and the durable `tool_trace` push below
-    // (the Fase-1 telemetry that reaches the memory/learning substrate).
-    let floor_trace = scaffold::floor_trace_for_mode(turn_tier, &turn_scaffold, floor_mode);
-    if let Some(line) = &floor_trace {
-        eprintln!("model={model} {line}");
-    }
     // Scope MEMORY to THIS conversation's project (profile injection, recall, per-file
     // recall, extractor). Uses a dedicated memory scope — NOT the global active
     // workspace — so Composio's entity and the user's selected workspace are untouched.
@@ -26934,28 +26850,9 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
     // fail open to ordinary BM25 routing, same as today.
     let routing_binding: Option<RoutingBinding> =
         active_routing_binding(state, request.thread_id.as_deref());
-    let routed = route_capability_with_binding(&request.prompt, routing_binding.as_ref());
-    let was_workflow = matches!(routed, CapabilityRouteDecision::Workflow { .. });
-    // Adaptive floor (ADR 0018), Fase 2: for a CAPABLE model, relax a Workflow
-    // route to AgentLoop (the workflow tool stays offered; the model just isn't
-    // forced into it). Weak/Balanced and flag-off keep the forced behaviour. A
-    // deterministic plugin binding is an explicit user choice, not a per-turn BM25
-    // guess — it is NOT subject to this relax; the floor only softens the heuristic.
-    let mut capability_route = if routing_binding.is_some() {
-        routed
-    } else {
-        relax_route_for_tier(routed, turn_scaffold.workflow_bias, floor_acting)
-    };
-    if floor_observing
-        && was_workflow
-        && matches!(capability_route, CapabilityRouteDecision::AgentLoop { .. })
-    {
-        eprintln!(
-            "adaptive-floor: capable tier ({}) → workflow route relaxed to agent loop (workflow tool still offered)",
-            turn_tier.as_str()
-        );
-    }
-    // Plan precedence (Pavimento, tier- and flag-independent): an in-progress runtime
+    let mut capability_route =
+        route_capability_with_binding(&request.prompt, routing_binding.as_ref());
+    // Plan precedence (Pavimento, model- and provider-independent): an in-progress runtime
     // plan — or a bare continuation/approval ("1", "procedi") — owns the control flow.
     // Honouring a workflow route here would prune the plan's tools (update_plan,
     // browser_navigate) and dead-end it (the APPROVAL-RESUME / "1 → make_deck" bug).
@@ -27073,8 +26970,11 @@ to the user (one table per row + an optional Sources footer)."
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
     // "ask" also drops the toolset below (pure conversation).
     let mode = request.mode.as_deref().unwrap_or("agent").to_string();
-    // Turn trace: setup COMPLETED (memory recall, prompt-build, tier resolution) and generation is about
-    // to begin. A `turn_start` following a `turn_received` implies setup succeeded (no pre-gen hang).
+    // Model tier remains useful observability for role selection and evals; it no longer changes
+    // the agent-loop control flow.
+    let turn_tier = load_provider_registry().tier_for_model(&model);
+    // Turn trace: setup COMPLETED (memory recall and prompt-build) and generation is about to begin.
+    // A `turn_start` following a `turn_received` implies setup succeeded (no pre-gen hang).
     turn_trace.record(local_first_engine::turn_trace::TurnEvent::TurnStart {
         prompt_head: request.prompt.chars().take(200).collect(),
         prompt_len: request.prompt.chars().count(),
@@ -27587,14 +27487,6 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         let memory_answer = String::new();
         // Consequential actions performed this turn (any domain) → fed to the
         // memory extractor so the "why" of each mutation is remembered.
-        // Adaptive-floor telemetry (ADR 0018 Fase 1): persist the tier+profile decision into
-        // the turn trace so it reaches the memory/learning substrate — not just stderr — and
-        // the floor can later be VALIDATED against outcomes before it is switched on. Present
-        // only in the observation modes (`shadow`|`on`); `off` keeps the trace clean. Shared
-        // by chat and channel/automation turns (this is the one shared loop).
-        if let Some(line) = &floor_trace {
-            ls.tool_trace.push(line.clone());
-        }
         if let Some(route_line) = capability_route_trace_line(&capability_route_for_runtime) {
             ls.tool_trace.push(route_line.clone());
             let _ = emit_stream_event(
@@ -27742,7 +27634,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, floor_acting, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, turn_scaffold, browse_sources, cfg, trace_dir, execution_journal, effect_turn_id, effect_run_id, &turn_trace, vision_fallback_armed).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, browse_sources, cfg, trace_dir, execution_journal, effect_turn_id, effect_run_id, &turn_trace, vision_fallback_armed).await;
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
         // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
@@ -27846,7 +27738,6 @@ async fn run_agent_rounds(
     can_see_contacts: bool,
     can_see_calendar: bool,
     can_use_project_memory: bool,
-    floor_acting: bool,
     memory_user_message: String,
     memory_answer: String,
     last_model_error: Option<String>,
@@ -27859,7 +27750,6 @@ async fn run_agent_rounds(
     capability_route_for_runtime: CapabilityRouteDecision,
     automation_user_id: UserId,
     automation_workspace_id: WorkspaceId,
-    turn_scaffold: scaffold::ScaffoldProfile,
     browse_sources: Vec<String>,
     cfg: local_first_engine::TurnConfig,
     // 5.D1c.9: the armed trace-dump dir (gateway-resolved `~/.homun/logs`), or None when the dump is
@@ -27909,8 +27799,6 @@ async fn run_agent_rounds(
         capability_corpus: &capability_corpus,
         automation_user_id: &automation_user_id,
         automation_workspace_id: &automation_workspace_id,
-        turn_scaffold: &turn_scaffold,
-        floor_acting,
         // ADR 0025: turn-constants for a recursive `browse(goal)` sub-turn (used only when the manager
         // calls the `browse` tool; inert otherwise).
         prompt: &prompt,
@@ -30636,16 +30524,10 @@ async fn set_channel_settings(
     Ok(Json(settings))
 }
 
-/// User-editable runtime/behaviour settings persisted in the data dir. The chat
-/// path reads these live (the adaptive floor is resolved from here unless the
-/// `HOMUN_ADAPTIVE_FLOOR` env var overrides). One small JSON, separate from the
-/// channel settings.
+/// User-editable runtime/behaviour settings persisted in the data dir. One small
+/// JSON, separate from the channel settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RuntimeSettings {
-    /// Adaptive scaffolding floor (ADR 0018): `off` (default) | `shadow` | `on`.
-    #[serde(default = "default_adaptive_floor")]
-    adaptive_floor: String,
-
     /// The persisted source for `resolved_sandbox_mode` (ADR 0023): `read-only` |
     /// `workspace-write` (default) | `danger`. `#[serde(default)]` means older
     /// settings files without the field deserialize to the default (workspace-write)
@@ -30683,10 +30565,6 @@ struct RuntimeSettings {
     local_computer_autostart: bool,
 }
 
-fn default_adaptive_floor() -> String {
-    "off".to_string()
-}
-
 /// Default persisted sandbox mode = `workspace-write` (see `resolved_sandbox_mode`:
 /// behavior-preserving on this line; NOT `danger`).
 fn default_sandbox_mode() -> String {
@@ -30706,7 +30584,6 @@ fn default_local_computer_autostart() -> bool {
 impl Default for RuntimeSettings {
     fn default() -> Self {
         Self {
-            adaptive_floor: default_adaptive_floor(),
             sandbox_mode: default_sandbox_mode(),
             approval_policy: default_approval_policy(),
             writable_roots: Vec::new(),
@@ -30735,18 +30612,9 @@ fn save_runtime_settings(settings: &RuntimeSettings) -> Result<(), String> {
     fs::write(path, json).map_err(|e| e.to_string())
 }
 
-fn normalize_adaptive_floor(raw: &str) -> String {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "on" | "1" | "true" => "on",
-        "shadow" => "shadow",
-        _ => "off",
-    }
-    .to_string()
-}
-
 /// Overlay a PARTIAL settings patch (top-level keys only) onto `current`, then normalize
 /// every axis. Pure so the merge is unit-testable. Any key ABSENT from `patch` is
-/// preserved from `current`: each Settings control (adaptive-floor / sandbox / approval)
+/// preserved from `current`: each Settings control (sandbox / approval)
 /// posts only its own field, so a naive whole-struct deserialize would let one control
 /// silently reset the others to their serde defaults (a real clobber once >1 control
 /// exists). Extra/unknown keys in the patch are dropped by the RuntimeSettings decode.
@@ -30760,7 +30628,6 @@ fn merge_runtime_settings(current: &RuntimeSettings, patch: &serde_json::Value) 
     let mut merged: RuntimeSettings =
         serde_json::from_value(base).unwrap_or_else(|_| current.clone());
     // Normalize each axis to a token the resolvers accept (unknown → safe default).
-    merged.adaptive_floor = normalize_adaptive_floor(&merged.adaptive_floor);
     merged.sandbox_mode =
         crate::tool_safety::SandboxMode::parse(&merged.sandbox_mode).as_str().to_string();
     merged.approval_policy =
@@ -58567,7 +58434,7 @@ mod tests {
         // Persist read-only → persisted beats default.
         std::fs::write(
             dir.join("runtime-settings.json"),
-            r#"{"adaptive_floor":"off","sandbox_mode":"read-only","approval_policy":"on-request"}"#,
+            r#"{"sandbox_mode":"read-only","approval_policy":"on-request"}"#,
         )
         .expect("write runtime settings");
         assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::ReadOnly);
@@ -58604,7 +58471,7 @@ mod tests {
         // Persist `never` → persisted beats default.
         std::fs::write(
             dir.join("runtime-settings.json"),
-            r#"{"adaptive_floor":"off","sandbox_mode":"workspace-write","approval_policy":"never"}"#,
+            r#"{"sandbox_mode":"workspace-write","approval_policy":"never"}"#,
         )
         .expect("write runtime settings");
         assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::Never);
@@ -58642,7 +58509,7 @@ mod tests {
         // Global default = workspace-write; "ro" overrides to read-only, "rw" inherits.
         std::fs::write(
             dir.join("runtime-settings.json"),
-            r#"{"adaptive_floor":"off","sandbox_mode":"workspace-write","approval_policy":"on-request"}"#,
+            r#"{"sandbox_mode":"workspace-write","approval_policy":"on-request"}"#,
         )
         .expect("write runtime settings");
         std::fs::write(
@@ -58896,26 +58763,24 @@ mod tests {
         assert_eq!(noop.skill_confirmations.as_deref(), Some(&["medical".to_string()][..]));
     }
 
-    // ADR 0023 UI: each Settings control (adaptive-floor / sandbox / approval) POSTs only
+    // ADR 0023 UI: each Settings control (sandbox / approval) POSTs only
     // its own field. `set_runtime_settings` must MERGE the partial patch so saving one
     // control does not reset the others to their serde defaults — otherwise the three
     // selectors silently clobber each other. Pure test over the merge helper.
     #[test]
     fn set_runtime_settings_merges_partial_updates() {
         let current = super::RuntimeSettings {
-            adaptive_floor: "on".to_string(),
             sandbox_mode: "danger".to_string(),
             approval_policy: "never".to_string(),
             writable_roots: Vec::new(),
             skill_confirmations: Vec::new(),
             local_computer_autostart: true,
         };
-        // Patch only sandbox_mode → the other two axes are preserved.
+        // Patch only sandbox_mode → the other axes are preserved.
         let merged = super::merge_runtime_settings(
             &current,
             &serde_json::json!({ "sandbox_mode": "read-only" }),
         );
-        assert_eq!(merged.adaptive_floor, "on", "adaptive_floor preserved");
         assert_eq!(merged.sandbox_mode, "read-only", "sandbox_mode updated");
         assert_eq!(merged.approval_policy, "never", "approval_policy preserved");
         assert!(merged.local_computer_autostart, "autostart preserved");
@@ -58931,18 +58796,9 @@ mod tests {
         assert!(!toggled.local_computer_autostart, "autostart toggled off");
         let after = super::merge_runtime_settings(
             &toggled,
-            &serde_json::json!({ "adaptive_floor": "off" }),
+            &serde_json::json!({ "approval_policy": "on-request" }),
         );
         assert!(!after.local_computer_autostart, "autostart preserved through other patch");
-
-        // Reverse direction: patching adaptive_floor must NOT reset sandbox_mode/approval.
-        let merged2 = super::merge_runtime_settings(
-            &merged,
-            &serde_json::json!({ "adaptive_floor": "off" }),
-        );
-        assert_eq!(merged2.adaptive_floor, "off", "adaptive_floor updated");
-        assert_eq!(merged2.sandbox_mode, "read-only", "sandbox_mode preserved");
-        assert_eq!(merged2.approval_policy, "never", "approval_policy preserved");
 
         // Unknown tokens normalize to the safe default; extra keys are ignored.
         let merged3 = super::merge_runtime_settings(
@@ -58950,7 +58806,19 @@ mod tests {
             &serde_json::json!({ "sandbox_mode": "bogus", "unrelated": 1 }),
         );
         assert_eq!(merged3.sandbox_mode, "workspace-write", "unknown → safe default");
-        assert_eq!(merged3.adaptive_floor, "on", "adaptive_floor preserved");
+    }
+
+    #[test]
+    fn runtime_settings_discard_retired_adaptive_floor_field() {
+        let settings: super::RuntimeSettings = serde_json::from_str(
+            r#"{"adaptive_floor":"on","sandbox_mode":"read-only","approval_policy":"never"}"#,
+        )
+        .expect("legacy runtime settings remain readable");
+        let serialized = serde_json::to_value(settings).expect("serialize runtime settings");
+        assert!(
+            serialized.get("adaptive_floor").is_none(),
+            "the retired adaptive_floor field must not remain in the public contract"
+        );
     }
 
     #[test]
@@ -65642,51 +65510,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
-    fn adaptive_floor_relaxes_workflow_route_only_for_capable_tier() {
-        use super::scaffold::WorkflowBias;
-        let deck = super::route_capability("Crea una presentazione pitch per Homun");
-        assert!(
-            matches!(deck, super::CapabilityRouteDecision::Workflow { .. }),
-            "precondition: a deck request routes to a workflow"
-        );
-
-        // Capable + floor ON → relaxed to the agent loop.
-        let relaxed = super::relax_route_for_tier(deck.clone(), WorkflowBias::AllowAgentic, true);
-        assert!(matches!(
-            relaxed,
-            super::CapabilityRouteDecision::AgentLoop { .. }
-        ));
-
-        // Capable but floor OFF → unchanged (still forced).
-        assert!(matches!(
-            super::relax_route_for_tier(deck.clone(), WorkflowBias::AllowAgentic, false),
-            super::CapabilityRouteDecision::Workflow { .. }
-        ));
-
-        // Weak/Balanced tiers stay forced even with the floor ON.
-        assert!(matches!(
-            super::relax_route_for_tier(deck.clone(), WorkflowBias::ForceWorkflow, true),
-            super::CapabilityRouteDecision::Workflow { .. }
-        ));
-        assert!(matches!(
-            super::relax_route_for_tier(deck, WorkflowBias::Prefer, true),
-            super::CapabilityRouteDecision::Workflow { .. }
-        ));
-
-        // AtomicTool (PDF) is never relaxed — it's the right tool regardless of tier.
-        let pdf = super::route_capability("estrai testo da questo PDF");
-        assert!(matches!(
-            pdf,
-            super::CapabilityRouteDecision::AtomicTool { .. }
-        ));
-        assert!(matches!(
-            super::relax_route_for_tier(pdf, WorkflowBias::AllowAgentic, true),
-            super::CapabilityRouteDecision::AtomicTool { .. }
-        ));
-    }
-
-    #[test]
-    fn active_binding_forces_workflow_route_bypassing_bm25_and_relax() {
+    fn active_binding_forces_workflow_route_bypassing_bm25() {
         let binding = super::RoutingBinding {
             plugin_id: "presentations".into(),
             route_id: "presentations.template_document".into(),

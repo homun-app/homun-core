@@ -113,15 +113,9 @@ A ogni turno di chat, `route_capability(prompt)` (`main.rs`) decide:
 AgentLoop`. `workflow_route_from_capability` (`main.rs`) la collassa nel più semplice
 `WorkflowRouteDecision { Workflow | AgentLoop }` usato per potare il toolset.
 
-Sopra la rotta grezza agiscono due correttori, **in quest'ordine**, nel cuore del turno
-(`main.rs`):
+Sopra la rotta grezza agisce un solo correttore nel cuore del turno (`main.rs`):
 
-- **Floor adattivo (ADR 0018, Fase 2)** — `relax_route_for_tier(route, bias, floor_on)`
-  (`main.rs`): per un modello **capace** (`scaffold::WorkflowBias::AllowAgentic`) un Workflow
-  viene **rilassato** ad AgentLoop (il tool del workflow resta comunque offerto, cade solo
-  la potatura + il vincolo «esattamente una volta»). Modelli deboli/bilanciati o floor
-  off restano invariati; `AtomicTool` non si rilassa mai.
-- **Precedenza del piano (`plan-precedence`)** — `main.rs`: se è in corso un piano
+- **Precedenza del piano (`plan-precedence`)** — se è in corso un piano
   runtime (`thread_has_active_runtime_plan`, `main.rs`, che cerca in memoria un
   `open_loop` con `source=runtime_plan` per il thread) **oppure** il messaggio è una
   continuazione/approvazione («1», «procedi», `is_plan_continuation_message`), una rotta
@@ -204,8 +198,7 @@ flowchart TD
     D --> E[ToolAccessPlan: visible_tools, executable_tools]
 
     P[Prompt del turno] --> R[route_capability: prefilter atomico, poi BM25 sui workflow nativi]
-    R --> F1[relax_route_for_tier: floor adattivo ADR 0018]
-    F1 --> F2[plan-precedence: piano attivo o continuazione forza AgentLoop]
+    R --> F2[plan-precedence: piano attivo o continuazione forza AgentLoop]
     F2 --> G{Rotta finale}
 
     G -->|Workflow| H[Carica solo il tool del workflow, pota gli altri]
@@ -284,13 +277,6 @@ flowchart TD
 
 ## Divergenze / debolezze
 
-- **`route_capability(prompt)` non vede il tier del modello (ADR 0018).** La decisione di
-  scaffolding dipende **solo** dal tipo di richiesta: `ModelTier` non raggiunge
-  `route_capability` (`main.rs`). Oggi il floor adattivo è correttivo a valle
-  (`relax_route_for_tier`, `main.rs`), non integrato nella decisione: un modello
-  frontier viene comunque profilato sugli slot pensati per i deboli prima del rilascio.
-  Direzione ADR 0018: rendere le manopole funzione del `ModelTier` portato fino alla
-  decisione di scaffolding.
 - **Il browser è visibile al planner (F1.d) — resta inline nel toolset LIVE della chat.**
   Il seed (`seed_default_capabilities`, `browser_registry_cached_tools`) semina nel
   provider `browser` i **veri** sei tool di chat (`browser_navigate`/`_snapshot`/`_act`/
@@ -350,7 +336,7 @@ flowchart TD
   (`max_loaded_tools`).
 - `crates/orchestrator/src/brain.rs` — `load_initial_tools`, retry/`NeedsMoreTools`.
 - `crates/desktop-gateway/src/main.rs` (~59k righe: cita i simboli, non i numeri) —
-  routing (`route_capability`, `relax_route_for_tier`, `thread_has_active_runtime_plan`,
+  routing (`route_capability`, `thread_has_active_runtime_plan`,
   `plan-precedence`), toolset live (`CORE_TOOL_NAMES`, split CORE/DEFERRED,
   `MCP_ALWAYS_LOAD_MAX = 24`, `auto_retrieve_composio`), `bm25_rank` (wrapper sul ranker
   condiviso), `find_capability` (handler), `lock_capability_registry`,

@@ -1035,13 +1035,11 @@ async function electronSetRuntimeModel(model: string): Promise<{ active: string 
   return gatewayPostJson<{ active: string }>("/api/runtime/model", { model });
 }
 
-/** Persisted runtime/behaviour axes (GET returns all three). Maps 1:1 to the gateway
+/** Persisted runtime/behaviour axes. Maps 1:1 to the gateway
  *  `RuntimeSettings` struct the chat path resolves live:
- *  - `adaptive_floor` (ADR 0018): "off" | "shadow" | "on"
  *  - `sandbox_mode` (ADR 0023): "read-only" | "workspace-write" | "danger"
  *  - `approval_policy` (ADR 0023): "untrusted" | "on-failure" | "on-request" | "never" */
 export interface RuntimeSettings {
-  adaptive_floor: string;
   sandbox_mode: string;
   approval_policy: string;
   /** Phase 2 — global default extra writable folders (empty = only the project root). */

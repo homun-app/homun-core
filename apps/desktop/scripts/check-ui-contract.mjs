@@ -101,6 +101,8 @@ assertContains("src/lib/accent.ts", 'export const DEFAULT_ACCENT = "#157a6e";', 
 assertContains("src/types.ts", '  | "usage"', "Settings must expose a Usage section");
 assertContains("src/data/mockData.ts", 'id: "usage"', "Settings drawer must list Usage");
 assertContains("src/components/SettingsView.tsx", "<UsageSettingsPane />", "Settings must render Usage");
+assertNotContains("src/components/SettingsView.tsx", "AdaptiveFloorBlock", "Settings must not expose the retired adaptive-floor experiment");
+assertNotContains("src/lib/coreBridge.ts", "adaptive_floor", "Desktop runtime settings must not expose the retired adaptive-floor field");
 assertContains("src/components/UsageSettingsPane.tsx", 'role="tablist"', "Usage views must be keyboard-addressable tabs");
 assertContains("src/components/UsageSettingsPane.tsx", 'aria-live="polite"', "Usage loading and errors must be announced");
 assertContains("src/components/UsageSettingsPane.tsx", 'className="reported"', "reported cost must stay separately labeled");
@@ -176,6 +178,9 @@ assertContains("src/components/UsageSettingsPane.tsx", "<UsageCalendar", "Settin
 assertContains("src/components/UsageSettingsPane.tsx", "dominant_provider", "Settings Overview must preserve provider-qualified model identity");
 assertNotContains("src/components/UsageSettingsPane.tsx", "usage-metrics", "Settings Overview must not keep the old KPI tile grid");
 for (const locale of ["en", "it", "es", "fr", "de"]) {
+  assertNotContains(`src/i18n/locales/${locale}.json`, '"adaptiveFloorTitle"', `${locale} must not retain the retired adaptive-floor label`);
+  assertNotContains(`src/i18n/locales/${locale}.json`, '"adaptiveFloorDesc"', `${locale} must not retain the retired adaptive-floor description`);
+  assertNotContains(`src/i18n/locales/${locale}.json`, '"adaptiveFloorShadow"', `${locale} must not retain the retired adaptive-floor shadow copy`);
   assertContains(`src/i18n/locales/${locale}.json`, '"use_for_task"', `${locale} must translate the task suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"change_role_preference"', `${locale} must translate the preference suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"dismiss"', `${locale} must translate suggestion dismissal`);

@@ -230,9 +230,9 @@ non un cambio di motore: il loop vive solo in `crates/engine/src/agent_loop.rs::
 - **L1 — Tool/Capability**: browser, sandbox, fs, skill, MCP, connettori — contratti
   affidabili. Vedi [browser.md](browser.md), [tools-mcp-skills.md](tools-mcp-skills.md),
   [capability-registry.md](capability-registry.md).
-- **L2 — Loop di controllo**: questa pagina. Harness possiede l'envelope; inner loop
-  **dovrebbe** essere libero per i capaci / scaffolded per i deboli (ADR 0018, **non
-  implementato**: floor default-off).
+- **L2 — Loop di controllo**: questa pagina. L'harness possiede un solo envelope e un solo
+  comportamento canonico per tutti i modelli. Il tier serve alla selezione dei ruoli e
+  all'osservabilità, non modifica il control-flow del turno.
 - **L3 — Convergenza**: **RISOLTA** da ADR 0021 → il turno gira su **un solo** loop
   guardato (motore #1). L'idea ADR 0020 di instradare il turno sull'orchestrator è stata
   superata (drive-come-chat rimosso); l'estrazione del loop in `crates/engine` (ADR 0024) e
@@ -249,14 +249,11 @@ non un cambio di motore: il loop vive solo in `crates/engine/src/agent_loop.rs::
   lo ha estratto nel solo `crates/engine/src/agent_loop.rs::run_turn`; il `drive`-come-chat (ADR 0020)
   è stato **rimosso** (audit 2026-07-09). `crates/orchestrator` resta in albero ma **dormiente per la
   chat**: non guida alcun turno, sopravvive solo come planner deliverable (`plan_only`) + `brain_materialize`.
-- **ADR 0018** (inner loop tier-adattivo): **parziale, default-off**. Il meccanismo È cablato:
-  `scaffold_for(turn_tier)` (`scaffold.rs`) deriva le manopole e, sotto `adaptive_floor=on`,
-  **workflow_bias** rilassa la rotta (`relax_route_for_tier`) e **verify_depth** modula il gate
-  F2; `format` è MOOT (chat già native tool-calling); `slot` è observe-only. **F2.1 (fatto):** la
-  decisione `{tier, profilo, mode}` è persistita nel `tool_trace` (→ memoria/learning,
-  `scaffold::floor_trace_for_mode`) in `shadow`|`on` — la telemetria Fase-1 prerequisito per
-  accendere il floor. Resta off di default finché la eval bi-popolazione (gemma4 vs capace) non lo
-  valida; e i modelli capaci ricevono ancora lo scaffolding dei deboli **finché il floor è off**.
+- **ADR 0018** (inner loop tier-adattivo): la parte adaptive-floor è stata **ritirata il
+  2026-07-21**. L'esperimento era parziale e default-off; esponeva più superficie di quanta ne
+  consumasse realmente il runtime. Il loop usa ora un solo routing e una sola verifica per tutti i
+  modelli. Memoria, contesto, tool envelope, stop conditions, approval e plan-precedence restano il
+  pavimento uniforme.
 
 ### Conseguenze osservate (sintomi)
 - "Il piano a volte parte, a volte no, lo segue e non lo segue" → creazione piano lasciata

@@ -215,7 +215,6 @@ il ruolo residuo del crate. I deliverable sono anche **entità di memoria** (rec
 | Vault (chiavi wrapped da syskey OS, PIN reveal-only) | **vivo** | on |
 | Canali Telegram/WhatsApp, contained-computer, graphify | **vivo** (sidecar) | opt-in per config |
 | Memoria service/pool (ADR 0022, estrazione crate) | **dietro-flag** | **off** — WIP dichiarato (`HOMUN_MEMORY_SERVICE`/`_POOL`) |
-| Adaptive floor per-tier (ADR 0018) | **dietro-flag** | **off** — WIP dichiarato (`HOMUN_ADAPTIVE_FLOOR`) |
 | `crates/orchestrator` come **motore di chat** | **ritirato** | — (drive-as-chat rimosso) |
 | `crates/orchestrator` come **planner deliverable** | **vivo** | on (`plan_only`) |
 
@@ -226,10 +225,9 @@ il ruolo residuo del crate. I deliverable sono anche **entità di memoria** (rec
 - **Memoria fluida (ADR 0022):** il crate è reale e convergente, ma i due flag di migrazione restano
   **default-OFF**. Il tool di recall on-demand è live; la convergenza completa sul service + la pulizia di
   fn morte del gateway è il residuo (Tappa 3). *Nessuna regressione col flag off (stesso codice del crate).*
-- **Adaptive floor (ADR 0018):** la macchina è cablata e testata (tier → profilo → due branch reali:
-  relax del route + profondità di verifica), ma **default-OFF**: nel default il tier viene calcolato e non
-  modula nulla. Due knob (`slot`/`format`) sono superficie senza consumatore. Land parziale + kill dei knob
-  morti è una decisione aperta (fuori scope pre-presentazione).
+- **Loop canonico:** l'esperimento adaptive-floor di ADR 0018 è stato ritirato il 2026-07-21.
+  `ModelTier` resta per selezione dei ruoli e osservabilità, ma non modifica routing, verifica o
+  libertà del modello durante il turno.
 - **`crates/orchestrator`:** il *secondo motore* (drive plan-execute come chat) è stato **rimosso** (ADR
   0020, superseded da 0021). Il crate **resta** solo per il **tipo `ExecutionPlan`** e il **planner
   deliverable** (`plan_only`, per `make_deck`/`make_document`) + `brain_materialize`. Non è un motore di chat.
