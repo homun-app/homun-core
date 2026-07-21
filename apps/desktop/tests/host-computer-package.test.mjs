@@ -61,9 +61,14 @@ test("Mac app access requires an explicit app selection", async () => {
     path.resolve(import.meta.dirname, "../src/components/SettingsView.tsx"),
     "utf8",
   );
+  const styles = await readFile(
+    path.resolve(import.meta.dirname, "../src/styles.css"),
+    "utf8",
+  );
 
   assert.doesNotMatch(source, /setSelectedBundle\(\(current\).*nextApps\.find/s);
   assert.match(source, /<option value="">\{t\("settings\.computer\.selectApp"\)\}<\/option>/);
+  assert.match(styles, /\.set-btn:disabled\s*\{[^}]*cursor:\s*not-allowed;[^}]*opacity:/s);
 });
 
 test("assembled helper authenticates a real Unix-socket handshake", async (t) => {

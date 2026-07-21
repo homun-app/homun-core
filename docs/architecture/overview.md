@@ -15,7 +15,8 @@
 > (`Desktop/homun-architecture.svg`, datato: MLX/Gemma-fallback, loop non
 > cross-modello). Dettagli: [agent-loop](agent-loop.md) · [memory](memory.md) ·
 > [plugins](plugins.md) · [system-map](system-map.md). Un poster SVG rifinito si
-> rigenera su richiesta.
+> rigenera su richiesta. Host Computer Control, aggiunto dopo questa mappa, è
+> documentato separatamente in [host-computer-control](host-computer-control.md).
 
 ```mermaid
 flowchart TD

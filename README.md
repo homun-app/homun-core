@@ -74,12 +74,17 @@ interface, and standalone sidecars handle heavier or isolated work.
 | `crates/desktop-gateway` | Rust gateway, agent loop, routing, task runtime, and APIs |
 | `crates/*` | Memory, inference, orchestration, skills, secrets, and capabilities |
 | `runtimes/contained-computer` | Sandboxed Docker computer with browser and shell over CDP/noVNC |
+| `runtimes/host-computer/macos` | Native macOS helper for explicitly granted host applications |
 | `runtimes/browser-automation` | Playwright/CDP browser driver |
 | `runtimes/channel-telegram`, `channel-whatsapp` | Messaging bridges |
 
 Read [PROJECT.md](PROJECT.md) for the founding document and the
 [architecture reference](https://homun.app/reference/architecture/) for the component
 map.
+
+The independent [Host Computer Control architecture](docs/architecture/host-computer-control.md)
+documents how the macOS helper, signed app grants, approvals, redaction, and physical
+takeover safety boundary work. It is separate from the Docker-based contained computer.
 
 ## Develop
 
