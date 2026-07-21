@@ -131,7 +131,7 @@ jobs:
         working-directory: apps/desktop
         shell: bash
         run: |
-          APP_PATH="$(find dist-installers -maxdepth 3 -type d -name Homun.app -print -quit)"
+          APP_PATH="$(find dist-installers -maxdepth 3 -type d -iname homun.app -print -quit)"
           test -n "$APP_PATH"
           npm run verify:host-computer-package -- --app "$APP_PATH" --expected-arch arm64
 

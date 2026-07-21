@@ -52,6 +52,7 @@ test("release workflow verifies the first beta as arm64-only", async () => {
     path.resolve(import.meta.dirname, "../../../.github/workflows/build.yml"),
     "utf8",
   );
+  assert.match(workflow, /find dist-installers .* -iname homun\.app/);
   assert.match(workflow, /verify:host-computer-package -- --app "\$APP_PATH" --expected-arch arm64/);
 });
 
