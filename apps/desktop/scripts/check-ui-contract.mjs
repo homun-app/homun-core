@@ -146,7 +146,8 @@ assertContains("src/styles.css", ".usage-calendar-grid", "Usage calendar must us
 assertContains("src/styles.css", ".usage-calendar-tooltip", "Usage calendar must provide an unclipped callout");
 assertContains("src/styles.css", ".app-shell.drawer-open > .workspace {\n    grid-column: 1;", "Narrow Settings content must stay in the visible grid column");
 assertContains("src/styles.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 292px), 292px) + 24px);", "Narrow Settings content must clear the overlay navigation");
-assertContains("src/styles.css", ".active-task-layout.is-empty {\n    grid-template-rows: 58px auto auto minmax(24px, 1fr);", "Narrow empty-chat hero must size its row from content instead of clipping upward");
+assertContains("src/styles.css", ".active-task-layout.is-empty {\n  grid-template-rows: 58px minmax(0, 1fr) auto;", "Empty chat must keep the composer in the same bottom row as active conversations");
+assertNotContains("src/styles.css", "grid-template-rows: 58px 1fr auto 1fr", "Empty chat must not vertically center the composer with spacer rows");
 assertNotContains("src/components/UsageSettingsPane.tsx", "latency-p50", "Models must not show latency until canonical aggregates expose it");
 assertNotContains("src/components/UsageSettingsPane.tsx", "fallback-count", "Models must not show fallback placeholders as measured data");
 assertContains("src/components/UsageSettingsPane.tsx", "modelCostProvenance", "Per-model cost must disclose reported, estimated, unknown, or not-billed provenance");
@@ -159,6 +160,9 @@ assertContains("src/components/UsageCalendar.tsx", "dominant_provider", "Usage c
 assertNotContains("src/components/ChatView.tsx", "chat-hero-mark", "New chat must not keep the decorative brandmark");
 assertNotContains("src/components/ChatView.tsx", "chat.emptyHeroSub", "New chat must not keep the fixed subtitle");
 assertContains("src/components/ChatView.tsx", "selectGreetingKey", "New chat must select a stable curated greeting");
+assertContains("src/components/ChatView.tsx", "chat-hero-headline", "New chat must render the primary greeting separately");
+assertContains("src/components/ChatView.tsx", "chat-hero-prompt", "New chat must render the rotating prompt as secondary typography");
+assertContains("src/styles.css", ".chat-hero-welcome", "New chat must give the welcome block its own spacing hierarchy");
 assertContains("src/data/mockData.ts", 'id: "m1_ready"', "The bootstrap greeting must be recognized as a removable placeholder");
 assertContains("src/components/ChatUsageOverview.tsx", "<UsageCalendar", "New chat must render the real activity calendar");
 assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageDaily", "New chat must load real daily usage");

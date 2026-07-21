@@ -2694,21 +2694,14 @@ body.resizing-drawer {
   display: none;
 }
 
-/* New-chat layout (mock): the prompt lives in the CENTER with the hero, not docked
-   at the bottom. A 4th 1fr row below the composer balances the 1fr above the hero,
-   so the [hero + composer] block sits vertically centered while the header stays
-   pinned at the top. Reverts to the docked composer as soon as a message exists. */
+/* New chat keeps the same stable composer position as an active conversation.
+   The scrollable middle row owns the welcome and usage overview. */
 .active-task-layout.is-empty {
-  grid-template-rows: 58px 1fr auto 1fr;
+  grid-template-rows: 58px minmax(0, 1fr) auto;
 }
 .active-task-layout.is-empty .thread-scroll {
-  overflow: visible;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-.active-task-layout.is-empty .chat-hero {
-  padding-top: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .task-topbar {
@@ -7211,23 +7204,37 @@ body.resizing-drawer {
   flex-direction: column;
   align-items: center;
   text-align: center;
-  width: min(100%, 820px);
+  width: min(100%, 920px);
   box-sizing: border-box;
   margin-inline: auto;
-  padding: clamp(48px, 9vh, 104px) 24px 0;
+  padding: clamp(40px, 7vh, 76px) 24px 40px;
 }
-.chat-hero-title {
+.chat-hero-welcome {
+  display: grid;
+  justify-items: center;
+  gap: clamp(8px, 1vh, 10px);
+  max-width: 760px;
+}
+.chat-hero-headline {
   font-family: var(--font-sans);
   font-weight: 620;
-  font-size: clamp(23px, 2.2vw, 29px);
-  letter-spacing: -0.025em;
-  line-height: 1.2;
+  font-size: clamp(28px, 2.6vw, 34px);
+  letter-spacing: -0.03em;
+  line-height: 1.12;
   color: var(--text);
-  margin: 0 0 24px;
+  margin: 0;
+  text-wrap: balance;
+}
+.chat-hero-prompt {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(14px, 1.25vw, 16px);
+  line-height: 1.45;
   text-wrap: balance;
 }
 .chat-usage-overview {
   width: 100%;
+  margin-top: clamp(36px, 6vh, 72px);
   padding: 14px 16px 12px;
   box-sizing: border-box;
   border-radius: 15px;
@@ -7408,7 +7415,9 @@ body.resizing-drawer {
 .chat-usage-infographic .usage-calendar-legend {
   justify-content: center;
 }
-.chat-usage-infographic .usage-calendar-scroll { display: flex; }
+.chat-usage-infographic .usage-calendar-scroll { display: block; }
+.chat-usage-infographic .usage-calendar-grid { margin-inline: auto; }
+.chat-usage-infographic .usage-calendar-legend { justify-content: center; }
 .usage-calendar-tooltip {
   position: fixed;
   z-index: 120;
@@ -7519,11 +7528,13 @@ body.resizing-drawer {
 }
 @media (max-width: 760px) {
   .active-task-layout.is-empty {
-    grid-template-rows: 58px auto auto minmax(24px, 1fr);
-    overflow-y: auto;
+    grid-template-rows: 58px minmax(0, 1fr) auto;
   }
-  .active-task-layout.is-empty .thread-scroll {
-    justify-content: flex-start;
+  .chat-hero {
+    padding: 32px 16px 28px;
+  }
+  .chat-usage-overview {
+    margin-top: 32px;
   }
   .chat-usage-infographic {
     grid-template-columns: minmax(0, 1fr);
