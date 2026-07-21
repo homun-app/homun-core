@@ -51,6 +51,7 @@ mod sandbox;
 // macOS Seatbelt (`sandbox-exec`) profile generator from a SandboxPolicy (ADR 0023,
 // step 3; pure string generation — not wired yet).
 mod seatbelt;
+mod semantic_decision;
 mod task_registry;
 mod temporal;
 mod template_packs;
