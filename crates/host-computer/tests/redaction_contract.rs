@@ -1,5 +1,5 @@
 use local_first_host_computer::{
-    protocol::{AppSnapshot, HostElement, SemanticAction, SnapshotTreeMode},
+    protocol::{AppSnapshot, ArtifactRef, HostElement, SemanticAction, SnapshotTreeMode},
     redaction::{DisclosurePolicy, ProviderDisclosure, project_snapshot},
 };
 
@@ -39,7 +39,7 @@ fn remote_projection_preserves_structure_and_actionability() {
         &snapshot(Some("customer@example.com"), false),
         ProviderDisclosure::Remote,
         DisclosurePolicy {
-            disclose_screenshots_to_remote: false,
+            disclose_screenshot_reference: false,
         },
     );
     assert_eq!(projected.elements[0].index, 4);
@@ -53,9 +53,30 @@ fn unknown_provider_fails_closed_and_secure_controls_have_no_affordance() {
         &snapshot(Some("secret"), true),
         ProviderDisclosure::Unknown,
         DisclosurePolicy {
-            disclose_screenshots_to_remote: true,
+            disclose_screenshot_reference: true,
         },
     );
     assert_eq!(projected.elements[0].value, None);
     assert!(projected.elements[0].actions.is_empty());
+}
+
+#[test]
+fn beta_projection_strips_screenshot_refs_for_every_provider() {
+    let mut input = snapshot(Some("safe text"), false);
+    input.screenshot_ref = Some(ArtifactRef {
+        artifact_ref:
+            "host-computer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .into(),
+        mime_type: "image/png".into(),
+        size_bytes: 42,
+        sha256: "a".repeat(64),
+    });
+    for provider in [
+        ProviderDisclosure::Local,
+        ProviderDisclosure::Remote,
+        ProviderDisclosure::Unknown,
+    ] {
+        let projected = project_snapshot(&input, provider, DisclosurePolicy::MAC_APPS_BETA);
+        assert!(projected.screenshot_ref.is_none());
+    }
 }

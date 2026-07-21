@@ -593,8 +593,12 @@ pub async fn worker_get_state(session_id: &str, pid: u32) -> Result<Value, Strin
     let snapshot = runtime.client.get_app_state(pid, None, context()).await.map_err(|error| error.to_string())?;
     runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?
         .insert(snapshot.snapshot_id.clone(), SnapshotGuard { app: identity, snapshot: snapshot.clone() });
-    let value = serde_json::to_value(project_snapshot(&snapshot, ProviderDisclosure::Remote,
-        DisclosurePolicy { disclose_screenshots_to_remote: false })).map_err(|error| error.to_string())?;
+    let value = serde_json::to_value(project_snapshot(
+        &snapshot,
+        ProviderDisclosure::Remote,
+        DisclosurePolicy::MAC_APPS_BETA,
+    ))
+    .map_err(|error| error.to_string())?;
     if let Ok(snapshot) = sessions().lock().map_err(|_| ()).and_then(|mut coordinator| {
         coordinator.mark_observing_app(session_id, app_display_name, now_ms()).map_err(|_| ())
     }) {

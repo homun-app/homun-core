@@ -9,7 +9,13 @@ pub enum ProviderDisclosure {
 
 #[derive(Debug, Clone, Copy)]
 pub struct DisclosurePolicy {
-    pub disclose_screenshots_to_remote: bool,
+    pub disclose_screenshot_reference: bool,
+}
+
+impl DisclosurePolicy {
+    pub const MAC_APPS_BETA: Self = Self {
+        disclose_screenshot_reference: false,
+    };
 }
 
 pub fn project_snapshot(
@@ -32,7 +38,7 @@ pub fn project_snapshot(
             }
         }
     }
-    if provider != ProviderDisclosure::Local && !policy.disclose_screenshots_to_remote {
+    if !policy.disclose_screenshot_reference {
         projected.screenshot_ref = None;
     }
     projected
