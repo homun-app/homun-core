@@ -9228,10 +9228,6 @@ enum CapabilityRouteDecision {
     },
 }
 
-fn route_workflow_or_agent(prompt: &str) -> WorkflowRouteDecision {
-    workflow_route_from_capability(&route_capability(prompt))
-}
-
 fn workflow_route_from_capability(decision: &CapabilityRouteDecision) -> WorkflowRouteDecision {
     match decision {
         CapabilityRouteDecision::Workflow {
@@ -9250,63 +9246,70 @@ fn workflow_route_from_capability(decision: &CapabilityRouteDecision) -> Workflo
     }
 }
 
-fn route_capability(prompt: &str) -> CapabilityRouteDecision {
-    if let Some(reason) = atomic_pdf_operation_reason(prompt) {
-        return CapabilityRouteDecision::AtomicTool {
-            capability_key: "pdf_atomic",
-            reason,
-        };
-    }
-
-    let entries = native_workflow_capability_entries();
-    let Some(entry) = bm25_rank(&entries, prompt, 1).into_iter().next() else {
+fn route_capability_from_semantic(
+    semantic: Option<&semantic_decision::ValidatedSemanticDecision>,
+) -> CapabilityRouteDecision {
+    let Some(semantic) = semantic else {
         return CapabilityRouteDecision::AgentLoop {
-            reason: "No native workflow candidate matched the request.".to_string(),
+            reason: "No validated semantic decision; safe agent-loop fallback.".to_string(),
         };
     };
-    if let Some(capability) = native_workflow_by_tool_name(&entry.key) {
-        let alternatives = entries
-            .iter()
-            .filter(|candidate| candidate.key != entry.key)
-            .map(|candidate| candidate.key.clone())
-            .collect();
-        return CapabilityRouteDecision::Workflow {
-            workflow_id: capability.workflow_id,
-            tool_name: capability.tool_name,
-            scaffolding_tier: capability.scaffolding_tier,
-            reason: format!(
-                "Selected `{}` from the native workflow registry via BM25 over semantic route text.",
-                capability.tool_name
-            ),
-            alternatives,
-        };
-    }
-    CapabilityRouteDecision::AgentLoop {
-        reason: "The best capability candidate was not a native workflow.".to_string(),
+    match semantic.decision.execution_shape {
+        semantic_decision::ExecutionShape::AgentLoop => CapabilityRouteDecision::AgentLoop {
+            reason: semantic.decision.rationale.clone(),
+        },
+        semantic_decision::ExecutionShape::Workflow => {
+            let Some(tool_name) = semantic.decision.selected_capability.as_deref() else {
+                return CapabilityRouteDecision::AgentLoop {
+                    reason: "Validated workflow decision omitted its capability; safe fallback."
+                        .to_string(),
+                };
+            };
+            let Some(capability) = native_workflow_by_tool_name(tool_name) else {
+                return CapabilityRouteDecision::AgentLoop {
+                    reason: "Validated workflow capability is unavailable; safe fallback."
+                        .to_string(),
+                };
+            };
+            CapabilityRouteDecision::Workflow {
+                workflow_id: capability.workflow_id,
+                tool_name: capability.tool_name,
+                scaffolding_tier: capability.scaffolding_tier,
+                reason: format!(
+                    "Selected by semantic decision schema v{}: {}",
+                    semantic.provenance.schema_version, semantic.decision.rationale
+                ),
+                alternatives: Vec::new(),
+            }
+        }
+        semantic_decision::ExecutionShape::AtomicCapability => {
+            if semantic.decision.selected_capability.as_deref() == Some("pdf_atomic") {
+                CapabilityRouteDecision::AtomicTool {
+                    capability_key: "pdf_atomic",
+                    reason: semantic.decision.rationale.clone(),
+                }
+            } else {
+                CapabilityRouteDecision::AgentLoop {
+                    reason: "Validated atomic capability is unavailable; safe fallback.".to_string(),
+                }
+            }
+        }
     }
 }
 
 /// S2 (plugin-owned deterministic routing): an active `RoutingBinding` — thread-scoped,
 /// set once when the user picks a template/route (e.g. "Use template"; see
 /// `RoutingBinding` in lib.rs, `ChatStore::thread_routing_binding`) — decides the route
-/// DIRECTLY when it resolves to a registered deterministic `WorkflowRouting`, bypassing
-/// per-turn BM25 (`route_capability`) entirely. This is the root-cause fix for "Use
-/// template" intake follow-up turns ("mio", "1 Senior developer…") that don't BM25-match
-/// the original route text and would otherwise fall through to the general AgentLoop (no
-/// tool pruning → a weak model wanders into skills/shell).
+/// DIRECTLY when it resolves to a registered `WorkflowRouting`. This is not natural-language
+/// inference: the binding records an exact route the user already selected.
 ///
 /// `enabled: &|_| true` — not a plugin-enablement gate — because the persisted binding
 /// itself IS the enablement signal: the user already chose this route this thread.
 ///
-/// Falls back to `route_capability(prompt)` (today's behaviour, unchanged) when: there is
-/// no binding, the bound `route_id` isn't a known deterministic routing, or (today
-/// unreachable — both seeded system routings map onto native workflows) the routing's
-/// `tool_name` isn't a native workflow. `CapabilityRouteDecision::Workflow::tool_name` is
-/// `&'static str`, sourced from `native_workflow_by_tool_name`; without a native match
-/// there is no static string to hand back, so we fail open to BM25 rather than fabricate
-/// one — revisit if a non-native deterministic routing is ever registered.
+/// Without a valid explicit binding, routing consumes the validated model-owned semantic
+/// decision. It never derives a route from prompt keywords or retrieval rank.
 fn route_capability_with_binding(
-    prompt: &str,
+    semantic: Option<&semantic_decision::ValidatedSemanticDecision>,
     binding: Option<&RoutingBinding>,
 ) -> CapabilityRouteDecision {
     if let Some(binding) = binding {
@@ -9329,7 +9332,7 @@ fn route_capability_with_binding(
             };
         }
     }
-    route_capability(prompt)
+    route_capability_from_semantic(semantic)
 }
 
 /// S2 T4: read the thread's active deterministic `RoutingBinding`, if any. Single fail-open
@@ -9399,30 +9402,6 @@ fn thread_user_message_count_fail_open(state: &AppState, thread_id: Option<&str>
         .and_then(|tid| lock_store(state).ok().and_then(|store| store.messages(tid).ok()))
         .map(|snapshot| thread_user_message_count(&snapshot))
         .unwrap_or(0)
-}
-
-fn atomic_pdf_operation_reason(prompt: &str) -> Option<String> {
-    let tokens: std::collections::BTreeSet<String> = cap_tokenize(prompt).into_iter().collect();
-    let mentions_pdf = tokens.contains("pdf");
-    if !mentions_pdf {
-        return None;
-    }
-    let atomic_actions = [
-        "estrai", "estrarre", "extract", "leggi", "read", "unisci", "merge", "combina", "combine",
-        "converti", "convert", "comprimi", "compress", "split", "dividi",
-    ];
-    let matched = atomic_actions
-        .iter()
-        .find(|action| tokens.contains(**action))?;
-    Some(format!(
-        "PDF action `{matched}` is an atomic document operation, not an end-to-end document creation workflow."
-    ))
-}
-
-#[cfg(test)]
-fn workflow_router_instruction(prompt: &str) -> Option<String> {
-    let decision = route_workflow_or_agent(prompt);
-    workflow_router_instruction_for_decision(&decision)
 }
 
 fn workflow_router_instruction_for_decision(decision: &WorkflowRouteDecision) -> Option<String> {
@@ -9605,29 +9584,6 @@ fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> 
         .is_some_and(|plan| plan.status == "open")
 }
 
-/// S2 T4 (critical demotion guard, flagged by T3 review): true when the plan-precedence
-/// doors (bare continuation/approval, an active runtime plan, or a first-turn plan/research
-/// prompt — see the call site) should demote a forced Workflow route back to AgentLoop. A
-/// deterministic routing binding is an explicit, thread-scoped user choice — once active it
-/// OWNS control flow for its workflow tool and is NEVER demoted, even when the prompt itself
-/// looks like a bare continuation (e.g. a "Use template" intake reply of just "1" to a
-/// numbered menu — `is_plan_continuation_message` treats any all-digit prompt up to 16
-/// chars as a bare continuation/approval, tripping door (a)). Extracted as its own function
-/// (rather than left inline) so it is unit-testable against a real `AppState` without
-/// re-deriving the condition by hand in the test. `routing_binding.is_none()` is checked
-/// FIRST, same as the inline `&&`-chain it replaces, so the (comparatively) expensive memory
-/// lookup in `thread_has_active_runtime_plan` still only runs when actually needed.
-fn plan_precedence_demotes_workflow_route(
-    state: &AppState,
-    thread_id: Option<&str>,
-    prompt: &str,
-    routing_binding: Option<&RoutingBinding>,
-) -> bool {
-    routing_binding.is_none()
-        && (prompt_forces_plan_precedence(prompt)
-            || thread_has_active_runtime_plan(state, thread_id))
-}
-
 /// Load the thread's CANONICAL plan steps from the durable runtime-plan store (the same
 /// per-thread memory `thread_has_active_runtime_plan` matches). This is the authoritative
 /// cross-turn state: it's upserted on EVERY `update_plan`/`step_advance` (synchronously,
@@ -9684,89 +9640,6 @@ fn plan_stall_check_and_bump(
                 .flatten()
         })
         .is_some_and(|plan| plan_stall_exhausted(plan.stall_turns))
-}
-
-/// A bare continuation/approval message ("1", a step/option number, "ok"/"procedi"/
-/// "continua"/"sì") is the user advancing an existing plan or approving a step — never
-/// a fresh task. It must not trigger a one-shot workflow route (that's the APPROVAL-RESUME
-/// dead-end). Kept deliberately tight (short, no task verbs) to avoid false positives.
-fn is_plan_continuation_message(prompt: &str) -> bool {
-    let t = prompt.trim().to_lowercase();
-    if t.is_empty() || t.chars().count() > 16 {
-        return false;
-    }
-    if t.chars().all(|c| c.is_ascii_digit()) {
-        return true;
-    }
-    matches!(
-        t.as_str(),
-        "ok" | "okay"
-            | "procedi"
-            | "continua"
-            | "prosegui"
-            | "avanti"
-            | "vai"
-            | "sì"
-            | "si"
-            | "yes"
-            | "y"
-            | "go"
-            | "next"
-            | "continue"
-    )
-}
-
-/// True when the prompt explicitly asks to PLAN (multi-step) and/or RESEARCH on the web
-/// (browse / verify sources) — i.e. a task whose control flow belongs to the agent loop,
-/// not a one-shot deliverable. Deliberately CONSERVATIVE: it fires only on explicit
-/// agentic verbs, so a plain "scrivimi un memo su X" still routes to the pruned
-/// make_document workflow (the weak-model file-discipline that route exists for).
-/// Bilingual (IT/EN): the user-facing prompt language varies (reply-language contract).
-fn prompt_requests_planning_or_research(prompt: &str) -> bool {
-    // TOKEN signals must match WHOLE tokens, not substrings: a bare `contains("pianifica")`
-    // false-fires on "pianificazione" (financial/strategic planning — a common one-shot
-    // document TOPIC) and `contains("naviga")` on "navigazione", which would wrongly
-    // downgrade a legit make_document/make_deck request to the agent loop and defeat the
-    // very tool-pruning this route exists for. cap_tokenize lowercases + splits on
-    // non-alphanumeric, so "pianificazione"/"navigazione" tokenize to themselves, not the
-    // agentic verb. (Multi-word PHRASE signals below stay substring — they can't collide.)
-    const TOKEN_SIGNALS: &[&str] = &["pianifica", "pianificare", "naviga", "navigare"];
-    let tokens: std::collections::BTreeSet<String> = cap_tokenize(prompt).into_iter().collect();
-    if TOKEN_SIGNALS.iter().any(|s| tokens.contains(*s)) {
-        return true;
-    }
-    let t = prompt.to_lowercase();
-    const PHRASE_SIGNALS: &[&str] = &[
-        // planning / explicit multi-step execution
-        "passo-passo",
-        "passo passo",
-        "step-by-step",
-        "step by step",
-        "scomponi il lavoro",
-        "esegui gli step",
-        "esegui i passi",
-        "step verificabil",
-        // research / browse / source verification
-        "cerca sul web",
-        "cerca online",
-        "fonti ufficiali",
-        "verifica sul web",
-        "verifica le fonti",
-        "navigate the web",
-        "browse the web",
-    ];
-    PHRASE_SIGNALS.iter().any(|s| t.contains(s))
-}
-
-/// The two CHEAP, prompt-only doors into plan-precedence: a bare
-/// continuation/approval resuming a plan, OR an explicit first-turn plan/research
-/// request. The third door — a thread that already has an active runtime plan — is a
-/// memory lookup checked separately at the call site to keep it short-circuited.
-/// Closing the whole CLASS here (not just the continuation door) is what stops the
-/// "make_document lock" from re-appearing via a new prompt phrasing (regression test:
-/// `plan_research_first_turn_is_not_collapsed_into_make_document`).
-fn prompt_forces_plan_precedence(prompt: &str) -> bool {
-    is_plan_continuation_message(prompt) || prompt_requests_planning_or_research(prompt)
 }
 
 fn runtime_plan_step_outcome_matches(
@@ -25809,6 +25682,20 @@ fn objective_blocks_tool(
         || effectful_tool_name(name, composio_writes)
 }
 
+fn prune_tools_for_objective_mode(
+    tools: &mut Vec<serde_json::Value>,
+    mode: local_first_task_runtime::ObjectiveMode,
+    composio_writes: &std::collections::BTreeSet<String>,
+) {
+    tools.retain(|schema| {
+        let name = schema
+            .pointer("/function/name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        !objective_blocks_tool(mode, name, composio_writes)
+    });
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SteeringDisposition {
     Apply,
@@ -25836,11 +25723,11 @@ pub(crate) fn classify_steering(
 fn objective_mode_for_execution(
     state: &AppState,
     thread_id: Option<&str>,
-    prompt: &str,
+    _prompt: &str,
 ) -> local_first_task_runtime::ObjectiveMode {
     objective_contract_for_execution(state, thread_id)
         .map(|objective| objective.mode)
-        .unwrap_or_else(|| classify_objective_mode(prompt))
+        .unwrap_or(local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis)
 }
 
 fn objective_contract_for_execution(
@@ -27235,50 +27122,22 @@ message — both your step-by-step narration AND the final answer. If the user w
 Italian, reply entirely in Italian; if in English, in English. Match the user and never \
 switch language on your own. (Tool arguments, code, file paths and URLs stay as-is.)"
     );
-    // S2 (plugin-owned deterministic routing): an active thread-scoped RoutingBinding
-    // (set once at "Use template" intake — EnqueueTurnRequest::routing_binding /
-    // ChatStore::thread_routing_binding) decides the route BEFORE per-turn BM25 runs at
-    // all — see route_capability_with_binding. Lock is taken and dropped inline inside
-    // `active_routing_binding` (mirrors the workspace_for_thread read above); never held
-    // across generation. Missing thread_id, no persisted binding, or malformed JSON all
-    // fail open to ordinary BM25 routing, same as today.
+    // An active thread-scoped RoutingBinding records an exact route the user already selected.
+    // It remains authoritative over the model-owned semantic decision; absent or malformed
+    // bindings fall back to that structured decision, never to prompt keyword routing.
     let routing_binding: Option<RoutingBinding> =
         active_routing_binding(state, request.thread_id.as_deref());
-    let mut capability_route =
-        route_capability_with_binding(&request.prompt, routing_binding.as_ref());
-    // Plan precedence (Pavimento, model- and provider-independent): an in-progress runtime
-    // plan — or a bare continuation/approval ("1", "procedi") — owns the control flow.
-    // Honouring a workflow route here would prune the plan's tools (update_plan,
-    // browser_navigate) and dead-end it (the APPROVAL-RESUME / "1 → make_deck" bug).
-    // Three doors, closed uniformly: (a) a bare continuation/approval, (b) a thread with
-    // an active runtime plan, (c) a FIRST-turn prompt that is itself a plan/research
-    // request (prompt_forces_plan_precedence) — the door the continuation-only guard
-    // left open (a plan/research prompt that also matches a workflow's keywords, e.g.
-    // "documento", could never get off the ground: chicken-and-egg).
-    //
-    // S2 T4 (critical, flagged by T3 review): a deterministic routing binding must NOT be
-    // demoted by any of these doors. Without this guard, a "Use template" intake reply
-    // that's a bare numeric answer (e.g. just "1" to a numbered menu) hits door (a),
-    // demotes the forced workflow route back to AgentLoop, skips the hard prune below, and
-    // a weak model wanders into skills/shell: exactly the bug S2 exists to close. The
-    // binding is an explicit, thread-scoped user choice (not a per-turn BM25 guess or an
-    // inferred continuation) — once active it OWNS control flow for its workflow tool, full
-    // stop.
-    if matches!(capability_route, CapabilityRouteDecision::Workflow { .. })
-        && plan_precedence_demotes_workflow_route(
-            state,
-            request.thread_id.as_deref(),
-            &request.prompt,
-            routing_binding.as_ref(),
-        )
-    {
-        eprintln!(
-            "plan-precedence: active plan/continuation → workflow route kept on the agent loop"
-        );
-        capability_route = CapabilityRouteDecision::AgentLoop {
-            reason: "Active runtime plan or continuation message takes precedence over workflow routing (the plan owns control flow).".to_string(),
-        };
-    }
+    let semantic_contract = objective_contract_for_execution(state, request.thread_id.as_deref())
+        .as_ref()
+        .and_then(semantic_decision::semantic_decision_from_contract);
+    let semantic_objective_mode = semantic_contract
+        .as_ref()
+        .map(|semantic| semantic.decision.mode)
+        .unwrap_or(local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis);
+    let capability_route = route_capability_with_binding(
+        semantic_contract.as_ref(),
+        routing_binding.as_ref(),
+    );
     let workflow_route = workflow_route_from_capability(&capability_route);
     // S2 T4/T5: resolve the binding's WorkflowRouting ONCE — when it survived plan-precedence
     // AND still resolves to a registered routing — so the hard-prune's `deny_tools` (T4) and the
@@ -27502,6 +27361,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     if !artifact_destinations.is_empty() && !read_only {
         base_tools.push(save_artifact_tool_schema(&artifact_destinations));
     }
+    prune_tools_for_objective_mode(&mut base_tools, semantic_objective_mode, &composio_writes);
     prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
     // Tool Search (Anthropic pattern): split the full toolset into a SMALL always-loaded
     // CORE + a DEFERRED registry the model discovers via `find_capability`. Keeps the
@@ -27568,6 +27428,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             }
         }
     }
+    prune_tools_for_objective_mode(&mut base_tools, semantic_objective_mode, &composio_writes);
     prune_tools_for_route(&mut base_tools, &workflow_route, &workflow_deny_tools);
     // Unified capability corpus for `find_capability`: deferred native tools + installed
     // skills + connected connector tools, all in one BM25-searchable list. One discovery
@@ -27582,7 +27443,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             capability_corpus.push(entry);
         }
     }
-    if !read_only {
+    if !read_only
+        && semantic_objective_mode != local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis
+    {
         capability_corpus.extend(native_workflow_capability_entries());
         capability_corpus.extend(native_atomic_capability_entries());
         capability_corpus.extend(template_catalog_capability_entries());
@@ -61898,22 +61761,6 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn objective_mode_is_fail_closed_for_analysis_and_explicit_for_mutation() {
-        assert_eq!(
-            super::classify_objective_mode("Analizza questa chat e dimmi quali bug trovi"),
-            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis
-        );
-        assert_eq!(
-            super::classify_objective_mode("Correggi i bug, fai i test e verifica tutto"),
-            local_first_task_runtime::ObjectiveMode::Mutation
-        );
-        assert_eq!(
-            super::classify_objective_mode("Analizza il problema e poi correggi il codice"),
-            local_first_task_runtime::ObjectiveMode::Mixed
-        );
-    }
-
-    #[test]
     fn read_only_objective_blocks_mutating_tools_but_keeps_analysis_tools() {
         use local_first_task_runtime::ObjectiveMode;
 
@@ -61942,6 +61789,31 @@ prs.save(Path({path:?}))
             "apply_patch",
             &Default::default(),
         ));
+    }
+
+    #[test]
+    fn read_only_objective_prunes_writes_but_keeps_directory_analysis() {
+        let mut tools = vec![
+            super::list_directory_tool_schema(),
+            super::read_text_file_tool_schema(),
+            super::make_document_tool_schema(),
+            super::write_file_tool_schema(),
+        ];
+        super::prune_tools_for_objective_mode(
+            &mut tools,
+            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+            &Default::default(),
+        );
+        let names = tools
+            .iter()
+            .filter_map(|schema| {
+                schema
+                    .pointer("/function/name")
+                    .and_then(serde_json::Value::as_str)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["list_directory", "read_text_file"]);
     }
 
     #[test]
@@ -62673,108 +62545,45 @@ prs.save(Path({path:?}))
         assert_eq!(validated.steps[3].step_id, "register_artifact");
     }
 
-    #[test]
-    fn workflow_router_sends_deck_requests_to_max_scaffolding_workflow() {
-        let decision = super::route_workflow_or_agent(
-            "Crea una presentazione pptx per il meeting commerciale",
-        );
-
-        assert_eq!(
-            decision,
-            super::WorkflowRouteDecision::Workflow {
-                workflow_id: "make_deck",
-                tool_name: "make_deck",
-                scaffolding_tier: "maximum",
-            },
-        );
-        let instruction = super::workflow_router_instruction("Create a 6 slide deck")
-            .expect("workflow instruction");
-        assert!(
-            instruction.contains("Call `make_deck` exactly once"),
-            "{instruction}"
-        );
+    fn semantic_route_fixture(
+        shape: super::semantic_decision::ExecutionShape,
+        capability: Option<&str>,
+    ) -> super::semantic_decision::ValidatedSemanticDecision {
+        let mut decision = super::semantic_decision::safe_fallback(None, "test_fixture");
+        decision.decision.execution_shape = shape;
+        decision.decision.selected_capability = capability.map(str::to_string);
+        decision.decision.rationale = "selected by the model fixture".to_string();
+        decision.provenance.fallback_reason = None;
+        decision
     }
 
     #[test]
-    fn workflow_registry_routes_pitch_to_deck_without_slide_keywords() {
-        let decision = super::route_workflow_or_agent("Voglio creare un pitch per Homun");
-
-        assert_eq!(
-            decision,
-            super::WorkflowRouteDecision::Workflow {
-                workflow_id: "make_deck",
-                tool_name: "make_deck",
-                scaffolding_tier: "maximum",
-            },
+    fn semantic_decision_routes_to_the_selected_workflow() {
+        let semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::Workflow,
+            Some("make_deck"),
         );
-    }
+        let decision = super::route_capability_from_semantic(Some(&semantic));
 
-    #[test]
-    fn capability_router_explains_native_workflow_selection() {
-        let decision = super::route_capability("Voglio creare un pitch per Homun");
-
-        match decision {
+        assert!(matches!(
+            decision,
             super::CapabilityRouteDecision::Workflow {
-                workflow_id,
-                tool_name,
-                reason,
-                alternatives,
+                workflow_id: "make_deck",
+                tool_name: "make_deck",
                 ..
-            } => {
-                assert_eq!(workflow_id, "make_deck");
-                assert_eq!(tool_name, "make_deck");
-                assert!(reason.contains("native workflow registry"), "{reason}");
-                assert!(alternatives.contains(&"make_document".to_string()));
             }
-            other => panic!("expected make_deck workflow decision, got {other:?}"),
-        }
+        ));
     }
 
     #[test]
-    fn capability_router_keeps_pdf_atomic_operations_out_of_make_document() {
-        for prompt in [
-            "estrai testo da questo PDF",
-            "unisci questi PDF",
-            "converti questo PDF in immagini",
-        ] {
-            let decision = super::route_capability(prompt);
-            assert!(
-                matches!(
-                    decision,
-                    super::CapabilityRouteDecision::AtomicTool {
-                        capability_key: "pdf_atomic",
-                        ..
-                    }
-                ),
-                "{prompt}: {decision:?}"
-            );
-            assert_eq!(
-                super::route_workflow_or_agent(prompt),
-                super::WorkflowRouteDecision::AgentLoop,
-            );
-        }
-    }
+    fn agent_loop_route_does_not_depend_on_prompt_retrieval_rank() {
+        let semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::AgentLoop,
+            None,
+        );
+        let decision = super::route_capability_from_semantic(Some(&semantic));
 
-    #[test]
-    fn capability_router_atomic_instruction_blocks_deliverable_workflow() {
-        let decision = super::route_capability("estrai testo da questo PDF");
-        let instruction = super::capability_router_instruction_for_decision(&decision)
-            .expect("atomic routing instruction");
-        let trace = super::capability_route_trace_line(&decision).expect("trace line");
-
-        assert!(
-            instruction.contains("atomic capability `pdf_atomic`"),
-            "{instruction}"
-        );
-        assert!(
-            instruction.contains("Do not call end-to-end deliverable workflows"),
-            "{instruction}"
-        );
-        assert!(instruction.contains("`make_document`"), "{instruction}");
-        assert!(
-            trace.contains("capability route: atomic pdf_atomic"),
-            "{trace}"
-        );
+        assert!(matches!(decision, super::CapabilityRouteDecision::AgentLoop { .. }));
     }
 
     #[test]
@@ -64254,8 +64063,12 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn capability_router_keeps_report_pdf_as_document_creation_workflow() {
-        let decision = super::route_capability("crea un report PDF per il cliente");
+    fn semantic_document_decision_produces_document_workflow_trace() {
+        let semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::Workflow,
+            Some("make_document"),
+        );
+        let decision = super::route_capability_from_semantic(Some(&semantic));
 
         assert!(matches!(
             decision,
@@ -64420,9 +64233,13 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn workflow_router_sends_document_requests_to_document_workflow() {
-        let decision =
-            super::route_workflow_or_agent("Scrivi un documento operativo per onboarding clienti");
+    fn semantic_document_route_prunes_to_document_workflow() {
+        let semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::Workflow,
+            Some("make_document"),
+        );
+        let capability_route = super::route_capability_from_semantic(Some(&semantic));
+        let decision = super::workflow_route_from_capability(&capability_route);
 
         assert_eq!(
             decision,
@@ -64432,7 +64249,7 @@ prs.save(Path({path:?}))
                 scaffolding_tier: "document",
             },
         );
-        let instruction = super::workflow_router_instruction("Write a document about onboarding")
+        let instruction = super::workflow_router_instruction_for_decision(&decision)
             .expect("workflow instruction");
         assert!(
             instruction.contains("Call `make_document` exactly once"),
@@ -66034,41 +65851,13 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
-    fn plan_continuation_messages_are_recognized() {
-        for cont in [
-            "1",
-            "42",
-            "ok",
-            "Procedi",
-            "  continua ",
-            "sì",
-            "si",
-            "next",
-            "vai",
-            "YES",
-        ] {
-            assert!(
-                super::is_plan_continuation_message(cont),
-                "{cont:?} should be a plan continuation"
-            );
-        }
-        for task in [
-            "crea una presentazione",
-            "1 slide sul fatturato",
-            "spiegami il piano",
-            "",
-        ] {
-            assert!(
-                !super::is_plan_continuation_message(task),
-                "{task:?} should NOT be a continuation"
-            );
-        }
-    }
-
-    #[test]
     fn workflow_router_prunes_alternative_tools_for_document_workflow() {
-        let decision =
-            super::route_workflow_or_agent("Scrivi un documento operativo per onboarding clienti");
+        let semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::Workflow,
+            Some("make_document"),
+        );
+        let capability_route = super::route_capability_from_semantic(Some(&semantic));
+        let decision = super::workflow_route_from_capability(&capability_route);
         let mut tools = vec![
             super::make_document_tool_schema(),
             super::run_in_sandbox_tool_schema(),
@@ -66124,65 +65913,37 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
-    fn routing_binding_overrides_plan_precedence_demotion() {
-        let facade = super::MemoryFacade::new(
-            local_first_memory::SQLiteMemoryStore::open_in_memory().unwrap(),
-        );
-        let state = test_app_state_for_brief(facade);
+    fn active_binding_forces_workflow_route_over_semantic_default() {
         let binding = super::RoutingBinding {
             plugin_id: "presentations".into(),
             route_id: "presentations.template_document".into(),
             args: serde_json::json!({"template_ref":"homun/cv-professional-01"}),
         };
-        // "Use template" intake reply — a bare numeric answer to a menu, e.g. picking
-        // option "1". `is_plan_continuation_message` treats any all-digit prompt up to 16
-        // chars as a bare continuation/approval (door (a)), so WITHOUT a binding this
-        // demotes the forced workflow route straight back to AgentLoop (the exact
-        // dead-end this guard exists to close for the "Use template" flow).
-        let intake_reply = "1";
-        assert!(
-            super::plan_precedence_demotes_workflow_route(&state, Some("t1"), intake_reply, None),
-            "sanity: an unbound bare-numeric intake reply demotes via plan precedence"
+        let semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::AgentLoop,
+            None,
         );
-        // WITH an active binding the template workflow OWNS control flow — no demotion.
-        assert!(
-            !super::plan_precedence_demotes_workflow_route(
-                &state,
-                Some("t1"),
-                intake_reply,
-                Some(&binding)
-            ),
-            "a deterministic routing binding must not be demoted by plan precedence"
-        );
-    }
-
-    #[test]
-    fn active_binding_forces_workflow_route_bypassing_bm25() {
-        let binding = super::RoutingBinding {
-            plugin_id: "presentations".into(),
-            route_id: "presentations.template_document".into(),
-            args: serde_json::json!({"template_ref":"homun/cv-professional-01"}),
-        };
-        // prompt che da solo NON instraderebbe a make_document (mima un turno d'intake)
-        let routed = super::route_capability_with_binding("mio", Some(&binding));
+        let routed = super::route_capability_with_binding(Some(&semantic), Some(&binding));
         match routed {
             super::CapabilityRouteDecision::Workflow { tool_name, .. } => {
                 assert_eq!(tool_name, "make_document")
             }
             other => panic!("expected forced Workflow route, got {other:?}"),
         }
-        // senza binding, "mio" NON è una workflow route
+        // Without the explicit structured binding, the model-owned decision remains authoritative.
         assert!(!matches!(
-            super::route_capability_with_binding("mio", None),
+            super::route_capability_with_binding(Some(&semantic), None),
             super::CapabilityRouteDecision::Workflow { .. }
         ));
     }
 
     #[test]
     fn workflow_route_blocks_manual_tool_fallbacks() {
-        let route = super::route_capability(
-            "Crea una presentazione pitch per Homun usando il template_ref homun/startup-pitch-clean-01",
+        let workflow_semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::Workflow,
+            Some("make_deck"),
         );
+        let route = super::route_capability_from_semantic(Some(&workflow_semantic));
 
         assert!(
             super::workflow_route_blocked_tool_message(&route, "make_deck").is_none(),
@@ -66193,7 +65954,11 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(blocked.contains("WORKFLOW_ROUTE_BLOCKED_TOOL"), "{blocked}");
         assert!(blocked.contains("make_deck"), "{blocked}");
 
-        let generic = super::route_capability("spiegami cosa può fare Homun");
+        let agent_semantic = semantic_route_fixture(
+            super::semantic_decision::ExecutionShape::AgentLoop,
+            None,
+        );
+        let generic = super::route_capability_from_semantic(Some(&agent_semantic));
         assert!(
             super::workflow_route_blocked_tool_message(&generic, "mcp__filesystem__create")
                 .is_none(),
@@ -66352,68 +66117,6 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             2,
             "the first intake reply crosses the >=2 threshold that forces tool_choice"
         );
-    }
-
-    #[test]
-    fn plan_research_first_turn_is_not_collapsed_into_make_document() {
-        // Regression: the exact first-turn prompt that dead-ended (~16 min) because the
-        // BM25 router picked the make_document workflow (matches "documento") and pruned
-        // update_plan/browser, so the plan/research could never start (chicken-and-egg).
-        let prompt = "Pianifica ed esegui passo-passo una mini-ricerca comparativa su tre \
-framework per agenti LLM — LangGraph, CrewAI e AutoGen. Scomponi il lavoro in almeno 7 \
-step verificabili. Naviga le fonti ufficiali dove serve e alla fine produci un breve \
-documento di sintesi con pro/contro e una raccomandazione finale.";
-        // The router STILL classifies it as a workflow — that's fine; precedence overrides it.
-        assert!(
-            matches!(super::route_capability(prompt), super::CapabilityRouteDecision::Workflow { .. }),
-            "router classifies the multi-intent prompt as a workflow (make_document)"
-        );
-        // Plan/research intent must take precedence so the workflow route is downgraded to the
-        // agent loop (where make_document is still available: plan -> browse -> document).
-        assert!(
-            super::prompt_forces_plan_precedence(prompt),
-            "a first-turn plan+research request must take plan precedence, not be pruned to make_document"
-        );
-    }
-
-    #[test]
-    fn plan_precedence_covers_the_whole_class_not_just_continuations() {
-        // (a) bare continuation / approval — the door the ORIGINAL fix already covered
-        assert!(super::prompt_forces_plan_precedence("1"));
-        assert!(super::prompt_forces_plan_precedence("procedi"));
-        // (c) first-turn planning intent
-        assert!(super::prompt_forces_plan_precedence("pianifica ed esegui il lavoro passo-passo"));
-        // (c) first-turn research / browse intent
-        assert!(super::prompt_forces_plan_precedence("naviga le fonti ufficiali e verifica sul web"));
-        // NEGATIVE — a plain one-shot document request must NOT trigger plan precedence
-        // (do not over-broaden: preserve the weak-model file-discipline the workflow route exists for).
-        let memo = "scrivimi un breve memo di una pagina sul progetto Homun";
-        assert!(
-            !super::prompt_forces_plan_precedence(memo),
-            "a plain document request must not trigger plan precedence"
-        );
-        // ...and it still routes to the make_document workflow, unchanged.
-        assert!(
-            matches!(super::route_capability(memo), super::CapabilityRouteDecision::Workflow { .. }),
-            "a plain document request still routes to the make_document workflow"
-        );
-    }
-
-    #[test]
-    fn plan_precedence_does_not_false_positive_on_document_topics() {
-        // "pianificazione"/"navigazione" are document/deck TOPICS, not plan/research intent —
-        // they must NOT trigger plan precedence, else the make_document route loses its pruning.
-        for p in [
-            "scrivimi un documento sulla pianificazione fiscale per la mia azienda",
-            "crea una presentazione sulla navigazione costiera in Liguria",
-            "prepara un documento con la pianificazione delle ferie del team",
-        ] {
-            assert!(!super::prompt_forces_plan_precedence(p), "false positive on: {p}");
-            assert!(
-                matches!(super::route_capability(p), super::CapabilityRouteDecision::Workflow { .. }),
-                "document/deck topic must still route to a pruned workflow: {p}"
-            );
-        }
     }
 
     #[test]
@@ -67072,19 +66775,6 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert_eq!(live_owner, None);
 
         super::sandbox_clear(None);
-    }
-
-    #[test]
-    fn workflow_router_keeps_generic_requests_on_agent_loop() {
-        assert_eq!(
-            super::route_workflow_or_agent("spiegami il codice del gateway"),
-            super::WorkflowRouteDecision::AgentLoop,
-        );
-        assert!(super::workflow_router_instruction("spiegami il codice del gateway").is_none());
-        assert_eq!(
-            super::route_workflow_or_agent("cos'è Homun e cosa può fare?"),
-            super::WorkflowRouteDecision::AgentLoop,
-        );
     }
 
     #[test]
