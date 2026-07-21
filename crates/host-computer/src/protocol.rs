@@ -22,6 +22,7 @@ pub enum HostComputerMethod {
     CaptureWindow,
     ExecuteAction,
     ResumeControl,
+    Shutdown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -16,6 +16,7 @@ public enum HostComputerMethod: String, Codable, Sendable {
     case captureWindow = "capture_window"
     case executeAction = "execute_action"
     case resumeControl = "resume_control"
+    case shutdown
 }
 
 public struct ApplicationIdentity: Codable, Equatable, Hashable, Sendable {

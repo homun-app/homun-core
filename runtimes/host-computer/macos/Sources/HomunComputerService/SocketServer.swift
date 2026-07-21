@@ -6,6 +6,7 @@ import HomunComputerServiceCore
 struct SocketServer {
     let socketPath: String
     let router: RequestRouter
+    let shutdownSignal: ShutdownSignal
 
     func run() throws {
         let listener = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -34,6 +35,7 @@ struct SocketServer {
                 defer { close(client) }
                 handle(client: client)
             }
+            if shutdownSignal.isRequested { break }
         }
     }
 

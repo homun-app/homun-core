@@ -72,6 +72,7 @@ do {
         }
     }
     let token = try consumeTokenFile(at: configuration.tokenFile)
+    let shutdownSignal = ShutdownSignal()
     let takeover = InputTakeoverMonitor(eventMarker: Int64.random(in: 1...Int64.max))
     let eventTap = SystemInputEventTap(monitor: takeover)
     _ = eventTap.start()
@@ -83,8 +84,10 @@ do {
             router: RequestRouter(
                 sessionToken: token,
                 artifactRoot: configuration.artifactRoot,
-                takeoverMonitor: takeover
-            )
+                takeoverMonitor: takeover,
+                shutdownSignal: shutdownSignal
+            ),
+            shutdownSignal: shutdownSignal
         ).run()
     }
 } catch {

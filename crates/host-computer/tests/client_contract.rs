@@ -69,6 +69,7 @@ impl HostComputerTransport for RecordingTransport {
                 serde_json::json!({"snapshot_required": true})
             }
             HostComputerMethod::ResumeControl => serde_json::json!({"phase": "active"}),
+            HostComputerMethod::Shutdown => serde_json::json!({"accepted": true}),
         };
         Ok(RpcResponse::Success(RpcSuccessResponse {
             jsonrpc: JsonRpcVersion::V2,
@@ -202,4 +203,17 @@ async fn mismatched_response_id_is_rejected() {
         .unwrap_err();
 
     assert_eq!(error.code(), HostComputerErrorCode::InvalidRequest);
+}
+
+#[tokio::test]
+async fn shutdown_is_an_authenticated_rpc_after_handshake() {
+    let transport = RecordingTransport::default();
+    let client = HostComputerClient::new(transport.clone(), SecretToken::from_bytes([12; 32]));
+
+    client.shutdown(future_context()).await.unwrap();
+
+    assert_eq!(
+        transport.methods(),
+        [HostComputerMethod::Handshake, HostComputerMethod::Shutdown]
+    );
 }

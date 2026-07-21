@@ -1,6 +1,21 @@
 import Foundation
 import HomunComputerProtocol
 
+public final class ShutdownSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requested = false
+
+    public init() {}
+
+    public var isRequested: Bool {
+        lock.withLock { requested }
+    }
+
+    public func request() {
+        lock.withLock { requested = true }
+    }
+}
+
 public struct RequestRouter: Sendable {
     private let authenticator: SessionAuthenticator
     private let permissionProbe: any PermissionProbing
@@ -9,12 +24,14 @@ public struct RequestRouter: Sendable {
     private let captureRunner: BlockingCaptureRunner?
     private let actionExecutor: ActionExecutor
     private let takeoverMonitor: InputTakeoverMonitor?
+    private let shutdownSignal: ShutdownSignal?
 
     public init(
         sessionToken: String,
         permissionProbe: any PermissionProbing = SystemPermissionProbe(),
         artifactRoot: URL? = nil,
-        takeoverMonitor: InputTakeoverMonitor? = nil
+        takeoverMonitor: InputTakeoverMonitor? = nil,
+        shutdownSignal: ShutdownSignal? = nil
     ) {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
         self.permissionProbe = permissionProbe
@@ -23,6 +40,7 @@ public struct RequestRouter: Sendable {
         snapshotProvider = SystemSnapshotProvider(registry: registry)
         actionExecutor = ActionExecutor(registry: registry, takeoverMonitor: takeoverMonitor)
         self.takeoverMonitor = takeoverMonitor
+        self.shutdownSignal = shutdownSignal
         captureRunner = artifactRoot.map {
             BlockingCaptureRunner(service: ScreenCaptureService(artifactRoot: $0))
         }
@@ -40,6 +58,7 @@ public struct RequestRouter: Sendable {
         snapshotProvider = SystemSnapshotProvider(registry: registry)
         actionExecutor = ActionExecutor(registry: registry)
         takeoverMonitor = nil
+        shutdownSignal = nil
         captureRunner = nil
     }
 
@@ -89,6 +108,7 @@ public struct RequestRouter: Sendable {
                     .string("capture_window"),
                     .string("execute_action"),
                     .string("resume_control"),
+                    .string("shutdown"),
                 ]),
             ]))
         case .permissionStatus:
@@ -190,6 +210,12 @@ public struct RequestRouter: Sendable {
             takeoverMonitor.resume(token: token)
             return .success(id: request.id, result: .object([
                 "phase": .string(takeoverMonitor.phase.rawValue),
+            ]))
+        case .shutdown:
+            guard let shutdownSignal else { throw ProtocolFailure.invalidRequest }
+            shutdownSignal.request()
+            return .success(id: request.id, result: .object([
+                "accepted": .bool(true),
             ]))
         }
     }

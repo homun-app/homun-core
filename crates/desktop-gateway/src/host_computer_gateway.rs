@@ -550,13 +550,19 @@ async fn cancel_active_and_clear_snapshots(reason: &str) {
     });
 
     if let Some(runtime) = RUNTIME.get() {
-        let mut guard = runtime.lock().await;
-        if let Some(current) = guard.as_ref() {
-            if let Ok(mut snapshots) = current.snapshots.lock() {
-                snapshots.clear();
+        let current = {
+            let mut guard = runtime.lock().await;
+            let current = guard.take();
+            if let Some(current) = current.as_ref() {
+                if let Ok(mut snapshots) = current.snapshots.lock() {
+                    snapshots.clear();
+                }
             }
+            current
+        };
+        if let Some(current) = current {
+            let _ = current.client.shutdown(context()).await;
         }
-        *guard = None;
     }
     if let Some(snapshot) = cancelled {
         publish_cancelled(reason, &snapshot);

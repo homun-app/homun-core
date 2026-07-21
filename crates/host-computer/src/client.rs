@@ -219,6 +219,14 @@ where
         .await
     }
 
+    pub async fn shutdown(&self, context: RequestContext) -> Result<(), HostComputerClientError> {
+        self.ensure_handshake(&context).await?;
+        let _: serde_json::Value = self
+            .call(HostComputerMethod::Shutdown, serde_json::json!({}), context)
+            .await?;
+        Ok(())
+    }
+
     async fn ensure_handshake(
         &self,
         context: &RequestContext,

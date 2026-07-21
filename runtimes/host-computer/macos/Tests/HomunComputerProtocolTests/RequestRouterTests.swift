@@ -34,6 +34,32 @@ import HomunComputerProtocol
     #expect(result["protocol_version"] == .number(1))
 }
 
+@Test func authenticatedShutdownRequestsServiceExitAfterReply() throws {
+    let shutdown = ShutdownSignal()
+    let router = RequestRouter(sessionToken: "expected", shutdownSignal: shutdown)
+    let rpc = RPCRequest(
+        jsonrpc: .v2,
+        id: 92,
+        method: .shutdown,
+        params: .object([:]),
+        meta: RequestMeta(
+            protocolVersion: 1,
+            turnID: nil,
+            deadlineUnixMs: Int64.max,
+            sessionToken: "expected"
+        )
+    )
+
+    let response = try JSONDecoder.hostComputer.decode(
+        RPCResponse.self,
+        from: router.route(JSONEncoder.hostComputer.encode(rpc))
+    )
+
+    #expect(response.id == 92)
+    #expect(response.error == nil)
+    #expect(shutdown.isRequested)
+}
+
 private func request(id: UInt64, token: String) -> RPCRequest {
     RPCRequest(
         jsonrpc: .v2,

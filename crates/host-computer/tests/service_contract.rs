@@ -51,6 +51,7 @@ impl HostComputerTransport for PermissionTransport {
                 serde_json::json!({"snapshot_required": true})
             }
             HostComputerMethod::ResumeControl => serde_json::json!({"phase": "active"}),
+            HostComputerMethod::Shutdown => serde_json::json!({"accepted": true}),
         };
         Ok(RpcResponse::Success(RpcSuccessResponse {
             jsonrpc: JsonRpcVersion::V2,
