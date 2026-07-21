@@ -9,7 +9,43 @@
 // Verified end-to-end only in a real `electron-builder` build (not package:smoke,
 // which runs raw electron and never invokes afterPack).
 import { FuseVersion, FuseV1Options, flipFuses } from "@electron/fuses";
+import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseDeveloperIdIdentity } from "./host-computer-signing.mjs";
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+
+function run(command, args) {
+  const result = spawnSync(command, args, { encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(" ")} failed\n${result.stderr || result.stdout}`);
+  }
+  return `${result.stdout ?? ""}${result.stderr ?? ""}`;
+}
+
+async function signHostComputerHelper(context) {
+  if (context.electronPlatformName !== "darwin" || process.env.CSC_IDENTITY_AUTO_DISCOVERY === "false") return;
+  const appName = context.packager.appInfo.productFilename;
+  const helper = path.join(context.appOutDir, `${appName}.app`, "Contents", "Resources", "host-computer", "HomunComputerService.app");
+  if (!existsSync(helper)) throw new Error(`Nested host helper is missing before signing: ${helper}`);
+  const executable = path.join(helper, "Contents", "MacOS", "HomunComputerService");
+  const entitlements = path.resolve(scriptDir, "../resources/host-computer/entitlements.mac.plist");
+  // Force electron-builder to import CSC_LINK into its temporary keychain before
+  // asking `security` for the resolved Developer ID identity.
+  await context.packager.codeSigningInfo?.value;
+  const identity = process.env.CSC_NAME || parseDeveloperIdIdentity(run("security", ["find-identity", "-v", "-p", "codesigning"]));
+  if (!identity) {
+    // Non-release local builds often have no signing certificate. electron-builder
+    // will make the same decision for the outer app; the signed release CI refuses
+    // to publish before reaching this hook when credentials are absent.
+    return;
+  }
+  const common = ["--force", "--sign", identity, "--options", "runtime", "--timestamp", "--entitlements", entitlements];
+  run("codesign", [...common, executable]);
+  run("codesign", [...common, helper]);
+}
 
 /** Resolve the packaged Electron executable per platform. */
 function electronBinaryPath(context) {
@@ -49,4 +85,8 @@ export default async function afterPack(context) {
     // so electron-builder's real signing step starts from a clean slate.
     resetAdHocDarwinSignature: context.electronPlatformName === "darwin",
   });
+  // Sign the isolated nested helper with its own empty, least-privilege
+  // entitlement set. mac.signIgnore preserves this signature; electron-builder
+  // then signs Electron's helpers and finally the outer app, which seals it.
+  await signHostComputerHelper(context);
 }
