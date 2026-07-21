@@ -119,6 +119,32 @@ impl GrantStore {
         )? > 0)
     }
 
+    pub fn list(&self, scope: &GrantScope, now_unix_ms: i64) -> rusqlite::Result<Vec<AppGrant>> {
+        let mut statement = self.connection.prepare(
+            "SELECT grant_id,bundle_id,team_id,requirement_sha256,level,expires_at_unix_ms
+             FROM host_computer_app_grants WHERE user_id=?1 AND workspace_id=?2
+               AND (expires_at_unix_ms IS NULL OR expires_at_unix_ms>?3)
+             ORDER BY bundle_id, grant_id",
+        )?;
+        let rows = statement.query_map(
+            params![scope.user_id, scope.workspace_id, now_unix_ms],
+            |row| {
+                Ok(AppGrant {
+                    grant_id: row.get(0)?,
+                    scope: scope.clone(),
+                    app: SignedAppIdentity {
+                        bundle_id: row.get(1)?,
+                        team_id: row.get(2)?,
+                        designated_requirement_sha256: row.get(3)?,
+                    },
+                    level: parse_level(row.get(4)?)?,
+                    expires_at_unix_ms: row.get(5)?,
+                })
+            },
+        )?;
+        rows.collect()
+    }
+
     pub fn clear_all(&self) -> rusqlite::Result<usize> {
         self.connection
             .execute("DELETE FROM host_computer_app_grants", [])

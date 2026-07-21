@@ -3600,6 +3600,7 @@ dependencies = [
  "local-first-capabilities",
  "local-first-context-compression",
  "local-first-engine",
+ "local-first-host-computer",
  "local-first-inference",
  "local-first-inference-usage",
  "local-first-local-computer-session",

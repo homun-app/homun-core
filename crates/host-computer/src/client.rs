@@ -11,8 +11,8 @@ use tokio::sync::Mutex;
 use crate::{
     protocol::{
         ActionRequest, ActionResult, AppSnapshot, HandshakeResult, HostComputerErrorCode,
-        HostComputerMethod, JsonRpcVersion, ListAppsResult, ListWindowsResult, PROTOCOL_VERSION,
-        PermissionStatus, RequestMeta, RpcError, RpcRequest, StagedCapture,
+        HostComputerMethod, HostPermission, JsonRpcVersion, ListAppsResult, ListWindowsResult,
+        PROTOCOL_VERSION, PermissionStatus, RequestMeta, RpcError, RpcRequest, StagedCapture,
     },
     transport::HostComputerTransport,
 };
@@ -107,6 +107,20 @@ where
         self.call(
             HostComputerMethod::PermissionStatus,
             serde_json::json!({}),
+            context,
+        )
+        .await
+    }
+
+    pub async fn permission_present(
+        &self,
+        permission: HostPermission,
+        context: RequestContext,
+    ) -> Result<PermissionStatus, HostComputerClientError> {
+        self.ensure_handshake(&context).await?;
+        self.call(
+            HostComputerMethod::PermissionPresent,
+            serde_json::json!({"permission": permission}),
             context,
         )
         .await

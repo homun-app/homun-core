@@ -4,6 +4,7 @@ mod apply_patch;
 mod attachments;
 mod agent_journal;
 mod browser_safety;
+mod host_computer_gateway;
 mod chat_store;
 // One-shot fuse of the two legacy SQLite files into the unified homun.sqlite.
 mod db_migrate;
@@ -1407,6 +1408,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/local-computer/live", get(contained_computer_live))
         .route("/api/local-computer/start", post(local_computer_start))
         .route("/api/local-computer/stop", post(local_computer_stop))
+        .route("/api/host-computer/status", get(host_computer_gateway::status))
+        .route("/api/host-computer/apps", get(host_computer_gateway::apps))
+        .route("/api/host-computer/grants", get(host_computer_gateway::list_grants).post(host_computer_gateway::create_grant))
+        .route("/api/host-computer/grants/{grant_id}", axum::routing::delete(host_computer_gateway::revoke_grant))
+        .route("/api/host-computer/permissions/present", post(host_computer_gateway::present_permission))
         // Bearer-authed: mint a short-lived ticket for the noVNC live-view proxy
         // (the iframe + WS that follow can't send the Bearer header).
         .route(
