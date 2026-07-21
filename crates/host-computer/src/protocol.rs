@@ -17,6 +17,32 @@ pub enum HostComputerMethod {
     PermissionStatus,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HandshakeResult {
+    pub protocol_version: u32,
+    pub helper_build: String,
+    pub helper_pid: u32,
+    pub host_os_version: String,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionState {
+    Granted,
+    Denied,
+    NotDetermined,
+    Restricted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PermissionStatus {
+    pub accessibility: PermissionState,
+    pub screen_recording: PermissionState,
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RequestMeta {
