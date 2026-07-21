@@ -3647,6 +3647,7 @@ dependencies = [
  "async-trait",
  "libc",
  "rand 0.8.6",
+ "rusqlite",
  "secrecy",
  "serde",
  "serde_json",
