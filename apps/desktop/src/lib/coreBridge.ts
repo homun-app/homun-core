@@ -5163,3 +5163,27 @@ function currentTimestampSeconds() {
 function roundedSeconds(value: number) {
   return Math.round(value * 1000) / 1000;
 }
+
+export type HostComputerPermissionState = "granted" | "denied" | "not_determined" | "restricted";
+export interface HostComputerStatus {
+  available: boolean;
+  helper_version: string | null;
+  accessibility: HostComputerPermissionState;
+  screen_recording: HostComputerPermissionState;
+  ready: boolean;
+}
+export interface HostComputerApp { bundle_id: string; display_name: string; pid: number; granted_level: "observe" | "control" | null; }
+export interface HostComputerGrant { grant_id: string; bundle_id: string; display_name: string; level: "observe" | "control"; }
+export interface GrantHostComputerAppInput { bundle_id: string; level: "observe" | "control"; }
+
+export const hostComputerStatus = () => gatewayGetJson<HostComputerStatus>("/api/host-computer/status");
+export const hostComputerApps = () => gatewayGetJson<HostComputerApp[]>("/api/host-computer/apps");
+export const hostComputerGrants = () => gatewayGetJson<HostComputerGrant[]>("/api/host-computer/grants");
+export const grantHostComputerApp = (input: GrantHostComputerAppInput) => gatewayPostJson<HostComputerGrant>("/api/host-computer/grants", input);
+export const revokeHostComputerGrant = (grantId: string) => gatewayDeleteJson<void>(`/api/host-computer/grants/${encodeURIComponent(grantId)}`);
+export const presentHostComputerPermission = (permission: "accessibility" | "screen_recording") => gatewayPostJson<void>("/api/host-computer/permissions/present", { permission });
+export const approveHostComputerAction = (sessionId: string, actionDigest: string) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/approve`, { action_digest: actionDigest });
+export const denyHostComputerAction = (sessionId: string, actionDigest: string) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/deny`, { action_digest: actionDigest });
+export const pauseHostComputerSession = (sessionId: string) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/pause`, {});
+export const resumeHostComputerSession = (sessionId: string, generation: number) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/resume`, { generation });
+export const cancelHostComputerSession = (sessionId: string) => gatewayPostJson<void>(`/api/host-computer/sessions/${encodeURIComponent(sessionId)}/cancel`, {});
