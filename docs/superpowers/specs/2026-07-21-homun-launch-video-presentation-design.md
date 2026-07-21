@@ -1,7 +1,7 @@
 # Homun launch videos and product presentation design
 
 **Date:** 2026-07-21
-**Status:** Approved design, pending user review of this written specification
+**Status:** Approved by the user; ready for production planning and execution
 **Primary deadline:** product presentation on 2026-07-22
 **Public content language:** English
 **Presentation delivery:** spoken Italian, English slides, Italian live prompts
