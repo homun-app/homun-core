@@ -17,7 +17,8 @@ pub mod ui;
 
 pub use approval::{ApprovalGate, ApprovalRequest, ApprovalStatus};
 pub use broker::{
-    chat_turn_task_id, ChatTurnInput, ChatTurnSource, EnqueueError, EnqueuedTurn, TurnApproval,
+    chat_turn_task_id, ChatTurnInput, ChatTurnSource, EnqueueError, EnqueuedTurn,
+    EnqueueTurnOutcome, TurnApproval,
 };
 pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
@@ -33,8 +34,9 @@ pub use types::{
     AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalPolicy,
     Automation, AutomationRun,
     AutomationSource, AutomationTrigger, EventTrigger, NewAgentRun, ResourceClass,
-    NewAgentToolReceipt, ResourceRequirement, RetryPolicy, RuntimePlanRecord, TaskId,
+    NewAgentToolReceipt, ObjectiveContractRecord, ObjectiveMode, ResourceRequirement, RetryPolicy,
+    RuntimePlanRecord, TaskId,
     TaskPriority, TaskRecord, TaskStatus, SubagentInfo, ThreadActivityProjection,
-    ToolReceiptClaim, TurnEvent, TurnEventKind, UserId, WorkflowId, WorkspaceId,
+    ToolReceiptClaim, TurnEvent, TurnEventKind, TurnSteeringRecord, UserId, WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

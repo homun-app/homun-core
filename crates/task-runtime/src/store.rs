@@ -1,9 +1,9 @@
 use crate::{
     AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalRequest,
-    Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ResourceClass, RuntimePlanRecord,
-    SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
+    Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ObjectiveContractRecord,
+    ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    ThreadActivityProjection, TurnEvent, TurnEventKind, UserId, WorkspaceId,
+    ThreadActivityProjection, TurnEvent, TurnEventKind, TurnSteeringRecord, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
@@ -229,6 +229,7 @@ impl TaskStore {
                 thread_id TEXT NOT NULL,
                 status TEXT NOT NULL,
                 plan_json TEXT NOT NULL,
+                objective_revision INTEGER NOT NULL DEFAULT 0,
                 revision INTEGER NOT NULL DEFAULT 1,
                 stall_turns INTEGER NOT NULL DEFAULT 0,
                 last_resume_done INTEGER,
@@ -239,6 +240,44 @@ impl TaskStore {
 
             CREATE INDEX IF NOT EXISTS idx_runtime_plans_scope_status
                 ON runtime_plans(user_id, workspace_id, status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS objective_contracts (
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                source_message_id TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                scope_json TEXT NOT NULL,
+                allowed_actions_json TEXT NOT NULL,
+                completion_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                revision INTEGER NOT NULL DEFAULT 1,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (user_id, workspace_id, thread_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_objective_contracts_scope_status
+                ON objective_contracts(user_id, workspace_id, status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS turn_steering (
+                steering_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                workspace_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL,
+                active_turn_id TEXT NOT NULL,
+                source_message_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                objective_revision INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at INTEGER NOT NULL,
+                consumed_at INTEGER,
+                UNIQUE(user_id, workspace_id, thread_id, source_message_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_turn_steering_pending
+                ON turn_steering(user_id, workspace_id, thread_id, active_turn_id, status, steering_id);
 
             CREATE TABLE IF NOT EXISTS agent_checkpoints (
                 checkpoint_id TEXT PRIMARY KEY,
@@ -285,7 +324,7 @@ impl TaskStore {
             );
 
             INSERT INTO task_runtime_metadata(key, value)
-            VALUES ('schema_version', '6')
+            VALUES ('schema_version', '8')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             ",
         )?;
@@ -300,6 +339,12 @@ impl TaskStore {
                     [],
                 )?;
             }
+        }
+        if !column_exists(&self.connection, "runtime_plans", "objective_revision") {
+            self.connection.execute(
+                "ALTER TABLE runtime_plans ADD COLUMN objective_revision INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
         }
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
         // 409-per-thread query (status queued/running) without polluting it with non-chat tasks.
@@ -399,6 +444,14 @@ impl TaskStore {
     ) -> TaskRuntimeResult<usize> {
         let tx = self.connection.unchecked_transaction()?;
         tx.execute(
+            "DELETE FROM turn_steering WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        tx.execute(
+            "DELETE FROM objective_contracts WHERE user_id = ?1 AND workspace_id = ?2",
+            rusqlite::params![user_id.as_str(), workspace_id.as_str()],
+        )?;
+        tx.execute(
             "DELETE FROM runtime_plans WHERE user_id = ?1 AND workspace_id = ?2",
             rusqlite::params![user_id.as_str(), workspace_id.as_str()],
         )?;
@@ -431,6 +484,7 @@ impl TaskStore {
         user_id: &str,
         workspace_id: &str,
         thread_id: &str,
+        objective_revision: u64,
         plan: &Value,
         status: &str,
     ) -> TaskRuntimeResult<RuntimePlanRecord> {
@@ -443,12 +497,13 @@ impl TaskStore {
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
         tx.execute(
             "INSERT INTO runtime_plans (
-                user_id, workspace_id, thread_id, status, plan_json, revision,
+                user_id, workspace_id, thread_id, status, plan_json, objective_revision, revision,
                 stall_turns, last_resume_done, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 0, NULL, ?6, ?6)
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 0, NULL, ?7, ?7)
              ON CONFLICT(user_id, workspace_id, thread_id) DO UPDATE SET
                 status = excluded.status,
                 plan_json = excluded.plan_json,
+                objective_revision = excluded.objective_revision,
                 revision = runtime_plans.revision + 1,
                 updated_at = excluded.updated_at",
             params![
@@ -457,6 +512,7 @@ impl TaskStore {
                 thread_id,
                 status,
                 serde_json::to_string(plan)?,
+                objective_revision as i64,
                 now,
             ],
         )?;
@@ -464,6 +520,171 @@ impl TaskStore {
             .ok_or_else(|| TaskRuntimeError::Store("runtime plan disappeared after upsert".into()))?;
         tx.commit()?;
         Ok(record)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_objective_contract(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        source_message_id: &str,
+        objective: &str,
+        mode: ObjectiveMode,
+        scope: &Value,
+        allowed_actions: &Value,
+        completion: &Value,
+        status: &str,
+    ) -> TaskRuntimeResult<ObjectiveContractRecord> {
+        if !matches!(status, "active" | "completed" | "cancelled") {
+            return Err(TaskRuntimeError::Store(format!(
+                "invalid objective contract status: {status}"
+            )));
+        }
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO objective_contracts (
+                user_id, workspace_id, thread_id, source_message_id, objective, mode,
+                scope_json, allowed_actions_json, completion_json, status, revision,
+                created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?11, ?11)
+             ON CONFLICT(user_id, workspace_id, thread_id) DO UPDATE SET
+                source_message_id = excluded.source_message_id,
+                objective = excluded.objective,
+                mode = excluded.mode,
+                scope_json = excluded.scope_json,
+                allowed_actions_json = excluded.allowed_actions_json,
+                completion_json = excluded.completion_json,
+                status = excluded.status,
+                revision = objective_contracts.revision + 1,
+                updated_at = excluded.updated_at",
+            params![
+                user_id,
+                workspace_id,
+                thread_id,
+                source_message_id,
+                objective,
+                enum_value(&mode)?,
+                serde_json::to_string(scope)?,
+                serde_json::to_string(allowed_actions)?,
+                serde_json::to_string(completion)?,
+                status,
+                now,
+            ],
+        )?;
+        let record = load_objective_contract_on(&tx, user_id, workspace_id, thread_id)?
+            .ok_or_else(|| TaskRuntimeError::Store("objective contract disappeared after upsert".into()))?;
+        tx.commit()?;
+        Ok(record)
+    }
+
+    pub fn load_objective_contract(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<Option<ObjectiveContractRecord>> {
+        load_objective_contract_on(&self.connection, user_id, workspace_id, thread_id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        active_turn_id: &str,
+        source_message_id: &str,
+        content: &str,
+        objective_revision: u64,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        self.connection.execute(
+            "INSERT INTO turn_steering (
+                user_id, workspace_id, thread_id, active_turn_id, source_message_id,
+                content, objective_revision, status, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8)
+             ON CONFLICT(user_id, workspace_id, thread_id, source_message_id) DO NOTHING",
+            params![
+                user_id,
+                workspace_id,
+                thread_id,
+                active_turn_id,
+                source_message_id,
+                content,
+                objective_revision as i64,
+                now,
+            ],
+        )?;
+        load_turn_steering_by_source_message(
+            &self.connection,
+            user_id,
+            workspace_id,
+            thread_id,
+            source_message_id,
+        )?
+        .ok_or_else(|| TaskRuntimeError::Store("steering message disappeared after append".into()))
+    }
+
+    pub fn consume_pending_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        active_turn_id: &str,
+    ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let records = {
+            let mut statement = tx.prepare(
+                "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                        source_message_id, content, objective_revision, status, created_at,
+                        consumed_at
+                 FROM turn_steering
+                 WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+                   AND active_turn_id = ?4 AND status = 'pending'
+                 ORDER BY steering_id ASC",
+            )?;
+            statement
+                .query_map(params![user_id, workspace_id, thread_id, active_turn_id], map_turn_steering_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        tx.execute(
+            "UPDATE turn_steering
+             SET status = 'consumed', consumed_at = ?1
+             WHERE user_id = ?2 AND workspace_id = ?3 AND thread_id = ?4
+               AND active_turn_id = ?5 AND status = 'pending'",
+            params![now, user_id, workspace_id, thread_id, active_turn_id],
+        )?;
+        tx.commit()?;
+        Ok(records
+            .into_iter()
+            .map(|mut record| {
+                record.status = "consumed".into();
+                record.consumed_at = Some(now);
+                record
+            })
+            .collect())
+    }
+
+    pub fn list_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                    source_message_id, content, objective_revision, status, created_at,
+                    consumed_at
+             FROM turn_steering
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+             ORDER BY steering_id ASC",
+        )?;
+        Ok(statement
+            .query_map(params![user_id, workspace_id, thread_id], map_turn_steering_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     pub fn load_runtime_plan(
@@ -2039,8 +2260,8 @@ fn load_runtime_plan_on(
     thread_id: &str,
 ) -> TaskRuntimeResult<Option<RuntimePlanRecord>> {
     conn.query_row(
-        "SELECT user_id, workspace_id, thread_id, status, plan_json, revision,
-                stall_turns, last_resume_done, created_at, updated_at
+        "SELECT user_id, workspace_id, thread_id, status, plan_json, objective_revision,
+                revision, stall_turns, last_resume_done, created_at, updated_at
          FROM runtime_plans
          WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
         params![user_id, workspace_id, thread_id],
@@ -2053,14 +2274,15 @@ fn load_runtime_plan_on(
                 row.get::<_, String>(4)?,
                 row.get::<_, i64>(5)?,
                 row.get::<_, i64>(6)?,
-                row.get::<_, Option<i64>>(7)?,
-                row.get::<_, i64>(8)?,
+                row.get::<_, i64>(7)?,
+                row.get::<_, Option<i64>>(8)?,
                 row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)?,
             ))
         },
     )
     .optional()?
-    .map(|(user_id, workspace_id, thread_id, status, plan_json, revision,
+    .map(|(user_id, workspace_id, thread_id, status, plan_json, objective_revision, revision,
            stall_turns, last_resume_done, created_at, updated_at)| {
         Ok(RuntimePlanRecord {
             user_id,
@@ -2068,6 +2290,7 @@ fn load_runtime_plan_on(
             thread_id,
             status,
             plan_json: serde_json::from_str(&plan_json)?,
+            objective_revision: objective_revision as u64,
             revision: revision as u64,
             stall_turns: stall_turns as u32,
             last_resume_done: last_resume_done.map(|value| value as usize),
@@ -2076,6 +2299,109 @@ fn load_runtime_plan_on(
         })
     })
     .transpose()
+}
+
+fn load_objective_contract_on(
+    conn: &Connection,
+    user_id: &str,
+    workspace_id: &str,
+    thread_id: &str,
+) -> TaskRuntimeResult<Option<ObjectiveContractRecord>> {
+    conn.query_row(
+        "SELECT user_id, workspace_id, thread_id, source_message_id, objective, mode,
+                scope_json, allowed_actions_json, completion_json, status, revision,
+                created_at, updated_at
+         FROM objective_contracts
+         WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3",
+        params![user_id, workspace_id, thread_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, i64>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, i64>(12)?,
+            ))
+        },
+    )
+    .optional()?
+    .map(
+        |(
+            user_id,
+            workspace_id,
+            thread_id,
+            source_message_id,
+            objective,
+            mode,
+            scope_json,
+            allowed_actions_json,
+            completion_json,
+            status,
+            revision,
+            created_at,
+            updated_at,
+        )| {
+            Ok(ObjectiveContractRecord {
+                user_id,
+                workspace_id,
+                thread_id,
+                source_message_id,
+                objective,
+                mode: serde_json::from_value(Value::String(mode))?,
+                scope_json: serde_json::from_str(&scope_json)?,
+                allowed_actions_json: serde_json::from_str(&allowed_actions_json)?,
+                completion_json: serde_json::from_str(&completion_json)?,
+                status,
+                revision: revision as u64,
+                created_at,
+                updated_at,
+            })
+        },
+    )
+    .transpose()
+}
+
+fn map_turn_steering_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnSteeringRecord> {
+    Ok(TurnSteeringRecord {
+        steering_id: row.get(0)?,
+        user_id: row.get(1)?,
+        workspace_id: row.get(2)?,
+        thread_id: row.get(3)?,
+        active_turn_id: row.get(4)?,
+        source_message_id: row.get(5)?,
+        content: row.get(6)?,
+        objective_revision: row.get::<_, i64>(7)? as u64,
+        status: row.get(8)?,
+        created_at: row.get(9)?,
+        consumed_at: row.get(10)?,
+    })
+}
+
+fn load_turn_steering_by_source_message(
+    conn: &Connection,
+    user_id: &str,
+    workspace_id: &str,
+    thread_id: &str,
+    source_message_id: &str,
+) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+    conn.query_row(
+        "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                source_message_id, content, objective_revision, status, created_at, consumed_at
+         FROM turn_steering
+         WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3 AND source_message_id = ?4",
+        params![user_id, workspace_id, thread_id, source_message_id],
+        map_turn_steering_row,
+    )
+    .optional()
+    .map_err(Into::into)
 }
 
 fn map_tool_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentToolReceipt> {
@@ -2167,12 +2493,14 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 6);
+        assert_eq!(store.schema_version().unwrap(), 8);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
         assert!(table_exists(&store.connection, "agent_checkpoints"));
         assert!(table_exists(&store.connection, "agent_tool_receipts"));
+        assert!(table_exists(&store.connection, "objective_contracts"));
+        assert!(table_exists(&store.connection, "turn_steering"));
     }
 
     #[test]
@@ -2188,13 +2516,93 @@ mod runtime_plan_tests {
     use serde_json::json;
 
     #[test]
+    fn objective_contract_is_created_and_replaced_in_place() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-1",
+                "Analyze the project without changing it",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({"roots": ["/project"]}),
+                &json!(["read", "search"]),
+                &json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+        let second = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-2",
+                "Analyze the project and include memory diagnostics",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({"roots": ["/project"]}),
+                &json!(["read", "search"]),
+                &json!({"kind": "report", "memory_status": true}),
+                "active",
+            )
+            .unwrap();
+
+        assert_eq!((first.revision, second.revision), (1, 2));
+        assert_eq!(second.source_message_id, "message-2");
+        assert_eq!(second.mode, ObjectiveMode::ReadOnlyAnalysis);
+        assert_eq!(
+            store
+                .load_objective_contract("u", "w", "t")
+                .unwrap()
+                .unwrap(),
+            second
+        );
+        assert!(store
+            .load_objective_contract("u", "other", "t")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn runtime_plan_is_bound_to_an_objective_revision() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let objective = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-1",
+                "Analyze only",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({}),
+                &json!(["read"]),
+                &json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+
+        let plan = store
+            .upsert_runtime_plan(
+                "u",
+                "w",
+                "t",
+                objective.revision,
+                &json!({"steps": []}),
+                "open",
+            )
+            .unwrap();
+
+        assert_eq!(plan.objective_revision, objective.revision);
+    }
+
+    #[test]
     fn runtime_plan_is_scoped_and_revisioned() {
         let store = TaskStore::open_in_memory().unwrap();
         let first = store
-            .upsert_runtime_plan("u", "w", "t", &json!({"steps": []}), "open")
+            .upsert_runtime_plan("u", "w", "t", 0, &json!({"steps": []}), "open")
             .unwrap();
         let second = store
-            .upsert_runtime_plan("u", "w", "t", &json!({"steps": [1]}), "open")
+            .upsert_runtime_plan("u", "w", "t", 0, &json!({"steps": [1]}), "open")
             .unwrap();
         assert_eq!((first.revision, second.revision), (1, 2));
         assert_eq!(second.plan_json, json!({"steps": [1]}));
@@ -2206,7 +2614,7 @@ mod runtime_plan_tests {
         let store = TaskStore::open_in_memory().unwrap();
         store
             .upsert_runtime_plan(
-                "u", "w", "t",
+                "u", "w", "t", 0,
                 &json!({"steps": [{"status": "in_progress"}]}),
                 "open",
             )
@@ -2225,7 +2633,7 @@ mod runtime_plan_tests {
         let store = TaskStore::open_in_memory().unwrap();
         for (workspace, thread) in [("w", "t"), ("w", "other"), ("other", "t")] {
             store
-                .upsert_runtime_plan("u", workspace, thread, &json!({"steps": []}), "open")
+                .upsert_runtime_plan("u", workspace, thread, 0, &json!({"steps": []}), "open")
                 .unwrap();
         }
         assert_eq!(store.purge_runtime_plan_for_thread("u", "w", "t").unwrap(), 1);
@@ -2236,6 +2644,61 @@ mod runtime_plan_tests {
             .purge_workspace(&UserId::new("u"), &WorkspaceId::new("other"))
             .unwrap();
         assert!(store.load_runtime_plan("u", "other", "t").unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod turn_steering_tests {
+    use super::*;
+
+    #[test]
+    fn pending_steering_is_ordered_and_consumed_once() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .append_turn_steering("u", "w", "thread", "turn-1", "message-1", "first", 3)
+            .unwrap();
+        store
+            .append_turn_steering("u", "w", "thread", "turn-1", "message-2", "second", 3)
+            .unwrap();
+
+        let consumed = store
+            .consume_pending_turn_steering("u", "w", "thread", "turn-1")
+            .unwrap();
+        assert_eq!(
+            consumed
+                .iter()
+                .map(|message| message.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first", "second"]
+        );
+        assert!(store
+            .consume_pending_turn_steering("u", "w", "thread", "turn-1")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn steering_cannot_cross_workspace_or_active_turn() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store
+            .append_turn_steering("u", "w", "thread", "turn-1", "message-1", "only", 1)
+            .unwrap();
+
+        assert!(store
+            .consume_pending_turn_steering("u", "other", "thread", "turn-1")
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .consume_pending_turn_steering("u", "w", "thread", "turn-2")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .consume_pending_turn_steering("u", "w", "thread", "turn-1")
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }
 
@@ -2838,7 +3301,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 6);
+        assert_eq!(store.schema_version().unwrap(), 8);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {

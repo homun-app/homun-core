@@ -138,6 +138,10 @@ assertNotContains("src/components/ChatView.tsx", "EMPTY_HERO_CHIPS", "New chat m
 assertNotContains("src/components/ChatView.tsx", "chat-hero-chip", "New chat must not render canned prompt buttons");
 assertContains("src/components/ChatView.tsx", "<ChatUsageOverview", "Empty hero must mount compact usage");
 assertContains("src/components/ChatView.tsx", "onUseForTask", "Confirmed task suggestions must reach the composer model override");
+assertContains("src/components/ChatView.tsx", "enqueueTurn(thread.threadId, requestId, promptWithReplyContext", "Active task instructions must be queued as steering");
+assertContains("src/components/ChatView.tsx", "{streaming && (", "Stop must remain available while the composer stays operational");
+assertContains("src/components/ChatView.tsx", "{(value.trim() || composerImages.length > 0) && (", "Send must remain available independently from Stop");
+assertContains("src/lib/chatApi.ts", "res.status === 201 || res.status === 202", "Turn enqueue must accept steering responses");
 assertContains("src/components/UsageSuggestion.tsx", "usage-suggestion-confirm", "Suggestion changes must use an explicit confirmation surface");
 assertContains("src/components/UsageSuggestion.tsx", "confirmed: true", "Apply request must be explicitly confirmed");
 assertContains("src/components/UsageSuggestion.tsx", "onDismiss", "Suggestions must be dismissible");
@@ -340,7 +344,7 @@ assertRepoContains("crates/desktop-gateway/src/main.rs", "approval_continuation_
 assertNotContains("src/App.tsx", "runAgentTurnHeadless", "frontend must not expose a headless agent-turn path");
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn run_agent_turn(", "backend must not keep a headless agent-turn helper that can bypass visible placeholders");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "run_agent_turn_into_message", "backend agent turns must stream into persisted assistant messages");
-assertRepoContains("crates/desktop-gateway/src/main.rs", "If the user explicitly asks to create, show, update, verify, or test a plan", "chat loop must force explicit plan requests through update_plan");
+assertRepoContains("crates/desktop-gateway/src/main.rs", "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing", "chat loop must maintain the canonical plan through update_plan and continue in the same turn");
 assertContains("src/App.tsx", "pendingEventThreadIdsRef", "event-driven thread navigation must not drop updates while React is switching active threads");
 assertContains("src/App.tsx", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
 assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");

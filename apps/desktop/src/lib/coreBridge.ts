@@ -569,6 +569,8 @@ export interface RecallEventPayload {
   query: string;
   hits: RecallHitPayload[];
   scope: "personal" | "project";
+  /** Operational state of memory access; absent only on legacy persisted events. */
+  status?: "ready" | "empty" | "degraded" | "unavailable" | "denied";
 }
 
 export type CoreChatStreamEvent =
@@ -4668,6 +4670,9 @@ async function submitBrokerRuntimeChatPromptStream(
     model,
     routingBinding,
   });
+  if (enqueued.status === "steering_queued") {
+    throw new Error("Instruction queued on the active task; no second stream was started.");
+  }
   const turnId = enqueued.turn_id;
   const promptBuildSeconds = roundedSeconds(
     (performance.now() - promptBuildStartedAt) / 1000,

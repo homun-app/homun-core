@@ -38,6 +38,114 @@ pub(crate) struct GatewayModelClient<'a> {
     pub http: &'a reqwest::Client,
     pub tx: &'a StreamSink,
     pub usage: &'a dyn UsageRecorder,
+    pub steering: Option<GatewaySteeringContext<'a>>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct GatewaySteeringContext<'a> {
+    pub state: &'a crate::AppState,
+    pub user_id: &'a str,
+    pub workspace_id: &'a str,
+    pub thread_id: &'a str,
+    pub turn_id: &'a str,
+}
+
+impl GatewayModelClient<'_> {
+    fn consume_steering_messages(&self) -> Vec<serde_json::Value> {
+        let Some(context) = self.steering else {
+            return Vec::new();
+        };
+        steering_messages_for_round(context)
+    }
+}
+
+pub(crate) fn steering_messages_for_round(
+    context: GatewaySteeringContext<'_>,
+) -> Vec<serde_json::Value> {
+    let binding = crate::active_routing_binding(context.state, Some(context.thread_id));
+    steering_messages_for_round_with(context, |content, active| {
+        crate::resolve_semantic_decision(
+            context.state,
+            Some(context.thread_id),
+            content,
+            active,
+            binding.as_ref(),
+        )
+    })
+}
+
+pub(crate) fn steering_messages_for_round_with(
+    context: GatewaySteeringContext<'_>,
+    mut resolve: impl FnMut(
+        &str,
+        Option<&local_first_task_runtime::ObjectiveContractRecord>,
+    ) -> crate::semantic_decision::ValidatedSemanticDecision,
+) -> Vec<serde_json::Value> {
+    let Ok(store) = context.state.task_store.lock() else {
+        return Vec::new();
+    };
+    let mut objective = store
+        .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
+        .ok()
+        .flatten();
+    let messages = store
+        .consume_pending_turn_steering(
+            context.user_id,
+            context.workspace_id,
+            context.thread_id,
+            context.turn_id,
+        )
+        .unwrap_or_default();
+    drop(store);
+
+    messages.into_iter().map(|message| {
+            let proposed = resolve(&message.content, objective.as_ref());
+            let requires_confirmation = objective.as_ref().is_none_or(|active| {
+                crate::semantic_decision::steering_requires_confirmation(
+                    active,
+                    &proposed,
+                    message.objective_revision == active.revision,
+                )
+            });
+            if !requires_confirmation {
+                let projection = crate::semantic_decision::objective_contract_projection(
+                    &proposed,
+                    objective.as_ref(),
+                    context.thread_id,
+                    context.workspace_id,
+                    crate::effective_thread_folder(context.thread_id).as_deref(),
+                );
+                objective = context.state.task_store.lock().ok().and_then(|store| {
+                    store.upsert_objective_contract(
+                        context.user_id,
+                        context.workspace_id,
+                        context.thread_id,
+                        &message.source_message_id,
+                        &projection.objective,
+                        projection.mode,
+                        &projection.scope_json,
+                        &projection.allowed_actions_json,
+                        &projection.completion_json,
+                        "active",
+                    ).ok()
+                });
+            }
+            let content = if requires_confirmation {
+                format!(
+                    "[USER STEERING — CONFIRMATION REQUIRED]\n{}\n\nThe validated semantic decision classified this as {:?}. Do not execute it yet. Ask the user for explicit confirmation and explain the proposed contract change.",
+                    message.content,
+                    proposed.decision.relationship_to_active_objective,
+                )
+            } else {
+                format!(
+                    "[USER STEERING — APPLY TO THE CURRENT RUN]\n{}\n\nThe validated semantic decision classified this as {:?}. Incorporate this now, preserving the canonical objective and already verified progress. Replan autonomously if needed.",
+                    message.content,
+                    proposed.decision.relationship_to_active_objective,
+                )
+            };
+            serde_json::json!({"role": "user", "content": content})
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -333,8 +441,12 @@ impl ModelClient for GatewayModelClient<'_> {
         // provider 400s specifically on the forcing shape. `None` everywhere but the loop's main
         // per-round call (see `ModelCall::forced_tool`), so this is a no-op for every other turn.
         let mut forced_tool_fallback_tried = false;
-        // Alias the call fields under the names the lifted block uses (borrows, no clone).
-        let messages = call.messages;
+        // Consume steering only at a round boundary: `generate` is entered once per
+        // model round, before the request payload is built. The durable queue makes
+        // this exactly-once even across provider retries within this round.
+        let mut messages_owned = call.messages.to_vec();
+        messages_owned.extend(self.consume_steering_messages());
+        let messages = messages_owned.as_slice();
         let tool_schemas = call.tools;
         let temperature = call.temperature;
         let is_final_round = call.is_final_round;

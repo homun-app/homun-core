@@ -151,6 +151,28 @@ pub fn memory_record_revision(record: &MemoryRecord) -> String {
 /// service popola solo [`RecallPack::block`] (l'output testuale di
 /// `relevant_memory_for_prompt`); [`RecallPack::hits`] resta vuoto e viene
 /// riempito in Tappa 3 (emissione eventi tipizzati per la UI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryAccessStatus {
+    Ready,
+    Empty,
+    Degraded,
+    Unavailable,
+    Denied,
+}
+
+impl MemoryAccessStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Empty => "empty",
+            Self::Degraded => "degraded",
+            Self::Unavailable => "unavailable",
+            Self::Denied => "denied",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RecallPack {
     /// La query originale (per tracing/UI).
@@ -164,17 +186,27 @@ pub struct RecallPack {
     pub block: Option<String>,
     /// Fonti non locali che non hanno contribuito, con soli reason code sicuri.
     pub degraded_sources: Vec<(WorkspaceId, String)>,
+    /// Stato operativo distinto dal numero di risultati. `empty` significa che
+    /// lo storage ha risposto correttamente ma non esisteva un match; non va
+    /// presentato come errore di connessione.
+    pub status: MemoryAccessStatus,
 }
 
 impl RecallPack {
     /// Costruisce un `RecallPack` dalla sola `block` testuale (caso Tappa 1).
     pub fn from_block(query: impl Into<String>, scope: MemoryScope, block: Option<String>) -> Self {
+        let status = if block.is_some() {
+            MemoryAccessStatus::Ready
+        } else {
+            MemoryAccessStatus::Empty
+        };
         Self {
             query: query.into(),
             scope,
             hits: Vec::new(),
             block,
             degraded_sources: Vec::new(),
+            status,
         }
     }
 
@@ -182,12 +214,18 @@ impl RecallPack {
     /// provenienza e testo iniettato non possono divergere.
     pub fn from_hits(query: String, scope: MemoryScope, hits: Vec<RecallHit>) -> Self {
         let block = format_recall_hits(&hits);
+        let status = if hits.is_empty() {
+            MemoryAccessStatus::Empty
+        } else {
+            MemoryAccessStatus::Ready
+        };
         Self {
             query,
             scope,
             hits,
             block,
             degraded_sources: Vec::new(),
+            status,
         }
     }
 
@@ -198,13 +236,26 @@ impl RecallPack {
         degraded_sources: Vec<(WorkspaceId, String)>,
     ) -> Self {
         let block = format_recall_hits(&hits);
+        let status = if !degraded_sources.is_empty() {
+            MemoryAccessStatus::Degraded
+        } else if hits.is_empty() {
+            MemoryAccessStatus::Empty
+        } else {
+            MemoryAccessStatus::Ready
+        };
         Self {
             query,
             scope,
             hits,
             block,
             degraded_sources,
+            status,
         }
+    }
+
+    pub fn with_status(mut self, status: MemoryAccessStatus) -> Self {
+        self.status = status;
+        self
     }
 }
 
@@ -853,6 +904,7 @@ mod tests {
         assert_eq!(pack.scope, scope);
         assert!(pack.hits.is_empty(), "hits si popolano in Tappa 3");
         assert_eq!(pack.block.as_deref(), Some("MEMORY RELEVANT…"));
+        assert_eq!(pack.status, MemoryAccessStatus::Ready);
     }
 
     /// `RecallPack` vuoto (recall non ha surface-ato nulla) resta ben formato.
@@ -861,6 +913,8 @@ mod tests {
         let pack = RecallPack::from_block("q", MemoryScope::Personal, None);
         assert!(pack.block.is_none());
         assert!(pack.hits.is_empty());
+        assert_eq!(pack.status, MemoryAccessStatus::Empty);
+        assert_ne!(pack.status, MemoryAccessStatus::Unavailable);
     }
 
     /// Verifica object-safety: il trait deve essere istanziabile come
