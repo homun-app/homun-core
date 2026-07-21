@@ -668,6 +668,25 @@ impl TaskStore {
             .collect())
     }
 
+    pub fn list_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+    ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                    source_message_id, content, objective_revision, status, created_at,
+                    consumed_at
+             FROM turn_steering
+             WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
+             ORDER BY steering_id ASC",
+        )?;
+        Ok(statement
+            .query_map(params![user_id, workspace_id, thread_id], map_turn_steering_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn load_runtime_plan(
         &self,
         user_id: &str,

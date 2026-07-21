@@ -518,6 +518,7 @@
     "recallingUnavailable": "Memoria no disponible; la búsqueda no se completó",
     "recallingDegraded": "Memoria conectada en modo degradado",
     "recallingDenied": "El acceso a la memoria no está autorizado para esta tarea",
+    "steeringQueued": "Instrucción añadida a la tarea activa",
     "memoryBadge": "Se recuperaron {{count}} memorias",
     "memoryLinked": "fuente vinculada",
     "memoryConflict": "conflicto",

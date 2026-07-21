@@ -107,7 +107,7 @@ import {
 } from "../lib/coreBridge";
 import { wsSubscription } from "../lib/wsSubscription";
 import { ExecutionInspector } from "./ExecutionInspector";
-import { fetchThreadActivity, type SubagentInfo } from "../lib/chatApi";
+import { enqueueTurn, fetchThreadActivity, type SubagentInfo } from "../lib/chatApi";
 import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
@@ -449,6 +449,7 @@ export function ChatView({
   const streamingUserPinnedRef = useRef(false);
   const streamingFrameRef = useRef<number | null>(null);
   const cancelStreamingRequestRef = useRef<(() => void) | null>(null);
+  const pendingSteeringMessagesRef = useRef<ChatMessage[]>([]);
   const cancelledStreamIdsRef = useRef<Set<string>>(new Set());
   // Tracks whether THIS ChatView instance is still mounted. The chat stream
   // (submitChat) keeps running in the background after the user navigates to
@@ -960,6 +961,7 @@ export function ChatView({
     const shouldAutoTitleAfterSubmit = isPlaceholderThreadTitle(thread.title);
     const userVisibleText = (visibleText ?? text).trim();
     if (!userVisibleText) return;
+    pendingSteeringMessagesRef.current = [];
     const visiblePrompt = userVisibleText === text ? undefined : userVisibleText;
 
     setPromptSubmitting(true);
@@ -1016,6 +1018,7 @@ export function ChatView({
           text: streamedText,
           eventParts: streamEventParts,
         },
+        ...pendingSteeringMessagesRef.current,
       ]);
       afterStreamingFramePaint();
     };
@@ -1053,6 +1056,7 @@ export function ChatView({
           eventParts: streamEventParts,
           metadata: "Interrotta localmente",
         },
+        ...pendingSteeringMessagesRef.current,
       ];
       setOptimisticMessages(cancelledMessages);
       onMessagesChange(cancelledMessages);
@@ -1202,6 +1206,7 @@ export function ChatView({
       };
       let finalMessages = [
         ...promptMessages,
+        ...pendingSteeringMessagesRef.current,
         finalAssistantMessage,
       ];
       setOptimisticMessages(finalMessages);
@@ -1228,6 +1233,7 @@ export function ChatView({
       );
       const errorMessages: ChatMessage[] = [
         ...promptMessages,
+        ...pendingSteeringMessagesRef.current,
         {
           id: `local_error_${Date.now()}`,
           role: "system" as const,
@@ -1513,6 +1519,53 @@ export function ChatView({
     const contextPrefix = options?.contextText ? `${options.contextText}\n\n` : "";
     const model = options?.model;
     const augmented = Boolean(skillPrefix || contextPrefix);
+
+    if (promptSubmitting && activeTurnIdRef.current) {
+      const promptWithReplyContext = activeReplyContext
+        ? [
+            skillPrefix,
+            contextPrefix,
+            "Apply this instruction to the active task while keeping the quoted context.",
+            `Quoted message (${messageRoleLabel(activeReplyContext.role)}):`,
+            activeReplyContext.preview,
+            "",
+            "User instruction:",
+            prompt,
+          ].join("\n")
+        : `${skillPrefix}${contextPrefix}${prompt}`;
+      const requestId = `chat_steering_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      void enqueueTurn(thread.threadId, requestId, promptWithReplyContext, {
+        visiblePrompt: prompt,
+        images,
+        attachments: attachments.length ? attachments : undefined,
+        mode,
+        model,
+      })
+        .then((result) => {
+          if (result.status !== "steering_queued") {
+            throw new Error("The active task ended while the instruction was being queued.");
+          }
+          const steeringMessage: ChatMessage = {
+            id: result.source_message_id,
+            role: "user",
+            text: prompt,
+            timestamp: currentTimestampSeconds(),
+            attachments: attachments.map(toMessageAttachment),
+          };
+          pendingSteeringMessagesRef.current = [
+            ...pendingSteeringMessagesRef.current,
+            steeringMessage,
+          ];
+          setOptimisticMessages((current) =>
+            current ? [...current, steeringMessage] : current,
+          );
+          setStreamStatus((current) =>
+            current ? { ...current, detail: t("chat.steeringQueued") } : current,
+          );
+        })
+        .catch((error) => setPromptError(describeBridgeError(error)));
+      return;
+    }
 
     if (!activeReplyContext) {
       if (augmented) {
@@ -2832,7 +2885,7 @@ export function ChatView({
       />
 
       <Composer
-        disabled={promptSubmitting}
+        disabled={false}
         error={promptError}
         replyContext={replyContext}
         seed={composerSeed}
@@ -9961,7 +10014,7 @@ function Composer({
             <span className="composer-error">{composerAttachmentError}</span>
           )}
           {dictationError && <span className="composer-error">{dictationError}</span>}
-          {streaming ? (
+          {streaming && (
             <button
               className="composer-stop-button"
               type="button"
@@ -9970,7 +10023,8 @@ function Composer({
             >
               <X size={17} />
             </button>
-          ) : value.trim() ? (
+          )}
+          {(value.trim() || composerImages.length > 0) && (
             <button
               className="send-button"
               disabled={disabled || (!value.trim() && composerImages.length === 0)}
@@ -9979,7 +10033,7 @@ function Composer({
             >
               <ArrowUp size={18} />
             </button>
-          ) : null}
+          )}
         </div>
       </div>
     </form>

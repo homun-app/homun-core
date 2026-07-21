@@ -538,6 +538,7 @@
     "recallingUnavailable": "Memoria non disponibile: la ricerca non è stata eseguita",
     "recallingDegraded": "Memoria connessa in modalità ridotta",
     "recallingDenied": "Accesso alla memoria non autorizzato per questa attività",
+    "steeringQueued": "Istruzione aggiunta all'attività in corso",
     "memoryBadge": "Ha richiamato {{count}} ricordi",
     "memoryLinked": "fonte collegata",
     "memoryConflict": "conflitto",

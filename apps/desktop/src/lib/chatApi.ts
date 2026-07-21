@@ -738,13 +738,24 @@ export interface RoutingBindingInput {
 }
 
 /** Response body for POST /api/chat/turns. */
-export interface EnqueueTurnResponse {
+export interface QueuedTurnResponse {
   turn_id: string;
   thread_id: string;
   request_id: string;
   status: "queued";
   position_in_queue: number;
 }
+
+export interface SteeringQueuedResponse {
+  thread_id: string;
+  active_turn_id: string;
+  request_id: string;
+  source_message_id: string;
+  objective_revision: number;
+  status: "steering_queued";
+}
+
+export type EnqueueTurnResponse = QueuedTurnResponse | SteeringQueuedResponse;
 
 export interface AgentRunView {
   run_id: string;
@@ -850,7 +861,9 @@ export async function enqueueTurn(
       routing_binding: options?.routingBinding,
     }),
   });
-  if (res.status === 201) return (await res.json()) as EnqueueTurnResponse;
+  if (res.status === 201 || res.status === 202) {
+    return (await res.json()) as EnqueueTurnResponse;
+  }
   if (res.status === 409) {
     const body = (await res.json()) as { active_turn_id: string };
     throw new TurnBusyError(body.active_turn_id);

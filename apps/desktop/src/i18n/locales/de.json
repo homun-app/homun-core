@@ -518,6 +518,7 @@
     "recallingUnavailable": "Speicher nicht verfügbar; die Suche wurde nicht abgeschlossen",
     "recallingDegraded": "Speicher im eingeschränkten Modus verbunden",
     "recallingDenied": "Speicherzugriff ist für diese Aufgabe nicht autorisiert",
+    "steeringQueued": "Anweisung zur laufenden Aufgabe hinzugefügt",
     "memoryBadge": "{{count}} Erinnerungen abgerufen",
     "memoryLinked": "verknüpfte Quelle",
     "memoryConflict": "Konflikt",
