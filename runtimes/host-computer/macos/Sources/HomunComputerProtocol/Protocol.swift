@@ -14,6 +14,7 @@ public enum HostComputerMethod: String, Codable, Sendable {
     case listWindows = "list_windows"
     case getAppState = "get_app_state"
     case captureWindow = "capture_window"
+    case executeAction = "execute_action"
 }
 
 public struct ApplicationIdentity: Codable, Equatable, Hashable, Sendable {
@@ -248,6 +249,47 @@ public struct StagedCapture: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case relativePath = "relative_path"
+    }
+}
+
+public struct ActionTarget: Codable, Equatable, Sendable {
+    public var snapshotID: String
+    public var generation: UInt64
+    public var index: UInt32
+
+    public init(snapshotID: String, generation: UInt64, index: UInt32) {
+        self.snapshotID = snapshotID
+        self.generation = generation
+        self.index = index
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotID = "snapshot_id"
+        case generation, index
+    }
+}
+
+public struct ActionRequest: Codable, Equatable, Sendable {
+    public var target: ActionTarget
+    public var action: SemanticAction
+    public var value: String?
+
+    public init(target: ActionTarget, action: SemanticAction, value: String? = nil) {
+        self.target = target
+        self.action = action
+        self.value = value
+    }
+}
+
+public struct ActionResult: Codable, Equatable, Sendable {
+    public var snapshotRequired: Bool
+
+    public init(snapshotRequired: Bool) {
+        self.snapshotRequired = snapshotRequired
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case snapshotRequired = "snapshot_required"
     }
 }
 
@@ -498,6 +540,8 @@ public enum ProtocolFailure: Error, Equatable, Sendable {
     case permissionMissing
     case targetNotFound
     case helperUnavailable
+    case staleSnapshot
+    case secureInputBlocked
 
     public var errorCode: HostComputerErrorCode {
         switch self {
@@ -509,6 +553,8 @@ public enum ProtocolFailure: Error, Equatable, Sendable {
         case .permissionMissing: .permissionMissing
         case .targetNotFound: .targetNotFound
         case .helperUnavailable: .helperUnavailable
+        case .staleSnapshot: .staleSnapshot
+        case .secureInputBlocked: .secureInputBlocked
         }
     }
 }

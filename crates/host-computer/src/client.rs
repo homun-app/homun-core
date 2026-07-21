@@ -10,9 +10,9 @@ use tokio::sync::Mutex;
 
 use crate::{
     protocol::{
-        AppSnapshot, HandshakeResult, HostComputerErrorCode, HostComputerMethod, JsonRpcVersion,
-        ListAppsResult, ListWindowsResult, PROTOCOL_VERSION, PermissionStatus, RequestMeta,
-        RpcError, RpcRequest, StagedCapture,
+        ActionRequest, ActionResult, AppSnapshot, HandshakeResult, HostComputerErrorCode,
+        HostComputerMethod, JsonRpcVersion, ListAppsResult, ListWindowsResult, PROTOCOL_VERSION,
+        PermissionStatus, RequestMeta, RpcError, RpcRequest, StagedCapture,
     },
     transport::HostComputerTransport,
 };
@@ -166,6 +166,25 @@ where
         self.call(
             HostComputerMethod::CaptureWindow,
             serde_json::json!({"window_id": window_id}),
+            context,
+        )
+        .await
+    }
+
+    pub async fn execute_action(
+        &self,
+        request: ActionRequest,
+        context: RequestContext,
+    ) -> Result<ActionResult, HostComputerClientError> {
+        self.ensure_handshake(&context).await?;
+        self.call(
+            HostComputerMethod::ExecuteAction,
+            serde_json::to_value(request).map_err(|error| {
+                HostComputerClientError::transport(
+                    HostComputerErrorCode::InvalidRequest,
+                    format!("action request is invalid: {error}"),
+                )
+            })?,
             context,
         )
         .await

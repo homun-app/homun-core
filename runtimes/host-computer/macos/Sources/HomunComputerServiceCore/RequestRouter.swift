@@ -7,6 +7,7 @@ public struct RequestRouter: Sendable {
     private let inventory: any AppInventoryProviding
     private let snapshotProvider: SystemSnapshotProvider
     private let captureRunner: BlockingCaptureRunner?
+    private let actionExecutor: ActionExecutor
 
     public init(
         sessionToken: String,
@@ -16,7 +17,9 @@ public struct RequestRouter: Sendable {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
         self.permissionProbe = permissionProbe
         inventory = SystemAppInventory()
-        snapshotProvider = SystemSnapshotProvider()
+        let registry = ElementRegistry()
+        snapshotProvider = SystemSnapshotProvider(registry: registry)
+        actionExecutor = ActionExecutor(registry: registry)
         captureRunner = artifactRoot.map {
             BlockingCaptureRunner(service: ScreenCaptureService(artifactRoot: $0))
         }
@@ -30,7 +33,9 @@ public struct RequestRouter: Sendable {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
         self.permissionProbe = permissionProbe
         self.inventory = inventory
-        snapshotProvider = SystemSnapshotProvider()
+        let registry = ElementRegistry()
+        snapshotProvider = SystemSnapshotProvider(registry: registry)
+        actionExecutor = ActionExecutor(registry: registry)
         captureRunner = nil
     }
 
@@ -78,6 +83,7 @@ public struct RequestRouter: Sendable {
                     .string("list_windows"),
                     .string("get_app_state"),
                     .string("capture_window"),
+                    .string("execute_action"),
                 ]),
             ]))
         case .permissionStatus:
@@ -145,6 +151,22 @@ public struct RequestRouter: Sendable {
             } catch {
                 throw ProtocolFailure.helperUnavailable
             }
+        case .executeAction:
+            let action: ActionRequest = try decodeJSONValue(request.params)
+            do {
+                return .success(
+                    id: request.id,
+                    result: try encodeJSONValue(actionExecutor.execute(action))
+                )
+            } catch ActionFailure.staleSnapshot {
+                throw ProtocolFailure.staleSnapshot
+            } catch ActionFailure.targetNotFound {
+                throw ProtocolFailure.targetNotFound
+            } catch ActionFailure.secureInputBlocked {
+                throw ProtocolFailure.secureInputBlocked
+            } catch {
+                throw ProtocolFailure.invalidRequest
+            }
         }
     }
 
@@ -153,6 +175,10 @@ public struct RequestRouter: Sendable {
             JSONValue.self,
             from: JSONEncoder.hostComputer.encode(value)
         )
+    }
+
+    private func decodeJSONValue<T: Decodable>(_ value: JSONValue) throws -> T {
+        try JSONDecoder.hostComputer.decode(T.self, from: JSONEncoder.hostComputer.encode(value))
     }
 
     private func extractID(from body: Data) -> UInt64 {
@@ -173,6 +199,8 @@ public struct RequestRouter: Sendable {
         case .permissionMissing: "screen recording permission is missing"
         case .targetNotFound: "capture target was not found"
         case .helperUnavailable: "window capture failed"
+        case .staleSnapshot: "snapshot is stale"
+        case .secureInputBlocked: "secure input is blocked"
         }
     }
 }

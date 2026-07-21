@@ -2,7 +2,7 @@ import ApplicationServices
 import Foundation
 import HomunComputerProtocol
 
-public final class SystemAXNode: AXNodeSource {
+public final class SystemAXNode: AXActionTarget {
     public let element: AXUIElement
 
     public init(element: AXUIElement) {
@@ -43,6 +43,18 @@ public final class SystemAXNode: AXNodeSource {
     public var children: [any AXNodeSource] {
         guard let children = attribute("AXChildren") as? [AXUIElement] else { return [] }
         return children.map(SystemAXNode.init(element:))
+    }
+
+    public func perform(actionNamed name: String) throws {
+        guard AXUIElementPerformAction(element, name as CFString) == .success else {
+            throw ActionFailure.nativeActionFailed
+        }
+    }
+
+    public func setStringValue(_ value: String) throws {
+        guard AXUIElementSetAttributeValue(element, "AXValue" as CFString, value as CFTypeRef) == .success else {
+            throw ActionFailure.nativeActionFailed
+        }
     }
 
     private func attribute(_ name: String) -> CFTypeRef? {

@@ -16,7 +16,12 @@ public protocol AXNodeSource: AnyObject {
     var children: [any AXNodeSource] { get }
 }
 
-public final class SyntheticAXNode: AXNodeSource {
+public protocol AXActionTarget: AXNodeSource {
+    func perform(actionNamed name: String) throws
+    func setStringValue(_ value: String) throws
+}
+
+public final class SyntheticAXNode: AXActionTarget {
     public var role: String
     public var subrole: String?
     public var label: String?
@@ -29,6 +34,7 @@ public final class SyntheticAXNode: AXNodeSource {
     public var expanded: Bool?
     public var actionNames: [String]
     public var children: [any AXNodeSource]
+    public private(set) var performedActions: [String] = []
 
     public init(
         role: String,
@@ -56,6 +62,15 @@ public final class SyntheticAXNode: AXNodeSource {
         self.selected = selected
         self.expanded = expanded
         self.children = children
+    }
+
+    public func perform(actionNamed name: String) throws {
+        performedActions.append(name)
+    }
+
+    public func setStringValue(_ value: String) throws {
+        self.value = value
+        performedActions.append("AXSetValue")
     }
 }
 

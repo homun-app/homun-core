@@ -20,6 +20,7 @@ pub enum HostComputerMethod {
     ListWindows,
     GetAppState,
     CaptureWindow,
+    ExecuteAction,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +153,28 @@ pub struct ArtifactRef {
 #[serde(deny_unknown_fields)]
 pub struct StagedCapture {
     pub relative_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionTarget {
+    pub snapshot_id: String,
+    pub generation: u64,
+    pub index: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionRequest {
+    pub target: ActionTarget,
+    pub action: SemanticAction,
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActionResult {
+    pub snapshot_required: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
