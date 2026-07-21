@@ -105,6 +105,15 @@ pub(crate) struct ValidatedSemanticDecision {
     pub(crate) provenance: SemanticDecisionProvenance,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ObjectiveContractProjection {
+    pub(crate) objective: String,
+    pub(crate) mode: ObjectiveMode,
+    pub(crate) scope_json: serde_json::Value,
+    pub(crate) allowed_actions_json: serde_json::Value,
+    pub(crate) completion_json: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SemanticDecisionError {
     pub(crate) code: &'static str,
@@ -465,6 +474,50 @@ pub(crate) fn semantic_decision_from_contract(
         .and_then(|value| serde_json::from_value(value).ok())
 }
 
+pub(crate) fn objective_contract_projection(
+    validated: &ValidatedSemanticDecision,
+    active: Option<&ObjectiveContractRecord>,
+    thread_id: &str,
+    workspace_id: &str,
+    project_root: Option<&str>,
+) -> ObjectiveContractProjection {
+    let decision = &validated.decision;
+    let objective = if matches!(
+        decision.relationship_to_active_objective,
+        ObjectiveRelationship::SameObjective | ObjectiveRelationship::CompatibleExtension
+    ) {
+        active
+            .map(|record| record.objective.clone())
+            .unwrap_or_else(|| decision.objective.clone())
+    } else {
+        decision.objective.clone()
+    };
+    let allowed_actions = decision
+        .allowed_effect_classes
+        .iter()
+        .map(|effect| serde_json::to_value(effect).unwrap_or(serde_json::Value::Null))
+        .collect::<Vec<_>>();
+    ObjectiveContractProjection {
+        objective,
+        mode: decision.mode,
+        scope_json: serde_json::json!({
+            "thread_id": thread_id,
+            "workspace_id": workspace_id,
+            "project_root": project_root,
+            "resources": decision.scope.resources,
+            "may_request_additional_access": decision.scope.may_request_additional_access,
+            "semantic_decision": validated,
+        }),
+        allowed_actions_json: serde_json::Value::Array(allowed_actions),
+        completion_json: serde_json::json!({
+            "requires_evidence": true,
+            "deliverable": serde_json::to_value(decision.deliverable.kind)
+                .unwrap_or(serde_json::Value::String("chat_report".to_string())),
+            "artifact_requested": decision.deliverable.artifact_requested,
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -604,5 +657,28 @@ mod tests {
             Some("effect_conflict")
         );
         assert_eq!(contradictory.decision.execution_shape, ExecutionShape::AgentLoop);
+    }
+
+    #[test]
+    fn objective_contract_uses_semantic_decision_fields() {
+        let validated = validate_decision(read_only_decision(), &registry(), None).unwrap();
+        let projection = objective_contract_projection(
+            &validated,
+            None,
+            "thread-1",
+            "workspace-1",
+            Some("/tmp/project"),
+        );
+
+        assert_eq!(projection.mode, ObjectiveMode::ReadOnlyAnalysis);
+        assert_eq!(projection.completion_json["deliverable"], "chat_report");
+        assert_eq!(
+            projection.scope_json["semantic_decision"]["execution_shape"],
+            "agent_loop"
+        );
+        assert_eq!(
+            projection.scope_json["semantic_decision"]["forbidden_effect_classes"][0],
+            "filesystem_write"
+        );
     }
 }

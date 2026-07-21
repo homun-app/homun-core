@@ -275,48 +275,45 @@ pub fn execute_chat_turn_task(
     let preseeded_user_message_id = request_id
         .as_ref()
         .map(|request_id| format!("local_user_{request_id}"));
-    let objective_mode = crate::classify_objective_mode(prompt);
+    let existing_objective = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .load_objective_contract(task.user_id.as_str(), &workspace_id, thread_id)
+                .ok()
+                .flatten()
+        })
+        .filter(|objective| objective.status == "active");
+    let routing_binding = crate::active_routing_binding(state, Some(thread_id));
+    let semantic_decision = crate::resolve_semantic_decision(
+        state,
+        Some(thread_id),
+        prompt,
+        existing_objective.as_ref(),
+        routing_binding.as_ref(),
+    );
+    let project_root = crate::effective_thread_folder(thread_id);
+    let projection = crate::semantic_decision::objective_contract_projection(
+        &semantic_decision,
+        existing_objective.as_ref(),
+        thread_id,
+        &workspace_id,
+        project_root.as_deref(),
+    );
     let objective = state.task_store.lock().ok().and_then(|store| {
-        let existing = store
-            .load_objective_contract(task.user_id.as_str(), &workspace_id, thread_id)
-            .ok()
-            .flatten();
-        if crate::is_plan_continuation_message(prompt) && existing.is_some() {
-            return existing;
-        }
-        let allowed_actions = match objective_mode {
-            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis => {
-                serde_json::json!(["read", "search", "inspect", "test", "report", "plan"])
-            }
-            local_first_task_runtime::ObjectiveMode::Mutation => {
-                serde_json::json!(["read", "search", "inspect", "test", "mutate", "plan"])
-            }
-            local_first_task_runtime::ObjectiveMode::Mixed => {
-                serde_json::json!(["read", "search", "inspect", "test", "mutate", "report", "plan"])
-            }
-        };
         store
             .upsert_objective_contract(
                 task.user_id.as_str(),
                 &workspace_id,
                 thread_id,
                 preseeded_user_message_id.as_deref().unwrap_or(turn_id),
-                prompt,
-                objective_mode,
-                &serde_json::json!({
-                    "thread_id": thread_id,
-                    "workspace_id": workspace_id,
-                    "project_root": crate::effective_thread_folder(thread_id),
-                }),
-                &allowed_actions,
-                &serde_json::json!({
-                    "requires_evidence": true,
-                    "deliverable": if objective_mode == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis {
-                        "analysis_report"
-                    } else {
-                        "verified_result"
-                    },
-                }),
+                &projection.objective,
+                projection.mode,
+                &projection.scope_json,
+                &projection.allowed_actions_json,
+                &projection.completion_json,
                 "active",
             )
             .ok()
