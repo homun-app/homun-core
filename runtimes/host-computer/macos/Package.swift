@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "HomunComputerProtocol", targets: ["HomunComputerProtocol"]),
         .library(name: "HomunComputerServiceCore", targets: ["HomunComputerServiceCore"]),
         .executable(name: "HomunComputerService", targets: ["HomunComputerService"]),
+        .executable(name: "HomunComputerFixture", targets: ["HomunComputerFixture"]),
     ],
     targets: [
         .target(name: "HomunComputerProtocol"),
@@ -20,9 +21,22 @@ let package = Package(
             name: "HomunComputerService",
             dependencies: ["HomunComputerProtocol", "HomunComputerServiceCore"]
         ),
+        .target(
+            name: "HomunComputerFixtureCore",
+            path: "Sources/HomunComputerFixture"
+        ),
+        .executableTarget(
+            name: "HomunComputerFixture",
+            dependencies: ["HomunComputerFixtureCore"],
+            path: "Sources/HomunComputerFixtureExecutable"
+        ),
         .testTarget(
             name: "HomunComputerProtocolTests",
-            dependencies: ["HomunComputerProtocol", "HomunComputerServiceCore"]
+            dependencies: [
+                "HomunComputerProtocol",
+                "HomunComputerServiceCore",
+                "HomunComputerFixtureCore",
+            ]
         ),
     ]
 )
