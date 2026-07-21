@@ -5171,10 +5171,24 @@ export interface HostComputerStatus {
   accessibility: HostComputerPermissionState;
   screen_recording: HostComputerPermissionState;
   ready: boolean;
+  reason?: string;
+  host_session?: HostComputerWireEvent | null;
 }
-export interface HostComputerApp { bundle_id: string; display_name: string; pid: number; granted_level: "observe" | "control" | null; }
+export interface HostComputerSigningIdentity { team_id: string; designated_requirement_sha256: string; }
+export interface HostComputerApp { bundle_id: string; display_name: string; pid: number; granted_level: "observe" | "control" | null; signing_identity?: HostComputerSigningIdentity | null; }
 export interface HostComputerGrant { grant_id: string; bundle_id: string; display_name: string; level: "observe" | "control"; }
 export interface GrantHostComputerAppInput { bundle_id: string; level: "observe" | "control"; }
+export interface HostComputerWireEvent {
+  type: string;
+  sequence: number;
+  session_id: string;
+  generation: number;
+  phase: "observing" | "awaiting_approval" | "acting" | "paused_by_user" | "suspended" | "done" | "failed" | "cancelled";
+  app: string;
+  artifact_ref?: string | null;
+  approval?: { category: string; summary: string; action_digest: string; expires_at_unix_ms?: number } | null;
+  error_code?: string | null;
+}
 
 export const hostComputerStatus = () => gatewayGetJson<HostComputerStatus>("/api/host-computer/status");
 export const hostComputerApps = () => gatewayGetJson<HostComputerApp[]>("/api/host-computer/apps");

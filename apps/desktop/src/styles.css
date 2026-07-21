@@ -15012,6 +15012,56 @@ body.resizing-drawer {
    (var(--s4)) is kept for content cards; the .rows modifier turns the card into a
    divider-split list with NO own padding (rows carry the ~15px inset padding). */
 .set-card { border-radius: var(--radius-card); }
+
+.host-computer-settings {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+
+.host-computer-permissions,
+.host-computer-settings > .set-rows {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.host-computer-grant-picker {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(130px, 0.7fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin: 10px 0;
+}
+
+.host-computer-grant-picker label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.host-computer-grant-picker select {
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-muted);
+  padding: 0 10px;
+}
+
+.host-computer-identity {
+  overflow-wrap: anywhere;
+}
+
+.host-computer-privacy,
+.host-computer-restrictions {
+  max-width: 78ch;
+}
+
+@media (max-width: 760px) {
+  .host-computer-grant-picker { grid-template-columns: 1fr; }
+}
 .set-card.rows { padding: 0; overflow: hidden; }
 .set-card.rows > .set-row,
 .set-card.rows > .set-trow { padding: 15px var(--s5); }

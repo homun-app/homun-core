@@ -85,6 +85,15 @@ import {
   type SkillsSecurityReport,
   type SkillssResponse,
   type SystemStatus,
+  type HostComputerApp,
+  type HostComputerGrant,
+  type HostComputerStatus,
+  grantHostComputerApp,
+  hostComputerApps,
+  hostComputerGrants,
+  hostComputerStatus,
+  presentHostComputerPermission,
+  revokeHostComputerGrant,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
 import { ProviderLogo, providerLogoKey } from "./providerLogos";
@@ -164,7 +173,7 @@ const SECTION_TITLES: Record<SettingsSectionId, string> = {
   connections: "settings.connectors",
   skills: "settings.skills",
   addon: "settings.addon",
-  computer: "settings.computer",
+  computer: "settings.computer.title",
 };
 
 // Roles that quietly lose a capability when no installed model meets their requirements — the picker
@@ -5255,6 +5264,7 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
 
   return (
     <>
+      <div className="set-section-label">{t("settings.computer.containedTitle")}</div>
       {/* Status card — title + subtitle left, live-state badge right (design 530). */}
       <div className="set-card set-computer-status">
         <div>
@@ -5344,7 +5354,177 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
       </div>
       {closedNote && <p className="set-hint">{closedNote}</p>}
 
+      <MacAppsSettings />
+
     </>
+  );
+}
+
+function MacAppsSettings() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<HostComputerStatus | null>(null);
+  const [apps, setApps] = useState<HostComputerApp[]>([]);
+  const [grants, setGrants] = useState<HostComputerGrant[]>([]);
+  const [selectedBundle, setSelectedBundle] = useState("");
+  const [level, setLevel] = useState<"observe" | "control">("observe");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshHostComputer = async () => {
+    const nextStatus = await hostComputerStatus();
+    setStatus(nextStatus);
+    if (!nextStatus.available) {
+      setApps([]);
+      setGrants([]);
+      return;
+    }
+    const [nextApps, nextGrants] = await Promise.all([hostComputerApps(), hostComputerGrants()]);
+    setApps(nextApps.filter((app) => Boolean(app.bundle_id)));
+    setGrants(nextGrants);
+    setSelectedBundle((current) => current || nextApps.find((app) => app.bundle_id)?.bundle_id || "");
+  };
+
+  useEffect(() => {
+    void refreshHostComputer().catch(() => setStatus(null));
+    const id = window.setInterval(() => void refreshHostComputer().catch(() => {}), 5000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const selectedApp = apps.find((app) => app.bundle_id === selectedBundle);
+  const permissionRow = (
+    permission: "accessibility" | "screen_recording",
+    value: HostComputerStatus["accessibility"],
+  ) => (
+    <div className="set-row" key={permission}>
+      <div>
+        <div className="rk">{t(`settings.computer.${permission}`)}</div>
+        <div className="rv">{t(`settings.computer.permission.${value}`)}</div>
+      </div>
+      {value !== "granted" && (
+        <button
+          className="set-btn"
+          type="button"
+          disabled={busy || !status?.available}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await presentHostComputerPermission(permission);
+              await refreshHostComputer();
+            } catch (cause) {
+              setError(String(cause));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {t("settings.computer.openSystemSettings")}
+        </button>
+      )}
+    </div>
+  );
+
+  return (
+    <section className="host-computer-settings" aria-labelledby="host-computer-title">
+      <div className="set-section-label" id="host-computer-title">
+        {t("settings.computer.macAppsTitle")}
+      </div>
+      <p className="set-hint">{t("settings.computer.macAppsDescription")}</p>
+      <div className="set-rows host-computer-permissions" aria-live="polite">
+        <div className="set-row">
+          <div>
+            <div className="rk">{t("settings.computer.helper")}</div>
+            <div className="rv">
+              {status?.available
+                ? t("settings.computer.helperReady", { version: status.helper_version ?? "—" })
+                : t("settings.computer.helperUnavailable")}
+            </div>
+          </div>
+          <span className={`set-badge ${status?.ready ? "green" : "muted"}`}>
+            {status?.ready ? t("settings.computer.ready") : t("settings.computer.setupRequired")}
+          </span>
+        </div>
+        {permissionRow("accessibility", status?.accessibility ?? "not_determined")}
+        {permissionRow("screen_recording", status?.screen_recording ?? "not_determined")}
+      </div>
+
+      {status?.available && (
+        <>
+          <div className="set-section-label">{t("settings.computer.appGrants")}</div>
+          <div className="host-computer-grant-picker">
+            <label>
+              <span>{t("settings.computer.chooseApp")}</span>
+              <select value={selectedBundle} onChange={(event) => setSelectedBundle(event.target.value)}>
+                <option value="">{t("settings.computer.selectApp")}</option>
+                {apps.map((app) => <option key={`${app.bundle_id}-${app.pid}`} value={app.bundle_id}>{app.display_name} · {app.bundle_id}</option>)}
+              </select>
+            </label>
+            <label>
+              <span>{t("settings.computer.accessLevel")}</span>
+              <select value={level} onChange={(event) => setLevel(event.target.value as "observe" | "control")}>
+                <option value="observe">{t("settings.computer.observe")}</option>
+                <option value="control">{t("settings.computer.control")}</option>
+              </select>
+            </label>
+            <button
+              className="set-btn primary"
+              type="button"
+              disabled={busy || !selectedBundle}
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                try {
+                  await grantHostComputerApp({ bundle_id: selectedBundle, level });
+                  await refreshHostComputer();
+                } catch (cause) {
+                  setError(String(cause));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {t("settings.computer.authorize")}
+            </button>
+          </div>
+          {selectedApp?.signing_identity && (
+            <p className="set-hint host-computer-identity">
+              {selectedApp.bundle_id} · {selectedApp.signing_identity.team_id} · {selectedApp.signing_identity.designated_requirement_sha256.slice(0, 12)}…
+            </p>
+          )}
+          <div className="set-rows">
+            {grants.length === 0 ? (
+              <div className="set-row"><span className="rv">{t("settings.computer.noGrants")}</span></div>
+            ) : grants.map((grant) => (
+              <div className="set-row" key={grant.grant_id}>
+                <div>
+                  <div className="rk">{grant.display_name}</div>
+                  <div className="rv">{grant.bundle_id} · {t(`settings.computer.${grant.level}`)}</div>
+                </div>
+                <button
+                  className="set-btn"
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await revokeHostComputerGrant(grant.grant_id);
+                      await refreshHostComputer();
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {t("settings.computer.revoke")}
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <p className="set-hint host-computer-privacy">{t("settings.computer.privacyNotice")}</p>
+      <p className="set-hint host-computer-restrictions">{t("settings.computer.restrictions")}</p>
+      {error && <p className="set-error" role="alert">{error}</p>}
+    </section>
   );
 }
 
