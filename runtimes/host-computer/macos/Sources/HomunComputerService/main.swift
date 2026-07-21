@@ -60,6 +60,17 @@ do {
     signal(SIGPIPE, SIG_IGN)
     let configuration = try ServiceConfiguration(arguments: CommandLine.arguments)
     guard kill(configuration.parentPID, 0) == 0 else { throw ServiceFailure.invalidArguments }
+    // The helper is launched through LaunchServices, so it is not a normal child of
+    // the gateway. Exit as soon as the authenticated parent disappears; this makes
+    // app quit and factory reset release the event tap, socket, and TCC-using process.
+    Thread.detachNewThread {
+        while true {
+            Thread.sleep(forTimeInterval: 1)
+            if kill(configuration.parentPID, 0) != 0 {
+                exit(0)
+            }
+        }
+    }
     let token = try consumeTokenFile(at: configuration.tokenFile)
     let takeover = InputTakeoverMonitor(eventMarker: Int64.random(in: 1...Int64.max))
     let eventTap = SystemInputEventTap(monitor: takeover)
