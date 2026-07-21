@@ -1413,6 +1413,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/host-computer/grants", get(host_computer_gateway::list_grants).post(host_computer_gateway::create_grant))
         .route("/api/host-computer/grants/{grant_id}", axum::routing::delete(host_computer_gateway::revoke_grant))
         .route("/api/host-computer/permissions/present", post(host_computer_gateway::present_permission))
+        .route("/api/host-computer/sessions/{session_id}/approve", post(host_computer_gateway::approve_session))
+        .route("/api/host-computer/sessions/{session_id}/deny", post(host_computer_gateway::deny_session))
+        .route("/api/host-computer/sessions/{session_id}/pause", post(host_computer_gateway::pause_session))
+        .route("/api/host-computer/sessions/{session_id}/resume", post(host_computer_gateway::resume_session))
+        .route("/api/host-computer/sessions/{session_id}/cancel", post(host_computer_gateway::cancel_session))
         // Bearer-authed: mint a short-lived ticket for the noVNC live-view proxy
         // (the iframe + WS that follow can't send the Bearer header).
         .route(
@@ -17570,7 +17575,7 @@ mod host_computer_tool_contract_tests {
 
 fn computer_list_apps_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_list_apps","description":"List only Mac applications granted for this workspace.","parameters":{"type":"object","additionalProperties":false,"properties":{}}}}) }
 fn computer_get_state_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_get_state","description":"Read a fresh bounded accessibility snapshot for a granted running app.","parameters":{"type":"object","additionalProperties":false,"required":["pid"],"properties":{"pid":{"type":"integer","minimum":1}}}}}) }
-fn computer_action_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_action","description":"Perform one semantic action using an element from the latest snapshot. After success, read a new snapshot. Text entry and consequential actions stop for user approval.","parameters":{"type":"object","additionalProperties":false,"required":["target","action"],"properties":{"target":{"type":"object","additionalProperties":false,"required":["snapshot_id","generation","index"],"properties":{"snapshot_id":{"type":"string"},"generation":{"type":"integer"},"index":{"type":"integer"}}},"action":{"type":"string","enum":["press","set_value","show_menu","increment","decrement","confirm","cancel","raise","scroll_up","scroll_down"]},"value":{"type":["string","null"],"maxLength":20000},"resume_token":{"type":["string","null"]}}}}}) }
+fn computer_action_tool_schema() -> serde_json::Value { serde_json::json!({"type":"function","function":{"name":"computer_action","description":"Perform one semantic action using an element from the latest snapshot. After success, read a new snapshot. Text entry and consequential actions stop for user approval.","parameters":{"type":"object","additionalProperties":false,"required":["target","action"],"properties":{"target":{"type":"object","additionalProperties":false,"required":["snapshot_id","generation","index"],"properties":{"snapshot_id":{"type":"string"},"generation":{"type":"integer"},"index":{"type":"integer"}}},"action":{"type":"string","enum":["press","set_value","show_menu","increment","decrement","confirm","cancel","raise","scroll_up","scroll_down"]},"value":{"type":["string","null"],"maxLength":20000}}}}}) }
 
 fn browser_navigate_tool_schema() -> serde_json::Value {
     serde_json::json!({
@@ -26050,6 +26055,10 @@ struct GatewayComputerExecutor<'a> {
 
 impl GatewayComputerExecutor<'_> {
     async fn run(&self, goal: &str) -> local_first_engine::BrowseResult {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        if let Err(error) = host_computer_gateway::start_worker_session(&session_id, "Mac Apps") {
+            return local_first_engine::BrowseResult::not_found(error);
+        }
         let (base_url, model, api_key) = chat_openai_stream_config().unwrap_or_default();
         let system = format!("You control explicitly approved Mac applications for ONE bounded goal. {now}\nUse only computer_list_apps, computer_get_state, and computer_action. Start by listing apps. Use only element indices from the latest snapshot; after every action fetch a fresh snapshot. Never guess a target. If a tool reports approval_required, paused_by_user, hard_denied, or unavailable, stop and report it plainly. Never attempt Terminal, password managers, secure fields, authorization UI, credentials, purchases, sends, deletion, or settings changes. Finish with a concise factual result.", now=now_block());
         let mut ls = local_first_engine::LoopState::new();
@@ -26062,7 +26071,7 @@ impl GatewayComputerExecutor<'_> {
             uuid::Uuid::new_v4().to_string(), local_first_inference_usage::InferencePurpose::Subagent, "local");
         usage_context.purpose_detail = Some("host_computer".into());
         usage_context.thread_id = self.thread_id.map(str::to_string);
-        let capability_executor = ComputerOnlyCapabilityExecutor;
+        let capability_executor = ComputerOnlyCapabilityExecutor { session_id: session_id.clone() };
         let mut browser_executor = ComputerNoBrowserExecutor;
         let outcome = local_first_engine::agent_loop::run_turn(
             ls,
@@ -26077,25 +26086,29 @@ impl GatewayComputerExecutor<'_> {
             &std::collections::BTreeSet::new(), &[], goal.to_string(), String::new(), None,
             false, 0, false, Vec::new(), None, &local_first_engine::turn_trace::TurnTrace::disabled(),
         ).await;
-        local_first_engine::browse::browse_result_from_outcome(&outcome)
+        let result = local_first_engine::browse::browse_result_from_outcome(&outcome);
+        host_computer_gateway::finish_worker_session(&session_id, result.found);
+        result
     }
 }
 
-struct ComputerOnlyCapabilityExecutor;
+struct ComputerOnlyCapabilityExecutor {
+    session_id: String,
+}
 impl local_first_engine::CapabilityExecutor for ComputerOnlyCapabilityExecutor {
     async fn execute_tool(&self, name: &str, args_raw: &str, _call_id: &str,
         _state: &mut local_first_engine::LoopState) -> Result<local_first_engine::ToolOutcome, String> {
         let result = match name {
-            "computer_list_apps" => host_computer_gateway::worker_list_apps().await,
+            "computer_list_apps" => host_computer_gateway::worker_list_apps(&self.session_id).await,
             "computer_get_state" => {
                 let value: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_default();
                 match value.get("pid").and_then(|value| value.as_u64()).and_then(|pid| u32::try_from(pid).ok()) {
-                    Some(pid) => host_computer_gateway::worker_get_state(pid).await,
+                    Some(pid) => host_computer_gateway::worker_get_state(&self.session_id, pid).await,
                     None => Err("invalid_pid".into()),
                 }
             }
             "computer_action" => match serde_json::from_str(args_raw) {
-                Ok(request) => host_computer_gateway::worker_execute_action(request).await,
+                Ok(request) => host_computer_gateway::worker_execute_action(&self.session_id, request).await,
                 Err(error) => Err(format!("invalid_action:{error}")),
             },
             _ => Err(format!("tool_not_available:{name}")),

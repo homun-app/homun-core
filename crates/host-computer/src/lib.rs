@@ -6,5 +6,6 @@ pub mod policy;
 pub mod protocol;
 pub mod redaction;
 pub mod service;
+pub mod session;
 pub mod supervisor;
 pub mod transport;

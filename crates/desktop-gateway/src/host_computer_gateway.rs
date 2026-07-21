@@ -1,5 +1,7 @@
 use std::{
     collections::HashMap,
+    fs::OpenOptions,
+    io::Write,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -16,12 +18,14 @@ use local_first_host_computer::{
     policy::{ActionCategory, HostActionPolicy, PolicyDecision, PolicyRequest},
     protocol::{ActionRequest, AppSnapshot, HostPermission, PermissionState, SemanticAction},
     redaction::{DisclosurePolicy, ProviderDisclosure, project_snapshot},
+    session::{HostSessionCoordinator, HostSessionPhase, HostSessionSnapshot, SessionError},
     service::HostComputerService,
     supervisor::{HostComputerSupervisorConfig, SystemHelperLauncher, prepare_launch},
     transport::UdsTransport,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 type ApiError = (StatusCode, Json<Value>);
 
@@ -41,6 +45,7 @@ struct SnapshotGuard {
 
 static RUNTIME: OnceLock<tokio::sync::Mutex<Option<Arc<HostRuntime>>>> = OnceLock::new();
 static GRANTS: OnceLock<Mutex<GrantStore>> = OnceLock::new();
+static SESSIONS: OnceLock<Mutex<HostSessionCoordinator>> = OnceLock::new();
 static MANAGER_READY: AtomicBool = AtomicBool::new(false);
 
 pub fn manager_ready() -> bool {
@@ -78,6 +83,10 @@ fn grants() -> Result<&'static Mutex<GrantStore>, ApiError> {
     let store = GrantStore::open(&path).map_err(internal)?;
     let _ = GRANTS.set(Mutex::new(store));
     Ok(GRANTS.get().expect("grant store initialized"))
+}
+
+fn sessions() -> &'static Mutex<HostSessionCoordinator> {
+    SESSIONS.get_or_init(|| Mutex::new(HostSessionCoordinator::default()))
 }
 
 async fn runtime() -> Result<Arc<HostRuntime>, ApiError> {
@@ -164,8 +173,11 @@ pub async fn status() -> Result<Json<Value>, ApiError> {
             let has_grant = grants().ok().and_then(|store| store.lock().ok())
                 .and_then(|store| store.list(&scope(), now_ms()).ok()).is_some_and(|items| !items.is_empty());
             MANAGER_READY.store(ready && has_grant, Ordering::Release);
+            let host_session = sessions().lock().ok().and_then(|coordinator| coordinator.active_snapshot())
+                .map(|snapshot| session_event("hydrated", &snapshot));
             Ok(Json(json!({"available":true,"helper_version":"0.1.0",
-                "accessibility":status.accessibility,"screen_recording":status.screen_recording,"ready":ready})))
+                "accessibility":status.accessibility,"screen_recording":status.screen_recording,
+                "ready":ready,"host_session":host_session})))
         }
         Err((_, Json(value))) => Ok(Json(json!({"available":false,"helper_version":null,
             "accessibility":"not_determined","screen_recording":"not_determined","ready":false,
@@ -286,11 +298,86 @@ pub async fn revoke_grant(Path(grant_id): Path<String>) -> Result<StatusCode, Ap
         .revoke(&grant_id, &scope())
         .map_err(internal)?;
     MANAGER_READY.store(false, Ordering::Release);
+    if removed {
+        let cancelled = sessions().lock().ok().and_then(|mut coordinator| {
+            coordinator.cancel_active(now_ms()).ok().flatten()
+        });
+        if let Some(snapshot) = cancelled {
+            publish_session("cancelled", &snapshot);
+        }
+        if let Some(runtime) = RUNTIME.get().and_then(|runtime| runtime.try_lock().ok())
+            .and_then(|runtime| runtime.clone())
+        {
+            if let Ok(mut snapshots) = runtime.snapshots.lock() {
+                snapshots.clear();
+            }
+        }
+    }
     Ok(if removed {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND
     })
+}
+
+#[derive(Deserialize)]
+pub struct ResolveApproval {
+    action_digest: String,
+}
+
+#[derive(Deserialize)]
+pub struct ResumeSession {
+    generation: u64,
+}
+
+pub async fn approve_session(
+    Path(session_id): Path<String>,
+    Json(input): Json<ResolveApproval>,
+) -> Result<Json<Value>, ApiError> {
+    transition_session("approval_resolved", |coordinator| {
+        coordinator.approve(&session_id, &input.action_digest, now_ms())
+    })
+}
+
+pub async fn deny_session(
+    Path(session_id): Path<String>,
+    Json(input): Json<ResolveApproval>,
+) -> Result<Json<Value>, ApiError> {
+    transition_session("approval_resolved", |coordinator| {
+        coordinator.deny(&session_id, &input.action_digest, now_ms())
+    })
+}
+
+pub async fn pause_session(Path(session_id): Path<String>) -> Result<Json<Value>, ApiError> {
+    transition_session("paused_by_user", |coordinator| {
+        coordinator.pause(&session_id, now_ms())
+    })
+}
+
+pub async fn resume_session(
+    Path(session_id): Path<String>,
+    Json(input): Json<ResumeSession>,
+) -> Result<Json<Value>, ApiError> {
+    transition_session("resumed", |coordinator| {
+        coordinator.resume(&session_id, input.generation, now_ms())
+    })
+}
+
+pub async fn cancel_session(Path(session_id): Path<String>) -> Result<Json<Value>, ApiError> {
+    transition_session("cancelled", |coordinator| {
+        coordinator.cancel(&session_id, now_ms())
+    })
+}
+
+fn transition_session(
+    kind: &str,
+    transition: impl FnOnce(&mut HostSessionCoordinator) -> Result<HostSessionSnapshot, SessionError>,
+) -> Result<Json<Value>, ApiError> {
+    let mut coordinator = sessions().lock().map_err(internal)?;
+    let snapshot = transition(&mut coordinator).map_err(session_api_error)?;
+    drop(coordinator);
+    publish_session(kind, &snapshot);
+    Ok(Json(session_event(kind, &snapshot)))
 }
 
 struct JsonGrant;
@@ -315,7 +402,29 @@ fn internal(error: impl std::fmt::Display) -> ApiError {
     )
 }
 
-pub async fn worker_list_apps() -> Result<Value, String> {
+pub fn start_worker_session(session_id: &str, app: &str) -> Result<(), String> {
+    let snapshot = sessions().lock().map_err(|_| "session coordinator unavailable".to_string())?
+        .start(session_id, app, now_ms()).map_err(|error| error.to_string())?;
+    publish_session("started", &snapshot);
+    Ok(())
+}
+
+pub fn finish_worker_session(session_id: &str, succeeded: bool) {
+    let snapshot = sessions().lock().ok().and_then(|mut coordinator| {
+        let current = coordinator.snapshot(session_id).ok()?;
+        if matches!(current.phase, HostSessionPhase::AwaitingApproval | HostSessionPhase::PausedByUser) {
+            return None;
+        }
+        if succeeded { coordinator.done(session_id, now_ms()).ok() }
+        else { coordinator.fail(session_id, "worker_failed", now_ms()).ok() }
+    });
+    if let Some(snapshot) = snapshot {
+        publish_session(if succeeded { "done" } else { "failed" }, &snapshot);
+    }
+}
+
+pub async fn worker_list_apps(session_id: &str) -> Result<Value, String> {
+    ensure_session_operational(session_id)?;
     let runtime = runtime().await.map_err(api_error_text)?;
     let apps = runtime.client.list_apps(false, context()).await.map_err(|error| error.to_string())?.apps;
     let scope = scope();
@@ -329,7 +438,8 @@ pub async fn worker_list_apps() -> Result<Value, String> {
     }).collect()))
 }
 
-pub async fn worker_get_state(pid: u32) -> Result<Value, String> {
+pub async fn worker_get_state(session_id: &str, pid: u32) -> Result<Value, String> {
+    ensure_session_operational(session_id)?;
     let runtime = runtime().await.map_err(api_error_text)?;
     let app = runtime.client.list_apps(false, context()).await.map_err(|error| error.to_string())?.apps
         .into_iter().find(|app| app.identity.pid == pid).ok_or("app_not_found")?;
@@ -340,11 +450,18 @@ pub async fn worker_get_state(pid: u32) -> Result<Value, String> {
     let snapshot = runtime.client.get_app_state(pid, None, context()).await.map_err(|error| error.to_string())?;
     runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?
         .insert(snapshot.snapshot_id.clone(), SnapshotGuard { app: identity, snapshot: snapshot.clone() });
-    serde_json::to_value(project_snapshot(&snapshot, ProviderDisclosure::Remote,
-        DisclosurePolicy { disclose_screenshots_to_remote: false })).map_err(|error| error.to_string())
+    let value = serde_json::to_value(project_snapshot(&snapshot, ProviderDisclosure::Remote,
+        DisclosurePolicy { disclose_screenshots_to_remote: false })).map_err(|error| error.to_string())?;
+    if let Ok(snapshot) = sessions().lock().map_err(|_| ()).and_then(|mut coordinator| {
+        coordinator.mark_observing(session_id, now_ms()).map_err(|_| ())
+    }) {
+        publish_session("state", &snapshot);
+    }
+    Ok(value)
 }
 
-pub async fn worker_execute_action(mut request: ActionRequest) -> Result<Value, String> {
+pub async fn worker_execute_action(session_id: &str, mut request: ActionRequest) -> Result<Value, String> {
+    ensure_session_operational(session_id)?;
     let runtime = runtime().await.map_err(api_error_text)?;
     let (app, snapshot) = runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?
         .get(&request.target.snapshot_id).map(|guard| (guard.app.clone(), guard.snapshot.clone()))
@@ -354,10 +471,21 @@ pub async fn worker_execute_action(mut request: ActionRequest) -> Result<Value, 
     let element = snapshot.elements.iter().find(|element| element.index == request.target.index)
         .ok_or("target_not_found")?;
     let category = if request.action == SemanticAction::SetValue { ActionCategory::TextEntry } else { ActionCategory::Reversible };
+    request.resume_token = None;
+    let digest = action_digest(session_id, &app, &request)?;
+    let approval_matches = sessions().lock().map_err(|_| "session coordinator unavailable".to_string())?
+        .consume_approval(session_id, &digest, now_ms()).map_err(|error| error.to_string())?;
     match HostActionPolicy.decide(level, &PolicyRequest { category, protected_target: element.sensitive,
-        low_risk_typing_enabled: false, approval_matches: false }) {
+        low_risk_typing_enabled: false, approval_matches }) {
         PolicyDecision::Allowed => {}
-        PolicyDecision::ApprovalRequired(category) => return Err(format!("approval_required:{category:?}")),
+        PolicyDecision::ApprovalRequired(category) => {
+            let summary = action_summary(category, element.role.as_str());
+            let pending = sessions().lock().map_err(|_| "session coordinator unavailable".to_string())?
+                .request_approval(session_id, &digest, category, summary, now_ms())
+                .map_err(|error| error.to_string())?;
+            publish_session("approval_required", &pending);
+            await_approval(session_id, &digest).await?;
+        }
         PolicyDecision::GrantRequired(_) => return Err("control_grant_required".into()),
         PolicyDecision::Denied(reason) => return Err(format!("hard_denied:{reason:?}")),
     }
@@ -366,7 +494,122 @@ pub async fn worker_execute_action(mut request: ActionRequest) -> Result<Value, 
     request.resume_token = Some(token);
     let result = runtime.client.execute_action(request, context()).await.map_err(|error| error.to_string())?;
     runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?.remove(&snapshot.snapshot_id);
+    if let Ok(session_snapshot) = sessions().lock().map_err(|_| ()).and_then(|mut coordinator| {
+        coordinator.mark_observing(session_id, now_ms()).map_err(|_| ())
+    }) {
+        publish_action(&session_snapshot, category, &digest, "succeeded");
+    }
     serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+async fn await_approval(session_id: &str, action_digest: &str) -> Result<(), String> {
+    loop {
+        {
+            let mut coordinator = sessions().lock().map_err(|_| "session coordinator unavailable".to_string())?;
+            let snapshot = coordinator.snapshot(session_id).map_err(|error| error.to_string())?;
+            match snapshot.phase {
+                HostSessionPhase::Failed => return Err(snapshot.error_code.unwrap_or_else(|| "approval_denied".into())),
+                HostSessionPhase::Cancelled => return Err("session_cancelled".into()),
+                HostSessionPhase::PausedByUser => return Err("paused_by_user".into()),
+                _ => {}
+            }
+            if coordinator.consume_approval(session_id, action_digest, now_ms()).map_err(|error| error.to_string())? {
+                let snapshot = coordinator.snapshot(session_id).map_err(|error| error.to_string())?;
+                drop(coordinator);
+                publish_session("approval_resolved", &snapshot);
+                return Ok(());
+            }
+            let snapshot = coordinator.snapshot(session_id).map_err(|error| error.to_string())?;
+            match snapshot.phase {
+                _ if now_ms() > snapshot.pending_approval.as_ref().map(|approval| approval.expires_at_unix_ms).unwrap_or(i64::MAX) => {
+                    let expired = coordinator.fail(session_id, "approval_expired", now_ms()).map_err(|error| error.to_string())?;
+                    drop(coordinator);
+                    publish_session("failed", &expired);
+                    return Err("approval_expired".into());
+                }
+                _ => {}
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+fn ensure_session_operational(session_id: &str) -> Result<(), String> {
+    let snapshot = sessions().lock().map_err(|_| "session coordinator unavailable".to_string())?
+        .snapshot(session_id).map_err(|error| error.to_string())?;
+    match snapshot.phase {
+        HostSessionPhase::PausedByUser => Err("paused_by_user".into()),
+        HostSessionPhase::Done | HostSessionPhase::Failed | HostSessionPhase::Cancelled => Err("session_terminated".into()),
+        _ => Ok(()),
+    }
+}
+
+fn action_digest(session_id: &str, app: &SignedAppIdentity, request: &ActionRequest) -> Result<String, String> {
+    let payload = serde_json::to_vec(&(session_id, &app.bundle_id, &app.team_id,
+        &app.designated_requirement_sha256, request)).map_err(|error| error.to_string())?;
+    Ok(Sha256::digest(payload).iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn action_summary(category: ActionCategory, role: &str) -> String {
+    match category {
+        ActionCategory::TextEntry => format!("Enter text in {role}"),
+        _ => format!("Perform a {category:?} action on {role}"),
+    }
+}
+
+fn publish_session(kind: &str, snapshot: &HostSessionSnapshot) {
+    let event = session_event(kind, snapshot);
+    super::publish_app_event(event.clone());
+    if let Some(registry) = super::ws_registry().get() {
+        registry.publish_computer_live(json!({"source":"host_apps","host":event}));
+    }
+    append_journal(&event);
+}
+
+fn publish_action(
+    snapshot: &HostSessionSnapshot,
+    category: ActionCategory,
+    action_digest: &str,
+    outcome: &str,
+) {
+    let mut event = session_event("action", snapshot);
+    if let Some(object) = event.as_object_mut() {
+        object.insert("category".into(), json!(category));
+        object.insert("action_digest".into(), json!(action_digest));
+        object.insert("outcome".into(), json!(outcome));
+    }
+    super::publish_app_event(event.clone());
+    if let Some(registry) = super::ws_registry().get() {
+        registry.publish_computer_live(json!({"source":"host_apps","host":event}));
+    }
+    append_journal(&event);
+}
+
+fn session_event(kind: &str, snapshot: &HostSessionSnapshot) -> Value {
+    let approval = snapshot.pending_approval.as_ref().map(|approval| json!({
+        "category": approval.category,
+        "summary": approval.summary,
+        "action_digest": approval.action_digest,
+        "expires_at_unix_ms": approval.expires_at_unix_ms,
+    }));
+    json!({
+        "type": format!("host_computer.{kind}"),
+        "sequence": snapshot.sequence,
+        "session_id": snapshot.session_id,
+        "generation": snapshot.generation,
+        "phase": snapshot.phase,
+        "app": snapshot.app,
+        "approval": approval,
+        "error_code": snapshot.error_code,
+        "updated_at_unix_ms": snapshot.updated_at_unix_ms,
+    })
+}
+
+fn append_journal(event: &Value) {
+    let Ok(data_dir) = super::gateway_data_dir() else { return; };
+    let path = data_dir.join("host-computer-journal.jsonl");
+    let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else { return; };
+    let _ = writeln!(file, "{}", event);
 }
 
 fn signed_identity(app: &local_first_host_computer::protocol::HostApplication) -> Result<SignedAppIdentity, String> {
@@ -378,4 +621,37 @@ fn signed_identity(app: &local_first_host_computer::protocol::HostApplication) -
 
 fn api_error_text(error: ApiError) -> String {
     error.1.0.get("error").and_then(Value::as_str).unwrap_or("host_computer_unavailable").to_string()
+}
+
+fn session_api_error(error: SessionError) -> ApiError {
+    let status = match error {
+        SessionError::NotFound => StatusCode::NOT_FOUND,
+        SessionError::ActionDigestMismatch | SessionError::GenerationMismatch => StatusCode::CONFLICT,
+        SessionError::ApprovalExpired => StatusCode::GONE,
+        _ => StatusCode::UNPROCESSABLE_ENTITY,
+    };
+    api_error(status, &error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn approval_event_contains_summary_but_never_action_value() {
+        let snapshot = HostSessionSnapshot {
+            session_id: "session-1".into(), sequence: 2, generation: 1,
+            phase: HostSessionPhase::AwaitingApproval, app: "Editor".into(),
+            pending_approval: Some(local_first_host_computer::session::PendingHostApproval {
+                category: ActionCategory::TextEntry,
+                summary: "Enter text in text field".into(),
+                action_digest: "digest".into(), expires_at_unix_ms: 10,
+            }),
+            error_code: None, updated_at_unix_ms: 1,
+        };
+        let json = session_event("approval_required", &snapshot).to_string();
+        assert!(json.contains("Enter text in text field"));
+        assert!(!json.contains("private body"));
+        assert!(!json.contains("resume_token"));
+    }
 }
