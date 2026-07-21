@@ -25569,6 +25569,16 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         ls: &mut local_first_engine::LoopState,
     ) -> Result<local_first_engine::ToolOutcome, String> {
         if name == "use_computer" {
+            if !host_computer_gateway::manager_ready() {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: serde_json::json!({
+                        "found": false,
+                        "error": "mac_apps_not_ready"
+                    })
+                    .to_string(),
+                    effects: Default::default(),
+                });
+            }
             let value: serde_json::Value = serde_json::from_str(args_raw).unwrap_or_default();
             let goal = value.get("goal").and_then(|value| value.as_str()).unwrap_or("").trim();
             if goal.is_empty() {
@@ -30803,12 +30813,16 @@ async fn set_runtime_settings(
     // PATCH semantics: merge the caller's partial patch onto the persisted settings so one
     // Settings control never clobbers another (see `merge_runtime_settings`). The full,
     // normalized object is persisted and returned.
-    let merged = merge_runtime_settings(&load_runtime_settings(), &patch);
+    let current = load_runtime_settings();
+    let merged = merge_runtime_settings(&current, &patch);
     save_runtime_settings(&merged).map_err(|message| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         code: "runtime_settings_save",
         message,
     })?;
+    if current.mac_apps_beta_enabled && !merged.mac_apps_beta_enabled {
+        host_computer_gateway::disable().await;
+    }
     Ok(Json(merged))
 }
 

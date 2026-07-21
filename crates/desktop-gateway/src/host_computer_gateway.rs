@@ -50,8 +50,51 @@ static GRANTS: OnceLock<Mutex<GrantStore>> = OnceLock::new();
 static SESSIONS: OnceLock<Mutex<HostSessionCoordinator>> = OnceLock::new();
 static MANAGER_READY: AtomicBool = AtomicBool::new(false);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum HostBetaState {
+    Unsupported,
+    Disabled,
+    Setup,
+    Ready,
+    Active,
+    Paused,
+    Error,
+}
+
+fn manager_should_register(enabled: bool, permissions_ready: bool, has_grant: bool) -> bool {
+    enabled && permissions_ready && has_grant
+}
+
+fn resolve_beta_state(
+    enabled: bool,
+    supported: bool,
+    accessibility: bool,
+    screen_recording: bool,
+    active: bool,
+    paused: bool,
+) -> HostBetaState {
+    if !supported {
+        return HostBetaState::Unsupported;
+    }
+    if !enabled {
+        return HostBetaState::Disabled;
+    }
+    if !(accessibility && screen_recording) {
+        return HostBetaState::Setup;
+    }
+    if paused {
+        return HostBetaState::Paused;
+    }
+    if active {
+        HostBetaState::Active
+    } else {
+        HostBetaState::Ready
+    }
+}
+
 pub fn manager_ready() -> bool {
-    MANAGER_READY.load(Ordering::Acquire)
+    super::mac_apps_beta_enabled() && MANAGER_READY.load(Ordering::Acquire)
 }
 
 fn context() -> RequestContext {
@@ -92,18 +135,24 @@ fn sessions() -> &'static Mutex<HostSessionCoordinator> {
 }
 
 async fn runtime() -> Result<Arc<HostRuntime>, ApiError> {
+    if !super::mac_apps_beta_enabled() {
+        return Err(api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "feature_disabled",
+        ));
+    }
+    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+    return Err(api_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "unsupported_platform",
+    ));
     if std::env::var("HOMUN_HOST_COMPUTER").ok().as_deref() != Some("1") {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "feature_disabled",
         ));
     }
-    #[cfg(not(target_os = "macos"))]
-    return Err(api_error(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "unsupported_platform",
-    ));
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         let guard = RUNTIME.get_or_init(|| tokio::sync::Mutex::new(None));
         let mut guard = guard.lock().await;
@@ -163,6 +212,23 @@ async fn runtime() -> Result<Arc<HostRuntime>, ApiError> {
 }
 
 pub async fn status() -> Result<Json<Value>, ApiError> {
+    let supported = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+    let enabled = super::mac_apps_beta_enabled();
+    if !supported || !enabled {
+        MANAGER_READY.store(false, Ordering::Release);
+        let state = resolve_beta_state(enabled, supported, false, false, false, false);
+        return Ok(Json(json!({
+            "available": false,
+            "supported": supported,
+            "enabled": enabled,
+            "state": state,
+            "helper_version": null,
+            "accessibility": "not_determined",
+            "screen_recording": "not_determined",
+            "ready": false,
+            "reason": if supported { "feature_disabled" } else { "unsupported_platform" },
+        })));
+    }
     match runtime().await {
         Ok(runtime) => {
             let status = runtime
@@ -170,20 +236,53 @@ pub async fn status() -> Result<Json<Value>, ApiError> {
                 .permission_status(context())
                 .await
                 .map_err(internal)?;
-            let ready = status.accessibility == PermissionState::Granted
-                && status.screen_recording == PermissionState::Granted;
+            let accessibility = status.accessibility == PermissionState::Granted;
+            let screen_recording = status.screen_recording == PermissionState::Granted;
+            let ready = accessibility && screen_recording;
             let has_grant = grants().ok().and_then(|store| store.lock().ok())
                 .and_then(|store| store.list(&scope(), now_ms()).ok()).is_some_and(|items| !items.is_empty());
-            MANAGER_READY.store(ready && has_grant, Ordering::Release);
-            let host_session = sessions().lock().ok().and_then(|coordinator| coordinator.active_snapshot())
-                .map(|snapshot| session_event("hydrated", &snapshot));
-            Ok(Json(json!({"available":true,"helper_version":"0.1.0",
+            MANAGER_READY.store(
+                manager_should_register(enabled, ready, has_grant),
+                Ordering::Release,
+            );
+            let active_snapshot = sessions()
+                .lock()
+                .ok()
+                .and_then(|coordinator| coordinator.active_snapshot());
+            let active = active_snapshot.as_ref().is_some_and(|snapshot| {
+                matches!(
+                    snapshot.phase,
+                    HostSessionPhase::Observing
+                        | HostSessionPhase::AwaitingApproval
+                        | HostSessionPhase::Acting
+                )
+            });
+            let paused = active_snapshot.as_ref().is_some_and(|snapshot| {
+                matches!(
+                    snapshot.phase,
+                    HostSessionPhase::PausedByUser | HostSessionPhase::Suspended
+                )
+            });
+            let state = resolve_beta_state(
+                enabled,
+                supported,
+                accessibility,
+                screen_recording,
+                active,
+                paused,
+            );
+            let host_session =
+                active_snapshot.map(|snapshot| session_event("hydrated", &snapshot));
+            Ok(Json(json!({"available":true,"supported":supported,"enabled":enabled,"state":state,"helper_version":"0.1.0",
                 "accessibility":status.accessibility,"screen_recording":status.screen_recording,
                 "ready":ready,"host_session":host_session})))
         }
-        Err((_, Json(value))) => Ok(Json(json!({"available":false,"helper_version":null,
+        Err((_, Json(value))) => {
+            MANAGER_READY.store(false, Ordering::Release);
+            Ok(Json(json!({"available":false,"supported":supported,"enabled":enabled,"state":HostBetaState::Error,"helper_version":null,
             "accessibility":"not_determined","screen_recording":"not_determined","ready":false,
-            "reason":value["error"]}))),
+            "reason":value["error"]})))
+        }
     }
 }
 
@@ -414,10 +513,36 @@ fn internal(error: impl std::fmt::Display) -> ApiError {
 }
 
 pub fn start_worker_session(session_id: &str, app: &str) -> Result<(), String> {
+    if !super::mac_apps_beta_enabled() {
+        return Err("feature_disabled".to_string());
+    }
+    if !manager_ready() {
+        return Err("mac_apps_not_ready".to_string());
+    }
     let snapshot = sessions().lock().map_err(|_| "session coordinator unavailable".to_string())?
         .start(session_id, app, now_ms()).map_err(|error| error.to_string())?;
     publish_session("started", &snapshot);
     Ok(())
+}
+
+pub async fn disable() {
+    MANAGER_READY.store(false, Ordering::Release);
+    let cancelled = sessions()
+        .lock()
+        .ok()
+        .and_then(|mut coordinator| coordinator.cancel_active(now_ms()).ok().flatten());
+    if let Some(snapshot) = cancelled {
+        publish_session("cancelled", &snapshot);
+    }
+    if let Some(runtime) = RUNTIME.get() {
+        let mut guard = runtime.lock().await;
+        if let Some(current) = guard.as_ref() {
+            if let Ok(mut snapshots) = current.snapshots.lock() {
+                snapshots.clear();
+            }
+        }
+        *guard = None;
+    }
 }
 
 pub fn finish_worker_session(session_id: &str, succeeded: bool) {
@@ -654,6 +779,42 @@ fn session_api_error(error: SessionError) -> ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn beta_state_is_disabled_before_permissions_and_never_ready_on_unsupported_hosts() {
+        assert_eq!(
+            resolve_beta_state(false, true, false, false, false, false),
+            HostBetaState::Disabled
+        );
+        assert_eq!(
+            resolve_beta_state(true, true, false, false, false, false),
+            HostBetaState::Setup
+        );
+        assert_eq!(
+            resolve_beta_state(true, true, true, true, false, false),
+            HostBetaState::Ready
+        );
+        assert_eq!(
+            resolve_beta_state(true, true, true, true, true, false),
+            HostBetaState::Active
+        );
+        assert_eq!(
+            resolve_beta_state(true, true, true, true, false, true),
+            HostBetaState::Paused
+        );
+        assert_eq!(
+            resolve_beta_state(true, false, true, true, false, false),
+            HostBetaState::Unsupported
+        );
+    }
+
+    #[test]
+    fn manager_tool_requires_opt_in_permissions_and_a_valid_grant() {
+        assert!(!manager_should_register(false, true, true));
+        assert!(!manager_should_register(true, false, true));
+        assert!(!manager_should_register(true, true, false));
+        assert!(manager_should_register(true, true, true));
+    }
 
     #[test]
     fn approval_event_contains_summary_but_never_action_value() {
