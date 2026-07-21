@@ -411,19 +411,7 @@ pub async fn revoke_grant(Path(grant_id): Path<String>) -> Result<StatusCode, Ap
         .map_err(internal)?;
     MANAGER_READY.store(false, Ordering::Release);
     if removed {
-        let cancelled = sessions().lock().ok().and_then(|mut coordinator| {
-            coordinator.cancel_active(now_ms()).ok().flatten()
-        });
-        if let Some(snapshot) = cancelled {
-            publish_session("cancelled", &snapshot);
-        }
-        if let Some(runtime) = RUNTIME.get().and_then(|runtime| runtime.try_lock().ok())
-            .and_then(|runtime| runtime.clone())
-        {
-            if let Ok(mut snapshots) = runtime.snapshots.lock() {
-                snapshots.clear();
-            }
-        }
+        cancel_active_and_clear_snapshots("grant_revoked").await;
     }
     Ok(if removed {
         StatusCode::NO_CONTENT
@@ -529,13 +517,38 @@ pub fn start_worker_session(session_id: &str, app: &str) -> Result<(), String> {
 
 pub async fn disable() {
     MANAGER_READY.store(false, Ordering::Release);
-    let cancelled = sessions()
-        .lock()
-        .ok()
-        .and_then(|mut coordinator| coordinator.cancel_active(now_ms()).ok().flatten());
-    if let Some(snapshot) = cancelled {
-        publish_session("cancelled", &snapshot);
-    }
+    cancel_active_and_clear_snapshots("feature_disabled").await;
+}
+
+fn cancel_session_and_clear_snapshots<K, V>(
+    coordinator: &mut HostSessionCoordinator,
+    snapshots: &mut HashMap<K, V>,
+    now_unix_ms: i64,
+) -> Option<HostSessionSnapshot>
+where
+    K: Eq + std::hash::Hash,
+{
+    let cancelled = coordinator.cancel_active(now_unix_ms).ok().flatten();
+    snapshots.clear();
+    cancelled
+}
+
+async fn cancel_active_and_clear_snapshots(reason: &str) {
+    let cancelled = sessions().lock().ok().and_then(|mut coordinator| {
+        if let Some(runtime) = RUNTIME.get().and_then(|runtime| runtime.try_lock().ok())
+            .and_then(|runtime| runtime.clone())
+        {
+            if let Ok(mut snapshots) = runtime.snapshots.lock() {
+                return cancel_session_and_clear_snapshots(
+                    &mut coordinator,
+                    &mut snapshots,
+                    now_ms(),
+                );
+            }
+        }
+        coordinator.cancel_active(now_ms()).ok().flatten()
+    });
+
     if let Some(runtime) = RUNTIME.get() {
         let mut guard = runtime.lock().await;
         if let Some(current) = guard.as_ref() {
@@ -544,6 +557,9 @@ pub async fn disable() {
             }
         }
         *guard = None;
+    }
+    if let Some(snapshot) = cancelled {
+        publish_cancelled(reason, &snapshot);
     }
 }
 
@@ -763,6 +779,18 @@ fn redact_approval_target(value: &str) -> String {
 
 fn publish_session(kind: &str, snapshot: &HostSessionSnapshot) {
     let event = session_event(kind, snapshot);
+    publish_session_event(event);
+}
+
+fn publish_cancelled(reason: &str, snapshot: &HostSessionSnapshot) {
+    let mut event = session_event("cancelled", snapshot);
+    if let Some(object) = event.as_object_mut() {
+        object.insert("reason".into(), json!(reason));
+    }
+    publish_session_event(event);
+}
+
+fn publish_session_event(event: Value) {
     super::publish_app_event(event.clone());
     if let Some(registry) = super::ws_registry().get() {
         registry.publish_computer_live(json!({"source":"host_apps","host":event}));
@@ -919,6 +947,40 @@ mod tests {
         );
         assert!(bounded.contains(&"x".repeat(120)));
         assert!(!bounded.contains(&"x".repeat(121)));
+    }
+
+    #[test]
+    fn host_computer_disable_clears_runtime_state() {
+        let mut coordinator = HostSessionCoordinator::default();
+        coordinator.start("session-disable", "Notes", 1).unwrap();
+        let mut snapshots = HashMap::from([("snapshot-1", ())]);
+
+        let cancelled = cancel_session_and_clear_snapshots(
+            &mut coordinator,
+            &mut snapshots,
+            2,
+        );
+
+        assert_eq!(cancelled.unwrap().phase, HostSessionPhase::Cancelled);
+        assert!(coordinator.active_snapshot().is_none());
+        assert!(snapshots.is_empty());
+    }
+
+    #[test]
+    fn host_computer_revoke_cancels_active_session() {
+        let mut coordinator = HostSessionCoordinator::default();
+        coordinator.start("session-revoke", "Notes", 1).unwrap();
+        coordinator.pause("session-revoke", 2).unwrap();
+        let stale_generation = coordinator.snapshot("session-revoke").unwrap().generation;
+        let mut snapshots = HashMap::from([("snapshot-1", ())]);
+
+        cancel_session_and_clear_snapshots(&mut coordinator, &mut snapshots, 3);
+
+        assert_eq!(
+            coordinator.resume("session-revoke", stale_generation, 4),
+            Err(SessionError::TerminalSession),
+        );
+        assert!(snapshots.is_empty());
     }
 
     #[test]

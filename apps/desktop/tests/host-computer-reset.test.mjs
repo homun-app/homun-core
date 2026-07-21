@@ -34,6 +34,14 @@ test("factory reset stops managed processes and removes every host-computer stat
   await fs.rm(temporary, { recursive: true, force: true });
 });
 
+test("factory reset owns the persisted Mac Apps beta opt-in", () => {
+  const root = path.join(os.tmpdir(), ".homun");
+  assert.ok(
+    hostComputerStatePaths(root).some((entry) => entry.endsWith("runtime-settings.json")),
+    "factory reset must remove the persisted Mac Apps opt-in",
+  );
+});
+
 test("factory reset refuses broad or unrelated roots", async () => {
   assert.throws(() => hostComputerStatePaths("/"));
   assert.throws(() => hostComputerStatePaths(path.join(os.tmpdir(), "not-homun")));

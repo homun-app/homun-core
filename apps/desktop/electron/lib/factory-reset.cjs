@@ -18,6 +18,7 @@ function hostComputerStatePaths(homunRoot) {
     path.join(root, "host-computer-grants.sqlite3-wal"),
     path.join(root, "host-computer-journal.jsonl"),
     path.join(root, "host-computer-cache"),
+    path.join(root, "runtime-settings.json"),
   ];
 }
 
