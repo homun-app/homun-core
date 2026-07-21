@@ -44,6 +44,9 @@ impl HostComputerTransport for PermissionTransport {
                 "screenshot_ref": null,
                 "truncated": false
             }),
+            HostComputerMethod::CaptureWindow => {
+                serde_json::json!({"relative_path": "capture.png"})
+            }
         };
         Ok(RpcResponse::Success(RpcSuccessResponse {
             jsonrpc: JsonRpcVersion::V2,

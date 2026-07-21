@@ -12,7 +12,7 @@ use crate::{
     protocol::{
         AppSnapshot, HandshakeResult, HostComputerErrorCode, HostComputerMethod, JsonRpcVersion,
         ListAppsResult, ListWindowsResult, PROTOCOL_VERSION, PermissionStatus, RequestMeta,
-        RpcError, RpcRequest,
+        RpcError, RpcRequest, StagedCapture,
     },
     transport::HostComputerTransport,
 };
@@ -152,6 +152,20 @@ where
                 "pid": pid,
                 "base_snapshot_id": base_snapshot_id,
             }),
+            context,
+        )
+        .await
+    }
+
+    pub async fn capture_window(
+        &self,
+        window_id: u32,
+        context: RequestContext,
+    ) -> Result<StagedCapture, HostComputerClientError> {
+        self.ensure_handshake(&context).await?;
+        self.call(
+            HostComputerMethod::CaptureWindow,
+            serde_json::json!({"window_id": window_id}),
             context,
         )
         .await

@@ -19,6 +19,7 @@ pub enum HostComputerMethod {
     ListApps,
     ListWindows,
     GetAppState,
+    CaptureWindow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,6 +139,21 @@ pub struct SnapshotDiff {
     pub removed_indices: Vec<u32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactRef {
+    pub artifact_ref: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StagedCapture {
+    pub relative_path: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSnapshot {
@@ -148,7 +164,7 @@ pub struct AppSnapshot {
     pub base_snapshot_id: Option<String>,
     pub elements: Vec<HostElement>,
     pub focused_element_index: Option<u32>,
-    pub screenshot_ref: Option<String>,
+    pub screenshot_ref: Option<ArtifactRef>,
     pub truncated: bool,
 }
 

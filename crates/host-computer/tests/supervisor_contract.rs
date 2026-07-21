@@ -43,9 +43,11 @@ fn launch_material_is_owner_only() {
 
     let launch = prepare_launch(&config).unwrap();
     let directory_mode = fs::metadata(&launch.session_root).unwrap().mode() & 0o777;
+    let artifact_mode = fs::metadata(&launch.artifact_root).unwrap().mode() & 0o777;
     let token_mode = fs::metadata(&launch.token_file).unwrap().mode() & 0o777;
 
     assert_eq!(directory_mode, 0o700);
+    assert_eq!(artifact_mode, 0o700);
     assert_eq!(token_mode, 0o600);
     assert!(launch.socket_path.starts_with(&launch.session_root));
 }

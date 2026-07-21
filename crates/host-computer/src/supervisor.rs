@@ -22,6 +22,7 @@ pub struct PreparedLaunch {
     pub session_root: PathBuf,
     pub socket_path: PathBuf,
     pub token_file: PathBuf,
+    pub artifact_root: PathBuf,
     pub arguments: Vec<String>,
     pub environment: BTreeMap<String, String>,
     token: SecretToken,
@@ -58,6 +59,8 @@ pub fn prepare_launch(
 
     let socket_path = session_root.join("computer.sock");
     let token_file = session_root.join("session-token");
+    let artifact_root = session_root.join("artifacts");
+    create_owner_only_directory(&artifact_root)?;
     let mut token_bytes = [0_u8; 32];
     rand::thread_rng().fill_bytes(&mut token_bytes);
     let token = SecretToken::from_bytes(token_bytes);
@@ -74,12 +77,15 @@ pub fn prepare_launch(
         token_file.to_string_lossy().into_owned(),
         "--parent-pid".to_string(),
         config.parent_pid.to_string(),
+        "--artifact-root".to_string(),
+        artifact_root.to_string_lossy().into_owned(),
     ];
 
     Ok(PreparedLaunch {
         session_root,
         socket_path,
         token_file,
+        artifact_root,
         arguments,
         environment: BTreeMap::new(),
         token,

@@ -13,6 +13,7 @@ public enum HostComputerMethod: String, Codable, Sendable {
     case listApps = "list_apps"
     case listWindows = "list_windows"
     case getAppState = "get_app_state"
+    case captureWindow = "capture_window"
 }
 
 public struct ApplicationIdentity: Codable, Equatable, Hashable, Sendable {
@@ -224,6 +225,32 @@ public struct SnapshotDiff: Codable, Equatable, Sendable {
     }
 }
 
+public struct ArtifactRef: Codable, Equatable, Sendable {
+    public var artifactRef: String
+    public var mimeType: String
+    public var sizeBytes: UInt64
+    public var sha256: String
+
+    enum CodingKeys: String, CodingKey {
+        case artifactRef = "artifact_ref"
+        case mimeType = "mime_type"
+        case sizeBytes = "size_bytes"
+        case sha256
+    }
+}
+
+public struct StagedCapture: Codable, Equatable, Sendable {
+    public var relativePath: String
+
+    public init(relativePath: String) {
+        self.relativePath = relativePath
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case relativePath = "relative_path"
+    }
+}
+
 public struct AppSnapshot: Codable, Equatable, Sendable {
     public var snapshotID: String
     public var generation: UInt64
@@ -232,7 +259,7 @@ public struct AppSnapshot: Codable, Equatable, Sendable {
     public var baseSnapshotID: String?
     public var elements: [HostElement]
     public var focusedElementIndex: UInt32?
-    public var screenshotRef: String?
+    public var screenshotRef: ArtifactRef?
     public var truncated: Bool
 
     public init(
@@ -243,7 +270,7 @@ public struct AppSnapshot: Codable, Equatable, Sendable {
         baseSnapshotID: String? = nil,
         elements: [HostElement],
         focusedElementIndex: UInt32?,
-        screenshotRef: String? = nil,
+        screenshotRef: ArtifactRef? = nil,
         truncated: Bool
     ) {
         self.snapshotID = snapshotID
@@ -468,6 +495,9 @@ public enum ProtocolFailure: Error, Equatable, Sendable {
     case invalidRequest
     case deadlineExceeded
     case payloadTooLarge
+    case permissionMissing
+    case targetNotFound
+    case helperUnavailable
 
     public var errorCode: HostComputerErrorCode {
         switch self {
@@ -476,6 +506,9 @@ public enum ProtocolFailure: Error, Equatable, Sendable {
         case .invalidRequest: .invalidRequest
         case .deadlineExceeded: .deadlineExceeded
         case .payloadTooLarge: .payloadTooLarge
+        case .permissionMissing: .permissionMissing
+        case .targetNotFound: .targetNotFound
+        case .helperUnavailable: .helperUnavailable
         }
     }
 }

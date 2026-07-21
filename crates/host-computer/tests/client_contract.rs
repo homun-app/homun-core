@@ -62,6 +62,9 @@ impl HostComputerTransport for RecordingTransport {
                 serde_json::json!({"windows": [], "truncated": false})
             }
             HostComputerMethod::GetAppState => empty_snapshot(),
+            HostComputerMethod::CaptureWindow => {
+                serde_json::json!({"relative_path": "capture.png"})
+            }
         };
         Ok(RpcResponse::Success(RpcSuccessResponse {
             jsonrpc: JsonRpcVersion::V2,

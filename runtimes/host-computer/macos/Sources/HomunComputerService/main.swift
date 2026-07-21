@@ -6,6 +6,7 @@ struct ServiceConfiguration {
     let socketPath: String
     let tokenFile: String
     let parentPID: pid_t
+    let artifactRoot: URL
 
     init(arguments: [String]) throws {
         func value(after flag: String) -> String? {
@@ -25,6 +26,12 @@ struct ServiceConfiguration {
         self.socketPath = socketPath
         self.tokenFile = tokenFile
         self.parentPID = parentPID
+        artifactRoot = URL(
+            fileURLWithPath: value(after: "--artifact-root")
+                ?? URL(fileURLWithPath: tokenFile).deletingLastPathComponent()
+                    .appendingPathComponent("artifacts", isDirectory: true).path,
+            isDirectory: true
+        )
     }
 }
 
@@ -56,7 +63,7 @@ do {
     let token = try consumeTokenFile(at: configuration.tokenFile)
     try SocketServer(
         socketPath: configuration.socketPath,
-        router: RequestRouter(sessionToken: token)
+        router: RequestRouter(sessionToken: token, artifactRoot: configuration.artifactRoot)
     ).run()
 } catch {
     FileHandle.standardError.write(Data("Homun Computer Service failed to start\n".utf8))

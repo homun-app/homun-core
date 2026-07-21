@@ -6,15 +6,20 @@ public struct RequestRouter: Sendable {
     private let permissionProbe: any PermissionProbing
     private let inventory: any AppInventoryProviding
     private let snapshotProvider: SystemSnapshotProvider
+    private let captureRunner: BlockingCaptureRunner?
 
     public init(
         sessionToken: String,
-        permissionProbe: any PermissionProbing = SystemPermissionProbe()
+        permissionProbe: any PermissionProbing = SystemPermissionProbe(),
+        artifactRoot: URL? = nil
     ) {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
         self.permissionProbe = permissionProbe
         inventory = SystemAppInventory()
         snapshotProvider = SystemSnapshotProvider()
+        captureRunner = artifactRoot.map {
+            BlockingCaptureRunner(service: ScreenCaptureService(artifactRoot: $0))
+        }
     }
 
     init(
@@ -26,6 +31,7 @@ public struct RequestRouter: Sendable {
         self.permissionProbe = permissionProbe
         self.inventory = inventory
         snapshotProvider = SystemSnapshotProvider()
+        captureRunner = nil
     }
 
     public func route(_ body: Data) -> Data {
@@ -71,6 +77,7 @@ public struct RequestRouter: Sendable {
                     .string("list_apps"),
                     .string("list_windows"),
                     .string("get_app_state"),
+                    .string("capture_window"),
                 ]),
             ]))
         case .permissionStatus:
@@ -119,6 +126,25 @@ public struct RequestRouter: Sendable {
                 sessionID: request.meta.turnID ?? "default"
             )
             return .success(id: request.id, result: try encodeJSONValue(snapshot))
+        case .captureWindow:
+            guard
+                let captureRunner,
+                case let .object(params) = request.params,
+                case let .number(rawWindowID)? = params["window_id"],
+                rawWindowID.rounded() == rawWindowID,
+                rawWindowID > 0,
+                rawWindowID <= Double(UInt32.max)
+            else { throw ProtocolFailure.invalidRequest }
+            do {
+                let staged = try captureRunner.capture(windowID: UInt32(rawWindowID))
+                return .success(id: request.id, result: try encodeJSONValue(staged))
+            } catch CaptureFailure.permissionDenied {
+                throw ProtocolFailure.permissionMissing
+            } catch CaptureFailure.windowNotFound {
+                throw ProtocolFailure.targetNotFound
+            } catch {
+                throw ProtocolFailure.helperUnavailable
+            }
         }
     }
 
@@ -144,6 +170,9 @@ public struct RequestRouter: Sendable {
         case .invalidRequest: "invalid request"
         case .deadlineExceeded: "request deadline exceeded"
         case .payloadTooLarge: "request payload too large"
+        case .permissionMissing: "screen recording permission is missing"
+        case .targetNotFound: "capture target was not found"
+        case .helperUnavailable: "window capture failed"
         }
     }
 }
