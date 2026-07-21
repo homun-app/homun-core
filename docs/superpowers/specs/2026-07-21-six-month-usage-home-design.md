@@ -30,13 +30,36 @@ composer nel blocco centrale.
 
 Nel contenuto flessibile:
 
-- il saluto resta una sola riga nella parte superiore;
-- l'infografica segue il saluto con spazio sufficiente, senza occupare l'intera altezza;
+- il benvenuto occupa un gruppo tipografico di due righe nella parte superiore;
+- la prima frase è il messaggio principale, grande e autorevole, per esempio
+  `Buongiorno, Fabio.`;
+- la seconda frase è un invito più piccolo e discreto, per esempio
+  `Da dove vogliamo cominciare?`;
+- il ritorno a capo è strutturale e non dipende dal wrapping automatico del testo;
+- l'infografica segue il benvenuto con un margine verticale ampio e resta centrata
+  orizzontalmente, senza apparire accatastata sotto il testo;
 - il composer rimane ancorato al margine inferiore della finestra;
 - aprendo un thread con messaggi non avviene alcun salto strutturale del composer.
 
 Su viewport compatte il contenuto può scorrere verticalmente, ma il composer resta
 l'ultimo elemento della griglia e non viene reinserito nel blocco del saluto.
+
+### Ritmo e gerarchia tipografica
+
+Il gruppo di benvenuto e l'infografica non formano una singola card. La gerarchia usa
+spazio e tipografia, non contenitori aggiuntivi:
+
+- frase principale: peso medio, dimensione fluida circa 28–34 px e interlinea compatta;
+- invito secondario: circa 14–16 px, peso normale e colore attenuato;
+- distanza tra le due righe: 8–10 px;
+- distanza tra il benvenuto e l'infografica: fluida, indicativamente 36–72 px;
+- distanza inferiore libera: appartiene al contenuto e non spinge il composer, che
+  resta nella propria riga ancorata in basso.
+
+Sotto i 760 px le dimensioni e il margine verticale possono ridursi, ma le due righe
+mantengono contrasto gerarchico e non vengono fuse. Le frasi localizzate devono restare
+brevi; quando una traduzione va a capo, il testo secondario inizia comunque su una riga
+separata.
 
 ## Finestra del calendario
 
@@ -106,9 +129,12 @@ contenitore.
    filtro del riepilogo.
 4. Test di layout: la modalità vuota usa la riga composer inferiore e non la griglia
    centrata a quattro righe.
-5. Test interazione: cambiare `7d / 30d / Tutto` aggiorna i numeri ma non il numero o le
+5. Test di struttura: benvenuto principale e invito secondario sono elementi distinti,
+   con classi tipografiche e riga semantica separate.
+6. Test interazione: cambiare `7d / 30d / Tutto` aggiorna i numeri ma non il numero o le
    date delle celle.
-6. Verifica nell'app reale a viewport desktop e compatta, inclusi scroll orizzontale,
+7. Verifica nell'app reale a viewport desktop e compatta, inclusi ritmo verticale,
+   ancoraggio del composer, scroll orizzontale,
    tooltip ai bordi e focus da tastiera.
 
 ## Criteri di accettazione
@@ -116,8 +142,10 @@ contenitore.
 La correzione è completa quando:
 
 1. il prompt è visivamente ancorato in basso in ogni nuova chat;
-2. la heatmap mostra sempre 26 settimane reali, indipendentemente dal filtro numerico;
-3. i filtri aggiornano metriche e suggerimenti senza ricostruire il grafico;
-4. i periodi non coperti non sono rappresentati come zero o attività;
-5. il calendario resta leggibile e navigabile alle larghezze target;
-6. test mirati, typecheck, build e verifica renderizzata dell'app sono verdi.
+2. il benvenuto presenta una frase principale grande e un invito secondario più piccolo;
+3. l'infografica è separata dal benvenuto da un margine ampio e resta centrata;
+4. la heatmap mostra sempre 26 settimane reali, indipendentemente dal filtro numerico;
+5. i filtri aggiornano metriche e suggerimenti senza ricostruire il grafico;
+6. i periodi non coperti non sono rappresentati come zero o attività;
+7. il calendario resta leggibile e navigabile alle larghezze target;
+8. test mirati, typecheck, build e verifica renderizzata dell'app sono verdi.
