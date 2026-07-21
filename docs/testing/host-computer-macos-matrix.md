@@ -83,14 +83,15 @@ both architectures.
 
 ## Local engineering evidence — 2026-07-21
 
-Verified on an Apple Silicon Mac from the `fabio/host-computer-control` worktree:
+Verified on macOS 26.5.1 (25F80), Apple Silicon (`arm64`), from the
+`fabio/host-computer-control` worktree at `ecdd4f28`:
 
-- 51 host-computer Rust integration tests passed;
+- 52 host-computer Rust integration tests passed;
 - 9 local-computer-session tests passed;
 - 8 focused gateway host-computer tests passed;
 - 95 engine tests passed;
-- 35 Swift helper tests passed;
-- 41 Electron tests passed, including the package, reset, and signing contracts, a real helper bundle
+- 36 Swift helper tests passed;
+- 42 Electron tests passed, including the package, reset, startup-order, and signing contracts, a real helper bundle
   launch and authenticated Unix-socket handshake;
 - UI contract, TypeScript typecheck, production frontend build, and gateway `cargo check` passed;
 - `npm run package:prepare` produced an `arm64` gateway and an `arm64` nested helper
@@ -102,8 +103,31 @@ Verified on an Apple Silicon Mac from the `fabio/host-computer-control` worktree
 - the factory-reset test removed every host-control state path from a temporary data
   root and rejected broad/unrelated roots.
 
-Not claimed by this automated run: the fresh rendered Settings inspection, granting
-real TCC permissions, executing actions in third-party apps, physical takeover on a
-live action, an actual Developer ID signed and notarized release candidate, or
-Intel/universal compatibility. Those rows remain mandatory gates rather than silently
-passing placeholders.
+## Local rendered and helper-lifecycle evidence — 2026-07-21
+
+The packaged desktop app and its native helper were exercised against disposable data
+and user-data roots. No existing Homun workspace or macOS privacy permission was changed.
+
+- first launch kept Mac Apps disabled and did not preselect an application;
+- enabling the beta started one helper and reported Accessibility and Screen Recording
+  as `not_determined`, with a clear setup state and no automatic permission prompt;
+- the running-app selector excluded protected password-manager targets and kept
+  authorization disabled until an application was selected;
+- disabling and re-enabling the beta produced an observed helper process count of
+  `1 -> 0 -> 1`, proving that opt-out shuts down the launchd-owned helper rather than
+  leaking a duplicate process;
+- a fresh packaged launch completed broker recovery before graph regeneration and did
+  not reproduce the prior one-shot `database is locked` crash;
+- the real Settings page was inspected at 1280 x 800, 1440 x 900, and 1728 x 1117;
+  it remained readable, had no horizontal overflow, and accepted a physical mouse-wheel
+  scroll at the smallest viewport;
+- the stable inspected page showed no current console errors attributable to the final
+  application state.
+
+Not claimed by this run: granting real TCC permissions, observing or controlling a
+third-party app, approval execution, physical takeover during a live action, protected
+target behavior against a live third-party UI, signed-identity invalidation after an app
+update, or a real Developer ID signed and notarized release candidate. The Mac was locked
+during the external OS inspection and no privacy permission was changed. Intel/universal
+compatibility is also not claimed. These rows remain explicit physical or release gates,
+not passing placeholders.
