@@ -17,6 +17,7 @@ use local_first_host_computer::{
     grants::{AppGrant, GrantLevel, GrantScope, GrantStore, SignedAppIdentity},
     policy::{
         ActionCategory, HostActionPolicy, PolicyDecision, PolicyRequest, is_protected_bundle_id,
+        is_terminal_bundle_id,
     },
     protocol::{ActionRequest, AppSnapshot, HostPermission, PermissionState, SemanticAction},
     redaction::{DisclosurePolicy, ProviderDisclosure, project_snapshot},
@@ -42,6 +43,7 @@ struct HostRuntime {
 
 struct SnapshotGuard {
     app: SignedAppIdentity,
+    display_name: String,
     snapshot: AppSnapshot,
 }
 
@@ -592,7 +594,11 @@ pub async fn worker_get_state(session_id: &str, pid: u32) -> Result<Value, Strin
     if level.is_none() { return Err("app_not_granted".into()); }
     let snapshot = runtime.client.get_app_state(pid, None, context()).await.map_err(|error| error.to_string())?;
     runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?
-        .insert(snapshot.snapshot_id.clone(), SnapshotGuard { app: identity, snapshot: snapshot.clone() });
+        .insert(snapshot.snapshot_id.clone(), SnapshotGuard {
+            app: identity,
+            display_name: app_display_name.clone(),
+            snapshot: snapshot.clone(),
+        });
     let value = serde_json::to_value(project_snapshot(
         &snapshot,
         ProviderDisclosure::Remote,
@@ -610,14 +616,18 @@ pub async fn worker_get_state(session_id: &str, pid: u32) -> Result<Value, Strin
 pub async fn worker_execute_action(session_id: &str, mut request: ActionRequest) -> Result<Value, String> {
     ensure_session_operational(session_id)?;
     let runtime = runtime().await.map_err(api_error_text)?;
-    let (app, snapshot) = runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?
-        .get(&request.target.snapshot_id).map(|guard| (guard.app.clone(), guard.snapshot.clone()))
+    let (app, app_display_name, snapshot) = runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?
+        .get(&request.target.snapshot_id).map(|guard| (
+            guard.app.clone(),
+            guard.display_name.clone(),
+            guard.snapshot.clone(),
+        ))
         .ok_or("stale_snapshot")?;
     let level = grants().map_err(api_error_text)?.lock().map_err(|_| "grant store unavailable".to_string())?
         .resolve(&scope(), &app, now_ms()).map_err(|error| error.to_string())?;
     let element = snapshot.elements.iter().find(|element| element.index == request.target.index)
         .ok_or("target_not_found")?;
-    let category = if request.action == SemanticAction::SetValue { ActionCategory::TextEntry } else { ActionCategory::Reversible };
+    let category = classify_action(&app.bundle_id, request.action);
     request.resume_token = None;
     let digest = action_digest(session_id, &app, &request)?;
     let approval_matches = sessions().lock().map_err(|_| "session coordinator unavailable".to_string())?
@@ -626,7 +636,13 @@ pub async fn worker_execute_action(session_id: &str, mut request: ActionRequest)
         low_risk_typing_enabled: false, approval_matches }) {
         PolicyDecision::Allowed => {}
         PolicyDecision::ApprovalRequired(category) => {
-            let summary = action_summary(category, element.role.as_str());
+            let summary = action_summary(
+                category,
+                &app_display_name,
+                request.action,
+                element.role.as_str(),
+                element.label.as_deref(),
+            );
             let pending = sessions().lock().map_err(|_| "session coordinator unavailable".to_string())?
                 .request_approval(session_id, &digest, category, summary, now_ms())
                 .map_err(|error| error.to_string())?;
@@ -697,10 +713,51 @@ fn action_digest(session_id: &str, app: &SignedAppIdentity, request: &ActionRequ
     Ok(Sha256::digest(payload).iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-fn action_summary(category: ActionCategory, role: &str) -> String {
-    match category {
-        ActionCategory::TextEntry => format!("Enter text in {role}"),
-        _ => format!("Perform a {category:?} action on {role}"),
+fn classify_action(bundle_id: &str, action: SemanticAction) -> ActionCategory {
+    if is_terminal_bundle_id(bundle_id) {
+        return ActionCategory::TerminalInput;
+    }
+    match action {
+        SemanticAction::SetValue => ActionCategory::TextEntry,
+        SemanticAction::Press
+        | SemanticAction::Confirm
+        | SemanticAction::Increment
+        | SemanticAction::Decrement => ActionCategory::Interaction,
+        SemanticAction::ShowMenu
+        | SemanticAction::Cancel
+        | SemanticAction::Raise
+        | SemanticAction::ScrollUp
+        | SemanticAction::ScrollDown => ActionCategory::Reversible,
+    }
+}
+
+fn action_summary(
+    category: ActionCategory,
+    app: &str,
+    action: SemanticAction,
+    role: &str,
+    label: Option<&str>,
+) -> String {
+    let target = label
+        .filter(|value| !value.trim().is_empty())
+        .map(redact_approval_target)
+        .unwrap_or_else(|| role.to_string());
+    format!("{action:?} ‘{target}’ in {app} ({category:?})")
+}
+
+fn redact_approval_target(value: &str) -> String {
+    let bounded = value.chars().take(120).collect::<String>();
+    let lower = bounded.to_ascii_lowercase();
+    let many_digits = bounded.chars().filter(|character| character.is_ascii_digit()).count() >= 8;
+    if bounded.contains('@')
+        || lower.contains("password")
+        || lower.contains("token")
+        || bounded.starts_with("/Users/")
+        || many_digits
+    {
+        "[redacted]".to_string()
+    } else {
+        bounded
     }
 }
 
@@ -818,6 +875,50 @@ mod tests {
         assert!(!manager_should_register(true, false, true));
         assert!(!manager_should_register(true, true, false));
         assert!(manager_should_register(true, true, true));
+    }
+
+    #[test]
+    fn terminal_actions_are_hard_denied_and_press_is_not_assumed_reversible() {
+        assert_eq!(
+            classify_action("com.apple.Terminal", SemanticAction::ScrollDown),
+            ActionCategory::TerminalInput
+        );
+        assert_eq!(
+            classify_action("com.apple.Notes", SemanticAction::Press),
+            ActionCategory::Interaction
+        );
+        assert_eq!(
+            classify_action("com.apple.Notes", SemanticAction::SetValue),
+            ActionCategory::TextEntry
+        );
+        assert_eq!(
+            classify_action("com.apple.Notes", SemanticAction::ScrollDown),
+            ActionCategory::Reversible
+        );
+    }
+
+    #[test]
+    fn approval_summaries_are_bounded_and_redact_private_labels() {
+        let redacted = action_summary(
+            ActionCategory::Interaction,
+            "Notes",
+            SemanticAction::Press,
+            "AXButton",
+            Some("fabio@example.com"),
+        );
+        assert!(redacted.contains("[redacted]"));
+        assert!(!redacted.contains("fabio@example.com"));
+
+        let long_label = "x".repeat(200);
+        let bounded = action_summary(
+            ActionCategory::Interaction,
+            "Notes",
+            SemanticAction::Press,
+            "AXButton",
+            Some(&long_label),
+        );
+        assert!(bounded.contains(&"x".repeat(120)));
+        assert!(!bounded.contains(&"x".repeat(121)));
     }
 
     #[test]

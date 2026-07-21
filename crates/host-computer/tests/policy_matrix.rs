@@ -27,6 +27,24 @@ fn observe_and_control_grants_have_distinct_scope() {
 }
 
 #[test]
+fn generic_interactions_need_control_and_single_use_approval() {
+    let request = PolicyRequest {
+        category: ActionCategory::Interaction,
+        protected_target: false,
+        low_risk_typing_enabled: false,
+        approval_matches: false,
+    };
+    assert_eq!(
+        HostActionPolicy.decide(Some(GrantLevel::Observe), &request),
+        PolicyDecision::GrantRequired(GrantLevel::Control),
+    );
+    assert_eq!(
+        HostActionPolicy.decide(Some(GrantLevel::Control), &request),
+        PolicyDecision::ApprovalRequired(ActionCategory::Interaction),
+    );
+}
+
+#[test]
 fn consequential_actions_require_exact_approval() {
     let policy = HostActionPolicy;
     for category in [

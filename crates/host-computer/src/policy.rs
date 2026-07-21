@@ -36,6 +36,7 @@ pub fn is_terminal_bundle_id(bundle_id: &str) -> bool {
 pub enum ActionCategory {
     Observe,
     Reversible,
+    Interaction,
     TextEntry,
     FileWrite,
     ExternalCommunication,
@@ -101,7 +102,8 @@ impl HostActionPolicy {
         let approval_required = match request.category {
             ActionCategory::Observe | ActionCategory::Reversible => false,
             ActionCategory::TextEntry => !request.low_risk_typing_enabled,
-            ActionCategory::FileWrite
+            ActionCategory::Interaction
+            | ActionCategory::FileWrite
             | ActionCategory::ExternalCommunication
             | ActionCategory::Purchase
             | ActionCategory::SystemSettings
