@@ -25573,6 +25573,30 @@ fn objective_blocks_tool(
         || effectful_tool_name(name, composio_writes)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SteeringDisposition {
+    Apply,
+    RequiresConfirmation,
+}
+
+pub(crate) fn classify_steering(
+    current_mode: local_first_task_runtime::ObjectiveMode,
+    content: &str,
+) -> SteeringDisposition {
+    let proposed_mode = classify_objective_mode(content);
+    if current_mode == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis
+        && matches!(
+            proposed_mode,
+            local_first_task_runtime::ObjectiveMode::Mutation
+                | local_first_task_runtime::ObjectiveMode::Mixed
+        )
+    {
+        SteeringDisposition::RequiresConfirmation
+    } else {
+        SteeringDisposition::Apply
+    }
+}
+
 fn objective_mode_for_execution(
     state: &AppState,
     thread_id: Option<&str>,
@@ -25996,6 +26020,7 @@ impl GatewayBrowseExecutor<'_> {
             http: self.http,
             tx: &drain,
             usage: self.state.usage_recorder.as_ref(),
+            steering: None,
         };
         let mut usage_context = local_first_inference_usage::UsageContext::new(
             uuid::Uuid::new_v4().to_string(),
@@ -27881,10 +27906,24 @@ async fn run_agent_rounds(
     // stores, constructed ONCE per turn from this turn's context (ADR 0024/0026). model_client borrows
     // http+tx locally; the tool chokepoints hold the turn-constant read-only context and get `&mut ls`
     // per call from the engine.
+    let steering_context = match (
+        thread_id.as_deref(),
+        effect_turn_id.as_deref(),
+    ) {
+        (Some(thread_id), Some(turn_id)) => Some(crate::model_client::GatewaySteeringContext {
+            state: &state_owned,
+            user_id: automation_user_id.as_str(),
+            workspace_id: automation_workspace_id.as_str(),
+            thread_id,
+            turn_id,
+        }),
+        _ => None,
+    };
     let model_client = crate::model_client::GatewayModelClient {
         http: &http,
         tx,
         usage: state_owned.usage_recorder.as_ref(),
+        steering: steering_context,
     };
     let mut usage_context = local_first_inference_usage::UsageContext::new(
         uuid::Uuid::new_v4().to_string(),
@@ -35100,7 +35139,11 @@ fn enqueue_chat_turn_core(
     local_first_task_runtime::broker::EnqueueError,
 > {
     let user_id = gateway_user_id();
-    let workspace_id = gateway_workspace_id();
+    let workspace_id = lock_store(state)
+        .ok()
+        .and_then(|store| store.workspace_for_thread(&input.thread_id).ok())
+        .map(WorkspaceId::new)
+        .unwrap_or_else(gateway_workspace_id);
     let store = state.task_store.lock().map_err(|e| {
         local_first_task_runtime::broker::EnqueueError::Store(
             local_first_task_runtime::TaskRuntimeError::Store(format!("task store lock: {e}")),
@@ -35123,7 +35166,11 @@ fn enqueue_or_steer_chat_turn_core(
     local_first_task_runtime::broker::EnqueueError,
 > {
     let user_id = gateway_user_id();
-    let workspace_id = gateway_workspace_id();
+    let workspace_id = lock_store(state)
+        .ok()
+        .and_then(|store| store.workspace_for_thread(&input.thread_id).ok())
+        .map(WorkspaceId::new)
+        .unwrap_or_else(gateway_workspace_id);
     let store = state.task_store.lock().map_err(|e| {
         local_first_task_runtime::broker::EnqueueError::Store(
             local_first_task_runtime::TaskRuntimeError::Store(format!("task store lock: {e}")),
@@ -42355,6 +42402,17 @@ async fn fs_authorize(
                     }
                 }
             }
+            resume_thread_after_approval(
+                &state,
+                request.thread_id.clone(),
+                "filesystem_authorize",
+                &output,
+                Some(serde_json::json!({
+                    "path": path.display().to_string(),
+                    "op": request.op,
+                })),
+                request.message_id.clone(),
+            );
             Ok(Json(serde_json::json!({
                 "ok": true,
                 "output": output.chars().take(6000).collect::<String>()
@@ -61583,6 +61641,87 @@ prs.save(Path({path:?}))
             "apply_patch",
             &Default::default(),
         ));
+    }
+
+    #[test]
+    fn steering_applies_same_scope_but_pauses_for_new_mutation() {
+        use local_first_task_runtime::ObjectiveMode;
+
+        assert_eq!(
+            super::classify_steering(
+                ObjectiveMode::ReadOnlyAnalysis,
+                "Controlla anche lo stato della memoria"
+            ),
+            super::SteeringDisposition::Apply
+        );
+        assert_eq!(
+            super::classify_steering(
+                ObjectiveMode::ReadOnlyAnalysis,
+                "Ora modifica i file e applica la correzione"
+            ),
+            super::SteeringDisposition::RequiresConfirmation
+        );
+        assert_eq!(
+            super::classify_steering(ObjectiveMode::Mutation, "Usa anche questi test"),
+            super::SteeringDisposition::Apply
+        );
+    }
+
+    #[test]
+    fn model_round_consumes_durable_steering_exactly_once() {
+        let state = super::AppState::for_tests();
+        let thread = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .create_thread("workspace-a")
+            .unwrap();
+        let user_id = super::gateway_user_id();
+        {
+            let store = state.task_store.lock().unwrap();
+            let objective = store
+                .upsert_objective_contract(
+                    user_id.as_str(),
+                    "workspace-a",
+                    &thread.thread_id,
+                    "message-1",
+                    "Analyze only",
+                    local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                    &serde_json::json!({}),
+                    &serde_json::json!(["read"]),
+                    &serde_json::json!({"deliverable": "report"}),
+                    "active",
+                )
+                .unwrap();
+            store
+                .append_turn_steering(
+                    user_id.as_str(),
+                    "workspace-a",
+                    &thread.thread_id,
+                    "turn-1",
+                    "message-2",
+                    "Controlla anche la memoria",
+                    objective.revision,
+                )
+                .unwrap();
+        }
+        let context = crate::model_client::GatewaySteeringContext {
+            state: &state,
+            user_id: user_id.as_str(),
+            workspace_id: "workspace-a",
+            thread_id: &thread.thread_id,
+            turn_id: "turn-1",
+        };
+
+        let first = crate::model_client::steering_messages_for_round(context);
+        let second = crate::model_client::steering_messages_for_round(context);
+
+        assert_eq!(first.len(), 1);
+        assert!(first[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("APPLY TO THE CURRENT RUN"));
+        assert!(second.is_empty());
     }
 
     #[test]
