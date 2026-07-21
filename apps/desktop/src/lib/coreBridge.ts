@@ -569,6 +569,8 @@ export interface RecallEventPayload {
   query: string;
   hits: RecallHitPayload[];
   scope: "personal" | "project";
+  /** Operational state of memory access; absent only on legacy persisted events. */
+  status?: "ready" | "empty" | "degraded" | "unavailable" | "denied";
 }
 
 export type CoreChatStreamEvent =

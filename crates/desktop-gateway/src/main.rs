@@ -1872,8 +1872,30 @@ fn recall_collection_token(collection: MemoryCollectionKey) -> &'static str {
     }
 }
 
+fn memory_access_status_instruction(status: local_first_memory::MemoryAccessStatus) -> &'static str {
+    match status {
+        local_first_memory::MemoryAccessStatus::Ready => {
+            "MEMORY ACCESS STATUS: ready. Matching records were retrieved."
+        }
+        local_first_memory::MemoryAccessStatus::Empty => {
+            "MEMORY ACCESS STATUS: empty. The memory store is connected and answered correctly, but no matching record was found. Never describe this as a connection failure."
+        }
+        local_first_memory::MemoryAccessStatus::Degraded => {
+            "MEMORY ACCESS STATUS: degraded. Memory is connected and lexical recall remains available, but semantic/vector recall is degraded. State that limitation precisely if relevant."
+        }
+        local_first_memory::MemoryAccessStatus::Unavailable => {
+            "MEMORY ACCESS STATUS: unavailable. The memory store could not be queried; do not claim that no matching memory exists."
+        }
+        local_first_memory::MemoryAccessStatus::Denied => {
+            "MEMORY ACCESS STATUS: denied. Policy does not authorize memory access for this turn; do not imply the store is empty or disconnected."
+        }
+    }
+}
+
 fn recall_stream_payload_from_pack(pack: &RecallPack) -> local_first_subagents::RecallStreamPayload {
-    recall_stream_payload_from_hits(&pack.query, &pack.scope, &pack.hits)
+    let mut payload = recall_stream_payload_from_hits(&pack.query, &pack.scope, &pack.hits);
+    payload.status = pack.status.as_str().to_string();
+    payload
 }
 
 fn recall_stream_payload_from_hits(
@@ -1907,6 +1929,11 @@ fn recall_stream_payload_from_hits(
             MemoryScope::Personal => "personal".to_string(),
             MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
         },
+        status: if hits.is_empty() {
+            "empty".to_string()
+        } else {
+            "ready".to_string()
+        },
     }
 }
 
@@ -1918,6 +1945,7 @@ fn merge_automatic_recall_payload(
         *target = Some(incoming);
         return;
     };
+    let incoming_status = incoming.status;
     for hit in incoming.hits {
         let duplicate = current.hits.iter().any(|existing| {
             existing.r#ref == hit.r#ref
@@ -1930,6 +1958,14 @@ fn merge_automatic_recall_payload(
             current.hits.push(hit);
         }
     }
+    current.status = match (current.status.as_str(), incoming_status.as_str()) {
+        ("unavailable", _) | (_, "unavailable") => "unavailable",
+        ("denied", _) | (_, "denied") => "denied",
+        ("degraded", _) | (_, "degraded") => "degraded",
+        ("ready", _) | (_, "ready") => "ready",
+        _ => "empty",
+    }
+    .to_string();
 }
 
 fn memory_read_effects_from_recall_payload(
@@ -4320,6 +4356,48 @@ fn store_episode(
     }
 }
 
+fn current_thread_episode_block(state: &AppState, thread_id: &str) -> Option<String> {
+    let user = gateway_memory_user_id();
+    let threads = MemoryWorkspaceId::new(THREADS_WORKSPACE);
+    let origin_workspace = gateway_memory_workspace_id();
+    let mut episodes = memory_facade(state)
+        .list_memories_for_ui(&user, &threads)
+        .ok()?
+        .into_iter()
+        .filter(|memory| memory.status == MemoryStatus::Confirmed)
+        .filter(|memory| {
+            episode_metadata_matches_scope(&memory.metadata, thread_id, origin_workspace.as_str())
+        })
+        .collect::<Vec<_>>();
+    episodes.sort_by(|left, right| left.updated_at.cmp(&right.updated_at));
+    let mut selected = Vec::new();
+    let mut used = 0usize;
+    for episode in episodes.into_iter().rev().take(24) {
+        if used.saturating_add(episode.text.len()) > CHAT_MEMORY_BUDGET_CHARS / 2 {
+            break;
+        }
+        used += episode.text.len();
+        selected.push(episode.text);
+    }
+    if selected.is_empty() {
+        return None;
+    }
+    selected.reverse();
+    Some(format!(
+        "CURRENT THREAD MEMORY (confirmed episodes from this exact thread and workspace):\n- {}",
+        selected.join("\n- ")
+    ))
+}
+
+fn episode_metadata_matches_scope(
+    metadata: &serde_json::Value,
+    thread_id: &str,
+    workspace_id: &str,
+) -> bool {
+    metadata.get("thread_id").and_then(|value| value.as_str()) == Some(thread_id)
+        && metadata.get("workspace").and_then(|value| value.as_str()) == Some(workspace_id)
+}
+
 fn artifact_memory_kind(name: &str) -> String {
     let lower = name.to_ascii_lowercase();
     if lower.ends_with(".pdf") {
@@ -5721,6 +5799,15 @@ fn recall_pack_on_facade(
         &(dyn Fn(&MemoryFacade, &MemoryUserId, &MemoryWorkspaceId, &str) -> Option<String> + Sync),
     >,
 ) -> RecallPack {
+    let scope = if workspace.as_str() == PERSONAL_WORKSPACE {
+        MemoryScope::Personal
+    } else {
+        MemoryScope::Project(workspace.clone())
+    };
+    if facade.memory_health().is_err() {
+        return RecallPack::from_hits(query.to_string(), scope, Vec::new())
+            .with_status(local_first_memory::MemoryAccessStatus::Unavailable);
+    }
     if memory_sources_enabled() && workspace.as_str() != PERSONAL_WORKSPACE {
         // Project lifecycle belongs to the gateway registry, not to the
         // memory store. The coordinator requests one authorization snapshot
@@ -5741,7 +5828,7 @@ fn recall_pack_on_facade(
                 })
                 .collect::<Vec<_>>()
         };
-        return local_first_memory::recall_authorized_sources_on_facade_with_source_filter(
+        let mut pack = local_first_memory::recall_authorized_sources_on_facade_with_source_filter(
             facade,
             user,
             workspace,
@@ -5757,16 +5844,27 @@ fn recall_pack_on_facade(
                 MemoryScope::Project(workspace.clone()),
                 Vec::new(),
             )
+            .with_status(local_first_memory::MemoryAccessStatus::Unavailable)
         });
+        if query_vec.is_empty()
+            && pack.status != local_first_memory::MemoryAccessStatus::Unavailable
+        {
+            pack.status = local_first_memory::MemoryAccessStatus::Degraded;
+        }
+        return pack;
     }
-    local_first_memory::recall_single_scope_pack(
+    let mut pack = local_first_memory::recall_single_scope_pack(
         facade,
         user,
         workspace,
         query,
         query_vec,
         graph_context,
-    )
+    );
+    if query_vec.is_empty() {
+        pack.status = local_first_memory::MemoryAccessStatus::Degraded;
+    }
+    pack
 }
 
 /// ADR 0022 (Tappa 4) — impl gateway del capability `EmbeddingClient`. Wrappa
@@ -14333,6 +14431,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
                 query: query.to_string(),
                 hits: Vec::new(),
                 scope: "personal".to_string(),
+                status: "empty".to_string(),
             },
         }
     };
@@ -14340,6 +14439,17 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
         return empty("No query provided.");
     }
     let facade = memory_facade(state);
+    if facade.memory_health().is_err() {
+        return RecallOutcome {
+            response: "Memory is unavailable; the search was not completed.".to_string(),
+            payload: local_first_subagents::RecallStreamPayload {
+                query: query.to_string(),
+                hits: Vec::new(),
+                scope: "personal".to_string(),
+                status: "unavailable".to_string(),
+            },
+        };
+    }
     let user = gateway_memory_user_id();
     let active = gateway_memory_workspace_id();
     let search = |workspace: MemoryWorkspaceId| -> Vec<local_first_subagents::RecallStreamHit> {
@@ -14448,6 +14558,7 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
         }
     }
     let scope = if in_project { "project" } else { "personal" }.to_string();
+    let has_hits = !lines.is_empty();
     let response = match lock_vault_store(state) {
         Ok(vault_store) => {
             recall_memory_response_with_vault_fallback(&vault_store, query, lines, in_project)
@@ -14462,6 +14573,11 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
             query: query.to_string(),
             hits: ui_hits,
             scope,
+            status: if has_hits {
+                "ready".to_string()
+            } else {
+                "empty".to_string()
+            },
         },
     }
 }
@@ -24237,6 +24353,7 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
                         query: "(query)".to_string(),
                         hits: Vec::new(),
                         scope: "personal".to_string(),
+                        status: "unavailable".to_string(),
                     },
                 });
             let payload = recall_stream_payload_from_outcome(&outcome, &query);
@@ -26739,6 +26856,16 @@ save/export a file to a folder, call save_artifact(file, destination)."
         can_use_project_memory,
         is_project,
     ) {
+        let scope = scope_from_active_workspace();
+        automatic_recall_payload = Some(local_first_subagents::RecallStreamPayload {
+            query: request.prompt.clone(),
+            hits: Vec::new(),
+            scope: match scope {
+                MemoryScope::Personal => "personal".to_string(),
+                MemoryScope::Project(_) | MemoryScope::Thread { .. } => "project".to_string(),
+            },
+            status: "denied".to_string(),
+        });
         system
     } else {
         // Always-on memory profile (M1): inject what we durably know about the user
@@ -26819,6 +26946,14 @@ save/export a file to a folder, call save_artifact(file, destination)."
             };
             system
         };
+        let thread_memory = request
+            .thread_id
+            .as_deref()
+            .and_then(|thread_id| current_thread_episode_block(state, thread_id));
+        let system = match thread_memory {
+            Some(block) => format!("{system}\n\n{block}"),
+            None => system,
+        };
         // Goal-propose affordance (projects only): when the model articulates the project's
         // objective, it emits a marker → the UI shows a "Salva come obiettivo" card. This is
         // content-contextual via a MODEL-emitted affordance (not keyword parsing).
@@ -26851,10 +26986,12 @@ normal answers."
                     &mut automatic_recall_payload,
                     recall_stream_payload_from_pack(&pack),
                 );
-                match pack.block {
+                let status = memory_access_status_instruction(pack.status);
+                let system = match pack.block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
-                }
+                };
+                format!("{system}\n\n{status}")
             } else {
                 // Path OFF: stessa orchestrazione del crate, capability client al volo.
                 let user = gateway_memory_user_id();
@@ -26888,10 +27025,12 @@ normal answers."
                     &mut automatic_recall_payload,
                     recall_stream_payload_from_pack(&block),
                 );
-                match block.block {
+                let status = memory_access_status_instruction(block.status);
+                let system = match block.block {
                     Some(block) => format!("{system}\n\n{block}"),
                     None => system,
-                }
+                };
+                format!("{system}\n\n{status}")
             }
         } else {
             system
@@ -33354,14 +33493,6 @@ async fn run_agent_turn_into_message(
         .lock()
         .ok()
         .and_then(|map| map.get(&request_id).cloned());
-    if let Some(abort) = stream_abort_registry()
-        .lock()
-        .ok()
-        .and_then(|map| map.get(&request_id).cloned())
-    {
-        crate::turn_executor::attach_turn_engine_abort(turn_id, abort);
-    }
-
     let body_task = tokio::spawn(async move {
         let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await;
     });
@@ -33455,6 +33586,13 @@ async fn run_agent_turn_into_message_with_fanout(
         .lock()
         .ok()
         .and_then(|map| map.get(&request_id).cloned());
+    if let Some(abort) = stream_abort_registry()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&request_id).cloned())
+    {
+        crate::turn_executor::attach_turn_engine_abort(turn_id, abort);
+    }
 
     let body_task = tokio::spawn(async move {
         let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await;
@@ -66421,6 +66559,42 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
         assert_eq!(payload.query, "launch");
         assert!(payload.hits.is_empty());
         assert_eq!(payload.scope, "personal");
+        assert_eq!(payload.status, "empty");
+    }
+
+    #[test]
+    fn memory_status_distinguishes_empty_from_unavailable() {
+        assert!(super::memory_access_status_instruction(
+            local_first_memory::MemoryAccessStatus::Empty
+        )
+        .contains("connected"));
+        assert!(super::memory_access_status_instruction(
+            local_first_memory::MemoryAccessStatus::Unavailable
+        )
+        .contains("could not be queried"));
+    }
+
+    #[test]
+    fn thread_episode_scope_requires_exact_thread_and_workspace() {
+        let metadata = serde_json::json!({
+            "thread_id": "thread-a",
+            "workspace": "project-a"
+        });
+        assert!(super::episode_metadata_matches_scope(
+            &metadata,
+            "thread-a",
+            "project-a"
+        ));
+        assert!(!super::episode_metadata_matches_scope(
+            &metadata,
+            "thread-b",
+            "project-a"
+        ));
+        assert!(!super::episode_metadata_matches_scope(
+            &metadata,
+            "thread-a",
+            "project-b"
+        ));
     }
 
     #[test]
@@ -66476,6 +66650,7 @@ documento di sintesi con pro/contro e una raccomandazione finale.";
                 graph_path: Vec::new(),
             }],
             scope: "project".to_string(),
+            status: "ready".to_string(),
         }
     }
 

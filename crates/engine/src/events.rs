@@ -54,6 +54,14 @@ pub struct RecallStreamPayload {
     pub hits: Vec<RecallStreamHit>,
     /// Scope della recall ("personal" | "project").
     pub scope: String,
+    /// Stato operativo della memoria. `empty` e `unavailable` sono distinti:
+    /// nessun match non deve essere scambiato per una connessione guasta.
+    #[serde(default = "default_recall_status")]
+    pub status: String,
+}
+
+fn default_recall_status() -> String {
+    "ready".to_string()
 }
 
 /// Una lettura collegata realmente iniettata nel modello. Contiene solo
@@ -319,6 +327,7 @@ mod tests {
             query: "fact".to_string(),
             hits: vec![linked.clone(), local, incomplete, linked],
             scope: "project".to_string(),
+            status: "ready".to_string(),
         };
         let mut reads = TurnMemoryReadSet::default();
         reads.extend_payload(&payload);

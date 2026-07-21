@@ -1088,14 +1088,22 @@ export function ChatView({
           // "Sto controllando la memoria…" (precedenza su thinking/writing).
           if (part.type === "recall") {
             const count = part.payload?.hits?.length ?? 0;
+            const memoryStatus = part.payload?.status ?? (count > 0 ? "ready" : "empty");
+            const detail =
+              memoryStatus === "unavailable"
+                ? t("chat.recallingUnavailable")
+                : memoryStatus === "degraded"
+                  ? t("chat.recallingDegraded")
+                  : memoryStatus === "denied"
+                    ? t("chat.recallingDenied")
+                    : count > 0
+                      ? t("chat.recallingHits", { count })
+                      : t("chat.recallingNoHits");
             setStreamStatus({
               requestId,
               phase: "recalling",
               title: t("chat.recalling"),
-              detail:
-                count > 0
-                  ? t("chat.recallingHits", { count })
-                  : t("chat.recallingNoHits"),
+              detail,
             });
           }
           streamEventParts = [...streamEventParts, part];
