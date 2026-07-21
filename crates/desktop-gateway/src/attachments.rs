@@ -138,6 +138,9 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
     if is_powerpoint(&mime, &ext) {
         return ingest_powerpoint(path);
     }
+    if is_opendocument_text(&mime, &ext) {
+        return ingest_opendocument_text(path);
+    }
     if is_text_like(&mime, &ext) {
         let bytes = read_file_capped(path)?;
         let mut text = String::from_utf8_lossy(&bytes).into_owned();
@@ -151,6 +154,155 @@ fn ingest_one(att: &AttachmentInput) -> Result<One, String> {
         "type not yet supported for analysis (for now: PDF, PowerPoint, images, text/code)"
             .to_string(),
     )
+}
+
+/// Extracts the readable body of an OpenDocument Text package without requiring
+/// LibreOffice. ODT is a ZIP container, so the deterministic local path is both
+/// faster and more portable than spawning an optional desktop application.
+fn ingest_opendocument_text(path: &Path) -> Result<One, String> {
+    let bytes = read_file_capped(path)?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("unreadable OpenDocument package: {e}"))?;
+    let content = archive
+        .by_name("content.xml")
+        .map_err(|_| "OpenDocument package has no content.xml".to_string())?;
+    let mut xml = String::new();
+    content
+        .take(MAX_ATTACHMENT_BYTES + 1)
+        .read_to_string(&mut xml)
+        .map_err(|e| format!("read OpenDocument content.xml: {e}"))?;
+    if xml.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "OpenDocument content.xml is too large (max {} MB)",
+            MAX_ATTACHMENT_BYTES / 1024 / 1024
+        ));
+    }
+
+    let mut text = opendocument_text_content(&xml)?;
+    if text.chars().all(char::is_whitespace) {
+        return Err("OpenDocument contains no extractable text".to_string());
+    }
+    truncate_chars(&mut text, MAX_TEXT_CHARS);
+    Ok(One {
+        text: Some(text),
+        images: Vec::new(),
+    })
+}
+
+fn is_opendocument_text(mime: &str, ext: &str) -> bool {
+    ext == "odt" || mime == "application/vnd.oasis.opendocument.text"
+}
+
+/// Converts the XML body into plain text while preserving the structural
+/// whitespace that carries meaning in ODT (`text:s`, tabs, line breaks and table
+/// cells). Text outside `office:body` and paragraph/heading blocks is metadata or
+/// style data and must never leak into the model prompt.
+fn opendocument_text_content(xml: &str) -> Result<String, String> {
+    let body_start = xml
+        .find("<office:body")
+        .ok_or_else(|| "OpenDocument content.xml has no office:body".to_string())?;
+    let body_open_end = xml[body_start..]
+        .find('>')
+        .map(|offset| body_start + offset + 1)
+        .ok_or_else(|| "OpenDocument office:body tag is malformed".to_string())?;
+    let body_end = xml[body_open_end..]
+        .find("</office:body>")
+        .map(|offset| body_open_end + offset)
+        .unwrap_or(xml.len());
+    let body = &xml[body_open_end..body_end];
+
+    let mut out = String::new();
+    let mut rest = body;
+    let mut text_block_depth = 0usize;
+    while let Some(tag_start) = rest.find('<') {
+        if text_block_depth > 0 {
+            out.push_str(&decode_xml_text(&rest[..tag_start]));
+        }
+        rest = &rest[tag_start + 1..];
+        let Some(tag_end) = rest.find('>') else {
+            return Err("OpenDocument content.xml contains an unterminated tag".to_string());
+        };
+        let raw_tag = rest[..tag_end].trim();
+        rest = &rest[tag_end + 1..];
+        if raw_tag.starts_with('!') || raw_tag.starts_with('?') {
+            continue;
+        }
+
+        let closing = raw_tag.starts_with('/');
+        let self_closing = raw_tag.ends_with('/');
+        let tag = raw_tag
+            .trim_start_matches('/')
+            .trim_end_matches('/')
+            .split_whitespace()
+            .next()
+            .unwrap_or("");
+
+        if closing {
+            match tag {
+                "text:p" | "text:h" => {
+                    text_block_depth = text_block_depth.saturating_sub(1);
+                    push_newline(&mut out);
+                }
+                "table:table-cell" => {
+                    trim_trailing_newlines(&mut out);
+                    if !out.is_empty() && !out.ends_with('\t') {
+                        out.push('\t');
+                    }
+                }
+                "table:table-row" => {
+                    while out.ends_with('\t') || out.ends_with(' ') {
+                        out.pop();
+                    }
+                    push_newline(&mut out);
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        match tag {
+            "text:p" | "text:h" if !self_closing => text_block_depth += 1,
+            "text:s" if text_block_depth > 0 => {
+                let count = xml_usize_attribute(raw_tag, "text:c")
+                    .unwrap_or(1)
+                    .min(1_000);
+                out.extend(std::iter::repeat_n(' ', count));
+            }
+            "text:tab" if text_block_depth > 0 => out.push('\t'),
+            "text:line-break" if text_block_depth > 0 => out.push('\n'),
+            _ => {}
+        }
+    }
+    if text_block_depth > 0 {
+        out.push_str(&decode_xml_text(rest));
+    }
+
+    Ok(out.trim().to_string())
+}
+
+fn xml_usize_attribute(tag: &str, name: &str) -> Option<usize> {
+    let start = tag.find(name)? + name.len();
+    let rest = tag[start..].trim_start();
+    let rest = rest.strip_prefix('=')?.trim_start();
+    let quote = rest.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let value = &rest[quote.len_utf8()..];
+    let end = value.find(quote)?;
+    value[..end].parse().ok()
+}
+
+fn trim_trailing_newlines(text: &mut String) {
+    while text.ends_with('\n') {
+        text.pop();
+    }
+}
+
+fn push_newline(text: &mut String) {
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
 }
 
 /// PDF: prefer the embedded text layer (born-digital docs → cheap, exact). If the
@@ -509,6 +661,19 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    fn write_odt(path: &Path, content_xml: Option<&str>) {
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("mimetype", options).unwrap();
+        zip.write_all(b"application/vnd.oasis.opendocument.text")
+            .unwrap();
+        if let Some(xml) = content_xml {
+            zip.start_file("content.xml", options).unwrap();
+            zip.write_all(xml.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
     #[test]
     fn text_file_is_read_as_a_text_block() {
         let dir = std::env::temp_dir().join(format!("lfpa-att-{}", std::process::id()));
@@ -636,5 +801,127 @@ mod tests {
             .contains("Slide 2:\nQuarterly goals\nPipeline & team focus"));
         assert!(out.images.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn odt_file_extracts_structured_text() {
+        let dir = std::env::temp_dir().join(format!("lfpa-odt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("analysis.odt");
+        write_odt(
+            &file,
+            Some(
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0">
+ <office:automatic-styles><text:p>style noise</text:p></office:automatic-styles>
+ <office:body><office:text>
+  <text:h>Quarterly &amp; annual analysis</text:h>
+  <text:p>First paragraph with <text:span>inline emphasis</text:span>.</text:p>
+  <text:p>Two<text:s text:c="3"/>spaces<text:tab/>tab<text:line-break/>next line</text:p>
+  <table:table><table:table-row>
+   <table:table-cell><text:p>Revenue</text:p></table:table-cell>
+   <table:table-cell><text:p>€ 42</text:p></table:table-cell>
+  </table:table-row></table:table>
+ </office:text></office:body>
+</office:document-content>"#,
+            ),
+        );
+
+        let att = AttachmentInput {
+            local_path: file.display().to_string(),
+            display_name: "analysis.odt".into(),
+            mime_type: "application/octet-stream".into(),
+            size_bytes: 0,
+        };
+        let out = ingest_attachments(std::slice::from_ref(&att));
+
+        assert!(out.text.contains("Quarterly & annual analysis"));
+        assert!(out.text.contains("First paragraph with inline emphasis."));
+        assert!(out.text.contains("Two   spaces\ttab\nnext line"));
+        assert!(out.text.contains("Revenue\t€ 42"));
+        assert!(!out.text.contains("style noise"));
+        assert!(!out.text.contains("not yet supported"));
+        assert!(out.images.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn odt_mime_is_recognized_without_an_extension() {
+        let dir = std::env::temp_dir().join(format!("lfpa-odt-mime-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("upload");
+        write_odt(
+            &file,
+            Some(
+                r#"<office:document-content><office:body><office:text><text:p>Readable by MIME</text:p></office:text></office:body></office:document-content>"#,
+            ),
+        );
+        let att = AttachmentInput {
+            local_path: file.display().to_string(),
+            display_name: "upload".into(),
+            mime_type: "application/vnd.oasis.opendocument.text".into(),
+            size_bytes: 0,
+        };
+
+        let out = ingest_attachments(std::slice::from_ref(&att));
+        assert!(out.text.contains("Readable by MIME"));
+        assert!(!out.text.contains("not yet supported"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn odt_without_content_xml_degrades_to_a_specific_note() {
+        let dir = std::env::temp_dir().join(format!("lfpa-odt-empty-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("empty.odt");
+        write_odt(&file, None);
+        let att = AttachmentInput {
+            local_path: file.display().to_string(),
+            display_name: "empty.odt".into(),
+            mime_type: "application/vnd.oasis.opendocument.text".into(),
+            size_bytes: 0,
+        };
+
+        let out = ingest_attachments(std::slice::from_ref(&att));
+        assert!(out.text.contains("OpenDocument package has no content.xml"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_odt_degrades_without_panicking() {
+        let dir = std::env::temp_dir().join(format!("lfpa-odt-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("broken.odt");
+        std::fs::write(&file, b"not a zip package").unwrap();
+        let att = AttachmentInput {
+            local_path: file.display().to_string(),
+            display_name: "broken.odt".into(),
+            mime_type: "application/vnd.oasis.opendocument.text".into(),
+            size_bytes: 0,
+        };
+
+        let out = ingest_attachments(std::slice::from_ref(&att));
+        assert!(out.text.contains("unreadable OpenDocument package"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "needs HOMUN_TEST_ODT to point at a real OpenDocument file"]
+    fn odt_ingestion_smoke() {
+        let path = std::env::var("HOMUN_TEST_ODT").expect("set HOMUN_TEST_ODT");
+        let att = AttachmentInput {
+            local_path: path,
+            display_name: "real-document.odt".into(),
+            mime_type: "application/vnd.oasis.opendocument.text".into(),
+            size_bytes: 0,
+        };
+
+        let out = ingest_attachments(std::slice::from_ref(&att));
+        assert!(!out.text.contains("not yet supported"));
+        assert!(!out.text.contains("⚠️"));
+        assert!(out.text.chars().filter(|ch| !ch.is_whitespace()).count() > 100);
+        assert!(out.images.is_empty());
     }
 }

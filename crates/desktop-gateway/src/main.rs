@@ -21256,6 +21256,101 @@ const ATTACHMENT_TEXT_BUDGET_CHARS: usize = 120_000;
 /// most-recent files win.
 const ATTACHMENT_CONTEXT_IMAGES: usize = 12;
 
+/// Appends the durable attachment working set to the user prompt and returns the
+/// bounded image payload. Extraction failures are diagnostics, not document text:
+/// keeping the two sections separate prevents the model from treating an error
+/// string as if it had read the file.
+fn append_thread_attachment_context(
+    model_text: &mut String,
+    working: &[chat_store::StoredAttachment],
+) -> Vec<String> {
+    if working.is_empty() {
+        return Vec::new();
+    }
+
+    let manifest = working
+        .iter()
+        .map(|attachment| {
+            let kind = if !attachment.images.is_empty() {
+                "images/scan"
+            } else if attachment
+                .text
+                .as_deref()
+                .is_some_and(attachment_text_is_ready)
+            {
+                "text"
+            } else {
+                "unavailable"
+            };
+            format!("- {} ({kind})", attachment.display_name)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    model_text.push_str(&format!(
+        "\n\n[Files attached to this conversation]\n{manifest}\n\
+Ready attachment content follows. Entries marked unavailable were received but could not be \
+extracted; do not claim to have analyzed them. If the user cites a file NOT in this list, ask \
+them to attach it (don't look for it in the sandbox or folders).\n\
+--- Attachment content ---"
+    ));
+
+    let mut text_budget = ATTACHMENT_TEXT_BUDGET_CHARS;
+    for attachment in working {
+        let Some(text) = attachment
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| attachment_text_is_ready(text))
+        else {
+            continue;
+        };
+        let slice: String = text.chars().take(text_budget).collect();
+        text_budget = text_budget.saturating_sub(slice.chars().count());
+        model_text.push_str(&format!("\n[{}]\n{}", attachment.display_name, slice));
+        if text_budget == 0 {
+            break;
+        }
+    }
+
+    let issues = working
+        .iter()
+        .filter(|attachment| attachment.images.is_empty())
+        .filter_map(|attachment| {
+            let text = attachment.text.as_deref().map(str::trim).unwrap_or("");
+            if text.starts_with("⚠️") {
+                Some(format!("[{}]\n{text}", attachment.display_name))
+            } else if text.is_empty() {
+                Some(format!(
+                    "[{}]\n⚠️ No extractable attachment content was produced.",
+                    attachment.display_name
+                ))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if !issues.is_empty() {
+        model_text.push_str("\n\n[Attachment extraction issues]\n");
+        model_text.push_str(&issues.join("\n"));
+    }
+
+    let mut images = Vec::new();
+    'outer: for attachment in working.iter().rev() {
+        for url in &attachment.images {
+            if images.len() >= ATTACHMENT_CONTEXT_IMAGES {
+                break 'outer;
+            }
+            images.push(url.clone());
+        }
+    }
+    images
+}
+
+fn attachment_text_is_ready(text: &str) -> bool {
+    let text = text.trim();
+    !text.is_empty() && !text.starts_with("⚠️")
+}
+
 /// The browser branch's tool context (ADR 0026 / inc 5, 5.D1b slice 3). SPLIT out of `ChatToolCtx`
 /// because `execute_browser_tool` and `execute_chat_tool` have DISJOINT read-sets: the browser
 /// tool reads the browser cluster + provider + a few read-only fields, and nothing execute_chat_tool
@@ -27249,49 +27344,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
 
     let mut model_text = prompt.clone();
     let mut all_images = request.images.clone();
-    if !working.is_empty() {
-        let manifest = working
-            .iter()
-            .map(|a| {
-                let kind = if a.images.is_empty() {
-                    "text"
-                } else {
-                    "images/scan"
-                };
-                format!("- {} ({kind})", a.display_name)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        model_text.push_str(&format!(
-            "\n\n[Files attached to this conversation]\n{manifest}\n\
-Use their content below to answer. If the user cites a file NOT in \
-this list, ask them to attach it (don't look for it in the sandbox or folders).\n\
---- Attachment content ---"
-        ));
-        let mut text_budget = ATTACHMENT_TEXT_BUDGET_CHARS;
-        for a in &working {
-            let Some(text) = a.text.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
-                continue;
-            };
-            let slice: String = text.chars().take(text_budget).collect();
-            text_budget = text_budget.saturating_sub(slice.chars().count());
-            model_text.push_str(&format!("\n[{}]\n{}", a.display_name, slice));
-            if text_budget == 0 {
-                break;
-            }
-        }
-        // Images: most-recent files first, capped to bound vision token cost.
-        let mut imgs: Vec<String> = Vec::new();
-        'outer: for a in working.iter().rev() {
-            for url in &a.images {
-                if imgs.len() >= ATTACHMENT_CONTEXT_IMAGES {
-                    break 'outer;
-                }
-                imgs.push(url.clone());
-            }
-        }
-        all_images.extend(imgs);
-    }
+    all_images.extend(append_thread_attachment_context(&mut model_text, &working));
 
     // Vision: when the turn carries images (request + rendered attachments), the
     // user message becomes multimodal content (text + image_url parts) per the
@@ -56187,6 +56240,48 @@ mod tests {
     // 5.D1c.2: test-only engine helpers (not used by non-test gateway code, so imported here, not at
     // the crate top where they'd read as unused).
     use local_first_engine::browser::{message_has_image_url, PRUNED_SNAPSHOT_STUB};
+
+    #[test]
+    fn attachment_prompt_distinguishes_ready_content_from_extraction_issues() {
+        let attachments = vec![
+            chat_store::StoredAttachment {
+                display_name: "analysis.odt".to_string(),
+                mime_type: "application/vnd.oasis.opendocument.text".to_string(),
+                text: Some("Actual document content".to_string()),
+                images: Vec::new(),
+            },
+            chat_store::StoredAttachment {
+                display_name: "scan.pdf".to_string(),
+                mime_type: "application/pdf".to_string(),
+                text: Some(
+                    "(scanned PDF: pages provided as images for visual analysis)".to_string(),
+                ),
+                images: vec!["data:image/jpeg;base64,AA==".to_string()],
+            },
+            chat_store::StoredAttachment {
+                display_name: "archive.bin".to_string(),
+                mime_type: "application/octet-stream".to_string(),
+                text: Some("⚠️ type not yet supported".to_string()),
+                images: Vec::new(),
+            },
+        ];
+        let mut prompt = "Summarize the attachment".to_string();
+
+        let images = super::append_thread_attachment_context(&mut prompt, &attachments);
+
+        assert!(prompt.contains("- analysis.odt (text)"));
+        assert!(prompt.contains("- scan.pdf (images/scan)"));
+        assert!(prompt.contains("- archive.bin (unavailable)"));
+        let content = prompt
+            .split("[Attachment extraction issues]")
+            .next()
+            .unwrap();
+        assert!(content.contains("Actual document content"));
+        assert!(!content.contains("⚠️ type not yet supported"));
+        assert!(prompt.contains("[Attachment extraction issues]\n[archive.bin]"));
+        assert!(prompt.contains("⚠️ type not yet supported"));
+        assert_eq!(images, vec!["data:image/jpeg;base64,AA=="]);
+    }
     // engine plan fn tested here directly (no longer re-used in gateway non-test code post-5.D2).
     use local_first_engine::plan::advance_plan_frontier;
     use local_first_browser_automation::BrowserAutomationError;

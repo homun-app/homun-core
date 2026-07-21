@@ -45,6 +45,12 @@ incondizionato, rotte montate sempre — il vecchio gate `turn_broker_enabled()`
    Immagini inline (`data:image/...`) e allegati file normalizzati sono input durevoli
    del task: l'executor li rende visibili al modello e ne conserva i metadati nel
    messaggio utente, così transcript e turno eseguito restano coerenti dopo un reload.
+   I file vengono estratti una volta da `attachments.rs` entro limiti di byte/testo e
+   persistiti per thread. ODT usa il percorso locale deterministico ZIP → `content.xml`
+   (nessun LibreOffice o servizio cloud); paragrafi, titoli, spazi strutturali e tabelle
+   diventano testo del prompt. Un fallimento resta invece una diagnostica marcata
+   `unavailable`, separata da `Attachment content`: il modello non può più scambiare
+   una nota `⚠️` per il documento letto (capisaldi #5 e #11).
 2. **L'executor** (`crates/desktop-gateway/src/turn_executor.rs`) esegue il task:
    chiama `start_visible_conversation_turn` poi
    `run_agent_turn_into_message_with_fanout`, cioè fa girare il **loop canonico**.

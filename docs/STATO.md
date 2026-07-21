@@ -3,7 +3,35 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-19.**
+> **Ultimo aggiornamento: 2026-07-21.**
+
+## ⭐ CHECKPOINT 2026-07-21 — ODT analizzabile direttamente in chat
+
+Corretto il percorso canonico degli allegati che aveva portato Homun a trattare
+`chat_2026-07-20.odt` come formato non supportato. Il gateway ora riconosce ODT sia per estensione
+sia per MIME, apre localmente il contenitore ZIP e ricava da `content.xml` titoli, paragrafi,
+spazi strutturali, interruzioni e tabelle entro i limiti esistenti di byte e testo. Non richiede
+LibreOffice, conversioni manuali o servizi cloud.
+
+Anche il prompt del modello è stato reso veritiero: un allegato estratto viene marcato `text`, una
+scansione `images/scan`, mentre un errore resta `unavailable` in una sezione diagnostica separata.
+Una nota `⚠️` non può quindi essere scambiata per il contenuto del documento né indurre il modello
+a dichiarare di averlo analizzato.
+
+**Gate eseguiti (sessione 2026-07-21):**
+| Gate | Esito |
+| --- | --- |
+| Test allegati | 8 passed, 0 failed, 2 ignored |
+| Smoke sul file reale `chat_2026-07-20.odt` | OK, testo estratto senza warning unsupported |
+| `cargo test -p local-first-desktop-gateway` | lib 53 + main 748 + integrazioni, 0 failed |
+| `npm run test:ui-contract` + `npm run build` | OK |
+| `cargo build -p local-first-desktop-gateway` | OK |
+| `git diff --check` | OK |
+
+**Nota operativa:** le risposte già salvate non vengono riscritte. Nella chat esistente basta
+ri-allegare l'ODT per sostituire l'estrazione precedente; i nuovi allegati ODT usano subito il
+percorso corretto. La semantica generale di completamento del task e l'ottimizzazione dei token del
+loop restano contratti separati da questa correzione mirata.
 
 ## ⭐ CHECKPOINT 2026-07-19 — Settings: lingue es/fr/de + factory reset SHIPPED
 
