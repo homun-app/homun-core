@@ -8,18 +8,21 @@ public struct RequestRouter: Sendable {
     private let snapshotProvider: SystemSnapshotProvider
     private let captureRunner: BlockingCaptureRunner?
     private let actionExecutor: ActionExecutor
+    private let takeoverMonitor: InputTakeoverMonitor?
 
     public init(
         sessionToken: String,
         permissionProbe: any PermissionProbing = SystemPermissionProbe(),
-        artifactRoot: URL? = nil
+        artifactRoot: URL? = nil,
+        takeoverMonitor: InputTakeoverMonitor? = nil
     ) {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
         self.permissionProbe = permissionProbe
         inventory = SystemAppInventory()
         let registry = ElementRegistry()
         snapshotProvider = SystemSnapshotProvider(registry: registry)
-        actionExecutor = ActionExecutor(registry: registry)
+        actionExecutor = ActionExecutor(registry: registry, takeoverMonitor: takeoverMonitor)
+        self.takeoverMonitor = takeoverMonitor
         captureRunner = artifactRoot.map {
             BlockingCaptureRunner(service: ScreenCaptureService(artifactRoot: $0))
         }
@@ -36,6 +39,7 @@ public struct RequestRouter: Sendable {
         let registry = ElementRegistry()
         snapshotProvider = SystemSnapshotProvider(registry: registry)
         actionExecutor = ActionExecutor(registry: registry)
+        takeoverMonitor = nil
         captureRunner = nil
     }
 
@@ -84,6 +88,7 @@ public struct RequestRouter: Sendable {
                     .string("get_app_state"),
                     .string("capture_window"),
                     .string("execute_action"),
+                    .string("resume_control"),
                 ]),
             ]))
         case .permissionStatus:
@@ -168,9 +173,24 @@ public struct RequestRouter: Sendable {
                 throw ProtocolFailure.terminalInputBlocked
             } catch ActionFailure.protectedTarget {
                 throw ProtocolFailure.approvalRequired
+            } catch ActionFailure.hostLocked {
+                throw ProtocolFailure.hostLocked
+            } catch ActionFailure.pausedByUser {
+                throw ProtocolFailure.approvalRequired
             } catch {
                 throw ProtocolFailure.invalidRequest
             }
+        case .resumeControl:
+            guard
+                let takeoverMonitor,
+                case let .object(params) = request.params,
+                case let .string(token)? = params["resume_token"],
+                !token.isEmpty
+            else { throw ProtocolFailure.invalidRequest }
+            takeoverMonitor.resume(token: token)
+            return .success(id: request.id, result: .object([
+                "phase": .string(takeoverMonitor.phase.rawValue),
+            ]))
         }
     }
 
@@ -207,6 +227,7 @@ public struct RequestRouter: Sendable {
         case .secureInputBlocked: "secure input is blocked"
         case .terminalInputBlocked: "terminal input is blocked"
         case .approvalRequired: "protected target is blocked"
+        case .hostLocked: "host session is locked"
         }
     }
 }

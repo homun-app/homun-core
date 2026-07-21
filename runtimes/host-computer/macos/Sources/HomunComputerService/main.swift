@@ -61,10 +61,21 @@ do {
     let configuration = try ServiceConfiguration(arguments: CommandLine.arguments)
     guard kill(configuration.parentPID, 0) == 0 else { throw ServiceFailure.invalidArguments }
     let token = try consumeTokenFile(at: configuration.tokenFile)
-    try SocketServer(
-        socketPath: configuration.socketPath,
-        router: RequestRouter(sessionToken: token, artifactRoot: configuration.artifactRoot)
-    ).run()
+    let takeover = InputTakeoverMonitor(eventMarker: Int64.random(in: 1...Int64.max))
+    let eventTap = SystemInputEventTap(monitor: takeover)
+    _ = eventTap.start()
+    let sessionMonitor = HostSessionMonitor(takeover: takeover)
+    sessionMonitor.start()
+    try withExtendedLifetime((eventTap, sessionMonitor)) {
+        try SocketServer(
+            socketPath: configuration.socketPath,
+            router: RequestRouter(
+                sessionToken: token,
+                artifactRoot: configuration.artifactRoot,
+                takeoverMonitor: takeover
+            )
+        ).run()
+    }
 } catch {
     FileHandle.standardError.write(Data("Homun Computer Service failed to start\n".utf8))
     exit(1)

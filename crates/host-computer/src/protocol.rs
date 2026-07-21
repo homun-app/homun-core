@@ -21,6 +21,7 @@ pub enum HostComputerMethod {
     GetAppState,
     CaptureWindow,
     ExecuteAction,
+    ResumeControl,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,12 +170,75 @@ pub struct ActionRequest {
     pub target: ActionTarget,
     pub action: SemanticAction,
     pub value: Option<String>,
+    pub resume_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActionResult {
     pub snapshot_required: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TakeoverPhase {
+    Active,
+    PausedByUser,
+    HostLocked,
+    MonitorUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostInputEvent {
+    PhysicalMouseDown,
+    PhysicalScroll,
+    PhysicalKeyDown,
+    HomunSynthetic,
+    HostLocked,
+    HostUnlocked,
+    MonitorFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TakeoverState {
+    pub phase: TakeoverPhase,
+    resume_token: Option<String>,
+}
+
+impl TakeoverState {
+    pub fn active(token: impl Into<String>) -> Self {
+        Self {
+            phase: TakeoverPhase::Active,
+            resume_token: Some(token.into()),
+        }
+    }
+
+    pub fn accepts(&self, token: &str) -> bool {
+        self.phase == TakeoverPhase::Active && self.resume_token.as_deref() == Some(token)
+    }
+
+    pub fn apply(&mut self, event: HostInputEvent) {
+        match event {
+            HostInputEvent::HomunSynthetic => {}
+            HostInputEvent::PhysicalMouseDown
+            | HostInputEvent::PhysicalScroll
+            | HostInputEvent::PhysicalKeyDown
+            | HostInputEvent::HostUnlocked => {
+                self.phase = TakeoverPhase::PausedByUser;
+                self.resume_token = None;
+            }
+            HostInputEvent::HostLocked => {
+                self.phase = TakeoverPhase::HostLocked;
+                self.resume_token = None;
+            }
+            HostInputEvent::MonitorFailed => {
+                self.phase = TakeoverPhase::MonitorUnavailable;
+                self.resume_token = None;
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

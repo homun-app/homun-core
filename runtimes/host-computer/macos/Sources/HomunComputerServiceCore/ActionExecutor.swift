@@ -10,18 +10,33 @@ public enum ActionFailure: Error, Equatable, Sendable {
     case nativeActionFailed
     case protectedTarget
     case terminalInputBlocked
+    case pausedByUser
+    case hostLocked
 }
 
 public struct ActionExecutor: Sendable {
     private let registry: ElementRegistry
     private let policy: ProtectedTargetPolicy
+    private let takeoverMonitor: InputTakeoverMonitor?
 
-    public init(registry: ElementRegistry, policy: ProtectedTargetPolicy = ProtectedTargetPolicy()) {
+    public init(
+        registry: ElementRegistry,
+        policy: ProtectedTargetPolicy = ProtectedTargetPolicy(),
+        takeoverMonitor: InputTakeoverMonitor? = nil
+    ) {
         self.registry = registry
         self.policy = policy
+        self.takeoverMonitor = takeoverMonitor
     }
 
     public func execute(_ request: ActionRequest) throws -> ActionResult {
+        if let takeoverMonitor {
+            guard takeoverMonitor.phase != .hostLocked else { throw ActionFailure.hostLocked }
+            guard
+                let token = request.resumeToken,
+                takeoverMonitor.accepts(token: token)
+            else { throw ActionFailure.pausedByUser }
+        }
         guard registry.contains(
             snapshotID: request.target.snapshotID,
             generation: request.target.generation

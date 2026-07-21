@@ -15,6 +15,7 @@ public enum HostComputerMethod: String, Codable, Sendable {
     case getAppState = "get_app_state"
     case captureWindow = "capture_window"
     case executeAction = "execute_action"
+    case resumeControl = "resume_control"
 }
 
 public struct ApplicationIdentity: Codable, Equatable, Hashable, Sendable {
@@ -273,11 +274,23 @@ public struct ActionRequest: Codable, Equatable, Sendable {
     public var target: ActionTarget
     public var action: SemanticAction
     public var value: String?
+    public var resumeToken: String?
 
-    public init(target: ActionTarget, action: SemanticAction, value: String? = nil) {
+    public init(
+        target: ActionTarget,
+        action: SemanticAction,
+        value: String? = nil,
+        resumeToken: String? = nil
+    ) {
         self.target = target
         self.action = action
         self.value = value
+        self.resumeToken = resumeToken
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case target, action, value
+        case resumeToken = "resume_token"
     }
 }
 
@@ -544,6 +557,7 @@ public enum ProtocolFailure: Error, Equatable, Sendable {
     case secureInputBlocked
     case terminalInputBlocked
     case approvalRequired
+    case hostLocked
 
     public var errorCode: HostComputerErrorCode {
         switch self {
@@ -559,6 +573,7 @@ public enum ProtocolFailure: Error, Equatable, Sendable {
         case .secureInputBlocked: .secureInputBlocked
         case .terminalInputBlocked: .terminalInputBlocked
         case .approvalRequired: .approvalRequired
+        case .hostLocked: .hostLocked
         }
     }
 }

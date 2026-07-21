@@ -12,6 +12,7 @@ fn action_target_always_carries_snapshot_generation() {
         },
         action: SemanticAction::Press,
         value: None,
+        resume_token: Some("resume-1".to_string()),
     };
     let json = serde_json::to_value(request).unwrap();
 
