@@ -26,6 +26,12 @@ export function routeLabel(point = {}, unknownLabel = "Unknown route") {
   return unknownLabel;
 }
 
+export function resolvedProviderLabel(providerId, labels = {}) {
+  const id = cleanLabel(providerId);
+  if (!id) return null;
+  return cleanLabel(labels[id]) || id;
+}
+
 export function usageIntensityLevels(values) {
   const positive = values.map(finiteNonnegative).filter((value) => value > 0);
   const unique = [...new Set(positive)].sort((a, b) => a - b);

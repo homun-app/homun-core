@@ -7337,13 +7337,13 @@ body.resizing-drawer {
 /* Shared GitHub-like activity calendar. The tooltip is viewport-positioned so it
    cannot be clipped by Settings or chat scroll containers. */
 .usage-calendar {
-  --usage-cell: 12px;
+  --usage-cell: 14px;
   --usage-gap: 4px;
   min-width: 0;
 }
 .usage-calendar--compact {
-  --usage-cell: 11px;
-  --usage-gap: 3px;
+  --usage-cell: 15px;
+  --usage-gap: 4px;
 }
 .usage-calendar-scroll {
   max-width: 100%;
@@ -7404,6 +7404,11 @@ body.resizing-drawer {
   color: var(--muted);
   font-size: 10px;
 }
+.chat-usage-infographic .usage-calendar-scroll,
+.chat-usage-infographic .usage-calendar-legend {
+  justify-content: center;
+}
+.chat-usage-infographic .usage-calendar-scroll { display: flex; }
 .usage-calendar-tooltip {
   position: fixed;
   z-index: 120;
@@ -16296,7 +16301,9 @@ body.resizing-drawer {
 .usage-activity-heading p { margin: 0; color: var(--text-muted); font-size: var(--text-xs); }
 .usage-activity-heading > strong { color: var(--text); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .usage-activity .usage-calendar { max-width: 760px; }
-.usage-activity .usage-calendar-grid { min-width: min(100%, 640px); }
+.usage-activity .usage-calendar-scroll,
+.usage-activity .usage-calendar-legend { justify-content: center; }
+.usage-activity .usage-calendar-scroll { display: flex; }
 .usage-summary-rail { display: grid; grid-template-columns: repeat(3, minmax(90px, 0.7fr)) minmax(180px, 1.6fr); gap: 20px; padding: 18px 0; border-block: 1px solid var(--line); }
 .usage-metric { display: grid; gap: 3px; min-width: 0; }
 .usage-metric span { color: var(--text-muted); font-size: var(--text-xs); }

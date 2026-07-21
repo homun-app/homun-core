@@ -139,6 +139,7 @@ assertContains("src/components/UsageCalendar.tsx", "dominant_provider", "Usage c
 assertNotContains("src/components/ChatView.tsx", "chat-hero-mark", "New chat must not keep the decorative brandmark");
 assertNotContains("src/components/ChatView.tsx", "chat.emptyHeroSub", "New chat must not keep the fixed subtitle");
 assertContains("src/components/ChatView.tsx", "selectGreetingKey", "New chat must select a stable curated greeting");
+assertContains("src/data/mockData.ts", 'id: "m1_ready"', "The bootstrap greeting must be recognized as a removable placeholder");
 assertContains("src/components/ChatUsageOverview.tsx", "<UsageCalendar", "New chat must render the real activity calendar");
 assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageDaily", "New chat must load real daily usage");
 assertContains("src/components/ChatUsageOverview.tsx", "dominant_provider", "New chat must render provider-qualified routes");

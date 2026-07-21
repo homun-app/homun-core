@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCalendarDays,
+  resolvedProviderLabel,
   routeLabel,
   totalTokens,
   usageIntensityLevels,
@@ -59,6 +60,16 @@ test("route label contains the real provider and model", () => {
     routeLabel({ dominant_provider: "ollama-cloud", dominant_model: "qwen" }),
     "ollama-cloud → qwen",
   );
+});
+
+test("provider registry labels replace opaque ids without losing route identity", () => {
+  assert.equal(
+    resolvedProviderLabel("8eb2018b-e43c-410c-b992-484bfadbe689", {
+      "8eb2018b-e43c-410c-b992-484bfadbe689": "Ollama Cloud",
+    }),
+    "Ollama Cloud",
+  );
+  assert.equal(resolvedProviderLabel("ollama", {}), "ollama");
 });
 
 test("total tokens includes cache traffic", () => {

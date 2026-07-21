@@ -64,6 +64,15 @@ export function routeLabel(
   return unknownLabel;
 }
 
+export function resolvedProviderLabel(
+  providerId: string | null | undefined,
+  labels: Record<string, string>,
+): string | null {
+  const id = cleanLabel(providerId);
+  if (!id) return null;
+  return cleanLabel(labels[id]) || id;
+}
+
 export function usageIntensityLevels(values: number[]): number[] {
   const positive = values.map(finiteNonnegative).filter((value) => value > 0);
   const unique = [...new Set(positive)].sort((a, b) => a - b);

@@ -12,7 +12,7 @@ import {
   type ApplyInstruction,
   type ModelUsageSuggestion,
 } from "../lib/coreBridge";
-import { routeLabel } from "../lib/usageCalendar";
+import { resolvedProviderLabel, routeLabel } from "../lib/usageCalendar";
 import { UsageSuggestion } from "./UsageSuggestion";
 import { UsageCalendar } from "./UsageCalendar";
 import {
@@ -33,6 +33,7 @@ type UsageData = {
   providers: UsageProviderRow[];
   processes: UsageProcessRow[];
   suggestions: ModelUsageSuggestion[];
+  providerLabels: Record<string, string>;
 };
 
 const WINDOWS: UsageWindow[] = ["7d", "30d", "all"];
@@ -54,16 +55,20 @@ export function UsageSettingsPane() {
     setLoading(true);
     setError(null);
     try {
-      const [summary, daily, models, providers, processes, suggestions] = await Promise.all([
+      const [summary, daily, models, providers, processes, suggestions, registry] = await Promise.all([
         coreBridge.usageSummary(selectedWindow),
         coreBridge.usageDaily(selectedWindow, -new Date().getTimezoneOffset()),
         coreBridge.usageModels(selectedWindow),
         coreBridge.usageProviders(selectedWindow),
         coreBridge.usageProcesses(selectedWindow),
         coreBridge.usageSuggestions(selectedWindow, "settings").catch(() => []),
+        coreBridge.providers().catch(() => null),
       ]);
       if (requestGenerationRef.current === generation) {
-        setData({ summary, daily, models, providers, processes, suggestions });
+        const providerLabels = Object.fromEntries(
+          (registry?.providers ?? []).map((provider) => [provider.id, provider.label]),
+        );
+        setData({ summary, daily, models, providers, processes, suggestions, providerLabels });
       }
     } catch (reason) {
       if (requestGenerationRef.current === generation) {
@@ -177,11 +182,12 @@ export function UsageSettingsPane() {
             <UsageOverview data={data} window={window} locale={i18n.resolvedLanguage} />
           )}
           {tab === "models" && (
-            <UsageModels rows={data.models} locale={i18n.resolvedLanguage} />
+            <UsageModels rows={data.models} providerLabels={data.providerLabels} locale={i18n.resolvedLanguage} />
           )}
           {tab === "providers" && (
             <UsageProviders
               rows={data.providers}
+              providerLabels={data.providerLabels}
               locale={i18n.resolvedLanguage}
               onReload={() => load(window)}
             />
@@ -228,7 +234,7 @@ function UsageOverview({
     + data.summary.reasoning_tokens + data.summary.cache_read_tokens
     + data.summary.cache_write_tokens;
   const dominantRoute = routeLabel({
-    dominant_provider: data.summary.dominant_provider,
+    dominant_provider: resolvedProviderLabel(data.summary.dominant_provider, data.providerLabels),
     dominant_model: data.summary.dominant_model,
   }, t("settings.usage.calendar.unknownRoute"));
   const coverageDate = data.summary.coverage_started_at
@@ -247,7 +253,7 @@ function UsageOverview({
           </div>
           <strong>{formatCount(allTokens, locale)} {t("chat.usageOverview.tokens").toLocaleLowerCase(locale)}</strong>
         </div>
-        <UsageCalendar series={data.daily} window={window} locale={locale} density="comfortable" />
+        <UsageCalendar series={data.daily} window={window} locale={locale} density="comfortable" providerLabels={data.providerLabels} />
       </section>
 
       <div className="usage-summary-rail">
@@ -296,7 +302,7 @@ function modelCostProvenance(row: UsageModelRow): Array<"reported" | "estimated"
   return labels;
 }
 
-function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string }) {
+function UsageModels({ rows, providerLabels, locale }: { rows: UsageModelRow[]; providerLabels: Record<string, string>; locale?: string }) {
   const { t } = useTranslation();
   const sorted = [...rows].sort((a, b) => rowTokens(b) - rowTokens(a));
   return (
@@ -314,7 +320,7 @@ function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string 
           const success = row.attempts ? Math.round((row.successful_attempts / row.attempts) * 100) : 0;
           const provenance = modelCostProvenance(row);
           return <tr key={`${row.provider_id}:${row.model_id}`}>
-            <th scope="row">{row.provider_id} → {row.model_id}</th>
+            <th scope="row">{resolvedProviderLabel(row.provider_id, providerLabels)} → {row.model_id}</th>
             <td>{formatCount(row.logical_calls, locale)}</td>
             <td>{formatCount(rowTokens(row), locale)}</td>
             <td className="usage-model-cost"><span>{formatMicrousd(row.cost_microusd, locale)}</span>{provenance.length > 0 && <small>{provenance.map((item) => t(`settings.usage.cost.${item}`)).join(" · ")}</small>}</td>
@@ -327,8 +333,9 @@ function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string 
   );
 }
 
-function UsageProviders({ rows, locale, onReload }: {
+function UsageProviders({ rows, providerLabels, locale, onReload }: {
   rows: UsageProviderRow[];
+  providerLabels: Record<string, string>;
   locale?: string;
   onReload: () => Promise<void> | void;
 }) {
@@ -353,7 +360,7 @@ function UsageProviders({ rows, locale, onReload }: {
       const spent = row.homun_usage.cost_microusd;
       const remaining = remainingBudgetPercent(row.manual_policy?.monthly_budget_microusd, spent, row.homun_usage.cost_breakdown.cost_coverage_percent);
       return <section key={row.provider_id} className="usage-provider-row">
-        <header><h3>{row.provider_id}</h3><button type="button" disabled={busy === row.provider_id || unsupported} onClick={() => void refresh(row.provider_id)}>{t("settings.usage.actions.refresh")}</button></header>
+        <header><h3>{resolvedProviderLabel(row.provider_id, providerLabels)}</h3><button type="button" disabled={busy === row.provider_id || unsupported} onClick={() => void refresh(row.provider_id)}>{t("settings.usage.actions.refresh")}</button></header>
         <div className="usage-provider-columns">
           <div><h4>{t("settings.usage.provider.measured")}</h4><dl>
             <div><dt>{t("settings.usage.metrics.calls")}</dt><dd>{row.homun_usage.logical_calls}</dd></div>

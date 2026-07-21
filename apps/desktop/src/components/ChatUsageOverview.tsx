@@ -8,7 +8,7 @@ import {
   type UsageSummaryView,
   type UsageWindow,
 } from "../lib/coreBridge";
-import { routeLabel } from "../lib/usageCalendar";
+import { resolvedProviderLabel, routeLabel } from "../lib/usageCalendar";
 import { compactUsageRows, formatCount, formatMicrousd } from "../lib/usageViewModel";
 import { UsageCalendar } from "./UsageCalendar";
 import { UsageSuggestion } from "./UsageSuggestion";
@@ -31,6 +31,7 @@ export function ChatUsageOverview({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [suggestions, setSuggestions] = useState<ModelUsageSuggestion[]>([]);
+  const [providerLabels, setProviderLabels] = useState<Record<string, string>>({});
   const generationRef = useRef(0);
   const suggestionGenerationRef = useRef(0);
 
@@ -40,13 +41,17 @@ export function ChatUsageOverview({
     setError(false);
     try {
       const timezoneOffsetMinutes = -new Date().getTimezoneOffset();
-      const [nextSummary, nextDaily] = await Promise.all([
+      const [nextSummary, nextDaily, providers] = await Promise.all([
         coreBridge.usageSummary(selectedWindow),
         coreBridge.usageDaily(selectedWindow, timezoneOffsetMinutes),
+        coreBridge.providers().catch(() => null),
       ]);
       if (generationRef.current === generation) {
         setSummary(nextSummary);
         setDaily(nextDaily);
+        if (providers) {
+          setProviderLabels(Object.fromEntries(providers.providers.map((provider) => [provider.id, provider.label])));
+        }
       }
     } catch {
       if (generationRef.current === generation) setError(true);
@@ -88,7 +93,7 @@ export function ChatUsageOverview({
   const coverage = Math.min(costCoverage, usageCoverage);
   const dominantRoute = summary
     ? routeLabel({
-        dominant_provider: summary.dominant_provider,
+        dominant_provider: resolvedProviderLabel(summary.dominant_provider, providerLabels),
         dominant_model: summary.dominant_model,
       }, t("settings.usage.calendar.unknownRoute"))
     : "—";
@@ -132,6 +137,7 @@ export function ChatUsageOverview({
             window={window}
             locale={i18n.resolvedLanguage}
             density="compact"
+            providerLabels={providerLabels}
           />
           <div className="chat-usage-summary">
             <UsageMetric label={t("settings.usage.metrics.calls")} value={formatCount(summary.logical_calls, i18n.resolvedLanguage)} />

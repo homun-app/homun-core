@@ -52,7 +52,7 @@ export const navItems: NavItem[] = [
 
 export const chatMessages: ChatMessage[] = [
   {
-    id: "m1",
+    id: "m1_ready",
     role: "assistant",
     text: "I'm ready. Write to me.",
     timestamp: "ora",

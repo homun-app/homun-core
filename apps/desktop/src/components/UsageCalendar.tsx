@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { UsageDailySeries, UsageWindow } from "../lib/coreBridge";
 import {
   buildCalendarDays,
+  resolvedProviderLabel,
   routeLabel,
   totalKnownCost,
   totalTokens,
@@ -16,6 +17,7 @@ interface UsageCalendarProps {
   locale?: string;
   density?: "compact" | "comfortable";
   onSelectDay?: (dayEpoch: number) => void;
+  providerLabels?: Record<string, string>;
 }
 
 interface TooltipState {
@@ -31,6 +33,7 @@ export function UsageCalendar({
   locale,
   density = "comfortable",
   onSelectDay,
+  providerLabels = {},
 }: UsageCalendarProps) {
   const { t } = useTranslation();
   const tooltipId = useId();
@@ -113,6 +116,7 @@ export function UsageCalendar({
           id={tooltipId}
           day={tooltip.day}
           locale={locale}
+          providerLabels={providerLabels}
           style={{ left: tooltip.left, top: tooltip.top }}
           placement={tooltip.placement}
         />
@@ -127,12 +131,14 @@ function UsageDayTooltip({
   locale,
   placement,
   style,
+  providerLabels,
 }: {
   id: string;
   day: CalendarDay;
   locale?: string;
   placement: "above" | "below";
   style: CSSProperties;
+  providerLabels: Record<string, string>;
 }) {
   const { t } = useTranslation();
   const cost = day.cost_breakdown;
@@ -162,7 +168,7 @@ function UsageDayTooltip({
           </dl>
           <p className="usage-calendar-route">
             {routeLabel({
-              dominant_provider: day.dominant_provider,
+              dominant_provider: resolvedProviderLabel(day.dominant_provider, providerLabels),
               dominant_model: day.dominant_model,
             }, t("settings.usage.calendar.unknownRoute"))}
           </p>
