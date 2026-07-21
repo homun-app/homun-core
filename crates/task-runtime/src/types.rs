@@ -257,6 +257,21 @@ pub struct ObjectiveContractRecord {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnSteeringRecord {
+    pub steering_id: i64,
+    pub user_id: String,
+    pub workspace_id: String,
+    pub thread_id: String,
+    pub active_turn_id: String,
+    pub source_message_id: String,
+    pub content: String,
+    pub objective_revision: u64,
+    pub status: String,
+    pub created_at: i64,
+    pub consumed_at: Option<i64>,
+}
+
 /// Canonical, operational plan state for one chat thread.
 ///
 /// This deliberately lives outside semantic memory: plan execution state must be

@@ -34999,31 +34999,51 @@ fn enqueue_chat_turn_core(
             local_first_task_runtime::TaskRuntimeError::Store(format!("task store lock: {e}")),
         )
     })?;
-    // The turn executor reuses this exact id, so the later commit_prompt_result INSERT OR
-    // IGNORE no-ops → one user message per turn (the atomic-enqueue invariant).
-    let user_message_id = format!("local_user_{}", input.request_id);
-    let user_message_thread = input.thread_id.clone();
-    let user_message_prompt = input.prompt.clone();
-    let user_message_ts = now_epoch_secs().to_string();
-    let user_message_attachments = broker_turn_message_attachments(input);
     local_first_task_runtime::broker::enqueue_chat_turn_atomic(
         &store,
         &user_id,
         &workspace_id,
         input,
-        |tx| {
-            ChatStore::insert_linked_user_message(
-                tx,
-                &user_message_thread,
-                &user_message_id,
-                &user_message_prompt,
-                &user_message_ts,
-                &user_message_attachments,
-            )
-            .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))?;
-            Ok(())
-        },
+        |tx| insert_broker_user_message(tx, input),
     )
+}
+
+fn enqueue_or_steer_chat_turn_core(
+    state: &AppState,
+    input: &local_first_task_runtime::broker::ChatTurnInput,
+) -> Result<
+    local_first_task_runtime::broker::EnqueueTurnOutcome,
+    local_first_task_runtime::broker::EnqueueError,
+> {
+    let user_id = gateway_user_id();
+    let workspace_id = gateway_workspace_id();
+    let store = state.task_store.lock().map_err(|e| {
+        local_first_task_runtime::broker::EnqueueError::Store(
+            local_first_task_runtime::TaskRuntimeError::Store(format!("task store lock: {e}")),
+        )
+    })?;
+    local_first_task_runtime::broker::enqueue_or_steer_chat_turn_atomic(
+        &store,
+        &user_id,
+        &workspace_id,
+        input,
+        |tx| insert_broker_user_message(tx, input),
+    )
+}
+
+fn insert_broker_user_message(
+    tx: &rusqlite::Transaction<'_>,
+    input: &local_first_task_runtime::broker::ChatTurnInput,
+) -> local_first_task_runtime::TaskRuntimeResult<()> {
+    ChatStore::insert_linked_user_message(
+        tx,
+        &input.thread_id,
+        &format!("local_user_{}", input.request_id),
+        &input.prompt,
+        &now_epoch_secs().to_string(),
+        &broker_turn_message_attachments(input),
+    )
+    .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
 }
 
 /// Project durable broker inputs into the transcript once, at enqueue. The
@@ -35153,8 +35173,8 @@ async fn enqueue_turn(
             .set_thread_routing_binding(&req.thread_id, &binding_json)
             .map_err(GatewayError::store)?;
     }
-    match enqueue_chat_turn_core(&state, &input) {
-        Ok(enqueued) => {
+    match enqueue_or_steer_chat_turn_core(&state, &input) {
+        Ok(local_first_task_runtime::broker::EnqueueTurnOutcome::Enqueued(enqueued)) => {
             let turn_id = enqueued.task_id.as_str().to_string();
             tracing::info!(
                 target: "broker::enqueue",
@@ -35173,6 +35193,22 @@ async fn enqueue_turn(
                 })),
             ))
         }
+        Ok(local_first_task_runtime::broker::EnqueueTurnOutcome::SteeringQueued {
+            thread_id,
+            active_turn_id,
+            source_message_id,
+            objective_revision,
+        }) => Ok((
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "thread_id": thread_id,
+                "active_turn_id": active_turn_id,
+                "request_id": request_id,
+                "source_message_id": source_message_id,
+                "objective_revision": objective_revision,
+                "status": "steering_queued",
+            })),
+        )),
         Err(local_first_task_runtime::broker::EnqueueError::ThreadBusy {
             thread_id,
             active_turn_id,

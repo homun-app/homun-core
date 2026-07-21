@@ -97,6 +97,17 @@ pub struct EnqueuedTurn {
     pub position_in_queue: u32,
 }
 
+#[derive(Debug, Clone)]
+pub enum EnqueueTurnOutcome {
+    Enqueued(EnqueuedTurn),
+    SteeringQueued {
+        thread_id: String,
+        active_turn_id: String,
+        source_message_id: String,
+        objective_revision: u64,
+    },
+}
+
 /// Generates a chat_turn task_id. Stable, debuggable.
 pub fn chat_turn_task_id(request_id: &str) -> TaskId {
     // request_id is already unique ("chat_stream_<ts>_<rand>" or "autorun_<uuid>");
@@ -361,6 +372,66 @@ where
         task_id,
         thread_id: input.thread_id.clone(),
         position_in_queue: 0,
+    })
+}
+
+/// Interactive input submitted while a thread is active is user steering for
+/// that run, not a competing turn. Persist the transcript row and steering row
+/// in one transaction so the executor can consume exactly what the user sees.
+pub fn enqueue_or_steer_chat_turn_atomic<F>(
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    input: &ChatTurnInput,
+    insert_user_message: F,
+) -> Result<EnqueueTurnOutcome, EnqueueError>
+where
+    F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
+{
+    let Some(active_turn_id) = store.active_chat_turn_for_thread(&input.thread_id)? else {
+        return enqueue_chat_turn_atomic(store, user_id, workspace_id, input, insert_user_message)
+            .map(EnqueueTurnOutcome::Enqueued);
+    };
+    if input.source != ChatTurnSource::Interactive {
+        return Err(EnqueueError::ThreadBusy {
+            thread_id: input.thread_id.clone(),
+            active_turn_id,
+        });
+    }
+
+    let objective_revision = store
+        .load_objective_contract(user_id.as_str(), workspace_id.as_str(), &input.thread_id)?
+        .map(|objective| objective.revision)
+        .unwrap_or(0);
+    let source_message_id = format!("local_user_{}", input.request_id);
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    store.with_transaction(|tx| {
+        insert_user_message(tx)?;
+        tx.execute(
+            "INSERT INTO turn_steering (
+                user_id, workspace_id, thread_id, active_turn_id, source_message_id,
+                content, objective_revision, status, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8)
+             ON CONFLICT(user_id, workspace_id, thread_id, source_message_id) DO NOTHING",
+            rusqlite::params![
+                user_id.as_str(),
+                workspace_id.as_str(),
+                input.thread_id,
+                active_turn_id,
+                source_message_id,
+                input.prompt,
+                objective_revision as i64,
+                now,
+            ],
+        )?;
+        Ok(())
+    })?;
+
+    Ok(EnqueueTurnOutcome::SteeringQueued {
+        thread_id: input.thread_id.clone(),
+        active_turn_id,
+        source_message_id,
+        objective_revision,
     })
 }
 
@@ -779,6 +850,48 @@ mod atomic_tests {
             !*called.lock().unwrap(),
             "user_message closure should NOT be called when pre-check fails"
         );
+    }
+
+    #[test]
+    fn busy_interactive_turn_is_atomically_queued_as_steering() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let active = enqueue_chat_turn(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &make_input("r1", "t1"),
+        )
+        .unwrap();
+        let called = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let called_clone = called.clone();
+
+        let outcome = enqueue_or_steer_chat_turn_atomic(
+            &s,
+            &UserId::new("u"),
+            &WorkspaceId::new("w"),
+            &make_input("r2", "t1"),
+            |_tx| {
+                *called_clone.lock().unwrap() = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(matches!(
+            outcome,
+            EnqueueTurnOutcome::SteeringQueued {
+                active_turn_id,
+                ..
+            } if active_turn_id == active.task_id.as_str()
+        ));
+        assert!(*called.lock().unwrap());
+        let steering = s
+            .consume_pending_turn_steering("u", "w", "t1", active.task_id.as_str())
+            .unwrap();
+        assert_eq!(steering.len(), 1);
+        assert_eq!(steering[0].source_message_id, "local_user_r2");
+        assert_eq!(steering[0].content, "p");
+        assert_eq!(s.active_chat_turn_for_thread("t1").unwrap(), Some("turn_r1".into()));
     }
 
     #[test]
