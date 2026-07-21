@@ -464,6 +464,16 @@
     "contacts": "Contacts"
   },
   "chat": {
+    "hostComputer": {
+      "computer": "Computer", "mac": "Mac", "macApps": "Mac Apps", "live": "live",
+      "pause": "Pause and take control", "resume": "Resume Homun", "cancel": "Cancel",
+      "approvalTitle": "Your approval is required", "approve": "Approve once", "deny": "Deny",
+      "youTookControl": "Paused — you took control",
+      "physicalInputHint": "Your mouse, trackpad, or keyboard pauses Homun immediately.",
+      "observationAvailable": "A protected observation is available", "semanticObservation": "Reading the app through macOS Accessibility — no screenshot is shared",
+      "phase": { "idle": "Idle", "observing": "Observing", "awaiting_approval": "Waiting for you", "acting": "Acting", "paused_by_user": "Paused by you", "suspended": "Suspended", "done": "Done", "failed": "Failed", "cancelled": "Cancelled" },
+      "error": { "approval_denied": "The action was denied.", "approval_expired": "The approval expired.", "worker_failed": "Mac app control stopped safely.", "terminal_input_denied": "Terminal input is always blocked." }
+    },
     "newTask": "New task",
     "emptyHero": "How can I help you?",
     "greetings": {

@@ -9991,6 +9991,97 @@ body.resizing-drawer {
   color: var(--muted);
 }
 
+.cc-source-badge,
+.host-computer-phase {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.host-computer-stage {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.host-computer-app {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.host-computer-app > div {
+  display: grid;
+  min-width: 0;
+}
+
+.host-computer-app span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.host-computer-observation {
+  min-height: 150px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--surface-muted), var(--surface));
+  color: var(--text-muted);
+  text-align: center;
+  padding: 18px;
+}
+
+.host-computer-approval,
+.host-computer-takeover,
+.host-computer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.host-computer-approval p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.host-computer-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.host-computer-takeover {
+  background: color-mix(in srgb, var(--brand-soft) 26%, var(--surface));
+}
+
+.host-computer-footer {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  .host-computer-approval,
+  .host-computer-takeover,
+  .host-computer-footer { align-items: stretch; flex-direction: column; }
+  .host-computer-actions { width: 100%; }
+}
+
 /* Terminal view (CLI skill execution) — a dark scrollable console. */
 .cc-term {
   max-height: 260px;

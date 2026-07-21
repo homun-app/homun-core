@@ -2,15 +2,36 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertTriangle,
+  AppWindow,
+  Check,
   ChevronDown,
   ChevronUp,
   Loader2,
   Maximize2,
   Minimize2,
   Monitor,
+  Pause,
+  Play,
   SquareTerminal,
+  X,
 } from "lucide-react";
-import { coreBridge, type ContainedComputerLive, type TerminalEntry } from "../lib/coreBridge";
+import {
+  approveHostComputerAction,
+  cancelHostComputerSession,
+  coreBridge,
+  denyHostComputerAction,
+  hostComputerStatus,
+  pauseHostComputerSession,
+  resumeHostComputerSession,
+  type ContainedComputerLive,
+  type HostComputerWireEvent,
+  type TerminalEntry,
+} from "../lib/coreBridge";
+import {
+  initialHostComputerState,
+  reduceHostComputerEvent,
+  type HostComputerState,
+} from "../lib/hostComputerState";
 import { wsSubscription } from "../lib/wsSubscription";
 
 const IDLE: ContainedComputerLive = {
@@ -36,6 +57,7 @@ export function ChatComputerPanel({
 }) {
   const { t } = useTranslation();
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
+  const [hostComputerSession, setHostComputerSession] = useState<HostComputerState>(() => ({ ...initialHostComputerState }));
   // "bar" (collapsed, default) | "expanded" (live inline) | "full" (overlay)
   // Default to the big browser (Fabio's ask): the live view takes the space, not a thumbnail.
   const [view, setView] = useState<"bar" | "expanded" | "full">("expanded");
@@ -52,11 +74,28 @@ export function ChatComputerPanel({
     // Primary: unified WS push (computer.live events from the gateway).
     const unsub = wsSubscription.subscribe((msg) => {
       if (msg.type === "computer.live" && msg.state) {
-        setLive(msg.state as ContainedComputerLive);
+        const state = msg.state as { source?: string; host?: HostComputerWireEvent };
+        if (state.source === "host_apps" && state.host) {
+          const event = state.host;
+          setHostComputerSession((current) => reduceHostComputerEvent(current, event));
+        } else {
+          setLive(msg.state as ContainedComputerLive);
+        }
+      }
+      if (msg.type === "app.event" && msg.event) {
+        const event = msg.event as HostComputerWireEvent;
+        if (typeof event.type === "string" && event.type.startsWith("host_computer.")) {
+          setHostComputerSession((current) => reduceHostComputerEvent(current, event));
+        }
       }
     });
     // Fallback: initial fetch so we don't wait for the first WS push.
     void coreBridge.containedComputerLive().then((value) => setLive(value)).catch(() => {});
+    void hostComputerStatus().then((value) => {
+      if (value.host_session) {
+        setHostComputerSession((current) => reduceHostComputerEvent(current, value.host_session!));
+      }
+    }).catch(() => {});
     return unsub;
   }, []);
 
@@ -103,6 +142,10 @@ export function ChatComputerPanel({
   const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running));
   const hasLiveActivity = browserRunning || terminalRunning;
   const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId;
+  const hostIsRunning = Boolean(
+    hostComputerSession.sessionId &&
+    !["done", "failed", "cancelled"].includes(hostComputerSession.phase),
+  );
   // Only bubble a CHANGED status up to ChatView. The unified-WS publisher pushes
   // `computer.live` ~1×/s while the container is alive (now that it stays alive across
   // idle), and `live.activity` changes each frame — but for a thread that doesn't own
@@ -115,8 +158,10 @@ export function ChatComputerPanel({
   });
   useEffect(() => {
     const next = {
-      active: Boolean(ownedLiveActivity),
-      activity: ownedLiveActivity ? (live?.activity ?? null) : null,
+      active: Boolean(hostIsRunning || ownedLiveActivity),
+      activity: hostIsRunning
+        ? `${hostComputerSession.app ?? t("chat.hostComputer.macApps")} · ${hostComputerSession.phase}`
+        : ownedLiveActivity ? (live?.activity ?? null) : null,
     };
     if (
       lastSentRef.current.active === next.active &&
@@ -126,7 +171,10 @@ export function ChatComputerPanel({
     }
     lastSentRef.current = next;
     onLiveChange?.(next);
-  }, [live?.activity, onLiveChange, ownedLiveActivity]);
+  }, [hostComputerSession.app, hostComputerSession.phase, hostIsRunning, live?.activity, onLiveChange, ownedLiveActivity, t]);
+  if (hostComputerSession.sessionId) {
+    return <HostComputerDock state={hostComputerSession} />;
+  }
   if (!ownedLiveActivity) return null;
 
   // Terminal-only mode: CLI skill running, no browser GUI to show. Completed
@@ -222,6 +270,98 @@ export function ChatComputerPanel({
         )}
       </div>
     </>
+  );
+}
+
+function HostComputerDock({ state }: { state: HostComputerState }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const pending = state.pendingApproval;
+  const terminal = ["done", "failed", "cancelled"].includes(state.phase);
+
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await action();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={`cc-dock expanded host-computer-dock phase-${state.phase}`}>
+      <header className="cc-dock-bar">
+        <span className="cc-dock-title">
+          <AppWindow size={15} />
+          <strong>{t("chat.hostComputer.computer")}</strong>
+          <span className="cc-source-badge">{t("chat.hostComputer.mac")}</span>
+          {!terminal && <span className="cc-live"><i className="cc-live-dot" /> {t("chat.hostComputer.live")}</span>}
+        </span>
+        {!terminal && state.phase !== "paused_by_user" && (
+          <button className="cc-icon-btn" type="button" disabled={busy} onClick={() => void run(() => pauseHostComputerSession(state.sessionId!))} aria-label={t("chat.hostComputer.pause")} title={t("chat.hostComputer.pause")}>
+            <Pause size={15} />
+          </button>
+        )}
+      </header>
+
+      <div className="host-computer-stage" aria-live="polite">
+        <div className="host-computer-app">
+          <AppWindow size={28} />
+          <div>
+            <strong>{state.app ?? t("chat.hostComputer.macApps")}</strong>
+            {state.window && <span>{state.window}</span>}
+          </div>
+          <span className="host-computer-phase">{t(`chat.hostComputer.phase.${state.phase}`)}</span>
+        </div>
+        {state.artifactRef ? (
+          <div className="host-computer-observation" role="img" aria-label={t("chat.hostComputer.observationAvailable")}>
+            <Monitor size={32} />
+            <span>{t("chat.hostComputer.observationAvailable")}</span>
+          </div>
+        ) : (
+          <div className="host-computer-observation empty">
+            <Monitor size={32} />
+            <span>{t("chat.hostComputer.semanticObservation")}</span>
+          </div>
+        )}
+      </div>
+
+      {pending && state.phase === "awaiting_approval" && (
+        <div className="host-computer-approval">
+          <div>
+            <strong>{t("chat.hostComputer.approvalTitle")}</strong>
+            <p>{pending.summary}</p>
+          </div>
+          <div className="host-computer-actions">
+            <button className="set-btn primary" type="button" disabled={busy} onClick={() => void run(() => approveHostComputerAction(state.sessionId!, pending.actionDigest))}>
+              <Check size={14} /> {t("chat.hostComputer.approve")}
+            </button>
+            <button className="set-btn" type="button" disabled={busy} onClick={() => void run(() => denyHostComputerAction(state.sessionId!, pending.actionDigest))}>
+              <X size={14} /> {t("chat.hostComputer.deny")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {state.phase === "paused_by_user" && (
+        <div className="host-computer-takeover">
+          <strong>{t("chat.hostComputer.youTookControl")}</strong>
+          <button className="set-btn primary" type="button" disabled={busy} onClick={() => void run(() => resumeHostComputerSession(state.sessionId!, state.generation))}>
+            <Play size={14} /> {t("chat.hostComputer.resume")}
+          </button>
+        </div>
+      )}
+
+      {state.errorCode && <div className="cc-statusline stalled"><AlertTriangle size={13} /><span>{t(`chat.hostComputer.error.${state.errorCode}`, { defaultValue: state.errorCode })}</span></div>}
+      {!terminal && (
+        <div className="host-computer-footer">
+          <span>{t("chat.hostComputer.physicalInputHint")}</span>
+          <button className="set-btn" type="button" disabled={busy} onClick={() => void run(() => cancelHostComputerSession(state.sessionId!))}>
+            <X size={14} /> {t("chat.hostComputer.cancel")}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

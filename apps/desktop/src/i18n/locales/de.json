@@ -464,6 +464,16 @@
     "contacts": "Kontakte"
   },
   "chat": {
+    "hostComputer": {
+      "computer": "Computer", "mac": "Mac", "macApps": "Mac-Apps", "live": "live",
+      "pause": "Pausieren und übernehmen", "resume": "Homun fortsetzen", "cancel": "Abbrechen",
+      "approvalTitle": "Ihre Zustimmung ist erforderlich", "approve": "Einmal genehmigen", "deny": "Ablehnen",
+      "youTookControl": "Pausiert — Sie haben übernommen",
+      "physicalInputHint": "Maus, Trackpad oder Tastatur pausieren Homun sofort.",
+      "observationAvailable": "Eine geschützte Beobachtung ist verfügbar", "semanticObservation": "Lesen über macOS-Bedienungshilfen — kein Screenshot wird geteilt",
+      "phase": { "idle": "Inaktiv", "observing": "Beobachtet", "awaiting_approval": "Wartet auf Sie", "acting": "Führt aus", "paused_by_user": "Von Ihnen pausiert", "suspended": "Angehalten", "done": "Fertig", "failed": "Fehlgeschlagen", "cancelled": "Abgebrochen" },
+      "error": { "approval_denied": "Die Aktion wurde abgelehnt.", "approval_expired": "Die Zustimmung ist abgelaufen.", "worker_failed": "Die Mac-App-Steuerung wurde sicher beendet.", "terminal_input_denied": "Terminal-Eingaben sind immer gesperrt." }
+    },
     "newTask": "Neue Aufgabe",
     "emptyHero": "Wie kann ich Ihnen helfen?",
     "greetings": {

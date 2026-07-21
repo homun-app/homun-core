@@ -26,3 +26,14 @@ test("screenshots remain opaque references", () => {
   assert.equal(state.artifactRef, "host-computer:abc");
   assert.equal(JSON.stringify(state).includes("base64-secret"), false);
 });
+
+test("safe app identity and resume generation are reduced", () => {
+  const state = reduceHostComputerEvent(initialHostComputerState, {
+    sequence: 1, session_id: "session", generation: 3, phase: "paused_by_user",
+    app: "Notes", window: "Project notes", value: "private body",
+  });
+  assert.equal(state.generation, 3);
+  assert.equal(state.app, "Notes");
+  assert.equal(state.window, "Project notes");
+  assert.equal(JSON.stringify(state).includes("private body"), false);
+});

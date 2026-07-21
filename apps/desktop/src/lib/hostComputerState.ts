@@ -11,6 +11,7 @@ export interface HostComputerApproval {
 export interface HostComputerState {
   sequence: number;
   sessionId: string | null;
+  generation: number;
   phase: HostComputerPhase;
   app: string | null;
   window: string | null;

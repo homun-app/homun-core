@@ -1,6 +1,7 @@
 export const initialHostComputerState = Object.freeze({
   sequence: 0,
   sessionId: null,
+  generation: 0,
   phase: "idle",
   app: null,
   window: null,
@@ -30,6 +31,9 @@ export function reduceHostComputerEvent(state, event) {
     phase: event.phase,
     needsHydration: false,
   };
+  if (Number.isInteger(event.generation)) next.generation = event.generation;
+  if (typeof event.app === "string") next.app = event.app.slice(0, 200);
+  if (typeof event.window === "string") next.window = event.window.slice(0, 300);
   if (typeof event.artifact_ref === "string") next.artifactRef = event.artifact_ref;
   if (event.phase === "awaiting_approval") {
     next.pendingApproval = sanitizeApproval(event.approval);

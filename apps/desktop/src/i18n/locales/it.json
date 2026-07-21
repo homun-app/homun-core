@@ -464,6 +464,16 @@
     "contacts": "Contatti"
   },
   "chat": {
+    "hostComputer": {
+      "computer": "Computer", "mac": "Mac", "macApps": "App Mac", "live": "live",
+      "pause": "Metti in pausa e prendi il controllo", "resume": "Riprendi Homun", "cancel": "Annulla",
+      "approvalTitle": "Serve la tua approvazione", "approve": "Approva una volta", "deny": "Nega",
+      "youTookControl": "In pausa — hai preso il controllo",
+      "physicalInputHint": "Mouse, trackpad o tastiera mettono immediatamente Homun in pausa.",
+      "observationAvailable": "È disponibile un'osservazione protetta", "semanticObservation": "Lettura dell'app tramite Accessibilità macOS — nessuno screenshot viene condiviso",
+      "phase": { "idle": "Inattivo", "observing": "Osservazione", "awaiting_approval": "In attesa di te", "acting": "Azione", "paused_by_user": "In pausa da te", "suspended": "Sospeso", "done": "Completato", "failed": "Non riuscito", "cancelled": "Annullato" },
+      "error": { "approval_denied": "L'azione è stata negata.", "approval_expired": "L'approvazione è scaduta.", "worker_failed": "Il controllo dell'app Mac è stato arrestato in sicurezza.", "terminal_input_denied": "L'input nel Terminale è sempre bloccato." }
+    },
     "newTask": "New task",
     "emptyHero": "Come posso aiutarti?",
     "greetings": {

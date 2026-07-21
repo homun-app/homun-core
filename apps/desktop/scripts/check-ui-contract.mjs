@@ -404,6 +404,11 @@ assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity 
 assertNotContains("src/components/ChatComputerPanel.tsx", "cc-dock-activity", "computer island header must show only Computer and LIVE, never prompt/activity text");
 assertNotContains("src/styles.css", ".cc-dock-activity", "computer island must not reserve header space for prompt/activity text");
 assertNotContains("src/components/ChatComputerPanel.tsx", "const ownedByThisThread = !hasLiveActivity", "idle global computer availability must not count as thread ownership");
+assertContains("src/components/ChatComputerPanel.tsx", "hostComputerSession", "computer panel must consume host state");
+assertContains("src/components/ChatComputerPanel.tsx", "approveHostComputerAction", "pending host actions need explicit consent");
+assertContains("src/components/ChatComputerPanel.tsx", "resumeHostComputerSession", "physical takeover must be explicitly resumable");
+assertContains("src/components/ChatComputerPanel.tsx", "cancelHostComputerSession", "host sessions must be cancellable");
+assertNotContains("src/components/ChatComputerPanel.tsx", "pendingAction.params", "sensitive action parameters must never render");
 assertNotContains(
   "src/components/ChatView.tsx",
   "const showComputerActivity =",
