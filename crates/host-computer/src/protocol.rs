@@ -215,6 +215,12 @@ pub struct TakeoverState {
     resume_token: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResumeControlResult {
+    pub phase: String,
+}
+
 impl TakeoverState {
     pub fn active(token: impl Into<String>) -> Self {
         Self {

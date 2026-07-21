@@ -1,6 +1,10 @@
 use std::{
+    collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -9,7 +13,9 @@ use local_first_host_computer::{
     artifact::ArtifactManager,
     client::{HostComputerClient, RequestContext},
     grants::{AppGrant, GrantLevel, GrantScope, GrantStore, SignedAppIdentity},
-    protocol::{HostPermission, PermissionState},
+    policy::{ActionCategory, HostActionPolicy, PolicyDecision, PolicyRequest},
+    protocol::{ActionRequest, AppSnapshot, HostPermission, PermissionState, SemanticAction},
+    redaction::{DisclosurePolicy, ProviderDisclosure, project_snapshot},
     service::HostComputerService,
     supervisor::{HostComputerSupervisorConfig, SystemHelperLauncher, prepare_launch},
     transport::UdsTransport,
@@ -25,10 +31,21 @@ struct HostRuntime {
     service: HostComputerService<UdsTransport>,
     #[allow(dead_code)]
     session_root: PathBuf,
+    snapshots: Mutex<HashMap<String, SnapshotGuard>>,
+}
+
+struct SnapshotGuard {
+    app: SignedAppIdentity,
+    snapshot: AppSnapshot,
 }
 
 static RUNTIME: OnceLock<tokio::sync::Mutex<Option<Arc<HostRuntime>>>> = OnceLock::new();
 static GRANTS: OnceLock<Mutex<GrantStore>> = OnceLock::new();
+static MANAGER_READY: AtomicBool = AtomicBool::new(false);
+
+pub fn manager_ready() -> bool {
+    MANAGER_READY.load(Ordering::Acquire)
+}
 
 fn context() -> RequestContext {
     RequestContext {
@@ -127,6 +144,7 @@ async fn runtime() -> Result<Arc<HostRuntime>, ApiError> {
             client,
             service,
             session_root,
+            snapshots: Mutex::new(HashMap::new()),
         });
         *guard = Some(value.clone());
         Ok(value)
@@ -143,6 +161,9 @@ pub async fn status() -> Result<Json<Value>, ApiError> {
                 .map_err(internal)?;
             let ready = status.accessibility == PermissionState::Granted
                 && status.screen_recording == PermissionState::Granted;
+            let has_grant = grants().ok().and_then(|store| store.lock().ok())
+                .and_then(|store| store.list(&scope(), now_ms()).ok()).is_some_and(|items| !items.is_empty());
+            MANAGER_READY.store(ready && has_grant, Ordering::Release);
             Ok(Json(json!({"available":true,"helper_version":"0.1.0",
                 "accessibility":status.accessibility,"screen_recording":status.screen_recording,"ready":ready})))
         }
@@ -254,6 +275,7 @@ pub async fn create_grant(Json(input): Json<CreateGrant>) -> Result<Json<Value>,
         .map_err(internal)?
         .upsert(&grant, now_ms())
         .map_err(internal)?;
+    MANAGER_READY.store(false, Ordering::Release);
     Ok(Json(JsonGrant::one(grant)))
 }
 
@@ -263,6 +285,7 @@ pub async fn revoke_grant(Path(grant_id): Path<String>) -> Result<StatusCode, Ap
         .map_err(internal)?
         .revoke(&grant_id, &scope())
         .map_err(internal)?;
+    MANAGER_READY.store(false, Ordering::Release);
     Ok(if removed {
         StatusCode::NO_CONTENT
     } else {
@@ -290,4 +313,69 @@ fn internal(error: impl std::fmt::Display) -> ApiError {
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error":error.to_string()})),
     )
+}
+
+pub async fn worker_list_apps() -> Result<Value, String> {
+    let runtime = runtime().await.map_err(api_error_text)?;
+    let apps = runtime.client.list_apps(false, context()).await.map_err(|error| error.to_string())?.apps;
+    let scope = scope();
+    let store = grants().map_err(api_error_text)?.lock().map_err(|_| "grant store unavailable".to_string())?;
+    Ok(Value::Array(apps.into_iter().filter_map(|app| {
+        let (bundle_id, signing) = app.bundle_id.zip(app.signing_identity)?;
+        let identity = SignedAppIdentity { bundle_id: bundle_id.clone(), team_id: signing.team_id,
+            designated_requirement_sha256: signing.designated_requirement_sha256 };
+        let level = store.resolve(&scope, &identity, now_ms()).ok().flatten()?;
+        Some(json!({"pid":app.identity.pid,"display_name":app.display_name,"bundle_id":bundle_id,"grant":level}))
+    }).collect()))
+}
+
+pub async fn worker_get_state(pid: u32) -> Result<Value, String> {
+    let runtime = runtime().await.map_err(api_error_text)?;
+    let app = runtime.client.list_apps(false, context()).await.map_err(|error| error.to_string())?.apps
+        .into_iter().find(|app| app.identity.pid == pid).ok_or("app_not_found")?;
+    let identity = signed_identity(&app)?;
+    let level = grants().map_err(api_error_text)?.lock().map_err(|_| "grant store unavailable".to_string())?
+        .resolve(&scope(), &identity, now_ms()).map_err(|error| error.to_string())?;
+    if level.is_none() { return Err("app_not_granted".into()); }
+    let snapshot = runtime.client.get_app_state(pid, None, context()).await.map_err(|error| error.to_string())?;
+    runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?
+        .insert(snapshot.snapshot_id.clone(), SnapshotGuard { app: identity, snapshot: snapshot.clone() });
+    serde_json::to_value(project_snapshot(&snapshot, ProviderDisclosure::Remote,
+        DisclosurePolicy { disclose_screenshots_to_remote: false })).map_err(|error| error.to_string())
+}
+
+pub async fn worker_execute_action(mut request: ActionRequest) -> Result<Value, String> {
+    let runtime = runtime().await.map_err(api_error_text)?;
+    let (app, snapshot) = runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?
+        .get(&request.target.snapshot_id).map(|guard| (guard.app.clone(), guard.snapshot.clone()))
+        .ok_or("stale_snapshot")?;
+    let level = grants().map_err(api_error_text)?.lock().map_err(|_| "grant store unavailable".to_string())?
+        .resolve(&scope(), &app, now_ms()).map_err(|error| error.to_string())?;
+    let element = snapshot.elements.iter().find(|element| element.index == request.target.index)
+        .ok_or("target_not_found")?;
+    let category = if request.action == SemanticAction::SetValue { ActionCategory::TextEntry } else { ActionCategory::Reversible };
+    match HostActionPolicy.decide(level, &PolicyRequest { category, protected_target: element.sensitive,
+        low_risk_typing_enabled: false, approval_matches: false }) {
+        PolicyDecision::Allowed => {}
+        PolicyDecision::ApprovalRequired(category) => return Err(format!("approval_required:{category:?}")),
+        PolicyDecision::GrantRequired(_) => return Err("control_grant_required".into()),
+        PolicyDecision::Denied(reason) => return Err(format!("hard_denied:{reason:?}")),
+    }
+    let token = uuid::Uuid::new_v4().to_string();
+    runtime.client.resume_control(token.clone(), context()).await.map_err(|error| error.to_string())?;
+    request.resume_token = Some(token);
+    let result = runtime.client.execute_action(request, context()).await.map_err(|error| error.to_string())?;
+    runtime.snapshots.lock().map_err(|_| "snapshot registry unavailable".to_string())?.remove(&snapshot.snapshot_id);
+    serde_json::to_value(result).map_err(|error| error.to_string())
+}
+
+fn signed_identity(app: &local_first_host_computer::protocol::HostApplication) -> Result<SignedAppIdentity, String> {
+    let bundle_id = app.bundle_id.clone().ok_or("app_has_no_bundle_id")?;
+    let signing = app.signing_identity.clone().ok_or("app_is_unsigned")?;
+    Ok(SignedAppIdentity { bundle_id, team_id: signing.team_id,
+        designated_requirement_sha256: signing.designated_requirement_sha256 })
+}
+
+fn api_error_text(error: ApiError) -> String {
+    error.1.0.get("error").and_then(Value::as_str).unwrap_or("host_computer_unavailable").to_string()
 }

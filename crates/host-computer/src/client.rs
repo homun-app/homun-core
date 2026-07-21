@@ -12,7 +12,8 @@ use crate::{
     protocol::{
         ActionRequest, ActionResult, AppSnapshot, HandshakeResult, HostComputerErrorCode,
         HostComputerMethod, HostPermission, JsonRpcVersion, ListAppsResult, ListWindowsResult,
-        PROTOCOL_VERSION, PermissionStatus, RequestMeta, RpcError, RpcRequest, StagedCapture,
+        PROTOCOL_VERSION, PermissionStatus, RequestMeta, ResumeControlResult, RpcError, RpcRequest,
+        StagedCapture,
     },
     transport::HostComputerTransport,
 };
@@ -199,6 +200,20 @@ where
                     format!("action request is invalid: {error}"),
                 )
             })?,
+            context,
+        )
+        .await
+    }
+
+    pub async fn resume_control(
+        &self,
+        resume_token: String,
+        context: RequestContext,
+    ) -> Result<ResumeControlResult, HostComputerClientError> {
+        self.ensure_handshake(&context).await?;
+        self.call(
+            HostComputerMethod::ResumeControl,
+            serde_json::json!({"resume_token": resume_token}),
             context,
         )
         .await
