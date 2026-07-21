@@ -66,6 +66,8 @@ import {
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatUsageOverview } from "./ChatUsageOverview";
+import { greetingPeriod, selectGreetingKey } from "../lib/chatGreeting";
+import { useSetting } from "../lib/settingsStore";
 import ForceGraph2D from "react-force-graph-2d";
 import type {
   ChangeEvent,
@@ -185,6 +187,7 @@ interface ChatViewProps {
   sidebarCollapsed?: boolean;
   onExpandSidebar?: () => void;
   onOpenSearch?: () => void;
+  onOpenUsageSettings: () => void;
   approvals: ApprovelItem[];
   approvalBusyId: string | null;
   computerSessionId: string;
@@ -324,6 +327,7 @@ export function ChatView({
   sidebarCollapsed,
   onExpandSidebar,
   onOpenSearch,
+  onOpenUsageSettings,
   approvals,
   approvalBusyId,
   computerSessionId,
@@ -2426,7 +2430,8 @@ export function ChatView({
           <div className="thread-message-list">
           {threadMessages.length === 0 && !promptSubmitting && (
             <ChatEmptyHero
-              threadId={thread.threadId}
+              thread={thread}
+              onOpenUsageSettings={onOpenUsageSettings}
               onUseForTask={(providerId, modelId) => setUsageSuggestedModel({
                 value: `${providerId}::${modelId}`,
                 nonce: Date.now(),
@@ -8837,33 +8842,46 @@ function ComputerDetailPanel({
   );
 }
 
-// Empty-chat hero (design): the Homun mark (the "U" + dot brandmark) + greeting.
-// The mark uses the theme vars
-// (U = --text, dot = --brand) so it adapts to light/dark.
 function ChatEmptyHero({
-  threadId,
+  thread,
+  onOpenUsageSettings,
   onUseForTask,
 }: {
-  threadId: string;
+  thread: ChatThread;
+  onOpenUsageSettings: () => void;
   onUseForTask: (providerId: string, modelId: string) => void;
 }) {
   const { t } = useTranslation();
+  const [displayName] = useSetting("displayName", "");
+  const [{ greetingKey, period }] = useState(() => {
+    const hour = new Date().getHours();
+    return {
+      greetingKey: selectGreetingKey({
+        hour,
+        hasName: Boolean(displayName.trim()),
+        hasProject: Boolean(thread.workspaceId && thread.workspaceId !== "local-workspace"),
+        seed: `${CHAT_VIEW_SESSION_ID}:${thread.threadId}`,
+      }),
+      period: greetingPeriod(hour),
+    };
+  });
+  const interpolation = {
+    name: displayName.trim(),
+    salutation: t(`chat.greetings.period.${period}`),
+  };
+  const greetingHeadline = t(`${greetingKey}.headline`, interpolation);
+  const greetingPrompt = t(`${greetingKey}.prompt`, interpolation);
   return (
     <div className="chat-hero">
-      <svg className="chat-hero-mark" viewBox="646 -2 280 280" aria-hidden="true">
-        <circle cx="786" cy="60" r="34" fill="var(--brand)" />
-        <path
-          d="M721 117V187C721 220.333 742.667 237 786 237C829.333 237 851 220.333 851 187V117"
-          fill="none"
-          stroke="var(--text)"
-          strokeWidth="28"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-      <h1 className="chat-hero-title">{t("chat.emptyHero")}</h1>
-      <p className="chat-hero-sub">{t("chat.emptyHeroSub")}</p>
-      <ChatUsageOverview threadId={threadId} onUseForTask={onUseForTask} />
+      <div className="chat-hero-welcome">
+        <h1 className="chat-hero-headline">{greetingHeadline}</h1>
+        <p className="chat-hero-prompt">{greetingPrompt}</p>
+      </div>
+      <ChatUsageOverview
+        threadId={thread.threadId}
+        onOpenUsageSettings={onOpenUsageSettings}
+        onUseForTask={onUseForTask}
+      />
     </div>
   );
 }

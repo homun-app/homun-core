@@ -4,6 +4,7 @@ use local_first_inference_usage::{
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, named_params, params, types::Type};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
+    collections::BTreeMap,
     path::Path,
     sync::{
         Arc, Mutex,
@@ -190,6 +191,23 @@ pub struct UsageBreakdownRow {
     pub cost_breakdown: UsageCostBreakdown,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct UsageRouteRow {
+    pub provider_id: String,
+    pub model_id: String,
+    pub logical_calls: u64,
+    pub attempts: u64,
+    pub successful_attempts: u64,
+    pub failed_attempts: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub cost_microusd: u64,
+    pub known_usage_attempts: u64,
+    pub unknown_usage_attempts: u64,
+    pub cost_breakdown: UsageCostBreakdown,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelUsageFacts {
     pub successful_sample_count: u64,
@@ -206,7 +224,6 @@ pub struct ModelUsageFacts {
 
 #[derive(Debug, Clone, Copy)]
 pub enum UsageBreakdownDimension {
-    Model,
     Provider,
     Purpose,
 }
@@ -230,6 +247,7 @@ pub struct UsageSummary {
     pub cost_breakdown: UsageCostBreakdown,
     pub coverage_started_at: Option<i64>,
     pub active_providers: u64,
+    pub dominant_provider: Option<String>,
     pub dominant_model: Option<String>,
     pub trend_percent: Option<i64>,
 }
@@ -242,6 +260,34 @@ pub struct UsageCostBreakdown {
     pub not_billed_attempts: u64,
     pub unknown_cost_attempts: u64,
     pub cost_coverage_percent: u8,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct UsageDailySeries {
+    pub coverage_started_at: Option<i64>,
+    pub generated_at: i64,
+    pub timezone_offset_minutes: i32,
+    pub days: Vec<UsageDailyPoint>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct UsageDailyPoint {
+    pub day_epoch: i64,
+    pub logical_calls: u64,
+    pub attempts: u64,
+    pub successful_attempts: u64,
+    pub failed_attempts: u64,
+    pub aborted_attempts: u64,
+    pub known_usage_attempts: u64,
+    pub unknown_usage_attempts: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub cost_breakdown: UsageCostBreakdown,
+    pub dominant_provider: Option<String>,
+    pub dominant_model: Option<String>,
 }
 
 #[cfg(test)]
@@ -748,6 +794,7 @@ impl UsageStore {
                     ),
                 },
                 active_providers: 0,
+                dominant_provider: None,
                 dominant_model: None,
                 trend_percent: None,
             })
@@ -766,22 +813,28 @@ impl UsageStore {
             params![user_id, cutoff],
             |row| nonnegative_u64(row.get(0)?, 0),
         )?;
-        summary.dominant_model = self
+        if let Some((provider_id, model_id)) = self
             .conn
             .query_row(
-                "SELECT model_id
+                "SELECT COALESCE(provider_id, 'unknown'), COALESCE(model_id, 'unknown')
                  FROM inference_usage_events
                  WHERE user_id = ?1 AND event_kind != 'attempt_started'
-                   AND recorded_at >= ?2 AND model_id IS NOT NULL
-                 GROUP BY model_id
+                   AND recorded_at >= ?2
+                 GROUP BY COALESCE(provider_id, 'unknown'), COALESCE(model_id, 'unknown')
                  ORDER BY SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
-                              + COALESCE(reasoning_tokens, 0)) DESC,
-                          model_id ASC
+                              + COALESCE(reasoning_tokens, 0) + COALESCE(cache_read_tokens, 0)
+                              + COALESCE(cache_write_tokens, 0)) DESC,
+                          COALESCE(provider_id, 'unknown') ASC,
+                          COALESCE(model_id, 'unknown') ASC
                  LIMIT 1",
                 params![user_id, cutoff],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()?;
+            .optional()?
+        {
+            summary.dominant_provider = Some(provider_id);
+            summary.dominant_model = Some(model_id);
+        }
         summary.trend_percent = match window {
             UsageWindow::All => None,
             UsageWindow::SevenDays | UsageWindow::ThirtyDays => {
@@ -819,7 +872,6 @@ impl UsageStore {
         dimension: UsageBreakdownDimension,
     ) -> rusqlite::Result<Vec<UsageBreakdownRow>> {
         let column = match dimension {
-            UsageBreakdownDimension::Model => "model_id",
             UsageBreakdownDimension::Provider => "provider_id",
             UsageBreakdownDimension::Purpose => "purpose",
         };
@@ -873,6 +925,198 @@ impl UsageStore {
             })
         })?;
         rows.collect()
+    }
+
+    pub fn model_routes(
+        &self,
+        user_id: &str,
+        window: UsageWindow,
+        now: i64,
+    ) -> rusqlite::Result<Vec<UsageRouteRow>> {
+        let cutoff = window.cutoff(now);
+        let mut statement = self.conn.prepare(
+            "SELECT COALESCE(provider_id, 'unknown'), COALESCE(model_id, 'unknown'),
+                    COUNT(DISTINCT call_id), COUNT(*),
+                    COALESCE(SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN outcome = 'failed' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(reasoning_tokens), 0), COALESCE(SUM(cost_microusd), 0),
+                    COALESCE(SUM(CASE WHEN input_tokens IS NOT NULL OR output_tokens IS NOT NULL
+                                          OR reasoning_tokens IS NOT NULL OR cache_read_tokens IS NOT NULL
+                                          OR cache_write_tokens IS NOT NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN input_tokens IS NULL AND output_tokens IS NULL
+                                          AND reasoning_tokens IS NULL AND cache_read_tokens IS NULL
+                                          AND cache_write_tokens IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='provider_reported' THEN cost_microusd ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='catalog_estimated' THEN cost_microusd ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='manual_estimated' THEN cost_microusd ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='not_billed' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='unavailable' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_microusd IS NOT NULL OR cost_provenance='not_billed'
+                                      THEN 1 ELSE 0 END), 0)
+             FROM inference_usage_events
+             WHERE user_id = ?1 AND event_kind != 'attempt_started'
+               AND (?2 IS NULL OR recorded_at >= ?2)
+             GROUP BY COALESCE(provider_id, 'unknown'), COALESCE(model_id, 'unknown')
+             ORDER BY SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
+                          + COALESCE(reasoning_tokens, 0)) DESC,
+                      COALESCE(provider_id, 'unknown') ASC,
+                      COALESCE(model_id, 'unknown') ASC",
+        )?;
+        let rows = statement.query_map(params![user_id, cutoff], |row| {
+            let unknown_cost_attempts = nonnegative_u64(row.get(16)?, 16)?;
+            let known_cost_attempts = nonnegative_u64(row.get(17)?, 17)?;
+            Ok(UsageRouteRow {
+                provider_id: row.get(0)?,
+                model_id: row.get(1)?,
+                logical_calls: nonnegative_u64(row.get(2)?, 2)?,
+                attempts: nonnegative_u64(row.get(3)?, 3)?,
+                successful_attempts: nonnegative_u64(row.get(4)?, 4)?,
+                failed_attempts: nonnegative_u64(row.get(5)?, 5)?,
+                input_tokens: nonnegative_u64(row.get(6)?, 6)?,
+                output_tokens: nonnegative_u64(row.get(7)?, 7)?,
+                reasoning_tokens: nonnegative_u64(row.get(8)?, 8)?,
+                cost_microusd: nonnegative_u64(row.get(9)?, 9)?,
+                known_usage_attempts: nonnegative_u64(row.get(10)?, 10)?,
+                unknown_usage_attempts: nonnegative_u64(row.get(11)?, 11)?,
+                cost_breakdown: UsageCostBreakdown {
+                    provider_reported_microusd: nonnegative_u64(row.get(12)?, 12)?,
+                    catalog_estimated_microusd: nonnegative_u64(row.get(13)?, 13)?,
+                    manual_estimated_microusd: nonnegative_u64(row.get(14)?, 14)?,
+                    not_billed_attempts: nonnegative_u64(row.get(15)?, 15)?,
+                    unknown_cost_attempts,
+                    cost_coverage_percent: percentage(
+                        known_cost_attempts,
+                        known_cost_attempts.saturating_add(unknown_cost_attempts),
+                    ),
+                },
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn daily_series(
+        &self,
+        user_id: &str,
+        window: UsageWindow,
+        now: i64,
+        timezone_offset_minutes: i32,
+    ) -> rusqlite::Result<UsageDailySeries> {
+        let timezone_offset_minutes = timezone_offset_minutes.clamp(-840, 840);
+        let offset_seconds = i64::from(timezone_offset_minutes) * 60;
+        let cutoff = match window {
+            UsageWindow::All => None,
+            UsageWindow::SevenDays | UsageWindow::ThirtyDays => {
+                let day_count = if window == UsageWindow::SevenDays { 7 } else { 30 };
+                let local_today = (now + offset_seconds).div_euclid(86_400) * 86_400;
+                Some(local_today - (day_count - 1) * 86_400 - offset_seconds)
+            }
+        };
+        let coverage_started_at = self.conn.query_row(
+            "SELECT MIN(recorded_at) FROM inference_usage_events
+             WHERE user_id = ?1 AND event_kind != 'attempt_started'",
+            params![user_id],
+            |row| row.get(0),
+        )?;
+        let day_expression = "((recorded_at + ?2) / 86400) * 86400";
+        let totals_sql = format!(
+            "SELECT {day_expression}, COUNT(DISTINCT call_id), COUNT(*),
+                    COALESCE(SUM(CASE WHEN outcome='success' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN outcome='failed' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN outcome='aborted' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN input_tokens IS NOT NULL OR output_tokens IS NOT NULL
+                                          OR reasoning_tokens IS NOT NULL OR cache_read_tokens IS NOT NULL
+                                          OR cache_write_tokens IS NOT NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN input_tokens IS NULL AND output_tokens IS NULL
+                                          AND reasoning_tokens IS NULL AND cache_read_tokens IS NULL
+                                          AND cache_write_tokens IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+                    COALESCE(SUM(reasoning_tokens), 0), COALESCE(SUM(cache_read_tokens), 0),
+                    COALESCE(SUM(cache_write_tokens), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='provider_reported' THEN cost_microusd ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='catalog_estimated' THEN cost_microusd ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='manual_estimated' THEN cost_microusd ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='not_billed' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_provenance='unavailable' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN cost_microusd IS NOT NULL OR cost_provenance='not_billed'
+                                      THEN 1 ELSE 0 END), 0)
+             FROM inference_usage_events
+             WHERE user_id = ?1 AND event_kind != 'attempt_started'
+               AND (?3 IS NULL OR recorded_at >= ?3)
+             GROUP BY {day_expression}
+             ORDER BY {day_expression} ASC"
+        );
+        let mut statement = self.conn.prepare(&totals_sql)?;
+        let rows = statement.query_map(params![user_id, offset_seconds, cutoff], |row| {
+            let unknown_cost_attempts = nonnegative_u64(row.get(17)?, 17)?;
+            let known_cost_attempts = nonnegative_u64(row.get(18)?, 18)?;
+            Ok(UsageDailyPoint {
+                day_epoch: row.get(0)?,
+                logical_calls: nonnegative_u64(row.get(1)?, 1)?,
+                attempts: nonnegative_u64(row.get(2)?, 2)?,
+                successful_attempts: nonnegative_u64(row.get(3)?, 3)?,
+                failed_attempts: nonnegative_u64(row.get(4)?, 4)?,
+                aborted_attempts: nonnegative_u64(row.get(5)?, 5)?,
+                known_usage_attempts: nonnegative_u64(row.get(6)?, 6)?,
+                unknown_usage_attempts: nonnegative_u64(row.get(7)?, 7)?,
+                input_tokens: nonnegative_u64(row.get(8)?, 8)?,
+                output_tokens: nonnegative_u64(row.get(9)?, 9)?,
+                reasoning_tokens: nonnegative_u64(row.get(10)?, 10)?,
+                cache_read_tokens: nonnegative_u64(row.get(11)?, 11)?,
+                cache_write_tokens: nonnegative_u64(row.get(12)?, 12)?,
+                cost_breakdown: UsageCostBreakdown {
+                    provider_reported_microusd: nonnegative_u64(row.get(13)?, 13)?,
+                    catalog_estimated_microusd: nonnegative_u64(row.get(14)?, 14)?,
+                    manual_estimated_microusd: nonnegative_u64(row.get(15)?, 15)?,
+                    not_billed_attempts: nonnegative_u64(row.get(16)?, 16)?,
+                    unknown_cost_attempts,
+                    cost_coverage_percent: percentage(
+                        known_cost_attempts,
+                        known_cost_attempts.saturating_add(unknown_cost_attempts),
+                    ),
+                },
+                dominant_provider: None,
+                dominant_model: None,
+            })
+        })?;
+        let mut days = rows.collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter().map(|day| (day.day_epoch, day)).collect::<BTreeMap<_, _>>();
+
+        let routes_sql = format!(
+            "SELECT {day_expression}, COALESCE(provider_id, 'unknown'),
+                    COALESCE(model_id, 'unknown'),
+                    COALESCE(SUM(COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0)
+                                 + COALESCE(reasoning_tokens, 0) + COALESCE(cache_read_tokens, 0)
+                                 + COALESCE(cache_write_tokens, 0)), 0)
+             FROM inference_usage_events
+             WHERE user_id = ?1 AND event_kind != 'attempt_started'
+               AND (?3 IS NULL OR recorded_at >= ?3)
+             GROUP BY {day_expression}, COALESCE(provider_id, 'unknown'), COALESCE(model_id, 'unknown')
+             ORDER BY {day_expression} ASC, 4 DESC,
+                      COALESCE(provider_id, 'unknown') ASC, COALESCE(model_id, 'unknown') ASC"
+        );
+        let mut route_statement = self.conn.prepare(&routes_sql)?;
+        let route_rows = route_statement.query_map(params![user_id, offset_seconds, cutoff], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+                nonnegative_u64(row.get(3)?, 3)?))
+        })?;
+        let mut winners = BTreeMap::<i64, (u64, String, String)>::new();
+        for route in route_rows {
+            let (day_epoch, provider_id, model_id, tokens) = route?;
+            winners.entry(day_epoch).or_insert((tokens, provider_id, model_id));
+        }
+        for (day_epoch, (_, provider_id, model_id)) in winners {
+            if let Some(day) = days.get_mut(&day_epoch) {
+                day.dominant_provider = Some(provider_id);
+                day.dominant_model = Some(model_id);
+            }
+        }
+        Ok(UsageDailySeries {
+            coverage_started_at,
+            generated_at: now,
+            timezone_offset_minutes,
+            days: days.into_values().collect(),
+        })
     }
 
     pub fn model_usage_facts(
@@ -1562,6 +1806,20 @@ mod tests {
         completed
     }
 
+    fn completed_route_fixture(
+        attempt_id: &str,
+        provider_id: &str,
+        model_id: &str,
+        input_tokens: u64,
+        output_tokens: u64,
+        recorded_at: i64,
+    ) -> UsageAttemptEvent {
+        let mut event = completed_fixture(attempt_id, input_tokens, output_tokens, recorded_at);
+        event.provider_id = Some(provider_id.to_string());
+        event.model_id = Some(model_id.to_string());
+        event
+    }
+
     fn snapshot(snapshot_id: &str, provider_id: &str, observed_at: i64) -> ProviderUsageSnapshot {
         ProviderUsageSnapshot {
             snapshot_id: snapshot_id.to_string(),
@@ -1695,6 +1953,51 @@ mod tests {
         store.clear_daily_rollups_for_test().unwrap();
         store.rebuild_daily_rollups().unwrap();
         assert_eq!(store.daily_rows().unwrap()[0].input_tokens, 100);
+    }
+
+    #[test]
+    fn model_routes_keep_equal_models_separate_by_provider() {
+        let store = UsageStore::open_in_memory().unwrap();
+        store.append(&completed_route_fixture("a", "ollama-local", "qwen", 100, 10, 86_400)).unwrap();
+        store.append(&completed_route_fixture("b", "ollama-cloud", "qwen", 200, 20, 86_400)).unwrap();
+        let routes = store.model_routes("local", UsageWindow::All, 172_800).unwrap();
+        assert_eq!(routes.len(), 2);
+        assert_eq!((routes[0].provider_id.as_str(), routes[0].model_id.as_str()), ("ollama-cloud", "qwen"));
+        assert_eq!((routes[1].provider_id.as_str(), routes[1].model_id.as_str()), ("ollama-local", "qwen"));
+    }
+
+    #[test]
+    fn daily_series_uses_local_day_and_same_pair_for_dominant_route() {
+        let store = UsageStore::open_in_memory().unwrap();
+        store.append(&completed_route_fixture("a", "ollama-local", "qwen", 100, 10, 86_100)).unwrap();
+        store.append(&completed_route_fixture("b", "openrouter", "qwen", 300, 20, 86_500)).unwrap();
+        let series = store.daily_series("local", UsageWindow::SevenDays, 172_800, 60).unwrap();
+        assert_eq!(series.days.len(), 1);
+        assert_eq!(series.days[0].day_epoch, 86_400);
+        assert_eq!(series.days[0].dominant_provider.as_deref(), Some("openrouter"));
+        assert_eq!(series.days[0].dominant_model.as_deref(), Some("qwen"));
+    }
+
+    #[test]
+    fn daily_series_keeps_real_coverage_start_and_sparse_days() {
+        let store = UsageStore::open_in_memory().unwrap();
+        store.append(&completed_route_fixture("a", "ollama-local", "qwen", 100, 10, 86_400)).unwrap();
+        store.append(&completed_route_fixture("b", "ollama-local", "qwen", 100, 10, 3 * 86_400)).unwrap();
+        let series = store.daily_series("local", UsageWindow::All, 4 * 86_400, 0).unwrap();
+        assert_eq!(series.coverage_started_at, Some(86_400));
+        assert_eq!(series.days.len(), 2);
+        assert_eq!(series.days[0].day_epoch, 86_400);
+        assert_eq!(series.days[1].day_epoch, 3 * 86_400);
+    }
+
+    #[test]
+    fn summary_dominant_model_keeps_its_provider() {
+        let store = UsageStore::open_in_memory().unwrap();
+        store.append(&completed_route_fixture("a", "ollama-local", "qwen", 100, 10, 86_400)).unwrap();
+        store.append(&completed_route_fixture("b", "openrouter", "qwen", 300, 20, 86_400)).unwrap();
+        let summary = store.summary("local", UsageWindow::All, 172_800).unwrap();
+        assert_eq!(summary.dominant_provider.as_deref(), Some("openrouter"));
+        assert_eq!(summary.dominant_model.as_deref(), Some("qwen"));
     }
 
     #[test]

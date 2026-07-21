@@ -24,6 +24,7 @@
     "test:inspector-stability": "node --test src/lib/uiSnapshot.test.mjs",
     "test:usage-ui": "node --test src/lib/usageViewModel.test.mjs",
     "test:new-chat-usage": "node --test src/lib/newChatUsage.test.mjs",
+    "test:usage-infographic": "node --test src/lib/usageCalendar.test.mjs src/lib/chatGreeting.test.mjs",
     "refresh-models": "node scripts/refresh-models-catalog.mjs",
     "typecheck": "tsc --noEmit"
   },

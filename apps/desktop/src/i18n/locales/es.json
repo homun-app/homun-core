@@ -466,6 +466,13 @@
   "chat": {
     "newTask": "Nueva tarea",
     "emptyHero": "¿En qué puedo ayudarte?",
+    "greetings": {
+      "period": { "morning": "Buenos días", "afternoon": "Buenas tardes", "evening": "Buenas noches" },
+      "named": { "0": { "headline": "{{salutation}}, {{name}}.", "prompt": "¿Por dónde empezamos?" }, "1": { "headline": "{{salutation}}, {{name}}.", "prompt": "¿Qué ponemos en marcha?" }, "2": { "headline": "{{salutation}}, {{name}}.", "prompt": "¿Cuál es la próxima idea?" }, "3": { "headline": "{{salutation}}, {{name}}.", "prompt": "¿En qué trabajamos?" } },
+      "anonymous": { "0": { "headline": "{{salutation}}.", "prompt": "¿Por dónde empezamos?" }, "1": { "headline": "{{salutation}}.", "prompt": "¿Qué ponemos en marcha?" }, "2": { "headline": "{{salutation}}.", "prompt": "¿Cuál es la próxima idea?" }, "3": { "headline": "{{salutation}}.", "prompt": "¿En qué trabajamos?" } },
+      "project": { "0": { "headline": "{{salutation}}.", "prompt": "¿Retomamos el proyecto?" }, "1": { "headline": "{{salutation}}.", "prompt": "Hagamos avanzar el proyecto." }, "2": { "headline": "{{salutation}}.", "prompt": "¿Cuál es el siguiente paso?" }, "3": { "headline": "{{salutation}}.", "prompt": "¿Dónde concentramos el trabajo?" } },
+      "returning": { "0": { "headline": "{{salutation}}.", "prompt": "¿Retomamos donde lo dejamos?" }, "1": { "headline": "{{salutation}}.", "prompt": "¿Continuamos el trabajo?" }, "2": { "headline": "{{salutation}}.", "prompt": "Pongamos las cosas en marcha." }, "3": { "headline": "{{salutation}}.", "prompt": "¿Cuál es la prioridad ahora?" } }
+    },
     "usageOverview": {
       "title": "Resumen de uso",
       "period": "Periodo de uso",
@@ -479,6 +486,9 @@
       "providers": "Proveedores",
       "model": "Modelo principal",
       "trend": "Tendencia de tokens",
+      "route": "Ruta principal",
+      "dataQuality": "Calidad de datos",
+      "openSettings": "Abrir Uso",
       "coverage": "Algunos datos de uso o coste están incompletos."
     },
     "composerPlaceholder": "Escribe un mensaje…",
@@ -1305,6 +1315,7 @@
       "windows": { "7d": "7 días", "30d": "30 días", "all": "Todo" },
       "tabs": { "label": "Vistas de uso", "overview": "Resumen", "models": "Modelos", "providers": "Proveedores", "processes": "Procesos" },
       "states": { "loading": "Cargando uso…", "empty": "No hay uso medido en este periodo.", "error": "No se pudo cargar el uso", "stale": "Desactualizado" },
+      "calendar": { "ariaLabel": "Actividad diaria", "unavailable": "Periodo sin cobertura", "unavailableDetail": "El seguimiento aún no estaba activo en esta fecha.", "noActivity": "Sin actividad registrada", "daySummary": "{{calls}} llamadas, {{tokens}} tokens", "less": "Menos", "more": "Más", "unknownRoute": "Ruta no disponible", "coverage": "Cobertura de uso {{usage}}%, coste {{cost}}%" },
       "metrics": { "calls": "Llamadas", "attempts": "Intentos", "inputTokens": "Tokens de entrada", "outputTokens": "Tokens de salida", "reasoningTokens": "Tokens de razonamiento", "cacheTokens": "Tokens de caché", "providers": "Proveedores activos", "dominantModel": "Modelo más usado" },
       "cost": { "title": "Procedencia de costes", "reported": "Declarado", "estimated": "Estimado", "unknown": "No disponible", "notBilled": "No facturado" },
       "coverage": { "title": "Cobertura", "usage": "Cobertura de uso", "cost": "Cobertura de costes", "incomplete": "Cobertura incompleta", "authoritativeSince": "Datos fiables desde {{date}}" },

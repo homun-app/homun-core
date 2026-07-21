@@ -111,6 +111,26 @@ assertContains("src/components/UsageSettingsPane.tsx", "retry-count", "model row
 assertContains("src/components/ChatUsageOverview.tsx", 'const WINDOWS: UsageWindow[] = ["7d", "30d", "all"]', "New chat must support all approved windows");
 assertContains("src/components/ChatUsageOverview.tsx", 'aria-live="polite"', "New-chat Usage load state must be announced");
 assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageSummary(selectedWindow)", "New chat must read the canonical summary");
+assertContains(
+  "src/components/ChatUsageOverview.tsx",
+  'coreBridge.usageDaily("all", timezoneOffsetMinutes)',
+  "Home heatmap must load the full canonical daily series independently",
+);
+assertContains(
+  "src/components/ChatUsageOverview.tsx",
+  'window="home-26w"',
+  "Home heatmap must render the fixed 26-week display window",
+);
+assertNotContains(
+  "src/components/ChatUsageOverview.tsx",
+  "coreBridge.usageDaily(selectedWindow",
+  "Changing summary filters must not change the Home heatmap range",
+);
+assertContains(
+  "src/components/UsageCalendar.tsx",
+  "scrollNode.scrollLeft = scrollNode.scrollWidth",
+  "Overflowing Home calendars must begin on the newest weeks",
+);
 assertNotContains("src/components/ChatUsageOverview.tsx", "usageModels", "New chat must not load full analytics");
 assertNotContains("src/components/ChatView.tsx", "EMPTY_HERO_CHIPS", "New chat must not keep canned prompt chips");
 assertNotContains("src/components/ChatView.tsx", "chat-hero-chip", "New chat must not render canned prompt buttons");
@@ -121,14 +141,40 @@ assertContains("src/components/UsageSuggestion.tsx", "confirmed: true", "Apply r
 assertContains("src/components/UsageSuggestion.tsx", "onDismiss", "Suggestions must be dismissible");
 assertNotContains("src/components/UsageSuggestion.tsx", "useEffect(() => onApply", "Mounting must never apply a suggestion");
 assertContains("src/components/ChatUsageOverview.tsx", ".slice(0, 1)", "Home must render at most one model suggestion");
-assertContains("src/styles.css", "grid-template-columns: minmax(68px, 0.65fr) minmax(132px, 1.35fr)", "New-chat usage must reserve readable width for cost and model values");
+assertContains("src/styles.css", ".chat-usage-infographic", "New-chat usage must provide a dedicated infographic layout");
+assertContains("src/styles.css", ".usage-calendar-grid", "Usage calendar must use a shared compact grid");
+assertContains("src/styles.css", ".usage-calendar-tooltip", "Usage calendar must provide an unclipped callout");
 assertContains("src/styles.css", ".app-shell.drawer-open > .workspace {\n    grid-column: 1;", "Narrow Settings content must stay in the visible grid column");
 assertContains("src/styles.css", ".app-shell.drawer-open > .settings-workspace {\n    padding-left: calc(min(var(--drawer-width, 292px), 292px) + 24px);", "Narrow Settings content must clear the overlay navigation");
-assertContains("src/styles.css", ".active-task-layout.is-empty {\n    grid-template-rows: 58px auto auto minmax(24px, 1fr);", "Narrow empty-chat hero must size its row from content instead of clipping upward");
+assertContains("src/styles.css", ".active-task-layout.is-empty {\n  grid-template-rows: 58px minmax(0, 1fr) auto;", "Empty chat must keep the composer in the same bottom row as active conversations");
+assertNotContains("src/styles.css", "grid-template-rows: 58px 1fr auto 1fr", "Empty chat must not vertically center the composer with spacer rows");
+assertContains("src/styles.css", ".active-task-layout.is-empty .thread-content {\n  width: min(100%, 960px);", "Empty chat must give the six-month heatmap enough desktop width");
+assertContains("src/styles.css", "@container chat-workspace (max-width: 860px) {\n  .chat-usage-infographic {", "The heatmap summary must stack before horizontal scrolling is needed");
+assertContains("src/styles.css", ".chat-usage-infographic .usage-calendar--compact {\n    --usage-cell: 11px;\n    --usage-gap: 3px;", "Compact windows must shrink the Home cells before exposing horizontal scroll");
 assertNotContains("src/components/UsageSettingsPane.tsx", "latency-p50", "Models must not show latency until canonical aggregates expose it");
 assertNotContains("src/components/UsageSettingsPane.tsx", "fallback-count", "Models must not show fallback placeholders as measured data");
 assertContains("src/components/UsageSettingsPane.tsx", "modelCostProvenance", "Per-model cost must disclose reported, estimated, unknown, or not-billed provenance");
 assertContains("src/components/UsageSettingsPane.tsx", "coreBridge.setRole({", "Settings must apply confirmed role instructions through the canonical role API");
+assertContains("src/lib/coreBridge.ts", "usageDaily:", "Usage must expose the real daily series");
+assertContains("src/components/UsageCalendar.tsx", 'role="grid"', "Usage calendar must expose an accessible grid");
+assertContains("src/components/UsageCalendar.tsx", 'role="gridcell"', "Usage days must be keyboard reachable");
+assertContains("src/components/UsageCalendar.tsx", "onFocus", "Keyboard focus must reveal day details");
+assertContains("src/components/UsageCalendar.tsx", "dominant_provider", "Usage callouts must preserve provider provenance");
+assertNotContains("src/components/ChatView.tsx", "chat-hero-mark", "New chat must not keep the decorative brandmark");
+assertNotContains("src/components/ChatView.tsx", "chat.emptyHeroSub", "New chat must not keep the fixed subtitle");
+assertContains("src/components/ChatView.tsx", "selectGreetingKey", "New chat must select a stable curated greeting");
+assertContains("src/components/ChatView.tsx", "chat-hero-headline", "New chat must render the primary greeting separately");
+assertContains("src/components/ChatView.tsx", "chat-hero-prompt", "New chat must render the rotating prompt as secondary typography");
+assertContains("src/styles.css", ".chat-hero-welcome", "New chat must give the welcome block its own spacing hierarchy");
+assertContains("src/data/mockData.ts", 'id: "m1_ready"', "The bootstrap greeting must be recognized as a removable placeholder");
+assertContains("src/components/ChatUsageOverview.tsx", "<UsageCalendar", "New chat must render the real activity calendar");
+assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageDaily", "New chat must load real daily usage");
+assertContains("src/components/ChatUsageOverview.tsx", "dominant_provider", "New chat must render provider-qualified routes");
+assertContains("src/components/ChatUsageOverview.tsx", "onOpenUsageSettings", "New chat must open the complete Usage workspace");
+assertContains("src/components/UsageSettingsPane.tsx", "coreBridge.usageDaily", "Settings Usage must load the same real daily series as Home");
+assertContains("src/components/UsageSettingsPane.tsx", "<UsageCalendar", "Settings Overview must lead with the shared activity calendar");
+assertContains("src/components/UsageSettingsPane.tsx", "dominant_provider", "Settings Overview must preserve provider-qualified model identity");
+assertNotContains("src/components/UsageSettingsPane.tsx", "usage-metrics", "Settings Overview must not keep the old KPI tile grid");
 for (const locale of ["en", "it", "es", "fr", "de"]) {
   assertContains(`src/i18n/locales/${locale}.json`, '"use_for_task"', `${locale} must translate the task suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"change_role_preference"', `${locale} must translate the preference suggestion action`);

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   coreBridge,
   type UsageModelRow,
+  type UsageDailySeries,
   type UsageProcessRow,
   type UsageProviderRow,
   type UsageSummaryView,
@@ -11,7 +12,9 @@ import {
   type ApplyInstruction,
   type ModelUsageSuggestion,
 } from "../lib/coreBridge";
+import { resolvedProviderLabel, routeLabel } from "../lib/usageCalendar";
 import { UsageSuggestion } from "./UsageSuggestion";
+import { UsageCalendar } from "./UsageCalendar";
 import {
   clampPercent,
   formatCount,
@@ -25,10 +28,12 @@ type UsageTab = "overview" | "models" | "providers" | "processes";
 
 type UsageData = {
   summary: UsageSummaryView;
+  daily: UsageDailySeries;
   models: UsageModelRow[];
   providers: UsageProviderRow[];
   processes: UsageProcessRow[];
   suggestions: ModelUsageSuggestion[];
+  providerLabels: Record<string, string>;
 };
 
 const WINDOWS: UsageWindow[] = ["7d", "30d", "all"];
@@ -50,15 +55,20 @@ export function UsageSettingsPane() {
     setLoading(true);
     setError(null);
     try {
-      const [summary, models, providers, processes, suggestions] = await Promise.all([
+      const [summary, daily, models, providers, processes, suggestions, registry] = await Promise.all([
         coreBridge.usageSummary(selectedWindow),
+        coreBridge.usageDaily(selectedWindow, -new Date().getTimezoneOffset()),
         coreBridge.usageModels(selectedWindow),
         coreBridge.usageProviders(selectedWindow),
         coreBridge.usageProcesses(selectedWindow),
         coreBridge.usageSuggestions(selectedWindow, "settings").catch(() => []),
+        coreBridge.providers().catch(() => null),
       ]);
       if (requestGenerationRef.current === generation) {
-        setData({ summary, models, providers, processes, suggestions });
+        const providerLabels = Object.fromEntries(
+          (registry?.providers ?? []).map((provider) => [provider.id, provider.label]),
+        );
+        setData({ summary, daily, models, providers, processes, suggestions, providerLabels });
       }
     } catch (reason) {
       if (requestGenerationRef.current === generation) {
@@ -169,14 +179,15 @@ export function UsageSettingsPane() {
           className="usage-panel"
         >
           {tab === "overview" && (
-            <UsageOverview data={data} locale={i18n.resolvedLanguage} />
+            <UsageOverview data={data} window={window} locale={i18n.resolvedLanguage} />
           )}
           {tab === "models" && (
-            <UsageModels rows={data.models} locale={i18n.resolvedLanguage} />
+            <UsageModels rows={data.models} providerLabels={data.providerLabels} locale={i18n.resolvedLanguage} />
           )}
           {tab === "providers" && (
             <UsageProviders
               rows={data.providers}
+              providerLabels={data.providerLabels}
               locale={i18n.resolvedLanguage}
               onReload={() => load(window)}
             />
@@ -207,52 +218,78 @@ function UsageMeter({ value, label }: { value: number; label: string }) {
   );
 }
 
-function UsageOverview({ data, locale }: { data: UsageData; locale?: string }) {
+function UsageOverview({
+  data,
+  window,
+  locale,
+}: {
+  data: UsageData;
+  window: UsageWindow;
+  locale?: string;
+}) {
   const { t } = useTranslation();
   const cost = data.summary.cost_breakdown;
   const estimated = cost.catalog_estimated_microusd + cost.manual_estimated_microusd;
-  const dominantModel = [...data.models].sort((a, b) => rowTokens(b) - rowTokens(a))[0]?.key;
+  const allTokens = data.summary.input_tokens + data.summary.output_tokens
+    + data.summary.reasoning_tokens + data.summary.cache_read_tokens
+    + data.summary.cache_write_tokens;
+  const dominantRoute = routeLabel({
+    dominant_provider: resolvedProviderLabel(data.summary.dominant_provider, data.providerLabels),
+    dominant_model: data.summary.dominant_model,
+  }, t("settings.usage.calendar.unknownRoute"));
   const coverageDate = data.summary.coverage_started_at
     ? new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(data.summary.coverage_started_at * 1_000)
     : null;
   return (
     <div data-usage-view="overview" className="usage-overview">
-      <div className="usage-metrics">
+      <section className="usage-activity" aria-labelledby="usage-activity-title">
+        <div className="usage-activity-heading">
+          <div>
+            <h3 id="usage-activity-title">{t("settings.usage.calendar.ariaLabel")}</h3>
+            <p>{t("settings.usage.calendar.coverage", {
+              usage: data.summary.usage_coverage_percent,
+              cost: cost.cost_coverage_percent,
+            })}</p>
+          </div>
+          <strong>{formatCount(allTokens, locale)} {t("chat.usageOverview.tokens").toLocaleLowerCase(locale)}</strong>
+        </div>
+        <UsageCalendar series={data.daily} window={window} locale={locale} density="comfortable" providerLabels={data.providerLabels} />
+      </section>
+
+      <div className="usage-summary-rail">
         <UsageMetric label={t("settings.usage.metrics.calls")} value={formatCount(data.summary.logical_calls, locale)} />
         <UsageMetric label={t("settings.usage.metrics.attempts")} value={formatCount(data.summary.attempts, locale)} />
-        <UsageMetric label={t("settings.usage.metrics.inputTokens")} value={formatCount(data.summary.input_tokens, locale)} />
-        <UsageMetric label={t("settings.usage.metrics.outputTokens")} value={formatCount(data.summary.output_tokens, locale)} />
-        <UsageMetric label={t("settings.usage.metrics.reasoningTokens")} value={formatCount(data.summary.reasoning_tokens, locale)} />
-        <UsageMetric label={t("settings.usage.metrics.cacheTokens")} value={formatCount(data.summary.cache_read_tokens + data.summary.cache_write_tokens, locale)} />
         <UsageMetric label={t("settings.usage.metrics.providers")} value={String(data.providers.length)} />
-        <UsageMetric label={t("settings.usage.metrics.dominantModel")} value={dominantModel ?? "—"} />
+        <UsageMetric label={t("chat.usageOverview.route")} value={dominantRoute} wide />
       </div>
 
-      <section className="usage-section usage-costs" aria-labelledby="usage-cost-title">
-        <h3 id="usage-cost-title">{t("settings.usage.cost.title")}</h3>
-        <dl>
-          <div className="reported"><dt>{t("settings.usage.cost.reported")}</dt><dd>{formatMicrousd(cost.provider_reported_microusd, locale)}</dd></div>
-          <div className="estimated"><dt>{t("settings.usage.cost.estimated")}</dt><dd>{formatMicrousd(estimated, locale)}</dd></div>
-          <div className="unknown"><dt>{t("settings.usage.cost.unknown")}</dt><dd>{cost.unknown_cost_attempts}</dd></div>
-          <div><dt>{t("settings.usage.cost.notBilled")}</dt><dd>{cost.not_billed_attempts}</dd></div>
-        </dl>
-      </section>
+      <div className="usage-detail-columns">
+        <section className="usage-section usage-costs" aria-labelledby="usage-cost-title">
+          <h3 id="usage-cost-title">{t("settings.usage.cost.title")}</h3>
+          <dl>
+            <div className="reported"><dt>{t("settings.usage.cost.reported")}</dt><dd>{formatMicrousd(cost.provider_reported_microusd, locale)}</dd></div>
+            <div className="estimated"><dt>{t("settings.usage.cost.estimated")}</dt><dd>{formatMicrousd(estimated, locale)}</dd></div>
+            <div className="unknown"><dt>{t("settings.usage.cost.unknown")}</dt><dd>{cost.unknown_cost_attempts}</dd></div>
+            <div><dt>{t("settings.usage.cost.notBilled")}</dt><dd>{cost.not_billed_attempts}</dd></div>
+          </dl>
+        </section>
 
-      <section className="usage-section usage-coverage" aria-labelledby="usage-coverage-title">
-        <h3 id="usage-coverage-title">{t("settings.usage.coverage.title")}</h3>
-        <UsageMeter value={data.summary.usage_coverage_percent} label={t("settings.usage.coverage.usage")} />
-        <UsageMeter value={cost.cost_coverage_percent} label={t("settings.usage.coverage.cost")} />
-        {(data.summary.usage_coverage_percent < 100 || cost.cost_coverage_percent < 100) && (
-          <p className="usage-warning">{t("settings.usage.coverage.incomplete")}</p>
-        )}
-        {coverageDate && <p className="usage-authority">{t("settings.usage.coverage.authoritativeSince", { date: coverageDate })}</p>}
-      </section>
+        <section className="usage-section usage-coverage" aria-labelledby="usage-coverage-title">
+          <h3 id="usage-coverage-title">{t("settings.usage.coverage.title")}</h3>
+          <UsageMeter value={data.summary.usage_coverage_percent} label={t("settings.usage.coverage.usage")} />
+          <UsageMeter value={cost.cost_coverage_percent} label={t("settings.usage.coverage.cost")} />
+          {(data.summary.usage_coverage_percent < 100 || cost.cost_coverage_percent < 100) && (
+            <p className="usage-warning">{t("settings.usage.coverage.incomplete")}</p>
+          )}
+          {coverageDate && <p className="usage-authority">{t("settings.usage.coverage.authoritativeSince", { date: coverageDate })}</p>}
+        </section>
+      </div>
     </div>
   );
 }
 
-function UsageMetric({ label, value }: { label: string; value: string }) {
-  return <div className="usage-metric"><span>{label}</span><strong>{value}</strong></div>;
+function UsageMetric({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  return <div className={`usage-metric${wide ? " is-wide" : ""}`}><span>{label}</span><strong title={value}>{value}</strong></div>;
 }
 
 function modelCostProvenance(row: UsageModelRow): Array<"reported" | "estimated" | "notBilled" | "unknown"> {
@@ -265,7 +302,7 @@ function modelCostProvenance(row: UsageModelRow): Array<"reported" | "estimated"
   return labels;
 }
 
-function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string }) {
+function UsageModels({ rows, providerLabels, locale }: { rows: UsageModelRow[]; providerLabels: Record<string, string>; locale?: string }) {
   const { t } = useTranslation();
   const sorted = [...rows].sort((a, b) => rowTokens(b) - rowTokens(a));
   return (
@@ -282,8 +319,8 @@ function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string 
         <tbody>{sorted.map((row) => {
           const success = row.attempts ? Math.round((row.successful_attempts / row.attempts) * 100) : 0;
           const provenance = modelCostProvenance(row);
-          return <tr key={row.key}>
-            <th scope="row">{row.key}</th>
+          return <tr key={`${row.provider_id}:${row.model_id}`}>
+            <th scope="row">{resolvedProviderLabel(row.provider_id, providerLabels)} → {row.model_id}</th>
             <td>{formatCount(row.logical_calls, locale)}</td>
             <td>{formatCount(rowTokens(row), locale)}</td>
             <td className="usage-model-cost"><span>{formatMicrousd(row.cost_microusd, locale)}</span>{provenance.length > 0 && <small>{provenance.map((item) => t(`settings.usage.cost.${item}`)).join(" · ")}</small>}</td>
@@ -296,8 +333,9 @@ function UsageModels({ rows, locale }: { rows: UsageModelRow[]; locale?: string 
   );
 }
 
-function UsageProviders({ rows, locale, onReload }: {
+function UsageProviders({ rows, providerLabels, locale, onReload }: {
   rows: UsageProviderRow[];
+  providerLabels: Record<string, string>;
   locale?: string;
   onReload: () => Promise<void> | void;
 }) {
@@ -322,7 +360,7 @@ function UsageProviders({ rows, locale, onReload }: {
       const spent = row.homun_usage.cost_microusd;
       const remaining = remainingBudgetPercent(row.manual_policy?.monthly_budget_microusd, spent, row.homun_usage.cost_breakdown.cost_coverage_percent);
       return <section key={row.provider_id} className="usage-provider-row">
-        <header><h3>{row.provider_id}</h3><button type="button" disabled={busy === row.provider_id || unsupported} onClick={() => void refresh(row.provider_id)}>{t("settings.usage.actions.refresh")}</button></header>
+        <header><h3>{resolvedProviderLabel(row.provider_id, providerLabels)}</h3><button type="button" disabled={busy === row.provider_id || unsupported} onClick={() => void refresh(row.provider_id)}>{t("settings.usage.actions.refresh")}</button></header>
         <div className="usage-provider-columns">
           <div><h4>{t("settings.usage.provider.measured")}</h4><dl>
             <div><dt>{t("settings.usage.metrics.calls")}</dt><dd>{row.homun_usage.logical_calls}</dd></div>

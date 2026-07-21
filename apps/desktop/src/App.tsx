@@ -1551,6 +1551,12 @@ export default function App() {
             sidebarCollapsed={!drawerOpen}
             onExpandSidebar={() => setDrawerOpen(true)}
             onOpenSearch={() => setSearchOpen(true)}
+            onOpenUsageSettings={() => {
+              setPreviousView("chat");
+              setSettingsSection("usage");
+              setSettingsSub("");
+              setActiveView("settings");
+            }}
             approvals={approvalItems}
             approvalBusyId={approvalBusyId}
             computerSessionId={activeThread.computerSessionId}
