@@ -345,30 +345,33 @@ function spawnGateway() {
     if (fs.existsSync(baDir)) env.HOMUN_BROWSER_AUTOMATION_DIR = baDir;
   }
 
-  // The native helper is opt-in until the complete permission/policy/UI rollout
-  // is enabled. Electron passes only its public bundle path; the Rust supervisor
-  // owns the socket and single-use authentication secret.
+  // The signed native helper is available by default when it is part of the macOS
+  // package. HOMUN_HOST_COMPUTER=0 remains an explicit emergency opt-out. Electron
+  // passes only the public bundle path; the Rust supervisor owns the private socket
+  // and single-use authentication secret.
   if (
     process.platform === "darwin" &&
-    env.HOMUN_HOST_COMPUTER === "1" &&
-    !env.HOMUN_HOST_COMPUTER_HELPER_PATH
+    env.HOMUN_HOST_COMPUTER !== "0"
   ) {
-    const helperCandidates = [
-      path.join(
-        RESOURCES_ROOT,
-        "host-computer",
-        "HomunComputerService.app",
-      ),
-      path.join(
-        __dirname,
-        "..",
-        ".package",
-        "host-computer-build",
-        "HomunComputerService.app",
-      ),
-    ];
-    const helperBundle = helperCandidates.find((candidate) => fs.existsSync(candidate));
-    if (helperBundle) env.HOMUN_HOST_COMPUTER_HELPER_PATH = helperBundle;
+    if (!env.HOMUN_HOST_COMPUTER_HELPER_PATH) {
+      const helperCandidates = [
+        path.join(
+          RESOURCES_ROOT,
+          "host-computer",
+          "HomunComputerService.app",
+        ),
+        path.join(
+          __dirname,
+          "..",
+          ".package",
+          "host-computer-build",
+          "HomunComputerService.app",
+        ),
+      ];
+      const helperBundle = helperCandidates.find((candidate) => fs.existsSync(candidate));
+      if (helperBundle) env.HOMUN_HOST_COMPUTER_HELPER_PATH = helperBundle;
+    }
+    if (env.HOMUN_HOST_COMPUTER_HELPER_PATH) env.HOMUN_HOST_COMPUTER = "1";
   }
 
   if (gatewayBin) {

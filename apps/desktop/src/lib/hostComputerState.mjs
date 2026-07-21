@@ -19,15 +19,19 @@ const phases = new Set([
 
 export function reduceHostComputerEvent(state, event) {
   if (!event || typeof event !== "object" || !Number.isInteger(event.sequence)) return state;
-  if (event.sequence <= state.sequence) return state;
-  if (state.sequence > 0 && event.sequence !== state.sequence + 1) {
-    return { ...state, needsHydration: true };
+  const startsNewSession = typeof event.session_id === "string"
+    && state.sessionId !== null
+    && event.session_id !== state.sessionId;
+  const current = startsNewSession ? initialHostComputerState : state;
+  if (event.sequence <= current.sequence) return current;
+  if (current.sequence > 0 && event.sequence !== current.sequence + 1) {
+    return { ...current, needsHydration: true };
   }
   if (!phases.has(event.phase)) return state;
   const next = {
-    ...state,
+    ...current,
     sequence: event.sequence,
-    sessionId: typeof event.session_id === "string" ? event.session_id : state.sessionId,
+    sessionId: typeof event.session_id === "string" ? event.session_id : current.sessionId,
     phase: event.phase,
     needsHydration: false,
   };

@@ -5381,7 +5381,6 @@ function MacAppsSettings() {
     const [nextApps, nextGrants] = await Promise.all([hostComputerApps(), hostComputerGrants()]);
     setApps(nextApps.filter((app) => Boolean(app.bundle_id)));
     setGrants(nextGrants);
-    setSelectedBundle((current) => current || nextApps.find((app) => app.bundle_id)?.bundle_id || "");
   };
 
   useEffect(() => {

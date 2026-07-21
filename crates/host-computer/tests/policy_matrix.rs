@@ -157,3 +157,35 @@ fn only_one_session_can_be_active_and_cancel_releases_the_slot() {
     assert!(sessions.active_snapshot().is_none());
     assert!(sessions.start("session-b", "Calendar", 4).is_ok());
 }
+
+#[test]
+fn denying_an_approval_releases_the_active_session_slot() {
+    let mut sessions = HostSessionCoordinator::default();
+    sessions.start("first", "Notes", 1).unwrap();
+    sessions
+        .request_approval(
+            "first",
+            "digest",
+            ActionCategory::Reversible,
+            "Press button",
+            2,
+        )
+        .unwrap();
+
+    let denied = sessions.deny("first", "digest", 3).unwrap();
+    assert_eq!(denied.phase, HostSessionPhase::Failed);
+    assert_eq!(denied.error_code.as_deref(), Some("approval_denied"));
+    assert!(sessions.active_snapshot().is_none());
+    assert!(sessions.start("second", "Mail", 4).is_ok());
+}
+
+#[test]
+fn observed_app_name_replaces_the_session_placeholder() {
+    let mut sessions = HostSessionCoordinator::default();
+    sessions.start("session", "Mac Apps", 1).unwrap();
+
+    let snapshot = sessions.mark_observing_app("session", "Notes", 2).unwrap();
+
+    assert_eq!(snapshot.app, "Notes");
+    assert_eq!(snapshot.phase, HostSessionPhase::Observing);
+}

@@ -15,7 +15,9 @@ use local_first_host_computer::{
     artifact::ArtifactManager,
     client::{HostComputerClient, RequestContext},
     grants::{AppGrant, GrantLevel, GrantScope, GrantStore, SignedAppIdentity},
-    policy::{ActionCategory, HostActionPolicy, PolicyDecision, PolicyRequest},
+    policy::{
+        ActionCategory, HostActionPolicy, PolicyDecision, PolicyRequest, is_protected_bundle_id,
+    },
     protocol::{ActionRequest, AppSnapshot, HostPermission, PermissionState, SemanticAction},
     redaction::{DisclosurePolicy, ProviderDisclosure, project_snapshot},
     session::{HostSessionCoordinator, HostSessionPhase, HostSessionSnapshot, SessionError},
@@ -197,6 +199,12 @@ pub async fn apps() -> Result<Json<Value>, ApiError> {
     let values = result
         .apps
         .into_iter()
+        .filter(|app| {
+            !app
+                .bundle_id
+                .as_deref()
+                .is_some_and(is_protected_bundle_id)
+        })
         .map(|app| {
             let granted_level = app
                 .bundle_id
@@ -258,6 +266,9 @@ pub struct CreateGrant {
 }
 
 pub async fn create_grant(Json(input): Json<CreateGrant>) -> Result<Json<Value>, ApiError> {
+    if is_protected_bundle_id(&input.bundle_id) {
+        return Err(api_error(StatusCode::FORBIDDEN, "protected_app"));
+    }
     let app = runtime()
         .await?
         .client
@@ -431,6 +442,9 @@ pub async fn worker_list_apps(session_id: &str) -> Result<Value, String> {
     let store = grants().map_err(api_error_text)?.lock().map_err(|_| "grant store unavailable".to_string())?;
     Ok(Value::Array(apps.into_iter().filter_map(|app| {
         let (bundle_id, signing) = app.bundle_id.zip(app.signing_identity)?;
+        if is_protected_bundle_id(&bundle_id) {
+            return None;
+        }
         let identity = SignedAppIdentity { bundle_id: bundle_id.clone(), team_id: signing.team_id,
             designated_requirement_sha256: signing.designated_requirement_sha256 };
         let level = store.resolve(&scope, &identity, now_ms()).ok().flatten()?;
@@ -443,6 +457,10 @@ pub async fn worker_get_state(session_id: &str, pid: u32) -> Result<Value, Strin
     let runtime = runtime().await.map_err(api_error_text)?;
     let app = runtime.client.list_apps(false, context()).await.map_err(|error| error.to_string())?.apps
         .into_iter().find(|app| app.identity.pid == pid).ok_or("app_not_found")?;
+    if app.bundle_id.as_deref().is_some_and(is_protected_bundle_id) {
+        return Err("protected_app".into());
+    }
+    let app_display_name = app.display_name.clone();
     let identity = signed_identity(&app)?;
     let level = grants().map_err(api_error_text)?.lock().map_err(|_| "grant store unavailable".to_string())?
         .resolve(&scope(), &identity, now_ms()).map_err(|error| error.to_string())?;
@@ -453,7 +471,7 @@ pub async fn worker_get_state(session_id: &str, pid: u32) -> Result<Value, Strin
     let value = serde_json::to_value(project_snapshot(&snapshot, ProviderDisclosure::Remote,
         DisclosurePolicy { disclose_screenshots_to_remote: false })).map_err(|error| error.to_string())?;
     if let Ok(snapshot) = sessions().lock().map_err(|_| ()).and_then(|mut coordinator| {
-        coordinator.mark_observing(session_id, now_ms()).map_err(|_| ())
+        coordinator.mark_observing_app(session_id, app_display_name, now_ms()).map_err(|_| ())
     }) {
         publish_session("state", &snapshot);
     }

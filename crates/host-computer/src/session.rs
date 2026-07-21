@@ -220,20 +220,23 @@ impl HostSessionCoordinator {
         action_digest: &str,
         now_unix_ms: i64,
     ) -> Result<HostSessionSnapshot, SessionError> {
-        let session = self.session_mut(session_id)?;
-        let pending = session
-            .snapshot
-            .pending_approval
-            .as_ref()
-            .ok_or(SessionError::NoPendingApproval)?;
-        if pending.action_digest != action_digest {
-            return Err(SessionError::ActionDigestMismatch);
+        {
+            let session = self.session_mut(session_id)?;
+            let pending = session
+                .snapshot
+                .pending_approval
+                .as_ref()
+                .ok_or(SessionError::NoPendingApproval)?;
+            if pending.action_digest != action_digest {
+                return Err(SessionError::ActionDigestMismatch);
+            }
         }
-        session.snapshot.pending_approval = None;
-        session.snapshot.phase = HostSessionPhase::Failed;
-        session.snapshot.error_code = Some("approval_denied".into());
-        touch(session, now_unix_ms);
-        Ok(session.snapshot.clone())
+        self.transition_terminal(
+            session_id,
+            HostSessionPhase::Failed,
+            Some("approval_denied".into()),
+            now_unix_ms,
+        )
     }
 
     pub fn pause(
@@ -314,6 +317,19 @@ impl HostSessionCoordinator {
         now_unix_ms: i64,
     ) -> Result<HostSessionSnapshot, SessionError> {
         let session = self.session_mut(session_id)?;
+        session.snapshot.phase = HostSessionPhase::Observing;
+        touch(session, now_unix_ms);
+        Ok(session.snapshot.clone())
+    }
+
+    pub fn mark_observing_app(
+        &mut self,
+        session_id: &str,
+        app: impl Into<String>,
+        now_unix_ms: i64,
+    ) -> Result<HostSessionSnapshot, SessionError> {
+        let session = self.session_mut(session_id)?;
+        session.snapshot.app = app.into();
         session.snapshot.phase = HostSessionPhase::Observing;
         touch(session, now_unix_ms);
         Ok(session.snapshot.clone())

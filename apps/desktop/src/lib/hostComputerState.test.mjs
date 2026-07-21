@@ -37,3 +37,19 @@ test("safe app identity and resume generation are reduced", () => {
   assert.equal(state.window, "Project notes");
   assert.equal(JSON.stringify(state).includes("private body"), false);
 });
+
+test("a new session starts its own sequence after a terminal session", () => {
+  const finished = reduceHostComputerEvent(initialHostComputerState, {
+    sequence: 8, session_id: "old", phase: "done", app: "Notes",
+  });
+
+  const next = reduceHostComputerEvent(finished, {
+    sequence: 1, session_id: "new", phase: "observing", app: "Mail",
+  });
+
+  assert.equal(next.sessionId, "new");
+  assert.equal(next.sequence, 1);
+  assert.equal(next.phase, "observing");
+  assert.equal(next.app, "Mail");
+  assert.equal(next.needsHydration, false);
+});

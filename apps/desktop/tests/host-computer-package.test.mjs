@@ -51,8 +51,19 @@ test("desktop packaging stages the helper and passes only its public path", asyn
   assert.match(prepare, /buildHostComputerHelper/);
   assert.match(prepare, /host-computer["'],[\s\n]*["']HomunComputerService\.app/);
   assert.match(electron, /HOMUN_HOST_COMPUTER_HELPER_PATH/);
-  assert.match(electron, /HOMUN_HOST_COMPUTER === ["']1["']/);
+  assert.match(electron, /HOMUN_HOST_COMPUTER !== ["']0["']/);
+  assert.match(electron, /env\.HOMUN_HOST_COMPUTER = ["']1["']/);
   assert.doesNotMatch(electron, /HOMUN_HOST_COMPUTER_TOKEN/);
+});
+
+test("Mac app access requires an explicit app selection", async () => {
+  const source = await readFile(
+    path.resolve(import.meta.dirname, "../src/components/SettingsView.tsx"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(source, /setSelectedBundle\(\(current\).*nextApps\.find/s);
+  assert.match(source, /<option value="">\{t\("settings\.computer\.selectApp"\)\}<\/option>/);
 });
 
 test("assembled helper authenticates a real Unix-socket handshake", async (t) => {

@@ -6,6 +6,7 @@ import Testing
     "com.apple.loginwindow",
     "com.apple.SecurityAgent",
     "com.1password.1password",
+    "2BUA8C4S2C.com.1password.browser-helper",
     "com.bitwarden.desktop",
 ])
 func protectedBundlesAreNeverMutable(bundleID: String) {

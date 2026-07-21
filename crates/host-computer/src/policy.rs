@@ -1,6 +1,36 @@
 use crate::grants::GrantLevel;
 use serde::{Deserialize, Serialize};
 
+pub const PROTECTED_BUNDLE_IDS: &[&str] = &[
+    "com.apple.loginwindow",
+    "com.apple.SecurityAgent",
+    "com.apple.LocalAuthentication.UIAgent",
+    "com.1password.1password",
+    "com.agilebits.onepassword7",
+    "com.bitwarden.desktop",
+    "com.lastpass.LastPass",
+    "com.dashlane.Dashlane",
+];
+
+pub const TERMINAL_BUNDLE_IDS: &[&str] = &[
+    "com.apple.Terminal",
+    "com.googlecode.iterm2",
+    "dev.warp.Warp-Stable",
+    "dev.warp.Warp",
+];
+
+pub fn is_protected_bundle_id(bundle_id: &str) -> bool {
+    let normalized = bundle_id.to_ascii_lowercase();
+    PROTECTED_BUNDLE_IDS.contains(&bundle_id)
+        || ["1password", "bitwarden", "lastpass", "dashlane"]
+            .iter()
+            .any(|marker| normalized.contains(marker))
+}
+
+pub fn is_terminal_bundle_id(bundle_id: &str) -> bool {
+    TERMINAL_BUNDLE_IDS.contains(&bundle_id)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionCategory {
