@@ -386,6 +386,7 @@ mod agent_run_api_tests {
                     user.as_str(),
                     "workspace-b",
                     &thread.thread_id,
+                    0,
                     &serde_json::json!([{"title": "foreign", "status": "doing"}]),
                     "open",
                 )
@@ -400,6 +401,7 @@ mod agent_run_api_tests {
                     user.as_str(),
                     "workspace-a",
                     &thread.thread_id,
+                    0,
                     &serde_json::json!([{"title": "owned", "status": "doing"}]),
                     "open",
                 )
@@ -425,6 +427,7 @@ mod agent_run_api_tests {
                 gateway_user_id().as_str(),
                 "workspace-a",
                 &thread.thread_id,
+                0,
                 &steps,
                 "open",
             )
@@ -10059,6 +10062,7 @@ fn upsert_runtime_plan_memory_from_state(
                     &user_id,
                     &workspace_id,
                     &thread_key,
+                    0,
                     &plan_json,
                     status,
                 )

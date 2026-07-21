@@ -33,7 +33,8 @@ pub use types::{
     AgentCheckpoint, AgentRun, AgentRunEvent, AgentRunStatus, AgentToolReceipt, ApprovalPolicy,
     Automation, AutomationRun,
     AutomationSource, AutomationTrigger, EventTrigger, NewAgentRun, ResourceClass,
-    NewAgentToolReceipt, ResourceRequirement, RetryPolicy, RuntimePlanRecord, TaskId,
+    NewAgentToolReceipt, ObjectiveContractRecord, ObjectiveMode, ResourceRequirement, RetryPolicy,
+    RuntimePlanRecord, TaskId,
     TaskPriority, TaskRecord, TaskStatus, SubagentInfo, ThreadActivityProjection,
     ToolReceiptClaim, TurnEvent, TurnEventKind, UserId, WorkflowId, WorkspaceId,
 };

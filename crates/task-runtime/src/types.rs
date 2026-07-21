@@ -228,6 +228,35 @@ pub struct NewAgentRun {
     pub prompt_fingerprint: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectiveMode {
+    ReadOnlyAnalysis,
+    Mutation,
+    Mixed,
+}
+
+/// The single canonical objective currently governing a chat thread.
+///
+/// Replanning updates this row in place and increments `revision`; execution
+/// records retain the revision they were authorized against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObjectiveContractRecord {
+    pub user_id: String,
+    pub workspace_id: String,
+    pub thread_id: String,
+    pub source_message_id: String,
+    pub objective: String,
+    pub mode: ObjectiveMode,
+    pub scope_json: Value,
+    pub allowed_actions_json: Value,
+    pub completion_json: Value,
+    pub status: String,
+    pub revision: u64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 /// Canonical, operational plan state for one chat thread.
 ///
 /// This deliberately lives outside semantic memory: plan execution state must be
@@ -239,6 +268,7 @@ pub struct RuntimePlanRecord {
     pub thread_id: String,
     pub status: String,
     pub plan_json: Value,
+    pub objective_revision: u64,
     pub revision: u64,
     pub stall_turns: u32,
     pub last_resume_done: Option<usize>,
