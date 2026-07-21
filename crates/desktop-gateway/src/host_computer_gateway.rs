@@ -12,7 +12,6 @@ use std::{
 
 use axum::{Json, extract::Path, http::StatusCode};
 use local_first_host_computer::{
-    artifact::ArtifactManager,
     client::{HostComputerClient, RequestContext},
     grants::{AppGrant, GrantLevel, GrantScope, GrantStore, SignedAppIdentity},
     policy::{
@@ -23,8 +22,12 @@ use local_first_host_computer::{
     redaction::{DisclosurePolicy, ProviderDisclosure, project_snapshot},
     session::{HostSessionCoordinator, HostSessionPhase, HostSessionSnapshot, SessionError},
     service::HostComputerService,
-    supervisor::{HostComputerSupervisorConfig, SystemHelperLauncher, prepare_launch},
     transport::UdsTransport,
+};
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use local_first_host_computer::{
+    artifact::ArtifactManager,
+    supervisor::{HostComputerSupervisorConfig, SystemHelperLauncher, prepare_launch},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -144,18 +147,20 @@ async fn runtime() -> Result<Arc<HostRuntime>, ApiError> {
         ));
     }
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-    return Err(api_error(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "unsupported_platform",
-    ));
-    if std::env::var("HOMUN_HOST_COMPUTER").ok().as_deref() != Some("1") {
+    {
         return Err(api_error(
             StatusCode::SERVICE_UNAVAILABLE,
-            "feature_disabled",
+            "unsupported_platform",
         ));
     }
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
+        if std::env::var("HOMUN_HOST_COMPUTER").ok().as_deref() != Some("1") {
+            return Err(api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "feature_disabled",
+            ));
+        }
         let guard = RUNTIME.get_or_init(|| tokio::sync::Mutex::new(None));
         let mut guard = guard.lock().await;
         if let Some(runtime) = guard.as_ref() {

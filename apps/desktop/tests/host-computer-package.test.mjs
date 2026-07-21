@@ -12,7 +12,9 @@ import {
   hostComputerStagingPlan,
 } from "../scripts/build-host-computer-helper.mjs";
 
-test("helper bundle has a stable nested-app layout", async (t) => {
+test("helper bundle has a stable nested-app layout", {
+  skip: process.platform !== "darwin" ? "requires the macOS Swift helper toolchain" : false,
+}, async (t) => {
   const outputDir = await mkdtemp(path.join(os.tmpdir(), "homun-helper-test-"));
   t.after(async () => {
     const { rm } = await import("node:fs/promises");
@@ -73,7 +75,9 @@ test("Mac app access requires an explicit app selection", async () => {
   assert.match(styles, /\.set-btn:disabled\s*\{[^}]*cursor:\s*not-allowed;[^}]*opacity:/s);
 });
 
-test("assembled helper authenticates a real Unix-socket handshake", async (t) => {
+test("assembled helper authenticates a real Unix-socket handshake", {
+  skip: process.platform !== "darwin" ? "requires a launchable macOS app bundle" : false,
+}, async (t) => {
   const outputDir = await mkdtemp(path.join(os.tmpdir(), "homun-helper-e2e-build-"));
   const runtimeDir = await mkdtemp(path.join(os.tmpdir(), "homun-helper-e2e-run-"));
   const { chmod, rm } = await import("node:fs/promises");
