@@ -12,16 +12,36 @@ function run(command, args) {
   return `${result.stdout ?? ""}${result.stderr ?? ""}`;
 }
 
-export function verifyHostComputerPackage({ appPath, requireNotarization = true, requireUniversal = false }) {
+export function assertExactArchitecture(output, expectedArchitecture, label) {
+  const architectures = String(output).trim().split(/\s+/).filter(Boolean);
+  if (architectures.length !== 1 || architectures[0] !== expectedArchitecture) {
+    throw new Error(
+      `${label} architecture mismatch: expected exactly ${expectedArchitecture}, got ${architectures.join(" ") || "none"}`,
+    );
+  }
+  return architectures;
+}
+
+export function verifyHostComputerPackage({
+  appPath,
+  requireNotarization = true,
+  expectedArchitecture = "arm64",
+}) {
   const app = resolve(appPath);
   const helper = `${app}/Contents/Resources/host-computer/HomunComputerService.app`;
   const helperExecutable = `${helper}/Contents/MacOS/HomunComputerService`;
+  const gatewayExecutable = `${app}/Contents/Resources/bin/local-first-desktop-gateway`;
   if (!existsSync(helperExecutable)) throw new Error(`Host helper is missing: ${helperExecutable}`);
+  if (!existsSync(gatewayExecutable)) throw new Error(`Desktop gateway is missing: ${gatewayExecutable}`);
 
   const commands = verificationCommandPlan(app).filter(([command, args]) =>
     requireNotarization || !(command === "xcrun" && args[0] === "stapler")
   );
-  for (const [command, args] of commands) run(command, args);
+  const commandOutputs = commands.map(([command, args]) => ({
+    command,
+    args,
+    output: run(command, args),
+  }));
 
   const appSignature = run("codesign", ["-dv", "--verbose=4", app]);
   const helperSignature = run("codesign", ["-dv", "--verbose=4", helper]);
@@ -37,20 +57,42 @@ export function verifyHostComputerPackage({ appPath, requireNotarization = true,
       throw new Error(`Forbidden helper entitlement: ${forbidden}`);
     }
   }
-  const helperArchitectures = run("lipo", ["-archs", helperExecutable]).trim().split(/\s+/);
-  if (requireUniversal && !(helperArchitectures.includes("arm64") && helperArchitectures.includes("x86_64"))) {
-    throw new Error(`Host helper is not universal: ${helperArchitectures.join(" ")}`);
-  }
-  return { app, helper, teamIdentifier: appTeam, helperArchitectures };
+  const architectureOutput = (executable) => commandOutputs.find(
+    ({ command, args }) => command === "lipo" && args.at(-1) === executable,
+  )?.output ?? "";
+  const helperArchitectures = assertExactArchitecture(
+    architectureOutput(helperExecutable),
+    expectedArchitecture,
+    "Host helper",
+  );
+  const gatewayArchitectures = assertExactArchitecture(
+    architectureOutput(gatewayExecutable),
+    expectedArchitecture,
+    "Desktop gateway",
+  );
+  return {
+    app,
+    helper,
+    teamIdentifier: appTeam,
+    helperArchitectures,
+    gatewayArchitectures,
+  };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const appIndex = process.argv.indexOf("--app");
   if (appIndex < 0 || !process.argv[appIndex + 1]) throw new Error("Usage: --app <Homun.app>");
+  const architectureIndex = process.argv.indexOf("--expected-arch");
   const result = verifyHostComputerPackage({
     appPath: process.argv[appIndex + 1],
     requireNotarization: !process.argv.includes("--skip-notarization"),
-    requireUniversal: process.argv.includes("--require-universal"),
+    expectedArchitecture: architectureIndex >= 0
+      ? process.argv[architectureIndex + 1]
+      : "arm64",
   });
-  process.stdout.write(`Verified host helper at ${result.helper}\nTeam: ${result.teamIdentifier}\nArchitectures: ${result.helperArchitectures.join(", ")}\n`);
+  process.stdout.write(
+    `Verified host helper at ${result.helper}\nTeam: ${result.teamIdentifier}\n` +
+    `Helper architecture: ${result.helperArchitectures.join(", ")}\n` +
+    `Gateway architecture: ${result.gatewayArchitectures.join(", ")}\n`,
+  );
 }

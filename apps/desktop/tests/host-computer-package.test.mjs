@@ -50,6 +50,8 @@ test("desktop packaging stages the helper and passes only its public path", asyn
 
   assert.match(prepare, /buildHostComputerHelper/);
   assert.match(prepare, /host-computer["'],[\s\n]*["']HomunComputerService\.app/);
+  assert.match(electron, /process\.platform === ["']darwin["']/);
+  assert.match(electron, /process\.arch === ["']arm64["']/);
   assert.match(electron, /HOMUN_HOST_COMPUTER_HELPER_PATH/);
   assert.match(electron, /HOMUN_HOST_COMPUTER !== ["']0["']/);
   assert.match(electron, /env\.HOMUN_HOST_COMPUTER = ["']1["']/);

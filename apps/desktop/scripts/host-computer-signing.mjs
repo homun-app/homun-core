@@ -5,7 +5,11 @@ export function signingPlan(platform = process.platform) {
 
 export function verificationCommandPlan(appPath) {
   const helper = `${appPath}/Contents/Resources/host-computer/HomunComputerService.app`;
+  const helperExecutable = `${helper}/Contents/MacOS/HomunComputerService`;
+  const gatewayExecutable = `${appPath}/Contents/Resources/bin/local-first-desktop-gateway`;
   return [
+    ["lipo", ["-archs", helperExecutable]],
+    ["lipo", ["-archs", gatewayExecutable]],
     ["codesign", ["--verify", "--strict", "--verbose=4", helper]],
     ["codesign", ["--verify", "--deep", "--strict", "--verbose=4", appPath]],
     ["spctl", ["--assess", "--type", "execute", "--verbose=4", appPath]],

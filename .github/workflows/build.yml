@@ -133,7 +133,7 @@ jobs:
         run: |
           APP_PATH="$(find dist-installers -maxdepth 3 -type d -name Homun.app -print -quit)"
           test -n "$APP_PATH"
-          npm run verify:host-computer-package -- --app "$APP_PATH"
+          npm run verify:host-computer-package -- --app "$APP_PATH" --expected-arch arm64
 
       # macOS unsigned: build as artifact only, never publish — an unsigned mac
       # build must not reach the signed auto-update channel. Runs when no Apple cert

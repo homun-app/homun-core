@@ -351,6 +351,7 @@ function spawnGateway() {
   // and single-use authentication secret.
   if (
     process.platform === "darwin" &&
+    process.arch === "arm64" &&
     env.HOMUN_HOST_COMPUTER !== "0"
   ) {
     if (!env.HOMUN_HOST_COMPUTER_HELPER_PATH) {

@@ -9,6 +9,7 @@ import {
   signingPlan,
   verificationCommandPlan,
 } from "../scripts/host-computer-signing.mjs";
+import { assertExactArchitecture } from "../scripts/verify-host-computer-package.mjs";
 
 test("release signing orders nested code before the outer app", () => {
   assert.deepEqual(signingPlan("darwin"), [
@@ -30,10 +31,40 @@ test("Developer ID identity discovery returns only the certificate hash", () => 
 
 test("verification covers strict signatures, Gatekeeper, and stapling", () => {
   const commands = verificationCommandPlan("/tmp/Homun.app");
-  assert.equal(commands[0][0], "codesign");
-  assert.match(commands[0][1].at(-1), /HomunComputerService\.app$/);
+  const helperArchitecture = commands.find(
+    ([command, args]) => command === "lipo" && args.at(-1).endsWith("HomunComputerService"),
+  );
+  const gatewayArchitecture = commands.find(
+    ([command, args]) => command === "lipo" && args.at(-1).endsWith("local-first-desktop-gateway"),
+  );
+  assert.deepEqual(helperArchitecture?.[1].slice(0, 1), ["-archs"]);
+  assert.deepEqual(gatewayArchitecture?.[1].slice(0, 1), ["-archs"]);
+  const helperSignature = commands.find(
+    ([command, args]) => command === "codesign" && args.at(-1).endsWith("HomunComputerService.app"),
+  );
+  assert.ok(helperSignature);
   assert.deepEqual(commands.at(-2).slice(0, 1), ["spctl"]);
   assert.deepEqual(commands.at(-1), ["xcrun", ["stapler", "validate", "/tmp/Homun.app"]]);
+});
+
+test("release workflow verifies the first beta as arm64-only", async () => {
+  const workflow = await readFile(
+    path.resolve(import.meta.dirname, "../../../.github/workflows/build.yml"),
+    "utf8",
+  );
+  assert.match(workflow, /verify:host-computer-package -- --app "\$APP_PATH" --expected-arch arm64/);
+});
+
+test("architecture verification rejects universal and Intel binaries", () => {
+  assert.deepEqual(assertExactArchitecture("arm64\n", "arm64", "helper"), ["arm64"]);
+  assert.throws(
+    () => assertExactArchitecture("arm64 x86_64\n", "arm64", "helper"),
+    /expected exactly arm64/,
+  );
+  assert.throws(
+    () => assertExactArchitecture("x86_64\n", "arm64", "gateway"),
+    /expected exactly arm64/,
+  );
 });
 
 test("helper entitlement file stays least privilege", async () => {
