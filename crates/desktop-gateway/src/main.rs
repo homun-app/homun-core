@@ -1265,6 +1265,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(get_llm_concurrency).post(set_llm_concurrency),
         )
         .route("/api/usage/summary", get(get_usage_summary))
+        .route("/api/usage/daily", get(get_usage_daily))
         .route("/api/usage/models", get(get_usage_models))
         .route("/api/usage/providers", get(get_usage_providers))
         .route("/api/usage/processes", get(get_usage_processes))
@@ -44130,6 +44131,8 @@ fn now_epoch_secs() -> u64 {
 struct UsageWindowQuery {
     #[serde(default = "default_usage_window")]
     window: String,
+    #[serde(default)]
+    timezone_offset_minutes: i32,
 }
 
 fn default_usage_window() -> String {
@@ -44173,6 +44176,31 @@ async fn get_usage_summary(
     Ok(Json(summary))
 }
 
+async fn get_usage_daily(
+    State(state): State<AppState>,
+    Query(query): Query<UsageWindowQuery>,
+) -> Result<Json<usage_store::UsageDailySeries>, GatewayError> {
+    let window = parse_usage_window(&query.window)?;
+    let store = state.usage_store.lock().map_err(|_| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "usage_store_unavailable",
+        message: "usage store unavailable".to_string(),
+    })?;
+    let series = store
+        .daily_series(
+            gateway_user_id().as_str(),
+            window,
+            usage_now_i64(),
+            query.timezone_offset_minutes,
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "usage_daily_failed",
+            message: error.to_string(),
+        })?;
+    Ok(Json(series))
+}
+
 async fn usage_breakdown(
     state: AppState,
     query: UsageWindowQuery,
@@ -44197,8 +44225,21 @@ async fn usage_breakdown(
 async fn get_usage_models(
     State(state): State<AppState>,
     Query(query): Query<UsageWindowQuery>,
-) -> Result<Json<Vec<usage_store::UsageBreakdownRow>>, GatewayError> {
-    usage_breakdown(state, query, usage_store::UsageBreakdownDimension::Model).await
+) -> Result<Json<Vec<usage_store::UsageRouteRow>>, GatewayError> {
+    let window = parse_usage_window(&query.window)?;
+    let store = state.usage_store.lock().map_err(|_| GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "usage_store_unavailable",
+        message: "usage store unavailable".to_string(),
+    })?;
+    let rows = store
+        .model_routes(gateway_user_id().as_str(), window, usage_now_i64())
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "usage_models_failed",
+            message: error.to_string(),
+        })?;
+    Ok(Json(rows))
 }
 
 #[derive(Debug, Serialize)]
