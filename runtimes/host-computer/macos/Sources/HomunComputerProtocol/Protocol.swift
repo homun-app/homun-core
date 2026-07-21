@@ -10,6 +10,124 @@ public enum HostComputerMethod: String, Codable, Sendable {
     case handshake
     case permissionStatus = "permission_status"
     case permissionPresent = "permission_present"
+    case listApps = "list_apps"
+    case listWindows = "list_windows"
+}
+
+public struct ApplicationIdentity: Codable, Equatable, Hashable, Sendable {
+    public var pid: Int32
+    public var processStartTimeUnixMs: Int64
+
+    public init(pid: Int32, processStartTimeUnixMs: Int64) {
+        self.pid = pid
+        self.processStartTimeUnixMs = processStartTimeUnixMs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case pid
+        case processStartTimeUnixMs = "process_start_time_unix_ms"
+    }
+}
+
+public enum HostActivationPolicy: String, Codable, Equatable, Sendable {
+    case regular
+    case accessory
+    case prohibited
+}
+
+public struct HostApplication: Codable, Equatable, Sendable {
+    public var identity: ApplicationIdentity
+    public var displayName: String
+    public var bundleID: String?
+    public var activationPolicy: HostActivationPolicy
+    public var isActive: Bool
+    public var isHidden: Bool
+
+    public init(
+        identity: ApplicationIdentity,
+        displayName: String,
+        bundleID: String?,
+        activationPolicy: HostActivationPolicy,
+        isActive: Bool,
+        isHidden: Bool
+    ) {
+        self.identity = identity
+        self.displayName = displayName
+        self.bundleID = bundleID
+        self.activationPolicy = activationPolicy
+        self.isActive = isActive
+        self.isHidden = isHidden
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case identity
+        case displayName = "display_name"
+        case bundleID = "bundle_id"
+        case activationPolicy = "activation_policy"
+        case isActive = "is_active"
+        case isHidden = "is_hidden"
+    }
+}
+
+public struct HostRect: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
+public struct WindowIdentity: Codable, Equatable, Hashable, Sendable {
+    public var pid: Int32
+    public var windowID: UInt32
+
+    public init(pid: Int32, windowID: UInt32) {
+        self.pid = pid
+        self.windowID = windowID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case pid
+        case windowID = "window_id"
+    }
+}
+
+public struct HostWindow: Codable, Equatable, Sendable {
+    public var identity: WindowIdentity
+    public var title: String?
+    public var bounds: HostRect
+    public var isMinimized: Bool
+    public var isOnScreen: Bool
+    public var displayID: UInt32?
+
+    public init(
+        identity: WindowIdentity,
+        title: String?,
+        bounds: HostRect,
+        isMinimized: Bool,
+        isOnScreen: Bool,
+        displayID: UInt32?
+    ) {
+        self.identity = identity
+        self.title = title
+        self.bounds = bounds
+        self.isMinimized = isMinimized
+        self.isOnScreen = isOnScreen
+        self.displayID = displayID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case identity, title, bounds
+        case isMinimized = "is_minimized"
+        case isOnScreen = "is_on_screen"
+        case displayID = "display_id"
+    }
 }
 
 public enum PermissionState: String, Codable, Equatable, Sendable {

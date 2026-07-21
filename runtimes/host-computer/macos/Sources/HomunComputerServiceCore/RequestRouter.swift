@@ -4,6 +4,7 @@ import HomunComputerProtocol
 public struct RequestRouter: Sendable {
     private let authenticator: SessionAuthenticator
     private let permissionProbe: any PermissionProbing
+    private let inventory: any AppInventoryProviding
 
     public init(
         sessionToken: String,
@@ -11,6 +12,17 @@ public struct RequestRouter: Sendable {
     ) {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
         self.permissionProbe = permissionProbe
+        inventory = SystemAppInventory()
+    }
+
+    init(
+        sessionToken: String,
+        permissionProbe: any PermissionProbing,
+        inventory: any AppInventoryProviding
+    ) {
+        authenticator = SessionAuthenticator(expectedToken: sessionToken)
+        self.permissionProbe = permissionProbe
+        self.inventory = inventory
     }
 
     public func route(_ body: Data) -> Data {
@@ -53,6 +65,8 @@ public struct RequestRouter: Sendable {
                 "capabilities": .array([
                     .string("permission_status"),
                     .string("permission_present"),
+                    .string("list_apps"),
+                    .string("list_windows"),
                 ]),
             ]))
         case .permissionStatus:
@@ -67,7 +81,35 @@ public struct RequestRouter: Sendable {
                 id: request.id,
                 result: permissionProbe.present(permission).jsonValue
             )
+        case .listApps:
+            let includeBackground: Bool
+            if
+                case let .object(params) = request.params,
+                case let .bool(value)? = params["include_background"]
+            {
+                includeBackground = value
+            } else {
+                includeBackground = false
+            }
+            let resolved = inventory.listApplications(includeBackground: includeBackground)
+            return .success(id: request.id, result: .object([
+                "apps": try encodeJSONValue(resolved.items),
+                "truncated": .bool(resolved.truncated),
+            ]))
+        case .listWindows:
+            let resolved = inventory.listWindows()
+            return .success(id: request.id, result: .object([
+                "windows": try encodeJSONValue(resolved.items),
+                "truncated": .bool(resolved.truncated),
+            ]))
         }
+    }
+
+    private func encodeJSONValue<T: Encodable>(_ value: T) throws -> JSONValue {
+        try JSONDecoder.hostComputer.decode(
+            JSONValue.self,
+            from: JSONEncoder.hostComputer.encode(value)
+        )
     }
 
     private func extractID(from body: Data) -> UInt64 {

@@ -16,6 +16,75 @@ pub enum HostComputerMethod {
     Handshake,
     PermissionStatus,
     PermissionPresent,
+    ListApps,
+    ListWindows,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationIdentity {
+    pub pid: u32,
+    pub process_start_time_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivationPolicy {
+    Regular,
+    Accessory,
+    Prohibited,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostApplication {
+    pub identity: ApplicationIdentity,
+    pub display_name: String,
+    pub bundle_id: Option<String>,
+    pub activation_policy: ActivationPolicy,
+    pub is_active: bool,
+    pub is_hidden: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListAppsResult {
+    pub apps: Vec<HostApplication>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowIdentity {
+    pub pid: u32,
+    pub window_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostWindow {
+    pub identity: WindowIdentity,
+    pub title: Option<String>,
+    pub bounds: HostRect,
+    pub is_minimized: bool,
+    pub is_on_screen: bool,
+    pub display_id: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListWindowsResult {
+    pub windows: Vec<HostWindow>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -57,6 +57,10 @@ impl HostComputerTransport for RecordingTransport {
             })
             .unwrap(),
             HostComputerMethod::PermissionPresent => serde_json::json!({}),
+            HostComputerMethod::ListApps => serde_json::json!({"apps": [], "truncated": false}),
+            HostComputerMethod::ListWindows => {
+                serde_json::json!({"windows": [], "truncated": false})
+            }
         };
         Ok(RpcResponse::Success(RpcSuccessResponse {
             jsonrpc: JsonRpcVersion::V2,
