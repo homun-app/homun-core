@@ -3,9 +3,14 @@ import HomunComputerProtocol
 
 public struct RequestRouter: Sendable {
     private let authenticator: SessionAuthenticator
+    private let permissionProbe: any PermissionProbing
 
-    public init(sessionToken: String) {
+    public init(
+        sessionToken: String,
+        permissionProbe: any PermissionProbing = SystemPermissionProbe()
+    ) {
         authenticator = SessionAuthenticator(expectedToken: sessionToken)
+        self.permissionProbe = permissionProbe
     }
 
     public func route(_ body: Data) -> Data {
@@ -45,13 +50,23 @@ public struct RequestRouter: Sendable {
                 "helper_build": .string("0.1.0"),
                 "helper_pid": .number(Double(ProcessInfo.processInfo.processIdentifier)),
                 "host_os_version": .string(ProcessInfo.processInfo.operatingSystemVersionString),
-                "capabilities": .array([.string("permission_status")]),
+                "capabilities": .array([
+                    .string("permission_status"),
+                    .string("permission_present"),
+                ]),
             ]))
         case .permissionStatus:
-            return .success(id: request.id, result: .object([
-                "accessibility": .string("not_determined"),
-                "screen_recording": .string("not_determined"),
-            ]))
+            return .success(id: request.id, result: permissionProbe.status().jsonValue)
+        case .permissionPresent:
+            guard
+                case let .object(params) = request.params,
+                case let .string(rawPermission)? = params["permission"],
+                let permission = HostPermission(rawValue: rawPermission)
+            else { throw ProtocolFailure.invalidRequest }
+            return .success(
+                id: request.id,
+                result: permissionProbe.present(permission).jsonValue
+            )
         }
     }
 

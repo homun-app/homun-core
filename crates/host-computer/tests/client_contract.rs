@@ -56,6 +56,7 @@ impl HostComputerTransport for RecordingTransport {
                 screen_recording: PermissionState::Denied,
             })
             .unwrap(),
+            HostComputerMethod::PermissionPresent => serde_json::json!({}),
         };
         Ok(RpcResponse::Success(RpcSuccessResponse {
             jsonrpc: JsonRpcVersion::V2,

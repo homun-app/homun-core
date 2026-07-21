@@ -9,6 +9,41 @@ public enum JSONRPCVersion: String, Codable, Sendable {
 public enum HostComputerMethod: String, Codable, Sendable {
     case handshake
     case permissionStatus = "permission_status"
+    case permissionPresent = "permission_present"
+}
+
+public enum PermissionState: String, Codable, Equatable, Sendable {
+    case granted
+    case denied
+    case notDetermined = "not_determined"
+    case restricted
+}
+
+public enum HostPermission: String, Codable, Equatable, Sendable {
+    case accessibility
+    case screenRecording = "screen_recording"
+}
+
+public struct PermissionSnapshot: Codable, Equatable, Sendable {
+    public var accessibility: PermissionState
+    public var screenRecording: PermissionState
+
+    public init(accessibility: PermissionState, screenRecording: PermissionState) {
+        self.accessibility = accessibility
+        self.screenRecording = screenRecording
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case accessibility
+        case screenRecording = "screen_recording"
+    }
+
+    public var jsonValue: JSONValue {
+        .object([
+            "accessibility": .string(accessibility.rawValue),
+            "screen_recording": .string(screenRecording.rawValue),
+        ])
+    }
 }
 
 public struct RequestMeta: Codable, Equatable, Sendable {

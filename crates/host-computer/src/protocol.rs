@@ -15,6 +15,7 @@ pub enum JsonRpcVersion {
 pub enum HostComputerMethod {
     Handshake,
     PermissionStatus,
+    PermissionPresent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
