@@ -7227,7 +7227,7 @@ fn step_advance_tool_schema() -> serde_json::Value {
 /// leaves the app to a plain-text surface — chiefly a channel mirror (Telegram/WhatsApp).
 /// These markers (‹‹PLAN››, ‹‹ACT››, ‹‹ARTIFACT››, ‹‹REASONING››, ‹‹COMPOSIO_*››) are
 /// rendered by the app UI; a channel must never receive them raw.
-fn strip_chat_markers(text: &str) -> String {
+pub(crate) fn strip_chat_markers(text: &str) -> String {
     // Canonical stripper lives in the lib (shared with the in-app context renderer, caposaldo
     // #5). The channel mirror just wants the trimmed prose.
     strip_display_markers(text).trim().to_string()
@@ -25632,6 +25632,15 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
     ) -> Result<local_first_engine::ToolOutcome, String> {
+        if self
+            .turn_id
+            .is_some_and(crate::turn_executor::turn_is_cancelled)
+        {
+            return Ok(local_first_engine::ToolOutcome {
+                result: "TURN CANCELLED: no tool was executed.".to_string(),
+                effects: Default::default(),
+            });
+        }
         let objective_mode = objective_mode_for_execution(self.state, self.thread_id, self.prompt);
         if objective_blocks_tool(objective_mode, name, self.composio_writes) {
             return Ok(local_first_engine::ToolOutcome {
@@ -27587,7 +27596,8 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         }
     }
     let capability_route_for_runtime = capability_route.clone();
-    tokio::spawn(async move {
+    let abort_resume_id = resume_id.clone();
+    let engine_task = tokio::spawn(async move {
         let mut ls = local_first_engine::LoopState::new();
         ls.prompt_packets = prompt_packets;
         ls.messages = messages;
@@ -27845,6 +27855,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             .store(true, std::sync::atomic::Ordering::Relaxed);
         schedule_stream_registry_cleanup(resume_id.clone());
     });
+    if let Ok(mut map) = stream_abort_registry().lock() {
+        map.insert(abort_resume_id, engine_task.abort_handle());
+    }
 
     let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
         rx.recv().await.map(|item| (item, rx))
@@ -33341,6 +33354,13 @@ async fn run_agent_turn_into_message(
         .lock()
         .ok()
         .and_then(|map| map.get(&request_id).cloned());
+    if let Some(abort) = stream_abort_registry()
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&request_id).cloned())
+    {
+        crate::turn_executor::attach_turn_engine_abort(turn_id, abort);
+    }
 
     let body_task = tokio::spawn(async move {
         let _ = axum::body::to_bytes(response.into_body(), usize::MAX).await;
@@ -34910,6 +34930,27 @@ fn stream_registry()
     CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
+fn stream_abort_registry()
+-> &'static std::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>> {
+    static CELL: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>,
+    > = std::sync::OnceLock::new();
+    CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+pub(crate) fn abort_stream_generation(resume_id: &str) {
+    let abort = stream_abort_registry()
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(resume_id));
+    if let Some(abort) = abort {
+        abort.abort();
+    }
+    if let Ok(mut map) = stream_registry().lock() {
+        map.remove(resume_id);
+    }
+}
+
 fn stream_event_is_terminal(line: &str) -> bool {
     line.contains("\"type\":\"done\"") || line.contains("\"type\":\"error\"")
 }
@@ -34992,6 +35033,9 @@ fn schedule_stream_registry_cleanup(resume_id: String) {
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(300)).await;
         if let Ok(mut map) = stream_registry().lock() {
+            map.remove(&resume_id);
+        }
+        if let Ok(mut map) = stream_abort_registry().lock() {
             map.remove(&resume_id);
         }
     });

@@ -3,7 +3,10 @@
 //! Sibling of `execute_proactive_prompt_task`, generalized for the broker.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{
+    Arc, Mutex, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 
 use local_first_task_runtime::{
     AgentRunStatus, NewAgentRun, TaskRuntimeResult, TaskStore, TurnEventKind, broker::CancelNotify,
@@ -54,7 +57,44 @@ fn finalize_agent_run(
 /// and broker-owned.
 pub struct TurnBroadcast {
     pub tx: broadcast::Sender<TurnEvent>,
-    pub cancel: Arc<Notify>,
+    pub cancel: Arc<TurnCancellation>,
+    engine_abort: Mutex<Option<tokio::task::AbortHandle>>,
+}
+
+pub struct TurnCancellation {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+impl TurnCancellation {
+    fn new() -> Self {
+        Self {
+            cancelled: AtomicBool::new(false),
+            notify: Notify::new(),
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub async fn cancelled(&self) {
+        loop {
+            let notified = self.notify.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+            if self.is_cancelled() {
+                return;
+            }
+        }
+    }
 }
 
 /// One unit of the turn stream, sent over the broadcast channel.
@@ -77,8 +117,12 @@ const TURN_CHANNEL_CAPACITY: usize = 256;
 /// Returns the broadcast handle. Also registers a cancel Notify (used by CancelNotify impl).
 pub fn register_turn(turn_id: &str) -> Arc<TurnBroadcast> {
     let (tx, _rx) = broadcast::channel(TURN_CHANNEL_CAPACITY);
-    let cancel = Arc::new(Notify::new());
-    let broadcast = Arc::new(TurnBroadcast { tx, cancel });
+    let cancel = Arc::new(TurnCancellation::new());
+    let broadcast = Arc::new(TurnBroadcast {
+        tx,
+        cancel,
+        engine_abort: Mutex::new(None),
+    });
     if let Ok(mut map) = turn_broadcast_registry().lock() {
         map.insert(turn_id.to_string(), broadcast.clone());
     }
@@ -93,11 +137,29 @@ pub fn unregister_turn(turn_id: &str) {
 }
 
 /// Look up the cancel Notify for a turn (used by the gateway's CancelNotify impl).
-pub fn turn_cancel_notify(turn_id: &str) -> Option<Arc<Notify>> {
+pub fn turn_cancel_notify(turn_id: &str) -> Option<Arc<TurnCancellation>> {
     turn_broadcast_registry()
         .lock()
         .ok()
         .and_then(|map| map.get(turn_id).map(|b| b.cancel.clone()))
+}
+
+pub fn turn_is_cancelled(turn_id: &str) -> bool {
+    turn_cancel_notify(turn_id).is_some_and(|cancel| cancel.is_cancelled())
+}
+
+pub fn attach_turn_engine_abort(turn_id: &str, abort: tokio::task::AbortHandle) {
+    if let Ok(map) = turn_broadcast_registry().lock() {
+        if let Some(turn) = map.get(turn_id) {
+            if let Ok(mut slot) = turn.engine_abort.lock() {
+                if turn.cancel.is_cancelled() {
+                    abort.abort();
+                } else {
+                    *slot = Some(abort);
+                }
+            }
+        }
+    }
 }
 
 /// Fan-out helper: persist the event in turn_events (durable) AND broadcast it live.
@@ -143,9 +205,17 @@ pub struct GatewayCancelNotify;
 
 impl CancelNotify for GatewayCancelNotify {
     fn notify_cancel(&self, turn_id: &str) {
-        if let Some(n) = turn_cancel_notify(turn_id) {
-            n.notify_one();
+        if let Ok(map) = turn_broadcast_registry().lock() {
+            if let Some(turn) = map.get(turn_id) {
+                turn.cancel.cancel();
+                if let Ok(slot) = turn.engine_abort.lock() {
+                    if let Some(abort) = slot.as_ref() {
+                        abort.abort();
+                    }
+                }
+            }
         }
+        crate::abort_stream_generation(&format!("broker-{turn_id}"));
     }
 }
 
@@ -391,7 +461,7 @@ pub fn execute_chat_turn_task(
     let run = tokio::runtime::Handle::current().block_on(async {
         tokio::select! {
             biased;
-            _ = cancel.notified() => None,
+            _ = cancel.cancelled() => None,
             answer = crate::run_agent_turn_into_message_with_fanout(
                 state,
                 thread_id,
@@ -422,6 +492,20 @@ pub fn execute_chat_turn_task(
         && !answer.trim().is_empty()
         && answer.trim() != "No reply generated.";
     if cancelled {
+        if let Ok(store) = state.chat_store.lock() {
+            let partial = store
+                .message(thread_id, &visible_turn.assistant_message_id)
+                .ok()
+                .flatten()
+                .map(|message| crate::strip_chat_markers(&message.text))
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| "Operazione interrotta.".to_string());
+            let _ = store.set_message_text(
+                thread_id,
+                &visible_turn.assistant_message_id,
+                partial.trim(),
+            );
+        }
         finalize_agent_run(
             state,
             thread_id,
@@ -653,18 +737,36 @@ mod tests {
     fn cancel_notify_signals_executor() {
         let broadcast = register_turn("turn_test_cancel");
         let cancel = broadcast.cancel.clone();
+        GatewayCancelNotify.notify_cancel("turn_test_cancel");
+        assert!(cancel.is_cancelled());
+        assert!(turn_is_cancelled("turn_test_cancel"));
         let wait = std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let _ = tokio::time::timeout(
                     std::time::Duration::from_secs(1),
-                    cancel.notified(),
+                    cancel.cancelled(),
                 )
-                .await;
+                .await
+                .expect("latched cancellation must wake a late waiter");
             });
         });
-        GatewayCancelNotify.notify_cancel("turn_test_cancel");
         wait.join().unwrap();
         unregister_turn("turn_test_cancel");
+    }
+
+    #[tokio::test]
+    async fn cancel_notify_aborts_attached_engine_task() {
+        register_turn("turn_test_abort");
+        let task = tokio::spawn(async {
+            std::future::pending::<()>().await;
+        });
+        attach_turn_engine_abort("turn_test_abort", task.abort_handle());
+
+        GatewayCancelNotify.notify_cancel("turn_test_abort");
+
+        let error = task.await.expect_err("engine task must be aborted");
+        assert!(error.is_cancelled());
+        unregister_turn("turn_test_abort");
     }
 }
