@@ -911,7 +911,13 @@
     "computer": {
       "title": "Computer",
       "containedTitle": "Computer contenuto",
-      "macAppsTitle": "App Mac",
+      "macAppsTitle": "App del Mac",
+      "macAppsBeta": "Beta",
+      "macAppsOptIn": "Attiva App del Mac Beta",
+      "macAppsOptInHint": "Disattivata per impostazione predefinita. Homun può usare solo le app che autorizzi singolarmente.",
+      "macAppsAppleSiliconOnly": "Disponibile in beta sui Mac Apple Silicon.",
+      "macAppsDisabled": "App del Mac è disattivata",
+      "macAppsLocalScreenshot": "Le acquisizioni delle finestre restano su questo Mac e non vengono mai inviate a un modello.",
       "macAppsDescription": "Consenti a Homun di osservare o controllare solo le app che autorizzi esplicitamente su questo Mac.",
       "helper": "Helper nativo",
       "helperReady": "Disponibile · versione {{version}}",
@@ -931,7 +937,7 @@
       "authorize": "Autorizza app",
       "revoke": "Revoca",
       "noGrants": "Nessuna app Mac è autorizzata.",
-      "privacyNotice": "I modelli cloud ricevono per impostazione predefinita una struttura di accessibilità oscurata. Screenshot e valori protetti non vengono mai inviati.",
+      "privacyNotice": "I modelli ricevono solo una struttura di accessibilità limitata e oscurata. Le acquisizioni delle finestre e i valori protetti non vengono mai inviati.",
       "restrictions": "Campi protetti, schermate di autorizzazione, password manager e ogni input nel Terminale sono sempre bloccati. Mouse, trackpad o tastiera fisici mettono immediatamente Homun in pausa."
     },
     "activeProviderModel": "Modello attivo del provider",

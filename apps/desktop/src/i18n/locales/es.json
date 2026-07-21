@@ -891,7 +891,13 @@
     "computer": {
       "title": "Ordenador",
       "containedTitle": "Ordenador aislado",
-      "macAppsTitle": "Apps de Mac",
+      "macAppsTitle": "Apps del Mac",
+      "macAppsBeta": "Beta",
+      "macAppsOptIn": "Activar Apps del Mac Beta",
+      "macAppsOptInHint": "Desactivada de forma predeterminada. Homun solo puede usar las apps que autorizas individualmente.",
+      "macAppsAppleSiliconOnly": "Disponible en beta en Mac con Apple Silicon.",
+      "macAppsDisabled": "Apps del Mac está desactivada",
+      "macAppsLocalScreenshot": "Las capturas de ventanas permanecen en este Mac y nunca se envían a un modelo.",
       "macAppsDescription": "Permite que Homun observe o controle únicamente las apps que apruebes expresamente en este Mac.",
       "helper": "Servicio nativo",
       "helperReady": "Disponible · versión {{version}}",
@@ -911,7 +917,7 @@
       "authorize": "Autorizar app",
       "revoke": "Revocar",
       "noGrants": "No hay apps de Mac autorizadas.",
-      "privacyNotice": "Los modelos en la nube reciben por defecto una estructura de accesibilidad redactada. Las capturas y los valores seguros nunca se envían.",
+      "privacyNotice": "Los modelos reciben solo una estructura de accesibilidad limitada y redactada. Las capturas de ventanas y los valores seguros nunca se envían.",
       "restrictions": "Los campos seguros, pantallas de autorización, gestores de contraseñas y cualquier entrada de Terminal están siempre bloqueados. La entrada física pausa Homun al instante."
     },
     "activeProviderModel": "Modelo del proveedor activo",

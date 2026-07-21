@@ -5373,9 +5373,10 @@ function MacAppsSettings() {
   const refreshHostComputer = async () => {
     const nextStatus = await hostComputerStatus();
     setStatus(nextStatus);
-    if (!nextStatus.available) {
+    if (!nextStatus.enabled || !nextStatus.available) {
       setApps([]);
       setGrants([]);
+      setSelectedBundle("");
       return;
     }
     const [nextApps, nextGrants] = await Promise.all([hostComputerApps(), hostComputerGrants()]);
@@ -5386,8 +5387,35 @@ function MacAppsSettings() {
   useEffect(() => {
     void refreshHostComputer().catch(() => setStatus(null));
     const id = window.setInterval(() => void refreshHostComputer().catch(() => {}), 5000);
-    return () => window.clearInterval(id);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshHostComputer().catch(() => {});
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
   }, []);
+
+  const changeOptIn = async (next: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await coreBridge.setRuntimeSettings({ mac_apps_beta_enabled: next });
+      if (!next) {
+        setApps([]);
+        setGrants([]);
+        setSelectedBundle("");
+      }
+      await refreshHostComputer();
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const selectedApp = apps.find((app) => app.bundle_id === selectedBundle);
   const permissionRow = (
@@ -5425,29 +5453,52 @@ function MacAppsSettings() {
 
   return (
     <section className="host-computer-settings" aria-labelledby="host-computer-title">
-      <div className="set-section-label" id="host-computer-title">
-        {t("settings.computer.macAppsTitle")}
+      <div className="set-section-label host-computer-heading" id="host-computer-title">
+        <span>{t("settings.computer.macAppsTitle")}</span>
+        <span className="set-badge muted">{t("settings.computer.macAppsBeta")}</span>
       </div>
       <p className="set-hint">{t("settings.computer.macAppsDescription")}</p>
-      <div className="set-rows host-computer-permissions" aria-live="polite">
-        <div className="set-row">
-          <div>
-            <div className="rk">{t("settings.computer.helper")}</div>
-            <div className="rv">
-              {status?.available
-                ? t("settings.computer.helperReady", { version: status.helper_version ?? "—" })
-                : t("settings.computer.helperUnavailable")}
-            </div>
-          </div>
-          <span className={`set-badge ${status?.ready ? "green" : "muted"}`}>
-            {status?.ready ? t("settings.computer.ready") : t("settings.computer.setupRequired")}
-          </span>
-        </div>
-        {permissionRow("accessibility", status?.accessibility ?? "not_determined")}
-        {permissionRow("screen_recording", status?.screen_recording ?? "not_determined")}
-      </div>
+      <p className="set-hint host-computer-beta-copy">{t("settings.computer.macAppsLocalScreenshot")}</p>
 
-      {status?.available && (
+      {status?.supported === false ? (
+        <p className="set-hint host-computer-unsupported">
+          {t("settings.computer.macAppsAppleSiliconOnly")}
+        </p>
+      ) : (
+        <div className="host-computer-opt-in" aria-busy={busy}>
+          <div>
+            <div className="rk">{t("settings.computer.macAppsOptIn")}</div>
+            <div className="rv host-computer-beta-copy">{t("settings.computer.macAppsOptInHint")}</div>
+          </div>
+          <Toggle on={Boolean(status?.enabled)} onChange={(next) => void changeOptIn(next)} />
+        </div>
+      )}
+
+      {status?.supported && !status.enabled && (
+        <p className="set-hint host-computer-disabled">{t("settings.computer.macAppsDisabled")}</p>
+      )}
+
+      {status?.supported && status.enabled && (
+        <div className="set-rows host-computer-permissions" aria-live="polite">
+          <div className="set-row">
+            <div>
+              <div className="rk">{t("settings.computer.helper")}</div>
+              <div className="rv">
+                {status.available
+                  ? t("settings.computer.helperReady", { version: status.helper_version ?? "—" })
+                  : t("settings.computer.helperUnavailable")}
+              </div>
+            </div>
+            <span className={`set-badge ${status.ready ? "green" : "muted"}`}>
+              {status.ready ? t("settings.computer.ready") : t("settings.computer.setupRequired")}
+            </span>
+          </div>
+          {permissionRow("accessibility", status.accessibility)}
+          {permissionRow("screen_recording", status.screen_recording)}
+        </div>
+      )}
+
+      {status?.enabled && status.available && (
         <>
           <div className="set-section-label">{t("settings.computer.appGrants")}</div>
           <div className="host-computer-grant-picker">
@@ -5507,6 +5558,7 @@ function MacAppsSettings() {
                     setBusy(true);
                     try {
                       await revokeHostComputerGrant(grant.grant_id);
+                      setSelectedBundle("");
                       await refreshHostComputer();
                     } finally {
                       setBusy(false);

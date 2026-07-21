@@ -5169,6 +5169,9 @@ function roundedSeconds(value: number) {
 export type HostComputerPermissionState = "granted" | "denied" | "not_determined" | "restricted";
 export interface HostComputerStatus {
   available: boolean;
+  supported: boolean;
+  enabled: boolean;
+  state: "unsupported" | "disabled" | "setup" | "ready" | "active" | "paused" | "error";
   helper_version: string | null;
   accessibility: HostComputerPermissionState;
   screen_recording: HostComputerPermissionState;

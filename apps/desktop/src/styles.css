@@ -15115,6 +15115,26 @@ body.resizing-drawer {
   padding-top: 4px;
 }
 
+.host-computer-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.host-computer-opt-in {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.host-computer-opt-in > div { min-width: 0; }
+.host-computer-beta-copy { max-width: 72ch; }
+.host-computer-disabled,
+.host-computer-unsupported { margin-top: 12px; }
+
 .host-computer-permissions,
 .host-computer-settings > .set-rows {
   border-top: 1px solid var(--line);
@@ -15157,6 +15177,7 @@ body.resizing-drawer {
 
 @media (max-width: 760px) {
   .host-computer-grant-picker { grid-template-columns: 1fr; }
+  .host-computer-opt-in { align-items: flex-start; }
 }
 .set-card.rows { padding: 0; overflow: hidden; }
 .set-card.rows > .set-row,

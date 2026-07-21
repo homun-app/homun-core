@@ -185,10 +185,17 @@ for (const locale of ["en", "it", "es", "fr", "de"]) {
   assertContains(`src/i18n/locales/${locale}.json`, '"change_role_preference"', `${locale} must translate the preference suggestion action`);
   assertContains(`src/i18n/locales/${locale}.json`, '"dismiss"', `${locale} must translate suggestion dismissal`);
   assertContains(`src/i18n/locales/${locale}.json`, '"macAppsTitle"', `${locale} must translate Mac Apps settings`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"macAppsBeta"', `${locale} must label Mac Apps as beta`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"macAppsOptIn"', `${locale} must translate the explicit beta opt-in`);
+  assertContains(`src/i18n/locales/${locale}.json`, '"macAppsLocalScreenshot"', `${locale} must explain the local-only screenshot policy`);
   assertContains(`src/i18n/locales/${locale}.json`, '"restrictions"', `${locale} must explain host control restrictions`);
 }
 assertContains("src/components/SettingsView.tsx", "settings.computer.containedTitle", "contained computer must remain explicit");
 assertContains("src/components/SettingsView.tsx", "settings.computer.macAppsTitle", "host apps need a separate section");
+assertContains("src/components/SettingsView.tsx", "mac_apps_beta_enabled", "Mac Apps must expose an explicit persisted opt-in");
+assertContains("src/components/SettingsView.tsx", 'window.addEventListener("focus", refreshWhenVisible)', "Mac Apps must refresh after returning from System Settings");
+assertContains("src/components/SettingsView.tsx", 'document.addEventListener("visibilitychange", refreshWhenVisible)', "Mac Apps must refresh when the app becomes visible");
+assertContains("src/lib/coreBridge.ts", 'state: "unsupported" | "disabled" | "setup" | "ready" | "active" | "paused" | "error"', "host status must expose the canonical beta state machine");
 assertContains("src/components/SettingsView.tsx", "revokeHostComputerGrant", "host app grants must be revocable");
 assertContains("src/components/SettingsView.tsx", "presentHostComputerPermission", "TCC prompts must require a local button click");
 assertNotContains("src/components/SettingsView.tsx", "grantHostComputerApp(session", "an agent session must never create grants");
