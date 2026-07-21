@@ -1,4 +1,5 @@
 import ApplicationServices
+import AppKit
 import Foundation
 import HomunComputerProtocol
 
@@ -7,6 +8,12 @@ public final class SystemAXNode: AXActionTarget {
 
     public init(element: AXUIElement) {
         self.element = element
+    }
+
+    public var bundleID: String? {
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success else { return nil }
+        return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
     }
 
     public var role: String { stringAttribute("AXRole") ?? "AXUnknown" }

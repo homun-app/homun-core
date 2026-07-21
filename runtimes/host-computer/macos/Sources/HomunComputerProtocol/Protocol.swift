@@ -542,6 +542,8 @@ public enum ProtocolFailure: Error, Equatable, Sendable {
     case helperUnavailable
     case staleSnapshot
     case secureInputBlocked
+    case terminalInputBlocked
+    case approvalRequired
 
     public var errorCode: HostComputerErrorCode {
         switch self {
@@ -555,6 +557,8 @@ public enum ProtocolFailure: Error, Equatable, Sendable {
         case .helperUnavailable: .helperUnavailable
         case .staleSnapshot: .staleSnapshot
         case .secureInputBlocked: .secureInputBlocked
+        case .terminalInputBlocked: .terminalInputBlocked
+        case .approvalRequired: .approvalRequired
         }
     }
 }

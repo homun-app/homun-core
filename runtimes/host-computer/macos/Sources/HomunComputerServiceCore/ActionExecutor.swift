@@ -8,13 +8,17 @@ public enum ActionFailure: Error, Equatable, Sendable {
     case unsupportedAction
     case invalidValue
     case nativeActionFailed
+    case protectedTarget
+    case terminalInputBlocked
 }
 
 public struct ActionExecutor: Sendable {
     private let registry: ElementRegistry
+    private let policy: ProtectedTargetPolicy
 
-    public init(registry: ElementRegistry) {
+    public init(registry: ElementRegistry, policy: ProtectedTargetPolicy = ProtectedTargetPolicy()) {
         self.registry = registry
+        self.policy = policy
     }
 
     public func execute(_ request: ActionRequest) throws -> ActionResult {
@@ -28,7 +32,20 @@ public struct ActionExecutor: Sendable {
             index: request.target.index
         ) else { throw ActionFailure.targetNotFound }
         guard node.enabled else { throw ActionFailure.disabledTarget }
-        guard !isSensitive(node) else { throw ActionFailure.secureInputBlocked }
+        do {
+            try policy.authorize(
+                bundleID: node.bundleID,
+                role: node.role,
+                subrole: node.subrole,
+                action: request.action
+            )
+        } catch ProtectedTargetFailure.secureInputBlocked {
+            throw ActionFailure.secureInputBlocked
+        } catch ProtectedTargetFailure.terminalInputBlocked {
+            throw ActionFailure.terminalInputBlocked
+        } catch {
+            throw ActionFailure.protectedTarget
+        }
         guard let target = node as? any AXActionTarget else {
             throw ActionFailure.unsupportedAction
         }
@@ -56,11 +73,6 @@ public struct ActionExecutor: Sendable {
             generation: request.target.generation
         )
         return ActionResult(snapshotRequired: true)
-    }
-
-    private func isSensitive(_ node: any AXNodeSource) -> Bool {
-        node.role.localizedCaseInsensitiveContains("secure")
-            || (node.subrole?.localizedCaseInsensitiveContains("secure") ?? false)
     }
 
     private func nativeName(for action: SemanticAction) -> String? {

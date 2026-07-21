@@ -2,6 +2,7 @@ import Foundation
 import HomunComputerProtocol
 
 public protocol AXNodeSource: AnyObject {
+    var bundleID: String? { get }
     var role: String { get }
     var subrole: String? { get }
     var label: String? { get }
@@ -22,6 +23,7 @@ public protocol AXActionTarget: AXNodeSource {
 }
 
 public final class SyntheticAXNode: AXActionTarget {
+    public var bundleID: String?
     public var role: String
     public var subrole: String?
     public var label: String?
@@ -38,6 +40,7 @@ public final class SyntheticAXNode: AXActionTarget {
 
     public init(
         role: String,
+        bundleID: String? = nil,
         subrole: String? = nil,
         label: String? = nil,
         help: String? = nil,
@@ -51,6 +54,7 @@ public final class SyntheticAXNode: AXActionTarget {
         children: [any AXNodeSource] = []
     ) {
         self.role = role
+        self.bundleID = bundleID
         self.subrole = subrole
         self.label = label
         self.help = help
@@ -200,6 +204,7 @@ private struct BuildState {
     }
 
     static func semanticActions(_ names: [String], sensitive: Bool) -> [SemanticAction] {
+        if sensitive { return [] }
         let mapped = names.compactMap { name -> SemanticAction? in
             switch name {
             case "AXPress": .press
@@ -216,7 +221,6 @@ private struct BuildState {
             }
         }
         return Array(Set(mapped))
-            .filter { !(sensitive && $0 == .setValue) }
             .sorted { $0.rawValue < $1.rawValue }
     }
 }

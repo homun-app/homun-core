@@ -164,6 +164,10 @@ public struct RequestRouter: Sendable {
                 throw ProtocolFailure.targetNotFound
             } catch ActionFailure.secureInputBlocked {
                 throw ProtocolFailure.secureInputBlocked
+            } catch ActionFailure.terminalInputBlocked {
+                throw ProtocolFailure.terminalInputBlocked
+            } catch ActionFailure.protectedTarget {
+                throw ProtocolFailure.approvalRequired
             } catch {
                 throw ProtocolFailure.invalidRequest
             }
@@ -201,6 +205,8 @@ public struct RequestRouter: Sendable {
         case .helperUnavailable: "window capture failed"
         case .staleSnapshot: "snapshot is stale"
         case .secureInputBlocked: "secure input is blocked"
+        case .terminalInputBlocked: "terminal input is blocked"
+        case .approvalRequired: "protected target is blocked"
         }
     }
 }
