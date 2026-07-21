@@ -40,6 +40,9 @@ pub struct PromptSnapshot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentExecutionEvent {
+    SemanticDecision {
+        payload: Value,
+    },
     PromptSnapshot {
         round: usize,
         snapshot: PromptSnapshot,
@@ -89,6 +92,7 @@ pub enum AgentExecutionEvent {
 impl AgentExecutionEvent {
     pub fn into_parts(self) -> (&'static str, Option<usize>, Value) {
         match self {
+            Self::SemanticDecision { payload } => ("semantic_decision", None, payload),
             Self::PromptSnapshot { round, snapshot } => (
                 "prompt_snapshot",
                 Some(round),

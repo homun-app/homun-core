@@ -412,7 +412,6 @@ mod agent_run_api_tests {
             load_runtime_plan_from_state(&state, Some(&thread.thread_id))[0]["title"],
             "owned"
         );
-        assert!(thread_has_active_runtime_plan(&state, Some(&thread.thread_id)));
     }
 
     #[test]
@@ -2932,7 +2931,7 @@ async fn chat_messages(
     ))
 }
 
-async fn activate_remote_approvals_from_message(
+pub(crate) async fn activate_remote_approvals_from_message(
     state: &AppState,
     thread_id: &str,
     message: &ChatMessage,
@@ -3371,35 +3370,29 @@ fn briefing_items_for_authorized_source(
 #[cfg(test)]
 fn gather_profile_memory_for_prompt(
     state: &AppState,
-    user_message: &str,
+    intent: &semantic_decision::MemoryIntent,
 ) -> (Vec<String>, Vec<String>) {
-    gather_profile_memory_with_options(
-        state,
-        profile_memory_personal_preferences_only_for_prompt(user_message),
-    )
+    gather_profile_memory_with_options(state, !intent.search_personal, intent.search_project)
 }
 
-fn gather_profile_memory_for_prompt_with_provenance(
+fn gather_profile_memory_for_intent_with_provenance(
     state: &AppState,
-    user_message: &str,
+    intent: &semantic_decision::MemoryIntent,
 ) -> (Vec<BriefingMemoryItem>, Vec<BriefingMemoryItem>) {
-    gather_profile_memory_with_provenance(
-        state,
-        profile_memory_personal_preferences_only_for_prompt(user_message),
-    )
-}
-
-fn profile_memory_personal_preferences_only_for_prompt(user_message: &str) -> bool {
-    !should_inject_cross_thread_memory_for_prompt(user_message)
+    gather_profile_memory_with_provenance(state, !intent.search_personal, intent.search_project)
 }
 
 #[cfg(test)]
 fn gather_profile_memory_with_options(
     state: &AppState,
     personal_preferences_only_override: bool,
+    include_project: bool,
 ) -> (Vec<String>, Vec<String>) {
-    let (personal, project) =
-        gather_profile_memory_with_provenance(state, personal_preferences_only_override);
+    let (personal, project) = gather_profile_memory_with_provenance(
+        state,
+        personal_preferences_only_override,
+        include_project,
+    );
     (
         personal.into_iter().map(|item| item.text).collect(),
         project.into_iter().map(|item| item.text).collect(),
@@ -3409,6 +3402,7 @@ fn gather_profile_memory_with_options(
 fn gather_profile_memory_with_provenance(
     state: &AppState,
     personal_preferences_only_override: bool,
+    include_project: bool,
 ) -> (Vec<BriefingMemoryItem>, Vec<BriefingMemoryItem>) {
     let facade = memory_facade(state);
     let user = gateway_memory_user_id();
@@ -3436,7 +3430,7 @@ fn gather_profile_memory_with_provenance(
             )
         })
         .unwrap_or_default();
-    let project = in_project
+    let project = (in_project && include_project)
         .then(|| {
             sources
                 .iter()
@@ -3560,127 +3554,29 @@ fn format_memory_block(
     format_memory_block_with_provenance(open_loops, &personal, &project, budget).block
 }
 
-/// Is this exchange worth mining for memory? Skips trivial turns (greetings,
-/// acks, very short messages) to avoid noise and needless extractor calls.
-fn is_salient_exchange(user_message: &str) -> bool {
-    let trimmed = user_message.trim();
-    if trimmed.chars().count() < 12 {
-        return false;
-    }
-    let low = trimmed.to_lowercase();
-    const TRIVIAL: [&str; 12] = [
-        "grazie", "ok", "okay", "va bene", "perfetto", "ciao", "sì", "si", "no", "thanks",
-        "ottimo", "capito",
-    ];
-    !TRIVIAL.contains(&low.as_str())
+fn memory_intent_for_execution(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> semantic_decision::MemoryIntent {
+    objective_contract_for_execution(state, thread_id)
+        .as_ref()
+        .and_then(semantic_decision::semantic_decision_from_contract)
+        .map(|validated| validated.decision.memory_intent)
+        .unwrap_or_else(semantic_decision::MemoryIntent::safe_default)
 }
 
-/// A SHORT user reply that AFFIRMS or CORRECTS what the assistant just proposed —
-/// "sì", "esatto", "confermo", or a correction like "no, è una V9". On its own such
-/// a reply is NOT salient (is_salient_exchange drops it as trivial), so a confirmed
-/// fact the assistant had only hypothesized ("la tua moto è una Moto Guzzi V7?" →
-/// "sì") would EVAPORATE and be re-asked forever. Paired with the prior assistant
-/// turn it IS durable knowledge, so learn_from_exchange keeps the turn and the
-/// extractor promotes the fact to committed.
-///
-/// HEURISTIC — deliberately permissive and easy to tune. It only gates whether the
-/// background extractor *sees* the turn; the extractor remains the final judge of
-/// whether a durable fact is actually present. So a false positive costs one cheap
-/// background call, while a false negative silently loses a confirmation — we bias
-/// toward catching. Matches on the LEADING token so "sì, esatto" and "no, è una V9"
-/// both qualify.
-fn is_confirmation_reply(user_message: &str) -> bool {
-    let low = user_message.trim().to_lowercase();
-    // Bare confirmations are short; a long reply stands on its own (and is already
-    // handled by is_salient_exchange).
-    if low.is_empty() || low.split_whitespace().count() > 8 {
-        return false;
-    }
-    let lead = low
-        .split(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | '!' | ';' | ':'))
-        .find(|t| !t.is_empty())
-        .unwrap_or("");
-    // Affirmations + corrections. Keep this list focused: strong fact-confirming
-    // words, not weak acks like "ok"/"va bene" (those rarely confirm a fact and
-    // would just add noise).
-    const CONFIRM_LEAD: [&str; 17] = [
-        "sì",
-        "si",
-        "sí",
-        "esatto",
-        "esattamente",
-        "giusto",
-        "corretto",
-        "confermo",
-        "confermato",
-        "vero",
-        "yes",
-        "yep",
-        "yup",
-        "no",
-        "non",
-        "sbagliato",
-        "macché",
-    ];
-    CONFIRM_LEAD.contains(&lead)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemoryInjectionPolicy {
+    include_current_thread: bool,
+    include_cross_thread: bool,
 }
 
-fn should_inject_open_loops_for_prompt(user_message: &str) -> bool {
-    should_inject_cross_thread_memory_for_prompt(user_message)
-}
-
-fn should_inject_cross_thread_memory_for_prompt(user_message: &str) -> bool {
-    let low = user_message.trim().to_lowercase();
-    if low.is_empty() {
-        return false;
+fn memory_injection_policy(intent: &semantic_decision::MemoryIntent) -> MemoryInjectionPolicy {
+    MemoryInjectionPolicy {
+        include_current_thread: intent.use_current_thread,
+        include_cross_thread: !intent.standalone_choice_request
+            && (intent.search_personal || intent.search_project),
     }
-    let compact = low.split_whitespace().collect::<Vec<_>>().join(" ");
-    if is_standalone_choice_card_request(&compact) {
-        return false;
-    }
-    if is_confirmation_reply(&compact) {
-        return false;
-    }
-    // Choice-card answers are often terse labels. They must be interpreted from
-    // the current thread history, not from global unfinished work.
-    const SHORT_CHOICE_REPLIES: [&str; 12] = [
-        "ok",
-        "okay",
-        "va bene",
-        "procedi",
-        "conferma",
-        "confermato",
-        "annulla",
-        "cancella",
-        "stop",
-        "cambio idea",
-        "non salvare",
-        "salva",
-    ];
-    if compact.split_whitespace().count() <= 3 && SHORT_CHOICE_REPLIES.contains(&compact.as_str()) {
-        return false;
-    }
-    true
-}
-
-fn is_standalone_choice_card_request(compact_lower_prompt: &str) -> bool {
-    let has_choice_card_language = compact_lower_prompt.contains("card di scelta")
-        || compact_lower_prompt.contains("choice card")
-        || compact_lower_prompt.contains("choices card")
-        || compact_lower_prompt.contains("card scelta");
-    let asks_to_choose = compact_lower_prompt.starts_with("fammi scegliere")
-        || compact_lower_prompt.starts_with("fai scegliere")
-        || compact_lower_prompt.starts_with("let me choose")
-        || compact_lower_prompt.starts_with("make me choose")
-        || (compact_lower_prompt.contains("scegliere tra")
-            && compact_lower_prompt.contains("non una lista"))
-        || (compact_lower_prompt.contains("choose between")
-            && compact_lower_prompt.contains("not a text"));
-    has_choice_card_language && asks_to_choose
-}
-
-fn should_inject_relevant_memory_for_prompt(user_message: &str) -> bool {
-    should_inject_cross_thread_memory_for_prompt(user_message)
 }
 
 
@@ -5745,6 +5641,18 @@ fn scope_from_active_workspace() -> MemoryScope {
     }
 }
 
+fn memory_scope_for_turn(thread_id: Option<&str>) -> MemoryScope {
+    let project = gateway_memory_workspace_id();
+    match thread_id {
+        Some(thread_id) if !thread_id.trim().is_empty() => MemoryScope::Thread {
+            project,
+            thread_id: thread_id.to_string(),
+        },
+        _ if project.as_str() == PERSONAL_WORKSPACE => MemoryScope::Personal,
+        _ => MemoryScope::Project(project),
+    }
+}
+
 /// Impl in-process di [`MemoryRecallService`] che **delega** alle funzioni
 /// esistenti del gateway senza cambiarne il behaviour (ADR 0022, Tappa 1).
 ///
@@ -5961,7 +5869,7 @@ impl local_first_memory::LlmClient for GatewayLlmClient {
 }
 
 impl MemoryRecallService for InProcessMemoryRecallService {
-    fn brief(&self, scope: &MemoryScope, user_message: &str) -> BriefingPack {
+    fn brief(&self, scope: &MemoryScope, _user_message: &str) -> BriefingPack {
         // `scope` è portato per il contratto (isolation by construction); l'impl delegante
         // usa il workspace attivo del gateway, coerente con `relevant_memory_for_prompt`.
         // Lo scope diventa realmente autoritativo in Tappa 4. Qui l'assert garantisce
@@ -5976,7 +5884,21 @@ impl MemoryRecallService for InProcessMemoryRecallService {
         // Hit solo se generation AND prompt_fingerprint combaciano.
         let user = gateway_memory_user_id();
         let workspace = gateway_memory_workspace_id();
-        let fingerprint = prompt_fingerprint(user_message);
+        let memory_intent = scope
+            .thread_id()
+            .map(|thread_id| memory_intent_for_execution(&self.state, Some(thread_id)))
+            .unwrap_or(semantic_decision::MemoryIntent {
+                use_current_thread: true,
+                search_personal: true,
+                search_project: true,
+                vault_value_requested: false,
+                standalone_choice_request: false,
+                durable_memory_candidate: false,
+            });
+        let fingerprint = prompt_fingerprint(
+            &serde_json::to_string(&memory_intent).unwrap_or_else(|_| "memory-intent".to_string()),
+        );
+        let injection_policy = memory_injection_policy(&memory_intent);
         let scope_key = format!("{}|{}", user.as_str(), workspace.as_str());
         for attempt in 0..=1 {
             let generation = memory_facade(&self.state).briefing_generation(&user, &workspace);
@@ -6006,8 +5928,8 @@ impl MemoryRecallService for InProcessMemoryRecallService {
             }
 
             let (memory_personal, memory_project) =
-                gather_profile_memory_for_prompt_with_provenance(&self.state, user_message);
-            let memory_open_loops = if should_inject_open_loops_for_prompt(user_message) {
+                gather_profile_memory_for_intent_with_provenance(&self.state, &memory_intent);
+            let memory_open_loops = if injection_policy.include_cross_thread {
                 gather_open_loops(&self.state, 6)
             } else {
                 Vec::new()
@@ -7342,8 +7264,8 @@ pub(crate) fn strip_chat_markers(text: &str) -> String {
 ///
 /// This is the single source of truth shared by the displayed ‹‹PLAN›› marker AND the
 /// persisted runtime plan, so the two can never diverge (a text-only reconcile would show
-/// the user 7/7 while the durable plan stays at 3/7 → `thread_has_active_runtime_plan` keeps
-/// firing and the NEXT turn falsely resumes it).
+/// the user 7/7 while the durable plan stays at 3/7, leaving the NEXT turn to falsely resume
+/// an already-delivered plan).
 ///
 /// It runs ONLY on the delivery path (25127/25242) — after the round loop has already DECIDED
 /// to stop (nudges spent, round budget hit, or the model concluded). At that instant nothing
@@ -7449,7 +7371,7 @@ fn plan_stall_abort_enabled() -> bool {
 /// When the over-running guard accepts the answer with the last
 /// step still open, reconcile that step to `done` so the PERSISTED runtime plan reflects the
 /// delivered work. Without it the plan stays "active" and the NEXT turn falsely resumes it
-/// (`thread_has_active_runtime_plan` only goes quiet when the plan is complete→Stale) — the
+/// (the runtime-plan state only goes quiet when the plan is complete→Stale) — the
 /// "lo segue e non lo segue" symptom. Default-on after live evidence showed the Plan panel
 /// stuck at 1/2 while the delivered answer had already registered the last-step failure.
 /// `HOMUN_PLAN_RECONCILE=0`/`off` remains as a diagnostic opt-out.
@@ -8108,7 +8030,11 @@ pub(crate) fn resolve_semantic_decision(
         capabilities: &capabilities,
     };
     let semantic_prompt = semantic_decision::semantic_decision_prompt(&input);
-    let resolved = resolve_role_for_task(prompt, "orchestrator");
+    // Semantic interpretation is part of orchestration itself: honor the canonical
+    // orchestrator binding instead of asking the per-task model router to select a
+    // second model before the turn has even been understood. Besides respecting a
+    // manual role binding, this keeps the contract preflight bounded and predictable.
+    let resolved = load_provider_registry().resolve_role("orchestrator");
     let router = resolved
         .as_ref()
         .map(build_router_for_resolved)
@@ -9404,21 +9330,6 @@ fn thread_user_message_count_fail_open(state: &AppState, thread_id: Option<&str>
         .unwrap_or(0)
 }
 
-fn workflow_router_instruction_for_decision(decision: &WorkflowRouteDecision) -> Option<String> {
-    match decision {
-        WorkflowRouteDecision::Workflow {
-            workflow_id,
-            tool_name,
-            scaffolding_tier,
-        } => Some(format!(
-            "WORKFLOW ROUTER: this request is routed by the harness to workflow `{workflow_id}` \
-with `{scaffolding_tier}` scaffolding. Call `{tool_name}` exactly once with the user's brief; \
-do not create a separate plan, do not decompose it into lower-level tools, and do not use shell/file tools for this workflow."
-        )),
-        WorkflowRouteDecision::AgentLoop => None,
-    }
-}
-
 fn capability_router_instruction_for_decision(
     decision: &CapabilityRouteDecision,
 ) -> Option<String> {
@@ -9557,35 +9468,8 @@ fn runtime_plan_memory_matches(memory: &MemoryRecord, thread_key: &str) -> bool 
         && memory.metadata.get("thread_id").and_then(|v| v.as_str()) == Some(thread_key)
 }
 
-/// True if this thread has an IN-PROGRESS runtime plan. A completed plan is marked
-/// Stale (see `upsert_runtime_plan_memory`) and excluded by `runtime_plan_memory_matches`,
-/// so this only fires while a plan is genuinely open.
-///
-/// The plan is harness-owned control flow (see docs/architecture/agent-loop.md): an active
-/// plan must take precedence over heuristic workflow routing.
-/// Without this, a continuation turn can be routed into a one-shot workflow (`make_deck`),
-/// which prunes the plan's own tools (`update_plan`, `browser_navigate`) and dead-ends it.
-/// This behavior is model- and provider-independent.
-fn thread_has_active_runtime_plan(state: &AppState, thread_id: Option<&str>) -> bool {
-    let Some((user_id, workspace_id, thread_id)) = runtime_plan_control_scope(state, thread_id)
-    else {
-        return false;
-    };
-    state
-        .task_store
-        .lock()
-        .ok()
-        .and_then(|store| {
-            store
-                .load_runtime_plan(&user_id, &workspace_id, &thread_id)
-                .ok()
-                .flatten()
-        })
-        .is_some_and(|plan| plan.status == "open")
-}
-
 /// Load the thread's CANONICAL plan steps from the durable runtime-plan store (the same
-/// per-thread memory `thread_has_active_runtime_plan` matches). This is the authoritative
+/// per-thread runtime-plan memory represents). This is the authoritative
 /// cross-turn state: it's upserted on EVERY `update_plan`/`step_advance` (synchronously,
 /// before a turn ends), so a CONTINUATION turn can inherit `{done,doing,…}` even before the
 /// prior turn's ‹‹PLAN›› message has been persisted/streamed into the next turn's context.
@@ -14414,7 +14298,7 @@ fn recall_stream_payload_from_outcome(
     payload
 }
 
-fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
+fn recall_memory(state: &AppState, query: &str, vault_value_requested: bool) -> RecallOutcome {
     let query = query.trim();
     let empty = |msg: &str| -> RecallOutcome {
         RecallOutcome {
@@ -14553,7 +14437,13 @@ fn recall_memory(state: &AppState, query: &str) -> RecallOutcome {
     let has_hits = !lines.is_empty();
     let response = match lock_vault_store(state) {
         Ok(vault_store) => {
-            recall_memory_response_with_vault_fallback(&vault_store, query, lines, in_project)
+            recall_memory_response_with_vault_fallback(
+                &vault_store,
+                query,
+                lines,
+                in_project,
+                vault_value_requested,
+            )
         }
         Err(_) if lines.is_empty() => format!("No memories relevant to «{query}»."),
         Err(_) if in_project => format!("Memories relevant to THIS project:\n{}", lines.join("\n")),
@@ -14579,6 +14469,7 @@ fn recall_memory_response_with_vault_fallback(
     query: &str,
     lines: Vec<String>,
     in_project: bool,
+    vault_value_requested: bool,
 ) -> String {
     let memory_block = if lines.is_empty() {
         format!("No memories relevant to «{query}».")
@@ -14588,7 +14479,7 @@ fn recall_memory_response_with_vault_fallback(
         format!("Relevant memories from memory:\n{}", lines.join("\n"))
     };
     let should_check_vault = lines.is_empty()
-        || query_should_offer_vault_reveal(query)
+        || vault_value_requested
         || (query_has_sensitive_vault_term(query) && memory_lines_mention_vault(&lines));
     if !should_check_vault {
         return memory_block;
@@ -14603,29 +14494,21 @@ fn recall_memory_response_with_vault_fallback(
     let vault_lines = vault_matches
         .into_iter()
         .map(|record| {
-            let marker = vault_reveal_marker(&record);
-            format!(
-                "- [{}] {} — {} ({})\n  reveal_card: {}",
-                record.category, record.label, record.redacted_preview, record.id, marker
-            )
+            let metadata = format!(
+                "- [{}] {} — {} ({})",
+                record.category, record.label, record.redacted_preview, record.id
+            );
+            if vault_value_requested {
+                format!("{metadata}\n  reveal_card: {}", vault_reveal_marker(&record))
+            } else {
+                metadata
+            }
         })
         .collect::<Vec<_>>()
         .join("\n");
     format!(
         "{memory_block}\n\nVault records matching the request (redacted metadata only; do NOT reveal or guess the secret value). If the user asked to see the value, you MUST copy the reveal_card marker exactly on its own line in your final answer so the UI can ask for the local PIN and reveal it locally:\n{vault_lines}"
     )
-}
-
-fn query_should_offer_vault_reveal(query: &str) -> bool {
-    let terms = vault_metadata_terms(query);
-    let has_sensitive_term = terms.iter().any(|term| vault_term_is_sensitive(term));
-    let asks_for_value = terms.iter().any(|term| {
-        matches!(
-            term.as_str(),
-            "qual" | "quale" | "mostra" | "vedere" | "visualizza" | "dimmi" | "dammi"
-        )
-    });
-    has_sensitive_term && asks_for_value
 }
 
 fn query_has_sensitive_vault_term(query: &str) -> bool {
@@ -21460,6 +21343,7 @@ struct ChatToolCtx<'a> {
     can_see_contacts: bool,
     can_see_calendar: bool,
     can_use_project_memory: bool,
+    vault_value_requested: bool,
     autonomous: bool,
     composio_writes: &'a std::collections::BTreeSet<String>,
     catalog_index: &'a [(String, String, serde_json::Value)],
@@ -24337,7 +24221,10 @@ contact: use only the messages from this chat. Do NOT reveal personal data of th
             // recalling + badge). Sostituisce il delta `‹‹ACT››🧠`.
             let st = ctx.state.clone();
             let recall_query = query.clone();
-            let outcome = tokio::task::spawn_blocking(move || recall_memory(&st, &recall_query))
+            let vault_value_requested = ctx.vault_value_requested;
+            let outcome = tokio::task::spawn_blocking(move || {
+                recall_memory(&st, &recall_query, vault_value_requested)
+            })
                 .await
                 .unwrap_or_else(|e| RecallOutcome {
                     response: format!("Execution error: {e}"),
@@ -25574,6 +25461,7 @@ struct GatewayCapabilityExecutor<'a> {
     can_see_contacts: bool,
     can_see_calendar: bool,
     can_use_project_memory: bool,
+    vault_value_requested: bool,
     autonomous: bool,
     composio_writes: &'a std::collections::BTreeSet<String>,
     catalog_index: &'a [(String, String, serde_json::Value)],
@@ -25616,33 +25504,6 @@ fn effectful_tool_name(name: &str, composio_writes: &std::collections::BTreeSet<
         ]
         .iter()
         .any(|token| name.to_ascii_lowercase().contains(token))
-}
-
-fn classify_objective_mode(prompt: &str) -> local_first_task_runtime::ObjectiveMode {
-    let normalized = prompt
-        .to_lowercase()
-        .replace(|character: char| !character.is_alphanumeric(), " ");
-    let asks_for_analysis = [
-        "analizz", "diagnostic", "spieg", "dimmi", "cerca", "trova", "review", "analy",
-        "inspect", "investigat", "report",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker));
-    let asks_for_mutation = [
-        "correggi", "sistema", "implementa", "aggiungi", "rimuovi", "cancella", "crea",
-        "scrivi", "salva", "pubblica", "installa", "aggiorna", "applica", "modifica il",
-        "modifica la", "modifica i", "modifica le", "fai le modifiche", "fix ", "implement ",
-        "add ", "remove ", "delete ", "create ", "write ", "save ", "publish ",
-        "install ", "update ", "apply ", "change the ",
-    ]
-    .iter()
-    .any(|marker| normalized.contains(marker));
-
-    match (asks_for_analysis, asks_for_mutation) {
-        (true, true) => local_first_task_runtime::ObjectiveMode::Mixed,
-        (false, true) => local_first_task_runtime::ObjectiveMode::Mutation,
-        _ => local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
-    }
 }
 
 fn objective_blocks_tool(
@@ -25694,30 +25555,6 @@ fn prune_tools_for_objective_mode(
             .unwrap_or_default();
         !objective_blocks_tool(mode, name, composio_writes)
     });
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SteeringDisposition {
-    Apply,
-    RequiresConfirmation,
-}
-
-pub(crate) fn classify_steering(
-    current_mode: local_first_task_runtime::ObjectiveMode,
-    content: &str,
-) -> SteeringDisposition {
-    let proposed_mode = classify_objective_mode(content);
-    if current_mode == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis
-        && matches!(
-            proposed_mode,
-            local_first_task_runtime::ObjectiveMode::Mutation
-                | local_first_task_runtime::ObjectiveMode::Mixed
-        )
-    {
-        SteeringDisposition::RequiresConfirmation
-    } else {
-        SteeringDisposition::Apply
-    }
 }
 
 fn objective_mode_for_execution(
@@ -25885,6 +25722,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
             can_see_contacts: self.can_see_contacts,
             can_see_calendar: self.can_see_calendar,
             can_use_project_memory: self.can_use_project_memory,
+            vault_value_requested: self.vault_value_requested,
             autonomous: self.autonomous,
             composio_writes: self.composio_writes,
             catalog_index: self.catalog_index,
@@ -26808,6 +26646,14 @@ save/export a file to a folder, call save_artifact(file, destination)."
     // prompt text-compatible while exposing the real content boundary to the
     // Prompt Inspector and independent budgets.
     let prompt_core = system.clone();
+    let semantic_contract = objective_contract_for_execution(state, request.thread_id.as_deref())
+        .as_ref()
+        .and_then(semantic_decision::semantic_decision_from_contract);
+    let memory_intent = semantic_contract
+        .as_ref()
+        .map(|semantic| semantic.decision.memory_intent.clone())
+        .unwrap_or_else(semantic_decision::MemoryIntent::safe_default);
+    let memory_injection = memory_injection_policy(&memory_intent);
     // Memory scope. Perimeter "contact_only" (the default for channel contacts) is a
     // HARD gate: the user's personal profile + RAG are NOT injected — the turn only
     // sees the conversation history with THIS contact. "personal" opts a trusted
@@ -26882,7 +26728,7 @@ save/export a file to a folder, call save_artifact(file, destination)."
         // briefing è incapsulato in `MemoryRecallService::brief` (che delega alle
         // stesse funzioni, nello stesso ordine). Flag OFF → path inline attuale.
         let system = if let Some(service) = state.memory_service.as_ref() {
-            let scope = scope_from_active_workspace();
+            let scope = memory_scope_for_turn(request.thread_id.as_deref());
             let pack = service.brief(&scope, &request.prompt);
             if !pack.linked_hits.is_empty() {
                 merge_automatic_recall_payload(
@@ -26905,8 +26751,8 @@ save/export a file to a folder, call save_artifact(file, destination)."
             system
         } else {
             let (memory_personal, memory_project) =
-                gather_profile_memory_for_prompt_with_provenance(state, &request.prompt);
-            let memory_open_loops = if should_inject_open_loops_for_prompt(&request.prompt) {
+                gather_profile_memory_for_intent_with_provenance(state, &memory_intent);
+            let memory_open_loops = if memory_injection.include_cross_thread {
                 gather_open_loops(state, 6)
             } else {
                 Vec::new()
@@ -26955,6 +26801,7 @@ save/export a file to a folder, call save_artifact(file, destination)."
         let thread_memory = request
             .thread_id
             .as_deref()
+            .filter(|_| memory_injection.include_current_thread)
             .and_then(|thread_id| current_thread_episode_block(state, thread_id));
         let system = match thread_memory {
             Some(block) => format!("{system}\n\n{block}"),
@@ -26984,9 +26831,9 @@ normal answers."
         // ADR 0022 — Tappa 1/4: via service quando il flag è ON; anche nel path OFF
         // usa le fn del crate (embed_query + recall_search_on_facade) con capability
         // client al volo — così `relevant_memory_for_prompt` non è più duplicata.
-        let system = if should_inject_relevant_memory_for_prompt(&request.prompt) {
+        let system = if memory_injection.include_cross_thread {
             if let Some(service) = state.memory_service.as_ref() {
-                let scope = scope_from_active_workspace();
+                let scope = memory_scope_for_turn(request.thread_id.as_deref());
                 let pack = service.recall(&request.prompt, &scope).await;
                 merge_automatic_recall_payload(
                     &mut automatic_recall_payload,
@@ -27085,21 +26932,19 @@ marker and renders the PIN unlock card. Do NOT send or forward raw Vault secret 
 generic external channels/tools such as send_message. The configured Telegram authorization channel may \
 receive Vault/payment summaries or approval prompts, but raw-value reveal stays behind the local PIN \
 unlock card unless a dedicated approved reveal flow exists. \
-PLAN (plan-mode): for a non-trivial MULTI-STEP task (development, refactor, involved research, \
-actions with effects) FIRST propose the plan and STOP — do NOT start executing in this turn. Emit \
-on its own line `‹‹PLAN_PROPOSE››{{\"summary\":\"objective in brief\",\"steps\":[\"step 1\",\"step 2\"]}}‹‹/PLAN_PROPOSE››` \
-(valid JSON). The user will see the Accept/Edit buttons. EXECUTE the plan ONLY in the NEXT turn, \
-after the user has approved it (e.g. «I approve the plan…»); if they ask for changes, revise and re-propose. \
-If the user explicitly asks to create, show, update, verify, or test a plan, use the plan machinery: \
-call update_plan for an operational plan or emit PLAN_PROPOSE for approval-gated plan-mode; do NOT \
-write a free-form numbered plan only in prose. \
-Once executing, use update_plan to update the step status (doing→done), shown in the \
+OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing \
+in the SAME turn. The plan is a live projection of the canonical objective, not a separate artifact \
+and not an approval gate. Replace or revise it autonomously when the new steps are only a better way \
+to reach the SAME objective. Ask the user before continuing only when the validated semantic decision \
+says the request changes the objective, expands its scope, or introduces new effects. Use update_plan \
+to create or revise the operational plan; do not write a free-form numbered plan in prose. \
+Use update_plan to update the step status (doing→done), shown in the \
 \"Plan\" panel. To move a step's status (e.g. doing→done) call step_advance with its id (shown in \
 parentheses after the title in the plan card) and the new status — this updates that ONE step \
 WITHOUT re-sending the plan, so steps never duplicate; use update_plan only to CREATE or revise \
-the plan. The plan (PLAN_PROPOSE or update_plan) is ALREADY shown to the user as a CARD: do NOT \
+the plan. The plan is ALREADY shown to the user as a CARD: do NOT \
 repeat it in the reply text too — no list or table of the steps in prose (at most one \
-line of context). For single-step requests neither a plan nor a proposal is needed. \
+line of context). For single-step requests no plan is needed. \
 STEP-AT-A-TIME EXECUTION: work the plan ONE step at a time — do, then VERIFY that step's \
 result (file written, search returned usable results, build/render succeeded), and only \
 THEN mark it `done` with update_plan before starting the next. Give each step a \
@@ -27127,9 +26972,6 @@ switch language on your own. (Tool arguments, code, file paths and URLs stay as-
     // bindings fall back to that structured decision, never to prompt keyword routing.
     let routing_binding: Option<RoutingBinding> =
         active_routing_binding(state, request.thread_id.as_deref());
-    let semantic_contract = objective_contract_for_execution(state, request.thread_id.as_deref())
-        .as_ref()
-        .and_then(semantic_decision::semantic_decision_from_contract);
     let semantic_objective_mode = semantic_contract
         .as_ref()
         .map(|semantic| semantic.decision.mode)
@@ -27237,8 +27079,8 @@ to the user (one table per row + an optional Sources footer)."
     });
     let system = match mode.as_str() {
         "plan" => format!(
-            "{system}\n\nPLAN MODE (chosen by the user): for ANY non-trivial request \
-FIRST propose a plan with `‹‹PLAN_PROPOSE››…‹‹/PLAN_PROPOSE››` and STOP; execute only after approval."
+            "{system}\n\nPLAN MODE (chosen by the user): maintain the canonical operational plan with \
+update_plan and continue execution in this turn. Replan autonomously while the objective, scope and effects stay unchanged."
         ),
         "ask" => format!(
             "{system}\n\nASK MODE (chosen by the user): answer by conversing from your \
@@ -27901,7 +27743,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         let trace_dir = local_first_engine::trace::dump_enabled()
             .then(gateway_logs_dir)
             .and_then(Result::ok);
-        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, browse_sources, cfg, trace_dir, execution_journal, effect_turn_id, effect_run_id, &turn_trace, vision_fallback_armed).await;
+        let outcome = run_agent_rounds(ls, &tx, http, state_owned, temperature, prompt, thread_id, read_only, autonomous, channel_owner, contact_only, can_see_contacts, can_see_calendar, can_use_project_memory, memory_intent.vault_value_requested, memory_user_message, memory_answer, last_model_error, final_done, plan_nudges, turn_used_tools, composio_writes, catalog_index, capability_corpus, capability_route_for_runtime, automation_user_id, automation_workspace_id, browse_sources, cfg, trace_dir, execution_journal, effect_turn_id, effect_run_id, &turn_trace, vision_fallback_armed).await;
         // Turn trace: the final record. `outcome.memory_answer` is the committed answer; `final_plan` is
         // the turn's last runtime plan (carried out for exactly this). The derived flags (incomplete
         // steps, artifact claimed-but-absent) are the high-value signal. Observability only.
@@ -28008,6 +27850,7 @@ async fn run_agent_rounds(
     can_see_contacts: bool,
     can_see_calendar: bool,
     can_use_project_memory: bool,
+    vault_value_requested: bool,
     memory_user_message: String,
     memory_answer: String,
     last_model_error: Option<String>,
@@ -28077,6 +27920,7 @@ async fn run_agent_rounds(
         can_see_contacts,
         can_see_calendar,
         can_use_project_memory,
+        vault_value_requested,
         autonomous,
         composio_writes: &composio_writes,
         catalog_index: &catalog_index,
@@ -35353,11 +35197,12 @@ fn insert_broker_user_message(
     tx: &rusqlite::Transaction<'_>,
     input: &local_first_task_runtime::broker::ChatTurnInput,
 ) -> local_first_task_runtime::TaskRuntimeResult<()> {
+    let visible_prompt = input.visible_prompt.as_deref().unwrap_or(&input.prompt);
     ChatStore::insert_linked_user_message(
         tx,
         &input.thread_id,
         &format!("local_user_{}", input.request_id),
-        &input.prompt,
+        visible_prompt,
         &now_epoch_secs().to_string(),
         &broker_turn_message_attachments(input),
     )
@@ -40014,6 +39859,29 @@ fn approval_continuation_visible_text(tool: &str) -> String {
     }
 }
 
+fn approval_continuation_turn_input(
+    thread_id: &str,
+    tool: &str,
+    prompt: String,
+) -> local_first_task_runtime::broker::ChatTurnInput {
+    local_first_task_runtime::broker::ChatTurnInput {
+        thread_id: thread_id.to_string(),
+        request_id: format!(
+            "approval_{}_{}",
+            now_epoch_secs(),
+            uuid::Uuid::new_v4().simple()
+        ),
+        prompt,
+        visible_prompt: Some(approval_continuation_visible_text(tool)),
+        images: Vec::new(),
+        attachments: None,
+        mode: None,
+        model: None,
+        source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+        approval: local_first_task_runtime::broker::TurnApproval::Full,
+    }
+}
+
 fn resume_thread_after_approval(
     state: &AppState,
     thread_id: Option<String>,
@@ -40037,47 +39905,14 @@ fn resume_thread_after_approval(
             approved_args.as_ref(),
             source_user_text.as_deref(),
         );
-        let Some(visible_turn) = start_visible_conversation_turn(
-            &st,
-            &thread_id,
-            &base_workspace_id(),
-            "approval",
-            Some("approval"),
-            "Approved action continuation",
-            &approval_continuation_visible_text(&tool),
-            None,
-            // Inline approval-continuation path (no broker task) → throwaway turn id.
-            None,
-        ) else {
-            return;
-        };
-        if let Some(reply) = run_agent_turn_into_message(
-            &st,
-            &thread_id,
-            &prompt,
-            "full",
-            &visible_turn.user_message_id,
-            &visible_turn.assistant_message_id,
-        )
-        .await
-        {
-            let assistant_message = channel_chat_message_with_id(
-                "assistant",
-                &reply,
-                &visible_turn.assistant_message_id,
-            );
-            activate_remote_approvals_from_message(&st, &thread_id, &assistant_message).await;
-            publish_app_event(serde_json::json!({
-                "type": "thread.updated",
-                "thread_id": thread_id,
-                "workspace": base_workspace_id(),
-            }));
-        } else {
-            update_channel_assistant_message(
-                &st,
-                &thread_id,
-                &visible_turn.assistant_message_id,
-                "No continuation was generated after the approved action.",
+        let input = approval_continuation_turn_input(&thread_id, &tool, prompt);
+        if let Err(error) = enqueue_chat_turn_core(&st, &input) {
+            tracing::error!(
+                target: "approval::continuation",
+                %thread_id,
+                %tool,
+                %error,
+                "could not enqueue the approved-action continuation"
             );
         }
     });
@@ -56460,8 +56295,8 @@ mod tests {
         collect_member_counts, composio_tool_is_read, connector_error_hint,
         default_browser_headless_value, evaluate_simple_arithmetic, extract_source_urls,
         fonti_section, format_memory_block, humanize_task_kind, hybrid_memory_score,
-        inbound_action, is_auto_confirmable, is_confirmation_reply, is_internal_task_kind,
-        is_low_value_source_url, is_salient_exchange, is_semantic_duplicate, jail_in_root,
+        inbound_action, is_auto_confirmable, is_internal_task_kind,
+        is_low_value_source_url, is_semantic_duplicate, jail_in_root,
         enforce_monotonic_plan_progress, legacy_dir_action,
         llm_concurrency_view, mcp_error_hint,
         mcp_provider_slug, mcp_stdio_config_from_metadata, mcp_stdio_config_to_metadata,
@@ -60565,6 +60400,7 @@ prs.save(Path({path:?}))
             "qual è il mio codice fiscale",
             Vec::new(),
             false,
+            true,
         );
 
         assert!(answer.contains("No memories relevant"));
@@ -60573,6 +60409,53 @@ prs.save(Path({path:?}))
         assert!(answer.contains("Codice Fiscale"));
         assert!(answer.contains("[VAULT:identity:fiscal_code]"));
         assert!(!answer.contains("CNTFBA76L16F839Y"));
+    }
+
+    #[test]
+    fn vault_intent_is_required_before_emitting_a_reveal_card() {
+        let vault = local_first_vault::SQLiteVaultStore::open_in_memory().unwrap();
+        super::apply_vault_pin_setup(
+            &vault,
+            &TEST_VAULT_WRAP_KEY,
+            &super::VaultPinSetupRequest {
+                pin: "123456".to_string(),
+                current_pin: None,
+            },
+        )
+        .expect("pin");
+        let request = super::VaultProposalActionRequest {
+            category: "identity".to_string(),
+            label: "Codice Fiscale".to_string(),
+            redacted_preview: "[VAULT:identity:fiscal_code]".to_string(),
+            secret_value: Some("CNTFBA76L16F839Y".to_string()),
+            pending_id: None,
+            pin: Some("123456".to_string()),
+            thread_id: None,
+            message_id: None,
+            resolution: None,
+            record_id: None,
+        };
+        super::accept_vault_proposal(&vault, None, &TEST_VAULT_WRAP_KEY, &request).expect("accept");
+
+        let metadata_only = super::recall_memory_response_with_vault_fallback(
+            &vault,
+            "qual è il mio codice fiscale",
+            Vec::new(),
+            false,
+            false,
+        );
+        let reveal = super::recall_memory_response_with_vault_fallback(
+            &vault,
+            "qual è il mio codice fiscale",
+            Vec::new(),
+            false,
+            true,
+        );
+
+        assert!(metadata_only.contains("Codice Fiscale"));
+        assert!(!metadata_only.contains(super::VAULT_REVEAL_OPEN));
+        assert!(reveal.contains(super::VAULT_REVEAL_OPEN));
+        assert!(!reveal.contains("CNTFBA76L16F839Y"));
     }
 
     #[test]
@@ -60624,6 +60507,7 @@ prs.save(Path({path:?}))
             "codice fiscale",
             vec!["- [episode] Il codice fiscale è nel Vault.".to_string()],
             false,
+            true,
         );
 
         assert!(answer.contains("Relevant memories from memory"));
@@ -61817,30 +61701,6 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn steering_applies_same_scope_but_pauses_for_new_mutation() {
-        use local_first_task_runtime::ObjectiveMode;
-
-        assert_eq!(
-            super::classify_steering(
-                ObjectiveMode::ReadOnlyAnalysis,
-                "Controlla anche lo stato della memoria"
-            ),
-            super::SteeringDisposition::Apply
-        );
-        assert_eq!(
-            super::classify_steering(
-                ObjectiveMode::ReadOnlyAnalysis,
-                "Ora modifica i file e applica la correzione"
-            ),
-            super::SteeringDisposition::RequiresConfirmation
-        );
-        assert_eq!(
-            super::classify_steering(ObjectiveMode::Mutation, "Usa anche questi test"),
-            super::SteeringDisposition::Apply
-        );
-    }
-
-    #[test]
     fn model_round_consumes_durable_steering_exactly_once() {
         let state = super::AppState::for_tests();
         let thread = state
@@ -61886,8 +61746,16 @@ prs.save(Path({path:?}))
             turn_id: "turn-1",
         };
 
-        let first = crate::model_client::steering_messages_for_round(context);
-        let second = crate::model_client::steering_messages_for_round(context);
+        let fixture = |_: &str,
+                       _: Option<&local_first_task_runtime::ObjectiveContractRecord>| {
+            let mut decision = super::semantic_decision::safe_fallback(None, "test_fixture");
+            decision.decision.relationship_to_active_objective =
+                super::semantic_decision::ObjectiveRelationship::CompatibleExtension;
+            decision.provenance.fallback_reason = None;
+            decision
+        };
+        let first = crate::model_client::steering_messages_for_round_with(context, fixture);
+        let second = crate::model_client::steering_messages_for_round_with(context, fixture);
 
         assert_eq!(first.len(), 1);
         assert!(first[0]["content"]
@@ -64248,12 +64116,6 @@ prs.save(Path({path:?}))
                 tool_name: "make_document",
                 scaffolding_tier: "document",
             },
-        );
-        let instruction = super::workflow_router_instruction_for_decision(&decision)
-            .expect("workflow instruction");
-        assert!(
-            instruction.contains("Call `make_document` exactly once"),
-            "{instruction}"
         );
         assert_eq!(
             super::document_artifact_name(Some("../Customer Brief 2026")),
@@ -68029,11 +67891,19 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     /// `brief()` DEVE produrre gli stessi blocchi, nello stesso ordine.
     fn inline_briefing_blocks(
         state: &super::AppState,
-        user_message: &str,
+        _user_message: &str,
     ) -> Vec<Option<String>> {
+        let intent = super::semantic_decision::MemoryIntent {
+            use_current_thread: true,
+            search_personal: true,
+            search_project: true,
+            vault_value_requested: false,
+            standalone_choice_request: false,
+            durable_memory_candidate: false,
+        };
         let (memory_personal, memory_project) =
-            super::gather_profile_memory_for_prompt(state, user_message);
-        let memory_open_loops = if super::should_inject_open_loops_for_prompt(user_message) {
+            super::gather_profile_memory_for_prompt(state, &intent);
+        let memory_open_loops = if intent.search_personal || intent.search_project {
             super::gather_open_loops(state, 6)
         } else {
             Vec::new()
@@ -68221,7 +68091,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         );
         let state = test_app_state_for_brief(facade);
 
-        let (before, project_before) = super::gather_profile_memory_with_options(&state, true);
+        let (before, project_before) =
+            super::gather_profile_memory_with_options(&state, true, true);
         assert!(before.is_empty());
         assert!(project_before.is_empty());
 
@@ -68234,10 +68105,10 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             "Project-local fact",
         );
         insert_preferences_grant(super::memory_facade(&state), &user, &project, "prefs-grant");
-        let (after, _) = super::gather_profile_memory_with_options(&state, true);
+        let (after, _) = super::gather_profile_memory_with_options(&state, true, true);
         assert_eq!(after, vec!["Prefers Italian".to_string()]);
         let (structured, structured_project) =
-            super::gather_profile_memory_with_provenance(&state, true);
+            super::gather_profile_memory_with_provenance(&state, true, true);
         let hit = structured[0].linked_hit.as_ref().expect("linked provenance");
         assert_eq!(hit.source_workspace_id, personal);
         assert_eq!(hit.grant_id.as_deref(), Some("prefs-grant"));
@@ -68324,7 +68195,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             })
             .unwrap();
         let state = test_app_state_for_brief(facade);
-        let (personal_items, _) = super::gather_profile_memory_with_options(&state, true);
+        let (personal_items, _) =
+            super::gather_profile_memory_with_options(&state, true, true);
         assert!(personal_items.is_empty());
 
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
@@ -68377,7 +68249,8 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             })
             .unwrap();
         let state = test_app_state_for_brief(facade);
-        let (personal_items, _) = super::gather_profile_memory_with_options(&state, true);
+        let (personal_items, _) =
+            super::gather_profile_memory_with_options(&state, true, true);
         assert!(personal_items.is_empty());
 
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
@@ -69014,7 +68887,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let state = test_app_state_for_brief(facade);
 
         super::set_memory_workspace("project-a");
-        let project = super::recall_memory(&state, "When do we launch?");
+        let project = super::recall_memory(&state, "When do we launch?", false);
         assert!(project.response.contains("Launch in September"));
         let payload = super::recall_stream_payload_from_outcome(&project, "When do we launch?");
         let hit = payload.hits.first().expect("linked source hit is surfaced to UI");
@@ -69027,7 +68900,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert!(!hit.r#ref.is_empty());
         assert_eq!(hit.kind, "decision");
         super::set_memory_workspace(super::PERSONAL_WORKSPACE);
-        let personal = super::recall_memory(&state, "When do we launch?");
+        let personal = super::recall_memory(&state, "When do we launch?", false);
         assert!(!personal.response.contains("Launch in September"));
 
         match previous_user {
@@ -69061,7 +68934,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         let state = test_app_state_for_brief(facade);
         super::set_memory_workspace("project-a");
 
-        let outcome = super::recall_memory(&state, "NEBULA-7429");
+        let outcome = super::recall_memory(&state, "NEBULA-7429", false);
 
         assert!(!outcome.response.contains("older conversation"));
         assert!(!outcome.payload.hits.iter().any(|hit| {
@@ -70026,79 +69899,29 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
     }
 
     #[test]
-    fn salience_skips_trivial_turns() {
-        assert!(!is_salient_exchange("grazie"));
-        assert!(!is_salient_exchange("ok"));
-        assert!(!is_salient_exchange("  Sì  "));
-        assert!(!is_salient_exchange("ciao"));
-        assert!(is_salient_exchange(
-            "preferisco risposte brevi e in italiano"
-        ));
-        assert!(is_salient_exchange("ho due figli, Luca e Sara"));
+    fn memory_intent_drives_injection_without_prompt_keywords() {
+        let mut intent = super::semantic_decision::MemoryIntent::safe_default();
+        assert_eq!(
+            super::memory_injection_policy(&intent),
+            super::MemoryInjectionPolicy {
+                include_current_thread: true,
+                include_cross_thread: false,
+            }
+        );
+        intent.search_project = true;
+        assert!(super::memory_injection_policy(&intent).include_cross_thread);
     }
 
     #[test]
-    fn confirmation_reply_catches_affirmations_and_corrections() {
-        // Affirmations a bare-salience check drops, but that DO confirm a fact.
-        assert!(is_confirmation_reply("sì"));
-        assert!(is_confirmation_reply("Sì, esatto"));
-        assert!(is_confirmation_reply("esatto."));
-        assert!(is_confirmation_reply("confermo"));
-        // Corrections revise the assistant's proposal → still a confirmation turn.
-        assert!(is_confirmation_reply("no, è una V9"));
-        assert!(is_confirmation_reply("No, del 2019"));
-        // Not confirmations: weak acks and substantive new messages stand on their own.
-        assert!(!is_confirmation_reply("ok"));
-        assert!(!is_confirmation_reply("grazie mille"));
-        assert!(!is_confirmation_reply(
-            "cercami un tappo serbatoio per la mia moto guzzi"
-        ));
-        assert!(!is_confirmation_reply(""));
-    }
+    fn memory_intent_standalone_choice_suppresses_unrelated_global_context() {
+        let mut intent = super::semantic_decision::MemoryIntent::safe_default();
+        intent.search_personal = true;
+        intent.search_project = true;
+        intent.standalone_choice_request = true;
 
-    #[test]
-    fn short_choice_replies_do_not_inject_global_open_loops() {
-        assert!(!super::should_inject_open_loops_for_prompt("Confermo"));
-        assert!(!super::should_inject_relevant_memory_for_prompt("Confermo"));
-        assert!(super::profile_memory_personal_preferences_only_for_prompt(
-            "Confermo"
-        ));
-        assert!(!super::should_inject_open_loops_for_prompt("cambio idea"));
-        assert!(!super::should_inject_relevant_memory_for_prompt(
-            "cambio idea"
-        ));
-        assert!(super::profile_memory_personal_preferences_only_for_prompt(
-            "cambio idea"
-        ));
-        assert!(!super::should_inject_open_loops_for_prompt("ok"));
-        assert!(!super::should_inject_relevant_memory_for_prompt("ok"));
-        assert!(!super::should_inject_open_loops_for_prompt("procedi"));
-        assert!(!super::should_inject_relevant_memory_for_prompt("procedi"));
-        assert!(!super::should_inject_open_loops_for_prompt(
-            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
-        ));
-        assert!(super::should_inject_open_loops_for_prompt(
-            "riprendi la ricerca del treno per Roma"
-        ));
-    }
-
-    #[test]
-    fn standalone_choice_card_requests_do_not_inject_cross_thread_memory() {
-        assert!(!super::should_inject_relevant_memory_for_prompt(
-            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
-        ));
-        assert!(super::profile_memory_personal_preferences_only_for_prompt(
-            "Fammi scegliere tra Confermo e Cambio idea usando una card di scelta, non una lista testuale."
-        ));
-        assert!(!super::should_inject_relevant_memory_for_prompt(
-            "Let me choose between Confirm and Change idea with a choice card."
-        ));
-        assert!(super::should_inject_relevant_memory_for_prompt(
-            "Cerca i treni da Milano a Roma e usa una card di scelta per farmi scegliere"
-        ));
-        assert!(!super::profile_memory_personal_preferences_only_for_prompt(
-            "Cerca i treni da Milano a Roma e usa una card di scelta per farmi scegliere"
-        ));
+        let policy = super::memory_injection_policy(&intent);
+        assert!(policy.include_current_thread);
+        assert!(!policy.include_cross_thread);
     }
 
     #[test]
@@ -73025,6 +72848,20 @@ data: [DONE]\n";
         let text = super::approval_continuation_visible_text(&long_tool);
         assert!(text.contains(&"x".repeat(80)));
         assert!(!text.contains(&"x".repeat(81)));
+
+        let input = super::approval_continuation_turn_input(
+            "thread-1",
+            "filesystem_authorize",
+            "internal grounded continuation".to_string(),
+        );
+        assert_eq!(input.thread_id, "thread-1");
+        assert_eq!(input.prompt, "internal grounded continuation");
+        assert_eq!(
+            input.visible_prompt.as_deref(),
+            Some("Continue after approved action `filesystem_authorize`.")
+        );
+        assert_eq!(input.source.as_str(), "interactive");
+        assert_eq!(input.approval.as_str(), "full");
     }
 
     #[test]
@@ -73435,6 +73272,7 @@ Sky Sport ha solo il menu. Vado direttamente alla pagina dei Mondiali.";
             "mostra il codice fiscale Atlas",
             Vec::new(),
             false,
+            true,
         );
         assert!(recall.contains("reveal_card"));
         assert!(recall.contains("[VAULT:identity:fiscal_code]"));

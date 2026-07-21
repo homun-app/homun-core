@@ -252,6 +252,12 @@ pub fn execute_chat_turn_task(
         .ok_or_else(|| crate::LocalTaskExecutionError {
             message: "chat_turn task missing prompt".to_string(),
         })?;
+    let visible_prompt = task
+        .input_json
+        .get("visible_prompt")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(prompt);
     // Optional inputs with defaults.
     let approval = task
         .input_json
@@ -390,6 +396,16 @@ pub fn execute_chat_turn_task(
             crate::agent_journal::register(&run_id, journal.clone());
             Some((run_id, journal))
         });
+    if let Some((_, journal)) = &agent_run {
+        local_first_engine::ExecutionJournal::record(
+            journal,
+            local_first_engine::AgentExecutionEvent::SemanticDecision {
+                payload: crate::semantic_decision::bounded_observability_payload(
+                    &semantic_decision,
+                ),
+            },
+        );
+    }
 
     // 3. Register the live turn broadcast (Task 1a.2). Cancellation + the
     //    per-turn SSE/WS fan-out key off this. Always unregistered on exit.
@@ -410,8 +426,8 @@ pub fn execute_chat_turn_task(
         &workspace_id,
         "interactive",
         None,
-        prompt,
-        prompt,
+        visible_prompt,
+        visible_prompt,
         preseeded_user_message_id.as_deref(),
         // Advertise the broker turn id so any client with this thread open can attach to the
         // live stream (island + transcript) — the whole point of routing channel turns through
@@ -572,6 +588,18 @@ pub fn execute_chat_turn_task(
             thread_id,
             &visible_turn.assistant_message_id,
             &full_text,
+        );
+        let assistant_message = crate::channel_chat_message_with_id(
+            "assistant",
+            &full_text,
+            &visible_turn.assistant_message_id,
+        );
+        tokio::runtime::Handle::current().block_on(
+            crate::activate_remote_approvals_from_message(
+                state,
+                thread_id,
+                &assistant_message,
+            ),
         );
 
         // Channel convergence: mirror the CLEAN answer out to Telegram/WhatsApp when this

@@ -62,10 +62,29 @@ impl GatewayModelClient<'_> {
 pub(crate) fn steering_messages_for_round(
     context: GatewaySteeringContext<'_>,
 ) -> Vec<serde_json::Value> {
+    let binding = crate::active_routing_binding(context.state, Some(context.thread_id));
+    steering_messages_for_round_with(context, |content, active| {
+        crate::resolve_semantic_decision(
+            context.state,
+            Some(context.thread_id),
+            content,
+            active,
+            binding.as_ref(),
+        )
+    })
+}
+
+pub(crate) fn steering_messages_for_round_with(
+    context: GatewaySteeringContext<'_>,
+    mut resolve: impl FnMut(
+        &str,
+        Option<&local_first_task_runtime::ObjectiveContractRecord>,
+    ) -> crate::semantic_decision::ValidatedSemanticDecision,
+) -> Vec<serde_json::Value> {
     let Ok(store) = context.state.task_store.lock() else {
         return Vec::new();
     };
-    let objective = store
+    let mut objective = store
         .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
         .ok()
         .flatten();
@@ -79,23 +98,49 @@ pub(crate) fn steering_messages_for_round(
         .unwrap_or_default();
     drop(store);
 
-    messages
-        .into_iter()
-        .map(|message| {
-            let requires_confirmation = objective.as_ref().is_none_or(|objective| {
-                message.objective_revision != objective.revision
-                    || crate::classify_steering(objective.mode, &message.content)
-                        == crate::SteeringDisposition::RequiresConfirmation
+    messages.into_iter().map(|message| {
+            let proposed = resolve(&message.content, objective.as_ref());
+            let requires_confirmation = objective.as_ref().is_none_or(|active| {
+                crate::semantic_decision::steering_requires_confirmation(
+                    active,
+                    &proposed,
+                    message.objective_revision == active.revision,
+                )
             });
+            if !requires_confirmation {
+                let projection = crate::semantic_decision::objective_contract_projection(
+                    &proposed,
+                    objective.as_ref(),
+                    context.thread_id,
+                    context.workspace_id,
+                    crate::effective_thread_folder(context.thread_id).as_deref(),
+                );
+                objective = context.state.task_store.lock().ok().and_then(|store| {
+                    store.upsert_objective_contract(
+                        context.user_id,
+                        context.workspace_id,
+                        context.thread_id,
+                        &message.source_message_id,
+                        &projection.objective,
+                        projection.mode,
+                        &projection.scope_json,
+                        &projection.allowed_actions_json,
+                        &projection.completion_json,
+                        "active",
+                    ).ok()
+                });
+            }
             let content = if requires_confirmation {
                 format!(
-                    "[USER STEERING — CONFIRMATION REQUIRED]\n{}\n\nThis changes the canonical objective, scope, or mutation level. Do not execute it yet. Ask the user for explicit confirmation and explain the proposed contract change.",
-                    message.content
+                    "[USER STEERING — CONFIRMATION REQUIRED]\n{}\n\nThe validated semantic decision classified this as {:?}. Do not execute it yet. Ask the user for explicit confirmation and explain the proposed contract change.",
+                    message.content,
+                    proposed.decision.relationship_to_active_objective,
                 )
             } else {
                 format!(
-                    "[USER STEERING — APPLY TO THE CURRENT RUN]\n{}\n\nIncorporate this now, preserving the current objective and already verified progress. Replan autonomously if needed.",
-                    message.content
+                    "[USER STEERING — APPLY TO THE CURRENT RUN]\n{}\n\nThe validated semantic decision classified this as {:?}. Incorporate this now, preserving the canonical objective and already verified progress. Replan autonomously if needed.",
+                    message.content,
+                    proposed.decision.relationship_to_active_objective,
                 )
             };
             serde_json::json!({"role": "user", "content": content})
