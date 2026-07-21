@@ -84,6 +84,7 @@ pub struct RemoteApprovalInput<'a> {
     pub arguments: &'a serde_json::Value,
     pub label: &'a str,
     pub thread_id: Option<&'a str>,
+    pub objective_revision: Option<u64>,
     pub requires_source: bool,
     pub expires_at: i64,
 }
@@ -96,6 +97,7 @@ pub struct RemoteApprovalRow {
     pub arguments: serde_json::Value,
     pub label: String,
     pub thread_id: Option<String>,
+    pub objective_revision: Option<u64>,
     pub source_message_id: Option<String>,
     pub requires_source: bool,
     pub status: String,
@@ -1363,8 +1365,8 @@ impl ChatStore {
             "insert into remote_approvals (
                 approval_id, code, tool, arguments_json, label, thread_id,
                 source_message_id, requires_source, status, created_at,
-                expires_at, dispatched_at
-             ) values (?1, ?2, ?3, ?4, ?5, ?6, null, ?7, 'pending', ?8, ?9, null)",
+                expires_at, dispatched_at, objective_revision
+             ) values (?1, ?2, ?3, ?4, ?5, ?6, null, ?7, 'pending', ?8, ?9, null, ?10)",
             params![
                 input.approval_id,
                 input.code,
@@ -1375,6 +1377,7 @@ impl ChatStore {
                 if input.requires_source { 1 } else { 0 },
                 Self::now_secs(),
                 input.expires_at,
+                input.objective_revision.map(|revision| revision as i64),
             ],
         )?;
         Ok(())
@@ -1489,7 +1492,8 @@ impl ChatStore {
         self.conn
             .query_row(
                 "select approval_id, code, tool, arguments_json, label, thread_id,
-                        source_message_id, requires_source, status, expires_at, dispatched_at
+                        source_message_id, requires_source, status, expires_at, dispatched_at,
+                        objective_revision
                    from remote_approvals where approval_id = ?1",
                 params![approval_id],
                 remote_approval_from_row,
@@ -1505,7 +1509,8 @@ impl ChatStore {
         self.conn
             .query_row(
                 "select approval_id, code, tool, arguments_json, label, thread_id,
-                        source_message_id, requires_source, status, expires_at, dispatched_at
+                        source_message_id, requires_source, status, expires_at, dispatched_at,
+                        objective_revision
                    from remote_approvals
                   where code = ?1 and status = ?2",
                 params![code.trim().to_ascii_uppercase(), status],
@@ -2354,7 +2359,8 @@ impl ChatStore {
                 created_at integer not null,
                 expires_at integer not null,
                 dispatched_at integer,
-                resolved_at integer
+                resolved_at integer,
+                objective_revision integer
             );
 
             create index if not exists idx_remote_approvals_code_status
@@ -2712,6 +2718,12 @@ impl ChatStore {
         if !self.column_exists("chat_messages", "memory_reuse_json")? {
             self.conn.execute(
                 "alter table chat_messages add column memory_reuse_json text",
+                [],
+            )?;
+        }
+        if !self.column_exists("remote_approvals", "objective_revision")? {
+            self.conn.execute(
+                "alter table remote_approvals add column objective_revision integer",
                 [],
             )?;
         }
@@ -3550,6 +3562,7 @@ fn remote_approval_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteA
         arguments: serde_json::from_str(&arguments_json).unwrap_or(serde_json::Value::Null),
         label: row.get(4)?,
         thread_id: row.get(5)?,
+        objective_revision: row.get::<_, Option<i64>>(11)?.map(|revision| revision as u64),
         source_message_id: row.get(6)?,
         requires_source: row.get::<_, i64>(7)? != 0,
         status: row.get(8)?,
@@ -4875,6 +4888,7 @@ mod tests {
                 arguments: &args,
                 label: "create file",
                 thread_id: Some(&thread.thread_id),
+                objective_revision: Some(4),
                 requires_source: true,
                 expires_at: ChatStore::now_secs() + 600,
             })
@@ -4882,6 +4896,7 @@ mod tests {
 
         let pending = store.pending_remote_approval("ABC123").unwrap().unwrap();
         assert!(pending.requires_source);
+        assert_eq!(pending.objective_revision, Some(4));
         assert_eq!(pending.source_message_id, None);
 
         let assistant = ChatMessage {

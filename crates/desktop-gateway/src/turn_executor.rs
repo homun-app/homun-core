@@ -195,6 +195,65 @@ pub fn execute_chat_turn_task(
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| task.workspace_id.as_str())
         .to_string();
+    let request_id = task
+        .input_json
+        .get("request_id")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| turn_id.strip_prefix("turn_").map(str::to_string));
+    let preseeded_user_message_id = request_id
+        .as_ref()
+        .map(|request_id| format!("local_user_{request_id}"));
+    let objective_mode = crate::classify_objective_mode(prompt);
+    let objective = state.task_store.lock().ok().and_then(|store| {
+        let existing = store
+            .load_objective_contract(task.user_id.as_str(), &workspace_id, thread_id)
+            .ok()
+            .flatten();
+        if crate::is_plan_continuation_message(prompt) && existing.is_some() {
+            return existing;
+        }
+        let allowed_actions = match objective_mode {
+            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis => {
+                serde_json::json!(["read", "search", "inspect", "test", "report", "plan"])
+            }
+            local_first_task_runtime::ObjectiveMode::Mutation => {
+                serde_json::json!(["read", "search", "inspect", "test", "mutate", "plan"])
+            }
+            local_first_task_runtime::ObjectiveMode::Mixed => {
+                serde_json::json!(["read", "search", "inspect", "test", "mutate", "report", "plan"])
+            }
+        };
+        store
+            .upsert_objective_contract(
+                task.user_id.as_str(),
+                &workspace_id,
+                thread_id,
+                preseeded_user_message_id.as_deref().unwrap_or(turn_id),
+                prompt,
+                objective_mode,
+                &serde_json::json!({
+                    "thread_id": thread_id,
+                    "workspace_id": workspace_id,
+                    "project_root": crate::effective_thread_folder(thread_id),
+                }),
+                &allowed_actions,
+                &serde_json::json!({
+                    "requires_evidence": true,
+                    "deliverable": if objective_mode == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis {
+                        "analysis_report"
+                    } else {
+                        "verified_result"
+                    },
+                }),
+                "active",
+            )
+            .ok()
+    });
+    if objective.is_none() {
+        tracing::warn!(target: "objective::contract", turn_id, "objective contract unavailable; execution policy will fail closed from the prompt");
+    }
     // Legacy tasks have no attachment fields; defaulting keeps boot recovery
     // compatible while new broker turns retain their original composer input.
     let images = task
@@ -278,14 +337,6 @@ pub fn execute_chat_turn_task(
     //    so we don't mint a SECOND user message for the same prompt. The atomic
     //    enqueue always writes `request_id` into input_json; fall back to deriving it
     //    from the turn_id (`turn_{request_id}`) if an older task is missing it.
-    let request_id = task
-        .input_json
-        .get("request_id")
-        .and_then(|v| v.as_str())
-        .filter(|v| !v.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| turn_id.strip_prefix("turn_").map(str::to_string));
-    let preseeded_user_message_id = request_id.map(|r| format!("local_user_{r}"));
     let visible_turn = crate::start_visible_conversation_turn(
         state,
         thread_id,

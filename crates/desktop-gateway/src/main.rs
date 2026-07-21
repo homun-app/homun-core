@@ -134,7 +134,7 @@ use local_first_desktop_gateway::workspace_delete::{
 use local_first_engine::plan::{
     build_plan_markdown, enforce_monotonic_plan_progress, parse_plan_marker,
     plan_done_count, plan_incomplete_reason, plan_is_complete, plan_is_settled, plan_next_open,
-    plan_step_id, plan_step_status, plan_step_title, plan_value_steps, MIN_DELIVERED_CHARS_TO_CONCLUDE,
+    plan_step_id, plan_step_status, plan_step_title, plan_value_steps,
 };
 use local_first_engine::markers::{VAULT_REVEAL_CLOSE, VAULT_REVEAL_OPEN};
 // Engine helpers exercised ONLY by this crate's tests (their non-test callers moved into
@@ -7257,23 +7257,13 @@ fn strip_chat_markers(text: &str) -> String {
 /// does NOT reuse `answer_concludes_plan` — that predicate must stay conservative for the
 /// *nudge* decision (25001), where many open steps means "keep pushing", the opposite intent.
 fn plan_steps_reconciled_on_delivery(
-    plan: &ExecutionPlan,
-    text: &str,
+    _plan: &ExecutionPlan,
+    _text: &str,
 ) -> Option<Vec<serde_json::Value>> {
-    if !plan_reconcile_on_delivery_enabled()
-        || strip_chat_markers(text).trim().chars().count() < MIN_DELIVERED_CHARS_TO_CONCLUDE
-    {
-        return None;
-    }
-    let mut plan_steps = execution_plan_steps(plan);
-    let mut changed = false;
-    for step in plan_steps.iter_mut() {
-        if !matches!(plan_step_status(step), "done" | "blocked") {
-            step["status"] = serde_json::json!("done");
-            changed = true;
-        }
-    }
-    changed.then_some(plan_steps)
+    // Completion is evidence-driven (`step_advance` + done criteria). Delivery
+    // length is never proof that open work happened: the old sweep converted
+    // every open step to done after a long answer and laundered partial runs.
+    None
 }
 
 /// Thin text-only wrapper over `plan_steps_reconciled_on_delivery` — the delivery call sites
@@ -10057,12 +10047,18 @@ fn upsert_runtime_plan_memory_from_state(
         .lock()
         .ok()
         .and_then(|store| {
+            let objective_revision = store
+                .load_objective_contract(&user_id, &workspace_id, &thread_key)
+                .ok()
+                .flatten()
+                .map(|objective| objective.revision)
+                .unwrap_or(0);
             store
                 .upsert_runtime_plan(
                     &user_id,
                     &workspace_id,
                     &thread_key,
-                    0,
+                    objective_revision,
                     &plan_json,
                     status,
                 )
@@ -25513,6 +25509,97 @@ fn effectful_tool_name(name: &str, composio_writes: &std::collections::BTreeSet<
         .any(|token| name.to_ascii_lowercase().contains(token))
 }
 
+fn classify_objective_mode(prompt: &str) -> local_first_task_runtime::ObjectiveMode {
+    let normalized = prompt
+        .to_lowercase()
+        .replace(|character: char| !character.is_alphanumeric(), " ");
+    let asks_for_analysis = [
+        "analizz", "diagnostic", "spieg", "dimmi", "cerca", "trova", "review", "analy",
+        "inspect", "investigat", "report",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+    let asks_for_mutation = [
+        "correggi", "sistema", "implementa", "aggiungi", "rimuovi", "cancella", "crea",
+        "scrivi", "salva", "pubblica", "installa", "aggiorna", "applica", "modifica il",
+        "modifica la", "modifica i", "modifica le", "fai le modifiche", "fix ", "implement ",
+        "add ", "remove ", "delete ", "create ", "write ", "save ", "publish ",
+        "install ", "update ", "apply ", "change the ",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker));
+
+    match (asks_for_analysis, asks_for_mutation) {
+        (true, true) => local_first_task_runtime::ObjectiveMode::Mixed,
+        (false, true) => local_first_task_runtime::ObjectiveMode::Mutation,
+        _ => local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+    }
+}
+
+fn objective_blocks_tool(
+    mode: local_first_task_runtime::ObjectiveMode,
+    name: &str,
+    composio_writes: &std::collections::BTreeSet<String>,
+) -> bool {
+    if mode != local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis {
+        return false;
+    }
+    if matches!(name, "update_plan" | "step_advance") {
+        return false;
+    }
+    composio_writes.contains(name)
+        || matches!(
+            name,
+            "create_artifact"
+                | "generate_image"
+                | "render_deck"
+                | "make_deck"
+                | "make_document"
+                | "save_artifact"
+                | "write_file"
+                | "edit_file"
+                | "apply_patch"
+                | "run_in_project"
+                | "schedule_task"
+                | "create_automation"
+                | "update_automation"
+                | "cancel_scheduled_task"
+                | "send_message"
+                | "customize_addon"
+                | "create_skill"
+                | "record_decision"
+                | "forget_memory"
+        )
+        || effectful_tool_name(name, composio_writes)
+}
+
+fn objective_mode_for_execution(
+    state: &AppState,
+    thread_id: Option<&str>,
+    prompt: &str,
+) -> local_first_task_runtime::ObjectiveMode {
+    objective_contract_for_execution(state, thread_id)
+        .map(|objective| objective.mode)
+        .unwrap_or_else(|| classify_objective_mode(prompt))
+}
+
+fn objective_contract_for_execution(
+    state: &AppState,
+    thread_id: Option<&str>,
+) -> Option<local_first_task_runtime::ObjectiveContractRecord> {
+    thread_id
+        .and_then(|thread_id| runtime_plan_control_scope(state, Some(thread_id)))
+        .and_then(|(user_id, workspace_id, thread_id)| {
+            state
+                .task_store
+                .lock()
+                .ok()?
+                .load_objective_contract(&user_id, &workspace_id, &thread_id)
+                .ok()
+                .flatten()
+        })
+}
+
 impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
     async fn execute_tool(
         &self,
@@ -25521,6 +25608,15 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
     ) -> Result<local_first_engine::ToolOutcome, String> {
+        let objective_mode = objective_mode_for_execution(self.state, self.thread_id, self.prompt);
+        if objective_blocks_tool(objective_mode, name, self.composio_writes) {
+            return Ok(local_first_engine::ToolOutcome {
+                result: format!(
+                    "OBJECTIVE CONTRACT BLOCKED `{name}`: this task is read-only analysis. No effect was executed. Ask the user to explicitly authorize expanding the objective to mutation before retrying."
+                ),
+                effects: Default::default(),
+            });
+        }
         // ADR 0025 slice 2: `browse` is delegated, not a normal capability. Intercept it BEFORE the
         // ChatToolCtx path and route it to the isolated recursive sub-turn (GatewayBrowseExecutor). The
         // engine dispatch sees `browse` as a plain non-browser tool → it arrives here; the recursion runs
@@ -25538,7 +25634,9 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 http: &self.state.http,
                 thread_id: self.thread_id,
                 prompt: self.prompt,
-                read_only: self.read_only,
+                read_only: self.read_only
+                    || objective_mode
+                        == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
                 channel_owner: self.channel_owner,
             };
             let outcome = browse_executor.browse(&goal).await;
@@ -27003,6 +27101,15 @@ problem, isolate the cause, form a hypothesis, verify it with a minimal experime
 RE-VERIFY by executing. One cause at a time, no blind attempts."
         ),
         _ => system,
+    };
+    let system = match objective_contract_for_execution(state, request.thread_id.as_deref()) {
+        Some(objective) => format!(
+            "{system}\n\nOBJECTIVE CONTRACT (canonical, harness-enforced): revision {}; mode={:?}; objective={}. Stay inside its scope and allowed actions. Replan autonomously only when the objective, scope and mutation level stay unchanged. A new objective, wider scope or newly mutating action requires explicit user confirmation. Plan completion requires recorded evidence; response length is never completion evidence.",
+            objective.revision,
+            objective.mode,
+            objective.objective
+        ),
+        None => system,
     };
     let prompt_runtime = system
         .strip_prefix(&prompt_core)
@@ -39515,6 +39622,9 @@ fn create_pending_approval(
         let approval_id = format!("approval_{raw}");
         let code = raw[..6].to_uppercase();
         let expires_at = approval_expires_at_secs();
+        let objective_revision = thread_id
+            .and_then(|thread_id| objective_contract_for_execution(state, Some(thread_id)))
+            .map(|objective| objective.revision);
         let input = RemoteApprovalInput {
             approval_id: &approval_id,
             code: &code,
@@ -39522,6 +39632,7 @@ fn create_pending_approval(
             arguments: args,
             label,
             thread_id,
+            objective_revision,
             requires_source,
             expires_at,
         };
@@ -39538,6 +39649,7 @@ fn create_pending_approval(
                     arguments: args.clone(),
                     label: label.to_string(),
                     thread_id: thread_id.map(ToString::to_string),
+                    objective_revision,
                     source_message_id: None,
                     requires_source,
                     status: "pending".to_string(),
@@ -39802,6 +39914,17 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
         if !source_ok {
             return format!(
                 "Approval {code} does not match its saved confirmation card; please retry in the app."
+            );
+        }
+    }
+    if let (Some(thread_id), Some(approved_revision)) =
+        (pending.thread_id.as_deref(), pending.objective_revision)
+    {
+        let current_revision = objective_contract_for_execution(state, Some(thread_id))
+            .map(|objective| objective.revision);
+        if current_revision != Some(approved_revision) {
+            return format!(
+                "Approval {code} belongs to objective revision {approved_revision}, but the task objective has changed. Review and approve the current plan instead."
             );
         }
     }
@@ -59507,6 +59630,7 @@ prs.save(Path({path:?}))
             }),
             label: "create".to_string(),
             thread_id: Some("thread-test".to_string()),
+            objective_revision: None,
             source_message_id: Some("assistant-test".to_string()),
             requires_source: true,
             status: "executing".to_string(),
@@ -61354,7 +61478,7 @@ prs.save(Path({path:?}))
     }
 
     #[test]
-    fn reconcile_final_plan_marker_closes_last_open_step_on_delivery() {
+    fn reconcile_final_plan_marker_does_not_close_open_step_from_answer_length() {
         let plan = super::runtime_execution_plan(&[
             serde_json::json!({"id":"s1","title":"Emit card","status":"done","detail":"ok"}),
             serde_json::json!({"id":"s2","title":"Deliver result","status":"doing","detail":"pending"}),
@@ -61367,15 +61491,12 @@ prs.save(Path({path:?}))
 
         let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
 
-        assert!(updated.contains("- [x] **Deliver result** (`s2`)"));
-        assert!(!updated.contains("- [-] **Deliver result**"));
+        assert!(updated.contains("- [-] **Deliver result** (`s2`)"));
+        assert!(!updated.contains("- [x] **Deliver result**"));
     }
 
     #[test]
-    fn reconcile_final_plan_closes_all_open_steps_but_keeps_blocked() {
-        // Regression: deepseek delivered the whole answer but left the plan frozen at 1/4 with
-        // a phantom "active" step. On a substantial delivery EVERY open step must close — except
-        // `blocked`, which is an explicit failure the model recorded and must survive.
+    fn reconcile_final_plan_preserves_all_evidence_free_open_steps() {
         let plan = super::runtime_execution_plan(&[
             serde_json::json!({"id":"s1","title":"Vincitrice","status":"done","detail":"ok"}),
             serde_json::json!({"id":"s2","title":"Girone","status":"doing","detail":"wip"}),
@@ -61390,12 +61511,11 @@ prs.save(Path({path:?}))
 
         let updated = super::reconcile_final_plan_marker_on_delivery(&plan, &answer);
 
-        // s2 (doing) and s3 (todo) both close…
-        assert!(updated.contains("- [x] **Girone** (`s2`)"));
-        assert!(updated.contains("- [x] **Finale** (`s3`)"));
-        // …but the blocked step is preserved, not laundered into success.
+        assert!(updated.contains("- [-] **Girone** (`s2`)"));
+        assert!(updated.contains("- [ ] **Finale** (`s3`)"));
         assert!(updated.contains("- [!] **Haaland** (`s4`)"));
-        assert!(!updated.contains("- [x] **Haaland**"));
+        assert!(!updated.contains("- [x] **Girone**"));
+        assert!(!updated.contains("- [x] **Finale**"));
     }
 
     #[test]
@@ -61416,6 +61536,53 @@ prs.save(Path({path:?}))
         // Unchanged: the still-open step stays open (doing marker `[-]`).
         assert!(updated.contains("- [-] **Deliver** (`s2`)"));
         assert!(!updated.contains("- [x] **Deliver**"));
+    }
+
+    #[test]
+    fn objective_mode_is_fail_closed_for_analysis_and_explicit_for_mutation() {
+        assert_eq!(
+            super::classify_objective_mode("Analizza questa chat e dimmi quali bug trovi"),
+            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis
+        );
+        assert_eq!(
+            super::classify_objective_mode("Correggi i bug, fai i test e verifica tutto"),
+            local_first_task_runtime::ObjectiveMode::Mutation
+        );
+        assert_eq!(
+            super::classify_objective_mode("Analizza il problema e poi correggi il codice"),
+            local_first_task_runtime::ObjectiveMode::Mixed
+        );
+    }
+
+    #[test]
+    fn read_only_objective_blocks_mutating_tools_but_keeps_analysis_tools() {
+        use local_first_task_runtime::ObjectiveMode;
+
+        assert!(super::objective_blocks_tool(
+            ObjectiveMode::ReadOnlyAnalysis,
+            "create_artifact",
+            &Default::default(),
+        ));
+        assert!(super::objective_blocks_tool(
+            ObjectiveMode::ReadOnlyAnalysis,
+            "apply_patch",
+            &Default::default(),
+        ));
+        assert!(!super::objective_blocks_tool(
+            ObjectiveMode::ReadOnlyAnalysis,
+            "read_file",
+            &Default::default(),
+        ));
+        assert!(!super::objective_blocks_tool(
+            ObjectiveMode::ReadOnlyAnalysis,
+            "update_plan",
+            &Default::default(),
+        ));
+        assert!(!super::objective_blocks_tool(
+            ObjectiveMode::Mutation,
+            "apply_patch",
+            &Default::default(),
+        ));
     }
 
     #[test]
