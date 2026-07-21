@@ -111,6 +111,26 @@ assertContains("src/components/UsageSettingsPane.tsx", "retry-count", "model row
 assertContains("src/components/ChatUsageOverview.tsx", 'const WINDOWS: UsageWindow[] = ["7d", "30d", "all"]', "New chat must support all approved windows");
 assertContains("src/components/ChatUsageOverview.tsx", 'aria-live="polite"', "New-chat Usage load state must be announced");
 assertContains("src/components/ChatUsageOverview.tsx", "coreBridge.usageSummary(selectedWindow)", "New chat must read the canonical summary");
+assertContains(
+  "src/components/ChatUsageOverview.tsx",
+  'coreBridge.usageDaily("all", timezoneOffsetMinutes)',
+  "Home heatmap must load the full canonical daily series independently",
+);
+assertContains(
+  "src/components/ChatUsageOverview.tsx",
+  'window="home-26w"',
+  "Home heatmap must render the fixed 26-week display window",
+);
+assertNotContains(
+  "src/components/ChatUsageOverview.tsx",
+  "coreBridge.usageDaily(selectedWindow",
+  "Changing summary filters must not change the Home heatmap range",
+);
+assertContains(
+  "src/components/UsageCalendar.tsx",
+  "scrollNode.scrollLeft = scrollNode.scrollWidth",
+  "Overflowing Home calendars must begin on the newest weeks",
+);
 assertNotContains("src/components/ChatUsageOverview.tsx", "usageModels", "New chat must not load full analytics");
 assertNotContains("src/components/ChatView.tsx", "EMPTY_HERO_CHIPS", "New chat must not keep canned prompt chips");
 assertNotContains("src/components/ChatView.tsx", "chat-hero-chip", "New chat must not render canned prompt buttons");

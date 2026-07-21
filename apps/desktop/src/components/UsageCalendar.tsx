@@ -1,6 +1,6 @@
-import { useId, useState, type CSSProperties, type FocusEvent, type MouseEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type FocusEvent, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
-import type { UsageDailySeries, UsageWindow } from "../lib/coreBridge";
+import type { UsageDailySeries } from "../lib/coreBridge";
 import {
   buildCalendarDays,
   resolvedProviderLabel,
@@ -8,12 +8,13 @@ import {
   totalKnownCost,
   totalTokens,
   type CalendarDay,
+  type UsageCalendarWindowLike,
 } from "../lib/usageCalendar";
 import { formatCount, formatMicrousd } from "../lib/usageViewModel";
 
 interface UsageCalendarProps {
   series: UsageDailySeries;
-  window: UsageWindow;
+  window: UsageCalendarWindowLike;
   locale?: string;
   density?: "compact" | "comfortable";
   onSelectDay?: (dayEpoch: number) => void;
@@ -37,9 +38,17 @@ export function UsageCalendar({
 }: UsageCalendarProps) {
   const { t } = useTranslation();
   const tooltipId = useId();
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const days = buildCalendarDays(series, window);
   const leading = days.length ? new Date(days[0].day_epoch * 1_000).getUTCDay() : 0;
+  const lastDayEpoch = days.at(-1)?.day_epoch ?? null;
+
+  useEffect(() => {
+    if (window !== "home-26w") return;
+    const scrollNode = scrollRef.current;
+    if (scrollNode) scrollNode.scrollLeft = scrollNode.scrollWidth;
+  }, [window, days.length, lastDayEpoch]);
 
   function showDay(day: CalendarDay, target: HTMLElement) {
     const rect = target.getBoundingClientRect();
@@ -64,7 +73,7 @@ export function UsageCalendar({
 
   return (
     <div className={`usage-calendar usage-calendar--${density}`}>
-      <div className="usage-calendar-scroll">
+      <div className="usage-calendar-scroll" ref={scrollRef}>
         <div
           className="usage-calendar-grid"
           role="grid"

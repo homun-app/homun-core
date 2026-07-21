@@ -28,42 +28,62 @@ export function ChatUsageOverview({
   const [window, setWindow] = useState<UsageWindow>("30d");
   const [summary, setSummary] = useState<UsageSummaryView | null>(null);
   const [daily, setDaily] = useState<UsageDailySeries | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [calendarLoading, setCalendarLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState(false);
+  const [calendarError, setCalendarError] = useState(false);
   const [suggestions, setSuggestions] = useState<ModelUsageSuggestion[]>([]);
   const [providerLabels, setProviderLabels] = useState<Record<string, string>>({});
-  const generationRef = useRef(0);
+  const summaryGenerationRef = useRef(0);
+  const calendarGenerationRef = useRef(0);
   const suggestionGenerationRef = useRef(0);
 
-  const load = useCallback(async (selectedWindow: UsageWindow) => {
-    const generation = ++generationRef.current;
-    setLoading(true);
-    setError(false);
+  const loadSummary = useCallback(async (selectedWindow: UsageWindow) => {
+    const generation = ++summaryGenerationRef.current;
+    setSummaryLoading(true);
+    setSummaryError(false);
+    try {
+      const nextSummary = await coreBridge.usageSummary(selectedWindow);
+      if (summaryGenerationRef.current === generation) setSummary(nextSummary);
+    } catch {
+      if (summaryGenerationRef.current === generation) setSummaryError(true);
+    } finally {
+      if (summaryGenerationRef.current === generation) setSummaryLoading(false);
+    }
+  }, []);
+
+  const loadCalendar = useCallback(async () => {
+    const generation = ++calendarGenerationRef.current;
+    setCalendarLoading(true);
+    setCalendarError(false);
     try {
       const timezoneOffsetMinutes = -new Date().getTimezoneOffset();
-      const [nextSummary, nextDaily, providers] = await Promise.all([
-        coreBridge.usageSummary(selectedWindow),
-        coreBridge.usageDaily(selectedWindow, timezoneOffsetMinutes),
+      const [nextDaily, providers] = await Promise.all([
+        coreBridge.usageDaily("all", timezoneOffsetMinutes),
         coreBridge.providers().catch(() => null),
       ]);
-      if (generationRef.current === generation) {
-        setSummary(nextSummary);
+      if (calendarGenerationRef.current === generation) {
         setDaily(nextDaily);
         if (providers) {
           setProviderLabels(Object.fromEntries(providers.providers.map((provider) => [provider.id, provider.label])));
         }
       }
     } catch {
-      if (generationRef.current === generation) setError(true);
+      if (calendarGenerationRef.current === generation) setCalendarError(true);
     } finally {
-      if (generationRef.current === generation) setLoading(false);
+      if (calendarGenerationRef.current === generation) setCalendarLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void load(window);
-    return () => { generationRef.current += 1; };
-  }, [load, window]);
+    void loadSummary(window);
+    return () => { summaryGenerationRef.current += 1; };
+  }, [loadSummary, window]);
+
+  useEffect(() => {
+    void loadCalendar();
+    return () => { calendarGenerationRef.current += 1; };
+  }, [loadCalendar]);
 
   useEffect(() => {
     const generation = ++suggestionGenerationRef.current;
@@ -119,35 +139,46 @@ export function ChatUsageOverview({
       </header>
 
       <div className="chat-usage-status" aria-live="polite">
-        {loading && !summary && t("chat.usageOverview.loading")}
-        {error && (
+        {((summaryLoading && !summary) || (calendarLoading && !daily)) && t("chat.usageOverview.loading")}
+        {(summaryError || calendarError) && (
           <span>
             {t("chat.usageOverview.error")}{" "}
-            <button type="button" onClick={() => void load(window)}>{t("chat.usageOverview.retry")}</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (summaryError) void loadSummary(window);
+                if (calendarError) void loadCalendar();
+              }}
+            >
+              {t("chat.usageOverview.retry")}
+            </button>
           </span>
         )}
       </div>
 
-      {rows?.kind === "empty" && <p className="chat-usage-empty">{t("chat.usageOverview.empty")}</p>}
-
-      {rows?.kind === "ready" && summary && daily && (
+      {daily && (
         <div className="chat-usage-infographic">
           <UsageCalendar
             series={daily}
-            window={window}
+            window="home-26w"
             locale={i18n.resolvedLanguage}
             density="compact"
             providerLabels={providerLabels}
           />
           <div className="chat-usage-summary">
-            <UsageMetric label={t("settings.usage.metrics.calls")} value={formatCount(summary.logical_calls, i18n.resolvedLanguage)} />
-            <UsageMetric label={t("chat.usageOverview.tokens")} value={formatCount(totalTokens, i18n.resolvedLanguage)} />
-            <UsageMetric label={t("chat.usageOverview.cost")} value={formatMicrousd(summary.cost_microusd, i18n.resolvedLanguage)} />
-            <UsageMetric label={t("chat.usageOverview.dataQuality")} value={`${coverage}%`} tone={coverage < 100 ? "warning" : undefined} />
-            <div className="chat-usage-route">
-              <span>{t("chat.usageOverview.route")}</span>
-              <strong title={dominantRoute}>{dominantRoute}</strong>
-            </div>
+            {rows?.kind === "empty" && <p className="chat-usage-empty">{t("chat.usageOverview.empty")}</p>}
+            {rows?.kind === "ready" && summary && (
+              <>
+                <UsageMetric label={t("settings.usage.metrics.calls")} value={formatCount(summary.logical_calls, i18n.resolvedLanguage)} />
+                <UsageMetric label={t("chat.usageOverview.tokens")} value={formatCount(totalTokens, i18n.resolvedLanguage)} />
+                <UsageMetric label={t("chat.usageOverview.cost")} value={formatMicrousd(summary.cost_microusd, i18n.resolvedLanguage)} />
+                <UsageMetric label={t("chat.usageOverview.dataQuality")} value={`${coverage}%`} tone={coverage < 100 ? "warning" : undefined} />
+                <div className="chat-usage-route">
+                  <span>{t("chat.usageOverview.route")}</span>
+                  <strong title={dominantRoute}>{dominantRoute}</strong>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
