@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2, MonitorPlay, Power } from "lucide-react";
 import { coreBridge, type ContainedComputerLive } from "../lib/coreBridge";
+
+type ComputerConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "failed";
 
 // The live "Computer" surface (ADR 0010): a real, headed browser runs inside the
 // contained Linux computer and is streamed here over noVNC — visible in-app,
@@ -11,6 +13,10 @@ export function ContainedComputerView() {
   const { t } = useTranslation();
   const [live, setLive] = useState<ContainedComputerLive | null>(null);
   const [error, setError] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [computerConnectionState, setComputerConnectionState] =
+    useState<ComputerConnectionState>("idle");
+  const [viewerRetry, setViewerRetry] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -18,7 +24,10 @@ export function ContainedComputerView() {
       coreBridge
         .containedComputerLive()
         .then((value) => {
-          if (!cancelled) setLive(value);
+          if (!cancelled) {
+            setError(false);
+            setLive(value);
+          }
         })
         .catch(() => {
           if (!cancelled && seed) setError(true);
@@ -37,8 +46,30 @@ export function ContainedComputerView() {
 
   const novncSrc =
     live?.enabled && live.novnc_url
-      ? `${live.novnc_url}${live.novnc_url.includes("?") ? "&" : "?"}autoconnect=true&resize=scale&reconnect=true&show_dot=true`
+      ? `${live.novnc_url.replace("/vnc.html", "/lfpa-view.html")}${live.novnc_url.includes("?") ? "&" : "?"}view_only=0&viewer=csp-external-v1&retry=${viewerRetry}`
       : null;
+
+  useEffect(() => {
+    if (!novncSrc) {
+      setComputerConnectionState("idle");
+      return;
+    }
+    setComputerConnectionState(live?.phase === "failed" ? "failed" : "connecting");
+    const expectedOrigin = new URL(novncSrc, window.location.href).origin;
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (event.origin !== expectedOrigin) return;
+      const payload = event.data as { type?: unknown; state?: unknown } | null;
+      if (payload?.type !== "homun-novnc-state") return;
+      if (!["connecting", "connected", "disconnected", "failed"].includes(String(payload.state))) return;
+      setComputerConnectionState(payload.state as ComputerConnectionState);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [live?.phase, novncSrc]);
+
+  const isConnected = computerConnectionState === "connected";
+  const connectionFailed = computerConnectionState === "failed" || computerConnectionState === "disconnected";
 
   return (
     <section className="contained-computer-view" aria-labelledby="cc-title">
@@ -50,9 +81,9 @@ export function ContainedComputerView() {
             windows on the desktop (ADR 0010).
           </small>
         </div>
-        <span className={`cc-status ${novncSrc ? "on" : "off"}`}>
-          {novncSrc ? <MonitorPlay size={15} /> : <Power size={15} />}
-          {novncSrc ? "Live" : "Spento"}
+        <span className={`cc-status ${isConnected ? "on" : "off"}`}>
+          {isConnected ? <MonitorPlay size={15} /> : <Power size={15} />}
+          {isConnected ? "Live" : live?.phase === "starting" ? "Avvio…" : connectionFailed ? "Non disponibile" : "Spento"}
         </span>
       </header>
 
@@ -89,12 +120,33 @@ export function ContainedComputerView() {
         )}
 
         {novncSrc && (
-          <iframe
-            className="cc-frame"
-            title="Contained computer (noVNC)"
-            src={novncSrc}
-            allow="clipboard-read; clipboard-write"
-          />
+          <>
+            {!isConnected && (
+              <div className="cc-connection-overlay" role={connectionFailed ? "alert" : "status"}>
+                {connectionFailed ? <Power size={18} /> : <Loader2 size={18} className="spin" />}
+                <strong>{connectionFailed ? "Computer non disponibile" : "Connessione al computer…"}</strong>
+                {connectionFailed && (
+                  <button
+                    type="button"
+                    className="state-retry"
+                    onClick={() => {
+                      setComputerConnectionState("connecting");
+                      setViewerRetry((value) => value + 1);
+                    }}
+                  >
+                    {t("common.retry")}
+                  </button>
+                )}
+              </div>
+            )}
+            <iframe
+              ref={iframeRef}
+              className="cc-frame"
+              title="Contained computer (noVNC)"
+              src={novncSrc}
+              allow="clipboard-read; clipboard-write"
+            />
+          </>
         )}
       </div>
     </section>

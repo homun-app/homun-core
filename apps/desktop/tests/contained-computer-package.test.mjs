@@ -48,6 +48,24 @@ test("chat noVNC viewer remains executable under the packaged Electron CSP", asy
     "utf8",
   );
   assert.match(viewerModule, /import RFB from ['"]\.\/core\/rfb\.js['"]/);
+  assert.match(viewerModule, /homun-novnc-state/);
+  assert.match(viewerModule, /publish\(['"]connected['"]\)/);
+  assert.match(viewerModule, /publish\(['"]connecting['"]\)/);
+
+  const chatPanel = await readFile(
+    path.join(appRoot, "src", "components", "ChatComputerPanel.tsx"),
+    "utf8",
+  );
+  const computerView = await readFile(
+    path.join(appRoot, "src", "components", "ContainedComputerView.tsx"),
+    "utf8",
+  );
+  for (const component of [chatPanel, computerView]) {
+    assert.match(component, /homun-novnc-state/);
+    assert.match(component, /event\.source !== iframeRef\.current\?\.contentWindow/);
+    assert.match(component, /event\.origin !== expectedOrigin/);
+  }
+  assert.match(chatPanel, /computerConnectionState === "connected"/);
 });
 
 test("architecture documents the cross-platform setup contract", async () => {
