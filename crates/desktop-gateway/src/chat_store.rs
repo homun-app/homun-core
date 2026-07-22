@@ -1,13 +1,14 @@
 use local_first_desktop_gateway::{
     ChatMessage, ChatMessagesSnapshot, ChatThread, ChatThreadSnapshot, LinkedMemoryReadRef,
-    MemoryReuseEnvelope, compact_thread_title, seeded_ready_message, strip_display_markers,
+    MemoryReuseEnvelope, MessageDeliveryState, compact_thread_title, seeded_ready_message,
+    strip_display_markers,
 };
 // The generic marker parsers live in the single `markers` module now; aliased so the local
 // call sites read unchanged.
 use local_first_desktop_gateway::markers::{
     bodies as marker_bodies, strip_blocks as strip_marker_blocks,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params, types::Type};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -873,7 +874,7 @@ impl ChatStore {
         let mut stmt = self.conn.prepare(
             "select id, role, text, timestamp, metadata, metrics_json, feedback,
                     saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                    event_parts_json, memory_reuse_json, parent_id
+                    event_parts_json, memory_reuse_json, delivery_state, parent_id
                from chat_messages
               where thread_id = ?1
               order by rowid asc",
@@ -882,7 +883,7 @@ impl ChatStore {
         let mut parents: HashMap<String, Option<String>> = HashMap::new();
         let mut by_id: HashMap<String, ChatMessage> = HashMap::new();
         let rows = stmt.query_map(params![thread_id], |row| {
-            let parent: Option<String> = row.get(13)?;
+            let parent: Option<String> = row.get(14)?;
             Ok((message_from_row(row)?, parent))
         })?;
         for row in rows {
@@ -1009,7 +1010,7 @@ impl ChatStore {
             .query_row(
                 "select id, role, text, timestamp, metadata, metrics_json, feedback,
                         saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                        event_parts_json, memory_reuse_json
+                        event_parts_json, memory_reuse_json, delivery_state
                    from chat_messages
                   where thread_id = ?1 and id = ?2",
                 params![thread_id, message_id],
@@ -1271,6 +1272,19 @@ impl ChatStore {
         Ok(())
     }
 
+    pub fn set_message_delivery_state(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+        state: MessageDeliveryState,
+    ) -> rusqlite::Result<bool> {
+        let changed = self.conn.execute(
+            "update chat_messages set delivery_state = ?1 where thread_id = ?2 and id = ?3",
+            params![state.as_str(), thread_id, message_id],
+        )?;
+        Ok(changed == 1)
+    }
+
     /// Atomically append one structured event part to an assistant message. The
     /// `(thread_id, message_id)` scope prevents a retried/background turn from
     /// touching a similarly named message in another chat; equality dedup keeps
@@ -1336,7 +1350,8 @@ impl ChatStore {
         let tx = self.conn.unchecked_transaction()?;
         let changed = tx.execute(
             "update chat_messages
-                set text = ?1, event_parts_json = ?2, memory_reuse_json = ?3
+                set text = ?1, event_parts_json = ?2, memory_reuse_json = ?3,
+                    delivery_state = 'delivered'
               where thread_id = ?4 and id = ?5 and role = 'assistant'",
             params![
                 clean_text,
@@ -2344,6 +2359,7 @@ impl ChatStore {
                 attachments_json text,
                 event_parts_json text,
                 memory_reuse_json text,
+                delivery_state text not null default 'delivered',
                 foreign key(thread_id) references chat_threads(thread_id) on delete cascade
             );
 
@@ -2725,6 +2741,12 @@ impl ChatStore {
         if !self.column_exists("chat_messages", "memory_reuse_json")? {
             self.conn.execute(
                 "alter table chat_messages add column memory_reuse_json text",
+                [],
+            )?;
+        }
+        if !self.column_exists("chat_messages", "delivery_state")? {
+            self.conn.execute(
+                "alter table chat_messages add column delivery_state text not null default 'delivered'",
                 [],
             )?;
         }
@@ -3313,8 +3335,8 @@ impl ChatStore {
             "insert or ignore into chat_messages (
                 id, thread_id, role, text, timestamp, metadata, metrics_json, feedback,
                 saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
-                parent_id, event_parts_json, memory_reuse_json
-            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                parent_id, event_parts_json, memory_reuse_json, delivery_state
+            ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 message.id,
                 thread_id,
@@ -3331,6 +3353,7 @@ impl ChatStore {
                 parent_id,
                 event_parts_to_json(message)?,
                 memory_reuse_to_json(message)?,
+                message.delivery_state.as_str(),
             ],
         )?;
         Ok(inserted == 1)
@@ -3374,6 +3397,7 @@ impl ChatStore {
             attachments: attachments.to_vec(),
             event_parts: Vec::new(),
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
         let parent_id = Self::active_leaf_on(conn, thread_id)?;
         let inserted = Self::insert_message_on(conn, thread_id, &message, parent_id.as_deref())?;
@@ -3480,8 +3504,8 @@ impl ChatStore {
                 set role = ?1, text = ?2, timestamp = ?3, metadata = ?4, metrics_json = ?5,
                     feedback = ?6, saved_memory_ref = ?7, linked_task_id = ?8,
                     linked_automation_ref = ?9, attachments_json = ?10, event_parts_json = ?11,
-                    memory_reuse_json = ?12
-              where id = ?13 and thread_id = ?14",
+                    memory_reuse_json = ?12, delivery_state = ?13
+              where id = ?14 and thread_id = ?15",
             params![
                 message.role,
                 message.text,
@@ -3495,6 +3519,7 @@ impl ChatStore {
                 attachments_to_json(message)?,
                 event_parts_to_json(message)?,
                 memory_reuse_to_json(message)?,
+                message.delivery_state.as_str(),
                 message_id,
                 thread_id,
             ],
@@ -3633,6 +3658,10 @@ fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
     let role: String = row.get(1)?;
     let event_parts = event_parts_from_row(row, 11)?;
     let memory_reuse = memory_reuse_from_row(row, 12, &role, &event_parts)?;
+    let delivery_state = MessageDeliveryState::try_from(row.get::<_, String>(13)?.as_str())
+        .map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(13, Type::Text, Box::new(error))
+        })?;
     Ok(ChatMessage {
         id: row.get(0)?,
         role,
@@ -3649,6 +3678,7 @@ fn message_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
         attachments: attachments_from_row(row, 10)?,
         event_parts,
         memory_reuse,
+        delivery_state,
     })
 }
 
@@ -3949,6 +3979,7 @@ fn monotonic_suffix() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use local_first_desktop_gateway::MessageDeliveryState;
     use local_first_desktop_gateway::MemoryWritePolicy;
 
     fn linked_read() -> local_first_desktop_gateway::LinkedMemoryReadRef {
@@ -4549,6 +4580,7 @@ mod tests {
             attachments: Vec::new(),
             event_parts: Vec::new(),
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
         let assistant = ChatMessage {
             id: "assistant_1".to_string(),
@@ -4564,6 +4596,7 @@ mod tests {
             attachments: Vec::new(),
             event_parts: Vec::new(),
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
 
         let messages = store
@@ -4602,6 +4635,7 @@ mod tests {
             attachments: Vec::new(),
             event_parts: Vec::new(),
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
 
         store.insert_message(&thread.thread_id, &assistant).unwrap();
@@ -4647,6 +4681,7 @@ mod tests {
             attachments: Vec::new(),
             event_parts: Vec::new(),
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
 
         store.insert_message(&thread.thread_id, &assistant).unwrap();
@@ -4697,6 +4732,7 @@ mod tests {
                 }
             })],
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
 
         store
@@ -4732,6 +4768,7 @@ mod tests {
             attachments: Vec::new(),
             event_parts: vec![serde_json::json!({ "type": "activity", "text": "Thinking" })],
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
         store
             .append_assistant_message(&thread.thread_id, &assistant)
@@ -4817,6 +4854,7 @@ mod tests {
             attachments: vec![attachment.clone()],
             event_parts: Vec::new(),
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
         let assistant = mk_message("assistant_after_file", "assistant");
 
@@ -5019,6 +5057,7 @@ mod tests {
             attachments: Vec::new(),
             event_parts: Vec::new(),
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         };
         store
             .append_assistant_message(&thread.thread_id, &assistant)
@@ -5051,7 +5090,106 @@ mod tests {
             attachments: Vec::new(),
             event_parts: Vec::new(),
             memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
         }
+    }
+
+    #[test]
+    fn assistant_delivery_state_round_trips_through_sqlite() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut assistant = mk_message("assistant_retrying", "assistant");
+        assistant.delivery_state = MessageDeliveryState::Retrying;
+
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let reloaded = store
+            .message(&thread.thread_id, &assistant.id)
+            .unwrap()
+            .expect("assistant message");
+        assert_eq!(reloaded.delivery_state, MessageDeliveryState::Retrying);
+    }
+
+    #[test]
+    fn sqlite_default_marks_legacy_message_rows_delivered() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        store
+            .conn
+            .execute(
+                "insert into chat_messages (id, thread_id, role, text, timestamp)
+                 values ('legacy_assistant', ?1, 'assistant', 'old answer', '0')",
+                params![thread.thread_id],
+            )
+            .unwrap();
+
+        assert_eq!(
+            store
+                .message(&thread.thread_id, "legacy_assistant")
+                .unwrap()
+                .expect("legacy assistant")
+                .delivery_state,
+            MessageDeliveryState::Delivered
+        );
+    }
+
+    #[test]
+    fn set_message_delivery_state_is_scoped_to_the_thread_and_message() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let other_thread = store.create_thread("other").unwrap();
+        let assistant = mk_message("assistant_state_scope", "assistant");
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        assert!(store
+            .set_message_delivery_state(
+                &thread.thread_id,
+                &assistant.id,
+                MessageDeliveryState::Streaming,
+            )
+            .unwrap());
+        assert!(!store
+            .set_message_delivery_state(
+                &other_thread.thread_id,
+                &assistant.id,
+                MessageDeliveryState::Cancelled,
+            )
+            .unwrap());
+        assert_eq!(
+            store
+                .message(&thread.thread_id, &assistant.id)
+                .unwrap()
+                .expect("assistant message")
+                .delivery_state,
+            MessageDeliveryState::Streaming
+        );
+    }
+
+    #[test]
+    fn finalizing_assistant_message_marks_it_delivered() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut assistant = mk_message("assistant_finalize", "assistant");
+        assistant.delivery_state = MessageDeliveryState::Streaming;
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let finalized = store
+            .finalize_assistant_message(
+                &thread.thread_id,
+                &assistant.id,
+                "Visible answer.",
+                &[],
+                &MemoryReuseEnvelope::normal(),
+            )
+            .unwrap();
+
+        assert_eq!(finalized.delivery_state, MessageDeliveryState::Delivered);
     }
 
     #[test]

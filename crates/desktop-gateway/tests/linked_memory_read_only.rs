@@ -217,6 +217,7 @@ fn linked_recall_remains_read_only_across_learning_revocation_and_other_projects
         attachments: Vec::new(),
         event_parts: Vec::new(),
         memory_reuse: Some(MemoryReuseEnvelope::user_input_only(vec![read.clone()])),
+        delivery_state: local_first_desktop_gateway::MessageDeliveryState::Delivered,
     };
     let same_thread_context = chat_message_for_existing_thread_context(&historical_answer)
         .expect("historical assistant context");

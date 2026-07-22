@@ -32334,7 +32334,29 @@ async fn handle_channel_inbound(
                     visible_turn.as_ref(),
                     reply.as_deref(),
                 ) {
-                    update_channel_assistant_message(&st, tid, &turn.assistant_message_id, reply);
+                    if let Ok(store) = lock_store(&st) {
+                        if store
+                            .finalize_assistant_message(
+                                tid,
+                                &turn.assistant_message_id,
+                                reply,
+                                &[],
+                                &local_first_memory::MemoryReuseEnvelope::normal(),
+                            )
+                            .is_err()
+                        {
+                            let _ = store.set_message_text(
+                                tid,
+                                &turn.assistant_message_id,
+                                reply,
+                            );
+                        }
+                    }
+                    publish_app_event(serde_json::json!({
+                        "type": "thread.updated",
+                        "thread_id": tid,
+                        "workspace": base_workspace_id(),
+                    }));
                 }
 
                 if let Some(tid) = thread_id.as_deref() {
@@ -32977,6 +32999,7 @@ fn channel_chat_message(role: &str, text: &str) -> ChatMessage {
         attachments: Vec::new(),
         event_parts: Vec::new(),
         memory_reuse: None,
+        delivery_state: local_first_desktop_gateway::MessageDeliveryState::Delivered,
     }
 }
 
@@ -33068,6 +33091,8 @@ fn start_visible_conversation_turn(
     };
     assistant_message.memory_reuse =
         Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
+    assistant_message.delivery_state =
+        local_first_desktop_gateway::MessageDeliveryState::Streaming;
     let turn = VisibleConversationTurn {
         turn_id: match turn_id_override {
             Some(id) => id.to_string(),
@@ -35576,6 +35601,7 @@ fn insert_broker_turn_messages(
     user.attachments = broker_turn_message_attachments(input);
     let mut assistant = channel_chat_message_with_id("assistant", "", &input.assistant_message_id);
     assistant.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
+    assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
     ChatStore::insert_linked_turn_messages(tx, &input.thread_id, &user, &assistant)
     .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
 }
@@ -35838,6 +35864,10 @@ async fn cancel_turn(
     let user_id = gateway_user_id();
     let workspace_id = gateway_workspace_id();
     let task_id = TaskId::new(&turn_id);
+    let delivery_task = store
+        .get_task(&task_id, &user_id, &workspace_id)
+        .ok()
+        .flatten();
     let ok = local_first_task_runtime::broker::cancel_chat_turn(
         &store,
         &user_id,
@@ -35850,6 +35880,16 @@ async fn cancel_turn(
         code: "broker_cancel",
         message: format!("{e}"),
     })?;
+    drop(store);
+    if ok {
+        if let Some(task) = delivery_task.as_ref() {
+            set_chat_turn_message_delivery_state(
+                &state,
+                task,
+                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            );
+        }
+    }
     Ok(if ok {
         StatusCode::ACCEPTED
     } else {
@@ -35872,6 +35912,29 @@ fn execution_thread_workspace(state: &AppState, thread_id: &str) -> Result<Strin
             code: "agent_thread_not_found",
             message: "thread not found".to_string(),
         })
+}
+
+fn set_chat_turn_message_delivery_state(
+    state: &AppState,
+    task: &TaskRecord,
+    delivery_state: local_first_desktop_gateway::MessageDeliveryState,
+) {
+    if task.kind != "chat_turn" {
+        return;
+    }
+    let Some(thread_id) = task.input_json.get("thread_id").and_then(|value| value.as_str()) else {
+        return;
+    };
+    let Some(message_id) = task
+        .input_json
+        .get("assistant_message_id")
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    if let Ok(store) = lock_store(state) {
+        let _ = store.set_message_delivery_state(thread_id, message_id, delivery_state);
+    }
 }
 
 async fn get_thread_agent_runs(
@@ -36808,6 +36871,11 @@ fn run_next_task_once(
             });
         }
     };
+    set_chat_turn_message_delivery_state(
+        state,
+        &task,
+        local_first_desktop_gateway::MessageDeliveryState::Streaming,
+    );
     sync_session_for_task_run(state, &task, SessionStatus::Running, 1, None)?;
     append_task_progress_checkpoint(
         state,
@@ -36951,6 +37019,11 @@ fn run_next_task_once(
         if let Ok(store) = lock_task_store(state) {
             let _ = store.release_resources(&task);
         }
+        set_chat_turn_message_delivery_state(
+            state,
+            &task,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+        );
         append_task_result_to_chat(state, &task_id, &outcome.chat_message)?;
         return Ok(TaskRunBatchResponse {
             status: "cancelled".to_string(),
@@ -36975,6 +37048,11 @@ fn run_next_task_once(
         sync_session_for_task_run(state, &task, SessionStatus::Completed, 3, None)?;
     } else if let Some(approval) = outcome.pending_approval.as_ref() {
         request_task_executor_approval(state, &mut task, approval)?;
+        set_chat_turn_message_delivery_state(
+            state,
+            &task,
+            local_first_desktop_gateway::MessageDeliveryState::WaitingUser,
+        );
         sync_session_for_task_run(
             state,
             &task,
@@ -37491,6 +37569,11 @@ fn handle_failed_task_run(
                 );
             }
         }
+        set_chat_turn_message_delivery_state(
+            state,
+            task,
+            local_first_desktop_gateway::MessageDeliveryState::Retrying,
+        );
         record_automation_run_for_task(state, task, false, &format!("retry: {reason}"));
         return Ok(());
     }
@@ -37499,6 +37582,11 @@ fn handle_failed_task_run(
     } else {
         mark_task_waiting_external(state, task, reason)?;
     }
+    set_chat_turn_message_delivery_state(
+        state,
+        task,
+        local_first_desktop_gateway::MessageDeliveryState::Failed,
+    );
     record_automation_run_for_task(state, task, false, reason);
     notify_automation_failure(state, task, reason);
     if let Some(next) = TaskScheduler::new().next_recurrence(task, OffsetDateTime::now_utc()) {
@@ -37788,6 +37876,7 @@ fn append_task_result_to_chat(
         attachments: Vec::new(),
         event_parts: Vec::new(),
         memory_reuse: None,
+        delivery_state: local_first_desktop_gateway::MessageDeliveryState::Delivered,
     };
     lock_store(state)?
         .append_assistant_message(&thread.thread_id, &message)
@@ -74051,6 +74140,14 @@ data: [DONE]\n";
                 .count(),
             1
         );
+        assert_eq!(
+            messages
+                .iter()
+                .find(|message| message.id == "local_assistant_r1")
+                .expect("stable assistant placeholder")
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Streaming
+        );
     }
 
     #[test]
@@ -74115,6 +74212,122 @@ data: [DONE]\n";
                 .unwrap()
                 .write_policy,
             local_first_memory::MemoryWritePolicy::BlockedUnknown
+        );
+        assert_eq!(
+            chat.message(&thread.thread_id, "local_assistant_r1")
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Streaming
+        );
+    }
+
+    #[test]
+    fn chat_turn_delivery_transitions_target_the_preallocated_assistant() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let mut assistant = super::channel_chat_message_with_id(
+            "assistant",
+            "",
+            "local_assistant_delivery_transition",
+        );
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let task = TaskRecord::new(
+            "turn_delivery_transition",
+            UserId::new("user_test"),
+            WorkspaceId::new("workspace_test"),
+            "chat_turn",
+            "prompt",
+            serde_json::json!({
+                "thread_id": thread.thread_id.clone(),
+                "assistant_message_id": assistant.id.clone(),
+            }),
+        );
+
+        super::set_chat_turn_message_delivery_state(
+            &state,
+            &task,
+            local_first_desktop_gateway::MessageDeliveryState::Retrying,
+        );
+        super::set_chat_turn_message_delivery_state(
+            &state,
+            &task,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+        );
+
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &assistant.id)
+                .unwrap()
+                .expect("stable assistant")
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled
+        );
+    }
+
+    #[test]
+    fn chat_turn_retry_and_terminal_failure_update_the_stable_assistant() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let mut assistant = super::channel_chat_message_with_id(
+            "assistant",
+            "",
+            "local_assistant_retry_failure",
+        );
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let mut task = TaskRecord::new(
+            "turn_retry_failure",
+            UserId::new("user_test"),
+            WorkspaceId::new("workspace_test"),
+            "chat_turn",
+            "prompt",
+            serde_json::json!({
+                "thread_id": thread.thread_id.clone(),
+                "assistant_message_id": assistant.id.clone(),
+            }),
+        );
+        task.retry_policy = local_first_task_runtime::RetryPolicy {
+            max_attempts: 2,
+            backoff_seconds: 0,
+        };
+
+        super::handle_failed_task_run(&state, &mut task, true, "temporary failure").unwrap();
+        assert_eq!(task.status, TaskStatus::Queued);
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &assistant.id)
+                .unwrap()
+                .expect("stable assistant")
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Retrying
+        );
+
+        super::handle_failed_task_run(&state, &mut task, true, "terminal failure").unwrap();
+        assert_eq!(task.status, TaskStatus::Failed);
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &assistant.id)
+                .unwrap()
+                .expect("stable assistant")
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Failed
         );
     }
 

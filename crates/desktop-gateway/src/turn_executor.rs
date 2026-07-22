@@ -504,12 +504,8 @@ pub fn execute_chat_turn_task(
             .block_on(crate::clear_channel_typing(state, thread_id));
     }
     let cancelled = run.is_none();
-    let answer = run
-        .flatten()
-        .unwrap_or_else(|| "No reply generated.".to_string());
-    let generated = !cancelled
-        && !answer.trim().is_empty()
-        && answer.trim() != "No reply generated.";
+    let answer = run.flatten().unwrap_or_default();
+    let generated = !cancelled && !answer.trim().is_empty();
     if cancelled {
         if let Ok(store) = state.chat_store.lock() {
             let partial = store
@@ -523,6 +519,11 @@ pub fn execute_chat_turn_task(
                 thread_id,
                 &visible_turn.assistant_message_id,
                 partial.trim(),
+            );
+            let _ = store.set_message_delivery_state(
+                thread_id,
+                &visible_turn.assistant_message_id,
+                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
             );
         }
         finalize_agent_run(
@@ -576,7 +577,7 @@ pub fn execute_chat_turn_task(
     // assistant-message finalize and the `done` event: `cancel_chat_turn` already persisted
     // the `Cancelled` status and emitted the `Cancelled` turn event, so writing a `done`/full
     // answer here would resurrect a cancelled turn.
-    if !cancelled {
+    if generated {
         // 6. Finalize the assistant message. The legacy path persists the full
         // streamed text (which includes ‹‹ACT›› activity markers as inline deltas),
         // so the working island can parse them out of `message.text`. The broker
@@ -630,7 +631,7 @@ pub fn execute_chat_turn_task(
             );
         }
     } else {
-        tracing::info!(target: "broker::executor", turn_id = %turn_id, "turn cancelled mid-flight — skipping finalize + done event");
+        tracing::info!(target: "broker::executor", turn_id = %turn_id, cancelled, "turn did not produce a final reply — skipping finalization + done event");
     }
 
     // 8. Drop the live broadcast (subscribers see the channel close).

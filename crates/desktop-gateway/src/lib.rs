@@ -21,6 +21,7 @@ use local_first_context_compression::{
     ContextKind,
 };
 use serde::{Deserialize, Serialize};
+use std::{error::Error, fmt, str::FromStr};
 
 const DEFAULT_CONTEXT_BUDGET_CHARS: usize = 3_600;
 const MAX_SINGLE_CONTEXT_MESSAGE_CHARS: usize = 2_000;
@@ -210,6 +211,70 @@ pub struct ChatThreadSnapshot {
     pub threads: Vec<ChatThread>,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageDeliveryState {
+    Streaming,
+    Retrying,
+    WaitingUser,
+    #[default]
+    Delivered,
+    Failed,
+    Cancelled,
+}
+
+impl MessageDeliveryState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Streaming => "streaming",
+            Self::Retrying => "retrying",
+            Self::WaitingUser => "waiting_user",
+            Self::Delivered => "delivered",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseMessageDeliveryStateError {
+    value: String,
+}
+
+impl fmt::Display for ParseMessageDeliveryStateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "invalid message delivery state: {}", self.value)
+    }
+}
+
+impl Error for ParseMessageDeliveryStateError {}
+
+impl FromStr for MessageDeliveryState {
+    type Err = ParseMessageDeliveryStateError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "streaming" => Ok(Self::Streaming),
+            "retrying" => Ok(Self::Retrying),
+            "waiting_user" => Ok(Self::WaitingUser),
+            "delivered" => Ok(Self::Delivered),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            _ => Err(ParseMessageDeliveryStateError {
+                value: value.to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&str> for MessageDeliveryState {
+    type Error = ParseMessageDeliveryStateError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
@@ -228,6 +293,8 @@ pub struct ChatMessage {
     pub event_parts: Vec<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_reuse: Option<MemoryReuseEnvelope>,
+    #[serde(default)]
+    pub delivery_state: MessageDeliveryState,
 }
 
 pub const LINKED_MEMORY_CONTEXT_OMITTED: &str =
@@ -244,6 +311,9 @@ pub fn chat_message_for_existing_thread_context(
         "assistant" => ChatContextRole::Assistant,
         _ => return None,
     };
+    if message.role == "assistant" && message.delivery_state != MessageDeliveryState::Delivered {
+        return None;
+    }
     if message.role == "user" {
         return Some(ChatContextMessage {
             role,
@@ -374,6 +444,7 @@ pub fn seeded_ready_message(thread_id: &str, timestamp: String) -> ChatMessage {
         attachments: Vec::new(),
         event_parts: Vec::new(),
         memory_reuse: None,
+        delivery_state: MessageDeliveryState::Delivered,
     }
 }
 
@@ -522,6 +593,55 @@ impl PromptCompressionSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mk_message(id: &str, role: &str) -> ChatMessage {
+        ChatMessage {
+            id: id.to_string(),
+            role: role.to_string(),
+            text: format!("{id} text"),
+            timestamp: "0".to_string(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: Vec::new(),
+            event_parts: Vec::new(),
+            memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
+        }
+    }
+
+    #[test]
+    fn only_delivered_assistant_messages_enter_model_context() {
+        let mut streaming = mk_message("a1", "assistant");
+        for state in [
+            MessageDeliveryState::Streaming,
+            MessageDeliveryState::Retrying,
+            MessageDeliveryState::WaitingUser,
+            MessageDeliveryState::Failed,
+            MessageDeliveryState::Cancelled,
+        ] {
+            streaming.delivery_state = state;
+            assert!(chat_message_for_existing_thread_context(&streaming).is_none());
+        }
+        streaming.delivery_state = MessageDeliveryState::Delivered;
+        assert!(chat_message_for_existing_thread_context(&streaming).is_some());
+
+        let mut user = mk_message("u1", "user");
+        user.delivery_state = MessageDeliveryState::Streaming;
+        assert!(chat_message_for_existing_thread_context(&user).is_some());
+    }
+
+    #[test]
+    fn message_delivery_state_rejects_unknown_persisted_values() {
+        assert_eq!(
+            "retrying".parse::<MessageDeliveryState>().unwrap(),
+            MessageDeliveryState::Retrying
+        );
+        assert!("future_state".parse::<MessageDeliveryState>().is_err());
+    }
 
     #[test]
     fn strip_display_markers_removes_blocks_including_unclosed() {
