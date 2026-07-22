@@ -2263,10 +2263,19 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   preflight e la UI mostrava il generico `Failed to fetch`. Aggiunto test di preflight `PATCH`.
 - **Privacy Guard pre-turn per Vault**: aggiunto gate prima del loop chat. Il guard prova il ruolo
   modellistico locale `privacy_guard` (solo endpoint loopback e modello non `:cloud`), valida che i
-  secret siano sottostringhe esatte del prompt e altrimenti usa il classifier deterministico come safety
-  net. Se rileva dati sensibili, non chiama il modello chat: lo stream `Done` porta `redacted_user_text`,
+  secret siano sottostringhe esatte del prompt e unisce sempre anche le rilevazioni deterministiche. Se il
+  guard modellistico non risponde o produce output invalido, un orchestratore locale può proseguire con il
+  solo classifier deterministico; verso un orchestratore remoto il turno si ferma prima dell'inferenza con
+  errore retryable `privacy_guard_unavailable` (fail-closed). Se rileva dati sensibili, non chiama il modello
+  chat: lo stream `Done` porta `redacted_user_text`,
   il frontend committa il messaggio utente redatto e l'assistant mostra solo `VAULT_PROPOSE` con
   `pending_id`. Il raw resta nel sidecar volatile.
+- **Privacy Guard qualificato su hardware supportato (22 luglio 2026)**: corpus versionato da 44 casi
+  bilanciati IT/EN e soglie minime recall 95%, specificità 90%, JSON valido 99%, p95 12 s. `qwen3.5:2b`
+  non è qualificato (recall 77,27%, specificità 100%, JSON 95,45%, p95 4,72 s) e non viene più scelto
+  automaticamente. `qwen3.5:4b` è il più piccolo candidato qualificato (recall 95,45%, specificità 100%,
+  JSON 100%, p95 8,50 s) ed è l'unico modello ammesso oggi dal resolver `privacy_guard`. `gemma4:12b`
+  è stato escluso dalla decisione perché il run ha superato il timeout e non ha prodotto un report completo.
 - **Vault proposal UX/policy fix**: la card `VAULT_PROPOSE` ora usa i token tema (niente card chiara
   hardcoded), non chiede PIN per salvare e si compatta dopo save/dismiss. L'accept salva un record
   metadata-only con `pending_id`; il PIN serve quando l'utente fa reveal/edit, momento in cui il gateway

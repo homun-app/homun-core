@@ -15638,7 +15638,7 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
 use model_registry::{
-    ModelTier, ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
+    ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
     canonical_provider_base_url,
 };
 
@@ -15869,12 +15869,25 @@ fn role_openai_config(role: &str) -> Option<(String, String, Option<String>)> {
     chat_openai_stream_config()
 }
 
+// Ordered by the smallest model that passed the versioned local qualification
+// corpus. Do not add a model here based on size or reputation alone: it must
+// satisfy the recall, specificity, strict-JSON and p95 latency thresholds in
+// docs/benchmarks/privacy-guard-thresholds.json.
+const QUALIFIED_PRIVACY_GUARD_MODELS: &[&str] = &["qwen3.5:4b"];
+
+fn privacy_guard_model_qualification_rank(model: &str) -> Option<usize> {
+    QUALIFIED_PRIVACY_GUARD_MODELS
+        .iter()
+        .position(|qualified| model.eq_ignore_ascii_case(qualified))
+}
+
 fn resolve_privacy_guard_role(
     registry: &ProviderRegistry,
 ) -> Option<model_registry::ResolvedRole> {
     if let Some(resolved) = registry.resolve_role("privacy_guard")
         && provider_endpoint_is_local(&resolved.base_url)
         && !model_id_is_cloud(&resolved.model)
+        && privacy_guard_model_qualification_rank(&resolved.model).is_some()
     {
         return Some(resolved);
     }
@@ -15887,29 +15900,17 @@ fn resolve_privacy_guard_role(
             provider
                 .models
                 .iter()
-                .filter(|model| model.modality == "text" && !model_id_is_cloud(&model.id))
+                .filter(|model| {
+                    model.modality == "text"
+                        && !model_id_is_cloud(&model.id)
+                        && privacy_guard_model_qualification_rank(&model.id).is_some()
+                })
                 .map(move |model| (provider, model))
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|(provider_a, model_a), (provider_b, model_b)| {
-        let tier_rank = |tier: ModelTier| match tier {
-            ModelTier::Fast => 0,
-            ModelTier::Balanced => 1,
-            ModelTier::Reasoning => 2,
-        };
-        let rank_a = model_a
-            .profile
-            .as_ref()
-            .map(|profile| tier_rank(profile.tier))
-            .unwrap_or(1);
-        let rank_b = model_b
-            .profile
-            .as_ref()
-            .map(|profile| tier_rank(profile.tier))
-            .unwrap_or(1);
-        rank_a
-            .cmp(&rank_b)
-            .then(model_a.reasoning.cmp(&model_b.reasoning))
+        privacy_guard_model_qualification_rank(&model_a.id)
+            .cmp(&privacy_guard_model_qualification_rank(&model_b.id))
             .then(provider_a.id.cmp(&provider_b.id))
             .then(model_a.id.cmp(&model_b.id))
     });
@@ -69335,7 +69336,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
-    fn privacy_guard_auto_resolution_reports_the_local_model_it_really_uses() {
+    fn privacy_guard_auto_resolution_uses_the_smallest_qualified_local_model() {
         let mut registry = super::model_registry::ProviderRegistry::default();
         let mut ollama = super::model_registry::ProviderEntry::new(
             "ollama".into(),
@@ -69346,14 +69347,31 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         ollama.models = vec![
             super::model_registry::ModelEntry::inferred("minimax-m3:cloud"),
             super::model_registry::ModelEntry::inferred("gemma4:12b"),
+            super::model_registry::ModelEntry::inferred("qwen3.5:2b"),
+            super::model_registry::ModelEntry::inferred("qwen3.5:4b"),
         ];
         registry.upsert(ollama);
 
         let resolved = super::resolve_privacy_guard_role(&registry).unwrap();
 
         assert_eq!(resolved.provider_id, "ollama");
-        assert_eq!(resolved.model, "gemma4:12b");
+        assert_eq!(resolved.model, "qwen3.5:4b");
         assert!(resolved.auto);
+    }
+
+    #[test]
+    fn privacy_guard_does_not_resolve_an_unqualified_local_model() {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut ollama = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        ollama.models = vec![super::model_registry::ModelEntry::inferred("qwen3.5:2b")];
+        registry.upsert(ollama);
+
+        assert!(super::resolve_privacy_guard_role(&registry).is_none());
     }
 
     #[test]
@@ -69367,7 +69385,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn privacy_guard_prompt_defines_contextual_credentials_without_keywords() {
-        let payload = super::privacy_guard_payload("qwen3.5:2b", "testo");
+        let payload = super::privacy_guard_payload("qwen3.5:4b", "testo");
         let system = payload["messages"][0]["content"].as_str().unwrap();
 
         assert!(system.contains("even when the word password is absent"));
