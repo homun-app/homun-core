@@ -10,6 +10,7 @@ pub enum TaskRuntimeError {
     ResourceUnavailable(String),
     LeaseConflict(String),
     ApprovalRequired(String),
+    Conflict(String),
 }
 
 impl fmt::Display for TaskRuntimeError {
@@ -29,6 +30,7 @@ impl fmt::Display for TaskRuntimeError {
             TaskRuntimeError::ApprovalRequired(message) => {
                 write!(formatter, "approval required: {message}")
             }
+            TaskRuntimeError::Conflict(message) => write!(formatter, "conflict: {message}"),
         }
     }
 }

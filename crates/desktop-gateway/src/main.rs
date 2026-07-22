@@ -36055,19 +36055,24 @@ async fn enqueue_turn(
         Ok(local_first_task_runtime::broker::EnqueueTurnOutcome::SteeringQueued {
             thread_id,
             active_turn_id,
-            source_message_id,
-            objective_revision,
-        }) => Ok((
-            StatusCode::ACCEPTED,
-            Json(serde_json::json!({
+            steering,
+        }) => {
+            publish_app_event(serde_json::json!({
+                "type": "thread.steering_changed",
+                "thread_id": thread_id,
+                "steering_id": steering.steering_id,
+                "revision": steering.revision,
+            }));
+            Ok((StatusCode::ACCEPTED, Json(serde_json::json!({
                 "thread_id": thread_id,
                 "active_turn_id": active_turn_id,
                 "request_id": request_id,
-                "source_message_id": source_message_id,
-                "objective_revision": objective_revision,
+                "source_message_id": steering.source_message_id,
+                "objective_revision": steering.objective_revision,
                 "status": "steering_queued",
-            })),
-        )),
+                "steering": steering,
+            }))))
+        },
         Err(local_first_task_runtime::broker::EnqueueError::ThreadBusy {
             thread_id,
             active_turn_id,

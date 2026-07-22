@@ -266,10 +266,79 @@ pub struct TurnSteeringRecord {
     pub active_turn_id: String,
     pub source_message_id: String,
     pub content: String,
+    pub prompt: String,
+    pub visible_prompt: String,
+    pub images: Vec<String>,
+    pub attachments: Value,
+    pub mode: Option<String>,
+    pub model: Option<String>,
     pub objective_revision: u64,
-    pub status: String,
+    pub status: TurnSteeringStatus,
+    pub revision: u64,
     pub created_at: i64,
+    pub updated_at: i64,
+    pub claimed_run_id: Option<String>,
+    pub claimed_round: Option<u32>,
+    pub claimed_at: Option<i64>,
+    pub applied_at: Option<i64>,
+    pub cancelled_at: Option<i64>,
     pub consumed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnSteeringStatus {
+    Pending,
+    Claimed,
+    Applied,
+    Held,
+    Cancelled,
+    Promoted,
+}
+
+impl TurnSteeringStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Claimed => "claimed",
+            Self::Applied => "applied",
+            Self::Held => "held",
+            Self::Cancelled => "cancelled",
+            Self::Promoted => "promoted",
+        }
+    }
+}
+
+impl std::fmt::Display for TurnSteeringStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for TurnSteeringStatus {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "claimed" | "consumed" => Ok(Self::Claimed),
+            "applied" => Ok(Self::Applied),
+            "held" => Ok(Self::Held),
+            "cancelled" => Ok(Self::Cancelled),
+            "promoted" => Ok(Self::Promoted),
+            _ => Err(format!("unknown steering status: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NewTurnSteering {
+    pub source_message_id: String,
+    pub prompt: String,
+    pub visible_prompt: String,
+    pub images: Vec<String>,
+    pub attachments: Value,
+    pub mode: Option<String>,
+    pub model: Option<String>,
 }
 
 /// Canonical, operational plan state for one chat thread.
@@ -399,6 +468,18 @@ pub struct ThreadActivityProjection {
     /// actually fires — today weak local managers route decomposition to the PLAN, so this
     /// is forward-looking plumbing: the section renders as soon as a subagent task appears.
     pub subagents: Vec<SubagentInfo>,
+    pub active_turn: Option<ActiveTurnProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveTurnProjection {
+    pub turn_id: String,
+    pub status: String,
+    pub attempt: u32,
+    pub max_attempts: u32,
+    pub not_before: Option<i64>,
+    pub blocked_reason: Option<String>,
+    pub updated_at: i64,
 }
 
 /// One spawned subagent, projected into the island's "Subagenti" section.

@@ -35,8 +35,8 @@ pub use types::{
     Automation, AutomationRun,
     AutomationSource, AutomationTrigger, EventTrigger, NewAgentRun, ResourceClass,
     NewAgentToolReceipt, ObjectiveContractRecord, ObjectiveMode, ResourceRequirement, RetryPolicy,
-    RuntimePlanRecord, TaskId,
+    ActiveTurnProjection, NewTurnSteering, RuntimePlanRecord, TaskId,
     TaskPriority, TaskRecord, TaskStatus, SubagentInfo, ThreadActivityProjection,
-    ToolReceiptClaim, TurnEvent, TurnEventKind, TurnSteeringRecord, UserId, WorkflowId, WorkspaceId,
+    ToolReceiptClaim, TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

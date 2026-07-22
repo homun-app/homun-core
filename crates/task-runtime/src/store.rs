@@ -3,7 +3,8 @@ use crate::{
     Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ObjectiveContractRecord,
     ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    ThreadActivityProjection, TurnEvent, TurnEventKind, TurnSteeringRecord, UserId, WorkspaceId,
+    ActiveTurnProjection, NewTurnSteering, ThreadActivityProjection, TurnEvent, TurnEventKind,
+    TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde_json::Value;
@@ -346,6 +347,32 @@ impl TaskStore {
                 [],
             )?;
         }
+        let steering_columns = [
+            ("payload_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("revision", "INTEGER NOT NULL DEFAULT 1"),
+            ("updated_at", "INTEGER NOT NULL DEFAULT 0"),
+            ("claimed_run_id", "TEXT"),
+            ("claimed_round", "INTEGER"),
+            ("claimed_at", "INTEGER"),
+            ("applied_at", "INTEGER"),
+            ("cancelled_at", "INTEGER"),
+        ];
+        for (column, definition) in steering_columns {
+            if !column_exists(&self.connection, "turn_steering", column) {
+                self.connection.execute(
+                    &format!("ALTER TABLE turn_steering ADD COLUMN {column} {definition}"),
+                    [],
+                )?;
+            }
+        }
+        self.connection.execute(
+            "UPDATE turn_steering SET updated_at = created_at WHERE updated_at = 0",
+            [],
+        )?;
+        self.connection.execute(
+            "UPDATE task_runtime_metadata SET value = '9' WHERE key = 'schema_version'",
+            [],
+        )?;
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
         // 409-per-thread query (status queued/running) without polluting it with non-chat tasks.
         if !index_exists(&self.connection, "idx_tasks_chat_turn_thread") {
@@ -588,31 +615,30 @@ impl TaskStore {
         load_objective_contract_on(&self.connection, user_id, workspace_id, thread_id)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn append_turn_steering(
         &self,
         user_id: &str,
         workspace_id: &str,
         thread_id: &str,
         active_turn_id: &str,
-        source_message_id: &str,
-        content: &str,
+        input: &NewTurnSteering,
         objective_revision: u64,
     ) -> TaskRuntimeResult<TurnSteeringRecord> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         self.connection.execute(
             "INSERT INTO turn_steering (
                 user_id, workspace_id, thread_id, active_turn_id, source_message_id,
-                content, objective_revision, status, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8)
+                content, payload_json, objective_revision, status, revision, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 1, ?9, ?9)
              ON CONFLICT(user_id, workspace_id, thread_id, source_message_id) DO NOTHING",
             params![
                 user_id,
                 workspace_id,
                 thread_id,
                 active_turn_id,
-                source_message_id,
-                content,
+                input.source_message_id,
+                input.prompt,
+                serde_json::to_string(input)?,
                 objective_revision as i64,
                 now,
             ],
@@ -622,25 +648,28 @@ impl TaskStore {
             user_id,
             workspace_id,
             thread_id,
-            source_message_id,
+            &input.source_message_id,
         )?
         .ok_or_else(|| TaskRuntimeError::Store("steering message disappeared after append".into()))
     }
 
-    pub fn consume_pending_turn_steering(
+    pub fn claim_pending_turn_steering(
         &self,
         user_id: &str,
         workspace_id: &str,
         thread_id: &str,
         active_turn_id: &str,
+        run_id: &str,
+        round: u32,
     ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
         let records = {
             let mut statement = tx.prepare(
                 "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
-                        source_message_id, content, objective_revision, status, created_at,
-                        consumed_at
+                        source_message_id, content, payload_json, objective_revision, status,
+                        revision, created_at, updated_at, claimed_run_id, claimed_round,
+                        claimed_at, applied_at, cancelled_at, consumed_at
                  FROM turn_steering
                  WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
                    AND active_turn_id = ?4 AND status = 'pending'
@@ -652,20 +681,37 @@ impl TaskStore {
         };
         tx.execute(
             "UPDATE turn_steering
-             SET status = 'consumed', consumed_at = ?1
-             WHERE user_id = ?2 AND workspace_id = ?3 AND thread_id = ?4
-               AND active_turn_id = ?5 AND status = 'pending'",
-            params![now, user_id, workspace_id, thread_id, active_turn_id],
+             SET status = 'claimed', claimed_run_id = ?1, claimed_round = ?2,
+                 claimed_at = ?3, consumed_at = ?3, updated_at = ?3
+             WHERE user_id = ?4 AND workspace_id = ?5 AND thread_id = ?6
+               AND active_turn_id = ?7 AND status = 'pending'",
+            params![run_id, round as i64, now, user_id, workspace_id, thread_id, active_turn_id],
         )?;
         tx.commit()?;
         Ok(records
             .into_iter()
             .map(|mut record| {
-                record.status = "consumed".into();
+                record.status = TurnSteeringStatus::Claimed;
+                record.claimed_run_id = Some(run_id.to_string());
+                record.claimed_round = Some(round);
+                record.claimed_at = Some(now);
+                record.updated_at = now;
                 record.consumed_at = Some(now);
                 record
             })
             .collect())
+    }
+
+    pub fn consume_pending_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        active_turn_id: &str,
+    ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
+        self.claim_pending_turn_steering(
+            user_id, workspace_id, thread_id, active_turn_id, "legacy", 0,
+        )
     }
 
     pub fn list_turn_steering(
@@ -676,8 +722,9 @@ impl TaskStore {
     ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
         let mut statement = self.connection.prepare(
             "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
-                    source_message_id, content, objective_revision, status, created_at,
-                    consumed_at
+                    source_message_id, content, payload_json, objective_revision, status,
+                    revision, created_at, updated_at, claimed_run_id, claimed_round,
+                    claimed_at, applied_at, cancelled_at, consumed_at
              FROM turn_steering
              WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
              ORDER BY steering_id ASC",
@@ -685,6 +732,75 @@ impl TaskStore {
         Ok(statement
             .query_map(params![user_id, workspace_id, thread_id], map_turn_steering_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn update_turn_steering(
+        &self,
+        steering_id: i64,
+        user_id: &str,
+        workspace_id: &str,
+        expected_revision: u64,
+        input: &NewTurnSteering,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE turn_steering SET source_message_id=?1, content=?2, payload_json=?3,
+                    revision=revision+1, updated_at=?4
+             WHERE steering_id=?5 AND user_id=?6 AND workspace_id=?7 AND revision=?8
+               AND status IN ('pending','held')",
+            params![input.source_message_id, input.prompt, serde_json::to_string(input)?, now,
+                steering_id, user_id, workspace_id, expected_revision as i64],
+        )?;
+        if changed == 0 { return Err(TaskRuntimeError::Conflict("steering changed or is no longer editable".into())); }
+        self.load_turn_steering(steering_id, user_id, workspace_id)?.ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
+    pub fn cancel_turn_steering(
+        &self, steering_id: i64, user_id: &str, workspace_id: &str, expected_revision: u64,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE turn_steering SET status='cancelled', revision=revision+1,
+                    cancelled_at=?1, updated_at=?1
+             WHERE steering_id=?2 AND user_id=?3 AND workspace_id=?4 AND revision=?5
+               AND status IN ('pending','held')",
+            params![now, steering_id, user_id, workspace_id, expected_revision as i64],
+        )?;
+        if changed == 0 { return Err(TaskRuntimeError::Conflict("steering changed or is no longer cancellable".into())); }
+        self.load_turn_steering(steering_id, user_id, workspace_id)?.ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
+    pub fn load_turn_steering(&self, steering_id: i64, user_id: &str, workspace_id: &str) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+        self.connection.query_row(
+            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                    source_message_id, content, payload_json, objective_revision, status,
+                    revision, created_at, updated_at, claimed_run_id, claimed_round,
+                    claimed_at, applied_at, cancelled_at, consumed_at
+             FROM turn_steering WHERE steering_id=?1 AND user_id=?2 AND workspace_id=?3",
+            params![steering_id, user_id, workspace_id], map_turn_steering_row,
+        ).optional().map_err(Into::into)
+    }
+
+    pub fn mark_turn_steering_applied(&self, ids: &[i64], run_id: &str) -> TaskRuntimeResult<()> {
+        if ids.is_empty() { return Ok(()); }
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let tx = self.connection.unchecked_transaction()?;
+        for id in ids {
+            tx.execute("UPDATE turn_steering SET status='applied', applied_at=?1, updated_at=?1
+                        WHERE steering_id=?2 AND status='claimed' AND claimed_run_id=?3",
+                params![now, id, run_id])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn hold_pending_turn_steering(&self, user_id: &str, workspace_id: &str, active_turn_id: &str) -> TaskRuntimeResult<usize> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        Ok(self.connection.execute(
+            "UPDATE turn_steering SET status='held', revision=revision+1, updated_at=?1
+             WHERE user_id=?2 AND workspace_id=?3 AND active_turn_id=?4 AND status='pending'",
+            params![now, user_id, workspace_id, active_turn_id],
+        )?)
     }
 
     pub fn load_runtime_plan(
@@ -1962,17 +2078,32 @@ impl TaskStore {
         activity_cap: usize,
     ) -> TaskRuntimeResult<ThreadActivityProjection> {
         // Latest turn (id + status) first: the plan is scoped to it.
-        let latest_turn: Option<(String, String)> = self
+        let latest_turn: Option<(String, String, String, i64, Option<String>)> = self
             .connection
             .query_row(
-                "SELECT task_id, status FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'
+                "SELECT task_id, status, task_json, updated_at, blocked_reason FROM tasks WHERE thread_id = ?1 AND kind = 'chat_turn'
                  ORDER BY created_at DESC LIMIT 1",
                 params![thread_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .optional()?;
-        let latest_turn_id = latest_turn.as_ref().map(|(id, _)| id.clone());
-        let latest_turn_status = latest_turn.map(|(_, status)| status);
+        let latest_turn_id = latest_turn.as_ref().map(|(id, _, _, _, _)| id.clone());
+        let latest_turn_status = latest_turn.as_ref().map(|(_, status, _, _, _)| status.clone());
+        let active_turn = latest_turn.as_ref().and_then(|(turn_id, status, task_json, updated_at, blocked_reason)| {
+            if matches!(status.as_str(), "completed" | "failed" | "cancelled" | "expired" | "finalizing") {
+                return None;
+            }
+            let task = serde_json::from_str::<TaskRecord>(task_json).ok()?;
+            Some(ActiveTurnProjection {
+                turn_id: turn_id.clone(),
+                status: status.clone(),
+                attempt: task.attempt_count,
+                max_attempts: task.retry_policy.max_attempts,
+                not_before: task.not_before.map(|value| value.unix_timestamp()),
+                blocked_reason: blocked_reason.clone(),
+                updated_at: *updated_at,
+            })
+        });
 
         let mut stmt = self.connection.prepare(
             "SELECT te.turn_id, te.kind, te.payload_json
@@ -2063,6 +2194,7 @@ impl TaskStore {
             latest_turn_status,
             turn_count: turn_count as usize,
             subagents,
+            active_turn,
         })
     }
 
@@ -2370,22 +2502,54 @@ fn load_objective_contract_on(
 }
 
 fn map_turn_steering_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnSteeringRecord> {
+    let content: String = row.get(6)?;
+    let payload_json: String = row.get(7)?;
+    let payload = serde_json::from_str::<NewTurnSteering>(&payload_json).unwrap_or_else(|_| NewTurnSteering {
+        source_message_id: row.get::<_, String>(5).unwrap_or_default(),
+        prompt: content.clone(),
+        visible_prompt: content.clone(),
+        images: Vec::new(),
+        attachments: Value::Array(Vec::new()),
+        mode: None,
+        model: None,
+    });
+    let status_text: String = row.get(9)?;
+    let status = status_text.parse::<TurnSteeringStatus>().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            9,
+            rusqlite::types::Type::Text,
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
+        )
+    })?;
     Ok(TurnSteeringRecord {
         steering_id: row.get(0)?,
         user_id: row.get(1)?,
         workspace_id: row.get(2)?,
         thread_id: row.get(3)?,
         active_turn_id: row.get(4)?,
-        source_message_id: row.get(5)?,
-        content: row.get(6)?,
-        objective_revision: row.get::<_, i64>(7)? as u64,
-        status: row.get(8)?,
-        created_at: row.get(9)?,
-        consumed_at: row.get(10)?,
+        source_message_id: payload.source_message_id,
+        content,
+        prompt: payload.prompt,
+        visible_prompt: payload.visible_prompt,
+        images: payload.images,
+        attachments: payload.attachments,
+        mode: payload.mode,
+        model: payload.model,
+        objective_revision: row.get::<_, i64>(8)? as u64,
+        status,
+        revision: row.get::<_, i64>(10)? as u64,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        claimed_run_id: row.get(13)?,
+        claimed_round: row.get::<_, Option<i64>>(14)?.map(|value| value as u32),
+        claimed_at: row.get(15)?,
+        applied_at: row.get(16)?,
+        cancelled_at: row.get(17)?,
+        consumed_at: row.get(18)?,
     })
 }
 
-fn load_turn_steering_by_source_message(
+pub(crate) fn load_turn_steering_by_source_message(
     conn: &Connection,
     user_id: &str,
     workspace_id: &str,
@@ -2394,7 +2558,9 @@ fn load_turn_steering_by_source_message(
 ) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
     conn.query_row(
         "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
-                source_message_id, content, objective_revision, status, created_at, consumed_at
+                source_message_id, content, payload_json, objective_revision, status,
+                revision, created_at, updated_at, claimed_run_id, claimed_round,
+                claimed_at, applied_at, cancelled_at, consumed_at
          FROM turn_steering
          WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3 AND source_message_id = ?4",
         params![user_id, workspace_id, thread_id, source_message_id],
@@ -2651,14 +2817,26 @@ mod runtime_plan_tests {
 mod turn_steering_tests {
     use super::*;
 
+    fn new_steering(text: &str) -> NewTurnSteering {
+        NewTurnSteering {
+            source_message_id: format!("message-{text}"),
+            prompt: text.into(),
+            visible_prompt: text.into(),
+            images: Vec::new(),
+            attachments: serde_json::json!([]),
+            mode: None,
+            model: None,
+        }
+    }
+
     #[test]
     fn pending_steering_is_ordered_and_consumed_once() {
         let store = TaskStore::open_in_memory().unwrap();
         store
-            .append_turn_steering("u", "w", "thread", "turn-1", "message-1", "first", 3)
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("first"), 3)
             .unwrap();
         store
-            .append_turn_steering("u", "w", "thread", "turn-1", "message-2", "second", 3)
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("second"), 3)
             .unwrap();
 
         let consumed = store
@@ -2681,7 +2859,7 @@ mod turn_steering_tests {
     fn steering_cannot_cross_workspace_or_active_turn() {
         let store = TaskStore::open_in_memory().unwrap();
         store
-            .append_turn_steering("u", "w", "thread", "turn-1", "message-1", "only", 1)
+            .append_turn_steering("u", "w", "thread", "turn-1", &new_steering("only"), 1)
             .unwrap();
 
         assert!(store
@@ -2699,6 +2877,33 @@ mod turn_steering_tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn steering_envelope_round_trips_and_claims_fifo() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let mut first = new_steering("first");
+        first.images.push("data:image/png;base64,abc".into());
+        let row = store.append_turn_steering("u", "w", "thread", "turn-1", &first, 3).unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("second"), 3).unwrap();
+        assert_eq!(row.revision, 1);
+        assert_eq!(row.status, TurnSteeringStatus::Pending);
+        assert_eq!(row.images.len(), 1);
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 2).unwrap();
+        assert_eq!(claimed.iter().map(|row| row.prompt.as_str()).collect::<Vec<_>>(), vec!["first", "second"]);
+        assert!(claimed.iter().all(|row| row.status == TurnSteeringStatus::Claimed));
+    }
+
+    #[test]
+    fn held_rows_are_revision_guarded() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let row = store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("first"), 1).unwrap();
+        store.hold_pending_turn_steering("u", "w", "turn-1").unwrap();
+        let held = store.list_turn_steering("u", "w", "thread").unwrap().remove(0);
+        assert_eq!(held.status, TurnSteeringStatus::Held);
+        let edited = store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("edited")).unwrap();
+        assert!(matches!(store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("stale")), Err(TaskRuntimeError::Conflict(_))));
+        assert_eq!(store.cancel_turn_steering(row.steering_id, "u", "w", edited.revision).unwrap().status, TurnSteeringStatus::Cancelled);
     }
 }
 

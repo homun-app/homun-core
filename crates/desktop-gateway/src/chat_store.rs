@@ -3445,6 +3445,38 @@ impl ChatStore {
         Ok(())
     }
 
+    /// Materialize a claimed steering envelope exactly once in the visible branch.
+    pub(crate) fn materialize_steering_message(
+        &self,
+        thread_id: &str,
+        steering: &local_first_task_runtime::TurnSteeringRecord,
+    ) -> rusqlite::Result<()> {
+        let mut attachments = steering
+            .attachments
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        attachments.extend(steering.images.iter().enumerate().map(|(index, image)| {
+            serde_json::json!({
+                "artifact_id": format!("steering_image_{}_{}", steering.steering_id, index),
+                "title_redacted": format!("Image {}", index + 1),
+                "kind": "image",
+                "size_bytes": 0,
+                "preview_available": true,
+                "privacy_domain": "local_files",
+                "preview_url": image,
+            })
+        }));
+        Self::insert_linked_user_message(
+            &self.conn,
+            thread_id,
+            &steering.source_message_id,
+            &steering.visible_prompt,
+            &steering.claimed_at.unwrap_or(steering.created_at).to_string(),
+            &attachments,
+        )
+    }
+
     /// Insert the broker's visible user prompt and assistant placeholder as one
     /// tree-linked pair. This runs inside the broker's task transaction, so an
     /// error inserting the placeholder rolls the user insert back with the task.

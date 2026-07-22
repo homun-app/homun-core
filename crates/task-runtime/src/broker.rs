@@ -3,7 +3,8 @@
 
 use crate::{
     ResourceClass, ResourceRequirement, RetryPolicy, TaskId, TaskPriority, TaskRecord,
-    TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind, UserId, WorkspaceId,
+    NewTurnSteering, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind,
+    TurnSteeringRecord, UserId, WorkspaceId,
 };
 use serde_json::{json, Value};
 use time::OffsetDateTime;
@@ -105,8 +106,7 @@ pub enum EnqueueTurnOutcome {
     SteeringQueued {
         thread_id: String,
         active_turn_id: String,
-        source_message_id: String,
-        objective_revision: u64,
+        steering: TurnSteeringRecord,
     },
 }
 
@@ -434,7 +434,7 @@ pub fn enqueue_or_steer_chat_turn_atomic<F, G>(
     workspace_id: &WorkspaceId,
     input: &ChatTurnInput,
     insert_turn_messages: F,
-    insert_steering_user_message: G,
+    _insert_steering_user_message: G,
 ) -> Result<EnqueueTurnOutcome, EnqueueError>
 where
     F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
@@ -445,6 +445,15 @@ where
         .map(|objective| objective.revision)
         .unwrap_or(0);
     let source_message_id = format!("local_user_{}", input.request_id);
+    let steering_input = NewTurnSteering {
+        source_message_id: source_message_id.clone(),
+        prompt: input.prompt.clone(),
+        visible_prompt: input.visible_prompt.clone().unwrap_or_else(|| input.prompt.clone()),
+        images: input.images.clone(),
+        attachments: input.attachments.clone().unwrap_or_else(|| Value::Array(Vec::new())),
+        mode: input.mode.clone(),
+        model: input.model.clone(),
+    };
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let task = queued_chat_turn_task(user_id, workspace_id, input);
     let outcome = store.with_transaction(|tx| {
@@ -462,12 +471,11 @@ where
         if input.source != ChatTurnSource::Interactive {
             return Ok(EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id));
         }
-        insert_steering_user_message(tx)?;
         tx.execute(
             "INSERT INTO turn_steering (
                 user_id, workspace_id, thread_id, active_turn_id, source_message_id,
-                content, objective_revision, status, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8)
+                content, payload_json, objective_revision, status, revision, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', 1, ?9, ?9)
              ON CONFLICT(user_id, workspace_id, thread_id, source_message_id) DO NOTHING",
             rusqlite::params![
                 user_id.as_str(),
@@ -475,17 +483,20 @@ where
                 input.thread_id,
                 active_turn_id,
                 source_message_id,
-                input.prompt,
+                steering_input.prompt,
+                serde_json::to_string(&steering_input)?,
                 objective_revision as i64,
                 now,
             ],
         )?;
+        let steering = crate::store::load_turn_steering_by_source_message(
+            tx, user_id.as_str(), workspace_id.as_str(), &input.thread_id, &source_message_id,
+        )?.ok_or_else(|| TaskRuntimeError::Store("steering disappeared after append".into()))?;
         Ok(EnqueueOrSteerTransactionOutcome::Outcome(
             EnqueueTurnOutcome::SteeringQueued {
                 thread_id: input.thread_id.clone(),
                 active_turn_id,
-                source_message_id: source_message_id.clone(),
-                objective_revision,
+                steering,
             },
         ))
     })?;
@@ -614,6 +625,9 @@ pub fn cancel_chat_turn(
     let request_id = task.input_json.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let source = task.input_json.get("source").and_then(|v| v.as_str()).unwrap_or("interactive");
     let approval = task.input_json.get("approval").and_then(|v| v.as_str()).unwrap_or("full");
+    store.hold_pending_turn_steering(
+        user_id.as_str(), workspace_id.as_str(), task_id.as_str(),
+    )?;
     store.insert_chat_turn(&task, &thread_id, &request_id, source, approval)?;
     store.insert_turn_event(
         task_id.as_str(),
