@@ -7682,7 +7682,7 @@ function ConnectSuggestRow({
     setStatus("running");
     setNote(null);
     try {
-      await coreBridge.catalogInstall(item.slug);
+      await coreBridge.catalogInstall({ slug: item.slug });
       setStatus("done");
       setNote(t("chat.skillInstalledRetry"));
       await markConnected();

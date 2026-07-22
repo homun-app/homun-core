@@ -84,6 +84,7 @@ import {
   type SkillsFileNode,
   type SkillsSecurityReport,
   type SkillssResponse,
+  type SkillsSummary,
   type SystemStatus,
   type HostComputerApp,
   type HostComputerGrant,
@@ -95,6 +96,11 @@ import {
   presentHostComputerPermission,
   revokeHostComputerGrant,
 } from "../lib/coreBridge";
+import {
+  catalogIdentity,
+  catalogInstallState,
+  type CatalogInstallState,
+} from "../lib/skillCatalogState";
 import { useSetting } from "../lib/settingsStore";
 import {
   buildRemoteMcpConnectInput,
@@ -4779,7 +4785,7 @@ function SkillssPane() {
         ))}
 
       {tab === "catalogo" && (
-        <MarketplaceView installedIds={skills.map((s) => s.id)} onInstalled={(r) => setResp(r)} />
+        <MarketplaceView installedSkills={skills} onInstalled={(r) => setResp(r)} />
       )}
 
       {selected && (
@@ -4833,10 +4839,10 @@ function SkillssEmpty({ dir, onBrowse }: { dir?: string; onBrowse: () => void })
 }
 
 function MarketplaceView({
-  installedIds,
+  installedSkills,
   onInstalled,
 }: {
-  installedIds: string[];
+  installedSkills: SkillsSummary[];
   onInstalled: (resp: SkillssResponse, installedId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -4846,13 +4852,17 @@ function MarketplaceView({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [previewSlug, setPreviewSlug] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<CatalogSkills | null>(null);
 
   const load = async (q: string, cat: string | null) => {
     setLoading(true);
     setNote(null);
     try {
-      setData(await coreBridge.skillCatalog(q || undefined, cat || undefined));
+      const response = await coreBridge.skillCatalog(q || undefined, cat || undefined);
+      setData(response);
+      if (response.search_degraded) {
+        setNote(t("settings.skillSearchDegraded"));
+      }
     } catch (e) {
       setNote(t("settings.catalogUnavailable", { message: (e as Error).message }));
     } finally {
@@ -4866,17 +4876,16 @@ function MarketplaceView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, category]);
 
-  const installed = new Set(installedIds);
   const skills = data?.skills ?? [];
 
-  const install = async (slug: string, name: string) => {
-    setBusy(slug);
+  const install = async (skill: CatalogSkills) => {
+    setBusy(catalogIdentity(skill));
     setNote(null);
     try {
-      const r = await coreBridge.catalogInstall(slug);
-      onInstalled(r, slug);
-      setPreviewSlug(null);
-      setNote(t("settings.installed", { name }));
+      const r = await coreBridge.catalogInstall(skill);
+      onInstalled(r, skill.slug);
+      setPreviewTarget(null);
+      setNote(t("settings.installed", { name: skill.name }));
     } catch (e) {
       setNote(t("settings.installationFailed", { message: (e as Error).message }));
     } finally {
@@ -4938,17 +4947,18 @@ function MarketplaceView({
       ) : (
         <div className="conn-kit-grid">
           {skills.map((skill) => {
-            const already = installed.has(skill.slug);
+            const identity = catalogIdentity(skill);
+            const installState = catalogInstallState(skill, installedSkills);
             return (
               <div
-                key={skill.slug}
+                key={identity}
                 className="conn-kit market clickable"
                 role="button"
                 tabIndex={0}
                 title={t("settings.detailOf", { name: skill.name })}
-                onClick={() => setPreviewSlug(skill.slug)}
+                onClick={() => setPreviewTarget(skill)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") setPreviewSlug(skill.slug);
+                  if (e.key === "Enter") setPreviewTarget(skill);
                 }}
               >
                 <span className="conn-kit-logo">
@@ -4956,20 +4966,30 @@ function MarketplaceView({
                 </span>
                 <div className="conn-kit-body">
                   <div className="conn-kit-name">{skill.name}</div>
+                  {skill.owner_handle && (
+                    <div className="conn-kit-meta market">
+                      {t("settings.skillPublisher", { owner: skill.owner_handle })}
+                      {skill.owner_name ? ` · ${skill.owner_name}` : ""}
+                    </div>
+                  )}
                   <div className="conn-kit-meta market">{skill.description || skill.slug}</div>
                 </div>
-                {already ? (
+                {installState === "installed" ? (
                   <span className="set-badge dot green">{t("settings.installedBadge")}</span>
+                ) : installState === "occupied" ? (
+                  <span className="set-badge" title={t("settings.skillSlugOccupied")}>
+                    {t("settings.skillSlugOccupiedBadge")}
+                  </span>
                 ) : (
                   <button
                     className="mdl-icon-btn"
                     type="button"
-                    disabled={busy === skill.slug}
+                    disabled={busy === identity}
                     title={t("settings.install", { name: skill.name })}
                     aria-label={t("settings.install", { name: skill.name })}
                     onClick={(e) => {
                       e.stopPropagation();
-                      void install(skill.slug, skill.name);
+                      void install(skill);
                     }}
                   >
                     <Download size={15} />
@@ -4984,13 +5004,13 @@ function MarketplaceView({
         </div>
       )}
       {note && <p className="set-hint">{note}</p>}
-      {previewSlug && (
+      {previewTarget && (
         <CatalogPreviewModal
-          slug={previewSlug}
-          installed={installed.has(previewSlug)}
-          installing={busy === previewSlug}
-          onClose={() => setPreviewSlug(null)}
-          onInstall={(name) => void install(previewSlug, name)}
+          target={previewTarget}
+          installState={catalogInstallState(previewTarget, installedSkills)}
+          installing={busy === catalogIdentity(previewTarget)}
+          onClose={() => setPreviewTarget(null)}
+          onInstall={() => void install(previewTarget)}
         />
       )}
     </>
@@ -5000,17 +5020,17 @@ function MarketplaceView({
 /** Preview of a catalog skill BEFORE installing: SKILL.md rendered + file list +
  *  security scan, with an Install action. */
 function CatalogPreviewModal({
-  slug,
-  installed,
+  target,
+  installState,
   installing,
   onClose,
   onInstall,
 }: {
-  slug: string;
-  installed: boolean;
+  target: CatalogSkills;
+  installState: CatalogInstallState;
   installing: boolean;
   onClose: () => void;
-  onInstall: (name: string) => void;
+  onInstall: () => void;
 }) {
   const { t } = useTranslation();
   const [preview, setPreview] = useState<CatalogPreview | null>(null);
@@ -5021,7 +5041,7 @@ function CatalogPreviewModal({
     let cancelled = false;
     void (async () => {
       try {
-        const p = await coreBridge.catalogPreview(slug);
+        const p = await coreBridge.catalogPreview(target);
         if (!cancelled) setPreview(p);
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
@@ -5030,7 +5050,7 @@ function CatalogPreviewModal({
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [target]);
 
   return (
     <div className="cmp-modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
@@ -5040,7 +5060,7 @@ function CatalogPreviewModal({
             <Sparkles size={18} />
           </span>
           <div className="conn-detail-titletext">
-            <h3 className="mdl-detail-title">{preview?.name ?? slug}</h3>
+            <h3 className="mdl-detail-title">{preview?.name ?? target.slug}</h3>
             <p className="mdl-detail-sub">
               {preview ? `${preview.files.length} file` : "Loading preview…"}
             </p>
@@ -5092,10 +5112,16 @@ function CatalogPreviewModal({
         <button
           className="set-btn primary cmp-modal-btn"
           type="button"
-          disabled={installed || installing || !preview}
-          onClick={() => preview && onInstall(preview.name)}
+          disabled={installState !== "available" || installing || !preview}
+          onClick={() => preview && onInstall()}
         >
-          {installed ? "Already installed" : installing ? "Installing…" : "Install"}
+          {installState === "installed"
+            ? t("settings.installedBadge")
+            : installState === "occupied"
+              ? t("settings.skillSlugOccupied")
+              : installing
+                ? "Installing…"
+                : t("settings.install", { name: preview?.name ?? target.name })}
         </button>
       </div>
     </div>

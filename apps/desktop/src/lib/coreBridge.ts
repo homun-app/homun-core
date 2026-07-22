@@ -3026,8 +3026,13 @@ async function electronSetSkillsEnabled(
   );
 }
 
-export interface CatalogSkills {
+export interface CatalogTarget {
   slug: string;
+  owner_handle?: string | null;
+}
+
+export interface CatalogSkills extends CatalogTarget {
+  owner_name?: string | null;
   name: string;
   description: string;
   downloads: number;
@@ -3046,6 +3051,7 @@ export interface SkillsCatalogResponse {
   repo: string;
   total: number;
   fetched_at: number;
+  search_degraded: boolean;
 }
 
 export interface TemplateCatalogEntry {
@@ -3178,6 +3184,7 @@ async function electronTemplatePreviewHtml(previewRef: string): Promise<string> 
 
 export interface CatalogPreview {
   slug: string;
+  owner_handle?: string | null;
   name: string;
   description: string;
   body: string;
@@ -3185,14 +3192,19 @@ export interface CatalogPreview {
   security: SkillsSecurityReport;
 }
 
-async function electronCatalogPreview(slug: string): Promise<CatalogPreview> {
+async function electronCatalogPreview(target: CatalogTarget): Promise<CatalogPreview> {
+  const params = new URLSearchParams({ slug: target.slug });
+  if (target.owner_handle) params.set("owner_handle", target.owner_handle);
   return gatewayGetJson<CatalogPreview>(
-    `/api/skills/catalog/preview?slug=${encodeURIComponent(slug)}`,
+    `/api/skills/catalog/preview?${params.toString()}`,
   );
 }
 
-async function electronCatalogInstall(slug: string): Promise<SkillssResponse> {
-  return gatewayPostJson<SkillssResponse>("/api/skills/catalog/install", { slug });
+async function electronCatalogInstall(target: CatalogTarget): Promise<SkillssResponse> {
+  return gatewayPostJson<SkillssResponse>("/api/skills/catalog/install", {
+    slug: target.slug,
+    owner_handle: target.owner_handle ?? null,
+  });
 }
 
 export interface RegistrySkills {
@@ -3546,8 +3558,8 @@ export const coreBridge = {
   templatePreviewBlobUrl: (previewRef: string) =>
     electronTemplatePreviewBlobUrl(previewRef),
   templatePreviewHtml: (previewRef: string) => electronTemplatePreviewHtml(previewRef),
-  catalogPreview: (slug: string) => electronCatalogPreview(slug),
-  catalogInstall: (slug: string) => electronCatalogInstall(slug),
+  catalogPreview: (target: CatalogTarget) => electronCatalogPreview(target),
+  catalogInstall: (target: CatalogTarget) => electronCatalogInstall(target),
   chatThreads: (workspace?: string) => chatApi.chatThreads(workspace),
   chatMessages: (threadId: string) => chatApi.chatMessages(threadId),
   setChatMessageFeedback: (
