@@ -385,8 +385,12 @@ const MAX_ENTRY_BYTES: u64 = 4 * 1024 * 1024;
 /// Downloads a skill's package ZIP from ClawHub's public download endpoint
 /// (`/api/v1/download?slug=`). No scraping, no auth — the same URL the website's
 /// "Download" button uses.
-pub async fn download_zip(http: &reqwest::Client, slug: &str) -> Result<Vec<u8>, String> {
-    let url = format!("{DOWNLOAD_BASE}?slug={}", urlencoding(slug));
+pub async fn download_zip(
+    http: &reqwest::Client,
+    slug: &str,
+    owner_handle: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let url = download_url(slug, owner_handle);
     let resp = http
         .get(&url)
         .header(reqwest::header::USER_AGENT, "homun")
@@ -394,7 +398,9 @@ pub async fn download_zip(http: &reqwest::Client, slug: &str) -> Result<Vec<u8>,
         .await
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("download {slug}: HTTP {}", resp.status()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(download_error_message(status, &body));
     }
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     if bytes.len() > MAX_ZIP_BYTES {
@@ -403,15 +409,24 @@ pub async fn download_zip(http: &reqwest::Client, slug: &str) -> Result<Vec<u8>,
     Ok(bytes.to_vec())
 }
 
-fn urlencoding(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
+fn download_url(slug: &str, owner_handle: Option<&str>) -> String {
+    let mut url = reqwest::Url::parse(DOWNLOAD_BASE).expect("static ClawHub download URL");
+    let mut pairs = url.query_pairs_mut();
+    pairs.append_pair("slug", slug);
+    if let Some(owner) = owner_handle.filter(|value| !value.is_empty()) {
+        pairs.append_pair("ownerHandle", owner);
+    }
+    drop(pairs);
+    url.to_string()
+}
+
+fn download_error_message(status: reqwest::StatusCode, body: &str) -> String {
+    let detail: String = body.trim().chars().take(1024).collect();
+    if detail.is_empty() {
+        format!("download: HTTP {status}")
+    } else {
+        format!("download: HTTP {status}: {detail}")
+    }
 }
 
 /// Returns the text files (relative path, content) inside a skill ZIP — for
@@ -582,5 +597,31 @@ mod tests {
             vec!["steipete", "legionspace-hackathon", "lfengwa2"]
         );
         assert!(entries.iter().all(|entry| entry.slug == "weather"));
+    }
+
+    #[test]
+    fn download_url_includes_owner_handle_when_known() {
+        assert_eq!(
+            download_url("weather", Some("steipete")),
+            "https://clawhub.ai/api/v1/download?slug=weather&ownerHandle=steipete"
+        );
+        assert_eq!(
+            download_url("weather", None),
+            "https://clawhub.ai/api/v1/download?slug=weather"
+        );
+    }
+
+    #[test]
+    fn download_error_keeps_bounded_upstream_explanation() {
+        let message = download_error_message(
+            reqwest::StatusCode::CONFLICT,
+            "Ambiguous skill slug. Retry with ownerHandle.",
+        );
+        assert!(message.contains("HTTP 409 Conflict"));
+        assert!(message.contains("Retry with ownerHandle"));
+        assert!(
+            download_error_message(reqwest::StatusCode::BAD_GATEWAY, &"x".repeat(5000)).len()
+                < 1300
+        );
     }
 }

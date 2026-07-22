@@ -46032,7 +46032,7 @@ async fn install_catalog_skill(
             message: format!("skill «{slug}» already installed"),
         });
     }
-    let zip = skills_catalog::download_zip(&state.http, &slug)
+    let zip = skills_catalog::download_zip(&state.http, &slug, None)
         .await
         .map_err(|message| GatewayError {
             status: StatusCode::BAD_GATEWAY,
@@ -46084,7 +46084,7 @@ async fn preview_catalog_skill(
     Query(query): Query<CatalogPreviewQuery>,
 ) -> Result<Json<CatalogPreview>, GatewayError> {
     let slug = query.slug.trim().to_string();
-    let zip = skills_catalog::download_zip(&state.http, &slug)
+    let zip = skills_catalog::download_zip(&state.http, &slug, None)
         .await
         .map_err(|message| GatewayError {
             status: StatusCode::BAD_GATEWAY,
