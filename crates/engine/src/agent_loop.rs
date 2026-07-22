@@ -1117,12 +1117,17 @@ missing, give what you have and note the gap in one short line.",
         }
         // synth_text was already streamed live by the collector; commit it only when it contains
         // visible prose. If it does not, the accumulated turn text gets the same validation.
-        let candidate = if let Some(synth_prose) = visible_answer(&synth_text) {
-            let preserved_blocks = preserved_display_marker_blocks(&ls.accumulated);
-            Some(if preserved_blocks.is_empty() {
-                synth_prose
+        let candidate = if visible_answer(&synth_text).is_some() {
+            let synthesis_blocks = preserved_display_marker_blocks(&synth_text);
+            let accumulated_prefix = preserved_display_marker_blocks(&ls.accumulated)
+                .into_iter()
+                .filter(|block| !synthesis_blocks.iter().any(|synthesis| synthesis == block))
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(if accumulated_prefix.is_empty() {
+                synth_text
             } else {
-                format!("{preserved_blocks}\n{synth_prose}")
+                format!("{accumulated_prefix}\n{synth_text}")
             })
         } else if visible_answer(&ls.accumulated).is_some() {
             Some(ls.accumulated.clone())
@@ -1273,7 +1278,7 @@ mod tests {
                     time_to_first_token_ms: None,
                 });
             }
-            let content = "Forced synthesis answer.";
+            let content = "‹‹ARTIFACT››report.md‹‹/ARTIFACT››\n‹‹CHOICES››choose a format‹‹/CHOICES››\n‹‹REASONING››synthesis reasoning‹‹/REASONING››\nForced synthesis answer.";
             on_delta(content);
             Ok(ModelRoundOutput {
                 message: json!({ "role": "assistant", "content": content }),
@@ -1698,10 +1703,24 @@ mod tests {
         )
         .await;
 
-        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
-        assert!(outcome.memory_answer.contains("Forced synthesis answer."));
-        assert!(outcome.memory_answer.contains("‹‹PLAN››"));
-        assert!(outcome.memory_answer.contains("‹‹ARTIFACT››report.md‹‹/ARTIFACT››"));
+        assert_eq!(
+            outcome.delivery,
+            crate::TurnDelivery::Delivered,
+        );
+        let expected = "‹‹PLAN››- [x] Deliver result‹‹/PLAN››\n‹‹ARTIFACT››report.md‹‹/ARTIFACT››\n‹‹CHOICES››choose a format‹‹/CHOICES››\n‹‹REASONING››synthesis reasoning‹‹/REASONING››\nForced synthesis answer.";
+        assert_eq!(outcome.memory_answer, expected);
+        assert_eq!(
+            outcome.memory_answer.matches("‹‹PLAN››").count(),
+            1,
+        );
+        assert_eq!(
+            outcome.memory_answer.matches("‹‹ARTIFACT››").count(),
+            1,
+        );
+        assert_eq!(
+            outcome.memory_answer.matches("‹‹CHOICES››").count(),
+            1,
+        );
         let done_text = sink
             .0
             .lock()
@@ -1712,9 +1731,7 @@ mod tests {
                 _ => None,
             })
             .expect("forced synthesis must emit Done");
-        assert!(done_text.contains("Forced synthesis answer."));
-        assert!(done_text.contains("‹‹PLAN››"));
-        assert!(done_text.contains("‹‹ARTIFACT››report.md‹‹/ARTIFACT››"));
+        assert_eq!(done_text, expected);
     }
 
     #[derive(Default)]

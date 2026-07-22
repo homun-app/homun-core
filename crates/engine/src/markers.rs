@@ -125,8 +125,8 @@ pub fn visible_answer(text: &str) -> Option<String> {
 /// Extract complete display blocks in their original order for a later final delivery. Reasoning is
 /// intentionally excluded: forced synthesis must retain tool-produced cards, not revive provisional
 /// chain-of-thought text from an earlier round.
-pub fn preserved_display_marker_blocks(text: &str) -> String {
-    let mut blocks = String::new();
+pub fn preserved_display_marker_blocks(text: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
     let mut cursor = 0;
     while cursor < text.len() {
         let next = DISPLAY_MARKER_TAGS
@@ -147,7 +147,7 @@ pub fn preserved_display_marker_blocks(text: &str) -> String {
             break;
         };
         let end = body_start + close_offset + close_tag.len();
-        blocks.push_str(&text[start..end]);
+        blocks.push(text[start..end].to_string());
         cursor = end;
     }
     blocks
@@ -429,6 +429,19 @@ mod tests {
                 "{tag} must not consume adjacent prose"
             );
         }
+    }
+
+    #[test]
+    fn preserved_display_marker_blocks_keeps_complete_non_reasoning_blocks_in_order() {
+        let text = "prefix‹‹PLAN››plan body‹‹/PLAN››\n‹‹REASONING››hidden‹‹/REASONING››\n‹‹ARTIFACT››report.md‹‹/ARTIFACT››\n‹‹CHOICES››pick one‹‹/CHOICES››suffix";
+        assert_eq!(
+            preserved_display_marker_blocks(text),
+            vec![
+                "‹‹PLAN››plan body‹‹/PLAN››".to_string(),
+                "‹‹ARTIFACT››report.md‹‹/ARTIFACT››".to_string(),
+                "‹‹CHOICES››pick one‹‹/CHOICES››".to_string(),
+            ]
+        );
     }
 
     // GOLDEN: the recurring reasoning-flood. A weak browser model degenerated into MALFORMED
