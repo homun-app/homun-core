@@ -204,6 +204,8 @@ use local_first_vault::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(not(test))]
+use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
@@ -41075,6 +41077,185 @@ fn actionable_source_terminal_text(text: &str, note: &str) -> String {
     }
 }
 
+fn actionable_claim_error(message: impl Into<String>) -> GatewayError {
+    GatewayError {
+        status: StatusCode::CONFLICT,
+        code: "actionable_source_claim",
+        message: message.into(),
+    }
+}
+
+/// One-shot security boundary for every actionable side effect. In production
+/// the task runtime and chat transcript share one SQLite file, so the exact
+/// linked task and exact message transition together or not at all.
+fn claim_actionable_source<F>(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    provenance_matches: F,
+) -> Result<(), GatewayError>
+where
+    F: FnOnce(&str) -> bool,
+{
+    #[cfg(not(test))]
+    {
+        let user = gateway_user_id();
+        let store = lock_task_store(state)?;
+        return store
+            .with_transaction(|tx| {
+                let row = tx
+                    .query_row(
+                        "select m.text, m.linked_task_id, c.workspace_id, t.task_json
+                         from chat_messages m
+                         join chat_threads c on c.thread_id = m.thread_id
+                         join tasks t on t.task_id = m.linked_task_id
+                           and t.user_id = ?3 and t.workspace_id = c.workspace_id
+                         where m.thread_id = ?1 and m.id = ?2 and m.role = 'assistant'
+                           and m.delivery_state = 'waiting_user'
+                           and t.status = 'waiting_user_approval'",
+                        rusqlite::params![thread_id, message_id, user.as_str()],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                                row.get::<_, String>(3)?,
+                            ))
+                        },
+                    )
+                    .optional()?;
+                let Some((text, task_id, workspace_id, task_json)) = row else {
+                    return Err(TaskRuntimeError::InvalidTransition(
+                        "actionable source is stale, cancelled, or already claimed".to_string(),
+                    ));
+                };
+                if !provenance_matches(&text) {
+                    return Err(TaskRuntimeError::InvalidTransition(
+                        "persisted actionable card provenance does not match".to_string(),
+                    ));
+                }
+                let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+                let supported = task.kind == "chat_turn"
+                    || matches!(
+                        state.task_executor_registry.resolve(task.kind.as_str()),
+                        Some(GatewayTaskExecutorKind::ProactivePrompt)
+                    );
+                let exact_source = task
+                    .input_json
+                    .get("thread_id")
+                    .and_then(Value::as_str)
+                    == Some(thread_id)
+                    && task
+                        .input_json
+                        .get("assistant_message_id")
+                        .and_then(Value::as_str)
+                        == Some(message_id);
+                if !supported || task.status != TaskStatus::WaitingUserApproval || !exact_source {
+                    return Err(TaskRuntimeError::InvalidTransition(
+                        "linked task does not own this waiting actionable source".to_string(),
+                    ));
+                }
+                task.status = TaskStatus::Running;
+                task.blocked_reason = Some("actionable side effect claimed".to_string());
+                task.updated_at = OffsetDateTime::now_utc();
+                let changed_task = tx.execute(
+                    "update tasks set status = 'running', blocked_reason = ?1,
+                        updated_at = ?2, task_json = ?3
+                     where task_id = ?4 and user_id = ?5 and workspace_id = ?6
+                       and status = 'waiting_user_approval'",
+                    rusqlite::params![
+                        task.blocked_reason,
+                        task.updated_at.unix_timestamp(),
+                        serde_json::to_string(&task)?,
+                        task_id,
+                        user.as_str(),
+                        workspace_id,
+                    ],
+                )?;
+                let changed_message = tx.execute(
+                    "update chat_messages set delivery_state = 'retrying'
+                     where thread_id = ?1 and id = ?2 and linked_task_id = ?3
+                       and delivery_state = 'waiting_user'",
+                    rusqlite::params![thread_id, message_id, task_id],
+                )?;
+                if changed_task != 1 || changed_message != 1 {
+                    return Err(TaskRuntimeError::InvalidTransition(
+                        "actionable source claim lost a concurrent race".to_string(),
+                    ));
+                }
+                Ok(())
+            })
+            .map_err(|error| actionable_claim_error(error.to_string()));
+    }
+
+    #[cfg(test)]
+    {
+        let user = gateway_user_id();
+        let task_store = lock_task_store(state)?;
+        let chat_store = lock_store(state)?;
+        let message = chat_store
+            .message(thread_id, message_id)
+            .map_err(GatewayError::store)?
+            .ok_or_else(|| actionable_claim_error("actionable source message is missing"))?;
+        if message.role != "assistant"
+            || message.delivery_state
+                != local_first_desktop_gateway::MessageDeliveryState::WaitingUser
+            || !provenance_matches(&message.text)
+        {
+            return Err(actionable_claim_error(
+                "actionable source is stale or provenance does not match",
+            ));
+        }
+        let task_id = message
+            .linked_task_id
+            .as_deref()
+            .ok_or_else(|| actionable_claim_error("actionable source has no linked task"))?;
+        let workspace = WorkspaceId::new(
+            chat_store
+                .workspace_for_thread(thread_id)
+                .map_err(GatewayError::store)?,
+        );
+        let mut task = task_store
+            .get_task(&TaskId::new(task_id), &user, &workspace)
+            .map_err(GatewayError::task)?
+            .ok_or_else(|| actionable_claim_error("linked actionable task is missing"))?;
+        let supported = task.kind == "chat_turn"
+            || matches!(
+                state.task_executor_registry.resolve(task.kind.as_str()),
+                Some(GatewayTaskExecutorKind::ProactivePrompt)
+            );
+        let exact_source = task.input_json.get("thread_id").and_then(Value::as_str)
+            == Some(thread_id)
+            && task
+                .input_json
+                .get("assistant_message_id")
+                .and_then(Value::as_str)
+                == Some(message_id);
+        if !supported || task.status != TaskStatus::WaitingUserApproval || !exact_source {
+            return Err(actionable_claim_error(
+                "linked task does not own this waiting actionable source",
+            ));
+        }
+        task.status = TaskStatus::Running;
+        task.blocked_reason = Some("actionable side effect claimed".to_string());
+        task.updated_at = OffsetDateTime::now_utc();
+        task_store.insert_task(&task).map_err(GatewayError::task)?;
+        if !chat_store
+            .set_message_delivery_state(
+                thread_id,
+                message_id,
+                local_first_desktop_gateway::MessageDeliveryState::Retrying,
+            )
+            .map_err(GatewayError::store)?
+        {
+            return Err(actionable_claim_error(
+                "actionable source claim lost a concurrent race",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Resolves the exact durable chat turn which owns an actionable assistant card.
 ///
 /// A source turn is terminalized and has its resources released before its
@@ -41148,8 +41329,23 @@ where
                 state.task_executor_registry.resolve(task.kind.as_str()),
                 Some(GatewayTaskExecutorKind::ProactivePrompt)
             );
+        let lifecycle_matches = match resolution {
+            ActionableSourceResolution::Cancelled => {
+                (task.status == TaskStatus::WaitingUserApproval
+                    && message.delivery_state
+                        == local_first_desktop_gateway::MessageDeliveryState::WaitingUser)
+                    || (task.status == TaskStatus::Running
+                        && message.delivery_state
+                            == local_first_desktop_gateway::MessageDeliveryState::Retrying)
+            }
+            ActionableSourceResolution::Succeeded | ActionableSourceResolution::Failed => {
+                task.status == TaskStatus::Running
+                    && message.delivery_state
+                        == local_first_desktop_gateway::MessageDeliveryState::Retrying
+            }
+        };
         let matches_source = supported_persisted_bubble
-            && task.status == TaskStatus::WaitingUserApproval
+            && lifecycle_matches
             && task
                 .input_json
                 .get("thread_id")
@@ -41275,34 +41471,6 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
         Some(row) => row,
         None => return format!("Code {code} not valid or expired."),
     };
-    if pending.requires_source {
-        let Some(thread_id) = pending.thread_id.as_deref() else {
-            return format!(
-                "Approval {code} is missing its origin thread; please retry in the app."
-            );
-        };
-        let Some(message_id) = pending.source_message_id.as_deref() else {
-            return format!(
-                "Approval {code} is not ready yet: the in-app confirmation card has not been saved."
-            );
-        };
-        let source_ok = lock_store(state)
-            .ok()
-            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
-            .is_some_and(|message| {
-                remote_approval_matches_persisted_message(
-                    &message,
-                    &pending.approval_id,
-                    &pending.tool,
-                    &pending.arguments,
-                )
-            });
-        if !source_ok {
-            return format!(
-                "Approval {code} does not match its saved confirmation card; please retry in the app."
-            );
-        }
-    }
     if let (Some(thread_id), Some(approved_revision)) =
         (pending.thread_id.as_deref(), pending.objective_revision)
     {
@@ -41321,6 +41489,55 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
             .flatten()
     }) {
         Some(claimed) => {
+            if claimed.requires_source {
+                let (Some(thread_id), Some(message_id)) = (
+                    claimed.thread_id.as_deref(),
+                    claimed.source_message_id.as_deref(),
+                ) else {
+                    if let Ok(store) = lock_store(state) {
+                        let _ = store.complete_remote_approval(&claimed.approval_id, "failed");
+                    }
+                    return format!(
+                        "Approval {code} is missing its exact source card; no action was executed."
+                    );
+                };
+                let source_claim = claim_actionable_source(
+                    state,
+                    thread_id,
+                    message_id,
+                    |text| {
+                        if claimed.tool.starts_with("mcp__") {
+                            mcp_confirm_matches_approval(
+                                text,
+                                &claimed.approval_id,
+                                &claimed.tool,
+                                &claimed.arguments,
+                            )
+                        } else {
+                            confirm_marker_matches_approval(
+                                text,
+                                COMPOSIO_CONFIRM_OPEN,
+                                COMPOSIO_CONFIRM_CLOSE,
+                                &claimed.approval_id,
+                                &claimed.tool,
+                                &claimed.arguments,
+                            )
+                        }
+                    },
+                );
+                if let Err(error) = source_claim {
+                    if let Ok(store) = lock_store(state) {
+                        let _ = store.complete_remote_approval(&claimed.approval_id, "failed");
+                    }
+                    append_remote_approval_thread_status(
+                        state,
+                        &claimed,
+                        "failed",
+                        Some("Source card was stale, cancelled, or already claimed."),
+                    );
+                    return format!("Approval {code} rejected before execution: {}", error.message);
+                }
+            }
             append_remote_approval_thread_status(state, &claimed, "running", None);
             let tool = claimed.tool.clone();
             let args = claimed.arguments.clone();
@@ -43449,20 +43666,21 @@ async fn composio_execute(
         request.arguments.clone()
     };
     let args_for_resume = args.clone();
-    let confirmed = match (&request.thread_id, &request.message_id) {
-        (Some(thread_id), Some(message_id)) => lock_store(&state)
-            .ok()
-            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
-            .is_some_and(|message| composio_confirm_matches(&message.text, &request.tool, &args)),
-        _ => false,
+    let (Some(thread_id), Some(message_id)) =
+        (request.thread_id.as_deref(), request.message_id.as_deref())
+    else {
+        return Err(actionable_claim_error(
+            "Composio execution requires an exact persisted source card",
+        ));
     };
-    if !confirmed {
-        return Err(GatewayError {
-            status: StatusCode::FORBIDDEN,
-            code: "composio_confirmation_required",
-            message: "Execute Composio writes from their matching confirmation card.".to_string(),
-        });
-    }
+    claim_actionable_source(&state, thread_id, message_id, |text| {
+        composio_confirm_matches(text, &request.tool, &args)
+    })
+    .map_err(|_| GatewayError {
+        status: StatusCode::FORBIDDEN,
+        code: "composio_confirmation_required",
+        message: "Execute Composio writes from their matching confirmation card.".to_string(),
+    })?;
     if request.scope.as_deref() == Some("always") {
         let _ = add_composio_tool_allow(&request.tool);
     }
@@ -43798,21 +44016,22 @@ async fn fs_authorize(
         });
     };
     let op = request.op.clone();
-    let confirmed = match (&request.thread_id, &request.message_id) {
-        (Some(thread_id), Some(message_id)) => lock_store(&state)
-            .ok()
-            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
-            .is_some_and(|message| fs_authorize_matches(&message.text, &request.path, &op)),
-        _ => false,
+    let (Some(thread_id), Some(message_id)) =
+        (request.thread_id.as_deref(), request.message_id.as_deref())
+    else {
+        return Err(actionable_claim_error(
+            "filesystem authorization requires an exact persisted source card",
+        ));
     };
-    if !confirmed {
-        return Err(GatewayError {
-            status: StatusCode::FORBIDDEN,
-            code: "fs_authorize_confirmation_required",
-            message: "Authorize filesystem access only from its matching confirmation card."
-                .to_string(),
-        });
-    }
+    claim_actionable_source(&state, thread_id, message_id, |text| {
+        fs_authorize_matches(text, &request.path, &op)
+    })
+    .map_err(|_| GatewayError {
+        status: StatusCode::FORBIDDEN,
+        code: "fs_authorize_confirmation_required",
+        message: "Authorize filesystem access only from its matching confirmation card."
+            .to_string(),
+    })?;
     let task_path = path.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
         fs_authorize_folder(&task_path)?;
@@ -43881,16 +44100,30 @@ async fn fs_authorize(
 /// message carries a SANDBOX_ESCALATE card whose `arguments.command` equals the
 /// requested `command`. Mirrors `mcp_confirm_matches`: the endpoint must only ever
 /// re-run the exact command that was proposed — never an arbitrary one.
-fn sandbox_escalate_matches(text: &str, command: &str) -> bool {
+fn sandbox_escalate_matches(text: &str, command: &str, cwd: Option<&str>) -> bool {
     let Some(marker) = confirm_marker_value(text, SANDBOX_ESCALATE_OPEN, SANDBOX_ESCALATE_CLOSE)
     else {
         return false;
     };
-    marker
-        .get("arguments")
+    let arguments = marker.get("arguments");
+    let command_matches = arguments
         .and_then(|a| a.get("command"))
         .and_then(serde_json::Value::as_str)
-        == Some(command)
+        == Some(command);
+    let approved_cwd = arguments
+        .and_then(|a| a.get("cwd"))
+        .and_then(serde_json::Value::as_str);
+    let cwd_matches = match (approved_cwd, cwd) {
+        (None, None) => true,
+        (Some(approved), Some(requested)) => {
+            let approved = PathBuf::from(approved);
+            let requested = PathBuf::from(requested);
+            approved.canonicalize().unwrap_or(approved)
+                == requested.canonicalize().unwrap_or(requested)
+        }
+        _ => false,
+    };
+    command_matches && cwd_matches
 }
 
 /// Rewrites the escalation-card marker into a plain "ran unsandboxed" note so
@@ -43945,20 +44178,21 @@ async fn run_escalate(
 ) -> Result<Json<serde_json::Value>, GatewayError> {
     // Provenance gate (REQUIRED): the command must match the card in the stored
     // message. Without a matching marker, refuse — never run an arbitrary command.
-    let confirmed = match (&request.thread_id, &request.message_id) {
-        (Some(thread_id), Some(message_id)) => lock_store(&state)
-            .ok()
-            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
-            .is_some_and(|message| sandbox_escalate_matches(&message.text, &request.command)),
-        _ => false,
+    let (Some(thread_id), Some(message_id)) =
+        (request.thread_id.as_deref(), request.message_id.as_deref())
+    else {
+        return Err(actionable_claim_error(
+            "sandbox escalation requires an exact persisted source card",
+        ));
     };
-    if !confirmed {
-        return Err(GatewayError {
-            status: StatusCode::FORBIDDEN,
-            code: "sandbox_escalate_required",
-            message: "Re-run unsandboxed only from its matching escalation card.".to_string(),
-        });
-    }
+    claim_actionable_source(&state, thread_id, message_id, |text| {
+        sandbox_escalate_matches(text, &request.command, request.cwd.as_deref())
+    })
+    .map_err(|_| GatewayError {
+        status: StatusCode::FORBIDDEN,
+        code: "sandbox_escalate_required",
+        message: "Re-run unsandboxed only from its matching escalation card.".to_string(),
+    })?;
     // Resolve the cwd: the card's cwd, else the thread's project root.
     let root = request
         .cwd
@@ -44215,20 +44449,21 @@ async fn mcp_execute(
     };
     let args_for_run = args.clone();
     let args_for_resume = args.clone();
-    let confirmed = match (&request.thread_id, &request.message_id) {
-        (Some(thread_id), Some(message_id)) => lock_store(&state)
-            .ok()
-            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
-            .is_some_and(|message| mcp_confirm_matches(&message.text, &request.tool, &args)),
-        _ => false,
+    let (Some(thread_id), Some(message_id)) =
+        (request.thread_id.as_deref(), request.message_id.as_deref())
+    else {
+        return Err(actionable_claim_error(
+            "MCP execution requires an exact persisted source card",
+        ));
     };
-    if !confirmed {
-        return Err(GatewayError {
-            status: StatusCode::FORBIDDEN,
-            code: "mcp_confirmation_required",
-            message: "Execute MCP writes from their matching confirmation card.".to_string(),
-        });
-    }
+    claim_actionable_source(&state, thread_id, message_id, |text| {
+        mcp_confirm_matches(text, &request.tool, &args)
+    })
+    .map_err(|_| GatewayError {
+        status: StatusCode::FORBIDDEN,
+        code: "mcp_confirmation_required",
+        message: "Execute MCP writes from their matching confirmation card.".to_string(),
+    })?;
     if request.allow_server {
         if let Some((server, _)) = request
             .tool
@@ -73784,11 +74019,15 @@ data: [DONE]\n";
 ‹‹SANDBOX_ESCALATE››{\"approval_id\":\"abc\",\"tool\":\"run_in_project\",\
 \"arguments\":{\"command\":\"npm ci\",\"cwd\":\"/proj\"}}‹‹/SANDBOX_ESCALATE››\n";
         // Matches the exact command carried by the card.
-        assert!(crate::sandbox_escalate_matches(text, "npm ci"));
+        assert!(crate::sandbox_escalate_matches(text, "npm ci", Some("/proj")));
         // Rejects any other command (the provenance gate).
-        assert!(!crate::sandbox_escalate_matches(text, "rm -rf /"));
+        assert!(!crate::sandbox_escalate_matches(text, "rm -rf /", Some("/proj")));
         // Rejects when the marker is missing entirely.
-        assert!(!crate::sandbox_escalate_matches("no card here", "npm ci"));
+        assert!(!crate::sandbox_escalate_matches(
+            "no card here",
+            "npm ci",
+            Some("/proj")
+        ));
     }
 
     #[test]
@@ -75274,6 +75513,15 @@ data: [DONE]\n";
                 .unwrap();
         }
 
+        super::claim_actionable_source(&state, &thread.thread_id, &source.id, |text| {
+            super::mcp_confirm_matches(
+                text,
+                "mcp__filesystem__create",
+                &serde_json::json!({}),
+            )
+        })
+        .unwrap();
+
         super::resolve_actionable_source(
             &state,
             &thread.thread_id,
@@ -75525,6 +75773,14 @@ data: [DONE]\n";
         task.status = TaskStatus::WaitingUserApproval;
         state.task_store.lock().unwrap().insert_task(&task).unwrap();
 
+        super::claim_actionable_source(&state, &thread.thread_id, &message.id, |text| {
+            super::mcp_confirm_matches(
+                text,
+                "mcp__filesystem__create",
+                &serde_json::json!({}),
+            )
+        })
+        .unwrap();
         super::resolve_actionable_source(
             &state,
             &thread.thread_id,
@@ -75663,6 +75919,15 @@ data: [DONE]\n";
             .insert_chat_turn(&task, &thread.thread_id, task_id, "interactive", "full")
             .unwrap();
 
+        super::claim_actionable_source(&state, &thread.thread_id, &message.id, |text| {
+            super::mcp_confirm_matches(
+                text,
+                "mcp__filesystem__create",
+                &serde_json::json!({}),
+            )
+        })
+        .unwrap();
+
         let error = super::terminal_actionable_execution_error(
             &state,
             Some(&thread.thread_id),
@@ -75764,6 +76029,7 @@ data: [DONE]\n";
     fn seed_sandbox_escalation_source(
         state: &AppState,
         command: &str,
+        cwd: Option<&str>,
     ) -> (String, String, String, local_first_task_runtime::UserId, local_first_task_runtime::WorkspaceId) {
         let thread = super::lock_store(state)
             .unwrap()
@@ -75771,12 +76037,17 @@ data: [DONE]\n";
             .unwrap();
         let task_id = format!("turn_sandbox_{}", uuid::Uuid::new_v4().simple());
         let message_id = format!("sandbox_card_{}", uuid::Uuid::new_v4().simple());
+        let mut arguments = serde_json::json!({ "command": command });
+        if let Some(cwd) = cwd {
+            arguments["cwd"] = serde_json::Value::String(cwd.to_string());
+        }
+        let marker = serde_json::json!({
+            "tool": "run_in_project",
+            "arguments": arguments,
+        });
         let mut message = super::channel_chat_message_with_id(
             "assistant",
-            &format!(
-                "Approve. ‹‹SANDBOX_ESCALATE››{{\"tool\":\"run_in_project\",\"arguments\":{{\"command\":{}}}}}‹‹/SANDBOX_ESCALATE››",
-                serde_json::to_string(command).unwrap()
-            ),
+            &format!("Approve. ‹‹SANDBOX_ESCALATE››{marker}‹‹/SANDBOX_ESCALATE››"),
             &message_id,
         );
         message.linked_task_id = Some(task_id.clone());
@@ -75812,7 +76083,7 @@ data: [DONE]\n";
     async fn sandbox_escalation_missing_root_fails_exact_source() {
         let state = AppState::for_tests();
         let (thread_id, message_id, task_id, user, workspace) =
-            seed_sandbox_escalation_source(&state, "pwd");
+            seed_sandbox_escalation_source(&state, "pwd", None);
 
         let error = super::run_escalate(
             axum::extract::State(state.clone()),
@@ -75855,7 +76126,11 @@ data: [DONE]\n";
         std::fs::create_dir_all(&root).unwrap();
         let state = AppState::for_tests();
         let (thread_id, message_id, task_id, user, workspace) =
-            seed_sandbox_escalation_source(&state, "exit 7");
+            seed_sandbox_escalation_source(
+                &state,
+                "exit 7",
+                Some(root.to_string_lossy().as_ref()),
+            );
 
         let response = super::run_escalate(
             axum::extract::State(state.clone()),
@@ -75902,6 +76177,103 @@ data: [DONE]\n";
             "failed execution must release the source without enqueuing a continuation"
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn concurrent_actionable_claim_allows_exactly_one_execution() {
+        use std::sync::{Arc, Barrier, atomic::{AtomicUsize, Ordering}};
+
+        let state = AppState::for_tests();
+        let (thread_id, message_id, _task_id, _user, _workspace) =
+            seed_sandbox_escalation_source(&state, "pwd", None);
+        let barrier = Arc::new(Barrier::new(3));
+        let executions = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..2 {
+            let state = state.clone();
+            let thread_id = thread_id.clone();
+            let message_id = message_id.clone();
+            let barrier = barrier.clone();
+            let executions = executions.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                if super::claim_actionable_source(&state, &thread_id, &message_id, |text| {
+                    super::sandbox_escalate_matches(text, "pwd", None)
+                })
+                .is_ok()
+                {
+                    executions.fetch_add(1, Ordering::SeqCst);
+                }
+            }));
+        }
+        barrier.wait();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn stale_actionable_claim_after_cancel_executes_nothing() {
+        let state = AppState::for_tests();
+        let (thread_id, message_id, _task_id, _user, _workspace) =
+            seed_sandbox_escalation_source(&state, "pwd", None);
+        super::resolve_actionable_source(
+            &state,
+            &thread_id,
+            &message_id,
+            |text| super::actionable_source_terminal_text(text, "Action cancelled."),
+            super::ActionableSourceResolution::Cancelled,
+        )
+        .unwrap();
+
+        assert!(
+            super::claim_actionable_source(&state, &thread_id, &message_id, |text| {
+                super::sandbox_escalate_matches(text, "pwd", None)
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn remote_actionable_claim_after_stop_executes_nothing() {
+        let state = AppState::for_tests();
+        let (thread_id, message_id, _task_id, _user, _workspace) =
+            seed_sandbox_escalation_source(&state, "pwd", None);
+        super::resolve_actionable_source(
+            &state,
+            &thread_id,
+            &message_id,
+            |text| super::actionable_source_terminal_text(text, "Stopped."),
+            super::ActionableSourceResolution::Cancelled,
+        )
+        .unwrap();
+
+        let executions = std::sync::atomic::AtomicUsize::new(0);
+        if super::claim_actionable_source(&state, &thread_id, &message_id, |text| {
+            super::sandbox_escalate_matches(text, "pwd", None)
+        })
+        .is_ok()
+        {
+            executions.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        assert_eq!(executions.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn sandbox_escalation_provenance_rejects_substituted_cwd() {
+        let text = "‹‹SANDBOX_ESCALATE››{\"arguments\":{\"command\":\"pwd\",\"cwd\":\"/tmp/approved\"}}‹‹/SANDBOX_ESCALATE››";
+        assert!(super::sandbox_escalate_matches(
+            text,
+            "pwd",
+            Some("/tmp/approved")
+        ));
+        assert!(!super::sandbox_escalate_matches(
+            text,
+            "pwd",
+            Some("/tmp/substituted")
+        ));
     }
 
     #[test]
