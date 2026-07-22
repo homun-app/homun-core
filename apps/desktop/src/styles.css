@@ -16084,6 +16084,7 @@ body.resizing-drawer {
   position: absolute;
   top: var(--s2);
   right: var(--s2);
+  z-index: 3;
 }
 
 /* ── Onboarding wizard ───────────────────────────────────────────────────── */

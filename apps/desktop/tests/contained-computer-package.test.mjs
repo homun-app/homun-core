@@ -60,12 +60,18 @@ test("chat noVNC viewer remains executable under the packaged Electron CSP", asy
     path.join(appRoot, "src", "components", "ContainedComputerView.tsx"),
     "utf8",
   );
-  for (const component of [chatPanel, computerView]) {
+  const settingsView = await readFile(
+    path.join(appRoot, "src", "components", "SettingsView.tsx"),
+    "utf8",
+  );
+  for (const component of [chatPanel, computerView, settingsView]) {
     assert.match(component, /homun-novnc-state/);
     assert.match(component, /event\.source !== iframeRef\.current\?\.contentWindow/);
     assert.match(component, /event\.origin !== expectedOrigin/);
   }
   assert.match(chatPanel, /computerConnectionState === "connected"/);
+  assert.match(settingsView, /replace\("\/vnc\.html", "\/lfpa-view\.html"\)/);
+  assert.doesNotMatch(settingsView, /<iframe className="set-computer-live-frame" src=\{liveUrl\}/);
 });
 
 test("architecture documents the cross-platform setup contract", async () => {
