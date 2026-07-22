@@ -1335,6 +1335,29 @@ impl ChatStore {
         event_parts: &[serde_json::Value],
         requested_envelope: &MemoryReuseEnvelope,
     ) -> rusqlite::Result<ChatMessage> {
+        self.finalize_assistant_message_with_delivery_state(
+            thread_id,
+            message_id,
+            text,
+            event_parts,
+            requested_envelope,
+            MessageDeliveryState::Delivered,
+        )
+    }
+
+    /// Atomically persists the final visible answer, its provenance and its
+    /// lifecycle state. Approval cards must become `WaitingUser` in the same
+    /// commit that makes their source card durable; otherwise a crash can
+    /// expose an executable card as an ordinary delivered answer.
+    pub fn finalize_assistant_message_with_delivery_state(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+        text: &str,
+        event_parts: &[serde_json::Value],
+        requested_envelope: &MemoryReuseEnvelope,
+        delivery_state: MessageDeliveryState,
+    ) -> rusqlite::Result<ChatMessage> {
         // Internal reasoning/activity/plan protocol blocks are represented by
         // event_parts. Persist only the readable answer in the transcript so a
         // later prompt cannot reinterpret UI/control metadata as conversation.
@@ -1351,12 +1374,13 @@ impl ChatStore {
         let changed = tx.execute(
             "update chat_messages
                 set text = ?1, event_parts_json = ?2, memory_reuse_json = ?3,
-                    delivery_state = 'delivered'
-              where thread_id = ?4 and id = ?5 and role = 'assistant'",
+                    delivery_state = ?4
+              where thread_id = ?5 and id = ?6 and role = 'assistant'",
             params![
                 clean_text,
                 event_parts_json,
                 memory_reuse_json,
+                delivery_state.as_str(),
                 thread_id,
                 message_id,
             ],
@@ -1507,7 +1531,7 @@ impl ChatStore {
         Ok(())
     }
 
-    fn remote_approval_by_id(
+    pub fn remote_approval_by_id(
         &self,
         approval_id: &str,
     ) -> rusqlite::Result<Option<RemoteApprovalRow>> {
@@ -4038,6 +4062,55 @@ mod tests {
         assert_eq!(saved.text, "Answer");
         assert_eq!(saved.event_parts, vec![recall_part]);
         assert_eq!(saved.memory_reuse, Some(envelope));
+    }
+
+    #[test]
+    fn finalization_can_atomically_leave_an_approval_card_waiting_for_user() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "assistant_waiting".to_string(),
+        );
+        assistant.delivery_state = MessageDeliveryState::Streaming;
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let saved = store
+            .finalize_assistant_message_with_delivery_state(
+                &thread.thread_id,
+                &assistant.id,
+                "Please approve this action.",
+                &[],
+                &MemoryReuseEnvelope::normal(),
+                MessageDeliveryState::WaitingUser,
+            )
+            .unwrap();
+
+        assert_eq!(saved.delivery_state, MessageDeliveryState::WaitingUser);
+        assert_eq!(saved.text, "Please approve this action.");
+    }
+
+    #[test]
+    fn finalization_failure_does_not_create_a_delivered_fallback_message() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+
+        let result = store.finalize_assistant_message_with_delivery_state(
+            &thread.thread_id,
+            "missing-assistant",
+            "This must not be reported as delivered.",
+            &[],
+            &MemoryReuseEnvelope::normal(),
+            MessageDeliveryState::Delivered,
+        );
+
+        assert!(result.is_err());
+        assert!(store
+            .message(&thread.thread_id, "missing-assistant")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

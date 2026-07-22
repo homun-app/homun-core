@@ -688,6 +688,7 @@ struct PendingExecutorApproval {
     risk_level: String,
     data_boundary: String,
     explanation: String,
+    remote_approval_id: Option<String>,
 }
 
 struct TaskArtifactOutput {
@@ -1097,7 +1098,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // pool starts AND before the background VACUUM (VACUUM takes an exclusive lock that
     // would collide with bump_process_generation on the unified DB → "database is locked").
     // Bare block scopes the task_store lock guard so it is released before the VACUUM below.
-    {
+    let recovered_chat_turns = {
         let store = state.task_store.lock().expect("task store lock at boot");
         let generation = store.bump_process_generation().expect("bump process generation");
         if let Err(error) = store.abort_running_agent_runs("gateway_restart") {
@@ -1125,7 +1126,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "turn broker: recovery generation={generation} recovered={} turns",
             recovered.len()
         );
-        drop(store);
+        recovered
+            .iter()
+            .filter_map(|task_id| store.get_task(task_id, &user_id, &workspace_id).ok().flatten())
+            .collect::<Vec<_>>()
+    };
+    // The broker has re-queued these tasks, but their visible placeholders are
+    // owned by the chat store. Update them only after the task-store guard is
+    // released so recovery cannot deadlock on the two stores at startup.
+    for task in &recovered_chat_turns {
+        set_chat_turn_message_delivery_state(
+            &state,
+            task,
+            local_first_desktop_gateway::MessageDeliveryState::Retrying,
+        );
     }
     // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
     // only after the lease-aware broker recovery above has completed its critical write to
@@ -2962,37 +2976,22 @@ pub(crate) async fn activate_remote_approvals_from_message(
     thread_id: &str,
     message: &ChatMessage,
 ) {
-    for (open_tag, close_tag) in [
-        (MCP_CONFIRM_OPEN, MCP_CONFIRM_CLOSE),
-        (COMPOSIO_CONFIRM_OPEN, COMPOSIO_CONFIRM_CLOSE),
-    ] {
-        let Some(marker) = confirm_marker_value(&message.text, open_tag, close_tag) else {
-            continue;
-        };
-        let Some(approval_id) = marker
-            .get("approval_id")
-            .and_then(serde_json::Value::as_str)
-        else {
-            continue;
-        };
-        let Some(tool) = marker.get("tool").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let arguments = marker
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        let matches = if open_tag == MCP_CONFIRM_OPEN {
-            mcp_confirm_matches_approval(&message.text, approval_id, tool, &arguments)
-        } else {
-            composio_confirm_matches_approval(&message.text, approval_id, tool, &arguments)
-        };
-        if !matches {
-            continue;
-        }
+    for intent in remote_approval_intents_from_message(message) {
         let row = lock_store(state).ok().and_then(|store| {
+            let pending = store.remote_approval_by_id(&intent.approval_id).ok().flatten()?;
+            let expected_protocol = if pending.tool.starts_with("mcp__") {
+                "mcp"
+            } else {
+                "composio"
+            };
+            if pending.tool != intent.tool
+                || pending.arguments != intent.arguments
+                || expected_protocol != intent.protocol
+            {
+                return None;
+            }
             store
-                .bind_remote_approval_source(approval_id, thread_id, &message.id)
+                .bind_remote_approval_source(&intent.approval_id, thread_id, &message.id)
                 .ok()
                 .flatten()
         });
@@ -3012,6 +3011,109 @@ pub(crate) async fn activate_remote_approvals_from_message(
             }
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct RemoteApprovalIntent {
+    protocol: &'static str,
+    approval_id: String,
+    tool: String,
+    arguments: serde_json::Value,
+}
+
+fn remote_approval_intent_from_marker(
+    text: &str,
+    protocol: &'static str,
+    open_tag: &str,
+    close_tag: &str,
+) -> Option<RemoteApprovalIntent> {
+    let marker = confirm_marker_value(text, open_tag, close_tag)?;
+    let approval_id = marker.get("approval_id")?.as_str()?.to_string();
+    let tool = marker.get("tool")?.as_str()?.to_string();
+    let arguments = marker
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let valid = if protocol == "mcp" {
+        mcp_confirm_matches_approval(text, &approval_id, &tool, &arguments)
+    } else {
+        composio_confirm_matches_approval(text, &approval_id, &tool, &arguments)
+    };
+    valid.then_some(RemoteApprovalIntent {
+        protocol,
+        approval_id,
+        tool,
+        arguments,
+    })
+}
+
+fn remote_approval_intent_from_raw_text(text: &str) -> Option<RemoteApprovalIntent> {
+    remote_approval_intent_from_marker(text, "mcp", MCP_CONFIRM_OPEN, MCP_CONFIRM_CLOSE).or_else(
+        || {
+            remote_approval_intent_from_marker(
+                text,
+                "composio",
+                COMPOSIO_CONFIRM_OPEN,
+                COMPOSIO_CONFIRM_CLOSE,
+            )
+        },
+    )
+}
+
+fn remote_approval_event_part(intent: &RemoteApprovalIntent) -> serde_json::Value {
+    serde_json::json!({
+        "type": "remote_approval",
+        "protocol": intent.protocol,
+        "approval_id": intent.approval_id,
+        "tool": intent.tool,
+        "arguments": intent.arguments,
+    })
+}
+
+fn remote_approval_intents_from_message(message: &ChatMessage) -> Vec<RemoteApprovalIntent> {
+    let structured: Vec<_> = message
+        .event_parts
+        .iter()
+        .filter(|part| part.get("type").and_then(serde_json::Value::as_str) == Some("remote_approval"))
+        .filter_map(|part| {
+            let protocol = match part.get("protocol").and_then(serde_json::Value::as_str) {
+                Some("mcp") => "mcp",
+                Some("composio") => "composio",
+                _ => return None,
+            };
+            Some(RemoteApprovalIntent {
+                protocol,
+                approval_id: part.get("approval_id")?.as_str()?.to_string(),
+                tool: part.get("tool")?.as_str()?.to_string(),
+                arguments: part.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({})),
+            })
+        })
+        .collect();
+    if structured.is_empty() {
+        remote_approval_intent_from_raw_text(&message.text)
+            .into_iter()
+            .collect()
+    } else {
+        structured
+    }
+}
+
+fn remote_approval_matches_persisted_message(
+    message: &ChatMessage,
+    approval_id: &str,
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> bool {
+    remote_approval_intents_from_message(message).iter().any(|intent| {
+        intent.approval_id == approval_id
+            && intent.tool == tool
+            && &intent.arguments == arguments
+            && (if tool.starts_with("mcp__") {
+                intent.protocol == "mcp"
+            } else {
+                intent.protocol == "composio"
+            })
+    })
 }
 
 /// Branch switcher (‹ n/m ›): every branch point on the thread's active path.
@@ -32312,11 +32414,17 @@ async fn handle_channel_inbound(
                             "read_only",
                             &turn.user_message_id,
                             &turn.assistant_message_id,
+                            if approve_mode {
+                                local_first_desktop_gateway::MessageDeliveryState::WaitingUser
+                            } else {
+                                local_first_desktop_gateway::MessageDeliveryState::Delivered
+                            },
                         )
                         .await
                     }
-                    _ => None,
+                    _ => Ok(None),
                 };
+                let reply = reply.ok().flatten().map(|result| result.text);
                 let reply = match reply {
                     Some(reply) => Some(reply),
                     None if visible_turn.is_some() => {
@@ -32329,35 +32437,39 @@ async fn handle_channel_inbound(
                 // If the full threaded agent turn failed and the stateless fallback
                 // produced a reply, replace the placeholder instead of appending a
                 // second assistant bubble.
-                if let (Some(tid), Some(turn), Some(reply)) = (
+                let reply = if let (Some(tid), Some(turn), Some(reply)) = (
                     thread_id.as_deref(),
                     visible_turn.as_ref(),
                     reply.as_deref(),
                 ) {
-                    if let Ok(store) = lock_store(&st) {
-                        if store
-                            .finalize_assistant_message(
+                    let persisted = lock_store(&st)
+                        .ok()
+                        .and_then(|store| {
+                            store
+                                .finalize_assistant_message_with_delivery_state(
                                 tid,
                                 &turn.assistant_message_id,
                                 reply,
                                 &[],
                                 &local_first_memory::MemoryReuseEnvelope::normal(),
+                                if approve_mode {
+                                    local_first_desktop_gateway::MessageDeliveryState::WaitingUser
+                                } else {
+                                    local_first_desktop_gateway::MessageDeliveryState::Delivered
+                                },
                             )
-                            .is_err()
-                        {
-                            let _ = store.set_message_text(
-                                tid,
-                                &turn.assistant_message_id,
-                                reply,
-                            );
-                        }
-                    }
+                            .ok()
+                        })
+                        .is_some();
                     publish_app_event(serde_json::json!({
                         "type": "thread.updated",
                         "thread_id": tid,
                         "workspace": base_workspace_id(),
                     }));
-                }
+                    persisted.then(|| reply.to_string())
+                } else {
+                    reply
+                };
 
                 if let Some(tid) = thread_id.as_deref() {
                     // Messages are already persisted/streamed: nudge the app once
@@ -33343,6 +33455,13 @@ impl StreamMemoryReuseCollector {
         &self.event_parts
     }
 
+    fn observe_remote_approval(&mut self, intent: &RemoteApprovalIntent) {
+        let part = remote_approval_event_part(intent);
+        if !self.event_parts.contains(&part) {
+            self.event_parts.push(part);
+        }
+    }
+
     fn envelope(&self) -> local_first_memory::MemoryReuseEnvelope {
         memory_reuse_envelope_from_read_set(&self.reads)
     }
@@ -33354,33 +33473,38 @@ fn finalize_streamed_assistant_message(
     message_id: &str,
     text: &str,
     collector: &StreamMemoryReuseCollector,
-) {
-    if let Ok(store) = lock_store(state) {
-        if let Err(error) = store.finalize_assistant_message(
+    requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
+) -> Result<(), String> {
+    let delivery_state = if collector.event_parts().iter().any(|part| {
+        part.get("type").and_then(serde_json::Value::as_str) == Some("remote_approval")
+    }) {
+        local_first_desktop_gateway::MessageDeliveryState::WaitingUser
+    } else {
+        requested_delivery_state
+    };
+    let store = lock_store(state).map_err(|error| error.message)?;
+    store
+        .finalize_assistant_message_with_delivery_state(
             thread_id,
             message_id,
             text,
             collector.event_parts(),
             &collector.envelope(),
-        ) {
-            tracing::warn!(
-                target: "gateway::memory_firewall",
-                %thread_id,
-                %message_id,
-                %error,
-                "atomic assistant finalization failed; retaining fail-closed placeholder envelope"
-            );
-            // Even the degraded path must not turn private stream protocol into
-            // durable conversation context. Keep the fail-closed envelope and
-            // persist only the user-visible answer.
-            let _ = store.set_message_text(thread_id, message_id, &strip_chat_markers(text));
-        }
-    }
+            delivery_state,
+        )
+        .map_err(|error| error.to_string())?;
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
         "thread_id": thread_id,
         "workspace": base_workspace_id(),
     }));
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct AgentTurnResult {
+    text: String,
+    remote_approval: Option<RemoteApprovalIntent>,
 }
 
 async fn drain_agent_stream_into_message(
@@ -33388,7 +33512,8 @@ async fn drain_agent_stream_into_message(
     thread_id: &str,
     assistant_message_id: &str,
     entry: std::sync::Arc<StreamEntry>,
-) -> Option<String> {
+    requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
+) -> Result<Option<AgentTurnResult>, String> {
     let mut streamed_text = String::new();
     let mut final_text: Option<String> = None;
     let mut last_flush = std::time::Instant::now();
@@ -33447,9 +33572,14 @@ async fn drain_agent_stream_into_message(
         }
     }
 
-    let final_text = strip_chat_markers(&final_text.unwrap_or(streamed_text));
+    let raw_final_text = final_text.unwrap_or(streamed_text);
+    let remote_approval = remote_approval_intent_from_raw_text(&raw_final_text);
+    if let Some(intent) = remote_approval.as_ref() {
+        memory_reuse.observe_remote_approval(intent);
+    }
+    let final_text = strip_chat_markers(&raw_final_text);
     if final_text.is_empty() {
-        return None;
+        return Ok(None);
     }
     finalize_streamed_assistant_message(
         state,
@@ -33457,8 +33587,12 @@ async fn drain_agent_stream_into_message(
         assistant_message_id,
         &final_text,
         &memory_reuse,
-    );
-    Some(final_text)
+        requested_delivery_state,
+    )?;
+    Ok(Some(AgentTurnResult {
+        text: final_text,
+        remote_approval,
+    }))
 }
 
 /// Maps a raw stream value to a durable TurnEventKind and its transport payload.
@@ -33587,7 +33721,8 @@ async fn drain_agent_stream_into_message_with_fanout(
     assistant_message_id: &str,
     entry: std::sync::Arc<StreamEntry>,
     turn_id: &str,
-) -> Option<String> {
+    requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
+) -> Result<Option<AgentTurnResult>, String> {
     let mut streamed_text = String::new();
     let mut final_text: Option<String> = None;
     let mut last_flush = std::time::Instant::now();
@@ -33655,9 +33790,14 @@ async fn drain_agent_stream_into_message_with_fanout(
         }
     }
 
-    let final_text = strip_chat_markers(&final_text.unwrap_or(streamed_text));
+    let raw_final_text = final_text.unwrap_or(streamed_text);
+    let remote_approval = remote_approval_intent_from_raw_text(&raw_final_text);
+    if let Some(intent) = remote_approval.as_ref() {
+        memory_reuse.observe_remote_approval(intent);
+    }
+    let final_text = strip_chat_markers(&raw_final_text);
     if final_text.is_empty() {
-        return None;
+        return Ok(None);
     }
     finalize_streamed_assistant_message(
         state,
@@ -33665,8 +33805,12 @@ async fn drain_agent_stream_into_message_with_fanout(
         assistant_message_id,
         &final_text,
         &memory_reuse,
-    );
-    Some(final_text)
+        requested_delivery_state,
+    )?;
+    Ok(Some(AgentTurnResult {
+        text: final_text,
+        remote_approval,
+    }))
 }
 
 /// Runs an agent turn for channel-originated work while keeping the owning chat
@@ -33679,13 +33823,16 @@ async fn run_agent_turn_into_message(
     tool_policy: &str,
     source_user_message_id: &str,
     assistant_message_id: &str,
-) -> Option<String> {
-    let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))?;
+    requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
+) -> Result<Option<AgentTurnResult>, String> {
+    let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))
+        .ok_or_else(|| "chat role configuration is unavailable".to_string())?;
     let context = agent_turn_context(
         state,
         thread_id,
         &[source_user_message_id, assistant_message_id],
-    )?;
+    )
+    .ok_or_else(|| "chat context is unavailable".to_string())?;
     let request_id = format!("agentturn-{thread_id}-{}", now_epoch_secs());
     let request = ChatGenerateStreamRequest {
         request_id: request_id.clone(),
@@ -33707,7 +33854,7 @@ async fn run_agent_turn_into_message(
     };
     let response = stream_chat_via_openai(state, request, base_url, model, api_key)
         .await
-        .ok()?;
+        .map_err(|error| error.message)?;
     let entry = stream_registry()
         .lock()
         .ok()
@@ -33718,11 +33865,18 @@ async fn run_agent_turn_into_message(
 
     let result = match entry {
         Some(entry) => {
-            drain_agent_stream_into_message(state, thread_id, assistant_message_id, entry).await
+            drain_agent_stream_into_message(
+                state,
+                thread_id,
+                assistant_message_id,
+                entry,
+                requested_delivery_state,
+            )
+            .await
         }
         None => {
             let _ = body_task.await;
-            return None;
+            return Err("stream registration disappeared before draining".to_string());
         }
     };
     let _ = body_task.await;
@@ -33743,13 +33897,16 @@ async fn run_agent_turn_into_message_with_fanout(
     assistant_message_id: &str,
     turn_id: &str,
     agent_run_id: Option<&str>,
-) -> Option<String> {
-    let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))?;
+    requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
+) -> Result<Option<AgentTurnResult>, String> {
+    let (base_url, model, api_key) = chat_role_config_for_thread(state, Some(thread_id))
+        .ok_or_else(|| "chat role configuration is unavailable".to_string())?;
     let context = agent_turn_context(
         state,
         thread_id,
         &[source_user_message_id, assistant_message_id],
-    )?;
+    )
+    .ok_or_else(|| "chat context is unavailable".to_string())?;
     let request_id = format!("broker-{turn_id}");
     let checkpoint_workspace = state
         .chat_store
@@ -33800,7 +33957,7 @@ async fn run_agent_turn_into_message_with_fanout(
     };
     let response = stream_chat_via_openai(state, request, base_url, model, api_key)
         .await
-        .ok()?;
+        .map_err(|error| error.message)?;
     let entry = stream_registry()
         .lock()
         .ok()
@@ -33826,12 +33983,13 @@ async fn run_agent_turn_into_message_with_fanout(
                 assistant_message_id,
                 entry,
                 turn_id,
+                requested_delivery_state,
             )
             .await
         }
         None => {
             let _ = body_task.await;
-            return None;
+            return Err("stream registration disappeared before draining".to_string());
         }
     };
     let _ = body_task.await;
@@ -37600,8 +37758,19 @@ fn request_task_executor_approval(
     state: &AppState,
     task: &mut TaskRecord,
     approval: &PendingExecutorApproval,
-) -> Result<ApprovalRequest, GatewayError> {
+) -> Result<(), GatewayError> {
     let store = lock_task_store(state)?;
+    if approval.remote_approval_id.is_some() {
+        task.status = TaskStatus::WaitingUserApproval;
+        task.blocked_reason = Some(format!("approval required: {}", approval.action));
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
+        task.updated_at = OffsetDateTime::now_utc();
+        store.release_resources(task).map_err(GatewayError::task)?;
+        store.insert_task(task).map_err(GatewayError::task)?;
+        return Ok(());
+    }
     let approval_request = ApprovalGate::new()
         .request_approval(
             &store,
@@ -37622,7 +37791,8 @@ fn request_task_executor_approval(
     task.updated_at = OffsetDateTime::now_utc();
     store.release_resources(task).map_err(GatewayError::task)?;
     store.insert_task(task).map_err(GatewayError::task)?;
-    Ok(approval_request)
+    let _ = approval_request;
+    Ok(())
 }
 
 /// Computes the session-level `(status, progress_current)` for a thread whose
@@ -38208,7 +38378,7 @@ fn execute_proactive_prompt_task(
         message: "could not start a visible automation turn".to_string(),
     })?;
 
-    let answer = tokio::runtime::Handle::current()
+    let result = tokio::runtime::Handle::current()
         .block_on(run_agent_turn_into_message(
             state,
             &thread_id,
@@ -38216,16 +38386,23 @@ fn execute_proactive_prompt_task(
             policy,
             &visible_turn.user_message_id,
             &visible_turn.assistant_message_id,
-        ))
-        .unwrap_or_else(|| "No reply generated for the scheduled task.".to_string());
-    let incomplete_reason = agent_output_incomplete_reason(&answer);
+            local_first_desktop_gateway::MessageDeliveryState::Delivered,
+        ));
+    let answer = result.ok().flatten().map(|result| result.text);
+    let incomplete_reason = answer
+        .as_deref()
+        .and_then(agent_output_incomplete_reason)
+        .or_else(|| answer.is_none().then(|| "scheduled task produced no final reply".to_string()));
 
-    update_channel_assistant_message(
-        state,
-        &thread_id,
-        &visible_turn.assistant_message_id,
-        &answer,
-    );
+    if answer.is_none() {
+        if let Ok(store) = lock_store(state) {
+            let _ = store.set_message_delivery_state(
+                &thread_id,
+                &visible_turn.assistant_message_id,
+                local_first_desktop_gateway::MessageDeliveryState::Failed,
+            );
+        }
+    }
     publish_app_event(serde_json::json!({
         "type": "thread.updated",
         "thread_id": thread_id,
@@ -38252,7 +38429,7 @@ fn execute_proactive_prompt_task(
             "kind": "proactive_prompt",
             "completed": completed,
         }),
-        chat_message: answer,
+        chat_message: answer.unwrap_or_default(),
         surface: SurfaceKind::Logs,
         event_kind: if completed {
             "proactive_prompt_completed".to_string()
@@ -40652,21 +40829,12 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
             .ok()
             .and_then(|store| store.message(thread_id, message_id).ok().flatten())
             .is_some_and(|message| {
-                if pending.tool.starts_with("mcp__") {
-                    mcp_confirm_matches_approval(
-                        &message.text,
-                        &pending.approval_id,
-                        &pending.tool,
-                        &pending.arguments,
-                    )
-                } else {
-                    composio_confirm_matches_approval(
-                        &message.text,
-                        &pending.approval_id,
-                        &pending.tool,
-                        &pending.arguments,
-                    )
-                }
+                remote_approval_matches_persisted_message(
+                    &message,
+                    &pending.approval_id,
+                    &pending.tool,
+                    &pending.arguments,
+                )
             });
         if !source_ok {
             return format!(
@@ -44138,6 +44306,7 @@ fn task_execution_outcome_from_executor_result(
                 risk_level: risk_level.clone(),
                 data_boundary: data_boundary.clone(),
                 explanation: explanation.clone(),
+                remote_approval_id: None,
             }),
             summary: "Task in attesa di approval.".to_string(),
             checkpoint_payload: serde_json::json!({
@@ -60530,6 +60699,38 @@ prs.save(Path({path:?}))
             "approval-a",
             "mcp__filesystem__create",
             &args
+        ));
+    }
+
+    #[test]
+    fn persisted_remote_approval_event_part_authorizes_the_exact_card() {
+        let approval_id = "approval-a";
+        let tool = "mcp__filesystem__create";
+        let args = serde_json::json!({ "path": "/tmp/a", "content": "x" });
+        let mut message = super::channel_chat_message_with_id(
+            "assistant",
+            "Please approve this action.",
+            "assistant-test",
+        );
+        message.event_parts.push(serde_json::json!({
+            "type": "remote_approval",
+            "protocol": "mcp",
+            "approval_id": approval_id,
+            "tool": tool,
+            "arguments": args,
+        }));
+
+        assert!(super::remote_approval_matches_persisted_message(
+            &message,
+            approval_id,
+            tool,
+            &serde_json::json!({ "path": "/tmp/a", "content": "x" }),
+        ));
+        assert!(!super::remote_approval_matches_persisted_message(
+            &message,
+            "approval-b",
+            tool,
+            &serde_json::json!({ "path": "/tmp/a", "content": "x" }),
         ));
     }
 
