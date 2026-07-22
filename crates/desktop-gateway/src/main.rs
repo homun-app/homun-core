@@ -38792,12 +38792,53 @@ fn connect_mcp_blocking(
     let connection_id = format!("mcp-{slug}");
     let user = gateway_capability_user_id();
     let workspace = gateway_capability_workspace_id();
+    let mut stored_secret_ref: Option<SecretRef> = None;
+    let mut previous_secret: Option<SecretMaterial> = None;
     // Remote (http) when a url is given, else local stdio.
     let (metadata, secret_label) = match &url {
-        Some(url) => (
-            mcp_http_config_to_metadata(url),
-            format!("http:{slug}"),
-        ),
+        Some(url) => {
+            let secret_label = if request.headers.is_empty() {
+                format!("http:{slug}")
+            } else {
+                let secret_ref = SecretRef::new(
+                    user.as_str(),
+                    workspace.as_str(),
+                    provider_id.as_str(),
+                    connection_id.as_str(),
+                )
+                .map_err(|error| GatewayError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "mcp_secret_ref_invalid",
+                    message: error.to_string(),
+                })?;
+                let material = mcp_http_headers_to_secret(&request.headers).map_err(|message| {
+                    GatewayError {
+                        status: StatusCode::BAD_REQUEST,
+                        code: "mcp_headers_invalid",
+                        message,
+                    }
+                })?;
+                previous_secret = state
+                    .secret_store
+                    .get(&secret_ref)
+                    .map_err(|error| GatewayError {
+                        status: StatusCode::INTERNAL_SERVER_ERROR,
+                        code: "mcp_secret_read_failed",
+                        message: error.to_string(),
+                    })?;
+                state
+                    .secret_store
+                    .put(secret_ref.clone(), material)
+                    .map_err(|error| GatewayError {
+                        status: StatusCode::INTERNAL_SERVER_ERROR,
+                        code: "mcp_secret_store_failed",
+                        message: error.to_string(),
+                    })?;
+                stored_secret_ref = Some(secret_ref.clone());
+                secret_ref.as_str().to_string()
+            };
+            (mcp_http_config_to_metadata(url), secret_label)
+        }
         None => {
             let config = McpStdioConfig {
                 command,
@@ -38822,7 +38863,7 @@ fn connect_mcp_blocking(
     .with_privacy_domains(vec!["local".to_string()])
     .with_metadata(metadata);
 
-    {
+    let persist_result = (|| -> Result<(), GatewayError> {
         let registry = lock_capability_registry(state)?;
         registry
             .upsert_provider_config(&CapabilityProviderConfig::new(
@@ -38846,6 +38887,17 @@ fn connect_mcp_blocking(
         registry
             .upsert_connection_config(&connection_config)
             .map_err(GatewayError::capability)?;
+        Ok(())
+    })();
+    if let Err(error) = persist_result {
+        if let Some(secret_ref) = stored_secret_ref {
+            if let Some(material) = previous_secret {
+                let _ = state.secret_store.put(secret_ref, material);
+            } else {
+                let _ = state.secret_store.delete(&secret_ref);
+            }
+        }
+        return Err(error);
     }
 
     // Best-effort discovery: connect (spawn/HTTP), MCP-initialize, list tools,
@@ -42547,13 +42599,8 @@ struct McpDisconnectRequest {
     provider_id: String,
 }
 
-/// Disconnects an MCP server: removes its provider config, grant, connection and
-/// cached tools. Guarded to MCP providers so it can't nuke Composio/browser.
-async fn mcp_disconnect(
-    State(state): State<AppState>,
-    Json(request): Json<McpDisconnectRequest>,
-) -> Result<Json<serde_json::Value>, GatewayError> {
-    let pid = request.provider_id.trim().to_string();
+fn mcp_disconnect_blocking(state: &AppState, provider_id: &str) -> Result<usize, GatewayError> {
+    let pid = provider_id.trim().to_string();
     if !pid.starts_with("mcp:") {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
@@ -42561,7 +42608,7 @@ async fn mcp_disconnect(
             message: "Qui si possono disconnettere solo i provider MCP.".to_string(),
         });
     }
-    let removed = tokio::task::spawn_blocking(move || -> Result<usize, GatewayError> {
+    let (removed, secret_ref) = {
         let registry = lock_capability_registry(&state)?;
         let provider = CapabilityProviderId::new(pid);
         match registry
@@ -42581,13 +42628,53 @@ async fn mcp_disconnect(
             }
             None => return Ok(0),
         }
-        registry
+        let secret_ref = registry
+            .connection_configs(&gateway_capability_user_id(), &gateway_capability_workspace_id())
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_disconnect",
+                message: error.to_string(),
+            })?
+            .into_iter()
+            .find(|connection| connection.provider_id == provider)
+            .and_then(|connection| {
+                connection
+                    .secret_ref
+                    .starts_with("secret://")
+                    .then(|| connection.secret_ref.parse::<SecretRef>().ok())
+                    .flatten()
+            });
+        let removed = registry
             .remove_provider(&provider)
             .map_err(|e| GatewayError {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
                 code: "mcp_disconnect",
                 message: e.to_string(),
-            })
+            })?;
+        (removed, secret_ref)
+    };
+    if let Some(secret_ref) = secret_ref {
+        state
+            .secret_store
+            .delete(&secret_ref)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_secret_delete_failed",
+                message: error.to_string(),
+            })?;
+    }
+    Ok(removed)
+}
+
+/// Disconnects an MCP server: removes its provider config, grant, connection,
+/// cached tools and any encrypted HTTP credential. Guarded to MCP providers so
+/// it can't remove Composio/browser.
+async fn mcp_disconnect(
+    State(state): State<AppState>,
+    Json(request): Json<McpDisconnectRequest>,
+) -> Result<Json<serde_json::Value>, GatewayError> {
+    let removed = tokio::task::spawn_blocking(move || {
+        mcp_disconnect_blocking(&state, &request.provider_id)
     })
     .await
     .map_err(|e| GatewayError {
@@ -72548,6 +72635,71 @@ data: [DONE]\n";
 
         assert!(error.contains("MCP credential not found"));
         assert!(!error.contains("orion-secret"));
+    }
+
+    #[test]
+    fn mcp_secret_lifecycle_persists_outside_metadata_and_deletes_on_disconnect() {
+        use local_first_secrets::SecretStore;
+
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().expect("memory store"),
+        );
+        let state = test_app_state_for_brief(facade);
+        let response = crate::connect_mcp_blocking(
+            &state,
+            crate::ConnectMcpRequest {
+                name: "Orion Moon".to_string(),
+                command: String::new(),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+                url: Some("http://127.0.0.1:1/mcp".to_string()),
+                headers: std::collections::HashMap::from([(
+                    "Authorization".to_string(),
+                    "Bearer orion-secret".to_string(),
+                )]),
+            },
+        )
+        .expect("register MCP connection");
+        assert!(response.discovery_error.is_some());
+
+        let user = crate::gateway_capability_user_id();
+        let workspace = crate::gateway_capability_workspace_id();
+        let connection = state
+            .capability_registry
+            .lock()
+            .expect("registry lock")
+            .connection_configs(&user, &workspace)
+            .expect("connection configs")
+            .into_iter()
+            .find(|connection| connection.provider_id.as_str() == "mcp:orion-moon")
+            .expect("Orion Moon connection");
+        let serialized = serde_json::to_string(&connection).expect("serialize connection");
+        assert_eq!(connection.metadata["transport"], "http");
+        assert!(connection.metadata.get("headers").is_none());
+        assert!(!serialized.contains("orion-secret"));
+
+        let secret_ref = connection
+            .secret_ref
+            .parse::<local_first_secrets::SecretRef>()
+            .expect("persisted secret ref");
+        let stored = state
+            .secret_store
+            .get(&secret_ref)
+            .expect("read secret")
+            .expect("stored MCP credential");
+        let headers = crate::mcp_http_headers_from_secret(stored).expect("decode headers");
+        assert_eq!(headers["Authorization"], "Bearer orion-secret");
+
+        let removed = crate::mcp_disconnect_blocking(&state, "mcp:orion-moon")
+            .expect("disconnect MCP provider");
+        assert_eq!(removed, 1);
+        assert!(
+            state
+                .secret_store
+                .get(&secret_ref)
+                .expect("read deleted secret")
+                .is_none()
+        );
     }
 
     #[test]
