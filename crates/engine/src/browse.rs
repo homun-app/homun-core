@@ -8,14 +8,12 @@
 //! its plan. This is the payoff of the ADR 0024 extraction (the loop is now a recursively-callable
 //! engine).
 
-use crate::outcome::TurnOutcome;
+use crate::outcome::{TurnDelivery, TurnOutcome};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// The engine's canned "no answer" fallback (see `agent_loop`'s tail): when the sub-turn ends without
-/// producing anything, `memory_answer` is this sentence. `browse` must read it as NOT-FOUND, not as a
-/// real answer — so the manager retries/blocks instead of relaying a non-result. Matched by substring
-/// (the full text carries a trailing hint) to stay robust to minor wording drift.
+/// A legacy no-answer phrase is still mapped to NOT-FOUND if it reaches a browse result. New engine
+/// turns use `TurnDelivery::NoVisibleAnswer` instead of manufacturing this prose.
 const NO_ANSWER_MARKER: &str = "couldn't produce a final answer";
 
 /// The delimiter the loop prepends to the auto-generated "Fonti"/Sources block (`text::fonti_section`).
@@ -82,6 +80,9 @@ pub fn seed_browse_messages(system_prompt: &str, goal: &str) -> Vec<Value> {
 /// actually visited (a source URL grounds the answer), else `Low`. The `**Sources**` block the loop may
 /// append is stripped from `answer` — sources travel structured in `sources`.
 pub fn browse_result_from_outcome(outcome: &TurnOutcome) -> BrowseResult {
+    if outcome.delivery != TurnDelivery::Delivered {
+        return BrowseResult::default();
+    }
     let raw = outcome.memory_answer.trim();
     let answer = raw
         .split(SOURCES_BLOCK_DELIM)
@@ -179,6 +180,7 @@ mod tests {
     #[test]
     fn maps_substantive_grounded_answer_to_found_high_and_strips_sources_block() {
         let outcome = TurnOutcome {
+            delivery: TurnDelivery::Delivered,
             memory_answer: "The price is $63,120.\n\n**Sources**\n- https://kraken.com/btc".to_string(),
             tool_actions: String::new(),
             browse_sources: vec!["https://kraken.com/btc".to_string()],
@@ -195,6 +197,7 @@ mod tests {
     #[test]
     fn substantive_answer_without_sources_is_found_but_low_confidence() {
         let outcome = TurnOutcome {
+            delivery: TurnDelivery::Delivered,
             memory_answer: "Roughly 42% according to the page.".to_string(),
             browse_sources: vec![],
             ..Default::default()
@@ -205,10 +208,10 @@ mod tests {
     }
 
     #[test]
-    fn canned_no_answer_fallback_maps_to_not_found() {
-        // The engine's tail returns this sentence when the sub-turn produced nothing — it must read as
-        // NOT-FOUND so the manager retries/blocks instead of relaying a non-result.
+    fn legacy_no_answer_text_maps_to_not_found() {
+        // Historical data carrying this phrase remains a NOT-FOUND result.
         let outcome = TurnOutcome {
+            delivery: TurnDelivery::NoVisibleAnswer,
             memory_answer: "I completed the steps but couldn't produce a final answer. \
 Tell me if you want me to retry or rephrase."
                 .to_string(),

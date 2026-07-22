@@ -23,8 +23,8 @@ use crate::execution_journal::{
     AgentExecutionEvent, classify_tool_result, tool_family, tool_result_fingerprint,
 };
 use crate::markers::{
-    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
-    should_force_synthesis_for_empty_visible_answer,
+    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker, strip_display_markers,
+    visible_answer,
 };
 use crate::model_normalize;
 use crate::plan::{
@@ -34,7 +34,7 @@ use crate::plan::{
 };
 use crate::text::{extract_source_urls, fonti_section, is_low_value_source_url};
 use crate::tools::{connected_capability_execution_trace_line, summarize_tool_action};
-use crate::{LoopState, TurnConfig};
+use crate::{LoopState, TurnConfig, TurnDelivery};
 
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
 const MAX_PLAN_NUDGES: u32 = 8;
@@ -160,7 +160,7 @@ pub async fn run_turn<M, C, B, P, J, K, Pol, X, E>(
     catalog_index: &[(String, String, serde_json::Value)],
     memory_user_message: String,
     mut memory_answer: String,
-    mut last_model_error: Option<String>,
+    _last_model_error: Option<String>,
     mut final_done: bool,
     mut plan_nudges: u32,
     mut turn_used_tools: bool,
@@ -182,6 +182,7 @@ where
     X: ExecutionJournal,
     E: EventSink,
 {
+    let mut delivery = TurnDelivery::NoVisibleAnswer;
     for round in 0..cfg.hard_round_ceiling {
         let max_rounds = if ls.browser_used {
             cfg.browser_max_rounds
@@ -339,11 +340,9 @@ missing, give what you have and note the gap in one short line.",
                 ls.provider = o.provider;
                 (o.message, o.finish_reason)
             }
-            // Parity: only an upstream status error becomes the committed final answer.
-            Err(crate::ModelCallError::Upstream(reason)) => {
-                last_model_error = Some(reason);
-                break;
-            }
+            // Upstream and transport failures end the loop; a visible final answer may still be
+            // recovered by the post-loop synthesis from accumulated turn prose.
+            Err(crate::ModelCallError::Upstream(_)) => break,
             Err(crate::ModelCallError::Transport(_)) => break,
             // The model can't see the images it was sent. This is recoverable — but ONLY as a replay of
             // the whole turn from a re-seeded conversation, so it is recoverable only while the turn is
@@ -351,7 +350,6 @@ missing, give what you have and note the gap in one short line.",
             // rejection is just a fatal upstream error like any other.
             Err(crate::ModelCallError::ImageUnsupported(reason)) => {
                 if turn_used_tools {
-                    last_model_error = Some(reason);
                     break;
                 }
                 // Return with NOTHING emitted and nothing committed: no Done, no answer, no memory. The
@@ -772,15 +770,18 @@ missing, give what you have and note the gap in one short line.",
                     collapse_plan_markers(&ls.accumulated),
                     ls.pending_vault_reveal_marker.as_deref(),
                 );
-                let _ = event_sink
-                    .emit(GenerateStreamEvent::Done {
-                        text: final_text.clone(),
-                        metrics: TokenMetrics::zero(),
-                        redacted_user_text: None,
-                    })
-                    .await;
-                memory_answer = final_text;
-                final_done = true;
+                if let Some(final_text) = visible_answer(&final_text) {
+                    let _ = event_sink
+                        .emit(GenerateStreamEvent::Done {
+                            text: final_text.clone(),
+                            metrics: TokenMetrics::zero(),
+                            redacted_user_text: None,
+                        })
+                        .await;
+                    memory_answer = final_text;
+                    delivery = TurnDelivery::Delivered;
+                    final_done = true;
+                }
                 break;
             }
             if stop_for_no_progress {
@@ -943,8 +944,11 @@ missing, give what you have and note the gap in one short line.",
         // forced-synthesis (`!final_done` below) then writes a real answer with a FRESH
         // token budget and an explicit "write the FINAL ANSWER now" directive. `break`
         // leaves the round loop, so the synthesis runs exactly once — no spin, no counter;
-        // if it too comes back empty, its own fallback chain ends the turn cleanly.
-        if should_force_synthesis_for_empty_visible_answer(&ls.accumulated, &content) {
+        // if it too comes back empty, the turn reports `NoVisibleAnswer` without emitting Done.
+        let mut candidate = String::with_capacity(ls.accumulated.len() + content.len());
+        candidate.push_str(&ls.accumulated);
+        candidate.push_str(&content);
+        if visible_answer(&candidate).is_none() {
             if cfg.verbose {
                 let fr = round_finish_reason.as_deref().unwrap_or("");
                 eprintln!("[answer] empty answer body (finish_reason={fr}) → forced synthesis");
@@ -979,7 +983,10 @@ missing, give what you have and note the gap in one short line.",
         // Reconcile the plan ONE last time on delivery — mark every still-open step done
         // (see plan_steps_reconciled_on_delivery) — and PERSIST it, so the runtime plan is
         // settled → the next turn won't falsely resume a plan this answer already finished.
-        let delivered = collapse_plan_markers(&ls.accumulated);
+        let delivered = strip_display_markers(&collapse_plan_markers(&ls.accumulated));
+        if visible_answer(&delivered).is_none() {
+            break;
+        }
         // Turn trace: open-step count BEFORE the final reconcile (its input), captured so the trace
         // shows how many steps the delivery reconcile swept closed.
         let final_open_before = plan_value_steps(&ls.plan)
@@ -1007,15 +1014,18 @@ missing, give what you have and note the gap in one short line.",
             delivered,
             ls.pending_vault_reveal_marker.as_deref(),
         );
-        memory_answer = final_answer.clone();
-        let _ = event_sink
-            .emit(GenerateStreamEvent::Done {
-                text: final_answer,
-                metrics: TokenMetrics::zero(),
-                redacted_user_text: None,
-            })
-            .await;
-        final_done = true;
+        if let Some(final_answer) = visible_answer(&final_answer) {
+            memory_answer = final_answer.clone();
+            let _ = event_sink
+                .emit(GenerateStreamEvent::Done {
+                    text: final_answer,
+                    metrics: TokenMetrics::zero(),
+                    redacted_user_text: None,
+                })
+                .await;
+            delivery = TurnDelivery::Delivered;
+            final_done = true;
+        }
         break;
     }
 
@@ -1053,9 +1063,8 @@ missing, give what you have and note the gap in one short line.",
         // provider fallback and the OpenAI/Ollama-native collectors instead of the old
         // single inline POST (which could dead-end on one transient failure). The impl
         // streams the answer live via its captured StreamSink, exactly like the loop.
-        // A provider swap here is moot (the turn ends right after), and any error →
-        // empty synth, falling through to the accumulated / last_model_error / canned
-        // chain below (same fallback shape as before).
+        // A provider swap here is moot (the turn ends right after), and any error leaves
+        // the turn without a delivery unless already-accumulated text is visibly answer prose.
         execution_journal.record(AgentExecutionEvent::PromptSnapshot {
             round: cfg.hard_round_ceiling,
             snapshot: crate::execution_journal::build_prompt_snapshot_with_packets(
@@ -1106,54 +1115,48 @@ missing, give what you have and note the gap in one short line.",
                 tool_calls: 0,
             });
         }
-        // synth_text was already streamed live by the collector; the committed text
-        // is the authoritative Done payload below.
-        let mut final_text = if !synth_text.trim().is_empty() {
-            synth_text
-        } else if !ls.accumulated.trim().is_empty() {
-            ls.accumulated.clone()
-        } else if let Some(err) = last_model_error.clone() {
-            // The model failed every call this turn (e.g. retired / unauthorized).
-            // Surface the real reason instead of a generic "no answer".
-            err
-        } else {
-            "I completed the steps but couldn't produce a final answer. \
-Tell me if you want me to retry or rephrase."
-                .to_string()
-        };
-        if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
-            final_text.push_str(&fonti);
-        }
-        // Anti-churn safety net for the `ls.accumulated` fallback (synth_text never
-        // carries plan blocks, so this is a no-op when synthesis succeeded). Reconcile +
-        // persist the plan on this exit path too, so a synthesis delivery also settles it.
-        let delivered = collapse_plan_markers(&final_text);
-        let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
-            Some(reconciled) => {
-                plan_progress
-                    .persist_plan(thread_id.as_deref(), &reconciled)
-                    .await;
-                replace_latest_plan_marker(&delivered, &reconciled)
+        // synth_text was already streamed live by the collector; commit it only when it contains
+        // visible prose. If it does not, the accumulated turn text gets the same validation.
+        if let Some(mut final_text) =
+            visible_answer(&synth_text).or_else(|| visible_answer(&ls.accumulated))
+        {
+            if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
+                final_text.push_str(&fonti);
             }
-            None => delivered,
-        };
-        let final_text = append_vault_reveal_marker_if_missing(
-            delivered,
-            ls.pending_vault_reveal_marker.as_deref(),
-        );
-        memory_answer = final_text.clone();
-        let _ = event_sink
-            .emit(GenerateStreamEvent::Done {
-                text: final_text,
-                metrics: TokenMetrics::zero(),
-                redacted_user_text: None,
-            })
-            .await;
+            // Anti-churn safety net for the accumulated fallback (synthesis normally has no plan
+            // blocks). Reconcile + persist only after a visible delivery candidate exists.
+            let delivered = strip_display_markers(&collapse_plan_markers(&final_text));
+            let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
+                Some(reconciled) => {
+                    plan_progress
+                        .persist_plan(thread_id.as_deref(), &reconciled)
+                        .await;
+                    replace_latest_plan_marker(&delivered, &reconciled)
+                }
+                None => delivered,
+            };
+            let final_text = append_vault_reveal_marker_if_missing(
+                delivered,
+                ls.pending_vault_reveal_marker.as_deref(),
+            );
+            if let Some(final_text) = visible_answer(&final_text) {
+                memory_answer = final_text.clone();
+                let _ = event_sink
+                    .emit(GenerateStreamEvent::Done {
+                        text: final_text,
+                        metrics: TokenMetrics::zero(),
+                        redacted_user_text: None,
+                    })
+                    .await;
+                delivery = TurnDelivery::Delivered;
+            }
+        }
     }
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
     // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
     // engine's turn ends here.
     crate::TurnOutcome {
+        delivery,
         memory_answer,
         tool_actions: ls.tool_trace.join("\n"),
         memory_reads: ls.memory_reads,
@@ -1187,6 +1190,35 @@ mod tests {
             on_delta("Final answer.");
             Ok(ModelRoundOutput {
                 message: json!({ "role": "assistant", "content": "Final answer." }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct ReasoningOnlyModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for ReasoningOnlyModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let content = "‹‹REASONING››hidden‹‹/REASONING››";
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
                 provider: ProviderBinding {
                     model: call.model.to_string(),
                     base_url: call.base_url.to_string(),
@@ -1373,6 +1405,7 @@ mod tests {
             outcome.memory_answer
         );
         assert!(!outcome.memory_reads.has_linked_reads());
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
         // A terminal Done event was emitted.
         assert!(
             sink.0
@@ -1381,6 +1414,72 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
             "expected a Done event"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reasoning_only_completion_never_emits_done_or_claims_delivery() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "hi" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = ReasoningOnlyModel::default();
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "hi".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(
+            outcome.delivery,
+            crate::TurnDelivery::NoVisibleAnswer,
+            "display-only text must not be delivered"
+        );
+        assert!(outcome.memory_answer.is_empty());
+        assert_eq!(
+            model.calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "the post-loop synthesis gets one chance to produce visible prose"
+        );
+        assert!(
+            !sink
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
+            "display-only text must not emit Done"
         );
     }
 

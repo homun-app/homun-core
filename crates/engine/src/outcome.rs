@@ -6,10 +6,20 @@
 //! returns, driven by this outcome. Splitting them out is what lets the loop body move into this leaf
 //! crate without dragging the memory/graph subsystems along.
 
+/// Whether the turn emitted a user-visible final answer.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum TurnDelivery {
+    Delivered,
+    #[default]
+    NoVisibleAnswer,
+}
+
 /// The turn's result the gateway tail consumes. Kept minimal — only what the tail can't already see
 /// (everything else, like `read_only` / `thread_id` / the memory scope, the caller still holds).
 #[derive(Debug, Default, Clone)]
 pub struct TurnOutcome {
+    /// The final-delivery status. `Delivered` is set only when the engine emitted a visible `Done`.
+    pub delivery: TurnDelivery,
     /// The committed final answer text (the `Done` payload). Fed to the memory learn extractor; empty
     /// means the turn produced no answer (the tail then skips learning).
     pub memory_answer: String,

@@ -103,6 +103,13 @@ pub fn strip_display_markers(text: &str) -> String {
     out
 }
 
+/// The user-visible prose in a model response, if any. Display-only marker blocks are never a
+/// deliverable by themselves.
+pub fn visible_answer(text: &str) -> Option<String> {
+    let visible = strip_display_markers(text).trim().to_string();
+    (!visible.is_empty()).then_some(visible)
+}
+
 /// True when the turn produced NO answer body — only display markers (chiefly a `‹‹REASONING››`
 /// trace) or nothing. The "non produce la risposta" failure: a reasoning model that burned its whole
 /// budget thinking (`finish_reason:length`, empty content) leaves markers and no prose, so committing
@@ -317,6 +324,23 @@ mod tests {
         assert_eq!(
             strip_display_markers("‹‹REASONING››thought‹‹/REASONING››\nHi").trim(),
             "Hi"
+        );
+    }
+
+    #[test]
+    fn visible_answer_rejects_display_only_text() {
+        assert_eq!(visible_answer(""), None);
+        assert_eq!(
+            visible_answer("‹‹REASONING››hidden‹‹/REASONING››\n‹‹PLAN››- [x] done‹‹/PLAN››"),
+            None,
+        );
+    }
+
+    #[test]
+    fn visible_answer_returns_trimmed_user_prose() {
+        assert_eq!(
+            visible_answer("‹‹REASONING››hidden‹‹/REASONING››\n  Risposta finale.  "),
+            Some("Risposta finale.".to_string()),
         );
     }
 
