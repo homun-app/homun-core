@@ -1417,6 +1417,11 @@ export function ChatView({
     }
   }
 
+  function openActivityIsland() {
+    dispatchInspector({ type: "hideWorkspace" });
+    setIslandOpen(true);
+  }
+
   // Reattach to an answer that was streaming when the app was reloaded: replays
   // the buffered events from the gateway and continues live, then persists.
   async function resumeActiveStream(
@@ -1663,8 +1668,16 @@ export function ChatView({
           mode,
           model,
         });
-        if (result.status !== "steering_queued") {
-          throw new Error("The active task ended while the instruction was being queued.");
+        if (result.status === "queued") {
+          setReplyContext(null);
+          setPromptError(null);
+          setProjectedActiveTurn(null);
+          try {
+            await onThreadChanged();
+          } catch (error) {
+            console.warn("queued turn refresh unavailable", error);
+          }
+          return true;
         }
         const returnedRecord = (
           result as typeof result & { steering?: TurnSteeringRecord }
@@ -2978,7 +2991,7 @@ export function ChatView({
                 <ActiveTurnStatus
                   {...chatTurnState}
                   variant="assistant-footer"
-                  onOpenActivity={() => setIslandOpen(true)}
+                  onOpenActivity={openActivityIsland}
                   onStop={() => void stopActiveTurn()}
                 />
               </div>
@@ -3003,7 +3016,7 @@ export function ChatView({
                   <ActiveTurnStatus
                     {...chatTurnState}
                     variant="assistant-footer"
-                    onOpenActivity={() => setIslandOpen(true)}
+                    onOpenActivity={openActivityIsland}
                     onStop={() => void stopActiveTurn()}
                   />
                 </div>
@@ -3101,7 +3114,7 @@ export function ChatView({
           <ActiveTurnStatus
             {...chatTurnState}
             variant="composer-bar"
-            onOpenActivity={() => setIslandOpen(true)}
+            onOpenActivity={openActivityIsland}
             onStop={() => void stopActiveTurn()}
           />
         )}

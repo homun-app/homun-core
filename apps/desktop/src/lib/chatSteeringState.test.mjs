@@ -144,6 +144,18 @@ test("reconciliation cannot revive a row older than an explicit tombstone", () =
   assert.deepEqual(reconciled.revisions, { 4: 2 });
 });
 
+test("reconciliation retains a newer visible local row when the server snapshot is stale", () => {
+  const local = createSteeringQueueState([
+    { steering_id: 8, revision: 3, status: "pending", visible_prompt: "latest local" },
+  ]);
+  const reconciled = reconcileSteering(local, [
+    { steering_id: 8, revision: 2, status: "claimed", visible_prompt: "stale server" },
+  ]);
+
+  assert.deepEqual(reconciled.rows, local.rows);
+  assert.deepEqual(reconciled.revisions, { 8: 3 });
+});
+
 test("selectors permit mutations only before claim", () => {
   assert.equal(canEdit({ status: "pending" }), true);
   assert.equal(canEdit({ status: "held" }), true);

@@ -26,7 +26,10 @@ export function reconcileSteering(state, rows) {
   for (const row of latestById.values()) {
     const watermark = revisions[row.steering_id];
     const previous = previouslyVisible.get(row.steering_id);
-    if (watermark !== undefined && row.revision < watermark) continue;
+    if (watermark !== undefined && row.revision < watermark) {
+      if (previous) visible.push(previous);
+      continue;
+    }
     // No visible row at the current watermark means the state holds a terminal
     // tombstone. Only a strictly newer server revision may replace it.
     if (watermark !== undefined && row.revision === watermark && !previous) continue;

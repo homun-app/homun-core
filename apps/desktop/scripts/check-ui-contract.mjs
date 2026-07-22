@@ -152,6 +152,16 @@ assertContains("src/components/ChatView.tsx", "enqueueTurn(thread.threadId, requ
 assertSource("src/components/ActiveTurnStatus.tsx", ["Attività", "onStop", "attempt"]);
 assertSource("src/components/PendingSteeringQueue.tsx", ["onEdit", "onDelete", "onSendNow"]);
 assertSource("src/components/ChatView.tsx", ["active-turn-tail", "pendingSteering"]);
+assertSource("src/components/ChatView.tsx", [
+  'function openActivityIsland() {\n    dispatchInspector({ type: "hideWorkspace" });\n    setIslandOpen(true);',
+  "onOpenActivity={openActivityIsland}",
+  'if (result.status === "queued")',
+]);
+assertNotContains(
+  "src/components/ChatView.tsx",
+  "onOpenActivity={() => setIslandOpen(true)}",
+  "Every Activity action must close the inspector before opening the Island",
+);
 assertContains("src/components/ChatView.tsx", "{streaming && (", "Stop must remain available while the composer stays operational");
 assertContains("src/components/ChatView.tsx", "{(value.trim() || composerImages.length > 0) && (", "Send must remain available independently from Stop");
 assertContains("src/lib/chatApi.ts", "res.status === 201 || res.status === 202", "Turn enqueue must accept steering responses");
