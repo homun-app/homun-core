@@ -784,7 +784,10 @@ mod tests {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
-    use crate::{AgentRunStatus, NewAgentRun, TaskRecord, TaskStore, TaskStatus, UserId, WorkspaceId};
+    use crate::{
+        AgentRunStatus, NewAgentRun, NewAgentToolReceipt, TaskRecord, TaskStore, TaskStatus,
+        ToolReceiptClaim, UserId, WorkspaceId,
+    };
     use serde_json::json;
     use time::Duration;
 
@@ -795,7 +798,13 @@ mod recovery_tests {
         let mut t = TaskRecord::new(
             "turn_stale", UserId::new("u"), WorkspaceId::new("w"),
             "chat_turn", "prompt",
-            json!({"thread_id":"t1","request_id":"r1","source":"interactive","approval":"full"}),
+            json!({
+                "thread_id":"t1",
+                "request_id":"r1",
+                "assistant_message_id":"local_assistant_r1",
+                "source":"interactive",
+                "approval":"full"
+            }),
         );
         t.status = TaskStatus::Running;
         t.lease_owner = Some(format!("{gen_val}:worker_0"));
@@ -819,6 +828,20 @@ mod recovery_tests {
             prompt_fingerprint: None,
         })
         .unwrap();
+        let receipt = NewAgentToolReceipt {
+            turn_id: "turn_stale".into(),
+            idempotency_key: "write_file:abc".into(),
+            run_id: "run-stale".into(),
+            thread_id: "t1".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            tool_name: "write_file".into(),
+            arguments_hash: "abc".into(),
+        };
+        assert!(matches!(
+            s.claim_tool_receipt(&receipt).unwrap(),
+            ToolReceiptClaim::Execute
+        ));
         // bump twice to simulate "we are generation 2, the lease is from generation 1"
         s.bump_process_generation().unwrap();
         let gen_now = s.bump_process_generation().unwrap();
@@ -829,10 +852,23 @@ mod recovery_tests {
         let t = s.get_task(&TaskId::new("turn_stale"), &UserId::new("u"), &WorkspaceId::new("w")).unwrap().unwrap();
         assert_eq!(t.status, TaskStatus::Queued);
         assert!(t.lease_owner.is_none());
+        assert_eq!(t.task_id.as_str(), "turn_stale");
+        assert_eq!(
+            t.input_json["assistant_message_id"],
+            "local_assistant_r1"
+        );
         // and the aborted event was written
         let events = s.read_turn_events("turn_stale", 0).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, TurnEventKind::Aborted);
+        assert!(events.iter().all(|event| !matches!(
+            event.kind,
+            TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
+        )));
+        assert!(matches!(
+            s.claim_tool_receipt(&receipt).unwrap(),
+            ToolReceiptClaim::Uncertain(_)
+        ));
         let runs = s.list_agent_runs_for_turn("turn_stale", "u", "w").unwrap();
         assert_eq!(runs[0].status, AgentRunStatus::Aborted);
         assert_eq!(runs[0].terminal_reason.as_deref(), Some("gateway_restart"));

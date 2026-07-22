@@ -76732,6 +76732,98 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn recovery_reuses_the_existing_assistant_message() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let mut assistant = super::channel_chat_message_with_id(
+            "assistant",
+            "",
+            "local_assistant_recovery",
+        );
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let initial_count = super::lock_store(&state)
+            .unwrap()
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages
+            .len();
+
+        let mut task = TaskRecord::new(
+            "turn_recovery",
+            UserId::new("user_test"),
+            WorkspaceId::new("workspace_test"),
+            "chat_turn",
+            "prompt",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "request_id": "recovery",
+                "assistant_message_id": assistant.id,
+                "source": "interactive",
+                "approval": "full",
+            }),
+        );
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("1:worker".to_string());
+        {
+            let store = super::lock_task_store(&state).unwrap();
+            store
+                .insert_chat_turn(
+                    &task,
+                    &thread.thread_id,
+                    "recovery",
+                    "interactive",
+                    "full",
+                )
+                .unwrap();
+            store.bump_process_generation().unwrap();
+            let generation = store.bump_process_generation().unwrap();
+            let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(
+                &store,
+                &UserId::new("user_test"),
+                &WorkspaceId::new("workspace_test"),
+                generation,
+            )
+            .unwrap();
+            assert_eq!(recovered, vec![task.task_id.clone()]);
+            task = store
+                .get_task(
+                    &task.task_id,
+                    &UserId::new("user_test"),
+                    &WorkspaceId::new("workspace_test"),
+                )
+                .unwrap()
+                .unwrap();
+        }
+
+        super::set_chat_turn_message_delivery_state(
+            &state,
+            &task,
+            local_first_desktop_gateway::MessageDeliveryState::Retrying,
+        );
+        let messages = super::lock_store(&state)
+            .unwrap()
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages;
+        assert_eq!(messages.len(), initial_count);
+        assert_eq!(
+            messages
+                .iter()
+                .find(|message| message.id == "local_assistant_recovery")
+                .expect("recovered assistant")
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Retrying
+        );
+    }
+
+    #[test]
     fn broker_enqueue_rejects_cross_thread_request_id_collision_without_mutating_first_turn() {
         let root = isolated_gateway_test_dir("broker-cross-thread-request-id-collision");
         std::fs::create_dir_all(&root).unwrap();
