@@ -38445,7 +38445,7 @@ fn execute_capability_generic(
             let connection = connection.ok_or_else(|| LocalTaskExecutionError {
                 message: format!("no connection for provider {}", provider_id.as_str()),
             })?;
-            let transport = build_mcp_transport(&connection.metadata)
+            let transport = build_mcp_transport(state, &connection)
                 .map_err(|message| LocalTaskExecutionError { message })?;
             let mut facade = CapabilityFacade::new(
                 CapabilityPolicy::default(),
@@ -38655,30 +38655,50 @@ impl McpTransport for McpAnyTransport {
 
 /// Builds the right transport from a connection's metadata `transport` field:
 /// `"http"` → remote streamable-HTTP, anything else → local stdio.
-fn build_mcp_transport(metadata: &Value) -> Result<McpAnyTransport, String> {
+fn mcp_http_config_from_connection<S: SecretStore>(
+    connection: &CapabilityConnectionConfig,
+    secrets: &S,
+) -> Result<mcp_http::McpHttpConfig, String> {
+    let url = connection
+        .metadata
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|url| !url.trim().is_empty())
+        .ok_or_else(|| "MCP http metadata without `url`".to_string())?
+        .to_string();
+    let headers = if connection.secret_ref.starts_with("secret://") {
+        let reference = connection
+            .secret_ref
+            .parse::<SecretRef>()
+            .map_err(|_| "MCP credential reference is invalid".to_string())?;
+        let material = secrets
+            .get(&reference)
+            .map_err(|_| "MCP credential could not be read".to_string())?
+            .ok_or_else(|| "MCP credential not found".to_string())?;
+        let mut headers = mcp_http_headers_from_secret(material)?
+            .into_iter()
+            .collect::<Vec<_>>();
+        headers.sort_by(|left, right| left.0.cmp(&right.0));
+        headers
+    } else {
+        Vec::new()
+    };
+    Ok(mcp_http::McpHttpConfig { url, headers })
+}
+
+fn build_mcp_transport(
+    state: &AppState,
+    connection: &CapabilityConnectionConfig,
+) -> Result<McpAnyTransport, String> {
+    let metadata = &connection.metadata;
     let kind = metadata
         .get("transport")
         .and_then(Value::as_str)
         .unwrap_or("stdio");
     if kind == "http" {
-        let url = metadata
-            .get("url")
-            .and_then(Value::as_str)
-            .filter(|u| !u.trim().is_empty())
-            .ok_or_else(|| "MCP http metadata without `url`".to_string())?
-            .to_string();
-        let headers = metadata
-            .get("headers")
-            .and_then(Value::as_object)
-            .map(|map| {
-                map.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let transport =
-            mcp_http::McpHttpTransport::connect(mcp_http::McpHttpConfig { url, headers })
-                .map_err(|e| format!("MCP http start failed: {e}"))?;
+        let config = mcp_http_config_from_connection(connection, state.secret_store.as_ref())?;
+        let transport = mcp_http::McpHttpTransport::connect(config)
+            .map_err(|e| format!("MCP http start failed: {e}"))?;
         Ok(McpAnyTransport::Http(transport))
     } else {
         let config = mcp_stdio_config_from_metadata(metadata).map_err(|e| e.message)?;
@@ -38791,6 +38811,17 @@ fn connect_mcp_blocking(
         }
     };
 
+    let connection_config = CapabilityConnectionConfig::new(
+        connection_id.as_str(),
+        provider_id.clone(),
+        user.clone(),
+        workspace.clone(),
+        name.clone(),
+        secret_label,
+    )
+    .with_privacy_domains(vec!["local".to_string()])
+    .with_metadata(metadata);
+
     {
         let registry = lock_capability_registry(state)?;
         registry
@@ -38813,25 +38844,14 @@ fn connect_mcp_blocking(
             )
             .map_err(GatewayError::capability)?;
         registry
-            .upsert_connection_config(
-                &CapabilityConnectionConfig::new(
-                    connection_id.as_str(),
-                    provider_id.clone(),
-                    user.clone(),
-                    workspace.clone(),
-                    name.clone(),
-                    secret_label,
-                )
-                .with_privacy_domains(vec!["local".to_string()])
-                .with_metadata(metadata.clone()),
-            )
+            .upsert_connection_config(&connection_config)
             .map_err(GatewayError::capability)?;
     }
 
     // Best-effort discovery: connect (spawn/HTTP), MCP-initialize, list tools,
     // cache them. Any failure is reported (not swallowed) and leaves the registration.
     let (tools_cached, discovery_error) =
-        match mcp_discover_and_cache_tools(state, &provider_id, &metadata) {
+        match mcp_discover_and_cache_tools(state, &provider_id, &connection_config) {
             Ok(count) => (count, None),
             Err(message) => (0, Some(message)),
         };
@@ -38850,9 +38870,9 @@ fn connect_mcp_blocking(
 fn mcp_discover_and_cache_tools(
     state: &AppState,
     provider_id: &CapabilityProviderId,
-    metadata: &Value,
+    connection: &CapabilityConnectionConfig,
 ) -> Result<usize, String> {
-    let transport = build_mcp_transport(metadata)?;
+    let transport = build_mcp_transport(state, connection)?;
     let provider = McpCapabilityProvider::new(provider_id.clone(), true, transport, Vec::new());
     // Handshake first; some servers reject tools/list before initialize.
     provider
@@ -39719,7 +39739,7 @@ fn run_mcp_chat_tool(
             .map_err(|e| format!("policy context: {e}"))?;
         (connection, tool_policies, policy_context)
     };
-    let transport = build_mcp_transport(&connection.metadata)?;
+    let transport = build_mcp_transport(state, &connection)?;
     let provider = McpCapabilityProvider::new(provider_id.clone(), true, transport, tool_policies);
     // MCP requires the initialize handshake before tools/call (strict servers
     // reject calls otherwise). Fresh transport per call → initialize exactly once.
@@ -72440,6 +72460,94 @@ data: [DONE]\n";
         let material = local_first_secrets::SecretMaterial::from_string("not-json");
 
         assert!(crate::mcp_http_headers_from_secret(material).is_err());
+    }
+
+    #[test]
+    fn mcp_http_connection_restores_headers_from_secret_store() {
+        use local_first_secrets::{InMemorySecretStore, SecretRef, SecretStore};
+
+        let secrets = InMemorySecretStore::default();
+        let secret_ref = SecretRef::new("user", "workspace", "mcp-orion-moon", "default")
+            .expect("secret ref");
+        let headers = std::collections::HashMap::from([(
+            "Authorization".to_string(),
+            "Bearer orion-secret".to_string(),
+        )]);
+        let material = crate::mcp_http_headers_to_secret(&headers).expect("secret material");
+        secrets
+            .put(secret_ref.clone(), material)
+            .expect("store headers");
+        let connection = local_first_capabilities::CapabilityConnectionConfig::new(
+            "mcp-orion-moon",
+            local_first_capabilities::ProviderId::new("mcp:orion-moon"),
+            local_first_capabilities::UserId::new("user"),
+            local_first_capabilities::WorkspaceId::new("workspace"),
+            "Orion Moon",
+            secret_ref.as_str(),
+        )
+        .with_metadata(crate::mcp_http_config_to_metadata(
+            "https://example.com/mcp",
+        ));
+
+        let config = crate::mcp_http_config_from_connection(&connection, &secrets)
+            .expect("restore HTTP config");
+
+        assert_eq!(config.url, "https://example.com/mcp");
+        assert_eq!(config.headers, vec![(
+            "Authorization".to_string(),
+            "Bearer orion-secret".to_string(),
+        )]);
+    }
+
+    #[test]
+    fn mcp_http_connection_without_secret_is_unauthenticated() {
+        let secrets = local_first_secrets::InMemorySecretStore::default();
+        let connection = local_first_capabilities::CapabilityConnectionConfig::new(
+            "mcp-public",
+            local_first_capabilities::ProviderId::new("mcp:public"),
+            local_first_capabilities::UserId::new("user"),
+            local_first_capabilities::WorkspaceId::new("workspace"),
+            "Public",
+            "http:public",
+        )
+        .with_metadata(crate::mcp_http_config_to_metadata(
+            "https://example.com/mcp",
+        ));
+
+        let config = crate::mcp_http_config_from_connection(&connection, &secrets)
+            .expect("public HTTP config");
+
+        assert!(config.headers.is_empty());
+    }
+
+    #[test]
+    fn mcp_http_connection_fails_closed_when_secret_is_missing() {
+        let secrets = local_first_secrets::InMemorySecretStore::default();
+        let secret_ref = local_first_secrets::SecretRef::new(
+            "user",
+            "workspace",
+            "mcp-orion-moon",
+            "default",
+        )
+        .expect("secret ref");
+        let connection = local_first_capabilities::CapabilityConnectionConfig::new(
+            "mcp-orion-moon",
+            local_first_capabilities::ProviderId::new("mcp:orion-moon"),
+            local_first_capabilities::UserId::new("user"),
+            local_first_capabilities::WorkspaceId::new("workspace"),
+            "Orion Moon",
+            secret_ref.as_str(),
+        )
+        .with_metadata(crate::mcp_http_config_to_metadata(
+            "https://example.com/mcp",
+        ));
+
+        let error = crate::mcp_http_config_from_connection(&connection, &secrets)
+            .err()
+            .expect("missing credential must fail");
+
+        assert!(error.contains("MCP credential not found"));
+        assert!(!error.contains("orion-secret"));
     }
 
     #[test]
