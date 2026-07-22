@@ -813,12 +813,18 @@ async function steeringJson<T>(path: string, init: RequestInit = {}): Promise<T>
     headers: gatewayHeaders(init.headers),
   });
   if (response.status === 409) {
-    const conflict = (await response.json()) as {
-      code?: string;
-      steering?: TurnSteeringRecord;
-    };
-    if (conflict.code === "steering_revision_conflict" && conflict.steering) {
-      throw new SteeringConflictError(conflict.steering);
+    try {
+      const conflict = (await response.clone().json()) as {
+        code?: string;
+        steering?: TurnSteeringRecord;
+      };
+      if (conflict.code === "steering_revision_conflict" && conflict.steering) {
+        throw new SteeringConflictError(conflict.steering);
+      }
+    } catch (error) {
+      if (error instanceof SteeringConflictError) throw error;
+      // Malformed and non-JSON conflicts fall through to the normal gateway
+      // error parser, which still owns the unconsumed original response body.
     }
   }
   if (!response.ok) {

@@ -91,6 +91,25 @@ test("terminal changes remove visible cards", () => {
   assert.deepEqual(withoutApplied, []);
 });
 
+test("a delayed older change cannot resurrect a terminal row", () => {
+  const pending = [{ steering_id: 1, revision: 1, status: "pending" }];
+  const cancelled = applySteeringChange(pending, {
+    steering_id: 1,
+    revision: 2,
+    status: "cancelled",
+  });
+
+  assert.deepEqual(cancelled, []);
+  assert.strictEqual(
+    applySteeringChange(cancelled, {
+      steering_id: 1,
+      revision: 1,
+      status: "pending",
+    }),
+    cancelled,
+  );
+});
+
 test("selectors permit mutations only before claim", () => {
   assert.equal(canEdit({ status: "pending" }), true);
   assert.equal(canEdit({ status: "held" }), true);
