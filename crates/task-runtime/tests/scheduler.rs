@@ -33,6 +33,39 @@ fn scheduler_selects_ready_tasks_by_priority_and_creation_order() {
 }
 
 #[test]
+fn scheduler_selects_ready_tasks_across_workspaces_with_global_ordering() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let personal = WorkspaceId::new("local-workspace");
+    let project = WorkspaceId::new("workspace_project");
+
+    let mut older_personal =
+        task("channel_turn", &user, &personal).with_priority(TaskPriority::High);
+    older_personal.created_at = OffsetDateTime::from_unix_timestamp(100).unwrap();
+    older_personal.updated_at = older_personal.created_at;
+    store.insert_task(&older_personal).unwrap();
+
+    let mut newer_project =
+        task("project_turn", &user, &project).with_priority(TaskPriority::High);
+    newer_project.created_at = OffsetDateTime::from_unix_timestamp(200).unwrap();
+    newer_project.updated_at = newer_project.created_at;
+    store.insert_task(&newer_project).unwrap();
+
+    let ready = TaskScheduler::new()
+        .ready_tasks_for_user(&store, &user, OffsetDateTime::now_utc(), 10)
+        .unwrap();
+
+    assert_eq!(
+        ready
+            .iter()
+            .map(|task| task.task_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["channel_turn", "project_turn"],
+    );
+    assert_eq!(ready[0].workspace_id, personal);
+}
+
+#[test]
 fn scheduler_skips_tasks_before_not_before_time() {
     let store = TaskStore::open_in_memory().unwrap();
     let user = UserId::new("user_1");

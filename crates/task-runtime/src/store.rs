@@ -1411,6 +1411,26 @@ impl TaskStore {
         Ok(scopes)
     }
 
+    /// Workspace scopes for this user that still contain work the runtime may
+    /// need to recover, requeue, or execute. Terminal-only scopes stay out of
+    /// the background worker's polling set.
+    pub fn non_terminal_workspace_ids(
+        &self,
+        user_id: &UserId,
+    ) -> TaskRuntimeResult<Vec<WorkspaceId>> {
+        let mut statement = self.connection.prepare(
+            "SELECT DISTINCT workspace_id
+             FROM tasks
+             WHERE user_id = ?1
+               AND status NOT IN ('completed', 'failed', 'cancelled', 'expired')
+             ORDER BY workspace_id ASC",
+        )?;
+        let rows = statement.query_map(params![user_id.as_str()], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.map(|row| Ok(WorkspaceId::new(row?))).collect()
+    }
+
     pub fn list_tasks(
         &self,
         user_id: &UserId,

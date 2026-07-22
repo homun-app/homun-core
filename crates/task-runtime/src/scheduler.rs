@@ -35,13 +35,25 @@ impl TaskScheduler {
             candidates.push(task);
         }
 
-        candidates.sort_by(|left, right| {
-            right
-                .priority
-                .cmp(&left.priority)
-                .then_with(|| left.created_at.cmp(&right.created_at))
-                .then_with(|| left.task_id.as_str().cmp(right.task_id.as_str()))
-        });
+        sort_ready_tasks(&mut candidates);
+        candidates.truncate(limit);
+        Ok(candidates)
+    }
+
+    /// Returns the globally ordered ready set for one user, independent of the
+    /// workspace currently selected in the desktop UI.
+    pub fn ready_tasks_for_user(
+        &self,
+        store: &TaskStore,
+        user_id: &UserId,
+        now: OffsetDateTime,
+        limit: usize,
+    ) -> TaskRuntimeResult<Vec<TaskRecord>> {
+        let mut candidates = Vec::new();
+        for workspace_id in store.non_terminal_workspace_ids(user_id)? {
+            candidates.extend(self.ready_tasks(store, user_id, &workspace_id, now, limit)?);
+        }
+        sort_ready_tasks(&mut candidates);
         candidates.truncate(limit);
         Ok(candidates)
     }
@@ -178,6 +190,16 @@ impl TaskScheduler {
         }
         Ok(true)
     }
+}
+
+fn sort_ready_tasks(candidates: &mut [TaskRecord]) {
+    candidates.sort_by(|left, right| {
+        right
+            .priority
+            .cmp(&left.priority)
+            .then_with(|| left.created_at.cmp(&right.created_at))
+            .then_with(|| left.task_id.as_str().cmp(right.task_id.as_str()))
+    });
 }
 
 impl Default for TaskScheduler {
