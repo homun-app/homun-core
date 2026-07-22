@@ -19,6 +19,7 @@
     "build:host-computer": "node scripts/build-host-computer-helper.mjs",
     "test:host-computer-package": "node --test tests/host-computer-package.test.mjs",
     "test:host-computer-signing": "node --test tests/host-computer-signing.test.mjs",
+    "test:contained-computer-package": "node --test tests/contained-computer-package.test.mjs",
     "verify:host-computer-package": "node scripts/verify-host-computer-package.mjs",
     "package:smoke": "npm run package:prepare -- --skip-build && HOMUN_DESKTOP_RESOURCES_DIR=\"$PWD/.package/resources\" HOMUN_DESKTOP_GATEWAY_PORT=18766 HOMUN_DESKTOP_GATEWAY_URL=http://127.0.0.1:18766 npx electron electron/main.cjs",
     "test:ui-contract": "node scripts/check-ui-contract.mjs",

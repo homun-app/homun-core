@@ -75,11 +75,10 @@ if (!existsSync(gatewaySource)) {
 cpSync(gatewaySource, gatewayTarget);
 chmodSync(gatewayTarget, 0o755);
 
-// Stage the contained-computer build context so the packaged app can start the
-// agent's browser/sandbox. up.sh builds the image from THIS directory; the
-// gateway is pointed at the staged up.sh via HOMUN_CONTAINED_COMPUTER_UP (see
-// main.cjs). Without this the "local computer" can't start on an installed
-// desktop app — up_script() only finds repo-relative paths absent from the bundle.
+// Stage the full contained-computer build context so the packaged gateway can
+// build and run it with the native Docker CLI on Windows, macOS, and Linux.
+// HOMUN_CONTAINED_COMPUTER_UP points at up.sh only as a backwards-compatible
+// context locator; packaged bootstrap never executes Bash or this helper script.
 const ccSource = join(repoRoot, "runtimes", "contained-computer");
 const ccTarget = join(resourcesDir, "contained-computer");
 if (!existsSync(ccSource)) {
