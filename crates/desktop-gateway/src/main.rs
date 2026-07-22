@@ -37177,7 +37177,7 @@ async fn cancel_task(
     {
         let store = lock_task_store(&state)?;
         let tid = local_first_task_runtime::TaskId::new(&task_id);
-        if let Some(task) = store
+        if let Some(mut task) = store
             .get_task(&tid, &user, &workspace)
             .map_err(GatewayError::task)?
         {
@@ -37189,15 +37189,29 @@ async fn cancel_task(
                     | local_first_task_runtime::TaskStatus::Expired
             );
             if !terminal {
-                store
-                    .update_task_status(
-                        &tid,
+                if task.kind == "chat_turn" {
+                    local_first_task_runtime::broker::cancel_chat_turn(
+                        &store,
                         &user,
                         &workspace,
-                        local_first_task_runtime::TaskStatus::Cancelled,
-                        Some("cancelled by the user"),
+                        &tid,
+                        &crate::turn_executor::GatewayCancelNotify,
                     )
                     .map_err(GatewayError::task)?;
+                } else {
+                    let was_running =
+                        task.status == local_first_task_runtime::TaskStatus::Running;
+                    task.status = local_first_task_runtime::TaskStatus::Cancelled;
+                    task.blocked_reason = Some("cancelled by the user".to_string());
+                    task.updated_at = OffsetDateTime::now_utc();
+                    if !was_running {
+                        store.release_resources(&task).map_err(GatewayError::task)?;
+                        task.lease_owner = None;
+                        task.lease_expires_at = None;
+                        task.last_heartbeat_at = None;
+                    }
+                    store.insert_task(&task).map_err(GatewayError::task)?;
+                }
             }
         }
     }

@@ -587,7 +587,48 @@ pub fn recover_chat_turns_at_boot(
 ) -> TaskRuntimeResult<Vec<TaskId>> {
     let mut recovered = Vec::new();
     for mut task in store.list_tasks(user_id, workspace_id)? {
-        if task.kind != "chat_turn" || task.status != TaskStatus::Running {
+        if task.kind != "chat_turn" {
+            continue;
+        }
+        if matches!(
+            task.status,
+            TaskStatus::Completed
+                | TaskStatus::Failed
+                | TaskStatus::Cancelled
+                | TaskStatus::Expired
+        ) {
+            store.release_resources(&task)?;
+            if task.lease_owner.is_some()
+                || task.lease_expires_at.is_some()
+                || task.last_heartbeat_at.is_some()
+            {
+                task.lease_owner = None;
+                task.lease_expires_at = None;
+                task.last_heartbeat_at = None;
+                task.updated_at = OffsetDateTime::now_utc();
+                store.insert_chat_turn(
+                    &task,
+                    task.input_json
+                        .get("thread_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    task.input_json
+                        .get("request_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    task.input_json
+                        .get("source")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("interactive"),
+                    task.input_json
+                        .get("approval")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("full"),
+                )?;
+            }
+            continue;
+        }
+        if task.status != TaskStatus::Running {
             continue;
         }
         // lease_owner has the form "<generation>:<worker_id>". If the generation is the
@@ -675,10 +716,17 @@ pub fn cancel_chat_turn(
     if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled) {
         return Ok(false); // idempotent
     }
+    let was_running = task.status == TaskStatus::Running;
     let now = OffsetDateTime::now_utc();
     task.status = TaskStatus::Cancelled;
     task.blocked_reason = Some("cancelled by user/server".into());
     task.updated_at = now;
+    if !was_running {
+        store.release_resources(&task)?;
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
+    }
     let thread_id = task.input_json.get("thread_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let request_id = task.input_json.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let source = task.input_json.get("source").and_then(|v| v.as_str()).unwrap_or("interactive");
@@ -926,7 +974,7 @@ mod recovery_tests {
 #[cfg(test)]
 mod cancel_tests {
     use super::*;
-    use crate::{TaskStore, TaskStatus, UserId, WorkspaceId};
+    use crate::{ResourceClass, TaskStore, TaskStatus, UserId, WorkspaceId};
     use std::sync::{Arc, Mutex};
 
     struct RecordingNotify { turns: Arc<Mutex<Vec<String>>> }
@@ -974,6 +1022,54 @@ mod cancel_tests {
         let notify = NoopCancelNotify;
         let ok = cancel_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &r.task_id, &notify).unwrap();
         assert!(!ok, "no-op on already-terminal turn");
+    }
+
+    #[test]
+    fn cancel_releases_resources_when_turn_is_not_running() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        s.reserve_resources(&task, "stale-worker").unwrap();
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            1
+        );
+
+        assert!(cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
+
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn boot_recovery_releases_terminal_turn_resources_and_lease() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let mut task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        s.reserve_resources(&task, "dead-worker").unwrap();
+        task.status = TaskStatus::Cancelled;
+        task.lease_owner = Some("old-generation:dead-worker".into());
+        task.lease_expires_at = Some(OffsetDateTime::now_utc());
+        task.last_heartbeat_at = Some(OffsetDateTime::now_utc());
+        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full").unwrap();
+
+        let recovered = recover_chat_turns_at_boot(&s, &user, &workspace, 7).unwrap();
+
+        assert!(recovered.is_empty());
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0
+        );
+        let stored = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        assert!(stored.lease_owner.is_none());
+        assert!(stored.lease_expires_at.is_none());
+        assert!(stored.last_heartbeat_at.is_none());
     }
 }
 
