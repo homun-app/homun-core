@@ -2351,6 +2351,7 @@ fn parse_review_suggestion(
         proposed_action,
         choices,
         dedup_key,
+        source_ref: "supervisor:review".to_string(),
         relevant_until,
     })
 }
@@ -29550,6 +29551,9 @@ async fn suggestions_list(
                 "status": r.status,
                 "feedback": r.feedback,
                 "created_at": r.created_at,
+                "generated_at": r.created_at,
+                "source_ref": r.source_ref,
+                "relevant_until": r.relevant_until,
             })
         })
         .collect();
@@ -38167,6 +38171,7 @@ fn notify_automation_failure(state: &AppState, task: &TaskRecord, reason: &str) 
             title,
             body: reason.chars().take(240).collect(),
             dedup_key: format!("autofail:{automation_id}"),
+            source_ref: format!("automation:{automation_id}"),
             ..Default::default()
         });
     }
@@ -62322,6 +62327,8 @@ prs.save(Path({path:?}))
             feedback: None,
             dedup_key: "follow-up:idra".to_string(),
             created_at: 123,
+            source_ref: "supervisor:test".to_string(),
+            relevant_until: None,
         };
         let lifecycle = local_first_memory::MemoryLifecycleRequest {
             actor_id: "test".to_string(),
@@ -62427,6 +62434,7 @@ prs.save(Path({path:?}))
                 proposed_action: Some("Controllare lo stato di Idra".to_string()),
                 choices: None,
                 dedup_key: "follow-up:idra".to_string(),
+                source_ref: "supervisor:test".to_string(),
                 relevant_until: None,
             })
             .unwrap();
