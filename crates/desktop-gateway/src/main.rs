@@ -75432,6 +75432,8 @@ data: [DONE]\n";
         let mut assistant =
             super::channel_chat_message_with_id("assistant", "", "local_assistant_r1");
         assistant.text.clear();
+        assistant.delivery_state =
+            local_first_desktop_gateway::MessageDeliveryState::Streaming;
         super::lock_store(&state)
             .unwrap()
             .commit_prompt_result(&thread.thread_id, &user, &assistant, None)
