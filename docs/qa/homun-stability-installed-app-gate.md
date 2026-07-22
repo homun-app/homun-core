@@ -1,8 +1,8 @@
 # Homun stability — installed app gate
 
-Date: 2026-07-22  
-Bundle: `apps/desktop/dist-installers/mac-arm64/homun.app`  
-Version: `0.1.1` (`app.homun.desktop`, arm64)  
+Date: 2026-07-22
+Bundle: `apps/desktop/dist-installers/mac-arm64/homun.app`
+Version: `0.1.1` (`app.homun.desktop`, arm64)
 Commit: `9e483a5ae6b73002ef51220e1351c5aff73d1aed`
 
 This gate keeps installed-app evidence separate from unit, integration and build evidence. A row is
