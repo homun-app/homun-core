@@ -1703,24 +1703,12 @@ mod tests {
         )
         .await;
 
-        assert_eq!(
-            outcome.delivery,
-            crate::TurnDelivery::Delivered,
-        );
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered,);
         let expected = "‹‹PLAN››- [x] Deliver result‹‹/PLAN››\n‹‹ARTIFACT››report.md‹‹/ARTIFACT››\n‹‹CHOICES››choose a format‹‹/CHOICES››\n‹‹REASONING››synthesis reasoning‹‹/REASONING››\nForced synthesis answer.";
         assert_eq!(outcome.memory_answer, expected);
-        assert_eq!(
-            outcome.memory_answer.matches("‹‹PLAN››").count(),
-            1,
-        );
-        assert_eq!(
-            outcome.memory_answer.matches("‹‹ARTIFACT››").count(),
-            1,
-        );
-        assert_eq!(
-            outcome.memory_answer.matches("‹‹CHOICES››").count(),
-            1,
-        );
+        assert_eq!(outcome.memory_answer.matches("‹‹PLAN››").count(), 1,);
+        assert_eq!(outcome.memory_answer.matches("‹‹ARTIFACT››").count(), 1,);
+        assert_eq!(outcome.memory_answer.matches("‹‹CHOICES››").count(), 1,);
         let done_text = sink
             .0
             .lock()
