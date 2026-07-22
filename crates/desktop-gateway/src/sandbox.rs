@@ -25,9 +25,7 @@ pub fn artifacts_dir() -> PathBuf {
             return PathBuf::from(dir);
         }
     }
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir())
+    host_home_dir()
         .join(".homun")
         .join("artifacts")
 }
@@ -42,11 +40,27 @@ pub fn cc_profile_dir() -> PathBuf {
             return PathBuf::from(dir);
         }
     }
-    std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir())
+    host_home_dir()
         .join(".homun")
         .join("cc-profile")
+}
+
+fn host_home_dir_from(home: Option<&str>, user_profile: Option<&str>, fallback: &Path) -> PathBuf {
+    home.or(user_profile)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| fallback.to_path_buf())
+}
+
+fn host_home_dir() -> PathBuf {
+    let home = std::env::var("HOME").ok();
+    let user_profile = std::env::var("USERPROFILE").ok();
+    host_home_dir_from(
+        home.as_deref(),
+        user_profile.as_deref(),
+        &std::env::temp_dir(),
+    )
 }
 
 /// The per-conversation output directory INSIDE the container.
@@ -77,45 +91,82 @@ fn cli_ok(program: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-/// Absolute paths where the `docker` CLI commonly lives, per OS. Probed so we
-/// keep working even when the gateway inherited a truncated GUI/launchd PATH (a
-/// macOS .app launched from Finder gets `/usr/bin:/bin:/usr/sbin:/sbin`, which
-/// omits `/usr/local/bin` — where Docker Desktop's `docker` symlink sits).
-#[cfg(target_os = "macos")]
-const DOCKER_CANDIDATES: &[&str] = &[
-    "/usr/local/bin/docker",
-    "/opt/homebrew/bin/docker",
-    "/Applications/Docker.app/Contents/Resources/bin/docker",
-];
-#[cfg(target_os = "linux")]
-const DOCKER_CANDIDATES: &[&str] = &[
-    "/usr/bin/docker",
-    "/usr/local/bin/docker",
-    "/opt/homebrew/bin/docker",
-];
-#[cfg(target_os = "windows")]
-const DOCKER_CANDIDATES: &[&str] = &[r"C:\Program Files\Docker\Docker\resources\bin\docker.exe"];
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-const DOCKER_CANDIDATES: &[&str] = &[];
+/// Absolute paths where the Docker CLI commonly lives. This is evaluated on
+/// every probe so a runtime installed while Homun is open becomes visible
+/// without refreshing the process PATH.
+fn docker_candidate_paths(
+    platform: &str,
+    program_files: Option<&str>,
+    home: Option<&str>,
+    explicit: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(value) = explicit.map(str::trim).filter(|value| !value.is_empty()) {
+        paths.push(PathBuf::from(value));
+    }
+    match platform {
+        "windows" => {
+            if let Some(root) = program_files
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                paths.push(PathBuf::from(format!(
+                    r"{}\Docker\Docker\resources\bin\docker.exe",
+                    root.trim_end_matches(['\\', '/'])
+                )));
+            }
+            paths.push(PathBuf::from(
+                r"C:\Program Files\Docker\Docker\resources\bin\docker.exe",
+            ));
+        }
+        "macos" => {
+            if let Some(root) = home {
+                paths.push(PathBuf::from(root).join(".docker/bin/docker"));
+            }
+            paths.extend([
+                PathBuf::from("/usr/local/bin/docker"),
+                PathBuf::from("/opt/homebrew/bin/docker"),
+                PathBuf::from("/Applications/Docker.app/Contents/Resources/bin/docker"),
+            ]);
+        }
+        "linux" => {
+            if let Some(root) = home {
+                paths.push(PathBuf::from(root).join(".docker/bin/docker"));
+            }
+            paths.extend([
+                PathBuf::from("/usr/bin/docker"),
+                PathBuf::from("/usr/local/bin/docker"),
+            ]);
+        }
+        _ => {}
+    }
+    paths.dedup();
+    paths
+}
 
 /// Resolves the `docker` executable, preferring an ABSOLUTE path so invocations
 /// succeed regardless of the inherited PATH. Honors `HOMUN_DOCKER_BIN`; falls back
 /// to the bare name `"docker"` (PATH lookup) when no known location exists.
 fn docker_bin() -> String {
-    if let Ok(explicit) = std::env::var("HOMUN_DOCKER_BIN") {
-        if !explicit.trim().is_empty() {
-            return explicit;
-        }
+    let explicit = std::env::var("HOMUN_DOCKER_BIN").ok();
+    let program_files = std::env::var("ProgramFiles").ok();
+    let home = std::env::var("HOME")
+        .ok()
+        .or_else(|| std::env::var("USERPROFILE").ok());
+    let candidates = docker_candidate_paths(
+        std::env::consts::OS,
+        program_files.as_deref(),
+        home.as_deref(),
+        explicit.as_deref(),
+    );
+    if let Some(explicit) = explicit.map(|value| value.trim().to_string())
+        && !explicit.is_empty()
+    {
+        return explicit;
     }
-    if let Ok(home) = std::env::var("HOME") {
-        let p = format!("{home}/.docker/bin/docker");
-        if Path::new(&p).is_file() {
-            return p;
-        }
-    }
-    for cand in DOCKER_CANDIDATES {
-        if Path::new(cand).is_file() {
-            return cand.to_string();
+    for candidate in candidates {
+        if candidate.is_file() {
+            return candidate.to_string_lossy().into_owned();
         }
     }
     "docker".to_string()
@@ -306,7 +357,7 @@ fn docker_start_failed_msg(attempted: Option<&str>) -> String {
 /// location (robust under a truncated PATH) or resolvable+runnable via PATH.
 /// Distinguishes "Docker isn't installed" from "Docker is installed but the
 /// daemon is down", so we don't bail before attempting `start_docker_engine()`.
-fn docker_installed() -> bool {
+pub fn docker_installed() -> bool {
     docker_bin() != "docker" || cli_ok("docker", &["--version"])
 }
 
@@ -728,6 +779,45 @@ pub fn run_command(command: &str, skill_id: Option<&str>) -> Result<String, Stri
         combined.push_str(&stderr);
     }
     Ok(combined.chars().take(MAX_OUTPUT_CHARS).collect())
+}
+
+#[cfg(test)]
+mod platform_tests {
+    use super::{docker_candidate_paths, host_home_dir_from};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn windows_docker_candidates_follow_program_files_without_path_restart() {
+        let candidates = docker_candidate_paths("windows", Some(r"D:\Apps"), None, None);
+
+        assert_eq!(
+            candidates[0],
+            PathBuf::from(r"D:\Apps\Docker\Docker\resources\bin\docker.exe")
+        );
+        assert!(candidates.contains(&PathBuf::from(
+            r"C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+        )));
+    }
+
+    #[test]
+    fn explicit_docker_binary_has_priority_on_every_platform() {
+        let candidates = docker_candidate_paths(
+            "linux",
+            None,
+            Some("/home/fabio"),
+            Some("/opt/custom/docker"),
+        );
+
+        assert_eq!(candidates[0], PathBuf::from("/opt/custom/docker"));
+    }
+
+    #[test]
+    fn windows_home_falls_back_to_userprofile() {
+        assert_eq!(
+            host_home_dir_from(None, Some(r"C:\Users\Fabio"), Path::new(r"C:\Temp")),
+            PathBuf::from(r"C:\Users\Fabio")
+        );
+    }
 }
 
 #[cfg(all(test, unix))]

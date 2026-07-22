@@ -28657,9 +28657,8 @@ async fn get_setup_status() -> Json<SetupStatus> {
                 .map(|p| format!("{:?}", p.kind).to_lowercase())
         });
     let (docker_installed, docker_running) = tokio::task::spawn_blocking(|| {
-        let installed = run_cli("docker", &["--version"]).is_some();
-        let running =
-            installed && run_cli("docker", &["info", "--format", "{{.ServerVersion}}"]).is_some();
+        let installed = sandbox::docker_installed();
+        let running = installed && sandbox::docker_running();
         (installed, running)
     })
     .await
