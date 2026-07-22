@@ -1198,6 +1198,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(chat_threads).post(create_chat_thread),
         )
         .route(
+            "/api/chat/threads/attention",
+            get(chat_thread_attentions),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/seen",
+            post(mark_chat_thread_seen),
+        )
+        .route(
             "/api/chat/threads/{thread_id}/select",
             post(select_chat_thread),
         )
@@ -1869,6 +1877,111 @@ async fn chat_threads(
             .threads(&resolve_threads_workspace(&query))
             .map_err(GatewayError::store)?,
     ))
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ThreadAttentionResponse {
+    thread_id: String,
+    status: String,
+    latest_terminal_event_id: Option<i64>,
+    last_seen_terminal_event_id: i64,
+    updated_at: i64,
+}
+
+impl ThreadAttentionResponse {
+    fn from_projection(
+        projection: local_first_task_runtime::ThreadAttention,
+        last_seen_terminal_event_id: i64,
+    ) -> Self {
+        Self {
+            thread_id: projection.thread_id,
+            status: projection.status,
+            latest_terminal_event_id: projection.latest_terminal_event_id,
+            last_seen_terminal_event_id,
+            updated_at: projection.updated_at,
+        }
+    }
+}
+
+async fn chat_thread_attentions(
+    State(state): State<AppState>,
+    Query(query): Query<ChatThreadsQuery>,
+) -> Result<Json<Vec<ThreadAttentionResponse>>, GatewayError> {
+    let workspace_id = resolve_threads_workspace(&query);
+    let thread_receipts = {
+        let store = lock_store(&state)?;
+        let snapshot = store.threads(&workspace_id).map_err(GatewayError::store)?;
+        snapshot
+            .threads
+            .into_iter()
+            .map(|thread| {
+                let seen = store
+                    .thread_terminal_seen(&thread.thread_id)
+                    .map_err(GatewayError::store)?;
+                Ok((thread.thread_id, seen))
+            })
+            .collect::<Result<Vec<_>, GatewayError>>()?
+    };
+    let task_store = lock_task_store(&state)?;
+    let mut response = Vec::with_capacity(thread_receipts.len());
+    for (thread_id, seen) in thread_receipts {
+        let projection = task_store
+            .thread_attention(&thread_id)
+            .map_err(GatewayError::task)?;
+        response.push(ThreadAttentionResponse::from_projection(projection, seen));
+    }
+    Ok(Json(response))
+}
+
+#[derive(Debug, Deserialize)]
+struct MarkThreadSeenRequest {
+    terminal_event_id: i64,
+}
+
+fn seen_terminal_cursor_to_persist(requested: i64, latest: Option<i64>) -> i64 {
+    requested.max(0).min(latest.unwrap_or(0).max(0))
+}
+
+async fn mark_chat_thread_seen(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<MarkThreadSeenRequest>,
+) -> Result<Json<ThreadAttentionResponse>, GatewayError> {
+    let projection = {
+        let task_store = lock_task_store(&state)?;
+        task_store
+            .thread_attention(&thread_id)
+            .map_err(GatewayError::task)?
+    };
+    let cursor = seen_terminal_cursor_to_persist(
+        request.terminal_event_id,
+        projection.latest_terminal_event_id,
+    );
+    let seen = {
+        let store = lock_store(&state)?;
+        store
+            .mark_thread_terminal_seen(&thread_id, cursor)
+            .map_err(GatewayError::store)?;
+        store
+            .thread_terminal_seen(&thread_id)
+            .map_err(GatewayError::store)?
+    };
+    Ok(Json(ThreadAttentionResponse::from_projection(
+        projection, seen,
+    )))
+}
+
+#[cfg(test)]
+mod thread_attention_handler_tests {
+    use super::seen_terminal_cursor_to_persist;
+
+    #[test]
+    fn seen_cursor_is_clamped_to_the_latest_terminal() {
+        assert_eq!(seen_terminal_cursor_to_persist(99, Some(41)), 41);
+        assert_eq!(seen_terminal_cursor_to_persist(20, Some(41)), 20);
+        assert_eq!(seen_terminal_cursor_to_persist(-1, Some(41)), 0);
+        assert_eq!(seen_terminal_cursor_to_persist(10, None), 0);
+    }
 }
 
 async fn create_chat_thread(

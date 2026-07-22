@@ -482,6 +482,17 @@ pub struct ActiveTurnProjection {
     pub updated_at: i64,
 }
 
+/// Durable sidebar/read-model state for one chat thread. The task runtime owns
+/// execution status and the latest public terminal cursor; the gateway combines
+/// this with the user's persisted seen cursor.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThreadAttention {
+    pub thread_id: String,
+    pub status: String,
+    pub latest_terminal_event_id: Option<i64>,
+    pub updated_at: i64,
+}
+
 /// One spawned subagent, projected into the island's "Subagenti" section.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubagentInfo {

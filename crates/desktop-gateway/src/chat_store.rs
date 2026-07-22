@@ -460,6 +460,42 @@ impl ChatStore {
         })
     }
 
+    /// Persist the greatest terminal event rendered for a thread. Replayed or
+    /// out-of-order clients can never move the read watermark backwards.
+    pub fn mark_thread_terminal_seen(
+        &self,
+        thread_id: &str,
+        terminal_event_id: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert into thread_read_receipts (
+                 thread_id, last_seen_terminal_event_id, updated_at
+             ) values (?1, ?2, ?3)
+             on conflict(thread_id) do update set
+                 last_seen_terminal_event_id = max(
+                     thread_read_receipts.last_seen_terminal_event_id,
+                     excluded.last_seen_terminal_event_id
+                 ),
+                 updated_at = excluded.updated_at",
+            params![thread_id, terminal_event_id.max(0), Self::now_secs()],
+        )?;
+        Ok(())
+    }
+
+    pub fn thread_terminal_seen(&self, thread_id: &str) -> rusqlite::Result<i64> {
+        Ok(self
+            .conn
+            .query_row(
+                "select last_seen_terminal_event_id
+                   from thread_read_receipts
+                  where thread_id = ?1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0))
+    }
+
     pub fn create_thread(&self, workspace_id: &str) -> rusqlite::Result<ChatThread> {
         // A brand-new profile already owns one seeded starter task. Reuse that
         // exact task on the first explicit "New task" action instead of showing
@@ -2379,6 +2415,13 @@ impl ChatStore {
                 message_count integer not null default 0
             );
 
+            create table if not exists thread_read_receipts (
+                thread_id text primary key,
+                last_seen_terminal_event_id integer not null default 0,
+                updated_at integer not null,
+                foreign key(thread_id) references chat_threads(thread_id) on delete cascade
+            );
+
             create table if not exists chat_messages (
                 id text primary key,
                 thread_id text not null,
@@ -4057,6 +4100,46 @@ mod tests {
             memory_ref: "memory:owner:source-a:fact-a".to_string(),
             source_revision: "sha256:rev-a".to_string(),
         }
+    }
+
+    #[test]
+    fn seen_terminal_cursor_is_monotonic() {
+        let store = ChatStore::in_memory().unwrap();
+
+        store
+            .mark_thread_terminal_seen("thread_active_prompt", 9)
+            .unwrap();
+        store
+            .mark_thread_terminal_seen("thread_active_prompt", 4)
+            .unwrap();
+
+        assert_eq!(
+            store
+                .thread_terminal_seen("thread_active_prompt")
+                .unwrap(),
+            9
+        );
+    }
+
+    #[test]
+    fn deleting_thread_removes_terminal_receipt() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("receipt_delete").unwrap();
+        store
+            .mark_thread_terminal_seen(&thread.thread_id, 12)
+            .unwrap();
+
+        store.delete_thread(&thread.thread_id).unwrap();
+
+        let remaining: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from thread_read_receipts where thread_id = ?1",
+                params![thread.thread_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 
     #[test]

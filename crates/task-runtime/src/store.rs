@@ -3,7 +3,8 @@ use crate::{
     Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ObjectiveContractRecord,
     ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    ActiveTurnProjection, NewTurnSteering, ThreadActivityProjection, TurnEvent, TurnEventKind,
+    ActiveTurnProjection, NewTurnSteering, ThreadActivityProjection, ThreadAttention, TurnEvent,
+    TurnEventKind,
     TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -2254,6 +2255,42 @@ impl TaskStore {
         })
     }
 
+    /// Projects the latest logical turn and terminal cursor for a chat thread.
+    /// A terminal cursor is global (`event_id`), so the gateway can persist one
+    /// monotonic seen watermark per thread across reloads and app restarts.
+    pub fn thread_attention(&self, thread_id: &str) -> TaskRuntimeResult<ThreadAttention> {
+        let latest_task: Option<(String, i64)> = self
+            .connection
+            .query_row(
+                "SELECT status, updated_at
+                   FROM tasks
+                  WHERE thread_id = ?1 AND kind = 'chat_turn'
+                  ORDER BY created_at DESC, task_id DESC
+                  LIMIT 1",
+                params![thread_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let latest_terminal_event_id = self.connection.query_row(
+            "SELECT MAX(te.event_id)
+               FROM turn_events te
+               JOIN tasks t ON t.task_id = te.turn_id
+              WHERE t.thread_id = ?1
+                AND t.kind = 'chat_turn'
+                AND te.kind IN ('done', 'error', 'cancelled')",
+            params![thread_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )?;
+        let (status, updated_at) = latest_task.unwrap_or_else(|| ("idle".to_string(), 0));
+
+        Ok(ThreadAttention {
+            thread_id: thread_id.to_string(),
+            status,
+            latest_terminal_event_id,
+            updated_at,
+        })
+    }
+
     /// Increments and persists the process_generation. Call ONCE at process startup,
     /// before any acquire. Uniquely identifies this incarnation of the process: leases
     /// written by previous generations are stale at boot recovery.
@@ -3400,6 +3437,30 @@ mod chat_turn_query_tests {
             s.active_chat_turn_for_thread("thread_x").unwrap(),
             None,
             "completed turns do not block a new enqueue"
+        );
+    }
+
+    #[test]
+    fn thread_attention_reports_latest_terminal_event() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let task = make_chat_turn("turn-a", "thread-a", TaskStatus::Completed);
+        s.insert_chat_turn(
+            &task,
+            "thread-a",
+            "chat_stream_1",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        let event = s
+            .insert_turn_event("turn-a", TurnEventKind::Done, json!({}))
+            .unwrap();
+
+        assert_eq!(
+            s.thread_attention("thread-a")
+                .unwrap()
+                .latest_terminal_event_id,
+            Some(event.event_id)
         );
     }
 
