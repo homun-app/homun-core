@@ -122,6 +122,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     phase: "idle",
     ready: false,
     error: null,
+    failed_at: null,
   });
 
   // System specs + model choice
@@ -244,7 +245,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
 
   async function enterComputerStep() {
     setStep("computer");
-    setComputerStatus({ phase: "checking_docker", ready: false, error: null });
+    setComputerStatus({ phase: "checking_docker", ready: false, error: null, failed_at: null });
     try {
       setComputerStatus(await coreBridge.prepareSetupComputer());
     } catch (error) {
@@ -252,6 +253,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
         phase: "failed",
         ready: false,
         error: (error as Error).message || t("onboarding.computerUnknownError"),
+        failed_at: "checking_docker",
       });
     }
   }
@@ -330,7 +332,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
             </ul>
 
             <div className="onb-computer-progress" aria-live="polite">
-              {computerProgressRows(computerStatus.phase).map((row) => (
+              {computerProgressRows(computerStatus.phase, computerStatus.failed_at).map((row) => (
                 <div key={row.id} className={`onb-computer-row ${row.state}`}>
                   <span className="onb-computer-row-icon" aria-hidden="true">
                     {row.state === "done" && <Check size={15} />}

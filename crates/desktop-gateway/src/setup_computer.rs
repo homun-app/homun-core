@@ -28,6 +28,7 @@ pub struct SetupComputerStatus {
     pub phase: SetupComputerPhase,
     pub ready: bool,
     pub error: Option<String>,
+    pub failed_at: Option<SetupComputerPhase>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +44,7 @@ struct CoordinatorState {
     active_generation: Option<u64>,
     phase: SetupComputerPhase,
     error: Option<String>,
+    failed_at: Option<SetupComputerPhase>,
 }
 
 impl Default for CoordinatorState {
@@ -52,6 +54,7 @@ impl Default for CoordinatorState {
             active_generation: None,
             phase: SetupComputerPhase::Idle,
             error: None,
+            failed_at: None,
         }
     }
 }
@@ -71,6 +74,7 @@ impl SetupComputerCoordinator {
             state.active_generation = None;
             state.phase = SetupComputerPhase::Ready;
             state.error = None;
+            state.failed_at = None;
             return BeginSetup::AlreadyReady;
         }
         if state.active_generation.is_some() {
@@ -80,6 +84,7 @@ impl SetupComputerCoordinator {
         state.active_generation = Some(state.generation);
         state.phase = SetupComputerPhase::CheckingDocker;
         state.error = None;
+        state.failed_at = None;
         BeginSetup::Start {
             generation: state.generation,
         }
@@ -93,6 +98,7 @@ impl SetupComputerCoordinator {
         if state.active_generation == Some(generation) {
             state.phase = phase;
             state.error = None;
+            state.failed_at = None;
         }
     }
 
@@ -105,6 +111,7 @@ impl SetupComputerCoordinator {
             state.active_generation = None;
             state.phase = SetupComputerPhase::Ready;
             state.error = None;
+            state.failed_at = None;
         }
     }
 
@@ -115,6 +122,7 @@ impl SetupComputerCoordinator {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.active_generation == Some(generation) {
             state.active_generation = None;
+            state.failed_at = Some(state.phase);
             state.phase = SetupComputerPhase::Failed;
             state.error = Some(message.into());
         }
@@ -129,6 +137,7 @@ impl SetupComputerCoordinator {
             phase: state.phase,
             ready: state.phase == SetupComputerPhase::Ready,
             error: state.error.clone(),
+            failed_at: state.failed_at,
         }
     }
 }
@@ -157,6 +166,10 @@ mod tests {
         };
         coordinator.fail(generation, "build failed");
 
+        assert_eq!(
+            coordinator.status().failed_at,
+            Some(SetupComputerPhase::CheckingDocker)
+        );
         let BeginSetup::Start { generation: retry } = coordinator.begin(false) else {
             panic!("failed bootstrap must be retryable");
         };

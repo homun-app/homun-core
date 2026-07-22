@@ -7,14 +7,15 @@ const ACTIVE_ROW_BY_PHASE = {
   verifying_browser: 3,
 };
 
-export function computerProgressRows(phase) {
+export function computerProgressRows(phase, failedAt = null) {
   if (phase === "ready") {
     return ROW_IDS.map((id) => ({ id, state: "done" }));
   }
   if (phase === "failed") {
+    const failedIndex = ACTIVE_ROW_BY_PHASE[failedAt ?? "checking_docker"] ?? 0;
     return ROW_IDS.map((id, index) => ({
       id,
-      state: index === 0 ? "error" : "pending",
+      state: index < failedIndex ? "done" : index === failedIndex ? "error" : "pending",
     }));
   }
   const activeIndex = ACTIVE_ROW_BY_PHASE[phase];

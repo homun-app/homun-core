@@ -33,8 +33,8 @@ test("only observed ready status unlocks model selection", () => {
 });
 
 test("failed state exposes retry without completing progress", () => {
-  assert.equal(
-    computerProgressRows("failed").some((row) => row.state === "error"),
-    true,
+  assert.deepEqual(
+    computerProgressRows("failed", "starting_container").map((row) => row.state),
+    ["done", "done", "error", "pending"],
   );
 });

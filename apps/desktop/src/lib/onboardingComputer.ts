@@ -11,6 +11,7 @@ export interface SetupComputerStatus {
   phase: SetupComputerPhase;
   ready: boolean;
   error: string | null;
+  failed_at: SetupComputerPhase | null;
 }
 
 export type ComputerProgressRowId = "docker" | "image" | "container" | "browser";
@@ -35,14 +36,18 @@ const ACTIVE_ROW_BY_PHASE: Partial<Record<SetupComputerPhase, number>> = {
   verifying_browser: 3,
 };
 
-export function computerProgressRows(phase: SetupComputerPhase): ComputerProgressRow[] {
+export function computerProgressRows(
+  phase: SetupComputerPhase,
+  failedAt: SetupComputerPhase | null = null,
+): ComputerProgressRow[] {
   if (phase === "ready") {
     return ROW_IDS.map((id) => ({ id, state: "done" }));
   }
   if (phase === "failed") {
+    const failedIndex = ACTIVE_ROW_BY_PHASE[failedAt ?? "checking_docker"] ?? 0;
     return ROW_IDS.map((id, index) => ({
       id,
-      state: index === 0 ? "error" : "pending",
+      state: index < failedIndex ? "done" : index === failedIndex ? "error" : "pending",
     }));
   }
   const activeIndex = ACTIVE_ROW_BY_PHASE[phase];
