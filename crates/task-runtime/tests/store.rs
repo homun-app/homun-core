@@ -13,6 +13,53 @@ fn store_creates_schema_and_migrations_are_idempotent() {
 }
 
 #[test]
+fn store_lists_only_workspace_scopes_with_non_terminal_tasks() {
+    let store = TaskStore::open_in_memory().unwrap();
+    let user = UserId::new("user_1");
+    let personal = WorkspaceId::new("local-workspace");
+    let project = WorkspaceId::new("workspace_project");
+    let archived = WorkspaceId::new("workspace_archived");
+
+    store
+        .insert_task(&TaskRecord::new(
+            "channel_turn",
+            user.clone(),
+            personal.clone(),
+            "chat_turn",
+            "Reply",
+            json!({}),
+        ))
+        .unwrap();
+
+    let mut waiting = TaskRecord::new(
+        "project_wait",
+        user.clone(),
+        project.clone(),
+        "capability.call",
+        "Wait",
+        json!({}),
+    );
+    waiting.status = TaskStatus::WaitingResource;
+    store.insert_task(&waiting).unwrap();
+
+    let mut completed = TaskRecord::new(
+        "archived",
+        user.clone(),
+        archived,
+        "chat_turn",
+        "Done",
+        json!({}),
+    );
+    completed.status = TaskStatus::Completed;
+    store.insert_task(&completed).unwrap();
+
+    assert_eq!(
+        store.non_terminal_workspace_ids(&user).unwrap(),
+        vec![personal, project],
+    );
+}
+
+#[test]
 fn store_inserts_loads_and_updates_task_status() {
     let store = TaskStore::open_in_memory().unwrap();
     let user = UserId::new("user_1");
