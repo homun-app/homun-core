@@ -1,7 +1,7 @@
 # Homun Stability Program — interfaccia stabile, turni deterministici, runtime affidabile
 
 **Data:** 2026-07-22
-**Stato:** design consolidato dopo test live; in revisione utente
+**Stato:** approvato dall'utente; piani esecutivi TDD disponibili
 **Ambito:** desktop, gateway, task runtime, engine, browser/computer, privacy guard,
 skill catalog e proactivity
 **Decisione UX approvata:** la task selezionata non cambia mai senza un gesto esplicito
