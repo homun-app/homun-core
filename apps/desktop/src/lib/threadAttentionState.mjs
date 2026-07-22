@@ -10,16 +10,27 @@ export function createThreadAttentionState(selectedThreadId = "") {
 export function applyThreadSignal(state, signal) {
   const terminalEventIds = { ...state.terminalEventIds };
   if (signal.terminalEventId != null) {
-    terminalEventIds[signal.threadId] = signal.terminalEventId;
+    terminalEventIds[signal.threadId] = Math.max(
+      terminalEventIds[signal.threadId] ?? 0,
+      signal.terminalEventId,
+    );
+  }
+  const terminalEventId = terminalEventIds[signal.threadId] ?? 0;
+  const seenTerminalEventIds = { ...state.seenTerminalEventIds };
+  if (signal.status === "completed" && signal.threadId === state.selectedThreadId) {
+    seenTerminalEventIds[signal.threadId] = Math.max(
+      seenTerminalEventIds[signal.threadId] ?? 0,
+      terminalEventId,
+    );
   }
   const unread = signal.status === "completed"
     && signal.threadId !== state.selectedThreadId
-    && (signal.terminalEventId ?? 0) > (state.seenTerminalEventIds[signal.threadId] ?? 0);
+    && terminalEventId > (seenTerminalEventIds[signal.threadId] ?? 0);
   const status = unread
     ? "completed_unread"
-    : ["running", "queued", "retrying"].includes(signal.status)
+    : ["running", "queued", "retrying", "retry_waiting", "waiting_resource"].includes(signal.status)
       ? "working"
-      : signal.status === "waiting_user"
+      : ["waiting_user", "waiting_approval"].includes(signal.status)
         ? "waiting_user"
         : signal.status === "failed"
           ? "failed"
@@ -27,8 +38,27 @@ export function applyThreadSignal(state, signal) {
   return {
     ...state,
     terminalEventIds,
+    seenTerminalEventIds,
     byThread: { ...state.byThread, [signal.threadId]: status },
   };
+}
+
+export function hydrateThreadAttentionState(state, rows) {
+  let next = state;
+  for (const row of rows) {
+    next = {
+      ...next,
+      seenTerminalEventIds: {
+        ...next.seenTerminalEventIds,
+        [row.threadId]: Math.max(
+          next.seenTerminalEventIds[row.threadId] ?? 0,
+          row.lastSeenTerminalEventId ?? 0,
+        ),
+      },
+    };
+    next = applyThreadSignal(next, row);
+  }
+  return next;
 }
 
 export function selectThread(state, threadId) {

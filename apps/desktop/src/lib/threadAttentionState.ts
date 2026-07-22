@@ -22,6 +22,10 @@ export interface ThreadAttentionSignal {
   terminalEventId?: number | null;
 }
 
+export interface ThreadAttentionSnapshot extends ThreadAttentionSignal {
+  lastSeenTerminalEventId: number;
+}
+
 export const createThreadAttentionState = implementation.createThreadAttentionState as (
   selectedThreadId?: string,
 ) => ThreadAttentionState;
@@ -29,6 +33,11 @@ export const createThreadAttentionState = implementation.createThreadAttentionSt
 export const applyThreadSignal = implementation.applyThreadSignal as (
   state: ThreadAttentionState,
   signal: ThreadAttentionSignal,
+) => ThreadAttentionState;
+
+export const hydrateThreadAttentionState = implementation.hydrateThreadAttentionState as (
+  state: ThreadAttentionState,
+  rows: ThreadAttentionSnapshot[],
 ) => ThreadAttentionState;
 
 export const selectThread = implementation.selectThread as (

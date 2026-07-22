@@ -41,10 +41,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import { settingsGroupLabels, settingsSections } from "../data/mockData";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
+import type { ThreadAttentionStatus } from "../lib/threadAttentionState";
 import { useSetting } from "../lib/settingsStore";
 import {
   coreBridge,
   type CoreChatThread,
+  type CoreThreadAttention,
   type Tag,
   type WorkspaceRecord,
 } from "../lib/coreBridge";
@@ -181,9 +183,10 @@ interface ProjectsNavProps {
   activeView: ViewId;
   activeThreadId: string;
   activeThreads: ChatThread[];
-  busyThreadIds: Set<string>;
+  threadAttention: Record<string, ThreadAttentionStatus>;
   onArchiveChatThread: (threadId: string) => void;
   onSelectThread: (threadId: string) => void;
+  onThreadAttention: (rows: CoreThreadAttention[]) => void;
   onCreateteChatThread: (workspaceId?: string) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onThreadContextMenu: (thread: ChatThread, event: MouseEvent<HTMLElement>) => void;
@@ -213,9 +216,10 @@ function ProjectsNav({
   activeView,
   activeThreadId,
   activeThreads,
-  busyThreadIds,
+  threadAttention,
   onArchiveChatThread,
   onSelectThread,
+  onThreadAttention,
   onCreateteChatThread,
   onSetChatThreadPinned,
   onThreadContextMenu,
@@ -269,9 +273,14 @@ function ProjectsNav({
   }
   useEffect(() => {
     void reloadWorkspaces().catch(() => {});
-    coreBridge
-      .chatThreads(PERSONAL_WORKSPACE_ID)
-      .then((snap) => setPersonalThreads(snap.threads.map(toChatThread)))
+    Promise.all([
+      coreBridge.chatThreads(PERSONAL_WORKSPACE_ID),
+      coreBridge.threadAttentions(PERSONAL_WORKSPACE_ID),
+    ])
+      .then(([snap, attention]) => {
+        setPersonalThreads(snap.threads.map(toChatThread));
+        onThreadAttention(attention);
+      })
       .catch(() => {});
   }, []);
 
@@ -334,7 +343,11 @@ function ProjectsNav({
 
   async function loadProjectThreads(projectId: string) {
     try {
-      const snap = await coreBridge.chatThreads(projectId);
+      const [snap, attention] = await Promise.all([
+        coreBridge.chatThreads(projectId),
+        coreBridge.threadAttentions(projectId),
+      ]);
+      onThreadAttention(attention);
       setProjectThreadsById((current) => ({
         ...current,
         [projectId]: snap.threads
@@ -559,7 +572,7 @@ function ProjectsNav({
     const renderThread = (thread: ChatThread) => (
       <ThreadLink
         active={thread.threadId === activeThreadId && activeView === "chat"}
-        busy={busyThreadIds.has(thread.threadId)}
+        attention={threadAttention[thread.threadId] ?? "idle"}
         thread={thread}
         onArchive={() => onArchiveChatThread(thread.threadId)}
         onContextMenu={(e) => onThreadContextMenu(thread, e)}
@@ -925,7 +938,7 @@ function ProjectsNav({
 interface NavDrawerProps {
   activeView: ViewId;
   activeThreadId: string;
-  busyThreadIds: Set<string>;
+  threadAttention: Record<string, ThreadAttentionStatus>;
   chatThreads: ChatThread[];
   navItems: NavItem[];
   onArchiveChatThread: (threadId: string) => void;
@@ -935,6 +948,7 @@ interface NavDrawerProps {
   onNavigate: (view: ViewId) => void;
   onSearchChat: () => void;
   onSelectThread: (threadId: string) => void;
+  onThreadAttention: (rows: CoreThreadAttention[]) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onToggleDrawer: () => void;
   onUnarchiveChatThread: (threadId: string) => void;
@@ -943,7 +957,7 @@ interface NavDrawerProps {
 export function NavDrawer({
   activeView,
   activeThreadId,
-  busyThreadIds,
+  threadAttention,
   chatThreads,
   navItems,
   onArchiveChatThread,
@@ -953,6 +967,7 @@ export function NavDrawer({
   onNavigate,
   onSearchChat,
   onSelectThread,
+  onThreadAttention,
   onSetChatThreadPinned,
   onToggleDrawer,
   onUnarchiveChatThread,
@@ -1212,9 +1227,10 @@ export function NavDrawer({
           activeView={activeView}
           activeThreadId={activeThreadId}
           activeThreads={activeThreads}
-          busyThreadIds={busyThreadIds}
+          threadAttention={threadAttention}
           onArchiveChatThread={onArchiveChatThread}
           onSelectThread={onSelectThread}
+          onThreadAttention={onThreadAttention}
           onCreateteChatThread={onCreateteChatThread}
           onSetChatThreadPinned={onSetChatThreadPinned}
           onThreadContextMenu={(thread, event) => {
@@ -1237,7 +1253,7 @@ export function NavDrawer({
               archivedThreads.map((thread) => (
                 <ThreadLink
                   active={thread.threadId === activeThreadId && activeView === "chat"}
-                  busy={busyThreadIds.has(thread.threadId)}
+                  attention={threadAttention[thread.threadId] ?? "idle"}
                   key={thread.threadId}
                   thread={thread}
                   onContextMenu={(event) => {
@@ -1882,7 +1898,7 @@ function RenamePopover({
 
 function ThreadLink({
   active,
-  busy,
+  attention = "idle",
   onArchive,
   onContextMenu,
   onMore,
@@ -1892,7 +1908,7 @@ function ThreadLink({
   tags,
 }: {
   active: boolean;
-  busy?: boolean;
+  attention?: ThreadAttentionStatus;
   onArchive?: () => void;
   onContextMenu: (event: MouseEvent<HTMLElement>) => void;
   onMore?: (event: MouseEvent<HTMLButtonElement>) => void;
@@ -1903,6 +1919,15 @@ function ThreadLink({
 }) {
   const { t } = useTranslation();
   const icon = threadTypeIcon(thread.source, t);
+  const attentionLabel = attention === "working"
+    ? t("sidebar.threadStatusWorking", { defaultValue: "Working" })
+    : attention === "completed_unread"
+      ? t("sidebar.threadStatusCompleted", { defaultValue: "Completed, unread" })
+      : attention === "waiting_user"
+        ? t("sidebar.threadStatusWaiting", { defaultValue: "Waiting for you" })
+        : attention === "failed"
+          ? t("sidebar.threadStatusFailed", { defaultValue: "Failed" })
+          : "";
   return (
     <div
       className={`drawer-thread-row ${active ? "active" : ""} ${thread.pinned ? "pinned" : ""}`}
@@ -1911,14 +1936,20 @@ function ThreadLink({
       <button
         className="drawer-link drawer-thread-main"
         type="button"
-        aria-busy={busy || undefined}
+        aria-busy={attention === "working" || undefined}
         onClick={onSelect}
       >
         <span className="drawer-link-icon" title={icon?.label} aria-label={icon?.label}>
           {icon?.node}
         </span>
         <span className="drawer-link-title">
-          {busy && <span className="thread-busy-dot" aria-hidden="true" />}
+          {attention !== "idle" && (
+            <span
+              className={`thread-status-dot ${attention}`}
+              aria-label={attentionLabel}
+              title={attentionLabel}
+            />
+          )}
           {thread.title}
         </span>
         {tags && tags.length > 0 && (

@@ -1104,7 +1104,7 @@ body.resizing-drawer {
    inline at the START of the title (status reads left-to-right, before the text).
    Surfaced when the thread is generating a chat answer (real-time streaming
    signal) or running a linked background task. */
-.thread-busy-dot {
+.thread-status-dot {
   display: inline-block;
   vertical-align: middle;
   width: 7px;
@@ -1113,7 +1113,25 @@ body.resizing-drawer {
   border-radius: 50%;
   background: var(--brand);
   flex: none;
+}
+
+.thread-status-dot.working {
   animation: msg-activity-pulse 1.2s ease-in-out infinite;
+}
+
+.thread-status-dot.completed-unread {
+  background: var(--brand);
+  animation: none;
+}
+
+.thread-status-dot.waiting_user {
+  background: var(--amber);
+  animation: none;
+}
+
+.thread-status-dot.failed {
+  background: var(--red);
+  animation: none;
 }
 
 /* Leading per-type glyph slot. Carries its own right margin (not a grid gap) so it can

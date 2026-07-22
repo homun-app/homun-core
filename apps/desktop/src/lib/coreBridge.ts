@@ -208,6 +208,14 @@ export interface CoreChatThreadSnapshot {
   threads: CoreChatThread[];
 }
 
+export interface CoreThreadAttention {
+  thread_id: string;
+  status: string;
+  latest_terminal_event_id: number | null;
+  last_seen_terminal_event_id: number;
+  updated_at: number;
+}
+
 export interface CoreChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -1597,6 +1605,21 @@ async function electronActiveStreams(): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function electronThreadAttentions(workspace?: string): Promise<CoreThreadAttention[]> {
+  const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+  return gatewayGetJson<CoreThreadAttention[]>(`/api/chat/threads/attention${query}`);
+}
+
+async function electronMarkThreadSeen(
+  threadId: string,
+  terminalEventId: number,
+): Promise<CoreThreadAttention> {
+  return gatewayPostJson<CoreThreadAttention>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/seen`,
+    { terminal_event_id: terminalEventId },
+  );
 }
 
 async function electronConsolidateMemory(
@@ -3587,6 +3610,9 @@ export const coreBridge = {
   ) => chatApi.captureProactiveAnswer(threadId, body),
   automations: (workspaceId?: string | null) => electronAutomations(workspaceId),
   activeStreams: () => electronActiveStreams(),
+  threadAttentions: (workspace?: string) => electronThreadAttentions(workspace),
+  markThreadSeen: (threadId: string, terminalEventId: number) =>
+    electronMarkThreadSeen(threadId, terminalEventId),
   automationEventSources: () => electronAutomationEventSources(),
   createAutomation: (input: AutomationCreateteInput) => electronCreateteAutomation(input),
   updateAutomation: (

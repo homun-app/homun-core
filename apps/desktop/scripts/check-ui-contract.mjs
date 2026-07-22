@@ -152,6 +152,26 @@ assertContains("src/components/ChatView.tsx", "enqueueTurn(thread.threadId, requ
 assertSource("src/components/ActiveTurnStatus.tsx", ["Attività", "onStop", "attempt"]);
 assertSource("src/components/PendingSteeringQueue.tsx", ["onEdit", "onDelete", "onSendNow"]);
 assertSource("src/components/ChatView.tsx", ["active-turn-tail", "pendingSteering"]);
+assertNotContains(
+  "src/App.tsx",
+  "navigateToThread(eventThreadId",
+  "background events cannot navigate",
+);
+assertContains(
+  "src/App.tsx",
+  "refreshThreadInBackground(eventThreadId)",
+  "background events refresh only their cache",
+);
+assertContains(
+  "src/App.tsx",
+  "const preservedThread = mappedThreads.find((thread) => thread.threadId === activeThreadId",
+  "non-selection thread actions must preserve the user-owned active task",
+);
+assertContains(
+  "src/styles.css",
+  ".thread-status-dot.completed-unread",
+  "completion uses a fixed teal dot",
+);
 assertSource("src/components/ChatView.tsx", [
   'function openActivityIsland() {\n    dispatchInspector({ type: "hideWorkspace" });\n    setIslandOpen(true);',
   "onOpenActivity={openActivityIsland}",
@@ -382,7 +402,8 @@ assertNotContains("src/App.tsx", "runAgentTurnHeadless", "frontend must not expo
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn run_agent_turn(", "backend must not keep a headless agent-turn helper that can bypass visible placeholders");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "run_agent_turn_into_message", "backend agent turns must stream into persisted assistant messages");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing", "chat loop must maintain the canonical plan through update_plan and continue in the same turn");
-assertContains("src/App.tsx", "pendingEventThreadIdsRef", "event-driven thread navigation must not drop updates while React is switching active threads");
+assertNotContains("src/App.tsx", "pendingEventThreadIdsRef", "background event refresh must not depend on a navigation race window");
+assertContains("src/App.tsx", "refreshThreadInBackground", "background events must refresh their own durable cache");
 assertContains("src/App.tsx", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
 assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");
 assertContains("src/components/ChatView.tsx", "eventParts: normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must preserve structured event parts from the gateway result");
