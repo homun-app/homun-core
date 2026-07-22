@@ -3267,16 +3267,42 @@ impl ChatStore {
         // thread this is simply "the previous message". Branching (a future phase)
         // will set `parent_id` to a non-leaf node explicitly; here we always follow
         // the active leaf, so today's behavior is unchanged.
-        let parent_id: Option<String> = self
-            .conn
-            .query_row(
-                "select active_leaf_id from chat_threads where thread_id = ?1",
-                params![thread_id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten();
-        let inserted = self.conn.execute(
+        let parent_id = Self::active_leaf_on(&self.conn, thread_id)?;
+        let inserted = Self::insert_message_on(
+            &self.conn,
+            thread_id,
+            message,
+            parent_id.as_deref(),
+        )?;
+        // Advance the active leaf only when a row was actually inserted —
+        // `insert or ignore` is a no-op on a duplicate id and must not move the
+        // pointer (which would corrupt the displayed path).
+        if inserted {
+            self.conn.execute(
+                "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
+                params![message.id, thread_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn active_leaf_on(conn: &Connection, thread_id: &str) -> rusqlite::Result<Option<String>> {
+        conn.query_row(
+            "select active_leaf_id from chat_threads where thread_id = ?1",
+            params![thread_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map(|leaf| leaf.flatten())
+    }
+
+    fn insert_message_on(
+        conn: &Connection,
+        thread_id: &str,
+        message: &ChatMessage,
+        parent_id: Option<&str>,
+    ) -> rusqlite::Result<bool> {
+        let inserted = conn.execute(
             "insert or ignore into chat_messages (
                 id, thread_id, role, text, timestamp, metadata, metrics_json, feedback,
                 saved_memory_ref, linked_task_id, linked_automation_ref, attachments_json,
@@ -3300,16 +3326,7 @@ impl ChatStore {
                 memory_reuse_to_json(message)?,
             ],
         )?;
-        // Advance the active leaf only when a row was actually inserted —
-        // `insert or ignore` is a no-op on a duplicate id and must not move the
-        // pointer (which would corrupt the displayed path).
-        if inserted == 1 {
-            self.conn.execute(
-                "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
-                params![message.id, thread_id],
-            )?;
-        }
-        Ok(())
+        Ok(inserted == 1)
     }
 
     /// Insert a crash-atomic user message that is a PROPER node of the thread tree,
@@ -3336,35 +3353,50 @@ impl ChatStore {
         timestamp: &str,
         attachments: &[serde_json::Value],
     ) -> rusqlite::Result<()> {
-        let parent_id: Option<String> = conn
-            .query_row(
-                "select active_leaf_id from chat_threads where thread_id = ?1",
-                params![thread_id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten();
-        let inserted = conn.execute(
-            "insert or ignore into chat_messages (
-                id, thread_id, role, text, timestamp, attachments_json, parent_id
-             ) values (?1, ?2, 'user', ?3, ?4, ?5, ?6)",
-            params![
-                id,
-                thread_id,
-                text,
-                timestamp,
-                if attachments.is_empty() {
-                    None
-                } else {
-                    Some(serde_json::to_string(attachments).map_err(json_error)?)
-                },
-                parent_id,
-            ],
-        )?;
-        if inserted == 1 {
+        let message = ChatMessage {
+            id: id.to_string(),
+            role: "user".to_string(),
+            text: text.to_string(),
+            timestamp: timestamp.to_string(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments: attachments.to_vec(),
+            event_parts: Vec::new(),
+            memory_reuse: None,
+        };
+        let parent_id = Self::active_leaf_on(conn, thread_id)?;
+        let inserted = Self::insert_message_on(conn, thread_id, &message, parent_id.as_deref())?;
+        if inserted {
             conn.execute(
                 "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
                 params![id, thread_id],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Insert the broker's visible user prompt and assistant placeholder as one
+    /// tree-linked pair. This runs inside the broker's task transaction, so an
+    /// error inserting the placeholder rolls the user insert back with the task.
+    /// Repeating it is idempotent on the stable message ids.
+    pub(crate) fn insert_linked_turn_messages(
+        conn: &Connection,
+        thread_id: &str,
+        user: &ChatMessage,
+        assistant: &ChatMessage,
+    ) -> rusqlite::Result<()> {
+        let parent_id = Self::active_leaf_on(conn, thread_id)?;
+        Self::insert_message_on(conn, thread_id, user, parent_id.as_deref())?;
+        let assistant_inserted =
+            Self::insert_message_on(conn, thread_id, assistant, Some(&user.id))?;
+        if assistant_inserted {
+            conn.execute(
+                "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
+                params![assistant.id, thread_id],
             )?;
         }
         Ok(())
@@ -5139,6 +5171,89 @@ mod tests {
             ids,
             vec![seed_id, enqueued_id.to_string(), "assistant_1".to_string()]
         );
+    }
+
+    #[test]
+    fn linked_turn_insert_preallocates_one_assistant_leaf_idempotently() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let tid = thread.thread_id;
+        let seed_id = store.messages(&tid).unwrap().messages[0].id.clone();
+        let user = mk_message("local_user_r1", "user");
+        let mut assistant = mk_message("local_assistant_r1", "assistant");
+        assistant.text.clear();
+
+        ChatStore::insert_linked_turn_messages(&store.conn, &tid, &user, &assistant).unwrap();
+        ChatStore::insert_linked_turn_messages(&store.conn, &tid, &user, &assistant).unwrap();
+
+        let rows: Vec<(String, String, Option<String>)> = store
+            .conn
+            .prepare(
+                "select id, role, parent_id from chat_messages
+                 where thread_id = ?1 and id in (?2, ?3) order by rowid",
+            )
+            .unwrap()
+            .query_map(params![tid, user.id, assistant.id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (user.id.clone(), "user".to_string(), Some(seed_id)),
+                (
+                    assistant.id.clone(),
+                    "assistant".to_string(),
+                    Some(user.id.clone()),
+                ),
+            ]
+        );
+        let leaf: Option<String> = store
+            .conn
+            .query_row(
+                "select active_leaf_id from chat_threads where thread_id = ?1",
+                params![tid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(leaf.as_deref(), Some(assistant.id.as_str()));
+    }
+
+    #[test]
+    fn linked_turn_insert_rolls_back_when_assistant_insert_is_rejected() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let tid = thread.thread_id;
+        let user = mk_message("local_user_rejected", "user");
+        let assistant = mk_message("local_assistant_rejected", "assistant");
+        store
+            .conn
+            .execute_batch(
+                "create trigger reject_preallocated_assistant
+                 before insert on chat_messages
+                 when new.id = 'local_assistant_rejected'
+                 begin select raise(abort, 'assistant rejected'); end;",
+            )
+            .unwrap();
+
+        store.conn.execute_batch("begin immediate").unwrap();
+        let error =
+            ChatStore::insert_linked_turn_messages(&store.conn, &tid, &user, &assistant)
+                .unwrap_err();
+        assert!(error.to_string().contains("assistant rejected"));
+        store.conn.execute_batch("rollback").unwrap();
+
+        let count: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from chat_messages where thread_id = ?1 and id in (?2, ?3)",
+                params![tid, user.id, assistant.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

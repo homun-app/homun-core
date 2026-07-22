@@ -32212,9 +32212,11 @@ async fn handle_channel_inbound(
                             now_epoch_secs(),
                             uuid::Uuid::new_v4().simple()
                         );
+                        let assistant_message_id = format!("local_assistant_{request_id}");
                         let input = local_first_task_runtime::broker::ChatTurnInput {
                             thread_id: tid.to_string(),
                             request_id,
+                            assistant_message_id,
                             prompt: content.clone(),
                             visible_prompt: None,
                             images: Vec::new(),
@@ -32274,6 +32276,7 @@ async fn handle_channel_inbound(
                         Some(channel),
                         &title,
                         &content,
+                        None,
                         None,
                         // Legacy inline ApproveReply path (no broker task) → throwaway turn id.
                         None,
@@ -33043,6 +33046,10 @@ fn start_visible_conversation_turn(
     // `None` for the inline paths (channel / automation / approval) that have no
     // pre-seeded message and must mint a fresh id.
     preseeded_user_message_id: Option<&str>,
+    // The assistant placeholder is preallocated with the user prompt by broker
+    // enqueue. Reusing this stable id across worker attempts prevents duplicate
+    // assistant bubbles after a retry.
+    preseeded_assistant_message_id: Option<&str>,
     // The broker turn id (`turn_{request_id}` = the task id) to advertise in the
     // `thread.turn_started` event. This is the SAME id the live WS `turn.event` fan-out and
     // the resumable turn stream key on, so a client that receives the event can attach to the
@@ -33055,7 +33062,10 @@ fn start_visible_conversation_turn(
         Some(id) => channel_chat_message_with_id("user", user_text, id),
         None => channel_chat_message("user", user_text),
     };
-    let mut assistant_message = channel_chat_message("assistant", "…");
+    let mut assistant_message = match preseeded_assistant_message_id {
+        Some(id) => channel_chat_message_with_id("assistant", "", id),
+        None => channel_chat_message("assistant", "…"),
+    };
     assistant_message.memory_reuse =
         Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
     let turn = VisibleConversationTurn {
@@ -35521,7 +35531,7 @@ fn enqueue_chat_turn_core(
         &user_id,
         &workspace_id,
         input,
-        |tx| insert_broker_user_message(tx, input),
+        |tx| insert_broker_turn_messages(tx, input),
     )
 }
 
@@ -35548,23 +35558,23 @@ fn enqueue_or_steer_chat_turn_core(
         &user_id,
         &workspace_id,
         input,
-        |tx| insert_broker_user_message(tx, input),
+        |tx| insert_broker_turn_messages(tx, input),
     )
 }
 
-fn insert_broker_user_message(
+fn insert_broker_turn_messages(
     tx: &rusqlite::Transaction<'_>,
     input: &local_first_task_runtime::broker::ChatTurnInput,
 ) -> local_first_task_runtime::TaskRuntimeResult<()> {
     let visible_prompt = input.visible_prompt.as_deref().unwrap_or(&input.prompt);
-    ChatStore::insert_linked_user_message(
-        tx,
-        &input.thread_id,
-        &format!("local_user_{}", input.request_id),
+    let mut user = channel_chat_message_with_id(
+        "user",
         visible_prompt,
-        &now_epoch_secs().to_string(),
-        &broker_turn_message_attachments(input),
-    )
+        &format!("local_user_{}", input.request_id),
+    );
+    user.attachments = broker_turn_message_attachments(input);
+    let assistant = channel_chat_message_with_id("assistant", "", &input.assistant_message_id);
+    ChatStore::insert_linked_turn_messages(tx, &input.thread_id, &user, &assistant)
     .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
 }
 
@@ -35669,6 +35679,7 @@ async fn enqueue_turn(
     let input = local_first_task_runtime::broker::ChatTurnInput {
         thread_id: req.thread_id.clone(),
         request_id: request_id.clone(),
+        assistant_message_id: format!("local_assistant_{request_id}"),
         prompt: req.prompt.clone(),
         visible_prompt: req.visible_prompt.clone(),
         images: req.images.clone(),
@@ -38082,6 +38093,7 @@ fn execute_proactive_prompt_task(
         &thread_plan.title,
         &goal,
         None,
+        None,
         // Inline automation path (no broker task) → throwaway turn id.
         None,
     )
@@ -40454,13 +40466,15 @@ fn approval_continuation_turn_input(
     tool: &str,
     prompt: String,
 ) -> local_first_task_runtime::broker::ChatTurnInput {
+    let request_id = format!(
+        "approval_{}_{}",
+        now_epoch_secs(),
+        uuid::Uuid::new_v4().simple()
+    );
     local_first_task_runtime::broker::ChatTurnInput {
         thread_id: thread_id.to_string(),
-        request_id: format!(
-            "approval_{}_{}",
-            now_epoch_secs(),
-            uuid::Uuid::new_v4().simple()
-        ),
+        assistant_message_id: format!("local_assistant_{request_id}"),
+        request_id,
         prompt,
         visible_prompt: Some(approval_continuation_visible_text(tool)),
         images: Vec::new(),
@@ -73959,6 +73973,122 @@ data: [DONE]\n";
         assert_eq!(event["turn_id"], "turn_1");
         assert_eq!(event["user_message_id"], "msg_user");
         assert_eq!(event["assistant_message_id"], "msg_assistant");
+    }
+
+    #[test]
+    fn visible_turn_reuses_preseeded_assistant_across_retries() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let user = super::channel_chat_message_with_id("user", "prompt", "local_user_r1");
+        let mut assistant =
+            super::channel_chat_message_with_id("assistant", "", "local_assistant_r1");
+        assistant.text.clear();
+        super::lock_store(&state)
+            .unwrap()
+            .commit_prompt_result(&thread.thread_id, &user, &assistant, None)
+            .unwrap();
+
+        let first = super::start_visible_conversation_turn(
+            &state,
+            &thread.thread_id,
+            "workspace_test",
+            "interactive",
+            None,
+            "Thread",
+            "prompt",
+            Some("local_user_r1"),
+            Some("local_assistant_r1"),
+            Some("turn_r1"),
+        )
+        .unwrap();
+        let retry = super::start_visible_conversation_turn(
+            &state,
+            &thread.thread_id,
+            "workspace_test",
+            "interactive",
+            None,
+            "Thread",
+            "prompt",
+            Some("local_user_r1"),
+            Some("local_assistant_r1"),
+            Some("turn_r1"),
+        )
+        .unwrap();
+
+        assert_eq!(first.user_message_id, "local_user_r1");
+        assert_eq!(first.assistant_message_id, "local_assistant_r1");
+        assert_eq!(retry.assistant_message_id, first.assistant_message_id);
+        let messages = super::lock_store(&state)
+            .unwrap()
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages;
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.id == "local_assistant_r1")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn broker_enqueue_preallocates_one_linked_user_and_assistant() {
+        let root = isolated_gateway_test_dir("broker-preallocated-visible-turn");
+        std::fs::create_dir_all(&root).unwrap();
+        let database = root.join("homun.sqlite");
+        let chat = ChatStore::open(&database).unwrap();
+        let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+        let thread = chat.create_thread("workspace_test").unwrap();
+        let input = local_first_task_runtime::broker::ChatTurnInput {
+            thread_id: thread.thread_id.clone(),
+            request_id: "r1".to_string(),
+            assistant_message_id: "local_assistant_r1".to_string(),
+            prompt: "prompt".to_string(),
+            visible_prompt: None,
+            images: Vec::new(),
+            attachments: None,
+            mode: None,
+            model: None,
+            source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+            approval: local_first_task_runtime::broker::TurnApproval::Full,
+        };
+        let user_id = super::gateway_user_id();
+        let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_test");
+
+        local_first_task_runtime::broker::enqueue_chat_turn_atomic(
+            &tasks,
+            &user_id,
+            &workspace_id,
+            &input,
+            |tx| super::insert_broker_turn_messages(tx, &input),
+        )
+        .unwrap();
+
+        let messages = chat.messages(&thread.thread_id).unwrap().messages;
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.id == "local_user_r1")
+                .count(),
+            1
+        );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.id == "local_assistant_r1")
+                .count(),
+            1
+        );
+        assert_eq!(
+            messages
+                .last()
+                .map(|message| message.id.as_str()),
+            Some("local_assistant_r1")
+        );
     }
 
     #[test]

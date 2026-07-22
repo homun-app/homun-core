@@ -281,6 +281,11 @@ pub fn execute_chat_turn_task(
     let preseeded_user_message_id = request_id
         .as_ref()
         .map(|request_id| format!("local_user_{request_id}"));
+    let preseeded_assistant_message_id = task
+        .input_json
+        .get("assistant_message_id")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty());
     let existing_objective = state
         .task_store
         .lock()
@@ -429,6 +434,7 @@ pub fn execute_chat_turn_task(
         visible_prompt,
         visible_prompt,
         preseeded_user_message_id.as_deref(),
+        preseeded_assistant_message_id,
         // Advertise the broker turn id so any client with this thread open can attach to the
         // live stream (island + transcript) — the whole point of routing channel turns through
         // the broker instead of an invisible inline run.

@@ -13,6 +13,7 @@ use time::OffsetDateTime;
 pub struct ChatTurnInput {
     pub thread_id: String,
     pub request_id: String,
+    pub assistant_message_id: String,
     pub prompt: String,
     pub visible_prompt: Option<String>,
     /// Inline image data URLs from the composer. Clipboard images have no host
@@ -171,6 +172,7 @@ pub fn enqueue_chat_turn(
     let input_json = json!({
         "thread_id": input.thread_id,
         "request_id": input.request_id,
+        "assistant_message_id": input.assistant_message_id,
         "prompt": input.prompt,
         "visible_prompt": input.visible_prompt,
         "images": input.images,
@@ -275,6 +277,7 @@ where
     let input_json = serde_json::json!({
         "thread_id": input.thread_id,
         "request_id": input.request_id,
+        "assistant_message_id": input.assistant_message_id,
         "prompt": input.prompt,
         "visible_prompt": input.visible_prompt,
         "images": input.images,
@@ -570,6 +573,7 @@ mod tests {
         ChatTurnInput {
             thread_id: thread_id.to_string(),
             request_id: request_id.to_string(),
+            assistant_message_id: format!("local_assistant_{request_id}"),
             prompt: "hi".into(),
             visible_prompt: None,
             images: Vec::new(),
@@ -764,6 +768,7 @@ mod cancel_tests {
         ChatTurnInput {
             thread_id: thread_id.to_string(),
             request_id: request_id.to_string(),
+            assistant_message_id: format!("local_assistant_{request_id}"),
             prompt: "hi".into(),
             visible_prompt: None,
             images: Vec::new(),
@@ -805,12 +810,13 @@ mod cancel_tests {
 #[cfg(test)]
 mod atomic_tests {
     use super::*;
-    use crate::TaskStore;
+    use crate::{TaskStore, UserId, WorkspaceId};
 
     fn make_input(request_id: &str, thread_id: &str) -> ChatTurnInput {
         ChatTurnInput {
             thread_id: thread_id.to_string(),
             request_id: request_id.to_string(),
+            assistant_message_id: format!("local_assistant_{request_id}"),
             prompt: "p".into(),
             visible_prompt: None,
             images: Vec::new(),
@@ -820,6 +826,22 @@ mod atomic_tests {
             source: ChatTurnSource::Interactive,
             approval: TurnApproval::Full,
         }
+    }
+
+    #[test]
+    fn retryable_turn_keeps_one_assistant_message_id() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let mut input = make_input("r1", "t1");
+        input.assistant_message_id = "local_assistant_r1".into();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let enqueued =
+            enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |_tx| Ok(())).unwrap();
+        let task = store
+            .get_task(&enqueued.task_id, &user, &workspace)
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.input_json["assistant_message_id"], "local_assistant_r1");
     }
 
     #[test]
