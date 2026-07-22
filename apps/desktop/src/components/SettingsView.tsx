@@ -97,6 +97,7 @@ import {
   revokeHostComputerGrant,
 } from "../lib/coreBridge";
 import {
+  catalogDisplayIdentity,
   catalogIdentity,
   catalogInstallState,
   type CatalogInstallState,
@@ -5036,6 +5037,13 @@ function CatalogPreviewModal({
   const [preview, setPreview] = useState<CatalogPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState(false);
+  const targetIdentity = catalogDisplayIdentity(target);
+  const displayIdentity = preview
+    ? catalogDisplayIdentity({
+        slug: preview.slug,
+        owner_handle: preview.owner_handle ?? target.owner_handle,
+      })
+    : targetIdentity;
 
   useEffect(() => {
     let cancelled = false;
@@ -5062,7 +5070,7 @@ function CatalogPreviewModal({
           <div className="conn-detail-titletext">
             <h3 className="mdl-detail-title">{preview?.name ?? target.slug}</h3>
             <p className="mdl-detail-sub">
-              {preview ? `${preview.files.length} file` : "Loading preview…"}
+              {displayIdentity} · {preview ? `${preview.files.length} file` : "Loading preview…"}
             </p>
           </div>
           <button className="mdl-icon-btn" type="button" aria-label="Close" onClick={onClose}>

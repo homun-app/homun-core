@@ -455,6 +455,7 @@ assertContains("src/data/mockData.ts", "label: \"settings.computer.title\"", "Se
 assertContains("src/lib/coreBridge.ts", "secret_value?: string", "Vault bridge must expose optional raw secret material only for the encrypted accept path");
 assertContains("src/components/ChatComputerPanel.tsx", "const browserRunning = Boolean(live?.active && live?.novnc_url)", "live computer browser state must distinguish running activity from idle availability");
 assertContains("src/components/ChatComputerPanel.tsx", "view_only=1&viewer=csp-external-v1", "chat computer must invalidate the CSP-blocked inline viewer cached by older desktop releases");
+assertContains("src/components/SettingsView.tsx", "catalogDisplayIdentity(target)", "skill preview must preserve the publisher-qualified target while loading or failing");
 assertContains("src/components/ChatComputerPanel.tsx", "const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running))", "terminal dock must be driven by running terminal activity, not completed history");
 assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId", "live computer activity must not appear across chats without a matching owner");
 assertNotContains("src/components/ChatComputerPanel.tsx", "cc-dock-activity", "computer island header must show only Computer and LIVE, never prompt/activity text");

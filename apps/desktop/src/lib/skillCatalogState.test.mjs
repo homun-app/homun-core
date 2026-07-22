@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { catalogIdentity, catalogInstallState } from "./skillCatalogState.mjs";
+import {
+  catalogDisplayIdentity,
+  catalogIdentity,
+  catalogInstallState,
+} from "./skillCatalogState.mjs";
 
 const weather = (owner_handle) => ({ slug: "weather", owner_handle });
 
@@ -9,6 +13,11 @@ test("publisher plus slug is the remote identity", () => {
   assert.equal(catalogIdentity(weather("steipete")), "steipete/weather");
   assert.equal(catalogIdentity(weather("lfengwa2")), "lfengwa2/weather");
   assert.equal(catalogIdentity(weather(null)), "weather");
+});
+
+test("preview identity keeps publisher", () => {
+  assert.equal(catalogDisplayIdentity(weather("steipete")), "@steipete/weather");
+  assert.equal(catalogDisplayIdentity(weather(null)), "weather");
 });
 
 test("installed requires exact provenance", () => {
