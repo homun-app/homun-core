@@ -718,6 +718,7 @@ pub fn execute_chat_turn_task(
             "completed": completed,
         }),
         chat_message: answer.clone(),
+        result_surfacing: crate::TaskResultSurfacing::AlreadyPersisted,
         surface: crate::SurfaceKind::Logs,
         event_kind: if completed {
             "chat_turn_completed".to_string()

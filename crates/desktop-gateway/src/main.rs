@@ -675,12 +675,24 @@ struct TaskExecutionOutcome {
     checkpoint_payload: Value,
     checkpoint_redacted: Value,
     chat_message: String,
+    result_surfacing: TaskResultSurfacing,
     surface: SurfaceKind,
     event_kind: String,
     event_title: String,
     event_subtitle: String,
     event_payload: Value,
     artifacts: Vec<TaskArtifactOutput>,
+}
+
+/// Whether the task executor has already persisted its final visible reply.
+///
+/// Broker and proactive turns stream into a stable assistant bubble themselves;
+/// the runner must not append their outcome again. Other executors rely on the
+/// runner to materialize their chat result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TaskResultSurfacing {
+    AppendToChat,
+    AlreadyPersisted,
 }
 
 struct PendingExecutorApproval {
@@ -37286,7 +37298,7 @@ fn run_next_task_once(
             &task,
             local_first_desktop_gateway::MessageDeliveryState::Cancelled,
         );
-        append_task_result_to_chat(state, &task_id, &outcome.chat_message)?;
+        surface_task_execution_outcome(state, &task_id, &outcome)?;
         return Ok(TaskRunBatchResponse {
             status: "cancelled".to_string(),
             completed: 0,
@@ -37348,7 +37360,7 @@ fn run_next_task_once(
             }),
         )?;
     }
-    append_task_result_to_chat(state, &task_id, &outcome.chat_message)?;
+    surface_task_execution_outcome(state, &task_id, &outcome)?;
 
     Ok(TaskRunBatchResponse {
         status: if outcome.completed {
@@ -38158,6 +38170,17 @@ fn append_task_result_to_chat(
     Ok(())
 }
 
+fn surface_task_execution_outcome(
+    state: &AppState,
+    task_id: &str,
+    outcome: &TaskExecutionOutcome,
+) -> Result<(), GatewayError> {
+    if outcome.result_surfacing == TaskResultSurfacing::AppendToChat {
+        append_task_result_to_chat(state, task_id, &outcome.chat_message)?;
+    }
+    Ok(())
+}
+
 fn append_task_observation_to_session(
     state: &AppState,
     task: &TaskRecord,
@@ -38575,6 +38598,7 @@ fn execute_proactive_prompt_task(
             "completed": completed,
         }),
         chat_message: answer.unwrap_or_default(),
+        result_surfacing: TaskResultSurfacing::AlreadyPersisted,
         surface: SurfaceKind::Logs,
         event_kind: if completed {
             "proactive_prompt_completed".to_string()
@@ -39686,6 +39710,7 @@ fn capability_call_completed_outcome(
             result.tool_name,
             result.provider_id.as_str()
         ),
+        result_surfacing: TaskResultSurfacing::AppendToChat,
         surface: SurfaceKind::Logs,
         event_kind: "capability_tool_completed".to_string(),
         event_title: "Tool executed".to_string(),
@@ -39715,6 +39740,7 @@ fn capability_call_failed_outcome(task: &TaskRecord, reason: &str) -> TaskExecut
             "reason": reason,
         }),
         chat_message: format!("The capability tool failed: {reason}"),
+        result_surfacing: TaskResultSurfacing::AppendToChat,
         surface: SurfaceKind::Logs,
         event_kind: "capability_tool_failed".to_string(),
         event_title: "Tool failed".to_string(),
@@ -44486,6 +44512,7 @@ fn task_execution_outcome_from_executor_result(
                 "The task `{}` requires a new approval before continuing: {}",
                 task.kind, explanation
             ),
+            result_surfacing: TaskResultSurfacing::AppendToChat,
             surface: SurfaceKind::Logs,
             event_kind: "computer_executor_waiting_approval".to_string(),
             event_title: "Approval required".to_string(),
@@ -44519,6 +44546,7 @@ fn task_execution_outcome_from_executor_result(
                     },
                 }),
                 chat_message: format!("The task `{}` is blocked: {}", task.kind, reason),
+                result_surfacing: TaskResultSurfacing::AppendToChat,
                 surface: SurfaceKind::Logs,
                 event_kind: "computer_executor_blocked".to_string(),
                 event_title: "Task blocked".to_string(),
@@ -44557,6 +44585,7 @@ fn completed_executor_outcome(
             "output": redact_json_for_task_output(&output),
         }),
         chat_message: format!("Task `{}` completed via `{tool_name}`.", task.kind),
+        result_surfacing: TaskResultSurfacing::AppendToChat,
         surface: SurfaceKind::Browser,
         event_kind: "computer_executor_completed".to_string(),
         event_title: "Executor completed".to_string(),
@@ -44671,6 +44700,7 @@ fn execute_local_read_only_task(
             checkpoint_payload: serde_json::json!({ "kind": "calculation", "answer": answer }),
             checkpoint_redacted: serde_json::json!({ "kind": "calculation", "answer": answer }),
             chat_message: format!("The result is **{answer}**."),
+            result_surfacing: TaskResultSurfacing::AppendToChat,
             surface: SurfaceKind::Logs,
             event_kind: "computer_calculation_completed".to_string(),
             event_title: "Local calculation completed".to_string(),
@@ -44687,6 +44717,7 @@ fn execute_local_read_only_task(
         checkpoint_payload: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
         checkpoint_redacted: serde_json::json!({ "kind": "local_read_only", "goal": task.goal }),
         chat_message: "I logged the local task. No external actions were needed for this first read-only pass.".to_string(),
+        result_surfacing: TaskResultSurfacing::AppendToChat,
         surface: SurfaceKind::Logs,
         event_kind: "computer_local_task_completed".to_string(),
         event_title: "Local task completed".to_string(),
@@ -44722,6 +44753,7 @@ fn execute_shell_read_only_task(
             "I ran a local read-only check:\n\n```text\n{}\n```",
             output.trim()
         ),
+        result_surfacing: TaskResultSurfacing::AppendToChat,
         surface: SurfaceKind::Shell,
         event_kind: "computer_terminal_output".to_string(),
         event_title: "Terminal output".to_string(),
@@ -68952,6 +68984,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
                 "tool": "subagent",
             }),
             chat_message: "Task completed.".to_string(),
+            result_surfacing: super::TaskResultSurfacing::AppendToChat,
             surface: super::SurfaceKind::Logs,
             event_kind: "computer_executor_completed".to_string(),
             event_title: "Executor completed".to_string(),
@@ -74685,6 +74718,80 @@ data: [DONE]\n";
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Cancelled
         );
+    }
+
+    #[test]
+    fn runner_does_not_duplicate_linked_proactive_approval_already_persisted_in_chat() {
+        let state = super::AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .find_or_create_channel_thread(
+                "project-a",
+                "test",
+                "proactive",
+                "Proactive test thread",
+            )
+            .unwrap();
+        let task_id = "proactive_approval_already_persisted";
+        let mut approval = super::channel_chat_message_with_id(
+            "assistant",
+            "Approve this. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{\"path\":\"/tmp/a\"}}‹‹/MCP_CONFIRM››",
+            "proactive_approval_card",
+        );
+        approval.linked_task_id = Some(task_id.to_string());
+        approval.delivery_state =
+            local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        {
+            let store = super::lock_store(&state).unwrap();
+            store
+                .append_assistant_message(&thread.thread_id, &approval)
+                .unwrap();
+            store.link_task_to_thread(task_id, &thread.thread_id).unwrap();
+        }
+
+        let outcome = super::TaskExecutionOutcome {
+            completed: false,
+            blocked_reason: Some("scheduled task is waiting for a user action".to_string()),
+            pending_approval: None,
+            summary: "Scheduled task is waiting for a user action.".to_string(),
+            checkpoint_payload: serde_json::json!({}),
+            checkpoint_redacted: serde_json::json!({}),
+            chat_message: approval.text.clone(),
+            result_surfacing: super::TaskResultSurfacing::AlreadyPersisted,
+            surface: super::SurfaceKind::Logs,
+            event_kind: "proactive_prompt_waiting_approval".to_string(),
+            event_title: "Scheduled task waiting approval".to_string(),
+            event_subtitle: "A persisted action card requires user confirmation.".to_string(),
+            event_payload: serde_json::json!({}),
+            artifacts: vec![],
+        };
+
+        super::surface_task_execution_outcome(&state, task_id, &outcome).unwrap();
+
+        let messages = super::lock_store(&state)
+            .unwrap()
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages;
+        let assistants: Vec<_> = messages
+            .iter()
+            .filter(|message| message.role == "assistant")
+            .collect();
+        assert_eq!(assistants.len(), 1);
+        assert_eq!(assistants[0].id, approval.id);
+        assert_eq!(
+            assistants[0].delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::WaitingUser
+        );
+        assert!(!assistants.iter().any(|message| {
+            message.delivery_state == local_first_desktop_gateway::MessageDeliveryState::Delivered
+        }));
+
+        let context = super::thread_context_for_model(&state, &thread.thread_id, &[], None)
+            .expect("thread context");
+        assert!(!context
+            .iter()
+            .any(|message| message.text.contains("MCP_CONFIRM")));
     }
 
     #[test]
