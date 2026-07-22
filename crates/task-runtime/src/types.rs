@@ -196,6 +196,12 @@ pub struct TurnEvent {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalWrite {
+    Inserted(TurnEvent),
+    Existing(TurnEvent),
+}
+
 /// One broker attempt through the guarded agent loop. This is operational state, not
 /// semantic memory: it exists so a run can be inspected and recovered without changing recall.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -474,11 +480,23 @@ pub struct ThreadActivityProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveTurnProjection {
     pub turn_id: String,
+    pub last_event_seq: i64,
     pub status: String,
     pub attempt: u32,
     pub max_attempts: u32,
     pub not_before: Option<i64>,
     pub blocked_reason: Option<String>,
+    pub updated_at: i64,
+}
+
+/// Durable sidebar/read-model state for one chat thread. The task runtime owns
+/// execution status and the latest public terminal cursor; the gateway combines
+/// this with the user's persisted seen cursor.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThreadAttention {
+    pub thread_id: String,
+    pub status: String,
+    pub latest_terminal_event_id: Option<i64>,
     pub updated_at: i64,
 }
 

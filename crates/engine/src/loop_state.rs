@@ -108,6 +108,10 @@ pub struct LoopState {
     pub pending_browser_image: Option<String>,
     /// The tool-call ids of browser results, so `prune_browser_history` keeps only the freshest one.
     pub browser_tool_call_ids: BTreeSet<String>,
+    /// Browser navigation failures observed during this turn.
+    pub browser_failed_navigations: u32,
+    /// Consecutive browser outcomes that made no useful progress.
+    pub browser_no_progress: u32,
 }
 
 impl LoopState {
@@ -234,6 +238,8 @@ mod tests {
         assert!(!ls.browser_used);
         assert!(ls.pending_browser_image.is_none());
         assert!(ls.browser_tool_call_ids.is_empty());
+        assert_eq!(ls.browser_failed_navigations, 0);
+        assert_eq!(ls.browser_no_progress, 0);
     }
 
     #[test]

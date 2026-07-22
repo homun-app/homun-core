@@ -9,7 +9,8 @@ use std::sync::{
 };
 
 use local_first_task_runtime::{
-    AgentRunStatus, NewAgentRun, TaskRuntimeResult, TaskStore, TurnEventKind, broker::CancelNotify,
+    AgentRunStatus, NewAgentRun, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind,
+    broker::CancelNotify,
 };
 use serde_json::Value;
 #[cfg(test)]
@@ -129,6 +130,17 @@ pub fn register_turn(turn_id: &str) -> Arc<TurnBroadcast> {
     broadcast
 }
 
+fn apply_persisted_cancellation(
+    broadcast: &TurnBroadcast,
+    persisted_status: Option<TaskStatus>,
+) -> bool {
+    if persisted_status == Some(TaskStatus::Cancelled) {
+        broadcast.cancel.cancel();
+        return true;
+    }
+    false
+}
+
 /// Drop the turn broadcast. Call when the executor finishes (success/failure/cancel).
 pub fn unregister_turn(turn_id: &str) {
     if let Ok(mut map) = turn_broadcast_registry().lock() {
@@ -177,7 +189,17 @@ pub fn emit_turn_event(
     kind: TurnEventKind,
     payload: Value,
 ) -> TaskRuntimeResult<()> {
-    let event = store.insert_turn_event(turn_id, kind, payload.clone())?;
+    let event = if matches!(
+        kind,
+        TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
+    ) {
+        match store.insert_terminal_event_once(turn_id, kind, payload.clone())? {
+            local_first_task_runtime::TerminalWrite::Inserted(event) => event,
+            local_first_task_runtime::TerminalWrite::Existing(_) => return Ok(()),
+        }
+    } else {
+        store.insert_turn_event(turn_id, kind, payload.clone())?
+    };
     // Best-effort live broadcast on the per-turn channel (NDJSON stream — transitional).
     // No receivers is fine (broadcast::send errors are benign).
     if let Ok(map) = turn_broadcast_registry().lock() {
@@ -415,6 +437,24 @@ pub fn execute_chat_turn_task(
     // 3. Register the live turn broadcast (Task 1a.2). Cancellation + the
     //    per-turn SSE/WS fan-out key off this. Always unregistered on exit.
     let broadcast = register_turn(turn_id);
+    // A worker owns the resource reservation before it reaches register_turn. If the
+    // user cancels inside that short window, the in-process notify has no receiver yet.
+    // Re-read the durable status after registration: either this observes Cancelled,
+    // or a later cancellation sees the registered broadcast and signals it directly.
+    let persisted_status = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .get_task(&task.task_id, &task.user_id, &task.workspace_id)
+                .ok()
+                .flatten()
+        })
+        .map(|stored| stored.status);
+    if apply_persisted_cancellation(&broadcast, persisted_status) {
+        tracing::info!(target: "broker::executor", turn_id = %turn_id, "latched cancellation registered before executor startup");
+    }
 
     // 4. Open the visible turn: persists user + assistant placeholder messages
     //    and emits `thread.turn_started`. Fail closed if it cannot be persisted
@@ -820,6 +860,41 @@ mod tests {
     }
 
     #[test]
+    fn emit_broadcasts_only_the_canonical_terminal() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let state = AppState::for_tests();
+        let broadcast = register_turn("turn_test_terminal");
+        let mut rx = broadcast.tx.subscribe();
+
+        emit_turn_event(
+            &state,
+            &store,
+            "turn_test_terminal",
+            TurnEventKind::Done,
+            json!({"attempt": 2}),
+        )
+        .unwrap();
+        emit_turn_event(
+            &state,
+            &store,
+            "turn_test_terminal",
+            TurnEventKind::Error,
+            json!({"attempt": 1}),
+        )
+        .unwrap();
+
+        let events = store.read_turn_events("turn_test_terminal", 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TurnEventKind::Done);
+        assert_eq!(rx.try_recv().unwrap().kind, "done");
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        unregister_turn("turn_test_terminal");
+    }
+
+    #[test]
     fn cancel_notify_signals_executor() {
         let broadcast = register_turn("turn_test_cancel");
         let cancel = broadcast.cancel.clone();
@@ -839,6 +914,19 @@ mod tests {
         });
         wait.join().unwrap();
         unregister_turn("turn_test_cancel");
+    }
+
+    #[test]
+    fn persisted_cancel_before_registration_is_latched() {
+        let broadcast = register_turn("turn_test_persisted_cancel");
+
+        assert!(apply_persisted_cancellation(
+            &broadcast,
+            Some(TaskStatus::Cancelled)
+        ));
+        assert!(broadcast.cancel.is_cancelled());
+
+        unregister_turn("turn_test_persisted_cancel");
     }
 
     #[tokio::test]

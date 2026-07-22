@@ -555,6 +555,7 @@ mod tests {
         sink.emit(GenerateStreamEvent::Error {
             code: "e".into(),
             message: "boom".into(),
+            retryable: false,
         })
         .await;
         let got = sink.0.lock().unwrap();

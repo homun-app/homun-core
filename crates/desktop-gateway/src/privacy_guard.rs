@@ -19,6 +19,54 @@ pub(crate) struct PrivacyGuardItem {
     pub(crate) confidence: f32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PrivacyGuardModelOutcome {
+    Classified(PrivacyGuardDecision),
+    Unavailable(&'static str),
+    InvalidOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PrivacyGuardFailurePolicy {
+    DeterministicLocalOnly,
+    BlockAndRetry,
+}
+
+pub(crate) fn failure_policy(orchestrator_is_local: bool) -> PrivacyGuardFailurePolicy {
+    if orchestrator_is_local {
+        PrivacyGuardFailurePolicy::DeterministicLocalOnly
+    } else {
+        PrivacyGuardFailurePolicy::BlockAndRetry
+    }
+}
+
+pub(crate) fn merge_guard_decisions(
+    original_text: &str,
+    model: PrivacyGuardDecision,
+    deterministic: PrivacyGuardDecision,
+) -> PrivacyGuardDecision {
+    let mut items = deterministic.items;
+    for item in model.items {
+        let duplicate = items.iter().any(|existing| {
+            existing.category == item.category
+                && existing.kind == item.kind
+                && existing.secret_value == item.secret_value
+        });
+        if !duplicate {
+            items.push(item);
+        }
+    }
+    let mut redacted_text = original_text.to_string();
+    for item in &items {
+        redacted_text = redacted_text.replace(&item.secret_value, &item.redacted_preview);
+    }
+    PrivacyGuardDecision {
+        has_sensitive_data: !items.is_empty(),
+        items,
+        redacted_text,
+    }
+}
+
 pub(crate) fn classify_sensitive_input_deterministic(text: &str) -> PrivacyGuardDecision {
     let classification = local_first_vault::classify_sensitive_text(text);
     let items = classification
@@ -230,6 +278,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unavailable_guard_blocks_remote_but_allows_local_deterministic_fallback() {
+        assert_eq!(
+            failure_policy(false),
+            PrivacyGuardFailurePolicy::BlockAndRetry
+        );
+        assert_eq!(
+            failure_policy(true),
+            PrivacyGuardFailurePolicy::DeterministicLocalOnly
+        );
+    }
+
+    #[test]
     fn deterministic_guard_detects_vehicle_plate_and_redacts_text() {
         let decision = classify_sensitive_input_deterministic(
             "ricordati che la targa della mia auto e' FM470BN e' un'audi q2",
@@ -305,5 +365,22 @@ mod tests {
         assert_eq!(decision.items[0].secret_value, "FM470BN");
         assert!(decision.redacted_text.contains("[VAULT:vehicles:plate]"));
         assert!(!decision.redacted_text.contains("FM470BN"));
+    }
+
+    #[test]
+    fn model_and_deterministic_detections_are_merged_without_exposing_values() {
+        let original = "La parola che uso per entrare è orchidea; targa FM470BN";
+        let model = decision_from_model_output(
+            original,
+            r#"{"has_sensitive_data":true,"items":[{"category":"credentials","kind":"account_password","label":"Password account","secret_value":"orchidea","confidence":0.99}]}"#,
+        )
+        .unwrap();
+        let deterministic = classify_sensitive_input_deterministic(original);
+
+        let merged = merge_guard_decisions(original, model, deterministic);
+
+        assert_eq!(merged.items.len(), 2);
+        assert!(!merged.redacted_text.contains("orchidea"));
+        assert!(!merged.redacted_text.contains("FM470BN"));
     }
 }

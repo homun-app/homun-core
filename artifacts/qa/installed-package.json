@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-07-22T17:36:44Z",
+  "bundle": "apps/desktop/dist-installers/mac-arm64/homun.app",
+  "bundle_identifier": "app.homun.desktop",
+  "bundle_version": "0.1.1",
+  "architecture": "arm64",
+  "commit": "9e483a5ae6b73002ef51220e1351c5aff73d1aed",
+  "codesign_valid": true,
+  "authority": "Developer ID Application: FABIO CANTONE (MQ5CGAH889)",
+  "team_identifier": "MQ5CGAH889",
+  "hardened_runtime_version": "26.2.0",
+  "staged_gateway_matches_release_build": true,
+  "notarized": false,
+  "notarization_note": "Notarization options are not configured for directory builds."
+}

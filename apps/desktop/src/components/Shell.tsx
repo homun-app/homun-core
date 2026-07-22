@@ -2,11 +2,13 @@ import { useRef, useState, type CSSProperties, type PointerEvent, type ReactNode
 import { useTranslation } from "react-i18next";
 import { NavDrawer, SettingsDrawer } from "./Sidebar";
 import type { ChatThread, NavItem, SettingsSectionId, ViewId } from "../types";
+import type { ThreadAttentionStatus } from "../lib/threadAttentionState";
+import type { CoreThreadAttention } from "../lib/coreBridge";
 
 interface ShellProps {
   activeView: ViewId;
   activeThreadId: string;
-  busyThreadIds: Set<string>;
+  threadAttention: Record<string, ThreadAttentionStatus>;
   chatThreads: ChatThread[];
   drawerOpen: boolean;
   // Composed at runtime in App: static core + enabled addon entries (ADR 0011 §10-A).
@@ -18,6 +20,7 @@ interface ShellProps {
   onDeleteChatThread: (threadId: string) => void;
   onNavigate: (view: ViewId) => void;
   onSelectThread: (threadId: string) => void;
+  onThreadAttention: (rows: CoreThreadAttention[]) => void;
   onSetChatThreadPinned: (threadId: string, pinned: boolean) => void;
   onSelectSettingsSection: (section: SettingsSectionId) => void;
   // Sub-item within a section that has an inline expandable submenu (generic string).
@@ -39,7 +42,7 @@ interface ShellProps {
 export function Shell({
   activeView,
   activeThreadId,
-  busyThreadIds,
+  threadAttention,
   chatThreads,
   children,
   drawerOpen,
@@ -51,6 +54,7 @@ export function Shell({
   onDeleteChatThread,
   onNavigate,
   onSelectThread,
+  onThreadAttention,
   onSetChatThreadPinned,
   onSelectSettingsSection,
   onSelectSettingsSub,
@@ -121,7 +125,7 @@ export function Shell({
         <NavDrawer
           activeView={activeView}
           activeThreadId={activeThreadId}
-          busyThreadIds={busyThreadIds}
+          threadAttention={threadAttention}
           chatThreads={chatThreads}
           navItems={navItems}
           onArchiveChatThread={onArchiveChatThread}
@@ -131,6 +135,7 @@ export function Shell({
           onNavigate={onNavigate}
           onSearchChat={onSearchChat}
           onSelectThread={onSelectThread}
+          onThreadAttention={onThreadAttention}
           onSetChatThreadPinned={onSetChatThreadPinned}
           onToggleDrawer={onToggleDrawer}
           onUnarchiveChatThread={onUnarchiveChatThread}

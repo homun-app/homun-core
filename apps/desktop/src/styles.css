@@ -1104,7 +1104,7 @@ body.resizing-drawer {
    inline at the START of the title (status reads left-to-right, before the text).
    Surfaced when the thread is generating a chat answer (real-time streaming
    signal) or running a linked background task. */
-.thread-busy-dot {
+.thread-status-dot {
   display: inline-block;
   vertical-align: middle;
   width: 7px;
@@ -1113,7 +1113,25 @@ body.resizing-drawer {
   border-radius: 50%;
   background: var(--brand);
   flex: none;
+}
+
+.thread-status-dot.working {
   animation: msg-activity-pulse 1.2s ease-in-out infinite;
+}
+
+.thread-status-dot.completed-unread {
+  background: var(--brand);
+  animation: none;
+}
+
+.thread-status-dot.waiting_user {
+  background: var(--amber);
+  animation: none;
+}
+
+.thread-status-dot.failed {
+  background: var(--red);
+  animation: none;
 }
 
 /* Leading per-type glyph slot. Carries its own right margin (not a grid gap) so it can
@@ -3000,6 +3018,41 @@ body.resizing-drawer {
   gap: 0;
   width: 100%;
   pointer-events: auto;
+}
+
+.browser-budget-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 14px 14px;
+  color: var(--muted);
+  background: var(--surface-raised);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: auto;
+}
+
+.browser-budget-notice svg {
+  color: var(--warning, #c58b3f);
+}
+
+.browser-budget-notice button {
+  border: 0;
+  padding: 4px 7px;
+  color: var(--brand);
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.browser-budget-notice button:disabled {
+  color: var(--muted);
+  cursor: default;
 }
 .unified-status-panel .project-context-panel {
   border-radius: 14px 14px 0 0;
@@ -5876,7 +5929,7 @@ body.resizing-drawer {
 }
 
 .pending-steering-edit {
-  margin-top: 7px;
+  margin: 0 0 8px;
 }
 
 .pending-steering-edit textarea {
@@ -10212,6 +10265,31 @@ body.resizing-drawer {
   height: 100%;
   border: 0;
   display: block;
+}
+
+.cc-connection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  background: color-mix(in srgb, #0b0d12 92%, transparent);
+}
+
+.cc-connection-overlay strong {
+  color: var(--text);
+}
+
+.cc-connection-state {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 /* Single alternating status line under the big browser: shows the CURRENT action, cycling
@@ -15139,6 +15217,21 @@ body.resizing-drawer {
   margin: 0 0 8px;
   line-height: 1.5;
 }
+.proattiva-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.proattiva-stale {
+  border: 1px solid color-mix(in srgb, var(--text-muted) 28%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--text-secondary);
+}
 .proattiva-card-why {
   display: flex;
   align-items: flex-start;
@@ -16006,6 +16099,7 @@ body.resizing-drawer {
   position: absolute;
   top: var(--s2);
   right: var(--s2);
+  z-index: 3;
 }
 
 /* ── Onboarding wizard ───────────────────────────────────────────────────── */

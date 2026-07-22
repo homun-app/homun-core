@@ -194,11 +194,60 @@ pub fn strip_display_markers(text: &str) -> String {
     out
 }
 
-/// The user-visible prose in a model response, if any. Display-only marker blocks are never a
-/// deliverable by themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryTextError {
+    Empty,
+    DegenerateRepetition,
+}
+
+/// Canonical delivery gate for model prose. Raw reasoning and display-only
+/// markers are removed first; visibly looping text is rejected so it follows
+/// the same retry/failure path as an empty answer.
+pub fn delivery_text(text: &str) -> Result<String, DeliveryTextError> {
+    let visible = strip_display_markers(&normalize_reasoning_markers(text))
+        .trim()
+        .to_string();
+    if visible.is_empty() {
+        return Err(DeliveryTextError::Empty);
+    }
+
+    let tokens = visible
+        .split_whitespace()
+        .map(|token| {
+            token
+                .trim_matches(|character: char| !character.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    if tokens.len() >= 10 {
+        let adjacent_duplicates = tokens.windows(2).filter(|pair| pair[0] == pair[1]).count();
+        let unique = tokens.iter().collect::<std::collections::HashSet<_>>().len();
+        let repeated = tokens.len().saturating_sub(unique);
+        let repeated_bigrams = tokens
+            .windows(2)
+            .fold(std::collections::HashMap::<(&str, &str), usize>::new(), |mut counts, pair| {
+                *counts.entry((&pair[0], &pair[1])).or_default() += 1;
+                counts
+            })
+            .values()
+            .copied()
+            .max()
+            .unwrap_or(0);
+        if adjacent_duplicates >= 2
+            || repeated_bigrams >= 3
+            || (repeated * 2 >= tokens.len() && unique <= 8)
+        {
+            return Err(DeliveryTextError::DegenerateRepetition);
+        }
+    }
+    Ok(visible)
+}
+
+/// The user-visible prose in a model response, if any. Display-only marker blocks and degenerate
+/// output are never deliverable by themselves.
 pub fn visible_answer(text: &str) -> Option<String> {
-    let visible = strip_display_markers(text).trim().to_string();
-    (!visible.is_empty()).then_some(visible)
+    delivery_text(text).ok()
 }
 
 /// Extract complete display blocks in their original order for a later final delivery. Reasoning is
@@ -476,6 +525,23 @@ mod tests {
         assert_eq!(
             visible_answer("‹‹REASONING››hidden‹‹/REASONING››\n  Risposta finale.  "),
             Some("Risposta finale.".to_string()),
+        );
+    }
+
+    #[test]
+    fn delivery_text_rejects_pathological_repetition() {
+        let raw = "Inter Inter Interessante essante essante il browse il browse il browse ha trovato ha trovato";
+        assert_eq!(
+            delivery_text(raw),
+            Err(DeliveryTextError::DegenerateRepetition)
+        );
+    }
+
+    #[test]
+    fn delivery_text_keeps_normal_prose() {
+        assert_eq!(
+            delivery_text("Molto bene. Bene davvero: il test è passato.").unwrap(),
+            "Molto bene. Bene davvero: il test è passato."
         );
     }
 

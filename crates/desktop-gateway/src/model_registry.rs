@@ -470,7 +470,7 @@ pub const ROLES: &[RoleInfo] = &[
     RoleInfo {
         key: "privacy_guard",
         label: "Privacy guard",
-        description: "Pre-turn sensitive-data classification before chat: must be a local fast text model when possible.",
+        description: "Pre-turn sensitive-data classification before chat: only locally benchmarked models are eligible.",
     },
     RoleInfo {
         key: "image_generation",
@@ -526,7 +526,8 @@ pub fn role_requirements(role: &str) -> RoleReq {
             preferred_tier: Some(ModelTier::Balanced),
         },
         // Memory/privacy extraction are short structured-output tasks. Privacy
-        // Guard is resolved separately at the call site to require a local model.
+        // Guard is resolved separately at the call site to require a local,
+        // benchmark-qualified model.
         "memory" | "privacy_guard" => RoleReq {
             needs_tools: false,
             needs_vision: false,

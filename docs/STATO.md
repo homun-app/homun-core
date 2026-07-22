@@ -5,6 +5,44 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-22.**
 
+## ⭐ CHECKPOINT 2026-07-22 — Interfaccia task stabile, gate app installata
+
+La selezione della chat è ora esclusivamente dell'utente: un completamento in background aggiorna
+il cursore terminale durabile e mostra un pallino Homun teal fisso, senza navigare. Retry, replay e
+recovery convergono su una sola bolla assistant e un solo terminale; il reasoning grezzo non entra
+nel transcript.
+
+Durante il collaudo installato è emerso e stato chiuso un leak P0: la cancellazione dal Workbench
+poteva lasciare occupata `browser_session`, bloccando tutte le chat successive in attesa risorsa.
+La cancellazione ora passa dal broker, libera subito i turni non in esecuzione, arresta in sicurezza
+quelli attivi e chiude la race tra prenotazione e registrazione del segnale. Il boot ripulisce anche
+prenotazioni/lease terminali orfane da crash precedenti.
+
+**Gate finale:** bundle arm64 0.1.1 firmato Developer ID; tre chat reali completate in 34,394 s con
+B sempre selezionata, una risposta/terminale ciascuna e zero reasoning leak; cancellazione live con
+risorsa 1 -> 0; renderer verificato a 1360x900 e 900x700; pre-release gate `ALL GREEN` (gateway
+835 passed, 0 failed, 6 live-Ollama ignored). Checklist ed esclusioni:
+[`docs/qa/homun-stability-installed-app-gate.md`](qa/homun-stability-installed-app-gate.md).
+
+## ⭐ CHECKPOINT 2026-07-22 — Transcript stabile e reasoning isolato
+
+La risposta visibile ora attraversa un unico quality gate: output vuoto, reasoning-only o con
+ripetizioni patologiche non può diventare un completamento e segue il percorso canonico di
+retry/fallimento. Nel desktop il reasoning grezzo viene scartato sia dagli eventi strutturati sia
+dal testo, inclusi i blocchi ancora aperti durante lo streaming; l'Activity sintetica resta
+disponibile fuori dal transcript.
+
+La finalizzazione gateway filtra inoltre le parti `reasoning` prima della persistenza del messaggio,
+conservando recall e provenance. Retry e fallimento terminale aggiornano sempre la stessa bolla
+assistant preallocata: non viene aggiunta una seconda risposta.
+
+**Gate mirati eseguiti:**
+| Gate | Esito |
+| --- | --- |
+| Engine `delivery_text_`, `visible_answer_`, `agent_loop::tests` | OK |
+| Desktop `chatVisibleContent.test.mjs`, UI contract e build | OK |
+| Gateway filtro reasoning + bolla stabile retry/failure | OK |
+
 ## ⭐ CHECKPOINT 2026-07-22 — Catalogo skill ClawHub publisher-aware
 
 Risolto il `409 Conflict` incontrato installando `weather`: su ClawHub lo stesso slug può
@@ -2244,10 +2282,19 @@ GIÀ FATTO sessione 5g (NON ripartire; tutto su `main`):
   preflight e la UI mostrava il generico `Failed to fetch`. Aggiunto test di preflight `PATCH`.
 - **Privacy Guard pre-turn per Vault**: aggiunto gate prima del loop chat. Il guard prova il ruolo
   modellistico locale `privacy_guard` (solo endpoint loopback e modello non `:cloud`), valida che i
-  secret siano sottostringhe esatte del prompt e altrimenti usa il classifier deterministico come safety
-  net. Se rileva dati sensibili, non chiama il modello chat: lo stream `Done` porta `redacted_user_text`,
+  secret siano sottostringhe esatte del prompt e unisce sempre anche le rilevazioni deterministiche. Se il
+  guard modellistico non risponde o produce output invalido, un orchestratore locale può proseguire con il
+  solo classifier deterministico; verso un orchestratore remoto il turno si ferma prima dell'inferenza con
+  errore retryable `privacy_guard_unavailable` (fail-closed). Se rileva dati sensibili, non chiama il modello
+  chat: lo stream `Done` porta `redacted_user_text`,
   il frontend committa il messaggio utente redatto e l'assistant mostra solo `VAULT_PROPOSE` con
   `pending_id`. Il raw resta nel sidecar volatile.
+- **Privacy Guard qualificato su hardware supportato (22 luglio 2026)**: corpus versionato da 44 casi
+  bilanciati IT/EN e soglie minime recall 95%, specificità 90%, JSON valido 99%, p95 12 s. `qwen3.5:2b`
+  non è qualificato (recall 77,27%, specificità 100%, JSON 95,45%, p95 4,72 s) e non viene più scelto
+  automaticamente. `qwen3.5:4b` è il più piccolo candidato qualificato (recall 95,45%, specificità 100%,
+  JSON 100%, p95 8,50 s) ed è l'unico modello ammesso oggi dal resolver `privacy_guard`. `gemma4:12b`
+  è stato escluso dalla decisione perché il run ha superato il timeout e non ha prodotto un report completo.
 - **Vault proposal UX/policy fix**: la card `VAULT_PROPOSE` ora usa i token tema (niente card chiara
   hardcoded), non chiede PIN per salvare e si compatta dopo save/dismiss. L'accept salva un record
   metadata-only con `pending_id`; il PIN serve quando l'utente fa reveal/edit, momento in cui il gateway

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-07-22T17:36:44Z",
+  "bundle_version": "0.1.1",
+  "commit": "9e483a5ae6b73002ef51220e1351c5aff73d1aed",
+  "passed": true,
+  "turn_id": "turn_chat_stream_1784741727_602a67224ff7441296fefd3bb1c45cb2",
+  "was_reserved_before_cancel": true,
+  "terminal_status": "cancelled",
+  "resource_reservations_after_cancel": 0
+}

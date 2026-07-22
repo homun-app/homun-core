@@ -152,6 +152,26 @@ assertContains("src/components/ChatView.tsx", "enqueueTurn(thread.threadId, requ
 assertSource("src/components/ActiveTurnStatus.tsx", ["Attività", "onStop", "attempt"]);
 assertSource("src/components/PendingSteeringQueue.tsx", ["onEdit", "onDelete", "onSendNow"]);
 assertSource("src/components/ChatView.tsx", ["active-turn-tail", "pendingSteering"]);
+assertNotContains(
+  "src/App.tsx",
+  "navigateToThread(eventThreadId",
+  "background events cannot navigate",
+);
+assertContains(
+  "src/App.tsx",
+  "refreshThreadInBackground(eventThreadId)",
+  "background events refresh only their cache",
+);
+assertContains(
+  "src/App.tsx",
+  "const preservedThread = mappedThreads.find((thread) => thread.threadId === activeThreadId",
+  "non-selection thread actions must preserve the user-owned active task",
+);
+assertContains(
+  "src/styles.css",
+  ".thread-status-dot.completed-unread",
+  "completion uses a fixed teal dot",
+);
 assertSource("src/components/ChatView.tsx", [
   'function openActivityIsland() {\n    dispatchInspector({ type: "hideWorkspace" });\n    setIslandOpen(true);',
   "onOpenActivity={openActivityIsland}",
@@ -382,7 +402,8 @@ assertNotContains("src/App.tsx", "runAgentTurnHeadless", "frontend must not expo
 assertRepoNotContains("crates/desktop-gateway/src/main.rs", "async fn run_agent_turn(", "backend must not keep a headless agent-turn helper that can bypass visible placeholders");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "run_agent_turn_into_message", "backend agent turns must stream into persisted assistant messages");
 assertRepoContains("crates/desktop-gateway/src/main.rs", "OPERATIONAL PLAN: for a non-trivial MULTI-STEP task, call update_plan and then continue executing", "chat loop must maintain the canonical plan through update_plan and continue in the same turn");
-assertContains("src/App.tsx", "pendingEventThreadIdsRef", "event-driven thread navigation must not drop updates while React is switching active threads");
+assertNotContains("src/App.tsx", "pendingEventThreadIdsRef", "background event refresh must not depend on a navigation race window");
+assertContains("src/App.tsx", "refreshThreadInBackground", "background events must refresh their own durable cache");
 assertContains("src/App.tsx", "event.type === \"thread.turn_started\"", "desktop client must handle visible turn start events");
 assertContains("src/lib/coreBridge.ts", "assistant_message_id?: string", "app event contract must expose persisted assistant message ids");
 assertContains("src/components/ChatView.tsx", "eventParts: normalizeChatEventParts(result.assistant_message.event_parts)", "completed chat turns must preserve structured event parts from the gateway result");
@@ -434,6 +455,7 @@ assertContains("src/data/mockData.ts", "label: \"settings.computer.title\"", "Se
 assertContains("src/lib/coreBridge.ts", "secret_value?: string", "Vault bridge must expose optional raw secret material only for the encrypted accept path");
 assertContains("src/components/ChatComputerPanel.tsx", "const browserRunning = Boolean(live?.active && live?.novnc_url)", "live computer browser state must distinguish running activity from idle availability");
 assertContains("src/components/ChatComputerPanel.tsx", "view_only=1&viewer=csp-external-v1", "chat computer must invalidate the CSP-blocked inline viewer cached by older desktop releases");
+assertContains("src/components/SettingsView.tsx", "catalogDisplayIdentity(target)", "skill preview must preserve the publisher-qualified target while loading or failing");
 assertContains("src/components/ChatComputerPanel.tsx", "const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running))", "terminal dock must be driven by running terminal activity, not completed history");
 assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId", "live computer activity must not appear across chats without a matching owner");
 assertNotContains("src/components/ChatComputerPanel.tsx", "cc-dock-activity", "computer island header must show only Computer and LIVE, never prompt/activity text");
@@ -597,6 +619,8 @@ assertNotContains("src/styles.css", ".virtual-message-row", "chat transcript mus
 assertContains("src/components/ChatView.tsx", "streamingFrameRef", "chat streaming must throttle visible updates in Electron");
 assertContains("src/components/ChatView.tsx", "setOptimisticMessages", "chat streaming must keep visible text in the React message state");
 assertContains("src/components/ChatView.tsx", "<AssistantMessageBody", "streaming answers must render through the normal message body component");
+assertContains("src/components/ChatView.tsx", "browser_budget_exceeded", "browser budget has an actionable Activity state");
+assertContains("src/i18n/locales/it.json", "Tempo massimo del browser raggiunto", "browser timeout is localized");
 assertMatches(
   "src/components/ChatView.tsx",
   /isStreamingMessage \? \([\s\S]*?<AssistantMessageBody[\s\S]*?\n\s+streaming\n[\s\S]*?\)/m,
@@ -724,7 +748,9 @@ assertContains("src/styles.css", ".artifacts-panel.embedded .artifact-preview-do
 assertContains("src/styles.css", ".workbench-artifacts-list .artifact-row-wrap {\n  overflow: hidden;\n  border: 0;", "artifact rows must avoid nested card borders");
 assertContains("src/components/ChatView.tsx", "fileStatus === \"missing\"", "missing files must expose a dedicated recoverable state");
 assertNotContains("src/components/ChatView.tsx", "{planSteps.length > 0 && <PlanProgressCard steps={planSteps} />}", "operational plan markers must not render duplicate inline cards inside the assistant answer");
-assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}", "assistant markdown must stay progressive while the message streams");
+assertContains("src/components/ChatView.tsx", "{readable && <RichMessage text={readable} streaming={streaming} />}", "assistant markdown must stay progressive while the message streams");
+assertContains("src/components/RichMessage.tsx", "visibleMessageText(text)", "raw reasoning must be filtered before transcript rendering");
+assertNotContains("src/components/RichMessage.tsx", "ReasoningBlock", "raw reasoning must never render as transcript content");
 assertContains("src/components/ChatView.tsx", "{planPropose && !streaming && onChoose && (", "actionable plan proposal cards must wait for a completed non-streaming message");
 assertContains("src/components/ChatView.tsx", "streamingUserPinnedRef", "chat must keep new streaming responses visible");
 assertNotContains("src/components/ChatView.tsx", "STREAM_TYPEWRITER_INTERVAL_MS", "chat streaming must not use timer-based typewriter rendering");
@@ -791,7 +817,7 @@ assertContains("src/styles.css", ".cc-dock,\n.cc-scrim {\n  pointer-events: auto
 assertContains("src/styles.css", ".cc-dock.full {\n  position: fixed;", "Computer fullscreen dock must escape the status stack and anchor inside the chat viewport");
 assertContains("src/styles.css", "left: calc(var(--drawer-island-gap) + var(--drawer-width, 292px) + 24px);", "Computer fullscreen dock must start to the right of the sidebar island");
 assertContains("src/styles.css", "width: min(1040px, calc(100vw - var(--drawer-width, 292px) - 72px));", "Computer fullscreen must be large but bounded by the chat area");
-assertContains("src/components/RichMessage.tsx", "STRAY_REASONING_MARKER_RE", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
+assertContains("src/lib/chatVisibleContent.mjs", "STRAY_REASONING_MARKER", "streaming renderer must strip stray or malformed reasoning markers from the visible answer body");
 assertContains("src/components/ChatView.tsx", "VAULT_PROPOSE_RE", "chat renderer must parse vault proposal markers");
 assertContains("src/components/ChatView.tsx", "VaultProposeCard", "chat renderer must render sensitive-data vault proposal cards");
 // The strip regex (COMPOSIO_MARKERS_RE, which lists VAULT_PROPOSE|…) was refactored out of

@@ -190,7 +190,7 @@ where
 {
     let event: GenerateStreamEvent =
         serde_json::from_str(line).map_err(RuntimeClientError::Json)?;
-    if let GenerateStreamEvent::Error { code, message } = &event {
+    if let GenerateStreamEvent::Error { code, message, .. } = &event {
         return Err(RuntimeClientError::Runtime {
             code: code.clone(),
             message: message.clone(),

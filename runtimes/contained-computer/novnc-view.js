@@ -18,10 +18,25 @@ const url = `${proto}://${location.host}${dir}websockify`
   + (ticket ? `?ticket=${encodeURIComponent(ticket)}` : '');
 
 let rfb = null;
+function publish(state, detail = null) {
+  // The desktop and the direct noVNC endpoint are normally cross-origin. The
+  // parent therefore validates both event.origin and event.source before
+  // accepting this message; using a wildcard here is required for delivery.
+  parent.postMessage({ type: 'homun-novnc-state', state, detail }, '*');
+}
+
 function connect() {
   status.hidden = false;
   status.textContent = 'Connessione al computer…';
-  rfb = new RFB(document.getElementById('screen'), url, { shared: true });
+  publish('connecting');
+  try {
+    rfb = new RFB(document.getElementById('screen'), url, { shared: true });
+  } catch (error) {
+    publish('failed', error instanceof Error ? error.message : 'rfb_start_failed');
+    status.textContent = 'Connessione non riuscita';
+    setTimeout(connect, 1200);
+    return;
+  }
   // Scale the remote framebuffer to fit the container, preserve aspect ratio,
   // never clip; do not ask the server to resize its display.
   rfb.viewOnly = viewOnly;
@@ -29,8 +44,12 @@ function connect() {
   rfb.clipViewport = false;
   rfb.resizeSession = false;
   rfb.background = '#0b0d12';
-  rfb.addEventListener('connect', () => { status.hidden = true; });
-  rfb.addEventListener('disconnect', () => {
+  rfb.addEventListener('connect', () => {
+    status.hidden = true;
+    publish('connected');
+  });
+  rfb.addEventListener('disconnect', (event) => {
+    publish(event.detail?.clean ? 'disconnected' : 'failed');
     status.hidden = false;
     status.textContent = 'Riconnessione…';
     // x11vnc runs with -forever -shared, so reconnecting is safe.

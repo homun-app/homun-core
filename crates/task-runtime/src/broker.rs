@@ -484,8 +484,8 @@ where
 }
 
 /// Interactive input submitted while a thread is active is user steering for
-/// that run, not a competing turn. Persist the transcript row and steering row
-/// in one transaction so the executor can consume exactly what the user sees.
+/// that run, not a competing turn. Persist only the steering envelope until a
+/// round boundary claims and materializes it exactly once in the transcript.
 pub fn enqueue_or_steer_chat_turn_atomic<F, G>(
     store: &TaskStore,
     user_id: &UserId,
@@ -587,7 +587,48 @@ pub fn recover_chat_turns_at_boot(
 ) -> TaskRuntimeResult<Vec<TaskId>> {
     let mut recovered = Vec::new();
     for mut task in store.list_tasks(user_id, workspace_id)? {
-        if task.kind != "chat_turn" || task.status != TaskStatus::Running {
+        if task.kind != "chat_turn" {
+            continue;
+        }
+        if matches!(
+            task.status,
+            TaskStatus::Completed
+                | TaskStatus::Failed
+                | TaskStatus::Cancelled
+                | TaskStatus::Expired
+        ) {
+            store.release_resources(&task)?;
+            if task.lease_owner.is_some()
+                || task.lease_expires_at.is_some()
+                || task.last_heartbeat_at.is_some()
+            {
+                task.lease_owner = None;
+                task.lease_expires_at = None;
+                task.last_heartbeat_at = None;
+                task.updated_at = OffsetDateTime::now_utc();
+                store.insert_chat_turn(
+                    &task,
+                    task.input_json
+                        .get("thread_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    task.input_json
+                        .get("request_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    task.input_json
+                        .get("source")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("interactive"),
+                    task.input_json
+                        .get("approval")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("full"),
+                )?;
+            }
+            continue;
+        }
+        if task.status != TaskStatus::Running {
             continue;
         }
         // lease_owner has the form "<generation>:<worker_id>". If the generation is the
@@ -675,10 +716,17 @@ pub fn cancel_chat_turn(
     if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled) {
         return Ok(false); // idempotent
     }
+    let was_running = task.status == TaskStatus::Running;
     let now = OffsetDateTime::now_utc();
     task.status = TaskStatus::Cancelled;
     task.blocked_reason = Some("cancelled by user/server".into());
     task.updated_at = now;
+    if !was_running {
+        store.release_resources(&task)?;
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
+    }
     let thread_id = task.input_json.get("thread_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let request_id = task.input_json.get("request_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let source = task.input_json.get("source").and_then(|v| v.as_str()).unwrap_or("interactive");
@@ -687,7 +735,7 @@ pub fn cancel_chat_turn(
         user_id.as_str(), workspace_id.as_str(), task_id.as_str(),
     )?;
     store.insert_chat_turn(&task, &thread_id, &request_id, source, approval)?;
-    store.insert_turn_event(
+    let _ = store.insert_terminal_event_once(
         task_id.as_str(),
         TurnEventKind::Cancelled,
         serde_json::json!({ "reason": "user_cancel", "at": now.unix_timestamp() }),
@@ -783,7 +831,10 @@ mod tests {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
-    use crate::{AgentRunStatus, NewAgentRun, TaskRecord, TaskStore, TaskStatus, UserId, WorkspaceId};
+    use crate::{
+        AgentRunStatus, NewAgentRun, NewAgentToolReceipt, TaskRecord, TaskStore, TaskStatus,
+        ToolReceiptClaim, UserId, WorkspaceId,
+    };
     use serde_json::json;
     use time::Duration;
 
@@ -794,7 +845,13 @@ mod recovery_tests {
         let mut t = TaskRecord::new(
             "turn_stale", UserId::new("u"), WorkspaceId::new("w"),
             "chat_turn", "prompt",
-            json!({"thread_id":"t1","request_id":"r1","source":"interactive","approval":"full"}),
+            json!({
+                "thread_id":"t1",
+                "request_id":"r1",
+                "assistant_message_id":"local_assistant_r1",
+                "source":"interactive",
+                "approval":"full"
+            }),
         );
         t.status = TaskStatus::Running;
         t.lease_owner = Some(format!("{gen_val}:worker_0"));
@@ -818,6 +875,20 @@ mod recovery_tests {
             prompt_fingerprint: None,
         })
         .unwrap();
+        let receipt = NewAgentToolReceipt {
+            turn_id: "turn_stale".into(),
+            idempotency_key: "write_file:abc".into(),
+            run_id: "run-stale".into(),
+            thread_id: "t1".into(),
+            user_id: "u".into(),
+            workspace_id: "w".into(),
+            tool_name: "write_file".into(),
+            arguments_hash: "abc".into(),
+        };
+        assert!(matches!(
+            s.claim_tool_receipt(&receipt).unwrap(),
+            ToolReceiptClaim::Execute
+        ));
         // bump twice to simulate "we are generation 2, the lease is from generation 1"
         s.bump_process_generation().unwrap();
         let gen_now = s.bump_process_generation().unwrap();
@@ -828,10 +899,23 @@ mod recovery_tests {
         let t = s.get_task(&TaskId::new("turn_stale"), &UserId::new("u"), &WorkspaceId::new("w")).unwrap().unwrap();
         assert_eq!(t.status, TaskStatus::Queued);
         assert!(t.lease_owner.is_none());
+        assert_eq!(t.task_id.as_str(), "turn_stale");
+        assert_eq!(
+            t.input_json["assistant_message_id"],
+            "local_assistant_r1"
+        );
         // and the aborted event was written
         let events = s.read_turn_events("turn_stale", 0).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].kind, TurnEventKind::Aborted);
+        assert!(events.iter().all(|event| !matches!(
+            event.kind,
+            TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
+        )));
+        assert!(matches!(
+            s.claim_tool_receipt(&receipt).unwrap(),
+            ToolReceiptClaim::Uncertain(_)
+        ));
         let runs = s.list_agent_runs_for_turn("turn_stale", "u", "w").unwrap();
         assert_eq!(runs[0].status, AgentRunStatus::Aborted);
         assert_eq!(runs[0].terminal_reason.as_deref(), Some("gateway_restart"));
@@ -890,7 +974,7 @@ mod recovery_tests {
 #[cfg(test)]
 mod cancel_tests {
     use super::*;
-    use crate::{TaskStore, TaskStatus, UserId, WorkspaceId};
+    use crate::{ResourceClass, TaskStore, TaskStatus, UserId, WorkspaceId};
     use std::sync::{Arc, Mutex};
 
     struct RecordingNotify { turns: Arc<Mutex<Vec<String>>> }
@@ -938,6 +1022,54 @@ mod cancel_tests {
         let notify = NoopCancelNotify;
         let ok = cancel_chat_turn(&s, &UserId::new("u"), &WorkspaceId::new("w"), &r.task_id, &notify).unwrap();
         assert!(!ok, "no-op on already-terminal turn");
+    }
+
+    #[test]
+    fn cancel_releases_resources_when_turn_is_not_running() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        s.reserve_resources(&task, "stale-worker").unwrap();
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            1
+        );
+
+        assert!(cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
+
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn boot_recovery_releases_terminal_turn_resources_and_lease() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let mut task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        s.reserve_resources(&task, "dead-worker").unwrap();
+        task.status = TaskStatus::Cancelled;
+        task.lease_owner = Some("old-generation:dead-worker".into());
+        task.lease_expires_at = Some(OffsetDateTime::now_utc());
+        task.last_heartbeat_at = Some(OffsetDateTime::now_utc());
+        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full").unwrap();
+
+        let recovered = recover_chat_turns_at_boot(&s, &user, &workspace, 7).unwrap();
+
+        assert!(recovered.is_empty());
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0
+        );
+        let stored = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        assert!(stored.lease_owner.is_none());
+        assert!(stored.lease_expires_at.is_none());
+        assert!(stored.last_heartbeat_at.is_none());
     }
 }
 
@@ -1104,7 +1236,10 @@ mod atomic_tests {
                 ..
             } if active_turn_id == active.task_id.as_str()
         ));
-        assert!(*called.lock().unwrap());
+        assert!(
+            !*called.lock().unwrap(),
+            "pending steering must stay out of the transcript until claim"
+        );
         let steering = s
             .consume_pending_turn_steering("u", "w", "t1", active.task_id.as_str())
             .unwrap();

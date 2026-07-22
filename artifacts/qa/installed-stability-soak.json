@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-07-22T17:36:44Z",
+  "bundle_version": "0.1.1",
+  "commit": "9e483a5ae6b73002ef51220e1351c5aff73d1aed",
+  "passed": true,
+  "violations": [],
+  "duration_ms": 34394,
+  "expected_selected": "thread_1784741749_1784741749447977000",
+  "actual_selected": "thread_1784741749_1784741749447977000",
+  "terminal_order": ["A", "B", "C"],
+  "turns": {
+    "turn_stability_a_b4dea68ae58c": {
+      "label": "A",
+      "status": "completed",
+      "terminal_count": 1,
+      "assistant_count": 1
+    },
+    "turn_stability_b_b30237a97ad5": {
+      "label": "B",
+      "status": "completed",
+      "terminal_count": 1,
+      "assistant_count": 1
+    },
+    "turn_stability_c_ec6531597027": {
+      "label": "C",
+      "status": "completed",
+      "terminal_count": 1,
+      "assistant_count": 1
+    }
+  }
+}

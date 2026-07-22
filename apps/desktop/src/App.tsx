@@ -37,6 +37,7 @@ import {
   type CoreChatMessage,
   type CoreChatThread,
   type CoreChatThreadSnapshot,
+  type CoreThreadAttention,
   type CoreCapabilitySnapshot,
   type CoreMemoryDashboard,
   type CoreTaskDetail,
@@ -51,6 +52,14 @@ import { wsSubscription } from "./lib/wsSubscription";
 import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
 import { reconcileChatMessages } from "./lib/uiSnapshot";
+import {
+  createThreadAttentionState,
+  hydrateThreadAttentionState,
+  selectThread,
+  type ThreadAttentionSnapshot,
+  type ThreadAttentionState,
+  type ThreadAttentionStatus,
+} from "./lib/threadAttentionState";
 import type {
   ApprovelItem,
   ChatAttachment,
@@ -99,6 +108,15 @@ function mapCoreChatThread(thread: CoreChatThread): ChatThread {
   };
 }
 
+function mapCoreThreadAttention(row: CoreThreadAttention): ThreadAttentionSnapshot {
+  return {
+    threadId: row.thread_id,
+    status: row.status,
+    terminalEventId: row.latest_terminal_event_id,
+    lastSeenTerminalEventId: row.last_seen_terminal_event_id,
+  };
+}
+
 function mapCoreChatMessage(message: CoreChatMessage): ChatMessage {
   return {
     id: message.id,
@@ -142,7 +160,10 @@ function mapCoreChatEventParts(parts: unknown[] | null | undefined): ChatEventPa
     }
     const record = part as Record<string, unknown>;
     const type = record.type;
-    if (type === "reasoning" || type === "activity") {
+    if (type === "reasoning") {
+      continue;
+    }
+    if (type === "activity") {
       if (typeof record.text === "string") {
         mapped.push({ type, text: record.text });
       }
@@ -622,12 +643,15 @@ export default function App() {
     assistantMessageId: string;
   } | null>(null);
   const pendingLocalMessageThreadIdsRef = useRef<Set<string>>(new Set());
-  const pendingEventThreadIdsRef = useRef<Set<string>>(new Set());
   const busyThreadIdsRef = useRef<Set<string>>(new Set());
   // Thread ids generating in the BACKGROUND (a chat left mid-answer while another is
   // on screen). Polled from the gateway's resume registry so the sidebar dots light
   // up on every working chat, not only the active one.
   const [backgroundStreamIds, setBackgroundStreamIds] = useState<Set<string>>(new Set());
+  const [threadAttention, setThreadAttention] = useState<ThreadAttentionState>(() =>
+    createThreadAttentionState(defaultChatThread.threadId),
+  );
+  const threadAttentionRef = useRef(threadAttention);
   const [selectedTaskId, setSelectedTaskId] = useState("task_prompt_session");
   const [drawerOpen, setDrawerOpen] = useState(() => window.innerWidth > 1024);
   // Search modal lifted here (was in Shell) so BOTH the sidebar and the collapsed in-header
@@ -658,6 +682,17 @@ export default function App() {
   useEffect(() => {
     busyThreadIdsRef.current = busyThreadIds;
   }, [busyThreadIds]);
+  const attentionByThread = useMemo(() => {
+    const attention: Record<string, ThreadAttentionStatus> = {
+      ...threadAttention.byThread,
+    };
+    for (const threadId of busyThreadIds) {
+      if (!attention[threadId] || attention[threadId] === "idle") {
+        attention[threadId] = "working";
+      }
+    }
+    return attention;
+  }, [busyThreadIds, threadAttention.byThread]);
   const selectedTask = useMemo(
     () =>
       taskItems.find((task) => task.id === selectedTaskId) ?? {
@@ -716,6 +751,38 @@ export default function App() {
     });
   }
 
+  function applyThreadAttentionRows(rows: CoreThreadAttention[]) {
+    const current = threadAttentionRef.current;
+    const next = hydrateThreadAttentionState(
+      current,
+      rows.map(mapCoreThreadAttention),
+    );
+    threadAttentionRef.current = next;
+    setThreadAttention(next);
+    const selectedThreadId = next.selectedThreadId;
+    const seenTerminalEventId = next.seenTerminalEventIds[selectedThreadId] ?? 0;
+    if (seenTerminalEventId > (current.seenTerminalEventIds[selectedThreadId] ?? 0)) {
+      void coreBridge
+        .markThreadSeen(selectedThreadId, seenTerminalEventId)
+        .then((row) => applyThreadAttentionRows([row]))
+        .catch((error) => console.warn("mark_thread_seen unavailable", error));
+    }
+  }
+
+  function markSelectedThreadSeen(threadId: string) {
+    const current = threadAttentionRef.current;
+    const next = selectThread(current, threadId);
+    threadAttentionRef.current = next;
+    setThreadAttention(next);
+    const terminalEventId = next.seenTerminalEventIds[threadId] ?? 0;
+    if (terminalEventId > (current.seenTerminalEventIds[threadId] ?? 0)) {
+      void coreBridge
+        .markThreadSeen(threadId, terminalEventId)
+        .then((row) => applyThreadAttentionRows([row]))
+        .catch((error) => console.warn("mark_thread_seen unavailable", error));
+    }
+  }
+
   function handleNavigate(view: ViewId) {
     if (view === "settings" && activeView !== "settings") {
       setPreviousView(activeView);
@@ -728,6 +795,7 @@ export default function App() {
     // Optimistic + instant: switch the center to the thread NOW, before any network. If its
     // messages are already in memory the switch is truly immediate (no spinner, no refetch).
     setActiveThreadId(threadId);
+    markSelectedThreadSeen(threadId);
     if (fallback) setSelectedTaskId(fallback.taskId);
     setActiveView("chat");
     try {
@@ -738,6 +806,9 @@ export default function App() {
       const selectedThread = mappedThreads.find((item) => item.threadId === threadId) ?? fallback;
       setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
       if (selectedThread) setSelectedTaskId(selectedThread.taskId);
+      const attention = await coreBridge.threadAttentions(selectedThread?.workspaceId ?? undefined);
+      applyThreadAttentionRows(attention);
+      markSelectedThreadSeen(threadId);
       // Fetch messages only when we don't already have them — re-selecting a thread is instant.
       if (!threadMessages[threadId]) {
         const messages = await coreBridge.chatMessages(threadId);
@@ -748,38 +819,41 @@ export default function App() {
     }
   }
 
-  // Navigate to a thread that may live in ANOTHER workspace (e.g. a channel
-  // thread in Personal): select_thread is workspace-aware and returns that
-  // workspace's snapshot, so applying it switches context for us.
-  async function navigateToThread(
+  async function refreshThreadInBackground(
     threadId: string,
+    workspaceId?: string,
     options: { forceMessages?: boolean } = {},
   ) {
     try {
-      const snapshot = await coreBridge.selectChatThread(threadId);
+      const [snapshot, messages, attention] = await Promise.all([
+        coreBridge.chatThreads(workspaceId),
+        coreBridge.chatMessages(threadId),
+        coreBridge.threadAttentions(workspaceId),
+      ]);
       const mappedThreads = snapshot.threads.map(mapCoreChatThread);
-      const selectedThread =
-        mappedThreads.find((item) => item.threadId === threadId) ??
-        mappedThreads[0] ??
-        defaultChatThread;
-      const messages = await coreBridge.chatMessages(threadId);
-      setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
+      // Keep App's active-workspace list scoped. Cross-workspace rows are owned
+      // by ProjectsNav and refresh on its next visible load; their attention is
+      // still updated immediately here.
+      if (
+        mappedThreads.some((thread) => thread.threadId === activeThreadId) ||
+        workspaceId === activeThread.workspaceId
+      ) {
+        setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
+      }
       setThreadMessagesFromBackend(
         threadId,
         messages.messages.map(mapCoreChatMessage),
         { force: options.forceMessages === true },
       );
-      setActiveThreadId(threadId);
-      setSelectedTaskId(selectedThread.taskId);
-      setActiveView("chat");
+      applyThreadAttentionRows(attention);
     } catch (error) {
-      console.warn("navigate_to_thread unavailable", error);
+      console.warn("refresh_thread_in_background unavailable", error);
     }
   }
 
-  // Real-time channel events. When an inbound Telegram/WhatsApp message creates a
-  // thread, jump to it (create the card + switch). A ref keeps the handler fresh
-  // (current state in closure) without re-subscribing on every render.
+  // Real-time channel events update the owning thread's durable cache and
+  // attention indicator. Selection remains exclusively user-owned. A ref keeps
+  // the handler fresh without re-subscribing on every render.
   const appEventHandlerRef = useRef<(event: AppEvent) => void>(() => {});
   appEventHandlerRef.current = (event: AppEvent) => {
     if (!event.thread_id) return;
@@ -808,15 +882,18 @@ export default function App() {
               ? t("notifications.scheduledReady")
               : t("notifications.newMessage"),
           tag: threadId,
-          onClick: () => void navigateToThread(threadId),
+          onClick: () => void handleSelectThread(threadId),
         });
       }
       if (isVisibleTurn) {
-        pendingEventThreadIdsRef.current.add(eventThreadId);
-        // Hand the started turn to ChatView so it can attach to the live stream (island +
-        // transcript). ChatView ignores it for turns it launched itself (already streaming)
-        // and for other threads; navigateToThread below makes eventThreadId the open one.
-        if (event.turn_id && event.user_message_id && event.assistant_message_id) {
+        // Attach only when this is already the user-selected task. A background
+        // turn updates its cache and sidebar state without touching the view.
+        if (
+          eventThreadId === activeThreadId &&
+          event.turn_id &&
+          event.user_message_id &&
+          event.assistant_message_id
+        ) {
           setIncomingBackgroundTurn({
             turnId: event.turn_id,
             threadId: eventThreadId,
@@ -825,19 +902,15 @@ export default function App() {
           });
         }
       }
-      void navigateToThread(eventThreadId, { forceMessages: isVisibleTurn }).finally(() => {
-        if (isVisibleTurn) {
-          window.setTimeout(() => {
-            pendingEventThreadIdsRef.current.delete(eventThreadId);
-          }, 1_500);
-        }
+      void refreshThreadInBackground(eventThreadId, event.workspace, {
+        forceMessages: isVisibleTurn,
       });
-    } else if (
-      event.type === "thread.updated" &&
-      (eventThreadId === activeThreadId ||
-        pendingEventThreadIdsRef.current.has(eventThreadId))
-    ) {
-      void refreshChatReadModels(eventThreadId);
+    } else if (event.type === "thread.updated") {
+      if (event.workspace) {
+        void refreshThreadInBackground(eventThreadId, event.workspace);
+      } else {
+        void refreshThreadInBackground(eventThreadId);
+      }
       if (eventThreadId === activeThreadId) {
         setIslandRefreshNonce((n) => n + 1);
       }
@@ -1090,13 +1163,19 @@ export default function App() {
 
   async function applyThreadSnapshot(snapshot: CoreChatThreadSnapshot) {
     const mappedThreads = snapshot.threads.map(mapCoreChatThread);
+    const preservedThread = mappedThreads.find((thread) => thread.threadId === activeThreadId
+      && thread.status === "active");
     const selectedThread =
-      mappedThreads.find((thread) => thread.threadId === snapshot.active_thread_id) ??
-      mappedThreads[0] ??
+      preservedThread ??
+      mappedThreads.find((thread) => thread.threadId === snapshot.active_thread_id
+        && thread.status === "active") ??
+      mappedThreads.find((thread) => thread.status === "active") ??
       defaultChatThread;
     setChatThreads(mappedThreads.length ? mappedThreads : [defaultChatThread]);
-    setActiveThreadId(selectedThread.threadId);
-    setSelectedTaskId(selectedThread.taskId);
+    if (!preservedThread) {
+      setActiveThreadId(selectedThread.threadId);
+      setSelectedTaskId(selectedThread.taskId);
+    }
     if (!threadMessages[selectedThread.threadId]) {
       try {
         const messages = await coreBridge.chatMessages(selectedThread.threadId);
@@ -1335,20 +1414,15 @@ export default function App() {
   async function refreshChatReadModels(preferredThreadId = activeThreadId) {
     const snapshot = await coreBridge.chatThreads();
     const mappedThreads = snapshot.threads.map(mapCoreChatThread);
-    const preferred = mappedThreads.find((thread) => thread.threadId === preferredThreadId);
-    const selectedThread =
-      preferred ??
-      mappedThreads.find((thread) => thread.threadId === snapshot.active_thread_id) ??
-      mappedThreads[0] ??
-      defaultChatThread;
-    const messages = await coreBridge.chatMessages(selectedThread.threadId);
     setChatThreads(mappedThreads.length ? mappedThreads : [defaultChatThread]);
-    setActiveThreadId(selectedThread.threadId);
-    setSelectedTaskId(selectedThread.taskId);
+    const preferred = mappedThreads.find((thread) => thread.threadId === preferredThreadId);
+    if (!preferred) return;
+    const messages = await coreBridge.chatMessages(preferred.threadId);
     setThreadMessagesFromBackend(
-      selectedThread.threadId,
+      preferred.threadId,
       messages.messages.map(mapCoreChatMessage),
     );
+    applyThreadAttentionRows(await coreBridge.threadAttentions());
   }
 
   async function refreshSelectedTaskDetail(taskId: string) {
@@ -1493,9 +1567,14 @@ export default function App() {
           mapped[0] ??
           defaultChatThread;
         let selectedMessages = starterMessages(selectedThread);
+        let attention: CoreThreadAttention[] = [];
         try {
-          const messages = await coreBridge.chatMessages(selectedThread.threadId);
+          const [messages, attentionRows] = await Promise.all([
+            coreBridge.chatMessages(selectedThread.threadId),
+            coreBridge.threadAttentions(selectedThread.workspaceId ?? undefined),
+          ]);
           selectedMessages = messages.messages.map(mapCoreChatMessage);
+          attention = attentionRows;
         } catch (error) {
           console.warn("active chat_messages unavailable", error);
         }
@@ -1504,6 +1583,14 @@ export default function App() {
         setActiveThreadId(selectedThread.threadId);
         setSelectedTaskId(selectedThread.taskId);
         setThreadMessagesFromBackend(selectedThread.threadId, selectedMessages);
+        const selectedAttention = selectThread(
+          threadAttentionRef.current,
+          selectedThread.threadId,
+        );
+        threadAttentionRef.current = selectedAttention;
+        setThreadAttention(selectedAttention);
+        applyThreadAttentionRows(attention);
+        markSelectedThreadSeen(selectedThread.threadId);
       } catch (error) {
         console.warn("chat_thread_snapshot unavailable", error);
       }
@@ -1520,7 +1607,7 @@ export default function App() {
       <Shell
       activeView={activeView}
       activeThreadId={activeThread.threadId}
-      busyThreadIds={busyThreadIds}
+      threadAttention={attentionByThread}
       chatThreads={chatThreads}
       drawerOpen={drawerOpen}
       onCreateteChatThread={handleCreateteChatThread}
@@ -1531,6 +1618,7 @@ export default function App() {
       navItems={composedNavItems}
       onNavigate={handleNavigate}
       onSelectThread={handleSelectThread}
+      onThreadAttention={applyThreadAttentionRows}
       onSetChatThreadPinned={handleSetChatThreadPinned}
       onToggleDrawer={() => setDrawerOpen((value) => !value)}
       onSearchChat={() => setSearchOpen(true)}

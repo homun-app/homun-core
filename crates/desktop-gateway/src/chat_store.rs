@@ -129,6 +129,9 @@ pub struct SuggestionInput {
     /// when engaged, they become clickable answers in the opened chat.
     pub choices: Option<String>,
     pub dedup_key: String,
+    /// Stable producer identity (for example `supervisor:daily` or an
+    /// automation id). Empty legacy inputs are normalized to `supervisor`.
+    pub source_ref: String,
     /// Unix epoch past which this card is stale (date-bound cards only; None = never
     /// expires). `gc_expired_suggestions` retires it once the date passes.
     pub relevant_until: Option<i64>,
@@ -150,6 +153,8 @@ pub struct SuggestionRow {
     pub feedback: Option<String>,
     pub dedup_key: String,
     pub created_at: i64,
+    pub source_ref: String,
+    pub relevant_until: Option<i64>,
 }
 
 /// A curated contact (rubrica). Knowledge ABOUT them lives in the memory DB,
@@ -311,6 +316,11 @@ pub const CHAT_STORE_MEMORY_BOUNDARY_AUDIT: &[ChatStoreMemoryBoundaryAudit] = &[
         canonical_policy: "conversation attachment cache; produced deliverables are artifacts in MemoryFacade",
     },
     ChatStoreMemoryBoundaryAudit {
+        table: "thread_read_receipts",
+        graph_like: false,
+        canonical_policy: "UX-only terminal seen cursor; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
         table: "thread_routing_bindings",
         graph_like: false,
         canonical_policy: "UX/ops-only: plugin-owned deterministic routing pin (S2), read by the router; no semantic memory",
@@ -359,6 +369,8 @@ fn map_suggestion(row: &rusqlite::Row) -> rusqlite::Result<SuggestionRow> {
         feedback: row.get(9)?,
         dedup_key: row.get(10)?,
         created_at: row.get(11)?,
+        source_ref: row.get(12)?,
+        relevant_until: row.get(13)?,
     })
 }
 
@@ -458,6 +470,42 @@ impl ChatStore {
             active_thread_id,
             threads,
         })
+    }
+
+    /// Persist the greatest terminal event rendered for a thread. Replayed or
+    /// out-of-order clients can never move the read watermark backwards.
+    pub fn mark_thread_terminal_seen(
+        &self,
+        thread_id: &str,
+        terminal_event_id: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "insert into thread_read_receipts (
+                 thread_id, last_seen_terminal_event_id, updated_at
+             ) values (?1, ?2, ?3)
+             on conflict(thread_id) do update set
+                 last_seen_terminal_event_id = max(
+                     thread_read_receipts.last_seen_terminal_event_id,
+                     excluded.last_seen_terminal_event_id
+                 ),
+                 updated_at = excluded.updated_at",
+            params![thread_id, terminal_event_id.max(0), Self::now_secs()],
+        )?;
+        Ok(())
+    }
+
+    pub fn thread_terminal_seen(&self, thread_id: &str) -> rusqlite::Result<i64> {
+        Ok(self
+            .conn
+            .query_row(
+                "select last_seen_terminal_event_id
+                   from thread_read_receipts
+                  where thread_id = ?1",
+                params![thread_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0))
     }
 
     pub fn create_thread(&self, workspace_id: &str) -> rusqlite::Result<ChatThread> {
@@ -1373,8 +1421,16 @@ impl ChatStore {
             }
             clean_text.push_str(&card.raw);
         }
-        let event_parts_json = serde_json::to_string(event_parts).map_err(json_error)?;
-        let derived = memory_reuse_from_event_parts(event_parts);
+        let persisted_event_parts = event_parts
+            .iter()
+            .filter(|part| {
+                part.get("type").and_then(serde_json::Value::as_str) != Some("reasoning")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let event_parts_json =
+            serde_json::to_string(&persisted_event_parts).map_err(json_error)?;
+        let derived = memory_reuse_from_event_parts(&persisted_event_parts);
         let envelope = if &derived == requested_envelope {
             requested_envelope.clone()
         } else {
@@ -2379,6 +2435,13 @@ impl ChatStore {
                 message_count integer not null default 0
             );
 
+            create table if not exists thread_read_receipts (
+                thread_id text primary key,
+                last_seen_terminal_event_id integer not null default 0,
+                updated_at integer not null,
+                foreign key(thread_id) references chat_threads(thread_id) on delete cascade
+            );
+
             create table if not exists chat_messages (
                 id text primary key,
                 thread_id text not null,
@@ -2512,7 +2575,9 @@ impl ChatStore {
                 feedback_note text,
                 dedup_key text not null default '',
                 created_at integer not null,
-                updated_at integer not null
+                updated_at integer not null,
+                relevant_until integer,
+                source_ref text not null default 'supervisor'
             );
 
             create index if not exists idx_suggestions_scope_status
@@ -2730,6 +2795,12 @@ impl ChatStore {
         if !self.column_exists("suggestions", "relevant_until")? {
             self.conn.execute(
                 "alter table suggestions add column relevant_until integer",
+                [],
+            )?;
+        }
+        if !self.column_exists("suggestions", "source_ref")? {
+            self.conn.execute(
+                "alter table suggestions add column source_ref text not null default 'supervisor'",
                 [],
             )?;
         }
@@ -3034,10 +3105,15 @@ impl ChatStore {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
+        let source_ref = if s.source_ref.trim().is_empty() {
+            "supervisor"
+        } else {
+            s.source_ref.trim()
+        };
         self.conn.execute(
             "insert into suggestions
-                (scope, kind, title, body, rationale, proposed_action, choices, status, dedup_key, created_at, updated_at, relevant_until)
-             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?9, ?9, ?10)",
+                (scope, kind, title, body, rationale, proposed_action, choices, status, dedup_key, created_at, updated_at, relevant_until, source_ref)
+             values (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?9, ?9, ?10, ?11)",
             params![
                 s.scope,
                 s.kind,
@@ -3049,6 +3125,7 @@ impl ChatStore {
                 s.dedup_key,
                 now,
                 s.relevant_until,
+                source_ref,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -3083,7 +3160,7 @@ impl ChatStore {
         let mut stmt;
         let rows = if let Some(scope) = scope {
             stmt = self.conn.prepare(
-                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at
+                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at, source_ref, relevant_until
                    from suggestions where status = 'pending' and scope = ?1
                    order by id desc limit ?2",
             )?;
@@ -3091,7 +3168,7 @@ impl ChatStore {
                 .collect::<rusqlite::Result<Vec<_>>>()?
         } else {
             stmt = self.conn.prepare(
-                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at
+                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at, source_ref, relevant_until
                    from suggestions where status = 'pending'
                    order by id desc limit ?1",
             )?;
@@ -3104,7 +3181,7 @@ impl ChatStore {
     pub fn suggestion(&self, id: i64) -> rusqlite::Result<Option<SuggestionRow>> {
         self.conn
             .query_row(
-                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at
+                "select id, scope, kind, title, body, rationale, proposed_action, choices, status, feedback, dedup_key, created_at, source_ref, relevant_until
                    from suggestions where id = ?1",
                 params![id],
                 map_suggestion,
@@ -4060,6 +4137,46 @@ mod tests {
     }
 
     #[test]
+    fn seen_terminal_cursor_is_monotonic() {
+        let store = ChatStore::in_memory().unwrap();
+
+        store
+            .mark_thread_terminal_seen("thread_active_prompt", 9)
+            .unwrap();
+        store
+            .mark_thread_terminal_seen("thread_active_prompt", 4)
+            .unwrap();
+
+        assert_eq!(
+            store
+                .thread_terminal_seen("thread_active_prompt")
+                .unwrap(),
+            9
+        );
+    }
+
+    #[test]
+    fn deleting_thread_removes_terminal_receipt() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("receipt_delete").unwrap();
+        store
+            .mark_thread_terminal_seen(&thread.thread_id, 12)
+            .unwrap();
+
+        store.delete_thread(&thread.thread_id).unwrap();
+
+        let remaining: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from thread_read_receipts where thread_id = ?1",
+                params![thread.thread_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
     fn finalize_assistant_message_is_atomic() {
         let store = ChatStore::in_memory().unwrap();
         let thread = store.create_thread("default").unwrap();
@@ -4105,6 +4222,37 @@ mod tests {
         assert_eq!(saved.text, "Answer");
         assert_eq!(saved.event_parts, vec![recall_part]);
         assert_eq!(saved.memory_reuse, Some(envelope));
+    }
+
+    #[test]
+    fn finalization_drops_reasoning_parts_but_keeps_recall() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "assistant-reasoning-filter".to_string(),
+        );
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let parts = vec![
+            serde_json::json!({"type": "reasoning", "text": "private"}),
+            serde_json::json!({"type": "recall", "payload": {"hits": []}}),
+        ];
+
+        let saved = store
+            .finalize_assistant_message(
+                &thread.thread_id,
+                &assistant.id,
+                "Risposta finale.",
+                &parts,
+                &MemoryReuseEnvelope::normal(),
+            )
+            .unwrap();
+
+        assert_eq!(saved.text, "Risposta finale.");
+        assert_eq!(saved.event_parts.len(), 1);
+        assert_eq!(saved.event_parts[0]["type"], "recall");
     }
 
     #[test]
@@ -4602,6 +4750,29 @@ mod tests {
             1
         );
         assert!(store.suggestion_dedup_exists("proj", "k1").unwrap());
+    }
+
+    #[test]
+    fn suggestion_roundtrip_keeps_source_and_expiry() {
+        let store = ChatStore::in_memory().unwrap();
+        let id = store
+            .insert_suggestion(&SuggestionInput {
+                scope: "workspace_test".into(),
+                kind: "info".into(),
+                title: "Fresh signal".into(),
+                body: "A bounded suggestion".into(),
+                rationale: "Recent task evidence".into(),
+                proposed_action: None,
+                choices: None,
+                dedup_key: "fresh-signal".into(),
+                relevant_until: Some(2_000_000_000),
+                source_ref: "supervisor:daily".into(),
+            })
+            .unwrap();
+
+        let row = store.suggestion(id).unwrap().unwrap();
+        assert_eq!(row.source_ref, "supervisor:daily");
+        assert_eq!(row.relevant_until, Some(2_000_000_000));
     }
 
     #[test]

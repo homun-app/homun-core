@@ -97,6 +97,7 @@ import {
   revokeHostComputerGrant,
 } from "../lib/coreBridge";
 import {
+  catalogDisplayIdentity,
   catalogIdentity,
   catalogInstallState,
   type CatalogInstallState,
@@ -5036,6 +5037,13 @@ function CatalogPreviewModal({
   const [preview, setPreview] = useState<CatalogPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [raw, setRaw] = useState(false);
+  const targetIdentity = catalogDisplayIdentity(target);
+  const displayIdentity = preview
+    ? catalogDisplayIdentity({
+        slug: preview.slug,
+        owner_handle: preview.owner_handle ?? target.owner_handle,
+      })
+    : targetIdentity;
 
   useEffect(() => {
     let cancelled = false;
@@ -5062,7 +5070,7 @@ function CatalogPreviewModal({
           <div className="conn-detail-titletext">
             <h3 className="mdl-detail-title">{preview?.name ?? target.slug}</h3>
             <p className="mdl-detail-sub">
-              {preview ? `${preview.files.length} file` : "Loading preview…"}
+              {displayIdentity} · {preview ? `${preview.files.length} file` : "Loading preview…"}
             </p>
           </div>
           <button className="mdl-icon-btn" type="button" aria-label="Close" onClick={onClose}>
@@ -5298,6 +5306,11 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [closing, setClosing] = useState(false);
   const [closedNote, setClosedNote] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [computerConnectionState, setComputerConnectionState] = useState<
+    "idle" | "connecting" | "connected" | "disconnected" | "failed"
+  >("idle");
+  const [viewerRetry, setViewerRetry] = useState(0);
 
   const refresh = async () => {
     try {
@@ -5325,6 +5338,30 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
   const dockerOk = Boolean(docker?.running && docker.container_up);
 
   const liveUrl = enabled ? computer?.novnc_url : null;
+  const viewerUrl = liveUrl
+    ? `${liveUrl.replace("/vnc.html", "/lfpa-view.html")}${liveUrl.includes("?") ? "&" : "?"}view_only=0&viewer=csp-external-v1&retry=${viewerRetry}`
+    : null;
+
+  useEffect(() => {
+    if (!viewerUrl) {
+      setComputerConnectionState("idle");
+      return;
+    }
+    setComputerConnectionState(computer?.phase === "failed" ? "failed" : "connecting");
+    const expectedOrigin = new URL(viewerUrl, window.location.href).origin;
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (event.origin !== expectedOrigin) return;
+      const payload = event.data as { type?: unknown; state?: unknown } | null;
+      if (payload?.type !== "homun-novnc-state") return;
+      if (!["connecting", "connected", "disconnected", "failed"].includes(String(payload.state))) return;
+      setComputerConnectionState(payload.state as "connecting" | "connected" | "disconnected" | "failed");
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [computer?.phase, viewerUrl]);
+
+  const viewerFailed = computerConnectionState === "failed" || computerConnectionState === "disconnected";
 
   return (
     <>
@@ -5344,12 +5381,30 @@ function ComputerPane({ computer }: { computer: ContainedComputerLive | null }) 
 
       {/* Live view container — real noVNC iframe, striped placeholder otherwise (design 531). */}
       <div className="set-computer-live">
-        {liveUrl ? (
+        {viewerUrl ? (
           <>
-            <iframe className="set-computer-live-frame" src={liveUrl} title={t("settings.liveViewNovnc")} />
+            {computerConnectionState !== "connected" && (
+              <div className="cc-connection-overlay" role={viewerFailed ? "alert" : "status"}>
+                {viewerFailed ? <AlertTriangle size={18} /> : <RefreshCw size={18} className="spin" />}
+                <strong>{viewerFailed ? "Computer non disponibile" : "Connessione al computer…"}</strong>
+                {viewerFailed && (
+                  <button
+                    type="button"
+                    className="state-retry"
+                    onClick={() => {
+                      setComputerConnectionState("connecting");
+                      setViewerRetry((value) => value + 1);
+                    }}
+                  >
+                    {t("common.retry")}
+                  </button>
+                )}
+              </div>
+            )}
+            <iframe ref={iframeRef} className="set-computer-live-frame" src={viewerUrl} title={t("settings.liveViewNovnc")} />
             <a
               className="set-btn set-computer-live-open"
-              href={liveUrl}
+              href={viewerUrl}
               target="_blank"
               rel="noreferrer"
             >

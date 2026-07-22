@@ -34,8 +34,15 @@ import {
 } from "../lib/hostComputerState";
 import { wsSubscription } from "../lib/wsSubscription";
 
+type ComputerConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "failed";
+
 const IDLE: ContainedComputerLive = {
   enabled: false,
+  phase: "off",
+  container_ok: false,
+  cdp_ok: false,
+  novnc_ok: false,
+  error_code: null,
   thread_id: null,
   novnc_url: null,
   active: false,
@@ -69,6 +76,14 @@ export function ChatComputerPanel({
   const lastActivityAtRef = useRef<number>(Date.now());
   const prevActivitySigRef = useRef<string>("");
   const [now, setNow] = useState<number>(() => Date.now());
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [computerConnectionState, setComputerConnectionState] =
+    useState<ComputerConnectionState>("idle");
+  const [viewerRetry, setViewerRetry] = useState(0);
+  const viewerBase = live?.novnc_url?.replace("/vnc.html", "/lfpa-view.html") ?? null;
+  const computerViewerSrc = viewerBase
+    ? `${viewerBase}${viewerBase.includes("?") ? "&" : "?"}view_only=1&viewer=csp-external-v1&retry=${viewerRetry}`
+    : null;
 
   useEffect(() => {
     // Primary: unified WS push (computer.live events from the gateway).
@@ -111,6 +126,25 @@ export function ChatComputerPanel({
     const id = window.setInterval(ping, 20_000);
     return () => window.clearInterval(id);
   }, [view]);
+
+  useEffect(() => {
+    if (!computerViewerSrc) {
+      setComputerConnectionState("idle");
+      return;
+    }
+    setComputerConnectionState(live?.phase === "failed" ? "failed" : "connecting");
+    const expectedOrigin = new URL(computerViewerSrc, window.location.href).origin;
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== iframeRef.current?.contentWindow) return;
+      if (event.origin !== expectedOrigin) return;
+      const payload = event.data as { type?: unknown; state?: unknown } | null;
+      if (payload?.type !== "homun-novnc-state") return;
+      if (!["connecting", "connected", "disconnected", "failed"].includes(String(payload.state))) return;
+      setComputerConnectionState(payload.state as ComputerConnectionState);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [computerViewerSrc, live?.phase]);
 
   // Reset the "last activity" clock whenever the step list or activity label changes.
   useEffect(() => {
@@ -190,12 +224,11 @@ export function ChatComputerPanel({
     );
   }
 
-  if (!live?.enabled || !live.novnc_url || !live.active) return null;
+  if (!live?.enabled || !live.novnc_url || !live.active || !computerViewerSrc) return null;
 
   // Chrome-free embed page (RFB core with scaleViewport) — shows the WHOLE
   // contained display, scaled to fit and proportioned, with no noVNC toolbar.
-  const base = live.novnc_url.replace("/vnc.html", "/lfpa-view.html");
-  const src = `${base}${base.includes("?") ? "&" : "?"}view_only=1&viewer=csp-external-v1`;
+  const src = computerViewerSrc;
   const fullscreen = view === "full";
   const showStage = view === "expanded" || fullscreen;
   const steps = live.steps ?? [];
@@ -228,9 +261,13 @@ export function ChatComputerPanel({
           <span className="cc-dock-title">
             <Monitor size={15} />
             <strong>Computer</strong>
-            <span className="cc-live">
-              <i className="cc-live-dot" /> live
-            </span>
+            {computerConnectionState === "connected" ? (
+              <span className="cc-live">
+                <i className="cc-live-dot" /> live
+              </span>
+            ) : (
+              <span className="cc-connection-state">{t("chat.starting")}</span>
+            )}
           </span>
           {/* One control, right-aligned: enlarge to fullscreen ⇄ contract back. */}
           <button
@@ -247,7 +284,34 @@ export function ChatComputerPanel({
         {/* The browser takes the space; one status line below it alternates the actions. */}
         {showStage && (
           <div className="cc-stage">
+            {computerConnectionState !== "connected" && (
+              <div className="cc-connection-overlay" role={computerConnectionState === "failed" ? "alert" : "status"}>
+                {computerConnectionState === "failed" || computerConnectionState === "disconnected" ? (
+                  <AlertTriangle size={18} />
+                ) : (
+                  <Loader2 size={18} className="spin" />
+                )}
+                <strong>
+                  {computerConnectionState === "failed" || computerConnectionState === "disconnected"
+                    ? "Computer non disponibile"
+                    : "Connessione al computer…"}
+                </strong>
+                {(computerConnectionState === "failed" || computerConnectionState === "disconnected") && (
+                  <button
+                    type="button"
+                    className="state-retry"
+                    onClick={() => {
+                      setComputerConnectionState("connecting");
+                      setViewerRetry((value) => value + 1);
+                    }}
+                  >
+                    {t("common.retry")}
+                  </button>
+                )}
+              </div>
+            )}
             <iframe
+              ref={iframeRef}
               className="cc-frame"
               title="Contained computer (live)"
               src={src}

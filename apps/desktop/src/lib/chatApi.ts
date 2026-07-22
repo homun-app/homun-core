@@ -1022,6 +1022,16 @@ export interface ThreadActivityProjection {
   latest_turn_status: string | null;
   turn_count: number;
   subagents: SubagentInfo[];
+  active_turn?: {
+    turn_id: string;
+    last_event_seq: number;
+    status: string;
+    attempt: number;
+    max_attempts: number;
+    not_before: number | null;
+    blocked_reason: string | null;
+    updated_at: number;
+  } | null;
 }
 
 export async function fetchThreadActivity(

@@ -15,6 +15,9 @@ export type CatalogInstallState = "available" | "installed" | "occupied";
 export const catalogIdentity: (skill: CatalogIdentityInput) => string =
   implementation.catalogIdentity;
 
+export const catalogDisplayIdentity: (skill: CatalogIdentityInput) => string =
+  implementation.catalogDisplayIdentity;
+
 export const catalogInstallState: (
   skill: CatalogIdentityInput,
   installed: InstalledSkillIdentity[],

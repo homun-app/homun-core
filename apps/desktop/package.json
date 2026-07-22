@@ -32,6 +32,7 @@
     "test:usage-infographic": "node --test src/lib/usageCalendar.test.mjs src/lib/chatGreeting.test.mjs",
     "test:mcp-connection": "node --test src/lib/mcpConnection.test.mjs",
     "test:onboarding-computer": "node --test src/lib/onboardingComputer.test.mjs",
+    "test:thread-attention": "node --test src/lib/threadAttentionState.test.mjs",
     "refresh-models": "node scripts/refresh-models-catalog.mjs",
     "typecheck": "tsc --noEmit"
   },

@@ -3,7 +3,8 @@ use crate::{
     Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ObjectiveContractRecord,
     ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    ActiveTurnProjection, NewTurnSteering, ThreadActivityProjection, TurnEvent, TurnEventKind,
+    ActiveTurnProjection, NewTurnSteering, TerminalWrite, ThreadActivityProjection, ThreadAttention,
+    TurnEvent, TurnEventKind,
     TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -26,6 +27,81 @@ fn subagent_name_from_kind(kind: &str) -> String {
 
 pub struct TaskStore {
     connection: Connection,
+}
+
+fn insert_turn_event_on(
+    connection: &Connection,
+    turn_id: &str,
+    kind: TurnEventKind,
+    payload: Value,
+) -> TaskRuntimeResult<TurnEvent> {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let seq: i64 = connection.query_row(
+        "SELECT COALESCE(MAX(seq), 0) + 1 FROM turn_events WHERE turn_id = ?1",
+        params![turn_id],
+        |row| row.get(0),
+    )?;
+    connection.execute(
+        "INSERT INTO turn_events (turn_id, seq, kind, payload_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            turn_id,
+            seq,
+            kind.as_str(),
+            serde_json::to_string(&payload)?,
+            now
+        ],
+    )?;
+    Ok(TurnEvent {
+        event_id: connection.last_insert_rowid(),
+        turn_id: turn_id.to_string(),
+        seq,
+        kind,
+        payload,
+        created_at: now,
+    })
+}
+
+fn first_terminal_event_on(
+    connection: &Connection,
+    turn_id: &str,
+) -> TaskRuntimeResult<Option<TurnEvent>> {
+    let row = connection
+        .query_row(
+            "SELECT event_id, turn_id, seq, kind, payload_json, created_at
+               FROM turn_events
+              WHERE turn_id = ?1 AND kind IN ('done', 'error', 'cancelled')
+              ORDER BY seq ASC
+              LIMIT 1",
+            params![turn_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(
+        |(event_id, turn_id, seq, kind, payload_json, created_at)| {
+            let kind = TurnEventKind::parse(&kind).ok_or_else(|| {
+                TaskRuntimeError::Store("unknown terminal turn event kind".to_string())
+            })?;
+            Ok(TurnEvent {
+                event_id,
+                turn_id,
+                seq,
+                kind,
+                payload: serde_json::from_str(&payload_json)?,
+                created_at,
+            })
+        },
+    )
+    .transpose()
 }
 
 impl TaskStore {
@@ -1636,20 +1712,36 @@ impl TaskStore {
         kind: TurnEventKind,
         payload: Value,
     ) -> TaskRuntimeResult<TurnEvent> {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        // next seq per turn_id
-        let seq: i64 = self.connection.query_row(
-            "SELECT COALESCE(MAX(seq), 0) + 1 FROM turn_events WHERE turn_id = ?1",
-            params![turn_id],
-            |row| row.get(0),
-        )?;
-        self.connection.execute(
-            "INSERT INTO turn_events (turn_id, seq, kind, payload_json, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![turn_id, seq, kind.as_str(), serde_json::to_string(&payload)?, now],
-        )?;
-        let event_id = self.connection.last_insert_rowid();
-        Ok(TurnEvent { event_id, turn_id: turn_id.to_string(), seq, kind, payload, created_at: now })
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let event = insert_turn_event_on(&tx, turn_id, kind, payload)?;
+        tx.commit()?;
+        Ok(event)
+    }
+
+    /// Atomically commits the first logical terminal for a turn. Later terminal
+    /// attempts return the canonical event and must not be broadcast again.
+    pub fn insert_terminal_event_once(
+        &self,
+        turn_id: &str,
+        kind: TurnEventKind,
+        payload: Value,
+    ) -> TaskRuntimeResult<TerminalWrite> {
+        if !matches!(
+            kind,
+            TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
+        ) {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "non-terminal turn event kind".to_string(),
+            ));
+        }
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        if let Some(existing) = first_terminal_event_on(&tx, turn_id)? {
+            tx.commit()?;
+            return Ok(TerminalWrite::Existing(existing));
+        }
+        let event = insert_turn_event_on(&tx, turn_id, kind, payload)?;
+        tx.commit()?;
+        Ok(TerminalWrite::Inserted(event))
     }
 
     /// Reads a turn's events with seq > since (for stream resume). Returned in
@@ -2145,6 +2237,17 @@ impl TaskStore {
             .optional()?;
         let latest_turn_id = latest_turn.as_ref().map(|(id, _, _, _, _)| id.clone());
         let latest_turn_status = latest_turn.as_ref().map(|(_, status, _, _, _)| status.clone());
+        let latest_turn_last_seq = latest_turn_id
+            .as_deref()
+            .map(|turn_id| {
+                self.connection.query_row(
+                    "SELECT COALESCE(MAX(seq), 0) FROM turn_events WHERE turn_id = ?1",
+                    params![turn_id],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .transpose()?
+            .unwrap_or(0);
         let active_turn = latest_turn.as_ref().and_then(|(turn_id, status, task_json, updated_at, blocked_reason)| {
             if matches!(status.as_str(), "completed" | "failed" | "cancelled" | "expired" | "finalizing") {
                 return None;
@@ -2152,6 +2255,7 @@ impl TaskStore {
             let task = serde_json::from_str::<TaskRecord>(task_json).ok()?;
             Some(ActiveTurnProjection {
                 turn_id: turn_id.clone(),
+                last_event_seq: latest_turn_last_seq,
                 status: status.clone(),
                 attempt: task.attempt_count,
                 max_attempts: task.retry_policy.max_attempts,
@@ -2251,6 +2355,42 @@ impl TaskStore {
             turn_count: turn_count as usize,
             subagents,
             active_turn,
+        })
+    }
+
+    /// Projects the latest logical turn and terminal cursor for a chat thread.
+    /// A terminal cursor is global (`event_id`), so the gateway can persist one
+    /// monotonic seen watermark per thread across reloads and app restarts.
+    pub fn thread_attention(&self, thread_id: &str) -> TaskRuntimeResult<ThreadAttention> {
+        let latest_task: Option<(String, i64)> = self
+            .connection
+            .query_row(
+                "SELECT status, updated_at
+                   FROM tasks
+                  WHERE thread_id = ?1 AND kind = 'chat_turn'
+                  ORDER BY created_at DESC, task_id DESC
+                  LIMIT 1",
+                params![thread_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let latest_terminal_event_id = self.connection.query_row(
+            "SELECT MAX(te.event_id)
+               FROM turn_events te
+               JOIN tasks t ON t.task_id = te.turn_id
+              WHERE t.thread_id = ?1
+                AND t.kind = 'chat_turn'
+                AND te.kind IN ('done', 'error', 'cancelled')",
+            params![thread_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )?;
+        let (status, updated_at) = latest_task.unwrap_or_else(|| ("idle".to_string(), 0));
+
+        Ok(ThreadAttention {
+            thread_id: thread_id.to_string(),
+            status,
+            latest_terminal_event_id,
+            updated_at,
         })
     }
 
@@ -3073,6 +3213,21 @@ mod turn_event_tests {
     }
 
     #[test]
+    fn terminal_event_is_written_once() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .insert_terminal_event_once("turn", TurnEventKind::Done, json!({"attempt": 2}))
+            .unwrap();
+        let late = store
+            .insert_terminal_event_once("turn", TurnEventKind::Error, json!({"attempt": 1}))
+            .unwrap();
+
+        assert!(matches!(first, TerminalWrite::Inserted(_)));
+        assert!(matches!(late, TerminalWrite::Existing(_)));
+        assert_eq!(store.read_turn_events("turn", 0).unwrap().len(), 1);
+    }
+
+    #[test]
     fn read_since_returns_only_newer_in_order() {
         let s = store();
         s.insert_turn_event("t1", TurnEventKind::Delta, json!({"i":1})).unwrap();
@@ -3404,6 +3559,30 @@ mod chat_turn_query_tests {
     }
 
     #[test]
+    fn thread_attention_reports_latest_terminal_event() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let task = make_chat_turn("turn-a", "thread-a", TaskStatus::Completed);
+        s.insert_chat_turn(
+            &task,
+            "thread-a",
+            "chat_stream_1",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        let event = s
+            .insert_turn_event("turn-a", TurnEventKind::Done, json!({}))
+            .unwrap();
+
+        assert_eq!(
+            s.thread_attention("thread-a")
+                .unwrap()
+                .latest_terminal_event_id,
+            Some(event.event_id)
+        );
+    }
+
+    #[test]
     fn active_chat_turn_ignores_non_chat_turn_kind() {
         let s = store();
         let mut other = TaskRecord::new(
@@ -3421,6 +3600,33 @@ mod chat_turn_query_tests {
             .execute("UPDATE tasks SET thread_id = 'thread_x' WHERE task_id = 'bg1'", [])
             .unwrap();
         assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap(), None);
+    }
+
+    #[test]
+    fn active_turn_projection_exposes_the_replay_cursor() {
+        let s = store();
+        let task = make_chat_turn("turn_cursor", "thread_cursor", TaskStatus::Running);
+        s.insert_chat_turn(
+            &task,
+            "thread_cursor",
+            "request_cursor",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.insert_turn_event("turn_cursor", TurnEventKind::Delta, json!({"text": "A"}))
+            .unwrap();
+        let last = s
+            .insert_turn_event("turn_cursor", TurnEventKind::Activity, json!({"text": "B"}))
+            .unwrap();
+
+        let active = s
+            .project_thread_activity("thread_cursor", 200)
+            .unwrap()
+            .active_turn
+            .expect("active turn projection");
+        assert_eq!(active.turn_id, "turn_cursor");
+        assert_eq!(active.last_event_seq, last.seq);
     }
 
     #[test]

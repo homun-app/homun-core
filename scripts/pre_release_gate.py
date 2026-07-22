@@ -15,6 +15,7 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -52,10 +53,22 @@ def build_plan(env: dict[str, str]) -> list[Step]:
             ["cargo", "test", "-p", "local-first-capabilities", "--", "--nocapture"],
         ),
         Step("orchestrator tests", ["cargo", "test", "-p", "local-first-orchestrator", "--", "--nocapture"]),
+        Step("task runtime tests", ["cargo", "test", "-p", "local-first-task-runtime", "--", "--nocapture"]),
+        Step("engine tests", ["cargo", "test", "-p", "local-first-engine", "--", "--nocapture"]),
         Step("gateway tests", ["cargo", "test", "-p", "local-first-desktop-gateway", "--", "--nocapture"]),
         Step("memorybench provider", ["npm", "test"], cwd=MEMORYBENCH_PROVIDER),
+        Step("desktop attention tests", ["node", "--test", "src/lib/threadAttentionState.test.mjs"], cwd=DESKTOP),
+        Step("desktop replay tests", ["node", "--test", "src/lib/turnReplayState.test.mjs"], cwd=DESKTOP),
+        Step("desktop visible content tests", ["node", "--test", "src/lib/chatVisibleContent.test.mjs"], cwd=DESKTOP),
+        Step("desktop electron tests", ["npm", "run", "test:electron"], cwd=DESKTOP),
+        Step("contained computer package tests", ["npm", "run", "test:contained-computer-package"], cwd=DESKTOP),
+        Step("host computer package tests", ["npm", "run", "test:host-computer-package"], cwd=DESKTOP),
         Step("ui contract", ["npm", "run", "test:ui-contract"], cwd=DESKTOP),
         Step("desktop build", ["npm", "run", "build"], cwd=DESKTOP),
+        Step(
+            "stability soak unit tests",
+            [PYTHON, "-m", "unittest", "scripts.test_stability_soak", "-v"],
+        ),
         Step(
             "eval unit tests",
             [
@@ -105,6 +118,13 @@ def build_plan(env: dict[str, str]) -> list[Step]:
                 env=smoke_env,
             )
         )
+    if truthy(env.get("HOMUN_RUN_STABILITY_SOAK")):
+        plan.append(
+            Step(
+                "live stability soak",
+                [PYTHON, "scripts/stability_soak.py", "--restart"],
+            )
+        )
     return plan
 
 
@@ -127,7 +147,13 @@ def run_plan(plan: list[Step], runner=run_step) -> bool:
     return True
 
 
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parse_args(argv)
     plan = build_plan(os.environ)
     print("== Homun pre-release gate ==", flush=True)
     for index, step in enumerate(plan, start=1):

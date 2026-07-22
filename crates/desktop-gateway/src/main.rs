@@ -1198,6 +1198,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             get(chat_threads).post(create_chat_thread),
         )
         .route(
+            "/api/chat/threads/attention",
+            get(chat_thread_attentions),
+        )
+        .route(
+            "/api/chat/threads/{thread_id}/seen",
+            post(mark_chat_thread_seen),
+        )
+        .route(
             "/api/chat/threads/{thread_id}/select",
             post(select_chat_thread),
         )
@@ -1871,6 +1879,111 @@ async fn chat_threads(
     ))
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ThreadAttentionResponse {
+    thread_id: String,
+    status: String,
+    latest_terminal_event_id: Option<i64>,
+    last_seen_terminal_event_id: i64,
+    updated_at: i64,
+}
+
+impl ThreadAttentionResponse {
+    fn from_projection(
+        projection: local_first_task_runtime::ThreadAttention,
+        last_seen_terminal_event_id: i64,
+    ) -> Self {
+        Self {
+            thread_id: projection.thread_id,
+            status: projection.status,
+            latest_terminal_event_id: projection.latest_terminal_event_id,
+            last_seen_terminal_event_id,
+            updated_at: projection.updated_at,
+        }
+    }
+}
+
+async fn chat_thread_attentions(
+    State(state): State<AppState>,
+    Query(query): Query<ChatThreadsQuery>,
+) -> Result<Json<Vec<ThreadAttentionResponse>>, GatewayError> {
+    let workspace_id = resolve_threads_workspace(&query);
+    let thread_receipts = {
+        let store = lock_store(&state)?;
+        let snapshot = store.threads(&workspace_id).map_err(GatewayError::store)?;
+        snapshot
+            .threads
+            .into_iter()
+            .map(|thread| {
+                let seen = store
+                    .thread_terminal_seen(&thread.thread_id)
+                    .map_err(GatewayError::store)?;
+                Ok((thread.thread_id, seen))
+            })
+            .collect::<Result<Vec<_>, GatewayError>>()?
+    };
+    let task_store = lock_task_store(&state)?;
+    let mut response = Vec::with_capacity(thread_receipts.len());
+    for (thread_id, seen) in thread_receipts {
+        let projection = task_store
+            .thread_attention(&thread_id)
+            .map_err(GatewayError::task)?;
+        response.push(ThreadAttentionResponse::from_projection(projection, seen));
+    }
+    Ok(Json(response))
+}
+
+#[derive(Debug, Deserialize)]
+struct MarkThreadSeenRequest {
+    terminal_event_id: i64,
+}
+
+fn seen_terminal_cursor_to_persist(requested: i64, latest: Option<i64>) -> i64 {
+    requested.max(0).min(latest.unwrap_or(0).max(0))
+}
+
+async fn mark_chat_thread_seen(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    Json(request): Json<MarkThreadSeenRequest>,
+) -> Result<Json<ThreadAttentionResponse>, GatewayError> {
+    let projection = {
+        let task_store = lock_task_store(&state)?;
+        task_store
+            .thread_attention(&thread_id)
+            .map_err(GatewayError::task)?
+    };
+    let cursor = seen_terminal_cursor_to_persist(
+        request.terminal_event_id,
+        projection.latest_terminal_event_id,
+    );
+    let seen = {
+        let store = lock_store(&state)?;
+        store
+            .mark_thread_terminal_seen(&thread_id, cursor)
+            .map_err(GatewayError::store)?;
+        store
+            .thread_terminal_seen(&thread_id)
+            .map_err(GatewayError::store)?
+    };
+    Ok(Json(ThreadAttentionResponse::from_projection(
+        projection, seen,
+    )))
+}
+
+#[cfg(test)]
+mod thread_attention_handler_tests {
+    use super::seen_terminal_cursor_to_persist;
+
+    #[test]
+    fn seen_cursor_is_clamped_to_the_latest_terminal() {
+        assert_eq!(seen_terminal_cursor_to_persist(99, Some(41)), 41);
+        assert_eq!(seen_terminal_cursor_to_persist(20, Some(41)), 20);
+        assert_eq!(seen_terminal_cursor_to_persist(-1, Some(41)), 0);
+        assert_eq!(seen_terminal_cursor_to_persist(10, None), 0);
+    }
+}
+
 async fn create_chat_thread(
     State(state): State<AppState>,
     Query(query): Query<ChatThreadsQuery>,
@@ -2238,6 +2351,7 @@ fn parse_review_suggestion(
         proposed_action,
         choices,
         dedup_key,
+        source_ref: "supervisor:review".to_string(),
         relevant_until,
     })
 }
@@ -15525,7 +15639,7 @@ fn set_persisted_inference_api_key(key: &str) -> Result<(), String> {
 // ── Provider registry (Phase 1: multi-provider inference) ──────────────────
 
 use model_registry::{
-    ModelTier, ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
+    ProviderEntry, ProviderKind, ProviderRegistry, ResolvedRole, RoleBinding,
     canonical_provider_base_url,
 };
 
@@ -15756,12 +15870,25 @@ fn role_openai_config(role: &str) -> Option<(String, String, Option<String>)> {
     chat_openai_stream_config()
 }
 
+// Ordered by the smallest model that passed the versioned local qualification
+// corpus. Do not add a model here based on size or reputation alone: it must
+// satisfy the recall, specificity, strict-JSON and p95 latency thresholds in
+// docs/benchmarks/privacy-guard-thresholds.json.
+const QUALIFIED_PRIVACY_GUARD_MODELS: &[&str] = &["qwen3.5:4b"];
+
+fn privacy_guard_model_qualification_rank(model: &str) -> Option<usize> {
+    QUALIFIED_PRIVACY_GUARD_MODELS
+        .iter()
+        .position(|qualified| model.eq_ignore_ascii_case(qualified))
+}
+
 fn resolve_privacy_guard_role(
     registry: &ProviderRegistry,
 ) -> Option<model_registry::ResolvedRole> {
     if let Some(resolved) = registry.resolve_role("privacy_guard")
         && provider_endpoint_is_local(&resolved.base_url)
         && !model_id_is_cloud(&resolved.model)
+        && privacy_guard_model_qualification_rank(&resolved.model).is_some()
     {
         return Some(resolved);
     }
@@ -15774,29 +15901,17 @@ fn resolve_privacy_guard_role(
             provider
                 .models
                 .iter()
-                .filter(|model| model.modality == "text" && !model_id_is_cloud(&model.id))
+                .filter(|model| {
+                    model.modality == "text"
+                        && !model_id_is_cloud(&model.id)
+                        && privacy_guard_model_qualification_rank(&model.id).is_some()
+                })
                 .map(move |model| (provider, model))
         })
         .collect::<Vec<_>>();
     candidates.sort_by(|(provider_a, model_a), (provider_b, model_b)| {
-        let tier_rank = |tier: ModelTier| match tier {
-            ModelTier::Fast => 0,
-            ModelTier::Balanced => 1,
-            ModelTier::Reasoning => 2,
-        };
-        let rank_a = model_a
-            .profile
-            .as_ref()
-            .map(|profile| tier_rank(profile.tier))
-            .unwrap_or(1);
-        let rank_b = model_b
-            .profile
-            .as_ref()
-            .map(|profile| tier_rank(profile.tier))
-            .unwrap_or(1);
-        rank_a
-            .cmp(&rank_b)
-            .then(model_a.reasoning.cmp(&model_b.reasoning))
+        privacy_guard_model_qualification_rank(&model_a.id)
+            .cmp(&privacy_guard_model_qualification_rank(&model_b.id))
             .then(provider_a.id.cmp(&provider_b.id))
             .then(model_a.id.cmp(&model_b.id))
     });
@@ -15812,11 +15927,25 @@ fn resolve_privacy_guard_role(
     })
 }
 
+fn qualified_privacy_guard_default_config() -> (String, String, Option<String>) {
+    (
+        "http://127.0.0.1:11434/v1".to_string(),
+        QUALIFIED_PRIVACY_GUARD_MODELS[0].to_string(),
+        None,
+    )
+}
+
 fn privacy_guard_openai_config() -> Option<(String, String, Option<String>)> {
     let registry = load_provider_registry();
-    let resolved = resolve_privacy_guard_role(&registry)?;
-    let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
-    Some((resolved.base_url, resolved.model, api_key))
+    if let Some(resolved) = resolve_privacy_guard_role(&registry) {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        return Some((resolved.base_url, resolved.model, api_key));
+    }
+    // The persisted provider catalog can lag behind Ollama after a model pull.
+    // Attempt the benchmark-qualified local default directly; a genuinely
+    // absent model becomes a typed request failure and remote inference still
+    // fails closed. This removes a manual "Refresh models" prerequisite.
+    Some(qualified_privacy_guard_default_config())
 }
 
 fn provider_endpoint_is_local(base_url: &str) -> bool {
@@ -15849,8 +15978,10 @@ fn privacy_guard_payload(model: &str, text: &str) -> serde_json::Value {
 async fn classify_sensitive_input_with_privacy_guard_model(
     http: &reqwest::Client,
     text: &str,
-) -> Option<privacy_guard::PrivacyGuardDecision> {
-    let (base_url, model, api_key) = privacy_guard_openai_config()?;
+) -> privacy_guard::PrivacyGuardModelOutcome {
+    let Some((base_url, model, api_key)) = privacy_guard_openai_config() else {
+        return privacy_guard::PrivacyGuardModelOutcome::Unavailable("no_local_guard_model");
+    };
     // Generous ceiling for REASONING models: they spend the budget on a hidden
     // `reasoning` field before emitting `content`. A tight cap (fine for an
     // instruct model) can leave `content` empty — which here means an empty
@@ -15859,8 +15990,6 @@ async fn classify_sensitive_input_with_privacy_guard_model(
     // still resolve a local reasoning one, so budget for it. A high ceiling costs
     // nothing for instruct models. See the note on `generate_thread_title`.
     let payload = privacy_guard_payload(&model, text);
-    // Every failure below fails OPEN (returns None → caller treats the input as
-    // clean). Log the reason so a broken guard model is never silently trusted.
     let response = match recorded_openai_value(
         http,
         &base_url,
@@ -15881,20 +16010,19 @@ async fn classify_sensitive_input_with_privacy_guard_model(
             tracing::warn!(
                 target: "privacy::guard",
                 model = %model, %base_url,
-                "privacy-guard LLM request errored — input NOT classified (failing open)"
+                "privacy-guard LLM request errored"
             );
-            return None;
+            return privacy_guard::PrivacyGuardModelOutcome::Unavailable("request_failed");
         }
     };
     if !(200..300).contains(&response.status) {
         let status = response.status;
-        let body: String = response.body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "privacy::guard",
-            %status, model = %model, %base_url, body = %body,
-            "privacy-guard LLM call failed — input NOT classified (failing open)"
+            %status, model = %model, %base_url,
+            "privacy-guard LLM call failed"
         );
-        return None;
+        return privacy_guard::PrivacyGuardModelOutcome::Unavailable("http_status");
     }
     let body = response.body;
     let content = body
@@ -15902,14 +16030,17 @@ async fn classify_sensitive_input_with_privacy_guard_model(
         .and_then(|c| c.as_str())
         .unwrap_or("");
     if content.trim().is_empty() {
-        let snippet: String = body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "privacy::guard",
-            model = %model, %base_url, body = %snippet,
-            "privacy-guard LLM returned 2xx but no content (e.g. reasoning-budget starvation) — input NOT classified (failing open)"
+            model = %model, %base_url,
+            "privacy-guard LLM returned 2xx but no content"
         );
+        return privacy_guard::PrivacyGuardModelOutcome::Unavailable("empty_content");
     }
-    privacy_guard::decision_from_model_output(text, content)
+    match privacy_guard::decision_from_model_output(text, content) {
+        Some(decision) => privacy_guard::PrivacyGuardModelOutcome::Classified(decision),
+        None => privacy_guard::PrivacyGuardModelOutcome::InvalidOutput,
+    }
 }
 
 /// F2 step-verification gate toggle (default ON). `HOMUN_VERIFY_STEPS=0` disables it,
@@ -17655,6 +17786,29 @@ fn chat_browser_nav_cap() -> usize {
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|n| *n > 0)
         .unwrap_or(MAX_BROWSER_NAVS_PER_STEP)
+}
+
+fn chat_browser_budget() -> local_first_engine::BrowserBudget {
+    let max_elapsed_ms = env::var("HOMUN_CHAT_BROWSER_MAX_ELAPSED_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .map(|value| value.clamp(1_000, 600_000))
+        .unwrap_or(300_000);
+    let max_failed_navigations = env::var("HOMUN_CHAT_BROWSER_MAX_FAILED_NAVIGATIONS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .map(|value| value.clamp(1, 32))
+        .unwrap_or(8);
+    let max_no_progress = env::var("HOMUN_CHAT_BROWSER_MAX_NO_PROGRESS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .map(|value| value.clamp(1, 20))
+        .unwrap_or(5);
+    local_first_engine::BrowserBudget {
+        max_elapsed_ms,
+        max_failed_navigations,
+        max_no_progress,
+    }
 }
 
 /// How many connected-service tools to pull into the searchable catalog (NOT
@@ -26311,6 +26465,7 @@ impl GatewayBrowseExecutor<'_> {
             max_rounds: chat_browser_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
+            browser_budget: chat_browser_budget(),
             // Browse sub-turn does NO token-budget compaction (NoContextCompactor); the browser
             // history hygiene it needs is `prune_browser_history`. Unknown window → fail-open anyway.
             context_window: None,
@@ -26399,6 +26554,7 @@ impl GatewayComputerExecutor<'_> {
             ls,
             local_first_engine::TurnConfig {
                 hard_round_ceiling: 24, max_rounds: 16, browser_max_rounds: 0, browser_nav_cap: 0,
+                browser_budget: chat_browser_budget(),
                 context_window: None, reconcile_on_delivery: false, autoadvance_from_evidence: false,
                 step_verification: false, verbose: verbose_debug(), forced_tool: None,
             },
@@ -27769,12 +27925,64 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         mpsc: mpsc_tx,
         entry: stream_entry,
     };
-    let privacy_decision =
-        classify_sensitive_input_with_privacy_guard_model(&state.http, &request.prompt)
-            .await
-            .unwrap_or_else(|| {
-                privacy_guard::classify_sensitive_input_deterministic(&request.prompt)
-            });
+    let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);
+    let deterministic_privacy_decision =
+        privacy_guard::classify_sensitive_input_deterministic(&request.prompt);
+    let guarded_decision = match classify_sensitive_input_with_privacy_guard_model(
+        &state.http,
+        &request.prompt,
+    )
+    .await
+    {
+        privacy_guard::PrivacyGuardModelOutcome::Classified(model_decision) => Ok(
+            privacy_guard::merge_guard_decisions(
+                &request.prompt,
+                model_decision,
+                deterministic_privacy_decision.clone(),
+            ),
+        ),
+        privacy_guard::PrivacyGuardModelOutcome::Unavailable(reason) => Err(reason),
+        privacy_guard::PrivacyGuardModelOutcome::InvalidOutput => Err("invalid_output"),
+    };
+    let privacy_decision = match guarded_decision {
+        Ok(decision) => decision,
+        Err(reason) => match privacy_guard::failure_policy(orchestrator_is_local) {
+            privacy_guard::PrivacyGuardFailurePolicy::DeterministicLocalOnly => {
+                tracing::warn!(
+                    target: "privacy::guard",
+                    %reason,
+                    "privacy guard unavailable; using deterministic local-only fallback"
+                );
+                deterministic_privacy_decision
+            }
+            privacy_guard::PrivacyGuardFailurePolicy::BlockAndRetry => {
+                tracing::warn!(
+                    target: "privacy::guard",
+                    %reason,
+                    "privacy guard unavailable; blocking remote inference"
+                );
+                let _ = emit_stream_event(
+                    &tx,
+                    GenerateStreamEvent::Error {
+                        code: "privacy_guard_unavailable".to_string(),
+                        message: "Privacy Guard non disponibile. Riprova senza inviare dati al provider remoto.".to_string(),
+                        retryable: true,
+                    },
+                )
+                .await;
+                schedule_stream_registry_cleanup(resume_id.clone());
+                let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+                    rx.recv().await.map(|item| (item, rx))
+                }));
+                return Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/x-ndjson")
+                    .header("x-effective-model", "privacy_guard")
+                    .body(body)
+                    .expect("valid streaming response"));
+            }
+        },
+    };
     if let Some(intercept) = privacy_guard::build_privacy_guard_intercept(
         &state.pending_vault_proposals,
         &request.request_id,
@@ -28094,6 +28302,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             max_rounds: chat_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
+            browser_budget: chat_browser_budget(),
             // Fase 1.1: the model's real context window (catalog `context_window`, resolved above)
             // drives token-budget auto-compaction. `None` → fail-open (no budget compaction).
             context_window: model_context_window,
@@ -29342,6 +29551,9 @@ async fn suggestions_list(
                 "status": r.status,
                 "feedback": r.feedback,
                 "created_at": r.created_at,
+                "generated_at": r.created_at,
+                "source_ref": r.source_ref,
+                "relevant_until": r.relevant_until,
             })
         })
         .collect();
@@ -36965,7 +37177,7 @@ async fn cancel_task(
     {
         let store = lock_task_store(&state)?;
         let tid = local_first_task_runtime::TaskId::new(&task_id);
-        if let Some(task) = store
+        if let Some(mut task) = store
             .get_task(&tid, &user, &workspace)
             .map_err(GatewayError::task)?
         {
@@ -36977,15 +37189,29 @@ async fn cancel_task(
                     | local_first_task_runtime::TaskStatus::Expired
             );
             if !terminal {
-                store
-                    .update_task_status(
-                        &tid,
+                if task.kind == "chat_turn" {
+                    local_first_task_runtime::broker::cancel_chat_turn(
+                        &store,
                         &user,
                         &workspace,
-                        local_first_task_runtime::TaskStatus::Cancelled,
-                        Some("cancelled by the user"),
+                        &tid,
+                        &crate::turn_executor::GatewayCancelNotify,
                     )
                     .map_err(GatewayError::task)?;
+                } else {
+                    let was_running =
+                        task.status == local_first_task_runtime::TaskStatus::Running;
+                    task.status = local_first_task_runtime::TaskStatus::Cancelled;
+                    task.blocked_reason = Some("cancelled by the user".to_string());
+                    task.updated_at = OffsetDateTime::now_utc();
+                    if !was_running {
+                        store.release_resources(&task).map_err(GatewayError::task)?;
+                        task.lease_owner = None;
+                        task.lease_expires_at = None;
+                        task.last_heartbeat_at = None;
+                    }
+                    store.insert_task(&task).map_err(GatewayError::task)?;
+                }
             }
         }
     }
@@ -37959,6 +38185,7 @@ fn notify_automation_failure(state: &AppState, task: &TaskRecord, reason: &str) 
             title,
             body: reason.chars().take(240).collect(),
             dedup_key: format!("autofail:{automation_id}"),
+            source_ref: format!("automation:{automation_id}"),
             ..Default::default()
         });
     }
@@ -54363,9 +54590,44 @@ fn resolve_contained_computer_novnc(
     )
 }
 
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct ComputerReadiness {
+    phase: &'static str,
+    container_ok: bool,
+    cdp_ok: bool,
+    novnc_ok: bool,
+    error_code: Option<String>,
+}
+
+fn computer_readiness(
+    container_ok: bool,
+    cdp_ok: bool,
+    novnc_ok: bool,
+    error: Option<&str>,
+) -> ComputerReadiness {
+    let phase = if error.is_some() {
+        "failed"
+    } else if container_ok && cdp_ok && novnc_ok {
+        "ready"
+    } else if container_ok {
+        "starting"
+    } else {
+        "off"
+    };
+    ComputerReadiness {
+        phase,
+        container_ok,
+        cdp_ok,
+        novnc_ok,
+        error_code: error.map(str::to_string),
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ContainedComputerLiveResponse {
     enabled: bool,
+    #[serde(flatten)]
+    readiness: ComputerReadiness,
     /// Chat thread that owns the current live activity, if known.
     thread_id: Option<String>,
     novnc_url: Option<String>,
@@ -54518,7 +54780,7 @@ fn spawn_computer_live_publisher(state: AppState) {
             // `touch_activity = false`: the publisher fires unconditionally, so
             // touching the idle timer here would pin the container alive forever
             // (only an open panel/Local-computer page should reset it).
-            let live = build_contained_computer_live(&state, false);
+            let live = build_contained_computer_live(&state, false).await;
             let signature = serde_json::to_string(&live).unwrap_or_default();
             if signature != last_signature {
                 last_signature = signature;
@@ -54530,12 +54792,29 @@ fn spawn_computer_live_publisher(state: AppState) {
     });
 }
 
-fn build_contained_computer_live(state: &AppState, touch_activity: bool) -> ContainedComputerLiveResponse {
+async fn build_contained_computer_live(
+    state: &AppState,
+    touch_activity: bool,
+) -> ContainedComputerLiveResponse {
     if touch_activity {
         touch_cc_activity();
     }
+    let container_detected = contained_container_detected();
+    let (cdp_ok, novnc_ok) = tokio::join!(
+        contained_cdp_reachable(state),
+        novnc_proxy::viewer_ready(&state.http)
+    );
+    // A verified CDP response is stronger evidence than a Docker CLI probe,
+    // which may be unavailable inside the packaged gateway sandbox.
+    let container_ok = container_detected || cdp_ok;
+    let readiness_error = if container_ok && cdp_ok && !novnc_ok {
+        Some("novnc_unreachable")
+    } else {
+        None
+    };
+    let readiness = computer_readiness(container_ok, cdp_ok, novnc_ok, readiness_error);
     let mut novnc_url = resolve_contained_computer_novnc(
-        contained_computer_cdp_endpoint().is_some(),
+        container_ok,
         env::var("HOMUN_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
         env::var("HOMUN_WEB_DIR")
             .map(|v| !v.trim().is_empty())
@@ -54579,6 +54858,7 @@ fn build_contained_computer_live(state: &AppState, touch_activity: bool) -> Cont
         // The panel is useful for terminal activity even when the noVNC view is
         // not available, so report enabled when either surface has something.
         enabled: novnc_url.is_some() || terminal_active,
+        readiness,
         thread_id: owner_thread_id,
         novnc_url,
         active: activity_state.is_some(),
@@ -54599,7 +54879,7 @@ async fn contained_computer_live(
     // computer panel / the Local-computer page is open, so touching the idle timer here
     // keeps the container from being recycled out from under the user mid-view (the
     // reaper still reclaims it once nothing is viewing it for the idle window).
-    Json(build_contained_computer_live(&state, true))
+    Json(build_contained_computer_live(&state, true).await)
 }
 
 const CONTAINED_CONTAINER_NAME: &str = "homun-cc";
@@ -62061,6 +62341,8 @@ prs.save(Path({path:?}))
             feedback: None,
             dedup_key: "follow-up:idra".to_string(),
             created_at: 123,
+            source_ref: "supervisor:test".to_string(),
+            relevant_until: None,
         };
         let lifecycle = local_first_memory::MemoryLifecycleRequest {
             actor_id: "test".to_string(),
@@ -62166,6 +62448,7 @@ prs.save(Path({path:?}))
                 proposed_action: Some("Controllare lo stato di Idra".to_string()),
                 choices: None,
                 dedup_key: "follow-up:idra".to_string(),
+                source_ref: "supervisor:test".to_string(),
                 relevant_until: None,
             })
             .unwrap();
@@ -69142,7 +69425,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
-    fn privacy_guard_auto_resolution_reports_the_local_model_it_really_uses() {
+    fn privacy_guard_auto_resolution_uses_the_smallest_qualified_local_model() {
         let mut registry = super::model_registry::ProviderRegistry::default();
         let mut ollama = super::model_registry::ProviderEntry::new(
             "ollama".into(),
@@ -69153,14 +69436,40 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         ollama.models = vec![
             super::model_registry::ModelEntry::inferred("minimax-m3:cloud"),
             super::model_registry::ModelEntry::inferred("gemma4:12b"),
+            super::model_registry::ModelEntry::inferred("qwen3.5:2b"),
+            super::model_registry::ModelEntry::inferred("qwen3.5:4b"),
         ];
         registry.upsert(ollama);
 
         let resolved = super::resolve_privacy_guard_role(&registry).unwrap();
 
         assert_eq!(resolved.provider_id, "ollama");
-        assert_eq!(resolved.model, "gemma4:12b");
+        assert_eq!(resolved.model, "qwen3.5:4b");
         assert!(resolved.auto);
+    }
+
+    #[test]
+    fn privacy_guard_does_not_resolve_an_unqualified_local_model() {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut ollama = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        ollama.models = vec![super::model_registry::ModelEntry::inferred("qwen3.5:2b")];
+        registry.upsert(ollama);
+
+        assert!(super::resolve_privacy_guard_role(&registry).is_none());
+    }
+
+    #[test]
+    fn privacy_guard_default_config_does_not_depend_on_a_fresh_provider_catalog() {
+        let (base_url, model, api_key) = super::qualified_privacy_guard_default_config();
+
+        assert_eq!(base_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(model, "qwen3.5:4b");
+        assert!(api_key.is_none());
     }
 
     #[test]
@@ -69174,7 +69483,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
 
     #[test]
     fn privacy_guard_prompt_defines_contextual_credentials_without_keywords() {
-        let payload = super::privacy_guard_payload("qwen3.5:2b", "testo");
+        let payload = super::privacy_guard_payload("qwen3.5:4b", "testo");
         let system = payload["messages"][0]["content"].as_str().unwrap();
 
         assert!(system.contains("even when the word password is absent"));
@@ -74692,6 +75001,22 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn readiness_requires_container_cdp_and_novnc() {
+        assert_eq!(
+            super::computer_readiness(true, true, true, None).phase,
+            "ready"
+        );
+        assert_eq!(
+            super::computer_readiness(true, false, true, None).phase,
+            "starting"
+        );
+        assert_eq!(
+            super::computer_readiness(true, true, false, Some("novnc_unreachable")).phase,
+            "failed"
+        );
+    }
+
+    #[test]
     fn contained_computer_novnc_resolves_when_enabled() {
         assert_eq!(resolve_contained_computer_novnc(false, None, false), None);
         assert_eq!(
@@ -76545,6 +76870,14 @@ data: [DONE]\n";
             .unwrap()
             .append_assistant_message(&thread.thread_id, &assistant)
             .unwrap();
+        let initial_assistant_count = super::lock_store(&state)
+            .unwrap()
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages
+            .iter()
+            .filter(|message| message.role == "assistant")
+            .count();
         let mut task = TaskRecord::new(
             "turn_retry_failure",
             UserId::new("user_test"),
@@ -76572,6 +76905,18 @@ data: [DONE]\n";
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Retrying
         );
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .messages(&thread.thread_id)
+                .unwrap()
+                .messages
+                .iter()
+                .filter(|message| message.role == "assistant")
+                .count(),
+            initial_assistant_count,
+            "retry must update the stable assistant instead of appending a bubble"
+        );
 
         super::handle_failed_task_run(&state, &mut task, true, "terminal failure").unwrap();
         assert_eq!(task.status, TaskStatus::Failed);
@@ -76583,6 +76928,110 @@ data: [DONE]\n";
                 .expect("stable assistant")
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Failed
+        );
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .messages(&thread.thread_id)
+                .unwrap()
+                .messages
+                .iter()
+                .filter(|message| message.role == "assistant")
+                .count(),
+            initial_assistant_count,
+            "terminal failure must update the same assistant bubble"
+        );
+    }
+
+    #[test]
+    fn recovery_reuses_the_existing_assistant_message() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let mut assistant = super::channel_chat_message_with_id(
+            "assistant",
+            "",
+            "local_assistant_recovery",
+        );
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let initial_count = super::lock_store(&state)
+            .unwrap()
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages
+            .len();
+
+        let mut task = TaskRecord::new(
+            "turn_recovery",
+            UserId::new("user_test"),
+            WorkspaceId::new("workspace_test"),
+            "chat_turn",
+            "prompt",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "request_id": "recovery",
+                "assistant_message_id": assistant.id,
+                "source": "interactive",
+                "approval": "full",
+            }),
+        );
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("1:worker".to_string());
+        {
+            let store = super::lock_task_store(&state).unwrap();
+            store
+                .insert_chat_turn(
+                    &task,
+                    &thread.thread_id,
+                    "recovery",
+                    "interactive",
+                    "full",
+                )
+                .unwrap();
+            store.bump_process_generation().unwrap();
+            let generation = store.bump_process_generation().unwrap();
+            let recovered = local_first_task_runtime::broker::recover_chat_turns_at_boot(
+                &store,
+                &UserId::new("user_test"),
+                &WorkspaceId::new("workspace_test"),
+                generation,
+            )
+            .unwrap();
+            assert_eq!(recovered, vec![task.task_id.clone()]);
+            task = store
+                .get_task(
+                    &task.task_id,
+                    &UserId::new("user_test"),
+                    &WorkspaceId::new("workspace_test"),
+                )
+                .unwrap()
+                .unwrap();
+        }
+
+        super::set_chat_turn_message_delivery_state(
+            &state,
+            &task,
+            local_first_desktop_gateway::MessageDeliveryState::Retrying,
+        );
+        let messages = super::lock_store(&state)
+            .unwrap()
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages;
+        assert_eq!(messages.len(), initial_count);
+        assert_eq!(
+            messages
+                .iter()
+                .find(|message| message.id == "local_assistant_recovery")
+                .expect("recovered assistant")
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Retrying
         );
     }
 

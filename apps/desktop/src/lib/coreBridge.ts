@@ -3,7 +3,11 @@ import { cancelTurn, enqueueTurn, openTurnStream } from "./chatApi";
 import type { RoutingBindingInput } from "./chatApi";
 import type { SetupComputerStatus } from "./onboardingComputer";
 export type { SetupComputerStatus, SetupComputerPhase } from "./onboardingComputer";
-import { wsSubscription } from "./wsSubscription";
+import {
+  applyTurnEvent,
+  createTurnReplayState,
+  type TurnReplayState,
+} from "./turnReplayState";
 export type { CoreBranchPoint, CoreBranchOption, RoutingBindingInput } from "./chatApi";
 import {
   DESKTOP_GATEWAY_URL,
@@ -206,6 +210,14 @@ export interface CoreChatThread {
 export interface CoreChatThreadSnapshot {
   active_thread_id: string;
   threads: CoreChatThread[];
+}
+
+export interface CoreThreadAttention {
+  thread_id: string;
+  status: string;
+  latest_terminal_event_id: number | null;
+  last_seen_terminal_event_id: number;
+  updated_at: number;
 }
 
 export interface CoreChatMessage {
@@ -489,6 +501,7 @@ export interface CoreChatStreamDelta {
   type: "delta";
   request_id: string;
   delta: string;
+  seq?: number;
 }
 
 /** B2 (Piano UI) — payload tipizzati dei ChatEventPart. Definiti qui (lower layer)
@@ -577,9 +590,9 @@ export interface RecallEventPayload {
 
 export type CoreChatStreamEvent =
   | CoreChatStreamDelta
-  | { type: "reasoning"; request_id: string; text: string }
-  | { type: "activity"; request_id: string; text: string }
-  | { type: "plan_update"; request_id: string; markdown: string }
+  | { type: "reasoning"; request_id: string; text: string; seq?: number }
+  | { type: "activity"; request_id: string; text: string; seq?: number }
+  | { type: "plan_update"; request_id: string; markdown: string; seq?: number }
   | { type: "choice_prompt"; request_id: string; payload: ChoicePromptPayload }
   | { type: "vault_propose"; request_id: string; payload: VaultProposePayload }
   | { type: "vault_reveal"; request_id: string; payload: VaultRevealPayload }
@@ -587,8 +600,9 @@ export type CoreChatStreamEvent =
   | { type: "tool_result"; request_id: string; payload: ToolResultPayload }
   | { type: "recall"; request_id: string; payload: RecallEventPayload }
   | { type: "diff"; request_id: string; payload: DiffEventPayload }
-  | { type: "done"; request_id: string }
-  | { type: "error"; request_id: string; message?: string };
+  | { type: "retry" | "aborted" | "queued"; request_id: string; payload: Record<string, unknown>; seq?: number }
+  | { type: "done"; request_id: string; seq?: number }
+  | { type: "error"; request_id: string; message?: string; retryable?: boolean; seq?: number };
 
 export interface CorePromptExecutionPlan {
   title: string;
@@ -810,6 +824,11 @@ export interface BrowserStep {
 
 export interface ContainedComputerLive {
   enabled: boolean;
+  phase: "off" | "starting" | "ready" | "failed";
+  container_ok: boolean;
+  cdp_ok: boolean;
+  novnc_ok: boolean;
+  error_code: string | null;
   thread_id?: string | null;
   novnc_url: string | null;
   /** True only while a browse_web is actually running right now. */
@@ -1597,6 +1616,21 @@ async function electronActiveStreams(): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function electronThreadAttentions(workspace?: string): Promise<CoreThreadAttention[]> {
+  const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+  return gatewayGetJson<CoreThreadAttention[]>(`/api/chat/threads/attention${query}`);
+}
+
+async function electronMarkThreadSeen(
+  threadId: string,
+  terminalEventId: number,
+): Promise<CoreThreadAttention> {
+  return gatewayPostJson<CoreThreadAttention>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/seen`,
+    { terminal_event_id: terminalEventId },
+  );
 }
 
 async function electronConsolidateMemory(
@@ -2735,6 +2769,9 @@ export interface ProactivitySuggestion {
   status: string; // pending | accepted | dismissed | snoozed
   feedback: string | null; // liked | disliked
   created_at: number;
+  generated_at?: number;
+  source_ref?: string;
+  relevant_until: number | null;
 }
 
 export interface ProactivityScopeCount {
@@ -3587,6 +3624,9 @@ export const coreBridge = {
   ) => chatApi.captureProactiveAnswer(threadId, body),
   automations: (workspaceId?: string | null) => electronAutomations(workspaceId),
   activeStreams: () => electronActiveStreams(),
+  threadAttentions: (workspace?: string) => electronThreadAttentions(workspace),
+  markThreadSeen: (threadId: string, terminalEventId: number) =>
+    electronMarkThreadSeen(threadId, terminalEventId),
   automationEventSources: () => electronAutomationEventSources(),
   createAutomation: (input: AutomationCreateteInput) => electronCreateteAutomation(input),
   updateAutomation: (
@@ -4704,62 +4744,29 @@ async function submitBrokerRuntimeChatPromptStream(
     (performance.now() - promptBuildStartedAt) / 1000,
   );
 
-  // The bridge subscribes to the unified WS for this turn's events. The WS
-  // delivers turn.event messages with {turn_id, seq, kind, payload}. We
-  // accumulate delta text, dispatch activity/plan to the UI, and resolve the
-  // Promise when done/error arrives.
-  let text = "";
-  let redactedUserText: string | undefined;
+  // The per-turn stream replays the durable prefix before following the live
+  // tail. Applying its sequence cursor closes the enqueue→subscribe race and
+  // makes reconnects insensitive to duplicate or late events.
+  let replay: BrokerTurnReplayResult;
   let metrics: Partial<CoreChatMessageMetrics> = {};
   let firstTokenSeconds: number | undefined;
   keepDesktopAwake(true);
   try {
-    await new Promise<void>((resolve, reject) => {
-      const unsub = wsSubscription.subscribe((msg) => {
-        if (msg.type !== "turn.event") return;
-        if ((msg.turn_id as string) !== turnId) return;
-        const kind = msg.kind as string;
-        const payload = (msg.payload ?? {}) as Record<string, unknown>;
-        if (kind === "delta") {
-          const deltaText = String(payload.text ?? "");
-          if (deltaText && firstTokenSeconds === undefined) {
-            firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
-          }
-          text += deltaText;
-          chatApi.notifyChatStreamDelta({
-            type: "delta",
-            request_id: requestId,
-            delta: deltaText,
-          });
-        } else if (kind === "done") {
-          chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
-          unsub();
-          resolve();
-        } else if (kind === "error") {
-          const errMsg = String((payload as { message?: string }).message ?? "Turn error");
-          chatApi.notifyChatStreamEvent({
-            type: "error",
-            request_id: requestId,
-            message: errMsg,
-          });
-          unsub();
-          reject(new Error(errMsg));
-        } else {
-          // activity, plan_update, reasoning, tool_result, queued, retry
-          const legacyType = kind === "tool" ? "tool_result" : kind;
-          chatApi.notifyChatStreamEvent({
-            type: legacyType as CoreChatStreamEvent["type"],
-            request_id: requestId,
-            text: payload.text ? String(payload.text) : undefined,
-            markdown: payload.markdown ? String(payload.markdown) : undefined,
-            payload,
-          } as CoreChatStreamEvent);
+    replay = await replayBrokerTurnStream(turnId, requestId, {
+      onFirstDelta: () => {
+        if (firstTokenSeconds === undefined) {
+          firstTokenSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
         }
-      });
+      },
     });
   } finally {
     keepDesktopAwake(false);
   }
+  if (replay.state.status !== "completed") {
+    throw new Error(replay.errorMessage ?? "Turn did not complete.");
+  }
+  const text = replay.state.text;
+  const redactedUserText = replay.redactedUserText;
 
   const timestamp = currentTimestampSeconds();
   const totalElapsedSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
@@ -4866,6 +4873,111 @@ function coreAttachmentFromInput(
   };
 }
 
+interface BrokerTurnReplayResult {
+  state: TurnReplayState;
+  redactedUserText?: string;
+  errorMessage?: string;
+}
+
+async function replayBrokerTurnStream(
+  turnId: string,
+  requestId: string,
+  options: {
+    since?: number;
+    initialText?: string;
+    onFirstDelta?: () => void;
+  } = {},
+): Promise<BrokerTurnReplayResult> {
+  let state = createTurnReplayState(turnId, {
+    lastSeq: options.since ?? 0,
+    text: options.initialText ?? "",
+  });
+  let redactedUserText: string | undefined;
+  let errorMessage: string | undefined;
+  let firstDelta = state.text.length === 0;
+  const response = await openTurnStream(turnId, state.lastSeq);
+  if (!response.body) {
+    throw new Error("The turn stream has no body.");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  stream: while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      let envelope: { seq?: number; kind?: string; payload?: Record<string, unknown> };
+      try {
+        envelope = JSON.parse(line) as typeof envelope;
+      } catch {
+        continue;
+      }
+      if (!envelope.kind || !Number.isFinite(envelope.seq)) continue;
+      const event = {
+        turn_id: turnId,
+        seq: Number(envelope.seq),
+        kind: envelope.kind,
+        payload: envelope.payload ?? {},
+      };
+      const next = applyTurnEvent(state, event);
+      if (next === state) continue;
+      state = next;
+      const payload = event.payload;
+      if (event.kind === "delta") {
+        const delta = String(payload.text ?? "");
+        if (firstDelta && delta) {
+          firstDelta = false;
+          options.onFirstDelta?.();
+        }
+        chatApi.notifyChatStreamDelta({
+          type: "delta",
+          request_id: requestId,
+          delta,
+          seq: event.seq,
+        });
+      } else if (event.kind === "done") {
+        if (typeof payload.redacted_user_text === "string") {
+          redactedUserText = payload.redacted_user_text;
+        }
+        chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId, seq: event.seq });
+        break stream;
+      } else if (event.kind === "error") {
+        errorMessage = String(payload.message ?? "Turn error");
+        chatApi.notifyChatStreamEvent({
+          type: "error",
+          request_id: requestId,
+          message: errorMessage,
+          retryable: payload.retryable === true,
+          seq: event.seq,
+        });
+        break stream;
+      } else if (event.kind === "cancelled") {
+        errorMessage = "Turn cancelled";
+        break stream;
+      } else {
+        const type = event.kind === "tool" ? "tool_result" : event.kind;
+        chatApi.notifyChatStreamEvent({
+          type,
+          request_id: requestId,
+          text: payload.text ? String(payload.text) : undefined,
+          markdown: payload.markdown ? String(payload.markdown) : undefined,
+          payload,
+          seq: event.seq,
+        } as CoreChatStreamEvent);
+      }
+    }
+  }
+  void reader.cancel().catch(() => undefined);
+  if (!["completed", "failed", "cancelled"].includes(state.status)) {
+    throw new Error("Turn stream ended before a terminal event.");
+  }
+  return { state, redactedUserText, errorMessage };
+}
+
 function attachmentKindFromMime(mimeType: string): CoreChatAttachment["kind"] {
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType.startsWith("text/") || mimeType === "application/json") return "text";
@@ -4884,60 +4996,14 @@ async function resumeBrowserRuntimeChatPromptStream(
   commitResult = true,
 ): Promise<CorePromptSubmissionResult> {
   const startedAt = performance.now();
-  // Broker resume: turn_id derives from the saved requestId (`turn_{requestId}`).
-  // since=0 replays all buffered turn_events for the turn; the live tail follows.
   const turnId = `turn_${requestId}`;
-  const response = await openTurnStream(turnId, 0);
-  if (!response.body) {
-    throw new Error("The turn stream to resume has no body.");
+  const replay = await replayBrokerTurnStream(turnId, requestId);
+  if (replay.state.status !== "completed") {
+    throw new Error(replay.errorMessage ?? "Turn did not complete.");
   }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let text = "";
-  let redactedUserText: string | undefined;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        // Adapt broker {seq, kind, payload} → legacy {type, ...} and re-parse.
-        if (line.includes("‹‹ACT") || line.includes("‹‹REASONING")) {
-          console.log("[broker-debug] raw line with marker:", line.slice(0, 200));
-        }
-        const legacyEvent = parseTurnStreamEventAsLegacy(line);
-        if (!legacyEvent) continue;
-        const event = parseBrowserStreamEvent(JSON.stringify(legacyEvent));
-        if (!event) continue;
-      if (event.type === "delta") {
-        text += String(event.text ?? "");
-        chatApi.notifyChatStreamDelta({
-          type: "delta",
-          request_id: requestId,
-          delta: String(event.text ?? ""),
-        });
-      } else if (event.type === "done") {
-        chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId });
-        // Broker done may not carry text (server persists authoritative version).
-        if (event.text) text = String(event.text);
-        if (typeof event.redacted_user_text === "string") {
-          redactedUserText = event.redacted_user_text;
-        }
-      } else if (event.type === "error") {
-        chatApi.notifyChatStreamEvent({
-          type: "error",
-          request_id: requestId,
-          message: String(event.message ?? "Local runtime error"),
-        });
-        throw new Error(String(event.message ?? "Local runtime error"));
-      } else {
-        const payload = browserStreamEventToCoreEvent(event, requestId);
-        if (payload) chatApi.notifyChatStreamEvent(payload);
-      }
-    }
-  }
+  const text = replay.state.text;
+  const redactedUserText = replay.redactedUserText;
+  void threadId;
   const timestamp = currentTimestampSeconds();
   const totalElapsedSeconds = roundedSeconds((performance.now() - startedAt) / 1000);
   const result: CorePromptSubmissionResult = {
@@ -5043,110 +5109,6 @@ function trimRepeatedContinuetionPrefix(previousText: string, continuationText: 
     }
   }
   return continuationText;
-}
-
-function parseBrowserStreamEvent(line: string) {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  return JSON.parse(trimmed) as {
-    type:
-      | "delta"
-      | "reasoning"
-      | "activity"
-      | "plan_update"
-      | "choice_prompt"
-      | "vault_propose"
-      | "vault_reveal"
-      | "payment_approval"
-      | "tool_result"
-      | "recall"
-      | "done"
-      | "error";
-    text?: string;
-    markdown?: string;
-    payload?: unknown;
-    redacted_user_text?: string;
-    message?: string;
-    metrics?: Partial<CoreChatMessageMetrics>;
-  };
-}
-
-/**
- * Adapt a broker turn_event NDJSON line into the legacy `{type, ...}` shape that
- * `parseBrowserStreamEvent` + the stream loop already consume. The broker emits
- * `{seq, kind, payload}`; the legacy path expects `{type, text|markdown|payload|...}`.
- * Unknown kinds (retry, queued, aborted, cancelled) are mapped to a no-op event
- * the loop ignores (returned as null by the downstream parser).
- */
-function parseTurnStreamEventAsLegacy(line: string) {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
-  const raw = JSON.parse(trimmed) as { seq?: number; kind: string; payload?: unknown };
-  const payload = (raw.payload ?? {}) as Record<string, unknown>;
-  switch (raw.kind) {
-    case "delta":
-      return { type: "delta" as const, text: String(payload.text ?? "") };
-    case "reasoning":
-      return { type: "reasoning" as const, text: String(payload.text ?? "") };
-    case "activity":
-      return { type: "activity" as const, text: String(payload.text ?? "") };
-    case "plan_update":
-      return { type: "plan_update" as const, markdown: String(payload.markdown ?? "") };
-    case "tool":
-      return { type: "tool_result" as const, payload: raw.payload };
-    case "recall":
-      return { type: "recall" as const, payload: raw.payload };
-    case "error":
-      return {
-        type: "error" as const,
-        message: String((payload as { message?: string }).message ?? "turn error"),
-      };
-    case "done":
-      // The broker's done payload carries assistant_message_id + user_message_id
-      // but NOT the final text (the broker persists it server-side). The loop will
-      // use whatever text it accumulated from deltas; the caller refreshes from
-      // the backend to get the authoritative persisted text.
-      return {
-        type: "done" as const,
-        text: undefined,
-        payload: raw.payload,
-      };
-    // retry / queued / aborted / cancelled: informational, no legacy mapping.
-    default:
-      return null;
-  }
-}
-
-function browserStreamEventToCoreEvent(
-  event: ReturnType<typeof parseBrowserStreamEvent>,
-  requestId: string,
-): CoreChatStreamEvent | null {
-  if (!event) return null;
-  switch (event.type) {
-    case "reasoning":
-      return { type: "reasoning", request_id: requestId, text: String(event.text ?? "") };
-    case "activity":
-      return { type: "activity", request_id: requestId, text: String(event.text ?? "") };
-    case "plan_update":
-      return {
-        type: "plan_update",
-        request_id: requestId,
-        markdown: String(event.markdown ?? ""),
-      };
-    case "choice_prompt":
-    case "vault_propose":
-    case "vault_reveal":
-    case "payment_approval":
-    case "tool_result":
-    case "recall":
-      return {
-        type: event.type,
-        request_id: requestId,
-        payload: event.payload,
-      } as CoreChatStreamEvent;
-    default:
-      return null;
-  }
 }
 
 function browserComputerSession(

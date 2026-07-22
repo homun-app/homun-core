@@ -220,6 +220,8 @@ pub enum GenerateStreamEvent {
     Error {
         code: String,
         message: String,
+        #[serde(default)]
+        retryable: bool,
     },
 }
 

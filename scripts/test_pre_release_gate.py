@@ -5,6 +5,27 @@ import scripts.pre_release_gate as gate
 
 
 class PreReleaseGateTests(unittest.TestCase):
+    def test_stability_steps_are_required(self):
+        labels = [step.label for step in gate.build_plan({})]
+
+        self.assertIn("task runtime tests", labels)
+        self.assertIn("engine tests", labels)
+        self.assertIn("desktop attention tests", labels)
+        self.assertIn("desktop replay tests", labels)
+        self.assertIn("desktop visible content tests", labels)
+        self.assertIn("desktop electron tests", labels)
+        self.assertIn("contained computer package tests", labels)
+        self.assertIn("stability soak unit tests", labels)
+
+    def test_live_stability_soak_is_last_when_enabled(self):
+        plan = gate.build_plan({"HOMUN_RUN_STABILITY_SOAK": "1"})
+
+        self.assertEqual(plan[-1].label, "live stability soak")
+        self.assertEqual(
+            plan[-1].command,
+            [gate.PYTHON, "scripts/stability_soak.py", "--restart"],
+        )
+
     def test_default_plan_runs_deterministic_local_checks_only(self):
         plan = gate.build_plan({})
 
@@ -64,8 +85,16 @@ class PreReleaseGateTests(unittest.TestCase):
             [
                 "capability tests",
                 "orchestrator tests",
+                "task runtime tests",
+                "engine tests",
                 "gateway tests",
                 "memorybench provider",
+                "desktop attention tests",
+                "desktop replay tests",
+                "desktop visible content tests",
+                "desktop electron tests",
+                "contained computer package tests",
+                "host computer package tests",
                 "ui contract",
             ],
         )

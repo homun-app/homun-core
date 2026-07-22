@@ -82,7 +82,7 @@ pub use execution_journal::{
     PromptToolSnapshot, build_prompt_snapshot,
 };
 pub use browse::{BrowseResult, Confidence};
-pub use config::TurnConfig;
+pub use config::{BrowserBudget, BrowserStopReason, TurnConfig};
 pub use loop_state::LoopState;
 pub use loop_checkpoint::LoopCheckpoint;
 pub use prompt_packets::{PromptPacket, PromptPacketMetadata, PromptPacketSource, compose_prompt_packets};
