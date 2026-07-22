@@ -195,7 +195,7 @@ export function ChatComputerPanel({
   // Chrome-free embed page (RFB core with scaleViewport) — shows the WHOLE
   // contained display, scaled to fit and proportioned, with no noVNC toolbar.
   const base = live.novnc_url.replace("/vnc.html", "/lfpa-view.html");
-  const src = `${base}${base.includes("?") ? "&" : "?"}view_only=1`;
+  const src = `${base}${base.includes("?") ? "&" : "?"}view_only=1&viewer=csp-external-v1`;
   const fullscreen = view === "full";
   const showStage = view === "expanded" || fullscreen;
   const steps = live.steps ?? [];

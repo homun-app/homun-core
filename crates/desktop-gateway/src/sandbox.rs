@@ -395,6 +395,7 @@ const CC_HASH_FILES: &[&str] = &[
     "fonts_manifest.py",
     "whisper_server.py",
     "novnc-view.html",
+    "novnc-view.js",
 ];
 
 /// Short content hash of every file baked into the contained-computer image.
@@ -983,6 +984,7 @@ mod platform_tests {
             "fonts_manifest.py",
             "whisper_server.py",
             "novnc-view.html",
+            "novnc-view.js",
         ] {
             fs::write(root.join(relative), relative).expect("write hash input");
         }
@@ -991,6 +993,12 @@ mod platform_tests {
         let first = contained_computer_def_hash_at(&root).expect("first hash");
         let second = contained_computer_def_hash_at(&root).expect("second hash");
         assert_eq!(first, second);
+
+        fs::write(root.join("novnc-view.js"), "changed").expect("change viewer module");
+        assert_ne!(
+            first,
+            contained_computer_def_hash_at(&root).expect("changed viewer module hash")
+        );
 
         fs::write(root.join("entrypoint.sh"), "changed").expect("change input");
         assert_ne!(
