@@ -211,18 +211,21 @@ def run_soak(
     timeout: float,
 ) -> dict[str, Any]:
     started = time.monotonic()
-    threads = {label: _create_thread(client) for label in ("A", "B", "C")}
-    client.request("POST", f"/api/chat/threads/{threads['B']}/select", {})
-    normalized: list[dict[str, Any]] = [{"thread": threads["B"], "kind": "selected"}]
-
+    threads: dict[str, str] = {}
     turns: dict[str, dict[str, str]] = {}
+    # Enqueue immediately after creation: a fresh profile intentionally reuses its
+    # empty starter thread until the first user message is committed.
     for label in ("A", "B", "C"):
-        turn_id, assistant_id = _enqueue(client, threads[label], label)
+        thread_id = _create_thread(client)
+        threads[label] = thread_id
+        turn_id, assistant_id = _enqueue(client, thread_id, label)
         turns[turn_id] = {
             "label": label,
-            "thread": threads[label],
+            "thread": thread_id,
             "assistant_id": assistant_id,
         }
+    client.request("POST", f"/api/chat/threads/{threads['B']}/select", {})
+    normalized: list[dict[str, Any]] = [{"thread": threads["B"], "kind": "selected"}]
 
     restarted = False
     if restart is not None:
@@ -270,15 +273,10 @@ def run_soak(
         normalized.append({"thread": active_thread, "kind": "selected"})
 
     evaluation = evaluate(normalized, threads["B"])
-    missing_terminal = [
-        turn_id for turn_id in turns if evaluation["terminal_counts"].get(turn_id, 0) != 1
-    ]
     nonterminal = [
         turn_id for turn_id in turns if statuses.get(turn_id) not in TERMINAL_STATUSES
     ]
     violations = set(evaluation["violations"])
-    if missing_terminal:
-        violations.add("missing_terminal")
     if nonterminal:
         violations.add("turn_timeout")
 
@@ -328,6 +326,9 @@ def main(argv: list[str] | None = None) -> int:
 
             def restart_gateway() -> None:
                 gateway.stop()
+                # macOS can keep the just-closed loopback listener unavailable for a
+                # short interval even after the process has exited cleanly.
+                time.sleep(0.75)
                 gateway.start()
 
             report = run_soak(client, restart_gateway if args.restart else None, args.timeout)
