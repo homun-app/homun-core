@@ -484,15 +484,15 @@ where
 }
 
 /// Interactive input submitted while a thread is active is user steering for
-/// that run, not a competing turn. Persist the transcript row and steering row
-/// in one transaction so the executor can consume exactly what the user sees.
+/// that run, not a competing turn. Persist only the steering envelope until a
+/// round boundary claims and materializes it exactly once in the transcript.
 pub fn enqueue_or_steer_chat_turn_atomic<F, G>(
     store: &TaskStore,
     user_id: &UserId,
     workspace_id: &WorkspaceId,
     input: &ChatTurnInput,
     insert_turn_messages: F,
-    insert_steering_user_message: G,
+    _insert_steering_user_message: G,
 ) -> Result<EnqueueTurnOutcome, EnqueueError>
 where
     F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
@@ -529,7 +529,6 @@ where
         if input.source != ChatTurnSource::Interactive {
             return Ok(EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id));
         }
-        insert_steering_user_message(tx)?;
         tx.execute(
             "INSERT INTO turn_steering (
                 user_id, workspace_id, thread_id, active_turn_id, source_message_id,
@@ -1141,7 +1140,10 @@ mod atomic_tests {
                 ..
             } if active_turn_id == active.task_id.as_str()
         ));
-        assert!(*called.lock().unwrap());
+        assert!(
+            !*called.lock().unwrap(),
+            "pending steering must stay out of the transcript until claim"
+        );
         let steering = s
             .consume_pending_turn_steering("u", "w", "t1", active.task_id.as_str())
             .unwrap();

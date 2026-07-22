@@ -316,6 +316,11 @@ pub const CHAT_STORE_MEMORY_BOUNDARY_AUDIT: &[ChatStoreMemoryBoundaryAudit] = &[
         canonical_policy: "conversation attachment cache; produced deliverables are artifacts in MemoryFacade",
     },
     ChatStoreMemoryBoundaryAudit {
+        table: "thread_read_receipts",
+        graph_like: false,
+        canonical_policy: "UX-only terminal seen cursor; no semantic memory",
+    },
+    ChatStoreMemoryBoundaryAudit {
         table: "thread_routing_bindings",
         graph_like: false,
         canonical_policy: "UX/ops-only: plugin-owned deterministic routing pin (S2), read by the router; no semantic memory",
