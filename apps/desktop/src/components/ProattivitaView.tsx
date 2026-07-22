@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { coreBridge } from "../lib/coreBridge";
+import { freshness } from "../lib/proactivityFreshness";
 import { EmptyState, LoadingState } from "./StateViews";
 import type { ProactivitySuggestion, WorkspaceRecord } from "../lib/coreBridge";
 
@@ -27,13 +28,14 @@ interface ProattivitaViewProps {
 }
 
 export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [suggestions, setSuggestions] = useState<ProactivitySuggestion[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [filter, setFilter] = useState<ScopeFilter>("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
 
   async function load() {
     const [list, ws] = await Promise.all([
@@ -44,6 +46,7 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
     ]);
     setSuggestions(list.suggestions);
     setWorkspaces(ws.workspaces);
+    setNowSeconds(Math.floor(Date.now() / 1000));
     setLoading(false);
   }
 
@@ -61,6 +64,7 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
   // hide behind "+N altre".
   const groups = useMemo(() => {
     const filtered = suggestions.filter((s) => {
+      if (freshness(s, nowSeconds) === "expired") return false;
       if (filter === "personal") return s.scope === PERSONAL_SCOPE;
       if (filter === "projects") return s.scope !== PERSONAL_SCOPE;
       return true;
@@ -76,7 +80,36 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
       if (b[0] === PERSONAL_SCOPE) return 1;
       return b[1].length - a[1].length;
     });
-  }, [suggestions, filter]);
+  }, [suggestions, filter, nowSeconds]);
+
+  function sourceLabel(sourceRef?: string): string {
+    if (!sourceRef || sourceRef.startsWith("supervisor")) {
+      return t("proattivita:sourceSupervisor");
+    }
+    if (sourceRef.startsWith("automation:")) {
+      const automation = sourceRef.slice("automation:".length);
+      return automation
+        ? `${t("proattivita:sourceAutomation")} · ${automation}`
+        : t("proattivita:sourceAutomation");
+    }
+    return sourceRef;
+  }
+
+  function generatedTime(s: ProactivitySuggestion): string {
+    const generatedAt = s.generated_at ?? s.created_at;
+    const delta = generatedAt - nowSeconds;
+    const absolute = Math.abs(delta);
+    const [amount, unit]: [number, Intl.RelativeTimeFormatUnit] =
+      absolute >= 86400
+        ? [Math.round(delta / 86400), "day"]
+        : absolute >= 3600
+          ? [Math.round(delta / 3600), "hour"]
+          : [Math.round(delta / 60), "minute"];
+    return new Intl.RelativeTimeFormat(i18n.resolvedLanguage, { numeric: "auto" }).format(
+      amount,
+      unit,
+    );
+  }
 
   function toggleScope(scope: string) {
     setExpanded((cur) => {
@@ -107,7 +140,7 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
     await onOpenChat(s);
   }
 
-  const total = suggestions.length;
+  const total = suggestions.filter((s) => freshness(s, nowSeconds) !== "expired").length;
 
   return (
     <section className="proattiva-view">
@@ -187,6 +220,18 @@ export function ProattivitaView({ onOpenChat }: ProattivitaViewProps) {
                       <span className="proattiva-card-title">{s.title}</span>
                     </div>
                     <p className="proattiva-card-body">{s.body}</p>
+                    <div className="proattiva-card-meta">
+                      <span>
+                        {t("proattivita:source", { source: sourceLabel(s.source_ref) })}
+                      </span>
+                      <span>·</span>
+                      <span>
+                        {t("proattivita:generated", { time: generatedTime(s) })}
+                      </span>
+                      {freshness(s, nowSeconds) === "stale" && (
+                        <span className="proattiva-stale">{t("proattivita:stale")}</span>
+                      )}
+                    </div>
                     {s.rationale && (
                       <div className="proattiva-card-why">
                         <Link2 size={13} aria-hidden="true" />

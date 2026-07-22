@@ -2769,6 +2769,9 @@ export interface ProactivitySuggestion {
   status: string; // pending | accepted | dismissed | snoozed
   feedback: string | null; // liked | disliked
   created_at: number;
+  generated_at?: number;
+  source_ref?: string;
+  relevant_until: number | null;
 }
 
 export interface ProactivityScopeCount {

@@ -5929,7 +5929,7 @@ body.resizing-drawer {
 }
 
 .pending-steering-edit {
-  margin-top: 7px;
+  margin: 0 0 8px;
 }
 
 .pending-steering-edit textarea {
@@ -15216,6 +15216,21 @@ body.resizing-drawer {
   color: var(--text);
   margin: 0 0 8px;
   line-height: 1.5;
+}
+.proattiva-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.proattiva-stale {
+  border: 1px solid color-mix(in srgb, var(--text-muted) 28%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: var(--text-secondary);
 }
 .proattiva-card-why {
   display: flex;
