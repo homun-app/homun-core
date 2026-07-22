@@ -96,6 +96,11 @@ import {
   revokeHostComputerGrant,
 } from "../lib/coreBridge";
 import { useSetting } from "../lib/settingsStore";
+import {
+  buildRemoteMcpConnectInput,
+  remoteMcpReady,
+  type McpRemoteAuthMode,
+} from "../lib/mcpConnection";
 import { ProviderLogo, providerLogoKey } from "./providerLogos";
 import {
   isLocalOllamaProvider,
@@ -4104,9 +4109,13 @@ function McpAddDetail({
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [url, setUrl] = useState("");
+  const [authMode, setAuthMode] = useState<McpRemoteAuthMode>("none");
+  const [bearerToken, setBearerToken] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const ready = !!name.trim() && (mode === "command" ? !!command.trim() : !!url.trim());
+  const ready = mode === "command"
+    ? !!name.trim() && !!command.trim()
+    : remoteMcpReady({ name, url, authMode, bearerToken });
 
   const submit = async () => {
     setBusy(true);
@@ -4114,7 +4123,7 @@ function McpAddDetail({
     try {
       const result = await coreBridge.mcpConnect(
         mode === "url"
-          ? { name: name.trim(), url: url.trim() }
+          ? buildRemoteMcpConnectInput({ name, url, authMode, bearerToken })
           : {
               name: name.trim(),
               command: command.trim(),
@@ -4130,11 +4139,13 @@ function McpAddDetail({
       setCommand("");
       setArgs("");
       setUrl("");
+      setAuthMode("none");
       await onChanged();
       onConnected(result.provider_id);
     } catch (error) {
       onNote(t("settings.mcpConnectionFailed", { message: (error as Error).message }));
     } finally {
+      setBearerToken("");
       setBusy(false);
     }
   };
@@ -4195,15 +4206,42 @@ function McpAddDetail({
           </div>
         </>
       ) : (
-        <div className="mdl-field">
-          <label className="mdl-field-label">URL</label>
-          <input
-            className="set-input"
-            placeholder="https://example.com/mcp"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-        </div>
+        <>
+          <div className="mdl-field">
+            <label className="mdl-field-label">URL</label>
+            <input
+              className="set-input"
+              placeholder="https://example.com/mcp"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+            />
+          </div>
+          <div className="mdl-field">
+            <label className="mdl-field-label">{t("settings.mcpAuthentication")}</label>
+            <select
+              className="set-input"
+              value={authMode}
+              onChange={(event) => setAuthMode(event.target.value as McpRemoteAuthMode)}
+            >
+              <option value="none">{t("settings.mcpAuthenticationNone")}</option>
+              <option value="bearer">{t("settings.mcpAuthenticationBearer")}</option>
+            </select>
+          </div>
+          {authMode === "bearer" && (
+            <div className="mdl-field">
+              <label className="mdl-field-label">{t("settings.mcpBearerToken")}</label>
+              <input
+                className="set-input"
+                type="password"
+                autoComplete="off"
+                placeholder={t("settings.mcpBearerTokenPlaceholder")}
+                value={bearerToken}
+                onChange={(event) => setBearerToken(event.target.value)}
+              />
+              <span className="set-hint">{t("settings.mcpCredentialStoredSecurely")}</span>
+            </div>
+          )}
+        </>
       )}
 
       <button
