@@ -3,7 +3,33 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-21.**
+> **Ultimo aggiornamento: 2026-07-22.**
+
+## ⭐ CHECKPOINT 2026-07-22 — Catalogo skill ClawHub publisher-aware
+
+Risolto il `409 Conflict` incontrato installando `weather`: su ClawHub lo stesso slug può
+appartenere a più publisher, ma il catalogo Homun perdeva `ownerHandle` e richiedeva il download
+con il solo slug ambiguo. La ricerca testuale ora usa il search remoto publisher-aware e mostra
+tutte le varianti omonime come card distinte; publisher e slug vengono propagati a preview e
+install, e la provenienza salvata è `clawhub:@owner/slug`.
+
+L'identità locale resta lo slug/cartella, quindi Homun installa una sola variante per slug. Se
+un'altra variante occupa già quello slug, la card lo segnala esplicitamente e non sovrascrive la
+skill. In caso di indisponibilità della ricerca remota resta il fallback cache, marcato come
+degradato. Il percorso legacy senza publisher continua a essere supportato e gli errori ClawHub
+riportano ora anche una spiegazione upstream limitata in dimensione.
+
+**Gate eseguiti (sessione 2026-07-22):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-desktop-gateway` | lib 53 + main 784 + integrazioni 18, 0 failed; 6 ignored |
+| `node --test src/lib/skillCatalogState.test.mjs` | 2/2 |
+| `npm run test:electron` | 44/44 |
+| `npm run test:ui-contract` | OK |
+| `npm run build` | OK; resta il warning Vite preesistente sui chunk maggiori di 500 kB |
+| ClawHub live search `weather` | 3 varianti: `steipete`, `legionspace-hackathon`, `lfengwa2` |
+| ClawHub live download `weather` + `ownerHandle=steipete` | HTTP 200 |
+| Verifica visuale nell'app | non eseguita in questa sessione |
 
 ## ⭐ CHECKPOINT 2026-07-21 — Adaptive scaffolding floor ritirato
 

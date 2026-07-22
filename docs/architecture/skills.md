@@ -116,10 +116,19 @@ Esecuzione + security scan:
 
 Catalogo / install (ClawHub):
 - `crates/desktop-gateway/src/skills_catalog.rs` — fetch del registry ClawHub
-  (`clawhub.ai`), cache locale (6h), categorizzazione per keyword (`:78`),
-  `search` BM25-like (`:251`), `download_zip` (`:296`), `extract_zip` con guardia
-  traversal/size (`:348`). Preflight di sicurezza via `read_zip_text_files` +
-  `skill_security::scan_blobs`.
+  (`clawhub.ai`). La vista senza query usa il feed `/skills` con cache locale
+  (6h) e categorizzazione per keyword; una ricerca testuale usa invece `/search`,
+  che conserva tutte le varianti omonime e l'identità remota
+  `(ownerHandle, slug)`. Se la ricerca remota non è disponibile, il gateway usa
+  la cache e marca la risposta come degradata.
+- Preview e install propagano `ownerHandle` fino a `/download`, evitando il `409
+  Conflict` prodotto da uno slug condiviso da più publisher. L'identità locale
+  resta lo slug/cartella: può quindi essere installata una sola variante per
+  slug; le altre sono mostrate come slug occupato, senza sovrascrittura
+  implicita. La provenienza persistita è `clawhub:@owner/slug` quando il
+  publisher è noto e resta `clawhub:slug` per i record legacy.
+- `extract_zip` protegge da traversal e archivi fuori misura. Il preflight di
+  sicurezza usa `read_zip_text_files` + `skill_security::scan_blobs`.
 
 ### Diagramma
 
