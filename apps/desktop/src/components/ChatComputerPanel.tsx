@@ -36,6 +36,11 @@ import { wsSubscription } from "../lib/wsSubscription";
 
 const IDLE: ContainedComputerLive = {
   enabled: false,
+  phase: "off",
+  container_ok: false,
+  cdp_ok: false,
+  novnc_ok: false,
+  error_code: null,
   thread_id: null,
   novnc_url: null,
   active: false,

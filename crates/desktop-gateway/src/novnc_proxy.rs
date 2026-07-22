@@ -81,6 +81,18 @@ fn novnc_origin() -> String {
     )
 }
 
+/// Bounded readiness probe for the exact viewer page embedded by the desktop.
+/// A listening TCP port is not enough: stale images can be missing the custom
+/// `lfpa-view.html` asset while websockify still accepts connections.
+pub(crate) async fn viewer_ready(http: &reqwest::Client) -> bool {
+    http.get(format!("{}/lfpa-view.html", novnc_origin()))
+        .timeout(Duration::from_millis(800))
+        .send()
+        .await
+        .map(|response| response.status().is_success())
+        .unwrap_or(false)
+}
+
 fn parse_novnc_origin(raw: Option<&str>) -> String {
     if let Some(raw) = raw {
         if let Some(idx) = raw.find("://") {

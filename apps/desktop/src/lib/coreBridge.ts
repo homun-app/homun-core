@@ -824,6 +824,11 @@ export interface BrowserStep {
 
 export interface ContainedComputerLive {
   enabled: boolean;
+  phase: "off" | "starting" | "ready" | "failed";
+  container_ok: boolean;
+  cdp_ok: boolean;
+  novnc_ok: boolean;
+  error_code: string | null;
   thread_id?: string | null;
   novnc_url: string | null;
   /** True only while a browse_web is actually running right now. */

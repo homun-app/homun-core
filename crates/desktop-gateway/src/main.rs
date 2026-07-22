@@ -54557,9 +54557,44 @@ fn resolve_contained_computer_novnc(
     )
 }
 
+#[derive(Debug, Serialize, PartialEq, Eq)]
+struct ComputerReadiness {
+    phase: &'static str,
+    container_ok: bool,
+    cdp_ok: bool,
+    novnc_ok: bool,
+    error_code: Option<String>,
+}
+
+fn computer_readiness(
+    container_ok: bool,
+    cdp_ok: bool,
+    novnc_ok: bool,
+    error: Option<&str>,
+) -> ComputerReadiness {
+    let phase = if error.is_some() {
+        "failed"
+    } else if container_ok && cdp_ok && novnc_ok {
+        "ready"
+    } else if container_ok {
+        "starting"
+    } else {
+        "off"
+    };
+    ComputerReadiness {
+        phase,
+        container_ok,
+        cdp_ok,
+        novnc_ok,
+        error_code: error.map(str::to_string),
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ContainedComputerLiveResponse {
     enabled: bool,
+    #[serde(flatten)]
+    readiness: ComputerReadiness,
     /// Chat thread that owns the current live activity, if known.
     thread_id: Option<String>,
     novnc_url: Option<String>,
@@ -54712,7 +54747,7 @@ fn spawn_computer_live_publisher(state: AppState) {
             // `touch_activity = false`: the publisher fires unconditionally, so
             // touching the idle timer here would pin the container alive forever
             // (only an open panel/Local-computer page should reset it).
-            let live = build_contained_computer_live(&state, false);
+            let live = build_contained_computer_live(&state, false).await;
             let signature = serde_json::to_string(&live).unwrap_or_default();
             if signature != last_signature {
                 last_signature = signature;
@@ -54724,12 +54759,29 @@ fn spawn_computer_live_publisher(state: AppState) {
     });
 }
 
-fn build_contained_computer_live(state: &AppState, touch_activity: bool) -> ContainedComputerLiveResponse {
+async fn build_contained_computer_live(
+    state: &AppState,
+    touch_activity: bool,
+) -> ContainedComputerLiveResponse {
     if touch_activity {
         touch_cc_activity();
     }
+    let container_detected = contained_container_detected();
+    let (cdp_ok, novnc_ok) = tokio::join!(
+        contained_cdp_reachable(state),
+        novnc_proxy::viewer_ready(&state.http)
+    );
+    // A verified CDP response is stronger evidence than a Docker CLI probe,
+    // which may be unavailable inside the packaged gateway sandbox.
+    let container_ok = container_detected || cdp_ok;
+    let readiness_error = if container_ok && cdp_ok && !novnc_ok {
+        Some("novnc_unreachable")
+    } else {
+        None
+    };
+    let readiness = computer_readiness(container_ok, cdp_ok, novnc_ok, readiness_error);
     let mut novnc_url = resolve_contained_computer_novnc(
-        contained_computer_cdp_endpoint().is_some(),
+        container_ok,
         env::var("HOMUN_CONTAINED_COMPUTER_NOVNC").ok().as_deref(),
         env::var("HOMUN_WEB_DIR")
             .map(|v| !v.trim().is_empty())
@@ -54773,6 +54825,7 @@ fn build_contained_computer_live(state: &AppState, touch_activity: bool) -> Cont
         // The panel is useful for terminal activity even when the noVNC view is
         // not available, so report enabled when either surface has something.
         enabled: novnc_url.is_some() || terminal_active,
+        readiness,
         thread_id: owner_thread_id,
         novnc_url,
         active: activity_state.is_some(),
@@ -54793,7 +54846,7 @@ async fn contained_computer_live(
     // computer panel / the Local-computer page is open, so touching the idle timer here
     // keeps the container from being recycled out from under the user mid-view (the
     // reaper still reclaims it once nothing is viewing it for the idle window).
-    Json(build_contained_computer_live(&state, true))
+    Json(build_contained_computer_live(&state, true).await)
 }
 
 const CONTAINED_CONTAINER_NAME: &str = "homun-cc";
@@ -74899,6 +74952,22 @@ data: [DONE]\n";
         assert_eq!(
             resolve_contained_computer_cdp(Some("http://10.0.0.5:9333"), Some("0")),
             Some("http://10.0.0.5:9333".to_string())
+        );
+    }
+
+    #[test]
+    fn readiness_requires_container_cdp_and_novnc() {
+        assert_eq!(
+            super::computer_readiness(true, true, true, None).phase,
+            "ready"
+        );
+        assert_eq!(
+            super::computer_readiness(true, false, true, None).phase,
+            "starting"
+        );
+        assert_eq!(
+            super::computer_readiness(true, true, false, Some("novnc_unreachable")).phase,
+            "failed"
         );
     }
 
