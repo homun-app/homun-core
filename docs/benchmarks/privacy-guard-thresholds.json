@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "minimum_recall": 0.95,
+  "minimum_specificity": 0.90,
+  "minimum_valid_json": 0.99,
+  "maximum_p95_ms": 12000
+}
