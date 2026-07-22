@@ -13407,7 +13407,10 @@ fn render_project_output(output: &std::process::Output) -> String {
 /// This is the single raw-exec code path: `run_in_project`'s non-sandboxed branch
 /// AND the on-failure escalation endpoint (`run_escalate`) both call it, so the
 /// unfenced execution + output rendering live in exactly one place.
-async fn run_bash_unsandboxed(root: &std::path::Path, command: &str) -> String {
+async fn run_bash_unsandboxed_result(
+    root: &std::path::Path,
+    command: &str,
+) -> Result<String, String> {
     let mut cmd = tokio::process::Command::new("bash");
     cmd.arg("-lc")
         .arg(command)
@@ -13419,11 +13422,18 @@ async fn run_bash_unsandboxed(root: &std::path::Path, command: &str) -> String {
     )
     .await
     {
-        Ok(Ok(output)) => render_project_output(&output),
-        Ok(Err(error)) => format!("Could not run the command: {error}"),
-        Err(_) => format!(
+        Ok(Ok(output)) if output.status.success() => Ok(render_project_output(&output)),
+        Ok(Ok(output)) => Err(render_project_output(&output)),
+        Ok(Err(error)) => Err(format!("Could not run the command: {error}")),
+        Err(_) => Err(format!(
             "Command interrupted: exceeded the {PROJECT_CMD_TIMEOUT_SECS}s timeout (process terminated)."
-        ),
+        )),
+    }
+}
+
+async fn run_bash_unsandboxed(root: &std::path::Path, command: &str) -> String {
+    match run_bash_unsandboxed_result(root, command).await {
+        Ok(output) | Err(output) => output,
     }
 }
 
@@ -37873,6 +37883,12 @@ fn request_task_executor_approval(
 ) -> Result<(), GatewayError> {
     let store = lock_task_store(state)?;
     if approval.inline_action_card {
+        if let Some(persisted) = store
+            .get_task(&task.task_id, &task.user_id, &task.workspace_id)
+            .map_err(GatewayError::task)?
+        {
+            task.input_json = persisted.input_json;
+        }
         task.status = TaskStatus::WaitingUserApproval;
         task.blocked_reason = Some(format!("approval required: {}", approval.action));
         task.lease_owner = None;
@@ -38420,6 +38436,53 @@ fn proactive_thread_plan(task: &TaskRecord, goal: &str) -> ProactiveThreadPlan {
     }
 }
 
+fn start_proactive_visible_turn(
+    state: &AppState,
+    task: &TaskRecord,
+    thread_id: &str,
+    thread_plan: &ProactiveThreadPlan,
+    goal: &str,
+) -> Result<VisibleConversationTurn, LocalTaskExecutionError> {
+    let visible_turn = start_visible_conversation_turn(
+        state,
+        thread_id,
+        &thread_plan.workspace_id,
+        &thread_plan.source,
+        thread_plan.channel.as_deref(),
+        &thread_plan.title,
+        goal,
+        None,
+        None,
+        None,
+        Some(task.task_id.as_str()),
+    )
+    .ok_or_else(|| LocalTaskExecutionError {
+        message: "could not start a visible automation turn".to_string(),
+    })?;
+
+    let store = lock_task_store(state).map_err(local_task_gateway_error)?;
+    let mut persisted = store
+        .get_task(&task.task_id, &task.user_id, &task.workspace_id)
+        .map_err(GatewayError::task)
+        .map_err(local_task_gateway_error)?
+        .ok_or_else(|| LocalTaskExecutionError {
+            message: "owning proactive task disappeared before execution".to_string(),
+        })?;
+    let mut input = persisted.input_json.as_object().cloned().unwrap_or_default();
+    input.insert("thread_id".to_string(), Value::String(thread_id.to_string()));
+    input.insert(
+        "assistant_message_id".to_string(),
+        Value::String(visible_turn.assistant_message_id.clone()),
+    );
+    persisted.input_json = Value::Object(input);
+    persisted.updated_at = OffsetDateTime::now_utc();
+    store
+        .insert_task(&persisted)
+        .map_err(GatewayError::task)
+        .map_err(local_task_gateway_error)?;
+    Ok(visible_turn)
+}
+
 /// Executes a scheduled/recurring "proactive prompt": runs a full agent turn on
 /// the task's goal in a stable per-schedule chat thread, persists the exchange,
 /// and pushes a live `/api/events` update so the desktop app surfaces it — the
@@ -38484,23 +38547,13 @@ fn execute_proactive_prompt_task(
     // Safety boundary: scheduled/automation work must be visible in its owning
     // chat before any model/tool/browser work starts. If the durable turn cannot
     // be persisted, fail closed instead of running invisible background work.
-    let visible_turn = start_visible_conversation_turn(
+    let visible_turn = start_proactive_visible_turn(
         state,
+        task,
         &thread_id,
-        &thread_plan.workspace_id,
-        &thread_plan.source,
-        thread_plan.channel.as_deref(),
-        &thread_plan.title,
+        &thread_plan,
         &goal,
-        None,
-        None,
-        // Inline automation path (no broker task) → throwaway turn id.
-        None,
-        Some(task.task_id.as_str()),
-    )
-    .ok_or_else(|| LocalTaskExecutionError {
-        message: "could not start a visible automation turn".to_string(),
-    })?;
+    )?;
 
     let result = tokio::runtime::Handle::current()
         .block_on(run_agent_turn_into_message(
@@ -43913,6 +43966,17 @@ async fn run_escalate(
         .map(PathBuf::from)
         .or_else(|| project_root_for_thread(&state, request.thread_id.as_deref()));
     let Some(root) = root else {
+        if let (Some(thread_id), Some(message_id)) =
+            (request.thread_id.as_deref(), request.message_id.as_deref())
+        {
+            let _ = resolve_actionable_source(
+                &state,
+                thread_id,
+                message_id,
+                |text| actionable_source_terminal_text(text, "Escalation failed."),
+                ActionableSourceResolution::Failed,
+            );
+        }
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
             code: "sandbox_escalate_no_root",
@@ -43920,7 +43984,20 @@ async fn run_escalate(
         });
     };
     // Execute UNSANDBOXED via the shared raw-exec helper.
-    let output = run_bash_unsandboxed(&root, &request.command).await;
+    let output = match run_bash_unsandboxed_result(&root, &request.command).await {
+        Ok(output) => output,
+        Err(error) => {
+            let _ = terminal_actionable_execution_error(
+                &state,
+                request.thread_id.as_deref(),
+                request.message_id.as_deref(),
+                "sandbox_escalate_execution",
+                &error,
+                "Escalation failed.",
+            );
+            return Ok(Json(serde_json::json!({ "ok": false, "output": error })));
+        }
+    };
     if let (Some(thread_id), Some(message_id)) =
         (request.thread_id.as_deref(), request.message_id.as_deref())
     {
@@ -75616,6 +75693,215 @@ data: [DONE]\n";
                 .status,
             TaskStatus::Failed
         );
+    }
+
+    #[test]
+    fn proactive_visible_turn_persists_generated_source_ids_on_owning_task() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .find_or_create_channel_thread("workspace_test", "scheduled", "schedule-1", "Schedule")
+            .unwrap();
+        let user = super::gateway_user_id();
+        let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        let task = TaskRecord::new(
+            "proactive_production_shape",
+            user.clone(),
+            workspace.clone(),
+            "proactive_prompt",
+            "production-shaped proactive task",
+            serde_json::json!({"automation_id": "schedule-1"}),
+        );
+        state.task_store.lock().unwrap().insert_task(&task).unwrap();
+        let plan = super::proactive_thread_plan(&task, &task.goal);
+
+        let turn = super::start_proactive_visible_turn(
+            &state,
+            &task,
+            &thread.thread_id,
+            &plan,
+            &task.goal,
+        )
+        .unwrap();
+        let mut runner_task = task.clone();
+        super::request_task_executor_approval(
+            &state,
+            &mut runner_task,
+            &super::PendingExecutorApproval {
+                action: "MCP_CONFIRM".to_string(),
+                risk_level: "high".to_string(),
+                data_boundary: "in-chat action card".to_string(),
+                explanation: "waiting on the persisted card".to_string(),
+                inline_action_card: true,
+            },
+        )
+        .unwrap();
+
+        let saved = state
+            .task_store
+            .lock()
+            .unwrap()
+            .get_task(&task.task_id, &user, &workspace)
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.input_json["thread_id"], thread.thread_id);
+        assert_eq!(
+            saved.input_json["assistant_message_id"],
+            turn.assistant_message_id
+        );
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &turn.assistant_message_id)
+                .unwrap()
+                .unwrap()
+                .linked_task_id
+                .as_deref(),
+            Some(task.task_id.as_str())
+        );
+    }
+
+    fn seed_sandbox_escalation_source(
+        state: &AppState,
+        command: &str,
+    ) -> (String, String, String, local_first_task_runtime::UserId, local_first_task_runtime::WorkspaceId) {
+        let thread = super::lock_store(state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let task_id = format!("turn_sandbox_{}", uuid::Uuid::new_v4().simple());
+        let message_id = format!("sandbox_card_{}", uuid::Uuid::new_v4().simple());
+        let mut message = super::channel_chat_message_with_id(
+            "assistant",
+            &format!(
+                "Approve. ‹‹SANDBOX_ESCALATE››{{\"tool\":\"run_in_project\",\"arguments\":{{\"command\":{}}}}}‹‹/SANDBOX_ESCALATE››",
+                serde_json::to_string(command).unwrap()
+            ),
+            &message_id,
+        );
+        message.linked_task_id = Some(task_id.clone());
+        message.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        super::lock_store(state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &message)
+            .unwrap();
+        let user = super::gateway_user_id();
+        let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            &task_id,
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "sandbox escalation",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": message_id,
+            }),
+        );
+        task.status = TaskStatus::WaitingUserApproval;
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .insert_chat_turn(&task, &thread.thread_id, &task_id, "interactive", "full")
+            .unwrap();
+        (thread.thread_id, message_id, task_id, user, workspace)
+    }
+
+    #[tokio::test]
+    async fn sandbox_escalation_missing_root_fails_exact_source() {
+        let state = AppState::for_tests();
+        let (thread_id, message_id, task_id, user, workspace) =
+            seed_sandbox_escalation_source(&state, "pwd");
+
+        let error = super::run_escalate(
+            axum::extract::State(state.clone()),
+            axum::Json(super::RunEscalateRequest {
+                command: "pwd".to_string(),
+                cwd: None,
+                thread_id: Some(thread_id.clone()),
+                message_id: Some(message_id.clone()),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code, "sandbox_escalate_no_root");
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread_id, &message_id)
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Failed
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Failed
+        );
+    }
+
+    #[tokio::test]
+    async fn sandbox_escalation_nonzero_exit_fails_source_without_continuation() {
+        let root = isolated_gateway_test_dir("sandbox-escalation-failure");
+        std::fs::create_dir_all(&root).unwrap();
+        let state = AppState::for_tests();
+        let (thread_id, message_id, task_id, user, workspace) =
+            seed_sandbox_escalation_source(&state, "exit 7");
+
+        let response = super::run_escalate(
+            axum::extract::State(state.clone()),
+            axum::Json(super::RunEscalateRequest {
+                command: "exit 7".to_string(),
+                cwd: Some(root.display().to_string()),
+                thread_id: Some(thread_id.clone()),
+                message_id: Some(message_id.clone()),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(response["ok"], false);
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread_id, &message_id)
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Failed
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Failed
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .active_chat_turn_for_thread(&thread_id)
+                .unwrap(),
+            None,
+            "failed execution must release the source without enqueuing a continuation"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
