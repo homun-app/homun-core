@@ -32417,6 +32417,7 @@ async fn handle_channel_inbound(
                         None,
                         // Legacy inline ApproveReply path (no broker task) → throwaway turn id.
                         None,
+                        None,
                     )
                 });
 
@@ -33236,6 +33237,10 @@ fn start_visible_conversation_turn(
     // `None` for legacy inline paths with no broker task: they mint a throwaway id (nothing
     // downstream joins on the visible turn_id, so it stays cosmetic for those).
     turn_id_override: Option<&str>,
+    // A persisted-bubble executor (currently proactive automation) owns this
+    // assistant from creation, so an inline action card can later resolve the
+    // exact waiting task without guessing from thread state.
+    linked_task_id: Option<&str>,
 ) -> Option<VisibleConversationTurn> {
     let user_message = match preseeded_user_message_id {
         Some(id) => channel_chat_message_with_id("user", user_text, id),
@@ -33249,6 +33254,7 @@ fn start_visible_conversation_turn(
         Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
     assistant_message.delivery_state =
         local_first_desktop_gateway::MessageDeliveryState::Streaming;
+    assistant_message.linked_task_id = linked_task_id.map(str::to_string);
     let turn = VisibleConversationTurn {
         turn_id: match turn_id_override {
             Some(id) => id.to_string(),
@@ -38490,6 +38496,7 @@ fn execute_proactive_prompt_task(
         None,
         // Inline automation path (no broker task) → throwaway turn id.
         None,
+        Some(task.task_id.as_str()),
     )
     .ok_or_else(|| LocalTaskExecutionError {
         message: "could not start a visible automation turn".to_string(),
@@ -41083,7 +41090,13 @@ where
             .get_task(&task_id, &user, &workspace)
             .map_err(GatewayError::task)?
             .ok_or_else(|| actionable_source_error("linked actionable source task is missing"))?;
-        let matches_source = task.kind == "chat_turn"
+        let supported_persisted_bubble = task.kind == "chat_turn"
+            || matches!(
+                state.task_executor_registry.resolve(task.kind.as_str()),
+                Some(GatewayTaskExecutorKind::ProactivePrompt)
+            );
+        let matches_source = supported_persisted_bubble
+            && task.status == TaskStatus::WaitingUserApproval
             && task
                 .input_json
                 .get("thread_id")
@@ -41139,6 +41152,34 @@ where
         "workspace": base_workspace_id(),
     }));
     Ok(())
+}
+
+/// Once an endpoint has proved a request came from its exact persisted card,
+/// every terminal executor error must release that source before being returned
+/// to the caller. This keeps a retryable UI error from becoming a permanent
+/// `WaitingUserApproval`/`ThreadBusy` deadlock.
+fn terminal_actionable_execution_error(
+    state: &AppState,
+    thread_id: Option<&str>,
+    message_id: Option<&str>,
+    code: &'static str,
+    message: impl Into<String>,
+    source_note: &str,
+) -> GatewayError {
+    if let (Some(thread_id), Some(message_id)) = (thread_id, message_id) {
+        let _ = resolve_actionable_source(
+            state,
+            thread_id,
+            message_id,
+            |text| actionable_source_terminal_text(text, source_note),
+            ActionableSourceResolution::Failed,
+        );
+    }
+    GatewayError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code,
+        message: message.into(),
+    }
 }
 
 fn cancel_pending_remote_approval(state: &AppState, code: &str) -> bool {
@@ -43372,16 +43413,34 @@ async fn composio_execute(
     if request.scope.as_deref() == Some("always") {
         let _ = add_composio_tool_allow(&request.tool);
     }
-    let output = tokio::task::spawn_blocking({
+    let output = match tokio::task::spawn_blocking({
         let state = state.clone();
         move || composio_execute_tool(&state, &tool, &args)
     })
     .await
-    .map_err(|e| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "composio_execute_join",
-        message: e.to_string(),
-    })??;
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            return Err(terminal_actionable_execution_error(
+                &state,
+                request.thread_id.as_deref(),
+                request.message_id.as_deref(),
+                "composio_execute",
+                error.message,
+                "Action failed.",
+            ));
+        }
+        Err(error) => {
+            return Err(terminal_actionable_execution_error(
+                &state,
+                request.thread_id.as_deref(),
+                request.message_id.as_deref(),
+                "composio_execute_join",
+                error.to_string(),
+                "Action failed.",
+            ));
+        }
+    };
 
     // Composio replies HTTP 200 even when the tool itself failed. Never mark the
     // action "done" nor claim success in that case — report the failure instead.
@@ -43389,12 +43448,13 @@ async fn composio_execute(
         if let (Some(thread_id), Some(message_id)) =
             (request.thread_id.as_deref(), request.message_id.as_deref())
         {
-            let _ = resolve_actionable_source(
+            let _ = terminal_actionable_execution_error(
                 &state,
-                thread_id,
-                message_id,
-                |text| actionable_source_terminal_text(text, "Action failed."),
-                ActionableSourceResolution::Failed,
+                Some(thread_id),
+                Some(message_id),
+                "composio_execute",
+                error.to_string(),
+                "Action failed.",
             );
         }
         return Ok(Json(ComposioExecuteResponse {
@@ -43610,6 +43670,17 @@ async fn mcp_disconnect(
 const FS_AUTHORIZE_OPEN: &str = "‹‹FS_AUTHORIZE››";
 const FS_AUTHORIZE_CLOSE: &str = "‹‹/FS_AUTHORIZE››";
 
+/// Provenance gate for filesystem authorization. A card authorizes exactly one
+/// absolute path and one pending operation; a UI request must not be able to
+/// substitute either value before native filesystem access begins.
+fn fs_authorize_matches(text: &str, path: &str, op: &str) -> bool {
+    let Some(marker) = confirm_marker_value(text, FS_AUTHORIZE_OPEN, FS_AUTHORIZE_CLOSE) else {
+        return false;
+    };
+    marker.get("path").and_then(Value::as_str) == Some(path)
+        && marker.get("op").and_then(Value::as_str) == Some(op)
+}
+
 // ADR 0023 on-failure sandbox escalation card markers. Same guillemet framing as the
 // other confirm/authorize markers so the frontend renders it as an actionable card.
 const SANDBOX_ESCALATE_OPEN: &str = "‹‹SANDBOX_ESCALATE››";
@@ -43674,6 +43745,21 @@ async fn fs_authorize(
         });
     };
     let op = request.op.clone();
+    let confirmed = match (&request.thread_id, &request.message_id) {
+        (Some(thread_id), Some(message_id)) => lock_store(&state)
+            .ok()
+            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
+            .is_some_and(|message| fs_authorize_matches(&message.text, &request.path, &op)),
+        _ => false,
+    };
+    if !confirmed {
+        return Err(GatewayError {
+            status: StatusCode::FORBIDDEN,
+            code: "fs_authorize_confirmation_required",
+            message: "Authorize filesystem access only from its matching confirmation card."
+                .to_string(),
+        });
+    }
     let task_path = path.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
         fs_authorize_folder(&task_path)?;
@@ -43684,10 +43770,15 @@ async fn fs_authorize(
         })
     })
     .await
-    .map_err(|e| GatewayError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        code: "fs_authorize_join",
-        message: e.to_string(),
+    .map_err(|error| {
+        terminal_actionable_execution_error(
+            &state,
+            request.thread_id.as_deref(),
+            request.message_id.as_deref(),
+            "fs_authorize_join",
+            error.to_string(),
+            "Authorization failed.",
+        )
     })?;
     match result {
         Ok(output) => {
@@ -43720,17 +43811,14 @@ async fn fs_authorize(
             })))
         }
         Err(message) => {
-            if let (Some(thread_id), Some(message_id)) =
-                (request.thread_id.as_deref(), request.message_id.as_deref())
-            {
-                let _ = resolve_actionable_source(
-                    &state,
-                    thread_id,
-                    message_id,
-                    |text| actionable_source_terminal_text(text, "Authorization failed."),
-                    ActionableSourceResolution::Failed,
-                );
-            }
+            let _ = terminal_actionable_execution_error(
+                &state,
+                request.thread_id.as_deref(),
+                request.message_id.as_deref(),
+                "fs_authorize",
+                &message,
+                "Authorization failed.",
+            );
             Ok(Json(serde_json::json!({ "ok": false, "summary": message })))
         }
     }
@@ -44080,24 +44168,24 @@ async fn mcp_execute(
     let outcome = match tokio::time::timeout(mcp_call_timeout(), handle).await {
         Ok(Ok(result)) => result,
         Ok(Err(join)) => {
-            return Err(GatewayError {
-                status: StatusCode::INTERNAL_SERVER_ERROR,
-                code: "mcp_execute_join",
-                message: join.to_string(),
-            });
+            return Err(terminal_actionable_execution_error(
+                &state,
+                request.thread_id.as_deref(),
+                request.message_id.as_deref(),
+                "mcp_execute_join",
+                join.to_string(),
+                "Action failed.",
+            ));
         }
         Err(_elapsed) => {
-            if let (Some(thread_id), Some(message_id)) =
-                (request.thread_id.as_deref(), request.message_id.as_deref())
-            {
-                let _ = resolve_actionable_source(
-                    &state,
-                    thread_id,
-                    message_id,
-                    |text| actionable_source_terminal_text(text, "Action timed out."),
-                    ActionableSourceResolution::Failed,
-                );
-            }
+            let _ = terminal_actionable_execution_error(
+                &state,
+                request.thread_id.as_deref(),
+                request.message_id.as_deref(),
+                "mcp_execute_timeout",
+                "MCP tool timed out",
+                "Action timed out.",
+            );
             return Ok(Json(McpExecuteResponse {
                 ok: false,
                 summary: format!(
@@ -44134,17 +44222,14 @@ async fn mcp_execute(
             Ok(Json(McpExecuteResponse { ok: true, summary }))
         }
         Err(error) => {
-            if let (Some(thread_id), Some(message_id)) =
-                (request.thread_id.as_deref(), request.message_id.as_deref())
-            {
-                let _ = resolve_actionable_source(
-                    &state,
-                    thread_id,
-                    message_id,
-                    |text| actionable_source_terminal_text(text, "Action failed."),
-                    ActionableSourceResolution::Failed,
-                );
-            }
+            let _ = terminal_actionable_execution_error(
+                &state,
+                request.thread_id.as_deref(),
+                request.message_id.as_deref(),
+                "mcp_execute",
+                error.to_string(),
+                "Action failed.",
+            );
             Ok(Json(McpExecuteResponse {
                 ok: false,
                 summary: format!("Action FAILED: {error}"),
@@ -74871,6 +74956,7 @@ data: [DONE]\n";
             Some("local_user_r1"),
             Some("local_assistant_r1"),
             Some("turn_r1"),
+            None,
         )
         .unwrap();
         let retry = super::start_visible_conversation_turn(
@@ -74884,6 +74970,7 @@ data: [DONE]\n";
             Some("local_user_r1"),
             Some("local_assistant_r1"),
             Some("turn_r1"),
+            None,
         )
         .unwrap();
 
@@ -75224,6 +75311,310 @@ data: [DONE]\n";
         assert_eq!(
             task_store.active_chat_turn_for_thread(&thread.thread_id).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn fs_authorize_card_requires_the_exact_path_and_operation() {
+        let card = "‹‹FS_AUTHORIZE››{\"path\":\"/tmp/demo-a\",\"op\":\"read\"}‹‹/FS_AUTHORIZE››";
+
+        assert!(super::fs_authorize_matches(card, "/tmp/demo-a", "read"));
+        assert!(!super::fs_authorize_matches(card, "/tmp/demo-b", "read"));
+        assert!(!super::fs_authorize_matches(card, "/tmp/demo-a", "list"));
+    }
+
+    #[tokio::test]
+    async fn fs_authorize_rejects_mismatched_card_without_grant_or_lifecycle_change() {
+        let dir = isolated_gateway_test_dir("fs-authorize-provenance");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _data_dir = TestGatewayDataDir::new(&dir);
+        let target = dir.join("requested-folder");
+        std::fs::create_dir_all(&target).unwrap();
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let task_id = "turn_fs_provenance";
+        let mut message = super::channel_chat_message_with_id(
+            "assistant",
+            format!(
+                "Authorize. ‹‹FS_AUTHORIZE››{{\"path\":\"{}-other\",\"op\":\"read\"}}‹‹/FS_AUTHORIZE››",
+                target.display()
+            )
+            .as_str(),
+            "fs_provenance_card",
+        );
+        message.linked_task_id = Some(task_id.to_string());
+        message.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &message)
+            .unwrap();
+        let user = super::gateway_user_id();
+        let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            task_id,
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "filesystem approval source",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": message.id,
+            }),
+        );
+        task.status = TaskStatus::WaitingUserApproval;
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .insert_chat_turn(&task, &thread.thread_id, task_id, "interactive", "full")
+            .unwrap();
+
+        let error = super::fs_authorize(
+            axum::extract::State(state.clone()),
+            axum::Json(super::FsAuthorizeRequest {
+                path: target.display().to_string(),
+                op: "read".to_string(),
+                thread_id: Some(thread.thread_id.clone()),
+                message_id: Some(message.id.clone()),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.code, "fs_authorize_confirmation_required");
+        assert!(!super::load_artifact_destinations()
+            .iter()
+            .any(|destination| destination.path == target.display().to_string()));
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &message.id)
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::WaitingUser
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::WaitingUserApproval
+        );
+        drop(_data_dir);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn resolving_linked_proactive_action_card_terminalizes_its_exact_task_and_bubble() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .find_or_create_channel_thread("workspace_test", "test", "proactive", "Proactive")
+            .unwrap();
+        let task_id = "proactive_actionable_source";
+        let mut message = super::channel_chat_message_with_id(
+            "assistant",
+            "Approve. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{}}‹‹/MCP_CONFIRM››",
+            "proactive_actionable_card",
+        );
+        message.linked_task_id = Some(task_id.to_string());
+        message.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &message)
+            .unwrap();
+
+        let user = super::gateway_user_id();
+        let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            task_id,
+            user.clone(),
+            workspace.clone(),
+            "proactive_prompt",
+            "proactive approval source",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": message.id,
+            }),
+        );
+        task.status = TaskStatus::WaitingUserApproval;
+        state.task_store.lock().unwrap().insert_task(&task).unwrap();
+
+        super::resolve_actionable_source(
+            &state,
+            &thread.thread_id,
+            &message.id,
+            |_| "✓ MCP tool executed".to_string(),
+            super::ActionableSourceResolution::Succeeded,
+        )
+        .unwrap();
+
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &message.id)
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Delivered
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Completed
+        );
+    }
+
+    #[test]
+    fn cancelling_linked_proactive_action_card_terminalizes_its_exact_task_and_bubble() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .find_or_create_channel_thread("workspace_test", "test", "proactive-cancel", "Proactive")
+            .unwrap();
+        let task_id = "proactive_cancelled_source";
+        let mut message = super::channel_chat_message_with_id(
+            "assistant",
+            "Approve. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{}}‹‹/MCP_CONFIRM››",
+            "proactive_cancelled_card",
+        );
+        message.linked_task_id = Some(task_id.to_string());
+        message.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &message)
+            .unwrap();
+
+        let user = super::gateway_user_id();
+        let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            task_id,
+            user.clone(),
+            workspace.clone(),
+            "proactive_prompt",
+            "proactive approval source",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": message.id,
+            }),
+        );
+        task.status = TaskStatus::WaitingUserApproval;
+        state.task_store.lock().unwrap().insert_task(&task).unwrap();
+
+        super::resolve_actionable_source(
+            &state,
+            &thread.thread_id,
+            &message.id,
+            |text| super::actionable_source_terminal_text(text, "Action cancelled."),
+            super::ActionableSourceResolution::Cancelled,
+        )
+        .unwrap();
+
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &message.id)
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn terminal_execution_error_fails_the_exact_actionable_source() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let task_id = "turn_terminal_execution_error";
+        let mut message = super::channel_chat_message_with_id(
+            "assistant",
+            "Approve. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{}}‹‹/MCP_CONFIRM››",
+            "terminal_execution_error_card",
+        );
+        message.linked_task_id = Some(task_id.to_string());
+        message.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &message)
+            .unwrap();
+        let user = super::gateway_user_id();
+        let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            task_id,
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "approval source",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": message.id,
+            }),
+        );
+        task.status = TaskStatus::WaitingUserApproval;
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .insert_chat_turn(&task, &thread.thread_id, task_id, "interactive", "full")
+            .unwrap();
+
+        let error = super::terminal_actionable_execution_error(
+            &state,
+            Some(&thread.thread_id),
+            Some(&message.id),
+            "mcp_execute_join",
+            "executor join failed",
+            "Action failed.",
+        );
+
+        assert_eq!(error.code, "mcp_execute_join");
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &message.id)
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Failed
+        );
+        assert_eq!(
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Failed
         );
     }
 

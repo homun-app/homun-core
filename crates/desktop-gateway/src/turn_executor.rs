@@ -439,6 +439,7 @@ pub fn execute_chat_turn_task(
         // live stream (island + transcript) — the whole point of routing channel turns through
         // the broker instead of an invisible inline run.
         Some(turn_id),
+        Some(turn_id),
     );
     let Some(visible_turn) = visible_turn else {
         finalize_agent_run(
