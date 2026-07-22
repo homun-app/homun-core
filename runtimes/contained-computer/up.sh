@@ -32,7 +32,7 @@ fi
 # otherwise a renderer change (deck_render.py) wouldn't trigger a rebuild and the
 # container would keep an old copy. MUST stay in sync with the gateway's
 # contained_computer_def_hash().
-HASH_FILES="Dockerfile entrypoint.sh deck_render.py deck_qa.py doc_render.py design_tokens.py fonts_embed.py fonts_manifest.py whisper_server.py novnc-view.html"
+HASH_FILES="Dockerfile entrypoint.sh deck_render.py deck_qa.py doc_render.py design_tokens.py fonts_embed.py fonts_manifest.py whisper_server.py novnc-view.html novnc-view.js"
 if [ -z "${HOMUN_CC_HASH:-}" ]; then
   HASH_PATHS=""
   for f in ${HASH_FILES}; do HASH_PATHS="${HASH_PATHS} ${HERE}/${f}"; done

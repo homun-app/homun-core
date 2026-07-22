@@ -20,6 +20,36 @@ test("packaged contained computer uses native gateway bootstrap", async () => {
   assert.doesNotMatch(sandbox, /Command::new\("bash"\).*up_script/s);
 });
 
+test("chat noVNC viewer remains executable under the packaged Electron CSP", async () => {
+  const viewer = await readFile(
+    path.join(repoRoot, "runtimes", "contained-computer", "novnc-view.html"),
+    "utf8",
+  );
+  const dockerfile = await readFile(
+    path.join(repoRoot, "runtimes", "contained-computer", "Dockerfile"),
+    "utf8",
+  );
+  const launcher = await readFile(
+    path.join(repoRoot, "runtimes", "contained-computer", "up.sh"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    viewer,
+    /<script\b(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/i,
+    "the packaged CSP blocks inline scripts in the iframe response",
+  );
+  assert.match(viewer, /<script type="module" src="\.\/lfpa-view\.js"><\/script>/);
+  assert.match(dockerfile, /COPY novnc-view\.js \/usr\/share\/novnc\/lfpa-view\.js/);
+  assert.match(launcher, /HASH_FILES="[^"]*novnc-view\.js[^"]*"/);
+
+  const viewerModule = await readFile(
+    path.join(repoRoot, "runtimes", "contained-computer", "novnc-view.js"),
+    "utf8",
+  );
+  assert.match(viewerModule, /import RFB from ['"]\.\/core\/rfb\.js['"]/);
+});
+
 test("architecture documents the cross-platform setup contract", async () => {
   const architecture = await readFile(
     path.join(repoRoot, "docs", "architecture", "contained-computer.md"),

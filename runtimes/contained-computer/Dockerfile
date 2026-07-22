@@ -103,6 +103,7 @@ COPY whisper_server.py /usr/local/bin/whisper_server.py
 # Chrome-free noVNC embed page used by the in-app "Computer" panel: scales the
 # whole framebuffer to fit (proportioned), no toolbar/status bar.
 COPY novnc-view.html /usr/share/novnc/lfpa-view.html
+COPY novnc-view.js /usr/share/novnc/lfpa-view.js
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 USER agent
