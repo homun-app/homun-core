@@ -45920,6 +45920,9 @@ struct CatalogResponse {
     repo: String,
     total: usize,
     fetched_at: u64,
+    /// True when live publisher-aware search failed and cached slug-only
+    /// results are being shown instead.
+    search_degraded: bool,
 }
 
 fn catalog_response(cache: &skills_catalog::CatalogCache, query: &CatalogQuery) -> CatalogResponse {
@@ -45941,6 +45944,7 @@ fn catalog_response(cache: &skills_catalog::CatalogCache, query: &CatalogQuery) 
         categories,
         repo: skills_catalog::CLAWHUB_REPO.to_string(),
         fetched_at: cache.fetched_at,
+        search_degraded: false,
     }
 }
 
@@ -45966,7 +45970,49 @@ async fn skill_catalog(
         fetched_at: 0,
         entries: Vec::new(),
     });
-    Ok(Json(catalog_response(&cache, &query)))
+    let text = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let limit = query.limit.unwrap_or(60).min(200);
+    let (skills, search_degraded) = if let Some(text) = text {
+        match skills_catalog::search_remote(&state.http, text, limit).await {
+            Ok(entries) => (
+                entries
+                    .into_iter()
+                    .filter(|entry| {
+                        query.category.as_deref().is_none_or(|category| {
+                            entry.category.eq_ignore_ascii_case(category)
+                        })
+                    })
+                    .take(limit)
+                    .collect(),
+                false,
+            ),
+            Err(error) => {
+                eprintln!("skill catalog search failed: {error}");
+                (
+                    skills_catalog::search(
+                        &cache,
+                        text,
+                        query.category.as_deref(),
+                        limit,
+                    ),
+                    true,
+                )
+            }
+        }
+    } else {
+        (
+            skills_catalog::search(&cache, "", query.category.as_deref(), limit),
+            false,
+        )
+    };
+    let mut response = catalog_response(&cache, &query);
+    response.skills = skills;
+    response.search_degraded = search_degraded;
+    Ok(Json(response))
 }
 
 /// Force a catalog refresh from ClawHub.
@@ -46002,6 +46048,39 @@ async fn skill_catalog_refresh(
 #[derive(Debug, Deserialize)]
 struct CatalogInstallRequest {
     slug: String,
+    #[serde(default)]
+    owner_handle: Option<String>,
+}
+
+fn valid_catalog_owner(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 100
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
+}
+
+fn validated_catalog_owner(value: Option<String>) -> Result<Option<String>, GatewayError> {
+    let value = value
+        .map(|owner| owner.trim().to_string())
+        .filter(|owner| !owner.is_empty());
+    if value
+        .as_deref()
+        .is_some_and(|owner| !valid_catalog_owner(owner))
+    {
+        return Err(GatewayError {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_owner_handle",
+            message: "invalid ClawHub owner handle".to_string(),
+        });
+    }
+    Ok(value)
+}
+
+fn clawhub_origin(slug: &str, owner_handle: Option<&str>) -> String {
+    owner_handle
+        .map(|owner| format!("clawhub:@{owner}/{slug}"))
+        .unwrap_or_else(|| format!("clawhub:{slug}"))
 }
 
 /// Installs a catalog skill: download its ClawHub ZIP, extract into the skills
@@ -46012,6 +46091,7 @@ async fn install_catalog_skill(
     Json(request): Json<CatalogInstallRequest>,
 ) -> Result<Json<SkillsResponse>, GatewayError> {
     let slug = request.slug.trim().to_string();
+    let owner_handle = validated_catalog_owner(request.owner_handle)?;
     if !skills::is_safe_id(&slug) {
         return Err(GatewayError {
             status: StatusCode::BAD_REQUEST,
@@ -46032,7 +46112,7 @@ async fn install_catalog_skill(
             message: format!("skill «{slug}» already installed"),
         });
     }
-    let zip = skills_catalog::download_zip(&state.http, &slug, None)
+    let zip = skills_catalog::download_zip(&state.http, &slug, owner_handle.as_deref())
         .await
         .map_err(|message| GatewayError {
             status: StatusCode::BAD_GATEWAY,
@@ -46056,7 +46136,10 @@ async fn install_catalog_skill(
             }
         })?;
     let mut origins = load_skills_origins();
-    origins.insert(slug.clone(), format!("clawhub:{slug}"));
+    origins.insert(
+        slug.clone(),
+        clawhub_origin(&slug, owner_handle.as_deref()),
+    );
     let _ = save_skills_origins(&origins);
     Ok(Json(current_skills_response()))
 }
@@ -46064,11 +46147,14 @@ async fn install_catalog_skill(
 #[derive(Debug, Deserialize)]
 struct CatalogPreviewQuery {
     slug: String,
+    #[serde(default)]
+    owner_handle: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct CatalogPreview {
     slug: String,
+    owner_handle: Option<String>,
     name: String,
     description: String,
     /// SKILL.md body (frontmatter stripped) for rendering.
@@ -46084,7 +46170,8 @@ async fn preview_catalog_skill(
     Query(query): Query<CatalogPreviewQuery>,
 ) -> Result<Json<CatalogPreview>, GatewayError> {
     let slug = query.slug.trim().to_string();
-    let zip = skills_catalog::download_zip(&state.http, &slug, None)
+    let owner_handle = validated_catalog_owner(query.owner_handle)?;
+    let zip = skills_catalog::download_zip(&state.http, &slug, owner_handle.as_deref())
         .await
         .map_err(|message| GatewayError {
             status: StatusCode::BAD_GATEWAY,
@@ -46110,6 +46197,7 @@ async fn preview_catalog_skill(
         files: files.iter().map(|(p, _)| p.clone()).collect(),
         security,
         slug,
+        owner_handle,
     }))
 }
 
@@ -56910,7 +56998,7 @@ mod tests {
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
         browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
-        build_memory_source_grant, build_plan_markdown,
+        build_memory_source_grant, build_plan_markdown, clawhub_origin,
         capability_call_completed_outcome, classify_connector_error,
         collect_member_counts, composio_tool_is_read, connector_error_hint,
         default_browser_headless_value, evaluate_simple_arithmetic, extract_source_urls,
@@ -56937,7 +57025,8 @@ mod tests {
         strip_json_fences, suggestion_choices_json, task_effective_goal,
         task_execution_outcome_from_executor_result, task_executor_worker_count,
         task_executor_worker_id, task_goal_summary, task_queue_response, tool_touches_calendar,
-        tool_touches_contacts, validate_memory_source_input, validate_memory_source_overrides,
+        tool_touches_contacts, valid_catalog_owner, validate_memory_source_input,
+        validate_memory_source_overrides,
         validate_memory_source_workspaces, wiki_title_from_text, workspace_write_roots,
     };
     use axum::extract::{Path, State};
@@ -56947,6 +57036,22 @@ mod tests {
     // 5.D1c.2: test-only engine helpers (not used by non-test gateway code, so imported here, not at
     // the crate top where they'd read as unused).
     use local_first_engine::browser::{message_has_image_url, PRUNED_SNAPSHOT_STUB};
+
+    #[test]
+    fn clawhub_origin_is_publisher_specific_and_legacy_compatible() {
+        assert_eq!(
+            clawhub_origin("weather", Some("steipete")),
+            "clawhub:@steipete/weather"
+        );
+        assert_eq!(clawhub_origin("weather", None), "clawhub:weather");
+    }
+
+    #[test]
+    fn catalog_owner_validation_rejects_path_or_query_injection() {
+        assert!(valid_catalog_owner("legionspace-hackathon"));
+        assert!(!valid_catalog_owner("../weather"));
+        assert!(!valid_catalog_owner("owner&slug=other"));
+    }
 
     #[test]
     fn attachment_prompt_distinguishes_ready_content_from_extraction_issues() {
