@@ -468,6 +468,9 @@ assertNotContains("src/components/ChatView.tsx", 'variant="assistant-footer"', "
 assertContains("src/components/ChatView.tsx", "!chatTurnState &&", "durable active turn status must suppress the duplicate transcript thinking state");
 assertContains("src/components/ActiveTurnStatus.tsx", 't("chat.inspector.views.activity")', "active turn activity action must use the valid localized inspector key");
 assertContains("src/components/PendingSteeringQueue.tsx", "pending-steering-strip", "queued steering must render as a compact request strip");
+assertContains("src/lib/coreBridge.ts", "SteeringQueuedDuringSubmissionError", "a submit/steering race must have a typed benign outcome");
+assertContains("src/components/ChatView.tsx", "error instanceof SteeringQueuedDuringSubmissionError", "the submit/steering race must clear optimistic UI instead of rendering an error");
+assertNotContains("src/lib/coreBridge.ts", "Instruction queued on the active task; no second stream was started.", "successful steering must not be represented by a user-visible error");
 assertContains("src/components/SettingsView.tsx", "catalogDisplayIdentity(target)", "skill preview must preserve the publisher-qualified target while loading or failing");
 assertContains("src/components/ChatComputerPanel.tsx", "const terminalRunning = Boolean(live?.terminal_active || terminal.some((entry) => entry.running))", "terminal dock must be driven by running terminal activity, not completed history");
 assertContains("src/components/ChatComputerPanel.tsx", "const ownedLiveActivity = hasLiveActivity && live?.thread_id === threadId", "live computer activity must not appear across chats without a matching owner");

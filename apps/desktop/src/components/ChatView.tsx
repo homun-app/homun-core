@@ -79,6 +79,7 @@ import type {
 } from "react";
 import {
   coreBridge,
+  SteeringQueuedDuringSubmissionError,
   subscribeAppEvents,
   type ActiveModelInfo,
   type ChatAttachmentInput,
@@ -1426,6 +1427,17 @@ export function ChatView({
     } catch (error) {
       cancelScheduledStreamingFrame();
       if (cancelledLocally || cancelledStreamIdsRef.current.has(requestId)) {
+        return;
+      }
+      if (error instanceof SteeringQueuedDuringSubmissionError) {
+        setPromptError(null);
+        setOptimisticMessages(null);
+        setProjectedActiveTurn(null);
+        onMessagesChange(conversationBase);
+        await Promise.all([
+          refreshPendingSteering().catch(() => undefined),
+          Promise.resolve().then(() => onThreadChanged()).catch(() => undefined),
+        ]);
         return;
       }
       const message = describeBridgeError(error);
