@@ -24,6 +24,12 @@ pub const CLAWHUB_REPO: &str = "openclaw/skills";
 pub struct CatalogEntry {
     /// ClawHub slug (also the folder name under `skills/` in the repo).
     pub slug: String,
+    /// Publisher identity is present on search results but absent from the
+    /// popular-feed cache. Keeping it optional preserves old cache files.
+    #[serde(default)]
+    pub owner_handle: Option<String>,
+    #[serde(default)]
+    pub owner_name: Option<String>,
     pub name: String,
     pub description: String,
     #[serde(default)]
@@ -59,6 +65,33 @@ struct ApiSkill {
     summary: String,
     #[serde(default)]
     stats: ApiStats,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchApiResponse {
+    #[serde(default)]
+    results: Vec<SearchApiSkill>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchApiSkill {
+    slug: String,
+    #[serde(rename = "displayName", default)]
+    display_name: String,
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    downloads: u64,
+    #[serde(rename = "ownerHandle", default)]
+    owner_handle: Option<String>,
+    #[serde(default)]
+    owner: Option<SearchApiOwner>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchApiOwner {
+    #[serde(rename = "displayName", default)]
+    display_name: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -221,6 +254,8 @@ pub async fn refresh_cache(http: &reqwest::Client, path: &Path) -> Result<usize,
             let category = derive_category(&name, &skill.summary);
             entries.push(CatalogEntry {
                 slug: skill.slug.clone(),
+                owner_handle: None,
+                owner_name: None,
                 name,
                 description: skill.summary.clone(),
                 downloads: skill.stats.downloads,
@@ -242,6 +277,63 @@ pub async fn refresh_cache(http: &reqwest::Client, path: &Path) -> Result<usize,
     let json = serde_json::to_string(&cache).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())?;
     Ok(count)
+}
+
+/// Searches ClawHub's publisher-aware endpoint. Unlike the popular feed, this
+/// endpoint intentionally returns every owner/slug match, so callers must not
+/// deduplicate entries by slug.
+pub async fn search_remote(
+    http: &reqwest::Client,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<CatalogEntry>, String> {
+    let mut url = reqwest::Url::parse(&format!("{CLAWHUB_API_BASE}/search"))
+        .map_err(|error| error.to_string())?;
+    url.query_pairs_mut()
+        .append_pair("q", query)
+        .append_pair("limit", &limit.clamp(1, 200).to_string());
+    let response = http
+        .get(url)
+        .header(reqwest::header::USER_AGENT, "homun")
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("search: HTTP {}", response.status()));
+    }
+    let body = response
+        .json::<SearchApiResponse>()
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(catalog_entries_from_search(body))
+}
+
+fn catalog_entries_from_search(response: SearchApiResponse) -> Vec<CatalogEntry> {
+    response
+        .results
+        .into_iter()
+        .map(|skill| {
+            let name = if skill.display_name.trim().is_empty() {
+                skill.slug.clone()
+            } else {
+                skill.display_name
+            };
+            let owner_name = skill
+                .owner
+                .map(|owner| owner.display_name)
+                .filter(|value| !value.trim().is_empty());
+            CatalogEntry {
+                category: derive_category(&name, &skill.summary),
+                slug: skill.slug,
+                owner_handle: skill.owner_handle,
+                owner_name,
+                name,
+                description: skill.summary,
+                downloads: skill.downloads,
+                stars: 0,
+            }
+        })
+        .collect()
 }
 
 // ---- search -----------------------------------------------------------------
@@ -419,6 +511,8 @@ mod tests {
             entries: vec![
                 CatalogEntry {
                     slug: "a".into(),
+                    owner_handle: None,
+                    owner_name: None,
                     name: "PDF Tools".into(),
                     description: "read pdf".into(),
                     downloads: 1000,
@@ -427,6 +521,8 @@ mod tests {
                 },
                 CatalogEntry {
                     slug: "b".into(),
+                    owner_handle: None,
+                    owner_name: None,
                     name: "K8s".into(),
                     description: "deploy".into(),
                     downloads: 5,
@@ -441,5 +537,50 @@ mod tests {
         // category filter
         assert_eq!(search(&cache, "", Some("Infrastructure"), 10).len(), 1);
         assert_eq!(search(&cache, "", Some("Docs"), 10)[0].slug, "a");
+    }
+
+    #[test]
+    fn remote_search_keeps_same_slug_from_distinct_publishers() {
+        let body: SearchApiResponse = serde_json::from_value(serde_json::json!({
+            "results": [
+                {
+                    "slug": "weather",
+                    "displayName": "Weather",
+                    "summary": "Forecasts",
+                    "downloads": 164739,
+                    "ownerHandle": "steipete",
+                    "owner": { "displayName": "Peter Steinberger" }
+                },
+                {
+                    "slug": "weather",
+                    "displayName": "Weather",
+                    "summary": "Forecasts",
+                    "downloads": 21,
+                    "ownerHandle": "legionspace-hackathon",
+                    "owner": { "displayName": "LegionSpace-Hackathon" }
+                },
+                {
+                    "slug": "weather",
+                    "displayName": "Weather China",
+                    "summary": "China forecasts",
+                    "downloads": 9,
+                    "ownerHandle": "lfengwa2",
+                    "owner": { "displayName": "lfengwa2" }
+                }
+            ]
+        }))
+        .unwrap();
+
+        let entries = catalog_entries_from_search(body);
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(
+            entries
+                .iter()
+                .filter_map(|entry| entry.owner_handle.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["steipete", "legionspace-hackathon", "lfengwa2"]
+        );
+        assert!(entries.iter().all(|entry| entry.slug == "weather"));
     }
 }
