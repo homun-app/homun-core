@@ -546,6 +546,13 @@
     "metrics": "Rendimiento",
     "operationalPlan": "Plan operativo",
     "computerActivity": "Actividad del ordenador",
+    "browserBudget": {
+      "wallClock": "Se alcanzó el tiempo máximo del navegador",
+      "failedNavigations": "Han fallado demasiadas navegaciones del navegador",
+      "noProgress": "El navegador no está avanzando",
+      "default": "La sesión del navegador se detuvo de forma segura",
+      "retry": "Reintentar"
+    },
     "projectGoal": "Objetivo del proyecto",
     "proposedPlan": "Plan propuesto",
     "plan": "Plan",

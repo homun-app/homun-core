@@ -3019,6 +3019,41 @@ body.resizing-drawer {
   width: 100%;
   pointer-events: auto;
 }
+
+.browser-budget-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 14px 14px;
+  color: var(--muted);
+  background: var(--surface-raised);
+  font-size: 12px;
+  line-height: 1.35;
+  pointer-events: auto;
+}
+
+.browser-budget-notice svg {
+  color: var(--warning, #c58b3f);
+}
+
+.browser-budget-notice button {
+  border: 0;
+  padding: 4px 7px;
+  color: var(--brand);
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.browser-budget-notice button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
 .unified-status-panel .project-context-panel {
   border-radius: 14px 14px 0 0;
   border-bottom: none;

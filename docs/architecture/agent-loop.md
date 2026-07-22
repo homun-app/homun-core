@@ -77,7 +77,7 @@ flowchart TD
     SEED -- no --> PLAN0
     PLAN0 --> LOOP{{Round loop 0..ceiling}}
 
-    LOOP --> GUARD[Guardie harness:<br/>budget per-step F1, wander-cap,<br/>no-progress, is_final_round]
+    LOOP --> GUARD[Guardie harness:<br/>budget per-step F1, budget browser wall-clock,<br/>navigazioni fallite, no-progress, is_final_round]
     GUARD -- "budget/wander/repeat break" --> SYNTH
     GUARD --> CALL[Chiama modello]
     CALL --> FORK{Il modello emette tool_calls?}
@@ -115,7 +115,11 @@ editato di continuo, re-grep il simbolo):
   con PIN. Il loop ReAct non parte e il raw non entra nella history del modello chat.
 - **Round loop** (`for round in 0..hard_round_ceiling()`).
 - **Guardie harness** (deterministiche): budget per-step F1 (`rounds_since_progress`),
-  wander-cap, no-progress identico, `is_final_round` che **rimuove i tool** dal payload
+  wander-cap e budget browser (`BrowserBudget`) con 300 secondi, 8 navigazioni fallite e
+  5 esiti consecutivi senza avanzamento come default. Gli override gateway sono limitati
+  superiormente. Il superamento emette `browser_budget_exceeded:<reason>` come Activity
+  tipizzata, non come messaggio di transcript, quindi esegue una sola sintesi finale no-tools.
+  Restano inoltre il no-progress identico e `is_final_round`, che **rimuove i tool** dal payload
   sull'ultimo round.
 - **Stream live tipizzato** (nota: gli eventi viaggiano oggi sul **WS unificato `/api/ws`**
   via il fan-out del broker, vedi §percorso richiesta; il canale NDJSON per-turno è

@@ -566,6 +566,13 @@
     "metrics": "Performance",
     "operationalPlan": "Operational plan",
     "computerActivity": "Computer activity",
+    "browserBudget": {
+      "wallClock": "Browser time limit reached",
+      "failedNavigations": "Too many browser navigations failed",
+      "noProgress": "The browser is not making progress",
+      "default": "The browser session was stopped safely",
+      "retry": "Retry"
+    },
     "projectGoal": "Project goal",
     "proposedPlan": "Proposed plan",
     "plan": "Plan",

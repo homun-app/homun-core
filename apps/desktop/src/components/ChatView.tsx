@@ -694,11 +694,38 @@ export function ChatView({
       ? projectedPlan
       : persistedPlan;
   // Activity accumulates across the thread: projection (prior turns) + live (current turn).
-  const conversationActivity = isStreaming
+  const rawConversationActivity = isStreaming
     ? [...projectedActivity, ...liveActivitySteps]
     : projectionLoaded
       ? projectedActivity
       : persistedActivity;
+  const rawLatestActivity = rawConversationActivity[rawConversationActivity.length - 1] ?? "";
+  const browserBudgetReason = rawLatestActivity.startsWith("browser_budget_exceeded:")
+    ? rawLatestActivity.slice("browser_budget_exceeded:".length)
+    : null;
+  const browserBudgetMessage = browserBudgetReason === "wall_clock"
+    ? t("chat.browserBudget.wallClock")
+    : browserBudgetReason === "failed_navigations"
+      ? t("chat.browserBudget.failedNavigations")
+      : browserBudgetReason === "no_progress"
+        ? t("chat.browserBudget.noProgress")
+        : browserBudgetReason
+          ? t("chat.browserBudget.default")
+          : null;
+  const conversationActivity = rawConversationActivity.map((step) =>
+    step.startsWith("browser_budget_exceeded:")
+      ? step.endsWith(":wall_clock")
+        ? t("chat.browserBudget.wallClock")
+        : step.endsWith(":failed_navigations")
+          ? t("chat.browserBudget.failedNavigations")
+          : step.endsWith(":no_progress")
+            ? t("chat.browserBudget.noProgress")
+            : t("chat.browserBudget.default")
+      : step,
+  );
+  const browserBudgetAssistantId = browserBudgetReason
+    ? [...threadMessages].reverse().find((message) => message.role === "assistant")?.id ?? null
+    : null;
   const chatTurnState = useMemo<ChatTurnState | null>(() => {
     if (!hasActiveTurn) return null;
     return {
@@ -2771,6 +2798,21 @@ export function ChatView({
             onExportChat={() => void exportChatMarkdown()}
             onOpenInspector={openUtilityTab}
           />
+          {browserBudgetMessage && !hasActiveTurn && (
+            <div className="browser-budget-notice" role="status">
+              <AlertTriangle size={15} aria-hidden="true" />
+              <span>{browserBudgetMessage}</span>
+              <button
+                type="button"
+                disabled={!browserBudgetAssistantId}
+                onClick={() => {
+                  if (browserBudgetAssistantId) regenerateAnswer(browserBudgetAssistantId);
+                }}
+              >
+                {t("chat.browserBudget.retry")}
+              </button>
+            </div>
+          )}
         </div>
         <ChatComputerPanel threadId={thread.threadId} onLiveChange={setComputerLiveStatus} />
       </div>
