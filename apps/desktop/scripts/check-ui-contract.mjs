@@ -96,6 +96,10 @@ assertContains("src/styles.css", "-webkit-app-region: no-drag", "interactive con
 assertContains("src/lib/accent.ts", "\"dark\"", "appearance surface themes must include a dark preset");
 assertContains("src/components/OnboardingWizard.tsx", 'href="https://homun.app/docs/"', "onboarding must link to the canonical documentation site");
 assertNotContains("src/components/OnboardingWizard.tsx", "https://docs.homun.app", "onboarding must not use the retired documentation host");
+assertContains("src/components/OnboardingWizard.tsx", 'type Step = "prereq" | "computer" | "model" | "done"', "onboarding must have a computer preparation step");
+assertContains("src/components/OnboardingWizard.tsx", "prepareSetupComputer", "computer step must start backend preparation");
+assertContains("src/components/OnboardingWizard.tsx", "setupComputerStatus", "computer step must render observed backend status");
+assertContains("src/components/OnboardingWizard.tsx", 't("onboarding.checkAgain")', "prerequisite screen must expose immediate recheck");
 assertContains("src/lib/accent.ts", 'export const DEFAULT_THEME: ThemeName = "dark";', "fresh installs must default to the dark surface theme");
 assertContains("src/lib/accent.ts", 'export const DEFAULT_ACCENT = "#157a6e";', "fresh installs must keep the Homun teal accent");
 assertContains("src/types.ts", '  | "usage"', "Settings must expose a Usage section");

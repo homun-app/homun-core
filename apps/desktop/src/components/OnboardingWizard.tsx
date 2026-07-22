@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, X, ArrowRight, Download, ExternalLink } from "lucide-react";
 import { coreBridge } from "../lib/coreBridge";
-import type { PullProgress, SetupStatus } from "../lib/coreBridge";
+import type { PullProgress, SetupComputerStatus, SetupStatus } from "../lib/coreBridge";
+import {
+  canContinueFromComputer,
+  computerProgressRows,
+  type ComputerProgressRowId,
+} from "../lib/onboardingComputer";
 import { getSystemSpecs } from "../lib/gatewayConfig";
 import { ProviderLogo, providerLogoKey } from "./providerLogos";
 import {
@@ -17,7 +22,7 @@ interface OnboardingWizardProps {
   onComplete: () => void;
 }
 
-type Step = "prereq" | "model" | "done";
+type Step = "prereq" | "computer" | "model" | "done";
 
 // Local model recommendations come from a catalog we scrape from ollama.com at
 // BUILD time (scripts/refresh-models-catalog.mjs) — tools-capable models ranked
@@ -96,6 +101,15 @@ function recommendIndex(ramGb: number | null): number {
   return 0;
 }
 
+function computerProgressLabel(id: ComputerProgressRowId): string {
+  return {
+    docker: "onboarding.computerPhaseDocker",
+    image: "onboarding.computerPhaseImage",
+    container: "onboarding.computerPhaseContainer",
+    browser: "onboarding.computerPhaseBrowser",
+  }[id];
+}
+
 export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const { t } = useTranslationSafe();
   const [step, setStep] = useState<Step>("prereq");
@@ -103,6 +117,12 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   // Prerequisites (polled so a manual install is auto-detected → marked done).
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [ollamaUp, setOllamaUp] = useState<boolean | null>(null);
+  const [isCheckingPrerequisites, setIsCheckingPrerequisites] = useState(false);
+  const [computerStatus, setComputerStatus] = useState<SetupComputerStatus>({
+    phase: "idle",
+    ready: false,
+    error: null,
+  });
 
   // System specs + model choice
   const [ramGb, setRamGb] = useState<number | null>(null);
@@ -121,32 +141,50 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const dockerOk = !!setup?.docker_running;
   const ollamaOk = ollamaUp === true;
   const selected = MODELS[modelIdx];
-  const activeDot = step === "prereq" ? 0 : step === "model" ? (panel ? 2 : 1) : 3;
-
+  const activeDot = step === "prereq" ? 0 : step === "computer" ? 1 : step === "model" ? 2 : 3;
 
   const pollRef = useRef<number | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    async function probe() {
-      try {
-        const [s, o] = await Promise.all([
-          coreBridge.setupStatus().catch(() => null),
-          coreBridge.ollamaSetup().catch(() => null),
-        ]);
-        if (cancelled) return;
-        if (s) setSetup(s);
-        if (o) setOllamaUp(o.running);
-      } catch {
-        /* gateway not ready yet */
-      }
+  const isCheckingPrerequisitesRef = useRef(false);
+
+  async function probePrerequisites() {
+    if (isCheckingPrerequisitesRef.current) return;
+    isCheckingPrerequisitesRef.current = true;
+    setIsCheckingPrerequisites(true);
+    try {
+      const [nextSetup, ollama] = await Promise.all([
+        coreBridge.setupStatus().catch(() => null),
+        coreBridge.ollamaSetup().catch(() => null),
+      ]);
+      if (nextSetup) setSetup(nextSetup);
+      if (ollama) setOllamaUp(ollama.running);
+    } finally {
+      isCheckingPrerequisitesRef.current = false;
+      setIsCheckingPrerequisites(false);
     }
-    void probe();
+  }
+
+  useEffect(() => {
+    void probePrerequisites();
     if (step === "prereq") {
-      pollRef.current = window.setInterval(() => void probe(), 4000);
+      pollRef.current = window.setInterval(() => void probePrerequisites(), 4000);
     }
     return () => {
-      cancelled = true;
       if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, [step]);
+
+  useEffect(() => {
+    if (step !== "computer") return;
+    let cancelled = false;
+    async function pollComputer() {
+      const status = await coreBridge.setupComputerStatus().catch(() => null);
+      if (!cancelled && status) setComputerStatus(status);
+    }
+    void pollComputer();
+    const timer = window.setInterval(() => void pollComputer(), 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
     };
   }, [step]);
 
@@ -204,6 +242,20 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     onComplete();
   }
 
+  async function enterComputerStep() {
+    setStep("computer");
+    setComputerStatus({ phase: "checking_docker", ready: false, error: null });
+    try {
+      setComputerStatus(await coreBridge.prepareSetupComputer());
+    } catch (error) {
+      setComputerStatus({
+        phase: "failed",
+        ready: false,
+        error: (error as Error).message || t("onboarding.computerUnknownError"),
+      });
+    }
+  }
+
   return (
     <div className="onb-overlay">
       {/* Our own window-drag region (Shell's is hidden during onboarding). Kept
@@ -243,9 +295,19 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
 
             <button
               type="button"
+              className="onb-recheck"
+              disabled={isCheckingPrerequisites}
+              onClick={() => void probePrerequisites()}
+            >
+              {isCheckingPrerequisites && <Loader2 size={14} className="spin" />}
+              {t("onboarding.checkAgain")}
+            </button>
+
+            <button
+              type="button"
               className="onb-primary"
               disabled={!dockerOk || !ollamaOk}
-              onClick={() => setStep("model")}
+              onClick={() => void enterComputerStep()}
             >
               {dockerOk && ollamaOk ? t("onboarding.continue") : t("onboarding.waitingPrereq")}
               {dockerOk && ollamaOk && <ArrowRight size={16} />}
@@ -253,9 +315,59 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
           </div>
         )}
 
-        {step === "model" && (
+        {step === "computer" && (
           <div className="onb-screen">
             <button type="button" className="onb-back" onClick={() => setStep("prereq")}>
+              <ArrowRight size={14} style={{ transform: "rotate(180deg)" }} /> {t("common.back")}
+            </button>
+            <h1 className="onb-title">{t("onboarding.computerTitle")}</h1>
+            <p className="onb-subtitle">{t("onboarding.computerSubtitle")}</p>
+
+            <ul className="onb-computer-capabilities">
+              <li>{t("onboarding.computerCapabilityBrowser")}</li>
+              <li>{t("onboarding.computerCapabilityTools")}</li>
+              <li>{t("onboarding.computerCapabilityArtifacts")}</li>
+            </ul>
+
+            <div className="onb-computer-progress" aria-live="polite">
+              {computerProgressRows(computerStatus.phase).map((row) => (
+                <div key={row.id} className={`onb-computer-row ${row.state}`}>
+                  <span className="onb-computer-row-icon" aria-hidden="true">
+                    {row.state === "done" && <Check size={15} />}
+                    {row.state === "active" && <Loader2 size={15} className="spin" />}
+                    {row.state === "error" && <X size={15} />}
+                  </span>
+                  <span>{t(computerProgressLabel(row.id))}</span>
+                </div>
+              ))}
+            </div>
+
+            {computerStatus.error && (
+              <p className="onb-error">
+                <X size={13} /> {computerStatus.error}
+              </p>
+            )}
+
+            {computerStatus.phase === "failed" ? (
+              <button type="button" className="onb-primary" onClick={() => void enterComputerStep()}>
+                {t("onboarding.computerRetry")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="onb-primary"
+                disabled={!canContinueFromComputer(computerStatus)}
+                onClick={() => setStep("model")}
+              >
+                {t("onboarding.computerContinue")} {computerStatus.ready && <ArrowRight size={16} />}
+              </button>
+            )}
+          </div>
+        )}
+
+        {step === "model" && (
+          <div className="onb-screen">
+            <button type="button" className="onb-back" onClick={() => setStep("computer")}>
               <ArrowRight size={14} style={{ transform: "rotate(180deg)" }} /> {t("common.back")}
             </button>
             <h1 className="onb-title">{t("onboarding.modelTitle")}</h1>

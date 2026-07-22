@@ -16100,6 +16100,85 @@ body.resizing-drawer {
 .onb-check-install:hover {
   background: color-mix(in srgb, var(--o-accent-bright) 12%, transparent);
 }
+.onb-recheck {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: -10px 0 18px;
+  padding: 7px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--o-accent-bright);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.onb-recheck:hover:not(:disabled) {
+  color: var(--o-text);
+}
+.onb-recheck:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.onb-computer-capabilities {
+  display: grid;
+  gap: 8px;
+  margin: -12px 0 24px;
+  padding-left: 22px;
+  color: var(--o-muted);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.onb-computer-capabilities li::marker {
+  color: var(--o-accent-bright);
+}
+.onb-computer-progress {
+  margin-bottom: 20px;
+  border-block: 1px solid var(--o-border);
+}
+.onb-computer-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 48px;
+  color: var(--o-faint);
+  font-size: var(--text-sm);
+}
+.onb-computer-row + .onb-computer-row {
+  border-top: 1px solid color-mix(in srgb, var(--o-border) 72%, transparent);
+}
+.onb-computer-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border: 1px solid var(--o-border);
+  border-radius: 50%;
+}
+.onb-computer-row.active {
+  color: var(--o-text);
+}
+.onb-computer-row.active .onb-computer-row-icon {
+  border-color: var(--o-accent-bright);
+  color: var(--o-accent-bright);
+}
+.onb-computer-row.done {
+  color: var(--o-muted);
+}
+.onb-computer-row.done .onb-computer-row-icon {
+  border-color: color-mix(in srgb, var(--o-accent-bright) 55%, var(--o-border));
+  color: var(--o-accent-bright);
+}
+.onb-computer-row.error {
+  color: #ff9a9a;
+}
+.onb-computer-row.error .onb-computer-row-icon {
+  border-color: #ff7a7a;
+  color: #ff7a7a;
+}
 .onb-models {
   display: flex;
   flex-direction: column;
