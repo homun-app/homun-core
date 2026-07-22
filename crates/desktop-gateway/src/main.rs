@@ -38589,20 +38589,46 @@ fn mcp_stdio_config_to_metadata(config: &McpStdioConfig) -> Value {
     })
 }
 
-/// Serializes a remote (streamable-HTTP) MCP connection to metadata.
-fn mcp_http_config_to_metadata(
-    url: &str,
-    headers: &std::collections::HashMap<String, String>,
-) -> Value {
-    let headers_obj: serde_json::Map<String, Value> = headers
-        .iter()
-        .map(|(key, value)| (key.clone(), Value::String(value.clone())))
-        .collect();
+/// Serializes the non-secret part of a remote (streamable-HTTP) MCP connection.
+/// Request headers are stored separately in the encrypted Secret Store.
+fn mcp_http_config_to_metadata(url: &str) -> Value {
     serde_json::json!({
         "transport": "http",
         "url": url,
-        "headers": Value::Object(headers_obj),
     })
+}
+
+fn validate_mcp_http_headers(
+    headers: &std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    if headers
+        .iter()
+        .any(|(name, value)| name.trim().is_empty() || value.trim().is_empty())
+    {
+        return Err("MCP HTTP header names and values must not be blank".to_string());
+    }
+    Ok(())
+}
+
+fn mcp_http_headers_to_secret(
+    headers: &std::collections::HashMap<String, String>,
+) -> Result<SecretMaterial, String> {
+    validate_mcp_http_headers(headers)?;
+    serde_json::to_vec(headers)
+        .map(SecretMaterial::from_bytes)
+        .map_err(|_| "MCP HTTP headers could not be encoded".to_string())
+}
+
+fn mcp_http_headers_from_secret(
+    material: SecretMaterial,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let encoded = material
+        .expose_utf8()
+        .map_err(|_| "MCP HTTP credential is not valid UTF-8".to_string())?;
+    let headers = serde_json::from_str::<std::collections::HashMap<String, String>>(&encoded)
+        .map_err(|_| "MCP HTTP credential has an invalid format".to_string())?;
+    validate_mcp_http_headers(&headers)?;
+    Ok(headers)
 }
 
 /// One transport type covering both MCP flavors, so a single
@@ -38749,7 +38775,7 @@ fn connect_mcp_blocking(
     // Remote (http) when a url is given, else local stdio.
     let (metadata, secret_label) = match &url {
         Some(url) => (
-            mcp_http_config_to_metadata(url, &request.headers),
+            mcp_http_config_to_metadata(url),
             format!("http:{slug}"),
         ),
         None => {
@@ -72380,6 +72406,40 @@ data: [DONE]\n";
         assert_eq!(restored.command, "my-server");
         assert!(restored.args.is_empty());
         assert!(restored.env.is_empty());
+    }
+
+    #[test]
+    fn mcp_http_metadata_never_contains_headers() {
+        let metadata = crate::mcp_http_config_to_metadata("https://example.com/mcp");
+        let serialized = metadata.to_string();
+
+        assert_eq!(metadata["transport"], "http");
+        assert_eq!(metadata["url"], "https://example.com/mcp");
+        assert!(metadata.get("headers").is_none());
+        assert!(!serialized.contains("Authorization"));
+    }
+
+    #[test]
+    fn mcp_http_headers_round_trip_as_secret_material() {
+        let headers = std::collections::HashMap::from([
+            (
+                "Authorization".to_string(),
+                "Bearer orion-secret".to_string(),
+            ),
+            ("X-Tenant".to_string(), "idra".to_string()),
+        ]);
+
+        let material = crate::mcp_http_headers_to_secret(&headers).expect("serialize headers");
+        let restored = crate::mcp_http_headers_from_secret(material).expect("decode headers");
+
+        assert_eq!(restored, headers);
+    }
+
+    #[test]
+    fn mcp_http_headers_reject_malformed_secret_material() {
+        let material = local_first_secrets::SecretMaterial::from_string("not-json");
+
+        assert!(crate::mcp_http_headers_from_secret(material).is_err());
     }
 
     #[test]
