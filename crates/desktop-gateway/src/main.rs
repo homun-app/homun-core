@@ -39760,12 +39760,34 @@ fn chat_turn_task_is_parked(
         .is_some_and(|persisted| persisted.status == TaskStatus::Parked)
 }
 
+/// Pick the next ready task for this user across EVERY non-terminal workspace.
+/// Channel turns live in `local-workspace`; without this, a worker scoped to the
+/// UI-selected project never sees them and WhatsApp/Telegram replies stay queued.
+fn next_ready_task_across_workspaces(
+    store: &TaskStore,
+    user: &UserId,
+    now: OffsetDateTime,
+    governor: &ResourceGovernor,
+    lease_manager: &LeaseManager,
+) -> local_first_task_runtime::TaskRuntimeResult<Option<TaskRecord>> {
+    let scheduler = TaskScheduler::new();
+    for workspace in store.non_terminal_workspace_ids(user)? {
+        lease_manager.recover_stale_leases(store, user, &workspace, now)?;
+        requeue_waiting_resource_tasks(store, user, &workspace, governor)?;
+        scheduler.mark_blocked_by_terminal_dependencies(store, user, &workspace)?;
+        scheduler.expire_overdue_tasks(store, user, &workspace, now)?;
+    }
+    Ok(scheduler
+        .ready_tasks_for_user(store, user, now, 1)?
+        .into_iter()
+        .next())
+}
+
 fn run_next_task_once(
     state: &AppState,
     worker_id: &str,
 ) -> Result<TaskRunBatchResponse, GatewayError> {
     let user = gateway_user_id();
-    let workspace = gateway_workspace_id();
     let now = OffsetDateTime::now_utc();
     // Dynamic LLM concurrency: the limit follows the active provider's locality
     // (loopback 1, cloud 4) or the user's override — resolved fresh each tick so a
@@ -39774,23 +39796,8 @@ fn run_next_task_once(
     let lease_manager = LeaseManager::new(Duration::minutes(5));
     let task = {
         let store = lock_task_store(state)?;
-        let scheduler = TaskScheduler::new();
-        lease_manager
-            .recover_stale_leases(&store, &user, &workspace, now)
-            .map_err(GatewayError::task)?;
-        requeue_waiting_resource_tasks(&store, &user, &workspace, &governor)
-            .map_err(GatewayError::task)?;
-        scheduler
-            .mark_blocked_by_terminal_dependencies(&store, &user, &workspace)
-            .map_err(GatewayError::task)?;
-        scheduler
-            .expire_overdue_tasks(&store, &user, &workspace, now)
-            .map_err(GatewayError::task)?;
-        scheduler
-            .ready_tasks(&store, &user, &workspace, now, 1)
+        next_ready_task_across_workspaces(&store, &user, now, &governor, &lease_manager)
             .map_err(GatewayError::task)?
-            .into_iter()
-            .next()
     };
     let Some(task) = task else {
         return Ok(TaskRunBatchResponse {
@@ -39801,6 +39808,7 @@ fn run_next_task_once(
         });
     };
 
+    let workspace = task.workspace_id.clone();
     let task_id = task.task_id.as_str().to_string();
     let task_kind = task.kind.clone();
     let mut task = match acquire_task_for_execution(
@@ -61162,7 +61170,7 @@ mod tests {
         memory_bench_search, memory_bench_status, memory_facade,
         memory_source_candidates_from_records, memory_source_grant_views,
         memory_source_facade_error, memory_sources_flag, memorybench_workspace_id, merge_plan,
-        next_plan_stall, normalize_for_dedup, parse_plan_marker,
+        next_plan_stall, next_ready_task_across_workspaces, normalize_for_dedup, parse_plan_marker,
         parse_review_suggestion, plan_done_count, plan_incomplete_reason, plan_is_complete,
         plan_is_settled, plan_next_open, plan_stall_exhausted, plan_step_status,
         proactive_answer_memory_request, proactive_memory_request_for_suggestion_action,
@@ -79549,6 +79557,39 @@ data: [DONE]\n";
             task_executor_worker_id(2),
             "desktop-gateway-background-worker-2"
         );
+    }
+
+    #[test]
+    fn task_executor_finds_personal_channel_turn_while_project_is_active() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("local-user");
+        let personal = WorkspaceId::new("local-workspace");
+        let project = WorkspaceId::new("workspace_project");
+        let channel = TaskRecord::new(
+            "turn_channel_1",
+            user.clone(),
+            personal.clone(),
+            "chat_turn",
+            "Reply to channel",
+            serde_json::json!({"source": "channel"}),
+        );
+        store.insert_task(&channel).unwrap();
+
+        let governor = ResourceGovernor::new(ResourceLimits::conservative_defaults());
+        let lease = local_first_task_runtime::LeaseManager::new(time::Duration::minutes(5));
+        let selected = next_ready_task_across_workspaces(
+            &store,
+            &user,
+            time::OffsetDateTime::now_utc(),
+            &governor,
+            &lease,
+        )
+        .unwrap()
+        .expect("personal task is visible");
+
+        assert_eq!(selected.task_id.as_str(), "turn_channel_1");
+        assert_eq!(selected.workspace_id, personal);
+        assert_ne!(selected.workspace_id, project);
     }
 
     #[test]
