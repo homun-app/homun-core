@@ -15962,8 +15962,10 @@ fn privacy_guard_payload(model: &str, text: &str) -> serde_json::Value {
 async fn classify_sensitive_input_with_privacy_guard_model(
     http: &reqwest::Client,
     text: &str,
-) -> Option<privacy_guard::PrivacyGuardDecision> {
-    let (base_url, model, api_key) = privacy_guard_openai_config()?;
+) -> privacy_guard::PrivacyGuardModelOutcome {
+    let Some((base_url, model, api_key)) = privacy_guard_openai_config() else {
+        return privacy_guard::PrivacyGuardModelOutcome::Unavailable("no_local_guard_model");
+    };
     // Generous ceiling for REASONING models: they spend the budget on a hidden
     // `reasoning` field before emitting `content`. A tight cap (fine for an
     // instruct model) can leave `content` empty — which here means an empty
@@ -15972,8 +15974,6 @@ async fn classify_sensitive_input_with_privacy_guard_model(
     // still resolve a local reasoning one, so budget for it. A high ceiling costs
     // nothing for instruct models. See the note on `generate_thread_title`.
     let payload = privacy_guard_payload(&model, text);
-    // Every failure below fails OPEN (returns None → caller treats the input as
-    // clean). Log the reason so a broken guard model is never silently trusted.
     let response = match recorded_openai_value(
         http,
         &base_url,
@@ -15994,20 +15994,19 @@ async fn classify_sensitive_input_with_privacy_guard_model(
             tracing::warn!(
                 target: "privacy::guard",
                 model = %model, %base_url,
-                "privacy-guard LLM request errored — input NOT classified (failing open)"
+                "privacy-guard LLM request errored"
             );
-            return None;
+            return privacy_guard::PrivacyGuardModelOutcome::Unavailable("request_failed");
         }
     };
     if !(200..300).contains(&response.status) {
         let status = response.status;
-        let body: String = response.body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "privacy::guard",
-            %status, model = %model, %base_url, body = %body,
-            "privacy-guard LLM call failed — input NOT classified (failing open)"
+            %status, model = %model, %base_url,
+            "privacy-guard LLM call failed"
         );
-        return None;
+        return privacy_guard::PrivacyGuardModelOutcome::Unavailable("http_status");
     }
     let body = response.body;
     let content = body
@@ -16015,14 +16014,17 @@ async fn classify_sensitive_input_with_privacy_guard_model(
         .and_then(|c| c.as_str())
         .unwrap_or("");
     if content.trim().is_empty() {
-        let snippet: String = body.to_string().chars().take(300).collect();
         tracing::warn!(
             target: "privacy::guard",
-            model = %model, %base_url, body = %snippet,
-            "privacy-guard LLM returned 2xx but no content (e.g. reasoning-budget starvation) — input NOT classified (failing open)"
+            model = %model, %base_url,
+            "privacy-guard LLM returned 2xx but no content"
         );
+        return privacy_guard::PrivacyGuardModelOutcome::Unavailable("empty_content");
     }
-    privacy_guard::decision_from_model_output(text, content)
+    match privacy_guard::decision_from_model_output(text, content) {
+        Some(decision) => privacy_guard::PrivacyGuardModelOutcome::Classified(decision),
+        None => privacy_guard::PrivacyGuardModelOutcome::InvalidOutput,
+    }
 }
 
 /// F2 step-verification gate toggle (default ON). `HOMUN_VERIFY_STEPS=0` disables it,
@@ -27907,12 +27909,64 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         mpsc: mpsc_tx,
         entry: stream_entry,
     };
-    let privacy_decision =
-        classify_sensitive_input_with_privacy_guard_model(&state.http, &request.prompt)
-            .await
-            .unwrap_or_else(|| {
-                privacy_guard::classify_sensitive_input_deterministic(&request.prompt)
-            });
+    let orchestrator_is_local = provider_endpoint_is_local(&base_url) && !model_id_is_cloud(&model);
+    let deterministic_privacy_decision =
+        privacy_guard::classify_sensitive_input_deterministic(&request.prompt);
+    let guarded_decision = match classify_sensitive_input_with_privacy_guard_model(
+        &state.http,
+        &request.prompt,
+    )
+    .await
+    {
+        privacy_guard::PrivacyGuardModelOutcome::Classified(model_decision) => Ok(
+            privacy_guard::merge_guard_decisions(
+                &request.prompt,
+                model_decision,
+                deterministic_privacy_decision.clone(),
+            ),
+        ),
+        privacy_guard::PrivacyGuardModelOutcome::Unavailable(reason) => Err(reason),
+        privacy_guard::PrivacyGuardModelOutcome::InvalidOutput => Err("invalid_output"),
+    };
+    let privacy_decision = match guarded_decision {
+        Ok(decision) => decision,
+        Err(reason) => match privacy_guard::failure_policy(orchestrator_is_local) {
+            privacy_guard::PrivacyGuardFailurePolicy::DeterministicLocalOnly => {
+                tracing::warn!(
+                    target: "privacy::guard",
+                    %reason,
+                    "privacy guard unavailable; using deterministic local-only fallback"
+                );
+                deterministic_privacy_decision
+            }
+            privacy_guard::PrivacyGuardFailurePolicy::BlockAndRetry => {
+                tracing::warn!(
+                    target: "privacy::guard",
+                    %reason,
+                    "privacy guard unavailable; blocking remote inference"
+                );
+                let _ = emit_stream_event(
+                    &tx,
+                    GenerateStreamEvent::Error {
+                        code: "privacy_guard_unavailable".to_string(),
+                        message: "Privacy Guard non disponibile. Riprova senza inviare dati al provider remoto.".to_string(),
+                        retryable: true,
+                    },
+                )
+                .await;
+                schedule_stream_registry_cleanup(resume_id.clone());
+                let body = Body::from_stream(futures_util::stream::unfold(rx, |mut rx| async move {
+                    rx.recv().await.map(|item| (item, rx))
+                }));
+                return Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/x-ndjson")
+                    .header("x-effective-model", "privacy_guard")
+                    .body(body)
+                    .expect("valid streaming response"));
+            }
+        },
+    };
     if let Some(intercept) = privacy_guard::build_privacy_guard_intercept(
         &state.pending_vault_proposals,
         &request.request_id,

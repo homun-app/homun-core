@@ -602,7 +602,7 @@ export type CoreChatStreamEvent =
   | { type: "diff"; request_id: string; payload: DiffEventPayload }
   | { type: "retry" | "aborted" | "queued"; request_id: string; payload: Record<string, unknown>; seq?: number }
   | { type: "done"; request_id: string; seq?: number }
-  | { type: "error"; request_id: string; message?: string; seq?: number };
+  | { type: "error"; request_id: string; message?: string; retryable?: boolean; seq?: number };
 
 export interface CorePromptExecutionPlan {
   title: string;
@@ -4943,6 +4943,7 @@ async function replayBrokerTurnStream(
           type: "error",
           request_id: requestId,
           message: errorMessage,
+          retryable: payload.retryable === true,
           seq: event.seq,
         });
         break stream;
