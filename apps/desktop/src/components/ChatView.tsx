@@ -107,7 +107,24 @@ import {
 } from "../lib/coreBridge";
 import { wsSubscription } from "../lib/wsSubscription";
 import { ExecutionInspector } from "./ExecutionInspector";
-import { enqueueTurn, fetchThreadActivity, type SubagentInfo } from "../lib/chatApi";
+import {
+  cancelTurn,
+  deleteSteering,
+  enqueueTurn,
+  fetchThreadActivity,
+  fetchThreadSteering,
+  sendSteeringNow,
+  SteeringConflictError,
+  updateSteering,
+  type SubagentInfo,
+  type TurnSteeringRecord,
+} from "../lib/chatApi";
+import {
+  applySteeringChange,
+  createSteeringQueueState,
+  reconcileSteering,
+  type SteeringQueueState,
+} from "../lib/chatSteeringState";
 import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
@@ -159,6 +176,8 @@ import { RichMessage } from "./RichMessage";
 import { CodeView, DiffView, diffStats } from "./CodeView";
 import { ChatComputerPanel } from "./ChatComputerPanel";
 import { WorkspaceIsland } from "./WorkspaceIsland";
+import { ActiveTurnStatus } from "./ActiveTurnStatus";
+import { PendingSteeringQueue } from "./PendingSteeringQueue";
 import { ChatHeaderMenu } from "./ChatHeaderMenu";
 import { InspectorWorkspace } from "./InspectorWorkspace";
 import { MemoryUsagePopover } from "./MemoryUsagePopover";
@@ -309,6 +328,26 @@ export interface ChatStreamStatus {
   detail: string;
 }
 
+// UI-local until the durable activity projection lands in the generated client type.
+// Missing backend fields stay absent; the view never invents retry/backoff metadata.
+interface ActiveTurnProjection {
+  turn_id: string;
+  status: string;
+  attempt: number;
+  max_attempts: number;
+  not_before: number | null;
+  blocked_reason: string | null;
+  updated_at: number;
+}
+
+interface ChatTurnState {
+  phase: string;
+  detail?: string;
+  elapsedSeconds: number;
+  attempt: number;
+  activityCount: number;
+}
+
 interface ChatAutoSubmit {
   id: string;
   threadId: string;
@@ -378,6 +417,12 @@ export function ChatView({
   const [projectedPlan, setProjectedPlan] = useState<string | null>(null);
   const [projectedTurnStatus, setProjectedTurnStatus] = useState<string | null>(null);
   const [projectedSubagents, setProjectedSubagents] = useState<SubagentInfo[]>([]);
+  const [projectedActiveTurn, setProjectedActiveTurn] =
+    useState<ActiveTurnProjection | null>(null);
+  const [activeTurnElapsedSeconds, setActiveTurnElapsedSeconds] = useState(0);
+  const [pendingSteering, setPendingSteering] = useState<SteeringQueueState>(() =>
+    createSteeringQueueState(),
+  );
   // Once the projection has loaded for a thread we TRUST it — including a null plan (a new
   // plan-less task must clear the previous task's plan). Before it loads we fall back to the
   // text markers to avoid a blank flash. Reset per thread.
@@ -449,7 +494,6 @@ export function ChatView({
   const streamingUserPinnedRef = useRef(false);
   const streamingFrameRef = useRef<number | null>(null);
   const cancelStreamingRequestRef = useRef<(() => void) | null>(null);
-  const pendingSteeringMessagesRef = useRef<ChatMessage[]>([]);
   const cancelledStreamIdsRef = useRef<Set<string>>(new Set());
   // Tracks whether THIS ChatView instance is still mounted. The chat stream
   // (submitChat) keeps running in the background after the user navigates to
@@ -477,6 +521,30 @@ export function ChatView({
       notifyStreaming(false);
     };
   }, [notifyStreaming]);
+  const refreshPendingSteering = useCallback(async () => {
+    const rows = await fetchThreadSteering(thread.threadId);
+    if (!isMountedRef.current) return;
+    setPendingSteering((current) => reconcileSteering(current, rows));
+  }, [thread.threadId]);
+
+  useEffect(() => {
+    setPendingSteering(createSteeringQueueState());
+    void refreshPendingSteering().catch(() => {
+      /* Queue remains empty until the endpoint is available or an event retries hydration. */
+    });
+  }, [refreshPendingSteering]);
+
+  useEffect(() => {
+    const unsubscribe = wsSubscription.subscribe((message) => {
+      const event = message.type === "app.event"
+        ? message.event as Record<string, unknown> | undefined
+        : message;
+      if (event?.type !== "thread.steering_changed") return;
+      if (event.thread_id !== thread.threadId) return;
+      void refreshPendingSteering().catch(() => undefined);
+    });
+    return unsubscribe;
+  }, [refreshPendingSteering, thread.threadId]);
   // ── Unified WS subscription for turn events ──
   // Listens for turn.event messages on the WS for the currently-active turn.
   // Feeds the island (activity steps + plan markdown) in real-time, independent
@@ -565,6 +633,24 @@ export function ChatView({
   const persistedPlan = useMemo(() => latestPlanMarkdown(messages), [messages]);
   const persistedActivity = useMemo(() => latestActivitySteps(messages), [messages]);
   const isStreaming = promptSubmitting || Boolean(streamingAssistantId);
+  const hasActiveTurn = isStreaming || Boolean(projectedActiveTurn);
+  const activeTurnKey = projectedActiveTurn?.turn_id ?? streamStatus?.requestId ?? null;
+  useEffect(() => {
+    if (!hasActiveTurn) {
+      setActiveTurnElapsedSeconds(0);
+      return;
+    }
+    const projectedUpdatedAt = projectedActiveTurn?.updated_at;
+    const startedAt = projectedUpdatedAt && projectedUpdatedAt > 0
+      ? Math.min(Date.now(), projectedUpdatedAt * 1000)
+      : Date.now();
+    const updateElapsed = () => {
+      setActiveTurnElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    };
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeTurnKey, hasActiveTurn, projectedActiveTurn?.updated_at]);
   // Island source, converged on the durable projection:
   //  - live: live WS events (current turn) layered over the projection (prior turns);
   //  - at rest: the projection alone, falling back to the lossy text markers only if the
@@ -583,6 +669,25 @@ export function ChatView({
     : projectionLoaded
       ? projectedActivity
       : persistedActivity;
+  const chatTurnState = useMemo<ChatTurnState | null>(() => {
+    if (!hasActiveTurn) return null;
+    return {
+      phase: streamStatus?.title ?? t("chat.stillWorking"),
+      detail: streamStatus?.detail ?? projectedActiveTurn?.blocked_reason ?? undefined,
+      elapsedSeconds: activeTurnElapsedSeconds,
+      attempt: projectedActiveTurn?.attempt ?? 1,
+      activityCount: conversationActivity.length,
+    };
+  }, [
+    activeTurnElapsedSeconds,
+    conversationActivity.length,
+    hasActiveTurn,
+    projectedActiveTurn?.attempt,
+    projectedActiveTurn?.blocked_reason,
+    streamStatus?.detail,
+    streamStatus?.title,
+    t,
+  ]);
   const workspacePlanSteps = useMemo(() => {
     const steps = conversationPlan ? parsePlanSteps(conversationPlan) : [];
     // A concluded successful turn has nothing actively "doing": weak local models often
@@ -604,6 +709,7 @@ export function ChatView({
     setProjectedPlan(null);
     setProjectedTurnStatus(null);
     setProjectedSubagents([]);
+    setProjectedActiveTurn(null);
     setProjectionLoaded(false);
   }, [thread.threadId]);
   // Load the durable island projection on thread change and when a turn ENDS (isStreaming →
@@ -620,6 +726,11 @@ export function ChatView({
         setProjectedPlan(projection.plan_markdown);
         setProjectedTurnStatus(projection.latest_turn_status);
         setProjectedSubagents(projection.subagents ?? []);
+        const activeTurn = (
+          projection as typeof projection & { active_turn?: ActiveTurnProjection | null }
+        ).active_turn ?? null;
+        setProjectedActiveTurn(activeTurn);
+        if (activeTurn) activeTurnIdRef.current = activeTurn.turn_id;
         setProjectionLoaded(true);
       })
       .catch(() => {
@@ -961,7 +1072,6 @@ export function ChatView({
     const shouldAutoTitleAfterSubmit = isPlaceholderThreadTitle(thread.title);
     const userVisibleText = (visibleText ?? text).trim();
     if (!userVisibleText) return;
-    pendingSteeringMessagesRef.current = [];
     const visiblePrompt = userVisibleText === text ? undefined : userVisibleText;
 
     setPromptSubmitting(true);
@@ -1018,7 +1128,6 @@ export function ChatView({
           text: streamedText,
           eventParts: streamEventParts,
         },
-        ...pendingSteeringMessagesRef.current,
       ]);
       afterStreamingFramePaint();
     };
@@ -1056,7 +1165,6 @@ export function ChatView({
           eventParts: streamEventParts,
           metadata: "Interrotta localmente",
         },
-        ...pendingSteeringMessagesRef.current,
       ];
       setOptimisticMessages(cancelledMessages);
       onMessagesChange(cancelledMessages);
@@ -1206,7 +1314,6 @@ export function ChatView({
       };
       let finalMessages = [
         ...promptMessages,
-        ...pendingSteeringMessagesRef.current,
         finalAssistantMessage,
       ];
       setOptimisticMessages(finalMessages);
@@ -1233,7 +1340,6 @@ export function ChatView({
       );
       const errorMessages: ChatMessage[] = [
         ...promptMessages,
-        ...pendingSteeringMessagesRef.current,
         {
           id: `local_error_${Date.now()}`,
           role: "system" as const,
@@ -1293,6 +1399,22 @@ export function ChatView({
 
   function cancelActiveStreaming() {
     cancelStreamingRequestRef.current?.();
+  }
+
+  async function stopActiveTurn() {
+    if (cancelStreamingRequestRef.current) {
+      cancelActiveStreaming();
+      return;
+    }
+    const turnId = projectedActiveTurn?.turn_id ?? activeTurnIdRef.current;
+    if (!turnId) return;
+    try {
+      await cancelTurn(turnId);
+      setProjectedActiveTurn(null);
+      await refreshPendingSteering().catch(() => undefined);
+    } catch (error) {
+      setPromptError(describeBridgeError(error));
+    }
   }
 
   // Reattach to an answer that was streaming when the app was reloaded: replays
@@ -1493,7 +1615,7 @@ export function ChatView({
     }
   }, [seed?.nonce]);
 
-  function submitComposerPrompt(
+  async function submitComposerPrompt(
     prompt: string,
     attachments: ChatAttachmentInput[],
     options?: {
@@ -1503,9 +1625,8 @@ export function ChatView({
       contextText?: string;
       images?: string[];
     },
-  ) {
+  ): Promise<boolean> {
     const activeReplyContext = replyContext;
-    setReplyContext(null);
     const images = options?.images;
     const mode = options?.mode;
 
@@ -1520,7 +1641,7 @@ export function ChatView({
     const model = options?.model;
     const augmented = Boolean(skillPrefix || contextPrefix);
 
-    if (promptSubmitting && activeTurnIdRef.current) {
+    if (hasActiveTurn) {
       const promptWithReplyContext = activeReplyContext
         ? [
             skillPrefix,
@@ -1534,39 +1655,41 @@ export function ChatView({
           ].join("\n")
         : `${skillPrefix}${contextPrefix}${prompt}`;
       const requestId = `chat_steering_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      void enqueueTurn(thread.threadId, requestId, promptWithReplyContext, {
-        visiblePrompt: prompt,
-        images,
-        attachments: attachments.length ? attachments : undefined,
-        mode,
-        model,
-      })
-        .then((result) => {
-          if (result.status !== "steering_queued") {
-            throw new Error("The active task ended while the instruction was being queued.");
-          }
-          const steeringMessage: ChatMessage = {
-            id: result.source_message_id,
-            role: "user",
-            text: prompt,
-            timestamp: currentTimestampSeconds(),
-            attachments: attachments.map(toMessageAttachment),
-          };
-          pendingSteeringMessagesRef.current = [
-            ...pendingSteeringMessagesRef.current,
-            steeringMessage,
-          ];
-          setOptimisticMessages((current) =>
-            current ? [...current, steeringMessage] : current,
-          );
-          setStreamStatus((current) =>
-            current ? { ...current, detail: t("chat.steeringQueued") } : current,
-          );
-        })
-        .catch((error) => setPromptError(describeBridgeError(error)));
-      return;
+      try {
+        const result = await enqueueTurn(thread.threadId, requestId, promptWithReplyContext, {
+          visiblePrompt: prompt,
+          images,
+          attachments: attachments.length ? attachments : undefined,
+          mode,
+          model,
+        });
+        if (result.status !== "steering_queued") {
+          throw new Error("The active task ended while the instruction was being queued.");
+        }
+        const returnedRecord = (
+          result as typeof result & { steering?: TurnSteeringRecord }
+        ).steering;
+        if (returnedRecord) {
+          setPendingSteering((current) => applySteeringChange(current, returnedRecord));
+        } else {
+          await refreshPendingSteering().catch(() => undefined);
+        }
+        setReplyContext(null);
+        setPromptError(null);
+        setStreamStatus((current) =>
+          current ? { ...current, detail: t("chat.steeringQueued") } : current,
+        );
+        return true;
+      } catch (error) {
+        if (error instanceof SteeringConflictError) {
+          setPendingSteering((current) => applySteeringChange(current, error.steering));
+        }
+        setPromptError(describeBridgeError(error));
+        return false;
+      }
     }
 
+    setReplyContext(null);
     if (!activeReplyContext) {
       if (augmented) {
         void submitPrompt(
@@ -1582,7 +1705,7 @@ export function ChatView({
       } else {
         void submitPrompt(prompt, attachments, undefined, undefined, model, images, undefined, mode);
       }
-      return;
+      return true;
     }
 
     const promptWithReplyContext = [
@@ -1596,6 +1719,69 @@ export function ChatView({
       prompt,
     ].join("\n");
     void submitPrompt(promptWithReplyContext, attachments, undefined, prompt, model, images, undefined, mode);
+    return true;
+  }
+
+  function steeringPromptWithEdit(row: TurnSteeringRecord, visiblePrompt: string): string {
+    if (row.visible_prompt && row.prompt.endsWith(row.visible_prompt)) {
+      return `${row.prompt.slice(0, -row.visible_prompt.length)}${visiblePrompt}`;
+    }
+    return visiblePrompt;
+  }
+
+  async function editPendingSteering(
+    row: TurnSteeringRecord,
+    visiblePrompt: string,
+    expectedRevision: number,
+  ) {
+    try {
+      const updated = await updateSteering(row.steering_id, {
+        expected_revision: expectedRevision,
+        prompt: steeringPromptWithEdit(row, visiblePrompt),
+        visible_prompt: visiblePrompt,
+        images: row.images,
+        attachments: row.attachments,
+        mode: row.mode,
+        model: row.model,
+      });
+      setPendingSteering((current) => applySteeringChange(current, updated));
+      setPromptError(null);
+    } catch (error) {
+      if (error instanceof SteeringConflictError) {
+        setPendingSteering((current) => applySteeringChange(current, error.steering));
+      }
+      setPromptError(describeBridgeError(error));
+      throw error;
+    }
+  }
+
+  async function deletePendingSteering(row: TurnSteeringRecord, expectedRevision: number) {
+    try {
+      const deleted = await deleteSteering(row.steering_id, expectedRevision);
+      setPendingSteering((current) => applySteeringChange(current, deleted));
+      setPromptError(null);
+    } catch (error) {
+      if (error instanceof SteeringConflictError) {
+        setPendingSteering((current) => applySteeringChange(current, error.steering));
+      }
+      setPromptError(describeBridgeError(error));
+      throw error;
+    }
+  }
+
+  async function sendPendingSteeringNow(row: TurnSteeringRecord, expectedRevision: number) {
+    try {
+      await sendSteeringNow(row.steering_id, expectedRevision);
+      await refreshPendingSteering();
+      setPromptError(null);
+      await onThreadChanged();
+    } catch (error) {
+      if (error instanceof SteeringConflictError) {
+        setPendingSteering((current) => applySteeringChange(current, error.steering));
+      }
+      setPromptError(describeBridgeError(error));
+      throw error;
+    }
   }
 
   async function copyMessageText(message: ChatMessage) {
@@ -2398,9 +2584,13 @@ export function ChatView({
       islandSources.length > 0 ||
       projectedSubagents.length > 0 ||
       computerLiveStatus.active ||
-      promptSubmitting ||
-      Boolean(streamingAssistantId));
+      hasActiveTurn);
   const islandColumnVisible = !inspector.open && islandOpen && islandHasContent;
+  const activeAssistantMessageId = streamingAssistantId ?? (
+    !isStreaming && projectedActiveTurn
+      ? [...threadMessages].reverse().find((message) => message.role === "assistant")?.id ?? null
+      : null
+  );
   return (
     <section
       ref={layoutRef}
@@ -2473,7 +2663,7 @@ export function ChatView({
             planSteps={workspacePlanSteps}
             sources={islandSources}
             subagents={projectedSubagents}
-            streaming={promptSubmitting || Boolean(streamingAssistantId)}
+            streaming={hasActiveTurn}
             status={streamStatus}
             threadHasMessages={threadMessages.length > 0}
             columnMode
@@ -2783,20 +2973,42 @@ export function ChatView({
                 )}
               </footer>
             </article>
+            {displayMessage.id === activeAssistantMessageId && chatTurnState && (
+              <div className="active-turn-tail">
+                <ActiveTurnStatus
+                  {...chatTurnState}
+                  variant="assistant-footer"
+                  onOpenActivity={() => setIslandOpen(true)}
+                  onStop={() => void stopActiveTurn()}
+                />
+              </div>
+            )}
             </div>
             );
           })}
           </div>
 
           {promptSubmitting && !streamingAssistantId && (
-            <article className="message assistant pending" aria-live="polite">
-              <header className="assistant-label">
-                <Sparkles size={17} />
-                <strong>assistant</strong>
-                <span>{t("chat.roleAssistant")}</span>
-              </header>
-              <AssistantThinkingState status={streamStatus} />
-            </article>
+            <div className="thread-message-row">
+              <article className="message assistant pending" aria-live="polite">
+                <header className="assistant-label">
+                  <Sparkles size={17} />
+                  <strong>assistant</strong>
+                  <span>{t("chat.roleAssistant")}</span>
+                </header>
+                <AssistantThinkingState status={streamStatus} />
+              </article>
+              {chatTurnState && (
+                <div className="active-turn-tail">
+                  <ActiveTurnStatus
+                    {...chatTurnState}
+                    variant="assistant-footer"
+                    onOpenActivity={() => setIslandOpen(true)}
+                    onStop={() => void stopActiveTurn()}
+                  />
+                </div>
+              )}
+            </div>
           )}
 
           <InlineApprovelPanel
@@ -2884,20 +3096,37 @@ export function ChatView({
         )}
       />
 
-      <Composer
-        disabled={false}
-        error={promptError}
-        replyContext={replyContext}
-        seed={composerSeed}
-        suggestedModel={usageSuggestedModel}
-        streaming={promptSubmitting}
-        threadId={thread.threadId}
-        onCancelStreaming={cancelActiveStreaming}
-        onClearReply={() => setReplyContext(null)}
-        onManualModelSelection={() => setUsageSuggestedModel(null)}
-        onSuggestedModelConsumed={() => setUsageSuggestedModel(null)}
-        onSubmit={submitComposerPrompt}
-      />
+      <div className="composer-stack">
+        {chatTurnState && (
+          <ActiveTurnStatus
+            {...chatTurnState}
+            variant="composer-bar"
+            onOpenActivity={() => setIslandOpen(true)}
+            onStop={() => void stopActiveTurn()}
+          />
+        )}
+        <PendingSteeringQueue
+          rows={pendingSteering.rows}
+          onEdit={editPendingSteering}
+          onDelete={deletePendingSteering}
+          onSendNow={sendPendingSteeringNow}
+        />
+        <Composer
+          activeWork={hasActiveTurn}
+          disabled={false}
+          error={promptError}
+          replyContext={replyContext}
+          seed={composerSeed}
+          suggestedModel={usageSuggestedModel}
+          streaming={promptSubmitting}
+          threadId={thread.threadId}
+          onCancelStreaming={cancelActiveStreaming}
+          onClearReply={() => setReplyContext(null)}
+          onManualModelSelection={() => setUsageSuggestedModel(null)}
+          onSuggestedModelConsumed={() => setUsageSuggestedModel(null)}
+          onSubmit={submitComposerPrompt}
+        />
+      </div>
     </section>
   );
 }
@@ -8948,6 +9177,7 @@ function ChatEmptyHero({
 }
 
 function Composer({
+  activeWork,
   disabled,
   error,
   replyContext,
@@ -8961,6 +9191,7 @@ function Composer({
   onSuggestedModelConsumed,
   onSubmit,
 }: {
+  activeWork: boolean;
   disabled: boolean;
   error: string | null;
   replyContext: ReplyContext | null;
@@ -8982,10 +9213,11 @@ function Composer({
       contextText?: string;
       images?: string[];
     },
-  ) => void;
+  ) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const [submitBusy, setSubmitBusy] = useState(false);
   // External task surfaces may seed the composer; nonce lets the same value re-apply.
   useEffect(() => {
     if (seed && seed.text) setValue(seed.text);
@@ -9360,10 +9592,10 @@ function Composer({
     node.style.height = `${Math.min(node.scrollHeight, 180)}px`;
   }
 
-  function submitCurrentValue() {
+  async function submitCurrentValue() {
     const prompt = value.trim();
     // Allow images-only messages (vision); supply a sensible default prompt.
-    if ((!prompt && composerImages.length === 0) || disabled) return;
+    if ((!prompt && composerImages.length === 0) || disabled || submitBusy) return;
     if (attachments.some((attachment) => !attachment.localPath)) {
       setComposerAttachmentError("Local path not available in this shell.");
       return;
@@ -9380,20 +9612,28 @@ function Composer({
     const modelOverride = selectedModel ?? undefined;
     const forcedSkillsId = forcedSkills?.id;
     const contextText = buildContextText();
-    setValue("");
-    setAttachments([]);
-    setComposerImages([]);
-    setContextFiles([]);
-    setComposerAttachmentError(null);
-    requestAnimationFrame(adjustComposerHeight);
-    onSubmit(effectivePrompt, attachmentInputs, {
+    const submittedAttachmentIds = new Set(attachments.map((item) => item.id));
+    const submittedImageIds = new Set(composerImages.map((item) => item.id));
+    const clearSubmittedEnvelope = () => {
+      setValue((current) => current === value ? "" : current);
+      setAttachments((current) => current.filter((item) => !submittedAttachmentIds.has(item.id)));
+      setComposerImages((current) => current.filter((item) => !submittedImageIds.has(item.id)));
+      setContextFiles([]);
+      setComposerAttachmentError(null);
+      requestAnimationFrame(adjustComposerHeight);
+    };
+    if (!activeWork) clearSubmittedEnvelope();
+    setSubmitBusy(true);
+    const accepted = await onSubmit(effectivePrompt, attachmentInputs, {
       model: modelOverride,
       mode: chatMode === "agent" ? undefined : chatMode,
       forcedSkillsId,
       contextText,
       images: images.length > 0 ? images : undefined,
-    });
-    if (suggestedModel && modelOverride === suggestedModel.value) {
+    }).catch(() => false);
+    setSubmitBusy(false);
+    if (activeWork && accepted) clearSubmittedEnvelope();
+    if (accepted && suggestedModel && modelOverride === suggestedModel.value) {
       setSelectedModel(null);
       onSuggestedModelConsumed();
     }
@@ -9401,7 +9641,7 @@ function Composer({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    submitCurrentValue();
+    void submitCurrentValue();
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -9409,7 +9649,7 @@ function Composer({
       return;
     }
     event.preventDefault();
-    submitCurrentValue();
+    void submitCurrentValue();
   }
 
   function handleValueChange(event: ChangeEvent<HTMLTextAreaElement>) {
@@ -10027,11 +10267,12 @@ function Composer({
           {(value.trim() || composerImages.length > 0) && (
             <button
               className="send-button"
-              disabled={disabled || (!value.trim() && composerImages.length === 0)}
+              disabled={disabled || submitBusy || (!value.trim() && composerImages.length === 0)}
               type="submit"
-              aria-label={t("chat.send")}
+              aria-label={activeWork ? t("chat.queueInstruction") : t("chat.send")}
+              title={activeWork ? t("chat.queueInstruction") : t("chat.send")}
             >
-              <ArrowUp size={18} />
+              {submitBusy ? <Loader2 size={18} className="composer-spin" /> : <ArrowUp size={18} />}
             </button>
           )}
         </div>

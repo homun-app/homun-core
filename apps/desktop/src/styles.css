@@ -2673,7 +2673,9 @@ body.resizing-drawer {
   grid-area: thread;
 }
 .active-task-layout.panel-open > .composer-surface,
-.active-task-layout.inspector-open > .composer-surface {
+.active-task-layout.inspector-open > .composer-surface,
+.active-task-layout.panel-open > .composer-stack,
+.active-task-layout.inspector-open > .composer-stack {
   grid-area: composer;
 }
 .active-task-layout.panel-open > .workbench,
@@ -2690,7 +2692,8 @@ body.resizing-drawer {
 }
 .active-task-layout.inspector-focused > .task-topbar,
 .active-task-layout.inspector-focused > .thread-scroll,
-.active-task-layout.inspector-focused > .composer-surface {
+.active-task-layout.inspector-focused > .composer-surface,
+.active-task-layout.inspector-focused > .composer-stack {
   display: none;
 }
 
@@ -5665,6 +5668,254 @@ body.resizing-drawer {
   gap: 8px;
 }
 
+.composer-stack {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.active-turn-tail {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.active-turn-status {
+  width: min(100%, 760px);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.active-turn-status.assistant-footer {
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.active-turn-status.composer-bar {
+  margin: 0 auto;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.active-turn-pulse {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--brand);
+  animation: active-turn-pulse 1.8s ease-in-out infinite;
+}
+
+.active-turn-copy {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  overflow: hidden;
+}
+
+.active-turn-copy strong {
+  flex: none;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.active-turn-copy > span,
+.active-turn-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-turn-copy small {
+  color: var(--faint);
+}
+
+.active-turn-meta {
+  display: inline-flex;
+  flex: none;
+  gap: 7px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.active-turn-activity,
+.active-turn-stop,
+.pending-steering-card footer button,
+.pending-steering-edit button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.active-turn-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+
+.active-turn-activity small {
+  color: var(--faint);
+}
+
+.active-turn-activity:hover,
+.active-turn-stop:hover,
+.pending-steering-card footer button:hover,
+.pending-steering-edit button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.active-turn-stop {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 7px;
+}
+
+.pending-steering-queue {
+  width: min(100%, 760px);
+  max-height: min(220px, 30vh);
+  overflow-y: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+.pending-steering-card {
+  position: relative;
+  padding: 9px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.pending-steering-card > header,
+.pending-steering-card > footer,
+.pending-steering-edit > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pending-steering-card > header {
+  justify-content: space-between;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.pending-steering-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pending-steering-card > p {
+  margin: 5px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pending-steering-card.claimed > p {
+  color: var(--muted);
+}
+
+.pending-steering-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pending-steering-attachments li {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.pending-steering-card > footer {
+  justify-content: flex-end;
+  margin-top: 5px;
+}
+
+.pending-steering-card footer button,
+.pending-steering-edit button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 7px;
+  border-radius: 6px;
+}
+
+.pending-steering-card footer button.send-now,
+.pending-steering-edit button.primary {
+  color: var(--brand-strong);
+}
+
+.pending-steering-card button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pending-steering-edit {
+  margin-top: 7px;
+}
+
+.pending-steering-edit textarea {
+  width: 100%;
+  min-height: 66px;
+  resize: vertical;
+  padding: 8px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.pending-steering-edit textarea:focus {
+  border-color: var(--brand);
+}
+
+.pending-steering-edit > div {
+  justify-content: flex-end;
+  margin-top: 5px;
+}
+
+.pending-steering-busy {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  color: var(--faint);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes active-turn-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 .composer-surface {
   position: relative;
   width: min(100%, 760px);
@@ -6337,7 +6588,8 @@ body.resizing-drawer {
   }
   .active-task-layout.inspector-open > .task-topbar,
   .active-task-layout.inspector-open > .thread-scroll,
-  .active-task-layout.inspector-open > .composer-surface {
+  .active-task-layout.inspector-open > .composer-surface,
+  .active-task-layout.inspector-open > .composer-stack {
     display: none;
   }
   .active-task-layout.inspector-open .inspector-resize-handle {

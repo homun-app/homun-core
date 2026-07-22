@@ -23,6 +23,12 @@ function assertContains(file, text, description) {
   }
 }
 
+function assertSource(file, snippets) {
+  for (const snippet of snippets) {
+    assertContains(file, snippet, `${file} UI contract`);
+  }
+}
+
 function assertNotContains(file, text, description) {
   const source = read(file);
   if (source.includes(text)) {
@@ -143,6 +149,9 @@ assertNotContains("src/components/ChatView.tsx", "chat-hero-chip", "New chat mus
 assertContains("src/components/ChatView.tsx", "<ChatUsageOverview", "Empty hero must mount compact usage");
 assertContains("src/components/ChatView.tsx", "onUseForTask", "Confirmed task suggestions must reach the composer model override");
 assertContains("src/components/ChatView.tsx", "enqueueTurn(thread.threadId, requestId, promptWithReplyContext", "Active task instructions must be queued as steering");
+assertSource("src/components/ActiveTurnStatus.tsx", ["Attività", "onStop", "attempt"]);
+assertSource("src/components/PendingSteeringQueue.tsx", ["onEdit", "onDelete", "onSendNow"]);
+assertSource("src/components/ChatView.tsx", ["active-turn-tail", "pendingSteering"]);
 assertContains("src/components/ChatView.tsx", "{streaming && (", "Stop must remain available while the composer stays operational");
 assertContains("src/components/ChatView.tsx", "{(value.trim() || composerImages.length > 0) && (", "Send must remain available independently from Stop");
 assertContains("src/lib/chatApi.ts", "res.status === 201 || res.status === 202", "Turn enqueue must accept steering responses");
