@@ -3,7 +3,7 @@ use local_first_desktop_gateway::{
     MemoryReuseEnvelope, MessageDeliveryState, compact_thread_title, seeded_ready_message,
     strip_display_markers,
 };
-use local_first_engine::markers::actionable_marker_blocks;
+use local_first_engine::markers::validated_actionable_marker_blocks;
 // The generic marker parsers live in the single `markers` module now; aliased so the local
 // call sites read unchanged.
 use local_first_desktop_gateway::markers::{
@@ -1367,7 +1367,7 @@ impl ChatStore {
         // their exact persisted envelope. Keep those safe card payloads for the
         // desktop renderer and endpoint provenance; `WaitingUser` keeps the
         // entire provisional assistant message out of future model context.
-        for card in actionable_marker_blocks(text) {
+        for card in validated_actionable_marker_blocks(text) {
             if !clean_text.is_empty() {
                 clean_text.push('\n');
             }
@@ -4150,6 +4150,34 @@ mod tests {
 
         assert!(saved.text.contains("‹‹MCP_CONFIRM››"));
         assert_eq!(saved.delivery_state, MessageDeliveryState::WaitingUser);
+    }
+
+    #[test]
+    fn finalization_strips_malformed_actionable_marker_from_delivered_message() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "assistant-malformed-card".to_string(),
+        );
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let saved = store
+            .finalize_assistant_message_with_delivery_state(
+                &thread.thread_id,
+                &assistant.id,
+                "Visible answer. ‹‹MCP_CONFIRM››{not json}‹‹/MCP_CONFIRM››",
+                &[],
+                &MemoryReuseEnvelope::normal(),
+                MessageDeliveryState::Delivered,
+            )
+            .unwrap();
+
+        assert_eq!(saved.delivery_state, MessageDeliveryState::Delivered);
+        assert_eq!(saved.text, "Visible answer.");
+        assert!(!saved.text.contains("MCP_CONFIRM"));
     }
 
     #[test]

@@ -123,6 +123,13 @@ pub struct ActionableMarkerBlock {
     pub raw: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidatedActionableMarkerBlock {
+    pub marker: &'static str,
+    pub raw: String,
+    pub payload: serde_json::Value,
+}
+
 /// Extract complete actionable card envelopes in their original order. The raw
 /// envelopes are intentionally retained: the desktop renderer and approval
 /// endpoints use their payload after a reload, while the chat lifecycle keeps
@@ -155,6 +162,26 @@ pub fn actionable_marker_blocks(text: &str) -> Vec<ActionableMarkerBlock> {
         cursor = end;
     }
     blocks
+}
+
+/// Complete actionable card envelopes whose bodies are valid JSON. This is the
+/// canonical admission gate for executable card data: invalid envelopes must
+/// never be persisted back into a delivered transcript or offered to a UI.
+pub fn validated_actionable_marker_blocks(text: &str) -> Vec<ValidatedActionableMarkerBlock> {
+    actionable_marker_blocks(text)
+        .into_iter()
+        .filter_map(|block| {
+            let open_tag = open(block.marker);
+            let close_tag = close(block.marker);
+            let body = block.raw.strip_prefix(&open_tag)?.strip_suffix(&close_tag)?;
+            let payload = serde_json::from_str(body).ok()?;
+            Some(ValidatedActionableMarkerBlock {
+                marker: block.marker,
+                raw: block.raw,
+                payload,
+            })
+        })
+        .collect()
 }
 
 /// Strip every display-only marker block, leaving only the answer prose. The canonical stripper
@@ -429,6 +456,19 @@ mod tests {
             visible_answer("‹‹REASONING››hidden‹‹/REASONING››\n‹‹PLAN››- [x] done‹‹/PLAN››"),
             None,
         );
+    }
+
+    #[test]
+    fn validated_actionable_blocks_admit_only_json_payloads() {
+        let text = concat!(
+            "‹‹MCP_CONFIRM››{\"approval_id\":\"ok\"}‹‹/MCP_CONFIRM››",
+            "‹‹FS_AUTHORIZE››not json‹‹/FS_AUTHORIZE››"
+        );
+
+        let blocks = validated_actionable_marker_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].marker, "MCP_CONFIRM");
+        assert_eq!(blocks[0].payload["approval_id"], "ok");
     }
 
     #[test]

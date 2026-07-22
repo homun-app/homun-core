@@ -3097,22 +3097,13 @@ struct ActionableCard {
 }
 
 fn actionable_cards_from_raw_text(text: &str) -> Vec<ActionableCard> {
-    local_first_desktop_gateway::markers::actionable_marker_blocks(text)
+    local_first_desktop_gateway::markers::validated_actionable_marker_blocks(text)
         .into_iter()
-        .filter_map(|block| {
-            let open = local_first_desktop_gateway::markers::open(block.marker);
-            let close = local_first_desktop_gateway::markers::close(block.marker);
-            let body = block
-                .raw
-                .strip_prefix(&open)?
-                .strip_suffix(&close)?;
-            let payload = serde_json::from_str(body).ok()?;
-            Some(ActionableCard {
-                kind: block.marker,
-                raw: block.raw,
-                payload,
-                requires_user: true,
-            })
+        .map(|block| ActionableCard {
+            kind: block.marker,
+            raw: block.raw,
+            payload: block.payload,
+            requires_user: true,
         })
         .collect()
 }
@@ -32056,11 +32047,8 @@ async fn telegram_callback(
         }
         execute_pending_approval(&state, code).await
     } else {
-        match lock_store(&state)
-            .ok()
-            .and_then(|store| store.cancel_remote_approval_by_code(code).ok())
-        {
-            Some(true) => format!("❌ Cancelled ({code})."),
+        match cancel_pending_remote_approval(&state, code) {
+            true => format!("❌ Cancelled ({code})."),
             _ => format!("Code {code} not valid or expired."),
         }
     };
@@ -32128,11 +32116,8 @@ async fn handle_channel_inbound(
                         }
                         execute_pending_approval(state, &code).await
                     } else {
-                        match lock_store(state)
-                            .ok()
-                            .and_then(|store| store.cancel_remote_approval_by_code(&code).ok())
-                        {
-                            Some(true) => format!("❌ Cancelled ({code})."),
+                        match cancel_pending_remote_approval(state, &code) {
+                            true => format!("❌ Cancelled ({code})."),
                             _ => format!("Code {code} not valid or expired."),
                         }
                     };
@@ -35874,6 +35859,11 @@ fn insert_broker_turn_messages(
     );
     user.attachments = broker_turn_message_attachments(input);
     let mut assistant = channel_chat_message_with_id("assistant", "", &input.assistant_message_id);
+    assistant.linked_task_id = Some(
+        local_first_task_runtime::broker::chat_turn_task_id(&input.request_id)
+            .as_str()
+            .to_string(),
+    );
     assistant.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
     assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
     ChatStore::insert_linked_turn_messages(tx, &input.thread_id, &user, &assistant)
@@ -40983,6 +40973,206 @@ fn resume_thread_after_approval(
     });
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActionableSourceResolution {
+    Succeeded,
+    Cancelled,
+    Failed,
+}
+
+impl ActionableSourceResolution {
+    fn task_status(self) -> TaskStatus {
+        match self {
+            Self::Succeeded => TaskStatus::Completed,
+            Self::Cancelled => TaskStatus::Cancelled,
+            Self::Failed => TaskStatus::Failed,
+        }
+    }
+
+    fn delivery_state(self) -> local_first_desktop_gateway::MessageDeliveryState {
+        match self {
+            Self::Succeeded => local_first_desktop_gateway::MessageDeliveryState::Delivered,
+            Self::Cancelled => local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            Self::Failed => local_first_desktop_gateway::MessageDeliveryState::Failed,
+        }
+    }
+}
+
+fn actionable_source_error(message: impl Into<String>) -> GatewayError {
+    GatewayError {
+        status: StatusCode::CONFLICT,
+        code: "actionable_source_resolution",
+        message: message.into(),
+    }
+}
+
+fn actionable_source_terminal_text(text: &str, note: &str) -> String {
+    let visible = strip_display_markers(text).trim().to_string();
+    if visible.is_empty() {
+        note.to_string()
+    } else {
+        format!("{visible}\n\n{note}")
+    }
+}
+
+/// Resolves the exact durable chat turn which owns an actionable assistant card.
+///
+/// A source turn is terminalized and has its resources released before its
+/// message leaves `WaitingUser`; callers may enqueue a continuation only after
+/// this returns successfully. New broker turns carry `linked_task_id`; legacy
+/// cards may fall back only to the exact `(thread_id, assistant_message_id)`
+/// pair stored in their task input.
+fn resolve_actionable_source<F>(
+    state: &AppState,
+    thread_id: &str,
+    message_id: &str,
+    rewrite: F,
+    resolution: ActionableSourceResolution,
+) -> Result<(), GatewayError>
+where
+    F: FnOnce(&str) -> String,
+{
+    let (message, workspace_id) = {
+        let store = lock_store(state)?;
+        let message = store
+            .message(thread_id, message_id)
+            .map_err(GatewayError::store)?
+            .ok_or_else(|| actionable_source_error("actionable source message is missing"))?;
+        if message.role != "assistant" {
+            return Err(actionable_source_error(
+                "actionable source message is not an assistant reply",
+            ));
+        }
+        let workspace_id = store.workspace_for_thread(thread_id).map_err(GatewayError::store)?;
+        (message, workspace_id)
+    };
+    let user = gateway_user_id();
+    let workspace = WorkspaceId::new(workspace_id);
+    let task_id = {
+        let store = lock_task_store(state)?;
+        if let Some(task_id) = message.linked_task_id.as_deref() {
+            TaskId::new(task_id)
+        } else {
+            store
+                .list_tasks(&user, &workspace)
+                .map_err(GatewayError::task)?
+                .into_iter()
+                .find(|task| {
+                    task.kind == "chat_turn"
+                        && task
+                            .input_json
+                            .get("thread_id")
+                            .and_then(Value::as_str)
+                            == Some(thread_id)
+                        && task
+                            .input_json
+                            .get("assistant_message_id")
+                            .and_then(Value::as_str)
+                            == Some(message_id)
+                })
+                .map(|task| task.task_id)
+                .ok_or_else(|| {
+                    actionable_source_error("no exact legacy chat turn owns this actionable card")
+                })?
+        }
+    };
+
+    {
+        let store = lock_task_store(state)?;
+        let mut task = store
+            .get_task(&task_id, &user, &workspace)
+            .map_err(GatewayError::task)?
+            .ok_or_else(|| actionable_source_error("linked actionable source task is missing"))?;
+        let matches_source = task.kind == "chat_turn"
+            && task
+                .input_json
+                .get("thread_id")
+                .and_then(Value::as_str)
+                == Some(thread_id)
+            && task
+                .input_json
+                .get("assistant_message_id")
+                .and_then(Value::as_str)
+                == Some(message_id);
+        if !matches_source {
+            return Err(actionable_source_error(
+                "linked task does not own the actionable source message",
+            ));
+        }
+        task.status = resolution.task_status();
+        task.blocked_reason = match resolution {
+            ActionableSourceResolution::Succeeded => None,
+            ActionableSourceResolution::Cancelled => Some("actionable card cancelled".to_string()),
+            ActionableSourceResolution::Failed => Some("actionable card execution failed".to_string()),
+        };
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
+        task.updated_at = OffsetDateTime::now_utc();
+        store.release_resources(&task).map_err(GatewayError::task)?;
+        store.insert_task(&task).map_err(GatewayError::task)?;
+    }
+
+    let rewritten = rewrite(&message.text);
+    let remote_approval_id = remote_approval_intent_from_raw_text(&message.text)
+        .and_then(|intent| intent.approval_id);
+    let store = lock_store(state)?;
+    if resolution != ActionableSourceResolution::Cancelled
+        && let Some(approval_id) = remote_approval_id.as_deref()
+    {
+        let _ = store.supersede_remote_approval(approval_id);
+    }
+    store
+        .set_message_text(thread_id, message_id, &rewritten)
+        .map_err(GatewayError::store)?;
+    if !store
+        .set_message_delivery_state(thread_id, message_id, resolution.delivery_state())
+        .map_err(GatewayError::store)?
+    {
+        return Err(actionable_source_error(
+            "actionable source message could not transition delivery state",
+        ));
+    }
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+    }));
+    Ok(())
+}
+
+fn cancel_pending_remote_approval(state: &AppState, code: &str) -> bool {
+    let pending = match lock_store(state)
+        .ok()
+        .and_then(|store| store.pending_remote_approval(code).ok().flatten())
+    {
+        Some(pending) => pending,
+        None => return false,
+    };
+    if pending.requires_source {
+        let (Some(thread_id), Some(message_id)) =
+            (pending.thread_id.as_deref(), pending.source_message_id.as_deref())
+        else {
+            return false;
+        };
+        if resolve_actionable_source(
+            state,
+            thread_id,
+            message_id,
+            |text| actionable_source_terminal_text(text, "Action cancelled."),
+            ActionableSourceResolution::Cancelled,
+        )
+        .is_err()
+        {
+            return false;
+        }
+    }
+    lock_store(state)
+        .ok()
+        .and_then(|store| store.cancel_remote_approval_by_code(code).ok())
+        .unwrap_or(false)
+}
+
 async fn execute_pending_approval(state: &AppState, code: &str) -> String {
     let pending = match lock_store(state)
         .ok()
@@ -41059,27 +41249,36 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
             match result {
                 Ok(value) => match composio_execution_error(&value) {
                     None => {
-                        if let Ok(store) = lock_store(state) {
-                            if let (Some(thread_id), Some(message_id)) =
-                                (&claimed.thread_id, &claimed.source_message_id)
-                            {
-                                if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                                    let rewritten = if claimed.tool.starts_with("mcp__") {
-                                        rewrite_mcp_confirm_to_done(&message.text, &claimed.tool)
+                        let source_resolved = match (
+                            claimed.thread_id.as_deref(),
+                            claimed.source_message_id.as_deref(),
+                        ) {
+                            (Some(thread_id), Some(message_id)) => resolve_actionable_source(
+                                state,
+                                thread_id,
+                                message_id,
+                                |text| {
+                                    if claimed.tool.starts_with("mcp__") {
+                                        rewrite_mcp_confirm_to_done(text, &claimed.tool)
                                     } else {
-                                        rewrite_confirm_to_done(&message.text, &claimed.tool)
-                                    };
-                                    let _ =
-                                        store.set_message_text(thread_id, message_id, &rewritten);
-                                }
-                                publish_app_event(serde_json::json!({
-                                    "type": "thread.updated",
-                                    "thread_id": thread_id,
-                                    "workspace": base_workspace_id(),
-                                }));
-                            }
-                            let _ =
-                                store.complete_remote_approval(&claimed.approval_id, "executed");
+                                        rewrite_confirm_to_done(text, &claimed.tool)
+                                    }
+                                },
+                                ActionableSourceResolution::Succeeded,
+                            ),
+                            _ => Ok(()),
+                        };
+                        if let Ok(store) = lock_store(state) {
+                            let _ = store.complete_remote_approval(&claimed.approval_id, "executed");
+                        }
+                        if let Err(error) = source_resolved {
+                            append_remote_approval_thread_status(
+                                state,
+                                &claimed,
+                                "executed",
+                                Some("Tool completed, but its source turn could not be resolved."),
+                            );
+                            return format!("⚠️ Done ({code}), but the source turn needs recovery: {}", error.message);
                         }
                         append_remote_approval_thread_status(
                             state,
@@ -41100,6 +41299,17 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                         format!("✅ Done ({code}).")
                     }
                     Some(err) => {
+                        if let (Some(thread_id), Some(message_id)) =
+                            (claimed.thread_id.as_deref(), claimed.source_message_id.as_deref())
+                        {
+                            let _ = resolve_actionable_source(
+                                state,
+                                thread_id,
+                                message_id,
+                                |text| actionable_source_terminal_text(text, "Action failed."),
+                                ActionableSourceResolution::Failed,
+                            );
+                        }
                         if let Ok(store) = lock_store(state) {
                             let _ = store.complete_remote_approval(&claimed.approval_id, "failed");
                         }
@@ -41108,6 +41318,17 @@ async fn execute_pending_approval(state: &AppState, code: &str) -> String {
                     }
                 },
                 Err(e) => {
+                    if let (Some(thread_id), Some(message_id)) =
+                        (claimed.thread_id.as_deref(), claimed.source_message_id.as_deref())
+                    {
+                        let _ = resolve_actionable_source(
+                            state,
+                            thread_id,
+                            message_id,
+                            |text| actionable_source_terminal_text(text, "Action failed."),
+                            ActionableSourceResolution::Failed,
+                        );
+                    }
                     if let Ok(store) = lock_store(state) {
                         let _ = store.complete_remote_approval(&claimed.approval_id, "failed");
                     }
@@ -43056,13 +43277,6 @@ fn confirm_marker_value(text: &str, open_tag: &str, close_tag: &str) -> Option<s
     serde_json::from_str::<serde_json::Value>(&text[start..start + close_rel]).ok()
 }
 
-fn confirm_marker_approval_id(text: &str, open_tag: &str, close_tag: &str) -> Option<String> {
-    confirm_marker_value(text, open_tag, close_tag)?
-        .get("approval_id")?
-        .as_str()
-        .map(ToString::to_string)
-}
-
 fn confirm_marker_matches_approval(
     text: &str,
     open_tag: &str,
@@ -43089,22 +43303,6 @@ fn composio_confirm_matches(text: &str, tool: &str, arguments: &serde_json::Valu
     };
     marker.get("tool").and_then(serde_json::Value::as_str) == Some(tool)
         && marker.get("arguments") == Some(arguments)
-}
-
-fn composio_confirm_matches_approval(
-    text: &str,
-    approval_id: &str,
-    tool: &str,
-    arguments: &serde_json::Value,
-) -> bool {
-    confirm_marker_matches_approval(
-        text,
-        COMPOSIO_CONFIRM_OPEN,
-        COMPOSIO_CONFIRM_CLOSE,
-        approval_id,
-        tool,
-        arguments,
-    )
 }
 
 /// Rewrites a message that carries a pending-confirmation marker into a
@@ -43156,6 +43354,7 @@ async fn composio_execute(
     } else {
         request.arguments.clone()
     };
+    let args_for_resume = args.clone();
     let confirmed = match (&request.thread_id, &request.message_id) {
         (Some(thread_id), Some(message_id)) => lock_store(&state)
             .ok()
@@ -43187,31 +43386,43 @@ async fn composio_execute(
     // Composio replies HTTP 200 even when the tool itself failed. Never mark the
     // action "done" nor claim success in that case — report the failure instead.
     if let Some(error) = composio_execution_error(&output) {
+        if let (Some(thread_id), Some(message_id)) =
+            (request.thread_id.as_deref(), request.message_id.as_deref())
+        {
+            let _ = resolve_actionable_source(
+                &state,
+                thread_id,
+                message_id,
+                |text| actionable_source_terminal_text(text, "Action failed."),
+                ActionableSourceResolution::Failed,
+            );
+        }
         return Ok(Json(ComposioExecuteResponse {
             ok: false,
             summary: format!("Action FAILED: {error}"),
         }));
     }
 
-    // Persist the executed state into the transcript so reopening the chat shows
-    // a "done" note, not the editable card (prevents accidental re-execution).
-    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
-        if let Ok(store) = lock_store(&state) {
-            if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                if let Some(approval_id) = confirm_marker_approval_id(
-                    &message.text,
-                    COMPOSIO_CONFIRM_OPEN,
-                    COMPOSIO_CONFIRM_CLOSE,
-                ) {
-                    let _ = store.supersede_remote_approval(&approval_id);
-                }
-                let rewritten = rewrite_confirm_to_done(&message.text, &request.tool);
-                let _ = store.set_message_text(thread_id, message_id, &rewritten);
-            }
-        }
-    }
-
     let summary = output.to_string().chars().take(2000).collect::<String>();
+    if let (Some(thread_id), Some(message_id)) =
+        (request.thread_id.as_deref(), request.message_id.as_deref())
+    {
+        resolve_actionable_source(
+            &state,
+            thread_id,
+            message_id,
+            |text| rewrite_confirm_to_done(text, &request.tool),
+            ActionableSourceResolution::Succeeded,
+        )?;
+        resume_thread_after_approval(
+            &state,
+            request.thread_id.clone(),
+            &request.tool,
+            &summary,
+            Some(args_for_resume),
+            request.message_id.clone(),
+        );
+    }
     Ok(Json(ComposioExecuteResponse { ok: true, summary }))
 }
 
@@ -43480,35 +43691,48 @@ async fn fs_authorize(
     })?;
     match result {
         Ok(output) => {
-            // Persist: rewrite the card marker to a "granted" note (no reopen on reload).
-            if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
-                if let Ok(store) = lock_store(&state) {
-                    if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                        let rewritten = rewrite_fs_authorize_to_done(
-                            &message.text,
-                            &path.display().to_string(),
-                        );
-                        let _ = store.set_message_text(thread_id, message_id, &rewritten);
-                    }
-                }
+            if let (Some(thread_id), Some(message_id)) =
+                (request.thread_id.as_deref(), request.message_id.as_deref())
+            {
+                let path_for_card = path.display().to_string();
+                resolve_actionable_source(
+                    &state,
+                    thread_id,
+                    message_id,
+                    |text| rewrite_fs_authorize_to_done(text, &path_for_card),
+                    ActionableSourceResolution::Succeeded,
+                )?;
+                resume_thread_after_approval(
+                    &state,
+                    request.thread_id.clone(),
+                    "filesystem_authorize",
+                    &output,
+                    Some(serde_json::json!({
+                        "path": path.display().to_string(),
+                        "op": request.op,
+                    })),
+                    request.message_id.clone(),
+                );
             }
-            resume_thread_after_approval(
-                &state,
-                request.thread_id.clone(),
-                "filesystem_authorize",
-                &output,
-                Some(serde_json::json!({
-                    "path": path.display().to_string(),
-                    "op": request.op,
-                })),
-                request.message_id.clone(),
-            );
             Ok(Json(serde_json::json!({
                 "ok": true,
                 "output": output.chars().take(6000).collect::<String>()
             })))
         }
-        Err(message) => Ok(Json(serde_json::json!({ "ok": false, "summary": message }))),
+        Err(message) => {
+            if let (Some(thread_id), Some(message_id)) =
+                (request.thread_id.as_deref(), request.message_id.as_deref())
+            {
+                let _ = resolve_actionable_source(
+                    &state,
+                    thread_id,
+                    message_id,
+                    |text| actionable_source_terminal_text(text, "Authorization failed."),
+                    ActionableSourceResolution::Failed,
+                );
+            }
+            Ok(Json(serde_json::json!({ "ok": false, "summary": message })))
+        }
     }
 }
 
@@ -43609,14 +43833,27 @@ async fn run_escalate(
     };
     // Execute UNSANDBOXED via the shared raw-exec helper.
     let output = run_bash_unsandboxed(&root, &request.command).await;
-    // Persist: rewrite the card marker to a "ran unsandboxed" note (no reopen on reload).
-    if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
-        if let Ok(store) = lock_store(&state) {
-            if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                let rewritten = rewrite_sandbox_escalate_to_done(&message.text, &request.command);
-                let _ = store.set_message_text(thread_id, message_id, &rewritten);
-            }
-        }
+    if let (Some(thread_id), Some(message_id)) =
+        (request.thread_id.as_deref(), request.message_id.as_deref())
+    {
+        resolve_actionable_source(
+            &state,
+            thread_id,
+            message_id,
+            |text| rewrite_sandbox_escalate_to_done(text, &request.command),
+            ActionableSourceResolution::Succeeded,
+        )?;
+        resume_thread_after_approval(
+            &state,
+            request.thread_id.clone(),
+            "run_in_project",
+            &output,
+            Some(serde_json::json!({
+                "command": request.command,
+                "cwd": root.display().to_string(),
+            })),
+            request.message_id.clone(),
+        );
     }
     Ok(Json(serde_json::json!({ "ok": true, "output": output })))
 }
@@ -43687,12 +43924,25 @@ async fn connect_mark(
     Json(request): Json<ConnectMarkRequest>,
 ) -> Json<serde_json::Value> {
     if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
-        if let Ok(store) = lock_store(&state) {
-            if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                let rewritten =
-                    rewrite_connect_suggest_mark(&message.text, &request.kind, &request.item_ref);
-                let _ = store.set_message_text(thread_id, message_id, &rewritten);
-            }
+        let rewritten = lock_store(&state)
+            .ok()
+            .and_then(|store| store.message(thread_id, message_id).ok().flatten())
+            .map(|message| {
+                rewrite_connect_suggest_mark(&message.text, &request.kind, &request.item_ref)
+            });
+        let Some(rewritten) = rewritten else {
+            return Json(serde_json::json!({ "ok": false }));
+        };
+        if resolve_actionable_source(
+            &state,
+            thread_id,
+            message_id,
+            |_| rewritten,
+            ActionableSourceResolution::Cancelled,
+        )
+        .is_err()
+        {
+            return Json(serde_json::json!({ "ok": false }));
         }
     }
     Json(serde_json::json!({ "ok": true }))
@@ -43837,6 +44087,17 @@ async fn mcp_execute(
             });
         }
         Err(_elapsed) => {
+            if let (Some(thread_id), Some(message_id)) =
+                (request.thread_id.as_deref(), request.message_id.as_deref())
+            {
+                let _ = resolve_actionable_source(
+                    &state,
+                    thread_id,
+                    message_id,
+                    |text| actionable_source_terminal_text(text, "Action timed out."),
+                    ActionableSourceResolution::Failed,
+                );
+            }
             return Ok(Json(McpExecuteResponse {
                 ok: false,
                 summary: format!(
@@ -43848,38 +44109,47 @@ async fn mcp_execute(
     };
     match outcome {
         Ok(output) => {
-            if let (Some(thread_id), Some(message_id)) = (&request.thread_id, &request.message_id) {
-                if let Ok(store) = lock_store(&state) {
-                    if let Ok(Some(message)) = store.message(thread_id, message_id) {
-                        if let Some(approval_id) = confirm_marker_approval_id(
-                            &message.text,
-                            MCP_CONFIRM_OPEN,
-                            MCP_CONFIRM_CLOSE,
-                        ) {
-                            let _ = store.supersede_remote_approval(&approval_id);
-                        }
-                        let rewritten = rewrite_mcp_confirm_to_done(&message.text, &request.tool);
-                        let _ = store.set_message_text(thread_id, message_id, &rewritten);
-                    }
-                }
-            }
             let summary = output.to_string().chars().take(2000).collect::<String>();
-            // 6.1b approval-resume (in-app): the chat turn died at `pending_confirm`; now that the
-            // action ran, continue the multi-step task on the origin thread (thread_id is known here).
-            resume_thread_after_approval(
-                &state,
-                request.thread_id.clone(),
-                &request.tool,
-                &summary,
-                Some(args_for_resume),
-                request.message_id.clone(),
-            );
+            if let (Some(thread_id), Some(message_id)) =
+                (request.thread_id.as_deref(), request.message_id.as_deref())
+            {
+                resolve_actionable_source(
+                    &state,
+                    thread_id,
+                    message_id,
+                    |text| rewrite_mcp_confirm_to_done(text, &request.tool),
+                    ActionableSourceResolution::Succeeded,
+                )?;
+                // The source is terminal before this enqueue, so it cannot make
+                // the continuation fail with ThreadBusy.
+                resume_thread_after_approval(
+                    &state,
+                    request.thread_id.clone(),
+                    &request.tool,
+                    &summary,
+                    Some(args_for_resume),
+                    request.message_id.clone(),
+                );
+            }
             Ok(Json(McpExecuteResponse { ok: true, summary }))
         }
-        Err(error) => Ok(Json(McpExecuteResponse {
-            ok: false,
-            summary: format!("Action FAILED: {error}"),
-        })),
+        Err(error) => {
+            if let (Some(thread_id), Some(message_id)) =
+                (request.thread_id.as_deref(), request.message_id.as_deref())
+            {
+                let _ = resolve_actionable_source(
+                    &state,
+                    thread_id,
+                    message_id,
+                    |text| actionable_source_terminal_text(text, "Action failed."),
+                    ActionableSourceResolution::Failed,
+                );
+            }
+            Ok(Json(McpExecuteResponse {
+                ok: false,
+                summary: format!("Action FAILED: {error}"),
+            }))
+        }
     }
 }
 
@@ -60936,6 +61206,51 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn malformed_actionable_marker_is_not_persisted_into_delivered_model_context() {
+        let state = super::AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .find_or_create_channel_thread("project-a", "test", "malformed", "Malformed card")
+            .unwrap();
+        let assistant = super::channel_chat_message_with_id(
+            "assistant",
+            "",
+            "malformed_actionable_marker",
+        );
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let raw = "Visible answer. ‹‹MCP_CONFIRM››{not valid json}‹‹/MCP_CONFIRM››";
+        super::finalize_streamed_assistant_message(
+            &state,
+            &thread.thread_id,
+            &assistant.id,
+            raw,
+            &super::StreamMemoryReuseCollector::default(),
+            local_first_desktop_gateway::MessageDeliveryState::Delivered,
+        )
+        .unwrap();
+
+        let saved = super::lock_store(&state)
+            .unwrap()
+            .message(&thread.thread_id, &assistant.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            saved.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Delivered
+        );
+        assert!(!saved.text.contains("MCP_CONFIRM"));
+        let context = super::thread_context_for_model(&state, &thread.thread_id, &[], None)
+            .expect("thread context");
+        assert!(!context
+            .iter()
+            .any(|message| message.text.contains("MCP_CONFIRM")));
+    }
+
+    #[test]
     fn scheduled_turn_with_an_action_card_is_nonterminal() {
         let cards = super::actionable_cards_from_raw_text(
             "‹‹COMPOSIO_CONFIRM››{\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{}}‹‹/COMPOSIO_CONFIRM››",
@@ -74664,6 +74979,17 @@ data: [DONE]\n";
             chat.message(&thread.thread_id, "local_assistant_r1")
                 .unwrap()
                 .unwrap()
+                .linked_task_id
+                .as_deref(),
+            Some(
+                local_first_task_runtime::broker::chat_turn_task_id(&input.request_id)
+                    .as_str()
+            )
+        );
+        assert_eq!(
+            chat.message(&thread.thread_id, "local_assistant_r1")
+                .unwrap()
+                .unwrap()
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Streaming
         );
@@ -74717,6 +75043,187 @@ data: [DONE]\n";
                 .expect("stable assistant")
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Cancelled
+        );
+    }
+
+    #[test]
+    fn resolving_an_actionable_source_unblocks_only_its_exact_waiting_turn() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .find_or_create_channel_thread("workspace_test", "test", "approval", "Approval")
+            .unwrap();
+        let other_thread = super::lock_store(&state)
+            .unwrap()
+            .find_or_create_channel_thread("workspace_test", "test", "other", "Other")
+            .unwrap();
+        let source_task_id = "turn_actionable_source";
+        let other_task_id = "turn_unrelated_waiting";
+        let mut source = super::channel_chat_message_with_id(
+            "assistant",
+            "Approve. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{}}‹‹/MCP_CONFIRM››",
+            "source_actionable_card",
+        );
+        source.linked_task_id = Some(source_task_id.to_string());
+        source.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        let mut unrelated = super::channel_chat_message_with_id(
+            "assistant",
+            "Approve. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{}}‹‹/MCP_CONFIRM››",
+            "unrelated_actionable_card",
+        );
+        unrelated.linked_task_id = Some(other_task_id.to_string());
+        unrelated.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        {
+            let store = super::lock_store(&state).unwrap();
+            store.append_assistant_message(&thread.thread_id, &source).unwrap();
+            store
+                .append_assistant_message(&other_thread.thread_id, &unrelated)
+                .unwrap();
+        }
+        let user = super::gateway_user_id();
+        let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        for (task_id, thread_id, message_id) in [
+            (source_task_id, thread.thread_id.as_str(), source.id.as_str()),
+            (
+                other_task_id,
+                other_thread.thread_id.as_str(),
+                unrelated.id.as_str(),
+            ),
+        ] {
+            let mut task = TaskRecord::new(
+                task_id,
+                user.clone(),
+                workspace.clone(),
+                "chat_turn",
+                "approval source",
+                serde_json::json!({
+                    "thread_id": thread_id,
+                    "assistant_message_id": message_id,
+                }),
+            );
+            task.status = TaskStatus::WaitingUserApproval;
+            state
+                .task_store
+                .lock()
+                .unwrap()
+                .insert_chat_turn(&task, thread_id, task_id, "interactive", "full")
+                .unwrap();
+        }
+
+        super::resolve_actionable_source(
+            &state,
+            &thread.thread_id,
+            &source.id,
+            |_| "✓ MCP tool executed: mcp__filesystem__create".to_string(),
+            super::ActionableSourceResolution::Succeeded,
+        )
+        .unwrap();
+
+        let source_message = super::lock_store(&state)
+            .unwrap()
+            .message(&thread.thread_id, &source.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            source_message.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Delivered
+        );
+        assert!(!source_message.text.contains("MCP_CONFIRM"));
+        let task_store = state.task_store.lock().unwrap();
+        assert_eq!(
+            task_store
+                .get_task(&local_first_task_runtime::TaskId::new(source_task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Completed
+        );
+        assert_eq!(
+            task_store.active_chat_turn_for_thread(&thread.thread_id).unwrap(),
+            None,
+            "the continuation must not hit ThreadBusy"
+        );
+        assert_eq!(
+            task_store
+                .get_task(&local_first_task_runtime::TaskId::new(other_task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::WaitingUserApproval,
+            "a matching-looking card in another thread must stay untouched"
+        );
+    }
+
+    #[test]
+    fn cancelling_an_actionable_source_leaves_no_waiting_message_or_task() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .find_or_create_channel_thread("workspace_test", "test", "cancel", "Cancel")
+            .unwrap();
+        let task_id = "turn_cancelled_actionable_source";
+        let mut message = super::channel_chat_message_with_id(
+            "assistant",
+            "Approve. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{}}‹‹/MCP_CONFIRM››",
+            "cancel_actionable_card",
+        );
+        message.linked_task_id = Some(task_id.to_string());
+        message.delivery_state = local_first_desktop_gateway::MessageDeliveryState::WaitingUser;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &message)
+            .unwrap();
+        let user = super::gateway_user_id();
+        let workspace = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            task_id,
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "approval source",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": message.id,
+            }),
+        );
+        task.status = TaskStatus::WaitingUserApproval;
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .insert_chat_turn(&task, &thread.thread_id, task_id, "interactive", "full")
+            .unwrap();
+
+        super::resolve_actionable_source(
+            &state,
+            &thread.thread_id,
+            &message.id,
+            |text| super::actionable_source_terminal_text(text, "Action cancelled."),
+            super::ActionableSourceResolution::Cancelled,
+        )
+        .unwrap();
+
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .message(&thread.thread_id, &message.id)
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled
+        );
+        let task_store = state.task_store.lock().unwrap();
+        assert_eq!(
+            task_store
+                .get_task(&local_first_task_runtime::TaskId::new(task_id), &user, &workspace)
+                .unwrap()
+                .unwrap()
+                .status,
+            TaskStatus::Cancelled
+        );
+        assert_eq!(
+            task_store.active_chat_turn_for_thread(&thread.thread_id).unwrap(),
+            None
         );
     }
 
