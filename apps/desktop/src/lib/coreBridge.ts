@@ -1,6 +1,8 @@
 import { chatApi } from "./chatApi";
 import { cancelTurn, enqueueTurn, openTurnStream } from "./chatApi";
 import type { RoutingBindingInput } from "./chatApi";
+import type { SetupComputerStatus } from "./onboardingComputer";
+export type { SetupComputerStatus, SetupComputerPhase } from "./onboardingComputer";
 import { wsSubscription } from "./wsSubscription";
 export type { CoreBranchPoint, CoreBranchOption, RoutingBindingInput } from "./chatApi";
 import {
@@ -1123,6 +1125,14 @@ export interface LlmValidationResult {
 
 async function electronSetupStatus(): Promise<SetupStatus> {
   return gatewayGetJson<SetupStatus>("/api/setup/status");
+}
+
+async function electronPrepareSetupComputer(): Promise<SetupComputerStatus> {
+  return gatewayPostJson<SetupComputerStatus>("/api/setup/computer/prepare", {});
+}
+
+async function electronSetupComputerStatus(): Promise<SetupComputerStatus> {
+  return gatewayGetJson<SetupComputerStatus>("/api/setup/computer/status");
 }
 
 async function electronValidateLlm(
@@ -3316,6 +3326,8 @@ export const coreBridge = {
   language: () => electronLanguage(),
   setLanguage: (language: string | null) => electronSetLanguage(language),
   setupStatus: () => electronSetupStatus(),
+  prepareSetupComputer: () => electronPrepareSetupComputer(),
+  setupComputerStatus: () => electronSetupComputerStatus(),
   validateLlm: (kind: string, baseUrl: string, apiKey: string | null) =>
     electronValidateLlm(kind, baseUrl, apiKey),
   completeSetup: () => electronCompleteSetup(),
