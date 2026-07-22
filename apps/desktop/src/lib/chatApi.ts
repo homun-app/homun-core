@@ -757,6 +757,118 @@ export interface SteeringQueuedResponse {
 
 export type EnqueueTurnResponse = QueuedTurnResponse | SteeringQueuedResponse;
 
+export type TurnSteeringStatus =
+  | "pending"
+  | "claimed"
+  | "applied"
+  | "held"
+  | "cancelled"
+  | "promoted";
+
+export interface TurnSteeringRecord {
+  steering_id: number;
+  user_id: string;
+  workspace_id: string;
+  thread_id: string;
+  active_turn_id: string;
+  source_message_id: string;
+  prompt: string;
+  visible_prompt: string;
+  images: string[];
+  attachments: unknown;
+  mode: string | null;
+  model: string | null;
+  objective_revision: number;
+  status: TurnSteeringStatus;
+  revision: number;
+  created_at: number;
+  updated_at: number;
+  claimed_run_id: string | null;
+  claimed_round: number | null;
+  claimed_at: number | null;
+  applied_at: number | null;
+  cancelled_at: number | null;
+}
+
+export interface SteeringMutation {
+  expected_revision: number;
+  prompt: string;
+  visible_prompt: string;
+  images: string[];
+  attachments: unknown;
+  mode: string | null;
+  model: string | null;
+}
+
+export class SteeringConflictError extends Error {
+  constructor(public readonly steering: TurnSteeringRecord) {
+    super(`steering instruction ${steering.steering_id} changed at revision ${steering.revision}`);
+    this.name = "SteeringConflictError";
+  }
+}
+
+async function steeringJson<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${DESKTOP_GATEWAY_URL}${path}`, {
+    ...init,
+    headers: gatewayHeaders(init.headers),
+  });
+  if (response.status === 409) {
+    const conflict = (await response.json()) as {
+      code?: string;
+      steering?: TurnSteeringRecord;
+    };
+    if (conflict.code === "steering_revision_conflict" && conflict.steering) {
+      throw new SteeringConflictError(conflict.steering);
+    }
+  }
+  if (!response.ok) {
+    throw new Error(await gatewayErrorMessage(response));
+  }
+  return response.json() as Promise<T>;
+}
+
+export function fetchThreadSteering(threadId: string): Promise<TurnSteeringRecord[]> {
+  return steeringJson<TurnSteeringRecord[]>(
+    `/api/chat/threads/${encodeURIComponent(threadId)}/steering`,
+  );
+}
+
+export function updateSteering(
+  steeringId: number,
+  mutation: SteeringMutation,
+): Promise<TurnSteeringRecord> {
+  return steeringJson<TurnSteeringRecord>(
+    `/api/chat/steering/${encodeURIComponent(steeringId)}`,
+    { method: "PATCH", body: JSON.stringify(mutation) },
+  );
+}
+
+export function deleteSteering(
+  steeringId: number,
+  expectedRevision: number,
+): Promise<TurnSteeringRecord> {
+  return steeringJson<TurnSteeringRecord>(
+    `/api/chat/steering/${encodeURIComponent(steeringId)}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    },
+  );
+}
+
+export function sendSteeringNow(
+  steeringId: number,
+  expectedRevision: number,
+): Promise<QueuedTurnResponse> {
+  return steeringJson<QueuedTurnResponse>(
+    `/api/chat/steering/${encodeURIComponent(steeringId)}/send-now`,
+    {
+      method: "POST",
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    },
+  );
+}
+
 export interface AgentRunView {
   run_id: string;
   turn_id: string;
