@@ -1,4 +1,4 @@
-import { Check, Loader2, Pencil, Send, Trash2 } from "lucide-react";
+import { Check, CornerDownRight, Loader2, Pencil, Send, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TurnSteeringRecord } from "../lib/chatApi";
@@ -46,7 +46,7 @@ export function PendingSteeringQueue({
   const statusLabel = (row: TurnSteeringRecord) => {
     if (row.status === "claimed") return t("chat.steeringApplied");
     if (row.status === "held") return t("chat.steeringHeld");
-    return t("chat.steeringPending");
+    return t("chat.steeringRequest");
   };
 
   const run = async (row: TurnSteeringRecord, action: () => Promise<void>) => {
@@ -54,7 +54,7 @@ export function PendingSteeringQueue({
     try {
       await action();
     } catch {
-      // ChatView owns the localized, durable error state; keep the card/edit draft intact.
+      // ChatView owns the localized, durable error state; keep the strip/edit draft intact.
     } finally {
       setBusyId(null);
     }
@@ -62,19 +62,16 @@ export function PendingSteeringQueue({
 
   return (
     <div className="pending-steering-queue" aria-label={t("chat.queueInstruction")}>
-      {rows.map((row) => {
+      {rows.map((row, index) => {
         const editing = editingId === row.steering_id;
         const names = attachmentNames(row.attachments);
         const busy = busyId === row.steering_id;
         return (
-          <article className={`pending-steering-card ${row.status}`} key={row.steering_id}>
-            <header>
-              <span className="pending-steering-status">
-                {row.status === "claimed" ? <Check size={13} /> : null}
-                {statusLabel(row)}
-              </span>
-              <span className="pending-steering-position">#{rows.indexOf(row) + 1}</span>
-            </header>
+          <article
+            className={`pending-steering-strip ${row.status}${editing ? " editing" : ""}`}
+            key={row.steering_id}
+          >
+            <CornerDownRight className="pending-steering-route" size={14} aria-hidden="true" />
 
             {editing ? (
               <div className="pending-steering-edit">
@@ -109,7 +106,17 @@ export function PendingSteeringQueue({
                 </div>
               </div>
             ) : (
-              <p>{row.visible_prompt}</p>
+              <p className="pending-steering-prompt" title={row.visible_prompt}>
+                {row.visible_prompt}
+              </p>
+            )}
+
+            {!editing && (
+              <span className="pending-steering-status">
+                {row.status === "claimed" ? <Check size={13} /> : null}
+                {statusLabel(row)}
+                <small>#{index + 1}</small>
+              </span>
             )}
 
             {names.length > 0 && (
@@ -118,8 +125,8 @@ export function PendingSteeringQueue({
               </ul>
             )}
 
-            {!editing && (canEdit(row) || canDelete(row) || canSendNow(row)) && (
-              <footer>
+            {!editing && !busy && (canEdit(row) || canDelete(row) || canSendNow(row)) && (
+              <div className="pending-steering-actions">
                 {canEdit(row) && (
                   <button
                     type="button"
@@ -132,7 +139,6 @@ export function PendingSteeringQueue({
                     }}
                   >
                     <Pencil size={13} />
-                    <span>{t("chat.editInstruction")}</span>
                   </button>
                 )}
                 {canDelete(row) && (
@@ -144,7 +150,6 @@ export function PendingSteeringQueue({
                     onClick={() => void run(row, () => onDelete(row, row.revision))}
                   >
                     <Trash2 size={13} />
-                    <span>{t("chat.deleteInstruction")}</span>
                   </button>
                 )}
                 {canSendNow(row) && (
@@ -152,13 +157,14 @@ export function PendingSteeringQueue({
                     type="button"
                     className="send-now"
                     disabled={busy}
+                    title={t("chat.sendNow")}
+                    aria-label={t("chat.sendNow")}
                     onClick={() => void run(row, () => onSendNow(row, row.revision))}
                   >
                     <Send size={13} />
-                    <span>{t("chat.sendNow")}</span>
                   </button>
                 )}
-              </footer>
+              </div>
             )}
             {busy && <Loader2 className="pending-steering-busy" size={12} aria-hidden="true" />}
           </article>

@@ -2856,7 +2856,7 @@ export function ChatView({
               )}
               {isStreamingMessage ? (
                 <>
-                  {!streamHasVisibleText && (
+                  {!streamHasVisibleText && !chatTurnState && (
                     <AssistantThinkingState status={streamStatus} />
                   )}
                   {displayMessage.text && (
@@ -3114,22 +3114,12 @@ export function ChatView({
                 )}
               </footer>
             </article>
-            {displayMessage.id === activeAssistantMessageId && chatTurnState && (
-              <div className="active-turn-tail">
-                <ActiveTurnStatus
-                  {...chatTurnState}
-                  variant="assistant-footer"
-                  onOpenActivity={openActivityIsland}
-                  onStop={() => void stopActiveTurn()}
-                />
-              </div>
-            )}
             </div>
             );
           })}
           </div>
 
-          {promptSubmitting && !streamingAssistantId && (
+          {promptSubmitting && !streamingAssistantId && !chatTurnState && (
             <div className="thread-message-row">
               <article className="message assistant pending" aria-live="polite">
                 <header className="assistant-label">
@@ -3139,16 +3129,6 @@ export function ChatView({
                 </header>
                 <AssistantThinkingState status={streamStatus} />
               </article>
-              {chatTurnState && (
-                <div className="active-turn-tail">
-                  <ActiveTurnStatus
-                    {...chatTurnState}
-                    variant="assistant-footer"
-                    onOpenActivity={openActivityIsland}
-                    onStop={() => void stopActiveTurn()}
-                  />
-                </div>
-              )}
             </div>
           )}
 
@@ -3241,7 +3221,6 @@ export function ChatView({
         {chatTurnState && (
           <ActiveTurnStatus
             {...chatTurnState}
-            variant="composer-bar"
             onOpenActivity={openActivityIsland}
             onStop={() => void stopActiveTurn()}
           />

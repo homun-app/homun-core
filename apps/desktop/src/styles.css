@@ -5729,31 +5729,21 @@ body.resizing-drawer {
   align-items: center;
 }
 
-.active-turn-tail {
-  width: 100%;
-  margin-top: 10px;
-}
-
 .active-turn-status {
-  width: min(100%, 760px);
+  width: fit-content;
+  max-width: min(100%, 760px);
   min-width: 0;
+  margin: 0 auto 6px;
+  padding: 6px 8px 6px 10px;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
-}
-
-.active-turn-status.assistant-footer {
-  padding-top: 9px;
-  border-top: 1px solid var(--line);
-}
-
-.active-turn-status.composer-bar {
-  margin: 0 auto;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--line);
 }
 
 .active-turn-pulse {
@@ -5774,9 +5764,13 @@ body.resizing-drawer {
 }
 
 .active-turn-copy strong {
-  flex: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text);
   font-size: 12px;
+  font-weight: 500;
 }
 
 .active-turn-copy > span,
@@ -5800,7 +5794,7 @@ body.resizing-drawer {
 
 .active-turn-activity,
 .active-turn-stop,
-.pending-steering-card footer button,
+.pending-steering-actions button,
 .pending-steering-edit button {
   border: 0;
   background: transparent;
@@ -5824,7 +5818,7 @@ body.resizing-drawer {
 
 .active-turn-activity:hover,
 .active-turn-stop:hover,
-.pending-steering-card footer button:hover,
+.pending-steering-actions button:hover,
 .pending-steering-edit button:hover {
   color: var(--text);
   background: var(--surface-hover);
@@ -5841,55 +5835,66 @@ body.resizing-drawer {
 
 .pending-steering-queue {
   width: min(100%, 760px);
-  max-height: min(220px, 30vh);
+  max-height: min(176px, 24vh);
   overflow-y: auto;
-  border-bottom: 1px solid var(--line);
-}
-
-.pending-steering-card {
-  position: relative;
-  padding: 9px 12px;
-  border-top: 1px solid var(--line);
-}
-
-.pending-steering-card > header,
-.pending-steering-card > footer,
-.pending-steering-edit > div {
   display: flex;
-  align-items: center;
-  gap: 7px;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 auto 6px;
 }
 
-.pending-steering-card > header {
-  justify-content: space-between;
+.pending-steering-strip {
+  position: relative;
+  width: 100%;
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 7px 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.pending-steering-route {
   color: var(--faint);
-  font-size: 11px;
 }
 
 .pending-steering-status {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
-.pending-steering-card > p {
-  margin: 5px 0 0;
+.pending-steering-status small {
+  color: var(--faint);
+  font-size: inherit;
+}
+
+.pending-steering-prompt {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text);
   font-size: 13px;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
-.pending-steering-card.claimed > p {
+.pending-steering-strip.claimed .pending-steering-prompt {
   color: var(--muted);
 }
 
 .pending-steering-attachments {
+  grid-column: 2 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin: 6px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -5903,33 +5908,37 @@ body.resizing-drawer {
   font-size: 11px;
 }
 
-.pending-steering-card > footer {
-  justify-content: flex-end;
-  margin-top: 5px;
+.pending-steering-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
-.pending-steering-card footer button,
+.pending-steering-actions button,
 .pending-steering-edit button {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  min-height: 26px;
-  padding: 0 7px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
   border-radius: 6px;
 }
 
-.pending-steering-card footer button.send-now,
+.pending-steering-actions button.send-now,
 .pending-steering-edit button.primary {
   color: var(--brand-strong);
 }
 
-.pending-steering-card button:disabled {
+.pending-steering-strip button:disabled {
   opacity: 0.45;
   cursor: default;
 }
 
 .pending-steering-edit {
-  margin: 0 0 8px;
+  grid-column: 2 / -1;
+  min-width: 0;
 }
 
 .pending-steering-edit textarea {
@@ -5952,14 +5961,16 @@ body.resizing-drawer {
 }
 
 .pending-steering-edit > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   justify-content: flex-end;
   margin-top: 5px;
 }
 
 .pending-steering-busy {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
+  grid-column: 4;
+  grid-row: 1;
   color: var(--faint);
   animation: spin 0.8s linear infinite;
 }

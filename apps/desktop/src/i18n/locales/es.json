@@ -532,6 +532,7 @@
     "stillWorking": "Homun sigue trabajando",
     "queueInstruction": "Poner en cola",
     "steeringPending": "En espera",
+    "steeringRequest": "Solicitud",
     "steeringApplied": "Aplicada",
     "steeringHeld": "Actividad detenida",
     "sendNow": "Enviar ahora",

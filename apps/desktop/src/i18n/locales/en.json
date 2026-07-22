@@ -552,6 +552,7 @@
     "stillWorking": "Homun is still working",
     "queueInstruction": "Queue instruction",
     "steeringPending": "Waiting",
+    "steeringRequest": "Request",
     "steeringApplied": "Applied",
     "steeringHeld": "Activity stopped",
     "sendNow": "Send now",
