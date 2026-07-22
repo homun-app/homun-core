@@ -1015,6 +1015,14 @@ missing, give what you have and note the gap in one short line.",
             ls.pending_vault_reveal_marker.as_deref(),
         );
         if visible_answer(&final_answer).is_some() {
+            if model_client.finalization_fence() == crate::FinalizationFence::PendingInput {
+                ls.messages.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": final_answer,
+                }));
+                ls.accumulated.clear();
+                continue;
+            }
             memory_answer = final_answer.clone();
             let _ = event_sink
                 .emit(GenerateStreamEvent::Done {

@@ -101,6 +101,12 @@ pub struct EnqueuedTurn {
 }
 
 #[derive(Debug, Clone)]
+pub struct PromotedSteering {
+    pub steering: TurnSteeringRecord,
+    pub turn: EnqueuedTurn,
+}
+
+#[derive(Debug, Clone)]
 pub enum EnqueueTurnOutcome {
     Enqueued(EnqueuedTurn),
     SteeringQueued {
@@ -113,6 +119,58 @@ pub enum EnqueueTurnOutcome {
 enum EnqueueOrSteerTransactionOutcome {
     Outcome(EnqueueTurnOutcome),
     ThreadBusy(String),
+}
+
+pub fn promote_held_turn_steering<F>(
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    steering_id: i64,
+    expected_revision: u64,
+    insert_turn_messages: F,
+) -> Result<PromotedSteering, EnqueueError>
+where
+    F: FnOnce(&rusqlite::Transaction<'_>, &ChatTurnInput) -> TaskRuntimeResult<()>,
+{
+    store.with_transaction(|tx| {
+        let steering = TaskStore::load_turn_steering_by_id_on(
+            tx, steering_id, user_id.as_str(), workspace_id.as_str(),
+        )?.ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))?;
+        if steering.status != crate::TurnSteeringStatus::Held || steering.revision != expected_revision {
+            return Err(TaskRuntimeError::Conflict("held steering changed".into()));
+        }
+        if active_chat_turn_on(tx, &steering.thread_id)?.is_some() {
+            return Err(TaskRuntimeError::Conflict("thread already has an active turn".into()));
+        }
+        let request_id = format!("steering_{}_{}", steering.steering_id, steering.revision);
+        let input = ChatTurnInput {
+            thread_id: steering.thread_id.clone(),
+            request_id: request_id.clone(),
+            assistant_message_id: format!("local_assistant_{request_id}"),
+            prompt: steering.prompt.clone(),
+            visible_prompt: Some(steering.visible_prompt.clone()),
+            images: steering.images.clone(),
+            attachments: Some(steering.attachments.clone()),
+            mode: steering.mode.clone(),
+            model: steering.model.clone(),
+            source: ChatTurnSource::Interactive,
+            approval: TurnApproval::Full,
+        };
+        let task = queued_chat_turn_task(user_id, workspace_id, &input);
+        insert_turn_messages(tx, &input)?;
+        insert_chat_turn_on(tx, &task, &input)?;
+        let steering = TaskStore::promote_turn_steering_on(
+            tx, steering_id, user_id.as_str(), workspace_id.as_str(), expected_revision,
+        )?;
+        Ok(PromotedSteering {
+            steering,
+            turn: EnqueuedTurn {
+                task_id: task.task_id,
+                thread_id: input.thread_id,
+                position_in_queue: 0,
+            },
+        })
+    }).map_err(EnqueueError::Store)
 }
 
 /// Generates a chat_turn task_id. Stable, debuggable.
@@ -307,7 +365,7 @@ fn active_chat_turn_on(conn: &Connection, thread_id: &str) -> TaskRuntimeResult<
         .query_row(
             "SELECT task_id FROM tasks
              WHERE thread_id = ?1 AND kind = 'chat_turn'
-               AND status NOT IN ('completed', 'failed', 'cancelled', 'expired')
+               AND status NOT IN ('completed', 'failed', 'cancelled', 'expired', 'finalizing')
              LIMIT 1",
             rusqlite::params![thread_id],
             |row| row.get(0),

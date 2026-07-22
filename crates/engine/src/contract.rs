@@ -64,6 +64,12 @@ pub struct ModelRoundOutput {
     pub time_to_first_token_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinalizationFence {
+    Ready,
+    PendingInput,
+}
+
 /// Typed failure. Preserves parity: only an UPSTREAM status error should surface as the turn's
 /// committed final answer (the gateway's `last_model_error`); a transport/stream failure already
 /// streamed a generic live notice and must NOT overwrite that fallback. A flat `String` would lose
@@ -85,6 +91,10 @@ pub enum ModelCallError {
 /// runtime) — the round future is held across `.await` in a `Send` task, so both bounds are required
 /// today, not deferred to the loop-move increment.
 pub trait ModelClient {
+    fn finalization_fence(&self) -> FinalizationFence {
+        FinalizationFence::Ready
+    }
+
     /// Run one model round. Stream raw token text through `on_delta` as it arrives, and return the
     /// assembled assistant message (content + `tool_calls`) plus the provider the impl ended on.
     /// Errors are typed (see `ModelCallError`) after the impl has exhausted its retries/fallbacks.

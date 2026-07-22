@@ -771,13 +771,40 @@ impl TaskStore {
     }
 
     pub fn load_turn_steering(&self, steering_id: i64, user_id: &str, workspace_id: &str) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+        load_turn_steering_by_id_on(&self.connection, steering_id, user_id, workspace_id)
+    }
+
+    pub(crate) fn load_turn_steering_by_id_on(
+        conn: &Connection,
+        steering_id: i64,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+        load_turn_steering_by_id_on(conn, steering_id, user_id, workspace_id)
+    }
+
+    pub(crate) fn promote_turn_steering_on(
+        tx: &Transaction<'_>, steering_id: i64, user_id: &str, workspace_id: &str,
+        expected_revision: u64,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = tx.execute(
+            "UPDATE turn_steering SET status='promoted', revision=revision+1, updated_at=?1
+             WHERE steering_id=?2 AND user_id=?3 AND workspace_id=?4 AND revision=?5 AND status='held'",
+            params![now, steering_id, user_id, workspace_id, expected_revision as i64],
+        )?;
+        if changed == 0 { return Err(TaskRuntimeError::Conflict("held steering changed".into())); }
+        load_turn_steering_by_id_on(tx, steering_id, user_id, workspace_id)?.ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
+    pub fn current_turn_steering(&self, steering_id: i64, user_id: &str, workspace_id: &str) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+        self.load_turn_steering(steering_id, user_id, workspace_id)
+    }
+
+    pub fn workspace_for_turn_steering(&self, steering_id: i64, user_id: &str) -> TaskRuntimeResult<Option<String>> {
         self.connection.query_row(
-            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
-                    source_message_id, content, payload_json, objective_revision, status,
-                    revision, created_at, updated_at, claimed_run_id, claimed_round,
-                    claimed_at, applied_at, cancelled_at, consumed_at
-             FROM turn_steering WHERE steering_id=?1 AND user_id=?2 AND workspace_id=?3",
-            params![steering_id, user_id, workspace_id], map_turn_steering_row,
+            "SELECT workspace_id FROM turn_steering WHERE steering_id=?1 AND user_id=?2",
+            params![steering_id, user_id], |row| row.get(0),
         ).optional().map_err(Into::into)
     }
 
@@ -801,6 +828,35 @@ impl TaskStore {
              WHERE user_id=?2 AND workspace_id=?3 AND active_turn_id=?4 AND status='pending'",
             params![now, user_id, workspace_id, active_turn_id],
         )?)
+    }
+
+    /// Atomically fences terminal delivery against newly queued steering.
+    /// `false` means the engine must continue; `true` changes the task to the
+    /// internal SQL-only `finalizing` state so later input becomes a new turn.
+    pub fn fence_chat_turn_finalization(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        active_turn_id: &str,
+    ) -> TaskRuntimeResult<bool> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let pending: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM turn_steering
+             WHERE user_id=?1 AND workspace_id=?2 AND active_turn_id=?3 AND status='pending'",
+            params![user_id, workspace_id, active_turn_id],
+            |row| row.get(0),
+        )?;
+        if pending > 0 {
+            tx.commit()?;
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE tasks SET status='finalizing', updated_at=?1
+             WHERE task_id=?2 AND user_id=?3 AND workspace_id=?4 AND status='running'",
+            params![OffsetDateTime::now_utc().unix_timestamp(), active_turn_id, user_id, workspace_id],
+        )?;
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn load_runtime_plan(
@@ -2337,7 +2393,7 @@ impl TaskStore {
             .query_row(
                 "SELECT task_id FROM tasks
                  WHERE thread_id = ?1 AND kind = 'chat_turn'
-                   AND status NOT IN ('completed', 'failed', 'cancelled', 'expired')
+                   AND status NOT IN ('completed', 'failed', 'cancelled', 'expired', 'finalizing')
                  LIMIT 1",
                 params![thread_id],
                 |row| row.get(0),
@@ -2570,6 +2626,23 @@ pub(crate) fn load_turn_steering_by_source_message(
     .map_err(Into::into)
 }
 
+fn load_turn_steering_by_id_on(
+    conn: &Connection,
+    steering_id: i64,
+    user_id: &str,
+    workspace_id: &str,
+) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+    conn.query_row(
+        "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                source_message_id, content, payload_json, objective_revision, status,
+                revision, created_at, updated_at, claimed_run_id, claimed_round,
+                claimed_at, applied_at, cancelled_at, consumed_at
+         FROM turn_steering WHERE steering_id=?1 AND user_id=?2 AND workspace_id=?3",
+        params![steering_id, user_id, workspace_id],
+        map_turn_steering_row,
+    ).optional().map_err(Into::into)
+}
+
 fn map_tool_receipt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentToolReceipt> {
     let result_json: Option<String> = row.get(9)?;
     let effects_json: Option<String> = row.get(10)?;
@@ -2659,7 +2732,7 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 8);
+        assert_eq!(store.schema_version().unwrap(), 9);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
@@ -3506,7 +3579,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 8);
+        assert_eq!(store.schema_version().unwrap(), 9);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {

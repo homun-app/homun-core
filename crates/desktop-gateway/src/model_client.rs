@@ -48,22 +48,30 @@ pub(crate) struct GatewaySteeringContext<'a> {
     pub workspace_id: &'a str,
     pub thread_id: &'a str,
     pub turn_id: &'a str,
+    pub run_id: &'a str,
 }
 
 impl GatewayModelClient<'_> {
-    fn consume_steering_messages(&self) -> Vec<serde_json::Value> {
+    fn consume_steering_messages(&self, round: u32) -> Vec<serde_json::Value> {
         let Some(context) = self.steering else {
             return Vec::new();
         };
-        steering_messages_for_round(context)
+        steering_messages_for_round_number(context, round)
     }
 }
 
 pub(crate) fn steering_messages_for_round(
     context: GatewaySteeringContext<'_>,
 ) -> Vec<serde_json::Value> {
+    steering_messages_for_round_number(context, 0)
+}
+
+fn steering_messages_for_round_number(
+    context: GatewaySteeringContext<'_>,
+    round: u32,
+) -> Vec<serde_json::Value> {
     let binding = crate::active_routing_binding(context.state, Some(context.thread_id));
-    steering_messages_for_round_with(context, |content, active| {
+    steering_messages_for_round_number_with(context, round, |content, active| {
         crate::resolve_semantic_decision(
             context.state,
             Some(context.thread_id),
@@ -81,6 +89,17 @@ pub(crate) fn steering_messages_for_round_with(
         Option<&local_first_task_runtime::ObjectiveContractRecord>,
     ) -> crate::semantic_decision::ValidatedSemanticDecision,
 ) -> Vec<serde_json::Value> {
+    steering_messages_for_round_number_with(context, 0, resolve)
+}
+
+fn steering_messages_for_round_number_with(
+    context: GatewaySteeringContext<'_>,
+    round: u32,
+    mut resolve: impl FnMut(
+        &str,
+        Option<&local_first_task_runtime::ObjectiveContractRecord>,
+    ) -> crate::semantic_decision::ValidatedSemanticDecision,
+) -> Vec<serde_json::Value> {
     let Ok(store) = context.state.task_store.lock() else {
         return Vec::new();
     };
@@ -89,14 +108,33 @@ pub(crate) fn steering_messages_for_round_with(
         .ok()
         .flatten();
     let messages = store
-        .consume_pending_turn_steering(
+        .claim_pending_turn_steering(
             context.user_id,
             context.workspace_id,
             context.thread_id,
             context.turn_id,
+            context.run_id,
+            round,
         )
         .unwrap_or_default();
     drop(store);
+
+    if !messages.is_empty() {
+        let materialized = crate::lock_store(context.state)
+            .ok()
+            .is_some_and(|chat| messages.iter().all(|message| {
+                chat.materialize_steering_message(context.thread_id, message).is_ok()
+            }));
+        if !materialized {
+            return Vec::new();
+        }
+        if let Ok(store) = context.state.task_store.lock() {
+            let ids = messages.iter().map(|message| message.steering_id).collect::<Vec<_>>();
+            if store.mark_turn_steering_applied(&ids, context.run_id).is_err() {
+                return Vec::new();
+            }
+        }
+    }
 
     messages.into_iter().map(|message| {
             let proposed = resolve(&message.content, objective.as_ref());
@@ -424,6 +462,24 @@ pub(crate) async fn send_with_headers_timeout(
 }
 
 impl ModelClient for GatewayModelClient<'_> {
+    fn finalization_fence(&self) -> local_first_engine::FinalizationFence {
+        let Some(context) = self.steering else {
+            return local_first_engine::FinalizationFence::Ready;
+        };
+        let ready = context.state.task_store.lock().ok().and_then(|store| {
+            store.fence_chat_turn_finalization(
+                context.user_id,
+                context.workspace_id,
+                context.turn_id,
+            ).ok()
+        }).unwrap_or(false);
+        if ready {
+            local_first_engine::FinalizationFence::Ready
+        } else {
+            local_first_engine::FinalizationFence::PendingInput
+        }
+    }
+
     async fn generate(
         &self,
         call: &ModelCall<'_>,
@@ -445,7 +501,7 @@ impl ModelClient for GatewayModelClient<'_> {
         // model round, before the request payload is built. The durable queue makes
         // this exactly-once even across provider retries within this round.
         let mut messages_owned = call.messages.to_vec();
-        messages_owned.extend(self.consume_steering_messages());
+        messages_owned.extend(self.consume_steering_messages(call.usage.round.unwrap_or_default()));
         let messages = messages_owned.as_slice();
         let tool_schemas = call.tools;
         let temperature = call.temperature;

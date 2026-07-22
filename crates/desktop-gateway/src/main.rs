@@ -1221,6 +1221,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/chat/threads/{thread_id}", delete(delete_chat_thread))
         .route("/api/chat/threads/{thread_id}/messages", get(chat_messages))
         .route("/api/chat/threads/{thread_id}/activity", get(thread_activity_projection))
+        .route("/api/chat/threads/{thread_id}/steering", get(list_thread_steering))
+        .route(
+            "/api/chat/steering/{steering_id}",
+            axum::routing::patch(update_steering).delete(delete_steering),
+        )
+        .route("/api/chat/steering/{steering_id}/send-now", post(send_steering_now))
         .route("/api/chat/threads/{thread_id}/branches", get(chat_branches))
         .route(
             "/api/chat/threads/{thread_id}/active_leaf",
@@ -28271,6 +28277,7 @@ async fn run_agent_rounds(
             workspace_id: automation_workspace_id.as_str(),
             thread_id,
             turn_id,
+            run_id: effect_run_id.as_deref().unwrap_or(turn_id),
         }),
         _ => None,
     };
@@ -36167,6 +36174,13 @@ async fn cancel_turn(
         code: "broker_cancel",
         message: format!("{e}"),
     })?;
+    let held_steering = delivery_task.as_ref()
+        .and_then(|task| task.input_json.get("thread_id").and_then(Value::as_str))
+        .and_then(|thread_id| store.list_turn_steering(user_id.as_str(), workspace_id.as_str(), thread_id).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|row| row.active_turn_id == turn_id && row.status == local_first_task_runtime::TurnSteeringStatus::Held)
+        .collect::<Vec<_>>();
     drop(store);
     if ok {
         if let Some(task) = delivery_task.as_ref() {
@@ -36176,6 +36190,9 @@ async fn cancel_turn(
                 local_first_desktop_gateway::MessageDeliveryState::Cancelled,
             );
         }
+    }
+    for steering in &held_steering {
+        publish_steering_changed(steering);
     }
     Ok(if ok {
         StatusCode::ACCEPTED
@@ -36495,6 +36512,152 @@ async fn thread_activity_projection(
             message: format!("{e}"),
         })?;
     Ok(Json(projection))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SteeringMutationRequest {
+    expected_revision: u64,
+    prompt: String,
+    visible_prompt: String,
+    #[serde(default)]
+    images: Vec<String>,
+    #[serde(default = "empty_json_array")]
+    attachments: Value,
+    mode: Option<String>,
+    model: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SteeringRevisionRequest {
+    expected_revision: u64,
+}
+
+fn empty_json_array() -> Value { Value::Array(Vec::new()) }
+
+fn publish_steering_changed(record: &local_first_task_runtime::TurnSteeringRecord) {
+    publish_app_event(serde_json::json!({
+        "type": "thread.steering_changed",
+        "thread_id": record.thread_id,
+        "steering_id": record.steering_id,
+        "revision": record.revision,
+    }));
+}
+
+fn steering_mutation_result(
+    result: local_first_task_runtime::TaskRuntimeResult<local_first_task_runtime::TurnSteeringRecord>,
+    store: &TaskStore,
+    steering_id: i64,
+    user_id: &str,
+    workspace_id: &str,
+) -> Result<(StatusCode, Json<Value>), GatewayError> {
+    match result {
+        Ok(record) => {
+            publish_steering_changed(&record);
+            Ok((StatusCode::OK, Json(serde_json::to_value(record).unwrap_or(Value::Null))))
+        }
+        Err(local_first_task_runtime::TaskRuntimeError::Conflict(_)) => {
+            let current = store.load_turn_steering(steering_id, user_id, workspace_id)
+                .map_err(GatewayError::task)?;
+            Ok((StatusCode::CONFLICT, Json(serde_json::json!({
+                "code": "steering_revision_conflict",
+                "steering": current,
+            }))))
+        }
+        Err(error) => Err(GatewayError::task(error)),
+    }
+}
+
+async fn list_thread_steering(
+    Path(thread_id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<local_first_task_runtime::TurnSteeringRecord>>, GatewayError> {
+    let workspace = execution_thread_workspace(&state, &thread_id)?;
+    let rows = lock_task_store(&state)?
+        .list_turn_steering(gateway_user_id().as_str(), &workspace, &thread_id)
+        .map_err(GatewayError::task)?;
+    Ok(Json(rows))
+}
+
+async fn update_steering(
+    Path(steering_id): Path<i64>,
+    State(state): State<AppState>,
+    Json(request): Json<SteeringMutationRequest>,
+) -> Result<(StatusCode, Json<Value>), GatewayError> {
+    let user = gateway_user_id();
+    let store = lock_task_store(&state)?;
+    let workspace = store.workspace_for_turn_steering(steering_id, user.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "steering_not_found", message: "steering not found".into() })?;
+    let current = store.load_turn_steering(steering_id, user.as_str(), &workspace)
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "steering_not_found", message: "steering not found".into() })?;
+    let input = local_first_task_runtime::NewTurnSteering {
+        source_message_id: current.source_message_id,
+        prompt: request.prompt,
+        visible_prompt: request.visible_prompt,
+        images: request.images,
+        attachments: request.attachments,
+        mode: request.mode,
+        model: request.model,
+    };
+    let result = store.update_turn_steering(
+        steering_id, user.as_str(), &workspace, request.expected_revision, &input,
+    );
+    steering_mutation_result(result, &store, steering_id, user.as_str(), &workspace)
+}
+
+async fn delete_steering(
+    Path(steering_id): Path<i64>,
+    State(state): State<AppState>,
+    Json(request): Json<SteeringRevisionRequest>,
+) -> Result<(StatusCode, Json<Value>), GatewayError> {
+    let user = gateway_user_id();
+    let store = lock_task_store(&state)?;
+    let workspace = store.workspace_for_turn_steering(steering_id, user.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "steering_not_found", message: "steering not found".into() })?;
+    let result = store.cancel_turn_steering(
+        steering_id, user.as_str(), &workspace, request.expected_revision,
+    );
+    steering_mutation_result(result, &store, steering_id, user.as_str(), &workspace)
+}
+
+async fn send_steering_now(
+    Path(steering_id): Path<i64>,
+    State(state): State<AppState>,
+    Json(request): Json<SteeringRevisionRequest>,
+) -> Result<(StatusCode, Json<Value>), GatewayError> {
+    let user = gateway_user_id();
+    let store = lock_task_store(&state)?;
+    let workspace = store.workspace_for_turn_steering(steering_id, user.as_str())
+        .map_err(GatewayError::task)?
+        .ok_or_else(|| GatewayError { status: StatusCode::NOT_FOUND, code: "steering_not_found", message: "steering not found".into() })?;
+    let workspace_id = WorkspaceId::new(&workspace);
+    let result = local_first_task_runtime::broker::promote_held_turn_steering(
+        &store, &user, &workspace_id, steering_id, request.expected_revision,
+        |tx, input| insert_broker_turn_messages(tx, input),
+    );
+    match result {
+        Ok(promoted) => {
+            publish_steering_changed(&promoted.steering);
+            Ok((StatusCode::CREATED, Json(serde_json::json!({
+                "turn_id": promoted.turn.task_id.as_str(),
+                "thread_id": promoted.turn.thread_id,
+                "status": "queued",
+                "position_in_queue": promoted.turn.position_in_queue,
+                "steering": promoted.steering,
+            }))))
+        }
+        Err(local_first_task_runtime::broker::EnqueueError::Store(local_first_task_runtime::TaskRuntimeError::Conflict(_))) => {
+            let current = store.load_turn_steering(steering_id, user.as_str(), &workspace)
+                .map_err(GatewayError::task)?;
+            Ok((StatusCode::CONFLICT, Json(serde_json::json!({
+                "code": "steering_revision_conflict",
+                "steering": current,
+            }))))
+        }
+        Err(error) => Err(GatewayError { status: StatusCode::INTERNAL_SERVER_ERROR, code: "steering_send_now", message: error.to_string() }),
+    }
 }
 
 /// GET /api/chat/turns/{turn_id}/stream — replay buffered events (seq > since) then
@@ -63781,8 +63944,15 @@ prs.save(Path({path:?}))
                     "workspace-a",
                     &thread.thread_id,
                     "turn-1",
-                    "message-2",
-                    "Controlla anche la memoria",
+                    &local_first_task_runtime::NewTurnSteering {
+                        source_message_id: "message-2".into(),
+                        prompt: "Controlla anche la memoria".into(),
+                        visible_prompt: "Controlla anche la memoria".into(),
+                        images: vec![],
+                        attachments: serde_json::json!([]),
+                        mode: None,
+                        model: None,
+                    },
                     objective.revision,
                 )
                 .unwrap();
@@ -63793,6 +63963,7 @@ prs.save(Path({path:?}))
             workspace_id: "workspace-a",
             thread_id: &thread.thread_id,
             turn_id: "turn-1",
+            run_id: "run-1",
         };
 
         let fixture = |_: &str,
@@ -76629,7 +76800,7 @@ data: [DONE]\n";
     }
 
     #[test]
-    fn broker_steering_adds_only_the_user_message_without_an_assistant_placeholder() {
+    fn broker_steering_stays_out_of_transcript_until_claim() {
         let root = isolated_gateway_test_dir("broker-steering-no-assistant");
         std::fs::create_dir_all(&root).unwrap();
         let database = root.join("homun.sqlite");
@@ -76691,7 +76862,7 @@ data: [DONE]\n";
                 .iter()
                 .filter(|message| message.id == "local_user_r2")
                 .count(),
-            1
+            0
         );
         assert!(
             messages
@@ -76700,7 +76871,7 @@ data: [DONE]\n";
         );
         assert_eq!(
             messages.last().map(|message| message.id.as_str()),
-            Some("local_user_r2")
+            Some("local_assistant_r1")
         );
         assert!(
             tasks
