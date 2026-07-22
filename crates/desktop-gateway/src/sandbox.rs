@@ -4,16 +4,20 @@
 //! Lifecycle: ensure the Docker daemon is up (auto-starting the platform's Docker
 //! engine — Docker Desktop / Colima on macOS, Docker Desktop on Windows, the
 //! systemd service or Docker Desktop on Linux), ensure the container is running
-//! (via `up.sh`), then run skill commands in it with `docker exec`. The container
-//! is loopback-only and runs as a non-root `agent` user, so it doubles as an
-//! isolated sandbox for SKILL.md scripts.
+//! (through native Docker CLI calls), then run skill commands in it with
+//! `docker exec`. The container is loopback-only and runs as a non-root `agent`
+//! user, so it doubles as an isolated sandbox for SKILL.md scripts.
 
+use sha2::{Digest, Sha256};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 /// The contained-computer container name (matches the browser's).
 pub const CONTAINER: &str = "homun-cc";
+const CONTAINED_IMAGE: &str = "homun-contained-computer";
+const CONTAINED_BASE_IMAGE: &str = "debian:trixie-slim";
 /// Where skills are copied inside the container.
 const CONTAINER_SKILLS_DIR: &str = "/home/agent/skills";
 
@@ -25,9 +29,7 @@ pub fn artifacts_dir() -> PathBuf {
             return PathBuf::from(dir);
         }
     }
-    host_home_dir()
-        .join(".homun")
-        .join("artifacts")
+    host_home_dir().join(".homun").join("artifacts")
 }
 
 /// Host directory holding the contained computer's browser profile (bind-mounted at
@@ -40,9 +42,7 @@ pub fn cc_profile_dir() -> PathBuf {
             return PathBuf::from(dir);
         }
     }
-    host_home_dir()
-        .join(".homun")
-        .join("cc-profile")
+    host_home_dir().join(".homun").join("cc-profile")
 }
 
 fn host_home_dir_from(home: Option<&str>, user_profile: Option<&str>, fallback: &Path) -> PathBuf {
@@ -170,28 +170,6 @@ fn docker_bin() -> String {
         }
     }
     "docker".to_string()
-}
-
-/// The current PATH with the resolved docker binary's directory prepended, so a
-/// child process (e.g. `up.sh`, which calls `docker`/`curl` by name) finds them
-/// even if the gateway itself inherited a truncated PATH. Unix-only separator —
-/// the only consumer is the bash-launched `up.sh`.
-fn path_with_docker_dir() -> String {
-    let current = std::env::var("PATH").unwrap_or_default();
-    let docker = docker_bin();
-    if let Some(dir) = Path::new(&docker)
-        .parent()
-        .map(|d| d.to_string_lossy().into_owned())
-    {
-        if !dir.is_empty() && !current.split(':').any(|p| p == dir) {
-            return if current.is_empty() {
-                dir
-            } else {
-                format!("{dir}:{current}")
-            };
-        }
-    }
-    current
 }
 
 pub fn docker_running() -> bool {
@@ -406,28 +384,44 @@ fn up_script() -> Option<PathBuf> {
     None
 }
 
-/// Short content hash of the contained-computer image definition (Dockerfile +
-/// entrypoint), computed with the SAME shell command as up.sh so the gateway- and
-/// manually-stamped `homun.cc_hash` labels always agree. Lets us tell a stale running
-/// container (built from an older app version) from a fresh one.
+const CC_HASH_FILES: &[&str] = &[
+    "Dockerfile",
+    "entrypoint.sh",
+    "deck_render.py",
+    "deck_qa.py",
+    "doc_render.py",
+    "design_tokens.py",
+    "fonts_embed.py",
+    "fonts_manifest.py",
+    "whisper_server.py",
+    "novnc-view.html",
+];
+
+/// Short content hash of every file baked into the contained-computer image.
+/// Implemented in Rust so freshness checks work in packaged Windows builds
+/// without Bash, WSL, `shasum`, or `sha256sum`.
+fn contained_computer_def_hash_at(dir: &Path) -> Option<String> {
+    let mut hasher = Sha256::new();
+    for relative in CC_HASH_FILES {
+        hasher.update(fs::read(dir.join(relative)).ok()?);
+    }
+    let mut fonts = fs::read_dir(dir.join("fonts"))
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("woff2"))
+        .collect::<Vec<_>>();
+    fonts.sort();
+    for font in fonts {
+        hasher.update(fs::read(font).ok()?);
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    Some(digest[..16].to_string())
+}
+
 fn contained_computer_def_hash() -> Option<String> {
     let dir = up_script()?.parent()?.to_path_buf();
-    if !dir.join("Dockerfile").is_file() {
-        return None;
-    }
-    // Hash ALL files baked into the image (everything COPY'd), so a renderer/QA change
-    // (deck_render.py/deck_qa.py) triggers a rebuild too. MUST match up.sh's HASH_FILES list.
-    let out = Command::new("bash")
-        .arg("-c")
-        .arg(
-            "cat Dockerfile entrypoint.sh deck_render.py deck_qa.py doc_render.py design_tokens.py fonts_embed.py fonts_manifest.py whisper_server.py novnc-view.html fonts/*.woff2 2>/dev/null | \
-             { command -v shasum >/dev/null 2>&1 && shasum -a 256 || sha256sum; } | cut -c1-16",
-        )
-        .current_dir(&dir)
-        .output()
-        .ok()?;
-    let hash = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!hash.is_empty()).then_some(hash)
+    contained_computer_def_hash_at(&dir)
 }
 
 /// The `homun.cc_hash` label the running container was built with (None if missing).
@@ -457,47 +451,163 @@ fn container_definition_fresh() -> bool {
     }
 }
 
-/// Ensures the contained computer is running AND built from the current definition,
-/// (re)building via `up.sh` when it's down OR stale (e.g. an app update changed the
-/// Dockerfile/entrypoint). up.sh's own `docker rm -f` recycles a stale container.
-pub fn ensure_contained_computer() -> Result<(), String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ContainedComputerRunConfig {
+    artifacts_dir: PathBuf,
+    profile_dir: PathBuf,
+    timezone: String,
+    network: Option<String>,
+}
+
+fn contained_computer_run_args(config: &ContainedComputerRunConfig) -> Vec<String> {
+    let mut args = vec![
+        "run".to_string(),
+        "-d".to_string(),
+        "--rm".to_string(),
+        "--name".to_string(),
+        CONTAINER.to_string(),
+    ];
+    if let Some(network) = config
+        .network
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        args.extend(["--network".to_string(), network.to_string()]);
+    }
+    args.extend([
+        "--shm-size=512m".to_string(),
+        "--tmpfs".to_string(),
+        "/tmp:rw,exec,nosuid,nodev,size=512m,mode=1777".to_string(),
+        "-e".to_string(),
+        format!("TZ={}", config.timezone),
+        "-p".to_string(),
+        "127.0.0.1:9222:9222".to_string(),
+        "-p".to_string(),
+        "127.0.0.1:6080:6080".to_string(),
+        "-p".to_string(),
+        "127.0.0.1:9100:9000".to_string(),
+        "-v".to_string(),
+        "homun-whisper-cache:/home/agent/.cache".to_string(),
+        "-v".to_string(),
+        format!("{}:/home/agent/output", config.artifacts_dir.display()),
+        "-v".to_string(),
+        format!("{}:/data/profile", config.profile_dir.display()),
+        CONTAINED_IMAGE.to_string(),
+    ]);
+    args
+}
+
+fn run_docker_checked(args: &[String], failure: &str) -> Result<(), String> {
+    let output = Command::new(docker_bin())
+        .args(args)
+        .output()
+        .map_err(|_| failure.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(failure.to_string())
+    }
+}
+
+fn contained_computer_context_dir() -> Result<PathBuf, String> {
+    up_script()
+        .and_then(|script| script.parent().map(Path::to_path_buf))
+        .filter(|dir| dir.join("Dockerfile").is_file())
+        .ok_or_else(|| "Homun Computer resources are missing from this installation.".to_string())
+}
+
+fn build_contained_computer_image() -> Result<(), String> {
+    let dir = contained_computer_context_dir()?;
+    let hash = contained_computer_def_hash_at(&dir).ok_or_else(|| {
+        "Homun Computer resources are incomplete in this installation.".to_string()
+    })?;
+    let no_cache = std::env::var("HOMUN_CC_NO_CACHE")
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty());
+    let no_pull = std::env::var("HOMUN_CC_NO_PULL")
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty());
+    if !no_cache && !no_pull {
+        let _ = Command::new(docker_bin())
+            .args(["pull", CONTAINED_BASE_IMAGE])
+            .output();
+    }
+    let mut args = vec!["build".to_string()];
+    if no_cache {
+        args.push("--no-cache".to_string());
+    }
+    args.extend([
+        "--label".to_string(),
+        format!("homun.cc_hash={hash}"),
+        "-t".to_string(),
+        CONTAINED_IMAGE.to_string(),
+        dir.to_string_lossy().into_owned(),
+    ]);
+    run_docker_checked(&args, "Homun Computer image build failed.")
+}
+
+fn start_contained_computer_container() -> Result<(), String> {
+    let artifacts = artifacts_dir();
+    let profile = cc_profile_dir();
+    fs::create_dir_all(&artifacts)
+        .map_err(|_| "Homun could not create its artifact directory.".to_string())?;
+    if std::env::var("HOMUN_CC_RESET_PROFILE").as_deref() == Ok("1") {
+        let _ = fs::remove_dir_all(&profile);
+    }
+    fs::create_dir_all(&profile)
+        .map_err(|_| "Homun could not create its browser profile directory.".to_string())?;
+    let _ = Command::new(docker_bin())
+        .args(["rm", "-f", CONTAINER])
+        .output();
+    let config = ContainedComputerRunConfig {
+        artifacts_dir: artifacts,
+        profile_dir: profile,
+        timezone: crate::effective_user_tz_name(),
+        network: std::env::var("HOMUN_CC_NETWORK").ok(),
+    };
+    run_docker_checked(
+        &contained_computer_run_args(&config),
+        "Homun Computer container failed to start.",
+    )
+}
+
+fn wait_for_container_running() -> Result<(), String> {
+    for _ in 0..30 {
+        if container_up() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    Err("Homun Computer did not become ready after Docker started it.".to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainedComputerBootstrapPhase {
+    CheckingDocker,
+    PreparingImage,
+    StartingContainer,
+}
+
+/// Ensures the contained computer is running and built from the current
+/// definition using only the Docker CLI, identically on Windows, macOS, and Linux.
+pub fn ensure_contained_computer_with_progress(
+    mut report: impl FnMut(ContainedComputerBootstrapPhase),
+) -> Result<(), String> {
+    report(ContainedComputerBootstrapPhase::CheckingDocker);
     ensure_docker()?;
     if container_up() && container_definition_fresh() {
         return Ok(());
     }
-    if let Some(script) = up_script() {
-        // up.sh builds the image (with the skill toolchain) and runs the container,
-        // bind-mounting the artifacts dir so generated files land on the host.
-        let _ = Command::new("bash")
-            .arg(&script)
-            .env("HOMUN_ARTIFACTS_DIR", artifacts_dir())
-            .env("HOMUN_CC_PROFILE_DIR", cc_profile_dir())
-            // Stamp the built image with the definition hash so a later update can
-            // detect a stale running container and rebuild it.
-            .env(
-                "HOMUN_CC_HASH",
-                contained_computer_def_hash().unwrap_or_default(),
-            )
-            // Layer D: the container defaults to UTC (debian-slim ships no
-            // /etc/localtime). Pass the user's effective IANA zone so `date`,
-            // Python AND Chromium's clock inside the container match the user —
-            // otherwise date-defaulting web forms pick the wrong day near the
-            // UTC midnight boundary.
-            .env("HOMUN_TZ", crate::effective_user_tz_name())
-            .env("PATH", path_with_docker_dir())
-            .output();
-        for _ in 0..30 {
-            if container_up() {
-                return Ok(());
-            }
-            std::thread::sleep(Duration::from_secs(1));
-        }
-    }
-    Err(
-        "The contained computer (homun-cc) is not running and I couldn't start it. \
-Start it with runtimes/contained-computer/up.sh."
-            .to_string(),
-    )
+    report(ContainedComputerBootstrapPhase::PreparingImage);
+    build_contained_computer_image()?;
+    report(ContainedComputerBootstrapPhase::StartingContainer);
+    start_contained_computer_container()?;
+    wait_for_container_running()
+}
+
+pub fn ensure_contained_computer() -> Result<(), String> {
+    ensure_contained_computer_with_progress(|_| {})
 }
 
 /// Source-tree noise excluded from extraction: vendored deps (site-packages catches
@@ -783,8 +893,20 @@ pub fn run_command(command: &str, skill_id: Option<&str>) -> Result<String, Stri
 
 #[cfg(test)]
 mod platform_tests {
-    use super::{docker_candidate_paths, host_home_dir_from};
+    use super::{
+        ContainedComputerRunConfig, contained_computer_def_hash_at, contained_computer_run_args,
+        docker_candidate_paths, host_home_dir_from,
+    };
+    use std::fs;
     use std::path::{Path, PathBuf};
+
+    struct TestDir(PathBuf);
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn windows_docker_candidates_follow_program_files_without_path_restart() {
@@ -816,6 +938,64 @@ mod platform_tests {
         assert_eq!(
             host_home_dir_from(None, Some(r"C:\Users\Fabio"), Path::new(r"C:\Temp")),
             PathBuf::from(r"C:\Users\Fabio")
+        );
+    }
+
+    #[test]
+    fn contained_computer_run_args_preserve_runtime_contract() {
+        let args = contained_computer_run_args(&ContainedComputerRunConfig {
+            artifacts_dir: PathBuf::from("/host/artifacts"),
+            profile_dir: PathBuf::from("/host/profile"),
+            timezone: "Europe/Rome".to_string(),
+            network: Some("homun-net".to_string()),
+        });
+
+        assert!(args.windows(2).any(|pair| pair == ["--name", "homun-cc"]));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--network", "homun-net"])
+        );
+        assert!(args.contains(&"127.0.0.1:9222:9222".to_string()));
+        assert!(args.contains(&"127.0.0.1:6080:6080".to_string()));
+        assert!(args.contains(&"127.0.0.1:9100:9000".to_string()));
+        assert!(args.contains(&"TZ=Europe/Rome".to_string()));
+        assert!(args.contains(&"homun-whisper-cache:/home/agent/.cache".to_string()));
+        assert!(args.contains(&"/host/artifacts:/home/agent/output".to_string()));
+        assert!(args.contains(&"/host/profile:/data/profile".to_string()));
+    }
+
+    #[test]
+    fn contained_computer_hash_is_deterministic_and_tracks_inputs() {
+        let root = std::env::temp_dir().join(format!(
+            "homun-cc-hash-test-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let _cleanup = TestDir(root.clone());
+        fs::create_dir_all(root.join("fonts")).expect("create hash fixture");
+        for relative in [
+            "Dockerfile",
+            "entrypoint.sh",
+            "deck_render.py",
+            "deck_qa.py",
+            "doc_render.py",
+            "design_tokens.py",
+            "fonts_embed.py",
+            "fonts_manifest.py",
+            "whisper_server.py",
+            "novnc-view.html",
+        ] {
+            fs::write(root.join(relative), relative).expect("write hash input");
+        }
+        fs::write(root.join("fonts/body.woff2"), b"font-a").expect("write font");
+
+        let first = contained_computer_def_hash_at(&root).expect("first hash");
+        let second = contained_computer_def_hash_at(&root).expect("second hash");
+        assert_eq!(first, second);
+
+        fs::write(root.join("entrypoint.sh"), "changed").expect("change input");
+        assert_ne!(
+            first,
+            contained_computer_def_hash_at(&root).expect("changed hash")
         );
     }
 }
