@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-22
 **Branch:** `fabio/fix-channel-lifecycle`
-**Status:** Approved direction, pending written-spec review
+**Status:** Implemented and verified on `fabio/fix-channel-lifecycle`; integration pending
 
 ## Problem
 
@@ -158,3 +158,14 @@ The implementation follows red-green TDD.
 - Changing WhatsApp pairing, allowlists, contact response modes, or Telegram bot
   credentials.
 - Refactoring the broader logical chat lifecycle.
+
+## Verification Result
+
+- `local-first-task-runtime`: 55 library tests and 8 scheduler tests pass.
+- `local-first-desktop-gateway`: 4 task-executor tests and 6 channel tests pass.
+- `channel-telegram`: 8 tests pass, including status refresh and redacted failure.
+- Live installed app: WhatsApp and Telegram status files report connected, both
+  packaged sidecars listen on ports 18766 and 18767, and the active Atlas
+  workspace was restored after releasing the queued WhatsApp turn.
+- The repository-wide formatting check still reports unrelated historical format
+  drift in large pre-existing files; no broad formatting rewrite was included.
