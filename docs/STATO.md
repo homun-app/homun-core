@@ -5,6 +5,25 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-22.**
 
+## ⭐ CHECKPOINT 2026-07-22 — Interfaccia task stabile, gate app installata
+
+La selezione della chat è ora esclusivamente dell'utente: un completamento in background aggiorna
+il cursore terminale durabile e mostra un pallino Homun teal fisso, senza navigare. Retry, replay e
+recovery convergono su una sola bolla assistant e un solo terminale; il reasoning grezzo non entra
+nel transcript.
+
+Durante il collaudo installato è emerso e stato chiuso un leak P0: la cancellazione dal Workbench
+poteva lasciare occupata `browser_session`, bloccando tutte le chat successive in attesa risorsa.
+La cancellazione ora passa dal broker, libera subito i turni non in esecuzione, arresta in sicurezza
+quelli attivi e chiude la race tra prenotazione e registrazione del segnale. Il boot ripulisce anche
+prenotazioni/lease terminali orfane da crash precedenti.
+
+**Gate finale:** bundle arm64 0.1.1 firmato Developer ID; tre chat reali completate in 34,394 s con
+B sempre selezionata, una risposta/terminale ciascuna e zero reasoning leak; cancellazione live con
+risorsa 1 -> 0; renderer verificato a 1360x900 e 900x700; pre-release gate `ALL GREEN` (gateway
+835 passed, 0 failed, 6 live-Ollama ignored). Checklist ed esclusioni:
+[`docs/qa/homun-stability-installed-app-gate.md`](qa/homun-stability-installed-app-gate.md).
+
 ## ⭐ CHECKPOINT 2026-07-22 — Transcript stabile e reasoning isolato
 
 La risposta visibile ora attraversa un unico quality gate: output vuoto, reasoning-only o con

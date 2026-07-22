@@ -1,0 +1,2335 @@
+== Homun pre-release gate ==
+1. capability tests: cargo test -p local-first-capabilities -- --nocapture [.]
+2. orchestrator tests: cargo test -p local-first-orchestrator -- --nocapture [.]
+3. task runtime tests: cargo test -p local-first-task-runtime -- --nocapture [.]
+4. engine tests: cargo test -p local-first-engine -- --nocapture [.]
+5. gateway tests: cargo test -p local-first-desktop-gateway -- --nocapture [.]
+6. memorybench provider: npm test [benchmarks/memorybench/homun-provider]
+7. desktop attention tests: node --test src/lib/threadAttentionState.test.mjs [apps/desktop]
+8. desktop replay tests: node --test src/lib/turnReplayState.test.mjs [apps/desktop]
+9. desktop visible content tests: node --test src/lib/chatVisibleContent.test.mjs [apps/desktop]
+10. desktop electron tests: npm run test:electron [apps/desktop]
+11. contained computer package tests: npm run test:contained-computer-package [apps/desktop]
+12. host computer package tests: npm run test:host-computer-package [apps/desktop]
+13. ui contract: npm run test:ui-contract [apps/desktop]
+14. desktop build: npm run build [apps/desktop]
+15. stability soak unit tests: /Applications/Xcode.app/Contents/Developer/usr/bin/python3 -m unittest scripts.test_stability_soak -v [.]
+16. eval unit tests: /Applications/Xcode.app/Contents/Developer/usr/bin/python3 -m unittest scripts.test_eval_suite scripts.test_pre_release_gate scripts.test_production_smoke -v [.]
+17. eval syntax: /Applications/Xcode.app/Contents/Developer/usr/bin/python3 -m py_compile scripts/eval_suite.py [.]
+18. deck renderer tests: /Applications/Xcode.app/Contents/Developer/usr/bin/python3 -m unittest discover -s runtimes/contained-computer -p test_deck_render.py [.]
+19. doc renderer tests: /Applications/Xcode.app/Contents/Developer/usr/bin/python3 -m unittest discover -s runtimes/contained-computer -p test_doc_render.py [.]
+== capability tests ==
+   Compiling local-first-browser-automation v0.1.0 (/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/crates/browser-automation)
+   Compiling local-first-capabilities v0.1.0 (/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/crates/capabilities)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.82s
+     Running unittests src/lib.rs (target/debug/deps/local_first_capabilities-21920f438ea5e8ae)
+
+running 13 tests
+test search::tests::empty_query_returns_a_capped_sample ... ok
+test mcp::tests::reads_are_read_only ... ok
+test search::tests::no_match_returns_empty_not_a_sample ... ok
+test search::tests::ranks_the_more_relevant_document_first ... ok
+test cached_provider::tests::refuses_execution ... ok
+test search::tests::rarer_query_term_dominates_via_idf ... ok
+test search::tests::tokenize_counts_chars_not_bytes_for_multilingual_terms ... ok
+test search::tests::tokenize_lowercases_splits_and_drops_single_chars ... ok
+test mcp::tests::writes_and_ambiguous_are_not ... ok
+test cached_provider::tests::lists_cached_tools_for_planning ... ok
+test workflow_routing::tests::deny_glob_matches_skill_prefix_and_exact ... ok
+test workflow_routing::tests::disabled_plugin_routings_are_filtered_out ... ok
+test workflow_routing::tests::system_registry_has_the_two_presentation_routings ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/fake_mcp_stdio.rs (target/debug/deps/fake_mcp_stdio-42fce322d8189640)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/channel.rs (target/debug/deps/channel-4fc98e59757185b4)
+
+running 3 tests
+test channel_message_normalizes_sender_target_thread_and_content ... ok
+test outbound_message_can_target_existing_thread ... ok
+test fake_channel_provider_records_sent_messages ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/contracts.rs (target/debug/deps/contracts-db89d9504f2344a3)
+
+running 13 tests
+test plugin_registry_entry_applies_install_and_update_policy ... ok
+test plugin_registry_entry_validates_digest_and_signature_policy ... ok
+test plugin_package_manifest_validates_safe_archive_layout ... ok
+test capability_tool_serializes_action_and_provider_kind ... ok
+test managed_provider_metadata_marks_cloud_boundary ... ok
+test provider_and_workspace_ids_are_stable ... ok
+test plugin_manifest_legacy_json_defaults_to_stable_free ... ok
+test plugin_registry_index_declares_signed_packages ... ok
+test plugin_manifest_declares_distribution_and_capability_contract ... ok
+test skill_manifest_declares_permissions_without_runtime_execution ... ok
+test plugin_registry_entry_verifies_install_candidate_policy ... ok
+test plugin_license_token_verifies_offline_signature_and_expiry ... ok
+test plugin_registry_entry_verifies_ed25519_package_signature ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/facade.rs (target/debug/deps/facade-b0502bafce9c3ca6)
+
+running 6 tests
+test facade_filters_connections_by_user_and_workspace ... ok
+test facade_rejects_tool_arguments_that_do_not_match_schema ... ok
+test facade_lists_policy_filtered_visible_and_executable_tools ... ok
+test facade_executes_allowed_tool_and_records_redacted_audit ... ok
+test facade_denies_managed_tool_without_cloud_permission ... ok
+test facade_compresses_large_tool_results_in_audit_payload ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/mcp_provider.rs (target/debug/deps/mcp_provider-043d71740847599c)
+
+running 3 tests
+test mcp_provider_sends_initialized_notification_after_initialize ... ok
+test mcp_provider_calls_tool_through_transport ... ok
+test mcp_provider_maps_tools_list_to_capability_tools ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mcp_stdio.rs (target/debug/deps/mcp_stdio-1728642b06ed8c33)
+
+running 1 test
+test stdio_transport_keeps_process_alive_across_requests ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/policy.rs (target/debug/deps/policy-56169e23defbd925)
+
+running 5 tests
+test policy_keeps_write_tool_visible_but_not_executable_without_autonomy ... ok
+test policy_hides_tools_from_disabled_providers ... ok
+test policy_denies_tools_outside_privacy_domain ... ok
+test fake_provider_returns_declared_tools_and_metadata ... ok
+test policy_requires_explicit_cloud_permission_for_managed_tools ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/provider_registry.rs (target/debug/deps/provider_registry-44cf42aa1600f2e0)
+
+running 8 tests
+test registry_round_trips_provider_config_with_resource_hint ... ok
+test registry_round_trips_connection_metadata_with_secret_ref_only ... ok
+test registry_round_trips_tool_cache_for_provider ... ok
+test registry_creates_schema_and_migrations_are_idempotent ... ok
+test registry_stores_connection_secret_material_outside_database ... ok
+test registry_policy_context_filters_facade_tools ... ok
+test registry_derives_policy_context_from_enabled_grants ... ok
+test registry_excludes_disabled_grants_and_requires_managed_opt_in ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/skill_plugin_registry.rs (target/debug/deps/skill_plugin_registry-ad6d672d7eddfcad)
+
+running 3 tests
+test contracts_serialize_skill_plugin_manifests ... ok
+test registry_registers_plugin_manifest_and_bundled_skills ... ok
+test registry_round_trips_skill_manifests_and_installs_by_scope ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/task_runtime_bridge.rs (target/debug/deps/task_runtime_bridge-da232954d886a50d)
+
+running 4 tests
+test bridge_assigns_resource_by_provider_kind ... ok
+test bridge_enqueues_capability_call_with_policy_payload_and_resource ... ok
+test capability_task_executor_completes_successful_tool_call ... ok
+test capability_task_executor_maps_policy_denial_to_retryable_failure ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/triggers.rs (target/debug/deps/triggers-f62a9eea486eec78)
+
+running 1 test
+test fake_provider_lists_enables_and_disables_triggers ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests local_first_capabilities
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== capability tests: PASS (9s) ==
+== orchestrator tests ==
+   Compiling local-first-task-runtime v0.1.0 (/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/crates/task-runtime)
+warning: unused import: `EmbeddingClient`
+ --> crates/memory/src/embedding.rs:9:13
+  |
+9 |     cosine, EmbeddingClient, MemoryFacade, MemoryLifecycleRequest, MemoryRef, UserId, WorkspaceId,
+  |             ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `local-first-memory` (lib) generated 1 warning (run `cargo fix --lib -p local-first-memory` to apply 1 suggestion)
+   Compiling local-first-browser-automation v0.1.0 (/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/crates/browser-automation)
+   Compiling local-first-capabilities v0.1.0 (/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/crates/capabilities)
+   Compiling local-first-subagents v0.1.0 (/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/crates/subagents)
+   Compiling local-first-orchestrator v0.1.0 (/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/crates/orchestrator)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.29s
+     Running unittests src/lib.rs (target/debug/deps/local_first_orchestrator-1e8a0d1823f0e9bc)
+
+running 27 tests
+test driver::tests::identity_keyed_by_step_id_not_by_title ... ok
+test driver::tests::boundedness_one_result_per_step_never_grows ... ok
+test driver::tests::each_step_runs_at_most_once_on_a_diamond_dag ... ok
+test driver::tests::linear_plan_all_done_in_order_with_data_flow ... ok
+test driver::tests::executor_failure_is_isolated_to_the_failed_branch ... ok
+test driver::tests::executor_error_surfaces_as_failed_with_note ... ok
+test agentic::tests::agentic_step_uses_a_tool_then_finishes ... ok
+test agentic::tests::agentic_step_constrains_tool_name_to_an_enum_of_gather_tools ... ok
+test execution::tests::tool_name_resolves_exact_and_tolerates_crammed_args ... ok
+test driver::tests::verify_failure_blocks_dependents_but_not_siblings ... ok
+test planner::tests::planner_schema_constrains_tool_name_to_loaded_tools ... ok
+test planner::tests::planner_schema_is_closed_for_constrained_orchestration ... ok
+test subagent_workflow::tests::directly_serialized_writers_are_allowed ... ok
+test subagent_workflow::tests::one_writer_among_gatherers_is_fine ... ok
+test subagent_workflow::tests::parallel_external_writers_are_rejected ... ok
+test subagent_workflow::tests::read_draft_gatherers_may_fan_out ... ok
+test subagent_workflow::tests::write_mode_classifies_only_external_writes_as_decide ... ok
+test subagent_workflow::tests::transitively_serialized_writers_are_allowed ... ok
+test tool_corpus::tests::off_vocabulary_query_falls_back_to_a_sample ... ok
+test tool_corpus::tests::ranks_relevant_tool_first_and_loads_detail_lazily ... ok
+test types::plan_step_tests::direct_answer_tolerates_word_or_missing_confidence ... ok
+test types::plan_step_tests::execution_plan_accepts_plan_propose_contract ... ok
+test types::plan_step_tests::known_archetype_agent_id_is_preserved ... ok
+test types::plan_step_tests::unknown_agent_id_maps_to_generic_worker_not_crash ... ok
+test types::plan_step_tests::unknown_allowed_actions_are_dropped_not_fatal ... ok
+test agentic::tests::agentic_step_forces_finish_on_the_last_round ... ok
+test agentic::tests::render_history_keeps_latest_snapshot_full_and_stubs_older ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/audit.rs (target/debug/deps/audit-cc824c0d97ccdfe7)
+
+running 3 tests
+test audit_store_records_planner_failures_for_ui_diagnostics ... ok
+test audit_store_persists_brain_run_without_raw_arguments_or_user_message ... ok
+test audit_store_exposes_context_budget_without_raw_context ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/brain.rs (target/debug/deps/brain-147e03c0774bc2f8)
+
+running 14 tests
+test drive_runs_capability_steps_in_turn_and_marks_done_after_verify ... ok
+test drive_resolves_crammed_tool_name_at_execution_like_validation ... ok
+test brain_validates_second_planner_round_against_retry_loaded_tools ... ok
+test brain_queues_browser_actions_even_when_the_planner_marks_them_immediate ... ok
+test drive_fills_empty_arguments_via_model_then_executes ... ok
+test brain_uses_lazy_tool_details_when_tool_catalog_is_large ... ok
+test brain_returns_direct_answer_without_creating_tasks_or_loading_tool_schemas ... ok
+test brain_runs_static_execution_plan_without_planner_roundtrip ... ok
+test brain_executes_read_and_draft_steps_immediately_but_queues_write_steps ... ok
+test brain_compresses_memory_and_tool_context_before_planner_prompt ... ok
+test drive_runs_subagent_step_via_agentic_loop_then_dependent ... ok
+test drive_skips_model_call_when_arguments_already_concrete ... ok
+test plan_only_returns_plan_without_materializing_tasks ... ok
+test planner_accepts_plan_without_steps_key ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+     Running tests/subagent_workflow.rs (target/debug/deps/subagent_workflow-817bb53947aa5538)
+
+running 1 test
+test brain_materializes_subagent_workflow_as_durable_tasks_with_dependencies ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests local_first_orchestrator
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== orchestrator tests: PASS (7s) ==
+== task runtime tests ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.18s
+     Running unittests src/lib.rs (target/debug/deps/local_first_task_runtime-3830cd4eb00eb01e)
+
+running 64 tests
+test broker::atomic_tests::atomic_enqueue_rolls_back_when_closure_fails ... ok
+test broker::atomic_tests::atomic_enqueue_skips_closure_when_pre_check_fails ... ok
+test broker::atomic_tests::atomic_enqueue_runs_both_inserts_on_success ... ok
+test broker::atomic_tests::retryable_turn_keeps_one_assistant_message_id ... ok
+test broker::cancel_tests::cancel_marks_cancelled_and_writes_event_and_notifies ... ok
+test broker::cancel_tests::cancel_releases_resources_when_turn_is_not_running ... ok
+test broker::atomic_tests::busy_interactive_turn_is_atomically_queued_as_steering ... ok
+test broker::atomic_tests::same_logical_turn_retry_preserves_terminal_task_state ... ok
+test broker::cancel_tests::boot_recovery_releases_terminal_turn_resources_and_lease ... ok
+test broker::cancel_tests::cancel_is_idempotent_on_terminal ... ok
+test recurrence::tests::daily_anchors_to_time_of_day_in_tz ... ok
+test recurrence::tests::interval_next_occurrence_adds_the_interval ... ok
+test recurrence::tests::multi_calendar_picks_soonest_day_and_time ... ok
+test recurrence::tests::parses_common_interval_specs ... ok
+test recurrence::tests::rejects_invalid_or_zero_rules ... ok
+test recurrence::tests::weekly_anchors_to_weekday_and_time_in_tz ... ok
+test broker::recovery_tests::recover_ignores_non_chat_turn_running ... ok
+test broker::recovery_tests::recover_ignores_completed_chat_turns ... ok
+test broker::recovery_tests::recover_does_not_touch_current_generation_running ... ok
+test broker::tests::different_threads_do_not_collide ... ok
+test broker::tests::enqueue_again_after_completion_succeeds ... ok
+test broker::tests::enqueue_persists_inline_images_for_the_executor ... ok
+test broker::recovery_tests::recover_requeues_stale_running_from_previous_generation ... ok
+test broker::tests::enqueue_returns_thread_busy_on_second_active_turn ... ok
+test broker::tests::enqueue_succeeds_on_idle_thread ... ok
+test store::agent_control_state_tests::checkpoint_recovery_requires_gateway_restart_abort ... ok
+test store::agent_control_state_tests::tool_receipt_never_reclaims_uncertain_started_action ... ok
+test store::agent_run_tests::agent_run_attempt_is_allocated_atomically_by_the_store ... ok
+test store::agent_run_tests::latest_prompt_snapshot_returns_only_the_latest_snapshot ... ok
+test store::agent_run_tests::agent_run_lifecycle_is_explicit ... ok
+test store::agent_run_tests::retention_deletes_only_old_terminal_runs ... ok
+test store::agent_run_tests::workspace_purge_deletes_owned_runs_and_events_only ... ok
+test store::agent_run_tests::agent_run_events_are_append_only_and_scope_filtered ... ok
+test store::agent_run_tests::thread_purge_deletes_owned_runs_and_events_only ... ok
+test store::chat_turn_query_tests::active_chat_turn_ignores_completed ... ok
+test store::chat_turn_query_tests::active_chat_turn_finds_queued_or_running ... ok
+test store::chat_turn_query_tests::project_thread_activity_includes_subagent_summary_and_timestamps ... ok
+test store::chat_turn_query_tests::project_thread_activity_plan_is_scoped_to_latest_turn ... ok
+test store::chat_turn_query_tests::project_thread_activity_empty_thread_is_default ... ok
+test store::chat_turn_query_tests::active_turn_projection_exposes_the_replay_cursor ... ok
+test store::chat_turn_query_tests::active_chat_turn_ignores_non_chat_turn_kind ... ok
+test store::chat_turn_query_tests::active_chat_turn_returns_none_when_empty ... ok
+test store::chat_turn_query_tests::project_thread_activity_caps_to_most_recent ... ok
+test store::chat_turn_query_tests::project_thread_activity_accumulates_cross_turn_and_takes_latest_plan ... ok
+test store::chat_turn_query_tests::thread_attention_reports_latest_terminal_event ... ok
+test store::generation_tests::bump_is_monotonic ... ok
+test store::migration_tests::chat_turn_index_exists ... ok
+test store::runtime_plan_tests::runtime_plan_cleanup_is_scope_safe ... ok
+test store::runtime_plan_tests::runtime_plan_is_bound_to_an_objective_revision ... ok
+test store::runtime_plan_tests::runtime_plan_stall_bookkeeping_is_atomic ... ok
+test store::runtime_plan_tests::objective_contract_is_created_and_replaced_in_place ... ok
+test store::turn_event_tests::append_assigns_monotonic_seq_per_turn ... ok
+test store::runtime_plan_tests::runtime_plan_is_scoped_and_revisioned ... ok
+test store::turn_event_tests::read_since_returns_only_newer_in_order ... ok
+test types::turn_event_kind_tests::recall_round_trips_through_persisted_event_kind ... ok
+test store::migration_tests::migrations_run_idempotently_with_chat_turn_cols ... ok
+test store::turn_event_tests::kind_round_trips ... ok
+test store::turn_steering_tests::held_rows_are_revision_guarded ... ok
+test store::turn_steering_tests::pending_steering_is_ordered_and_consumed_once ... ok
+test store::turn_event_tests::terminal_event_is_written_once ... ok
+test store::turn_steering_tests::steering_cannot_cross_workspace_or_active_turn ... ok
+test store::turn_steering_tests::steering_envelope_round_trips_and_claims_fifo ... ok
+test store::wal_tests::open_sets_wal_mode ... ok
+test store::upgrade_tests::upgrades_v3_to_v5_adding_chat_turn_and_agent_journal_schema ... ok
+
+test result: ok. 64 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.60s
+
+     Running tests/approval.rs (target/debug/deps/approval-9dc01c67b86911ef)
+
+running 3 tests
+test approval_gate_moves_high_risk_task_to_waiting_user_approval ... ok
+test approval_gate_approves_task_back_to_queue ... ok
+test approval_gate_rejects_task_without_execution ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/checkpoint.rs (target/debug/deps/checkpoint-e788e55ed534648b)
+
+running 3 tests
+test checkpoint_contract_keeps_task_scope ... ok
+test retry_controller_applies_backoff_before_terminal_failure ... ok
+test store_appends_and_loads_latest_checkpoint_with_redacted_payload ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/contracts.rs (target/debug/deps/contracts-0e3139f234e17a92)
+
+running 3 tests
+test local_computer_resources_serialize_for_governance ... ok
+test task_status_and_priority_serialize_as_snake_case ... ok
+test task_contract_captures_identity_priority_resources_and_retry_policy ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/facade.rs (target/debug/deps/facade-a15eed6585777cbe)
+
+running 8 tests
+test task_runtime_records_retryable_failure ... ok
+test task_runtime_completes_ready_task_and_releases_resources ... ok
+test task_runtime_waits_for_time_or_user_approval ... ok
+test task_runtime_records_checkpoint_and_requeues_task ... ok
+test task_runtime_requeues_waiting_resource_before_scheduling ... ok
+test task_runtime_materializes_next_recurrence_after_terminal_failure ... ok
+test task_runtime_materializes_next_recurrence_after_completion ... ok
+test task_runtime_recovers_resource_wait_across_worker_connections ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running tests/lease.rs (target/debug/deps/lease-830ebd3102203fb5)
+
+running 3 tests
+test lease_manager_prevents_duplicate_execution ... ok
+test lease_manager_acquires_and_heartbeats_a_task ... ok
+test lease_recovery_requeues_stale_running_tasks_and_releases_resources ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/plan_context.rs (target/debug/deps/plan_context-331629dffd91b3ed)
+
+running 2 tests
+test dependency_outputs_fail_when_dependency_has_no_checkpoint ... ok
+test dependency_outputs_resolve_latest_completed_output ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/resources.rs (target/debug/deps/resources-ad3e18926d434fdc)
+
+running 4 tests
+test resource_governor_tracks_multiple_resource_classes ... ok
+test resource_governor_reserves_and_releases_limited_resources ... ok
+test resource_governor_marks_task_waiting_resource_with_reason ... ok
+test resource_governor_requeues_waiting_task_when_capacity_returns ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/scheduler.rs (target/debug/deps/scheduler-80e79a3cc4f73de6)
+
+running 7 tests
+test scheduler_materializes_next_recurring_occurrence ... ok
+test scheduler_skips_tasks_before_not_before_time ... ok
+test scheduler_does_not_schedule_overdue_tasks ... ok
+test scheduler_selects_ready_tasks_by_priority_and_creation_order ... ok
+test scheduler_marks_dependents_waiting_when_dependency_failed ... ok
+test scheduler_waits_for_dependencies_to_complete ... ok
+test scheduler_expires_tasks_past_their_time_budget ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/store.rs (target/debug/deps/store-2e4eb3276919e765)
+
+running 6 tests
+test store_inserts_loads_and_updates_task_status ... ok
+test store_isolates_tasks_by_user_and_workspace ... ok
+test automation_event_dedup_is_scoped_per_rule ... ok
+test store_lists_tasks_for_user_workspace_in_creation_order ... ok
+test store_creates_schema_and_migrations_are_idempotent ... ok
+test automation_runs_record_recent_and_retention ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/ui.rs (target/debug/deps/ui-f769830ac08d75a8)
+
+running 3 tests
+test ui_task_detail_uses_redacted_checkpoint_and_omits_raw_input ... ok
+test ui_task_detail_exposes_browser_metadata_without_raw_input ... ok
+test ui_read_model_reports_queue_active_blocked_approvals_and_failures ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests local_first_task_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== task runtime tests: PASS (1s) ==
+== engine tests ==
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running unittests src/lib.rs (target/debug/deps/local_first_engine-f103badf46100ef9)
+
+running 108 tests
+test browse::tests::empty_answer_maps_to_not_found_with_no_note ... ok
+test browse::tests::legacy_no_answer_text_maps_to_not_found ... ok
+test browse::tests::manager_view_of_not_found_carries_note_and_no_answer ... ok
+test browse::tests::manager_view_labels_a_found_result_with_sources ... ok
+test browse::tests::browse_result_round_trips_with_lowercase_confidence ... ok
+test browse::tests::maps_substantive_grounded_answer_to_found_high_and_strips_sources_block ... ok
+test browse::tests::not_found_carries_the_note_and_defaults_to_low ... ok
+test browse::tests::seed_produces_an_isolated_two_message_context ... ok
+test browse::tests::substantive_answer_without_sources_is_found_but_low_confidence ... ok
+test config::tests::browser_budget_stops_on_time_or_stagnation ... ok
+test browser::tests::prune_stubs_older_snapshots_and_images ... ok
+test contract::tests::browser_executor_is_usable_with_a_mock ... ok
+test browser::tests::resolves_exact_and_near_miss_browser_names ... ok
+test contract::tests::context_compactor_is_usable_with_a_mock ... ok
+test contract::tests::event_sink_is_usable_with_a_mock ... ok
+test contract::tests::plan_progress_is_usable_with_a_mock ... ok
+test contract::tests::turn_completion_judge_is_usable_with_a_mock ... ok
+test contract::tests::seams_are_usable_with_a_mock ... ok
+test contract::tests::turn_policy_is_usable_with_a_mock ... ok
+test events::tests::recall_stream_hit_serializes_source_provenance ... ok
+test events::tests::linked_recall_hit_round_trips_its_source_revision ... ok
+test events::tests::turn_read_set_keeps_only_complete_linked_reads_and_deduplicates ... ok
+test agent_loop::tests::run_turn_happy_path_finishes_with_the_model_answer ... ok
+test agent_loop::tests::visible_answer_validation_preserves_structured_markers_in_done ... ok
+test execution_journal::tests::tool_outcomes_use_structured_signals_and_fingerprints_hide_content ... ok
+test execution_journal::tests::event_parts_keep_prompt_fingerprint_at_payload_root ... ok
+test agent_loop::tests::reasoning_only_completion_never_emits_done_or_claims_delivery ... ok
+test loop_state::tests::loop_state_collects_linked_memory_reads ... ok
+test loop_checkpoint::tests::checkpoint_roundtrip_excludes_provider_secret_and_image_body ... ok
+test loop_state::tests::new_is_all_empty ... ok
+test loop_state::tests::structured_no_progress_streak_is_family_scoped_and_success_resets_it ... ok
+test markers::tests::body_and_bodies_and_strip ... ok
+test markers::tests::canonicalize_folds_single_guillemet_and_xml_reasoning ... ok
+test agent_loop::tests::forced_tool_applies_only_to_round_zero_then_terminates_on_model_text ... ok
+test markers::tests::marker_safe_split_never_cuts_a_delimiter ... ok
+test markers::tests::delivery_text_keeps_normal_prose ... ok
+test markers::tests::delivery_text_rejects_pathological_repetition ... ok
+test execution_journal::tests::prompt_snapshot_is_stable_ordered_and_strips_data_url_bodies ... ok
+test markers::tests::open_close_derive_delimiters ... ok
+test agent_loop::tests::recall_tool_reads_reach_turn_outcome ... ok
+test markers::tests::normalize_collapses_malformed_reasoning_flood ... ok
+test markers::tests::preserved_display_marker_blocks_keeps_complete_non_reasoning_blocks_in_order ... ok
+test markers::tests::normalize_collapses_flood_and_closes_dangling ... ok
+test markers::tests::stream_filter_folds_malformed_reasoning_flood_live ... ok
+test markers::tests::should_force_synthesis_on_reasoning_only ... ok
+test markers::tests::validated_actionable_blocks_admit_only_json_payloads ... ok
+test markers::tests::stream_filter_is_the_one_streaming_tool ... ok
+test markers::tests::strip_display_markers_removes_all_display_blocks ... ok
+test markers::tests::visible_answer_rejects_display_only_text ... ok
+test markers::tests::visible_answer_rejects_choices_and_mcp_confirm_only_text ... ok
+test markers::tests::visible_answer_returns_trimmed_user_prose ... ok
+test model_normalize::tests::accepts_string_steps ... ok
+test model_normalize::tests::accepts_object_steps ... ok
+test model_normalize::tests::assistant_response_collapses_explicit_reasoning_when_content_empty ... ok
+test model_normalize::tests::assistant_response_collapses_reasoning_above_the_answer ... ok
+test model_normalize::tests::assistant_response_attaches_tool_calls_only_when_present ... ok
+test model_normalize::tests::assistant_response_recovers_answer_buried_in_think_tags ... ok
+test model_normalize::tests::ollama_tool_call_keeps_string_arguments_and_handles_missing ... ok
+test agent_loop::tests::browser_circuit_breaker_synthesizes_once ... ok
+test model_normalize::tests::ollama_tool_call_stringifies_object_arguments_and_synthesizes_id ... ok
+test model_normalize::tests::parse_text_tool_calls_extracts_claude_xml_invoke ... ok
+test model_normalize::tests::parse_text_tool_calls_extracts_hermes_json ... ok
+test model_normalize::tests::parse_text_tool_calls_ignores_unknown_and_prose ... ok
+test model_normalize::tests::rejects_missing_and_empty ... ok
+test model_normalize::tests::sanitize_strips_known_control_tokens ... ok
+test model_normalize::tests::split_reasoning_extracts_think_tags ... ok
+test model_normalize::tests::synthesize_tool_calls_builds_openai_shape_with_stable_ids ... ok
+test plan::tests::markdown_round_trips_through_parse ... ok
+test plan::tests::monotonic_and_frontier_and_queries ... ok
+test plan::tests::plan_value_steps_reads_steps_and_tolerates_missing ... ok
+test plan::tests::settled_covers_blocked ... ok
+test text::tests::extract_dedups_and_trims_trailing_punct ... ok
+test prompt_packets::tests::prompt_packets_keep_stable_priority_and_insertion_order ... ok
+test model_normalize::tests::balance_reasoning_collapses_minimax_flood ... ok
+test text::tests::low_value_urls_are_flagged ... ok
+test tools::tests::summarizes_writes_skips_reads ... ok
+test tools::tests::traces_mcp_and_connector_executions ... ok
+test text::tests::fonti_section_skips_when_empty_or_already_cited ... ok
+test prompt_packets::tests::layered_prompt_keeps_each_authority_source_inspectable ... ok
+test markers::tests::visible_answer_rejects_every_canonical_display_marker ... ok
+test trace::tests::append_never_panics ... ok
+test trace::tests::extract_markers_empty_on_no_markers ... ok
+test trace::tests::extract_markers_finds_all_in_delta ... ok
+test trace::tests::extract_markers_handles_prev_len_ge_len ... ok
+test trace::tests::extract_markers_ignores_before_prev_len ... ok
+test trace::tests::extract_markers_ignores_closing_markers ... ok
+test trace::tests::hash_hex_is_fnv1a_known_vectors ... ok
+test trace::tests::hash_hex_differs_for_different_input ... ok
+test trace::tests::hash_hex_stable_for_equal_input ... ok
+test trace::tests::normalize_leaves_non_matches_intact ... ok
+test trace::tests::normalize_preserves_multibyte_utf8 ... ok
+test agent_loop::tests::forced_synthesis_keeps_prior_structured_output ... ok
+test trace::tests::normalize_strips_all_three_together ... ok
+test trace::tests::normalize_strips_timestamp_with_fraction_and_zulu ... ok
+test trace::tests::normalize_strips_home ... ok
+test trace::tests::normalize_strips_timestamp ... ok
+test trace::tests::normalize_strips_timestamp_with_offset_tz ... ok
+test trace::tests::normalize_strips_uuid ... ok
+test trace::tests::normalize_with_no_home_leaves_paths ... ok
+test turn_trace::tests::counts_source_urls ... ok
+test turn_trace::tests::detects_a_markdown_table_but_not_a_prose_source_list ... ok
+test turn_trace::tests::append_never_panics_on_a_bad_dir ... ok
+test turn_trace::tests::disabled_handle_is_a_silent_noop ... ok
+test turn_trace::tests::no_flag_when_the_table_is_present ... ok
+test turn_trace::tests::flags_a_table_step_delivered_without_a_table ... ok
+test turn_trace::tests::no_artifact_flag_when_no_step_expects_one ... ok
+test turn_trace::tests::turn_received_serializes_with_its_kind_tag ... ok
+test execution_journal::tests::prompt_snapshot_is_bounded_and_marks_truncation ... ok
+
+test result: ok. 108 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests local_first_engine
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== engine tests: PASS (0s) ==
+== gateway tests ==
+warning: unused import: `EmbeddingClient`
+ --> crates/memory/src/embedding.rs:9:13
+  |
+9 |     cosine, EmbeddingClient, MemoryFacade, MemoryLifecycleRequest, MemoryRef, UserId, WorkspaceId,
+  |             ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `local-first-memory` (lib) generated 1 warning (run `cargo fix --lib -p local-first-memory` to apply 1 suggestion)
+warning: variable does not need to be mutable
+  --> crates/desktop-gateway/src/model_client.rs:87:5
+   |
+87 |     mut resolve: impl FnMut(
+   |     ----^^^^^^^
+   |     |
+   |     help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `fill_extraction_defaults` is never used
+    --> crates/desktop-gateway/src/main.rs:4378:4
+     |
+4378 | fn fill_extraction_defaults(item: &serde_json::Value) -> serde_json::Value {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `persist_scope_memories` is never used
+    --> crates/desktop-gateway/src/main.rs:4392:4
+     |
+4392 | fn persist_scope_memories(
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `open_loop_closure_targets` is never used
+    --> crates/desktop-gateway/src/main.rs:5720:4
+     |
+5720 | fn open_loop_closure_targets(memory: &ExtractedMemory) -> Vec<String> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `reference` is never read
+     --> crates/desktop-gateway/src/main.rs:14345:5
+      |
+14344 | struct MemoryCandidate {
+      |        --------------- field in this struct
+14345 |     reference: String,
+      |     ^^^^^^^^^
+
+warning: function `vision_openai_config` is never used
+     --> crates/desktop-gateway/src/main.rs:17619:4
+      |
+17619 | fn vision_openai_config() -> Option<(String, String, Option<String>)> {
+      |    ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `load_skill_body` is never used
+     --> crates/desktop-gateway/src/main.rs:18191:4
+      |
+18191 | fn load_skill_body(id: &str) -> Option<String> {
+      |    ^^^^^^^^^^^^^^^
+
+warning: field `soul_md` is never read
+     --> crates/desktop-gateway/src/main.rs:52519:5
+      |
+52510 | struct ContactUpdateRequest {
+      |        -------------------- field in this struct
+...
+52519 |     soul_md: Option<String>,
+      |     ^^^^^^^
+
+warning: field `mime_type` is never read
+  --> crates/desktop-gateway/src/chat_store.rs:52:9
+   |
+50 | pub struct StoredAttachment {
+   |            ---------------- field in this struct
+51 |     pub display_name: String,
+52 |     pub mime_type: String,
+   |         ^^^^^^^^^
+   |
+   = note: `StoredAttachment` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `expires_at` is never read
+   --> crates/desktop-gateway/src/chat_store.rs:113:9
+    |
+102 | pub struct RemoteApprovalRow {
+    |            ----------------- field in this struct
+...
+113 |     pub expires_at: i64,
+    |         ^^^^^^^^^^
+    |
+    = note: `RemoteApprovalRow` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: fields `nickname`, `preferred_channel`, and `avatar` are never read
+   --> crates/desktop-gateway/src/chat_store.rs:166:9
+    |
+163 | pub struct StoredContact {
+    |            ------------- fields in this struct
+...
+166 |     pub nickname: Option<String>,
+    |         ^^^^^^^^
+...
+170 |     pub preferred_channel: Option<String>,
+    |         ^^^^^^^^^^^^^^^^^
+171 |     pub avatar: Option<String>,
+    |         ^^^^^^
+    |
+    = note: `StoredContact` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `label` is never read
+   --> crates/desktop-gateway/src/chat_store.rs:215:9
+    |
+212 | pub struct StoredContactIdentity {
+    |            --------------------- field in this struct
+...
+215 |     pub label: Option<String>,
+    |         ^^^^^
+    |
+    = note: `StoredContactIdentity` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: methods `link_message_task`, `commit_continuation_result`, and `upsert_message` are never used
+    --> crates/desktop-gateway/src/chat_store.rs:1071:12
+     |
+ 411 | impl ChatStore {
+     | -------------- methods in this implementation
+...
+1071 |     pub fn link_message_task(
+     |            ^^^^^^^^^^^^^^^^^
+...
+1283 |     pub fn commit_continuation_result(
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3640 |     fn upsert_message(
+     |        ^^^^^^^^^^^^^^
+
+warning: function `steering_messages_for_round` is never used
+  --> crates/desktop-gateway/src/model_client.rs:63:15
+   |
+63 | pub(crate) fn steering_messages_for_round(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `suggestion_action_columns` is never used
+   --> crates/desktop-gateway/src/usage_store.rs:594:12
+    |
+303 | impl UsageStore {
+    | --------------- method in this implementation
+...
+594 |     pub fn suggestion_action_columns(&self) -> rusqlite::Result<Vec<String>> {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `dropped_events` is never used
+    --> crates/desktop-gateway/src/usage_store.rs:1699:12
+     |
+1676 | impl BufferedUsageRecorder {
+     | -------------------------- method in this implementation
+...
+1699 |     pub fn dropped_events(&self) -> u64 {
+     |            ^^^^^^^^^^^^^^
+
+warning: field `kind` is never read
+   --> crates/desktop-gateway/src/mcp_registry.rs:169:5
+    |
+167 | struct RawArg {
+    |        ------ field in this struct
+168 |     #[serde(default, rename = "type")]
+169 |     kind: String,
+    |     ^^^^
+    |
+    = note: `RawArg` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: field `redacted_preview` is never read
+   --> crates/desktop-gateway/src/privacy_guard.rs:214:16
+    |
+211 | pub(crate) struct PendingVaultProposal {
+    |                   -------------------- field in this struct
+...
+214 |     pub(crate) redacted_preview: String,
+    |                ^^^^^^^^^^^^^^^^
+    |
+    = note: `PendingVaultProposal` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `test_thread` is never used
+     --> crates/desktop-gateway/src/main.rs:75700:8
+      |
+75700 |     fn test_thread(
+      |        ^^^^^^^^^^^
+
+warning: function `remote_approval_matches_persisted_message` is never used
+    --> crates/desktop-gateway/src/main.rs:3264:4
+     |
+3264 | fn remote_approval_matches_persisted_message(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `is_auto_confirmable` is never used
+    --> crates/desktop-gateway/src/main.rs:3882:4
+     |
+3882 | fn is_auto_confirmable(
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `normalize_for_dedup` is never used
+    --> crates/desktop-gateway/src/main.rs:3912:4
+     |
+3912 | fn normalize_for_dedup(text: &str) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `fill_extraction_defaults` is never used
+    --> crates/desktop-gateway/src/main.rs:4378:4
+     |
+4378 | fn fill_extraction_defaults(item: &serde_json::Value) -> serde_json::Value {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `deduplicate_open_loops` is never used
+    --> crates/desktop-gateway/src/main.rs:5712:4
+     |
+5712 | fn deduplicate_open_loops(
+     |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `open_loop_matches_target` is never used
+    --> crates/desktop-gateway/src/main.rs:5743:4
+     |
+5743 | fn open_loop_matches_target(open_loop_text: &str, target: &str) -> bool {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `close_matching_open_loops` is never used
+    --> crates/desktop-gateway/src/main.rs:5756:4
+     |
+5756 | fn close_matching_open_loops(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `status_wiki_body_from_open_loops` is never used
+    --> crates/desktop-gateway/src/main.rs:5800:4
+     |
+5800 | fn status_wiki_body_from_open_loops(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `next_plan_stall` is never used
+    --> crates/desktop-gateway/src/main.rs:7621:4
+     |
+7621 | fn next_plan_stall(prior_stall: u32, last_resume_done: usize, current_done: usize) -> u32 {
+     |    ^^^^^^^^^^^^^^^
+
+warning: method `provider_id` is never used
+    --> crates/desktop-gateway/src/main.rs:8125:8
+     |
+8124 | trait TemplateCatalogProvider {
+     |       ----------------------- method in this trait
+8125 |     fn provider_id(&self) -> &str;
+     |        ^^^^^^^^^^^
+
+warning: field `provider_id` is never read
+    --> crates/desktop-gateway/src/main.rs:8135:5
+     |
+8134 | struct FileTemplateCatalogProvider {
+     |        --------------------------- field in this struct
+8135 |     provider_id: String,
+     |     ^^^^^^^^^^^
+     |
+     = note: `FileTemplateCatalogProvider` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: struct `MemoryCandidate` is never constructed
+     --> crates/desktop-gateway/src/main.rs:14344:8
+      |
+14344 | struct MemoryCandidate {
+      |        ^^^^^^^^^^^^^^^
+
+warning: function `memory_recall_timing_trace_line` is never used
+     --> crates/desktop-gateway/src/main.rs:14373:4
+      |
+14373 | fn memory_recall_timing_trace_line(timing: &MemoryRecallTiming) -> String {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `hybrid_memory_score` is never used
+     --> crates/desktop-gateway/src/main.rs:14560:4
+      |
+14560 | fn hybrid_memory_score(c: &MemoryCandidate) -> f32 {
+      |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `memory_age_days` is never used
+     --> crates/desktop-gateway/src/main.rs:14570:4
+      |
+14570 | fn memory_age_days(created_at: &str, now_secs: i64) -> f32 {
+      |    ^^^^^^^^^^^^^^^
+
+warning: function `resolved_deliverable_design_components` is never used
+     --> crates/desktop-gateway/src/main.rs:18575:4
+      |
+18575 | fn resolved_deliverable_design_components(
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `resolved_deliverable_design_profile` is never used
+     --> crates/desktop-gateway/src/main.rs:18615:4
+      |
+18615 | fn resolved_deliverable_design_profile(
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `payment_approval_marker` is never used
+     --> crates/desktop-gateway/src/main.rs:42802:4
+      |
+42802 | fn payment_approval_marker(snapshot: &PaymentApprovalSnapshot) -> String {
+      |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `label` is never read
+     --> crates/desktop-gateway/src/main.rs:55342:5
+      |
+55341 | struct BrowserTarget {
+      |        ------------- field in this struct
+55342 |     label: String,
+      |     ^^^^^
+      |
+      = note: `BrowserTarget` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: struct `IngestedAttachments` is never constructed
+  --> crates/desktop-gateway/src/attachments.rs:31:12
+   |
+31 | pub struct IngestedAttachments {
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning: function `ingest_attachments` is never used
+  --> crates/desktop-gateway/src/attachments.rs:81:8
+   |
+81 | pub fn ingest_attachments(attachments: &[AttachmentInput]) -> IngestedAttachments {
+   |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `high_risk_reason` is never used
+  --> crates/desktop-gateway/src/browser_safety.rs:86:8
+   |
+86 | pub fn high_risk_reason(action: &Value, snapshot: &str) -> Option<String> {
+   |        ^^^^^^^^^^^^^^^^
+
+warning: struct `ChatStoreMemoryBoundaryAudit` is never constructed
+   --> crates/desktop-gateway/src/chat_store.rs:231:12
+    |
+231 | pub struct ChatStoreMemoryBoundaryAudit {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CHAT_STORE_MEMORY_BOUNDARY_AUDIT` is never used
+   --> crates/desktop-gateway/src/chat_store.rs:237:11
+    |
+237 | pub const CHAT_STORE_MEMORY_BOUNDARY_AUDIT: &[ChatStoreMemoryBoundaryAudit] = &[
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `link_message_task`, `commit_regenerated_answer`, `commit_continuation_result`, `finalize_assistant_message`, and `upsert_message` are never used
+    --> crates/desktop-gateway/src/chat_store.rs:1071:12
+     |
+ 411 | impl ChatStore {
+     | -------------- methods in this implementation
+...
+1071 |     pub fn link_message_task(
+     |            ^^^^^^^^^^^^^^^^^
+...
+1112 |     pub fn commit_regenerated_answer(
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1283 |     pub fn commit_continuation_result(
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+1379 |     pub fn finalize_assistant_message(
+     |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+3640 |     fn upsert_message(
+     |        ^^^^^^^^^^^^^^
+
+warning: function `steering_messages_for_round_with` is never used
+  --> crates/desktop-gateway/src/model_client.rs:85:15
+   |
+85 | pub(crate) fn steering_messages_for_round_with(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `LimitSource` is never used
+  --> crates/desktop-gateway/src/usage_store.rs:83:10
+   |
+83 | pub enum LimitSource {
+   |          ^^^^^^^^^^^
+
+warning: method `limit_source` is never used
+  --> crates/desktop-gateway/src/usage_store.rs:89:12
+   |
+88 | impl ProviderUsagePolicy {
+   | ------------------------ method in this implementation
+89 |     pub fn limit_source(&self) -> LimitSource {
+   |            ^^^^^^^^^^^^
+
+warning: associated items `open_in_memory`, `events_for_attempt`, `events_for_scope`, `suggestion_action_columns`, and `provider_snapshot_count` are never used
+   --> crates/desktop-gateway/src/usage_store.rs:313:12
+    |
+303 | impl UsageStore {
+    | --------------- associated items in this implementation
+...
+313 |     pub fn open_in_memory() -> rusqlite::Result<Self> {
+    |            ^^^^^^^^^^^^^^
+...
+458 |     pub fn events_for_attempt(&self, attempt_id: &str) -> rusqlite::Result<Vec<UsageAttemptEvent>> {
+    |            ^^^^^^^^^^^^^^^^^^
+...
+469 |     pub fn events_for_scope(
+    |            ^^^^^^^^^^^^^^^^
+...
+594 |     pub fn suggestion_action_columns(&self) -> rusqlite::Result<Vec<String>> {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+717 |     pub fn provider_snapshot_count(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `dropped_events` and `shutdown` are never used
+    --> crates/desktop-gateway/src/usage_store.rs:1699:12
+     |
+1676 | impl BufferedUsageRecorder {
+     | -------------------------- methods in this implementation
+...
+1699 |     pub fn dropped_events(&self) -> u64 {
+     |            ^^^^^^^^^^^^^^
+...
+1703 |     pub fn shutdown(&self, timeout: Duration) {
+     |            ^^^^^^^^
+
+warning: function `parse_models_response` is never used
+   --> crates/desktop-gateway/src/model_registry.rs:859:8
+    |
+859 | pub fn parse_models_response(kind: ProviderKind, body: &serde_json::Value) -> Vec<String> {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `start`, `date_only`, and `is_future` are never read
+  --> crates/desktop-gateway/src/temporal.rs:87:9
+   |
+86 | pub struct Resolved {
+   |            -------- fields in this struct
+87 |     pub start: jiff::Zoned,
+   |         ^^^^^
+...
+91 |     pub date_only: bool,
+   |         ^^^^^^^^^
+...
+96 |     pub is_future: bool,
+   |         ^^^^^^^^^
+   |
+   = note: `Resolved` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: `local-first-desktop-gateway` (bin "local-first-desktop-gateway" test) generated 19 warnings (run `cargo fix --bin "local-first-desktop-gateway" -p local-first-desktop-gateway --tests` to apply 1 suggestion)
+warning: `local-first-desktop-gateway` (bin "local-first-desktop-gateway") generated 45 warnings (13 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
+     Running unittests src/lib.rs (target/debug/deps/local_first_desktop_gateway-0728213bcbc63bdc)
+
+running 55 tests
+test model_registry::tests::capability_inference_distinguishes_modalities ... ok
+test model_registry::tests::auto_role_falls_back_to_active_model_without_catalog ... ok
+test model_registry::tests::generic_catalog_without_price_keeps_cost_unknown ... ok
+test model_registry::tests::eligible_models_apply_the_capability_gate ... ok
+test model_registry::tests::auto_role_picks_largest_context_text_tool_model ... ok
+test model_registry::tests::image_generation_role_gates_on_image_modality ... ok
+test model_registry::tests::manual_binding_overrides_auto ... ok
+test model_registry::tests::disabled_provider_is_excluded_from_routing ... ok
+test model_registry::tests::model_profiles_classify_models_in_use ... ok
+test model_registry::tests::ollama_models_endpoint_uses_api_tags ... ok
+test model_registry::tests::manual_binding_reports_only_explicit_enabled_pins ... ok
+test model_registry::tests::openrouter_catalog_price_converts_per_token_strings_to_microusd_per_million ... ok
+test integrity_api::tests::integrity_actions_are_canonical_and_mixed_domains_are_rejected ... ok
+test model_registry::tests::remove_reassigns_active ... ok
+test model_registry::tests::orchestrator_prefers_reasoning_tier_over_balanced ... ok
+test model_registry::tests::slugify_makes_stable_ids ... ok
+test model_registry::tests::parse_ollama_and_openai_lists ... ok
+test model_registry::tests::upsert_preserves_cached_models_and_sets_active ... ok
+test model_registry::tests::tier_does_not_mistake_large_param_sizes_for_fast ... ok
+test provider_usage::tests::anthropic_standard_key_is_explicitly_unsupported_for_org_usage ... ok
+test model_registry::tests::vision_role_auto_picks_a_model_that_can_actually_see ... ok
+test provider_usage::tests::openrouter_key_response_becomes_a_credit_snapshot ... ok
+test tests::message_delivery_state_rejects_unknown_persisted_values ... ok
+test tests::only_delivered_assistant_messages_enter_model_context ... ok
+test tests::strip_display_markers_removes_blocks_including_unclosed ... ok
+test usage_pricing::tests::local_without_a_price_is_not_billed ... ok
+test usage_pricing::tests::manual_override_wins_over_catalog_for_estimates ... ok
+test tests::followup_context_excludes_the_assistant_reasoning_trace ... ok
+test usage_pricing::tests::missing_token_component_does_not_become_zero_cost ... ok
+test tests::prompt_builder_keeps_recent_context_for_followups ... ok
+test tests::prompt_builder_redacts_sensitive_context_before_returning_to_renderer ... ok
+test usage_pricing::tests::provider_reported_cost_wins_unchanged ... ok
+test usage_store::tests::bounded_sender_drops_instead_of_blocking ... ok
+test tests::prompt_builder_compresses_older_turns_under_budget ... ok
+test tests::large_budget_lifts_the_per_message_clamp_for_capable_models ... ok
+test integrity_api::tests::integrity_graph_status_distinguishes_missing_fresh_stale_and_invalid ... ok
+test usage_store::tests::latest_snapshot_is_provider_scoped_and_append_only ... ok
+test usage_store::tests::empty_summary_is_zero_without_a_fake_coverage_start ... ok
+test usage_store::tests::events_are_append_only_idempotent_and_scope_filtered ... ok
+test usage_store::tests::daily_series_uses_local_day_and_same_pair_for_dominant_route ... ok
+test usage_store::tests::daily_series_keeps_real_coverage_start_and_sparse_days ... ok
+test usage_store::tests::daily_rollups_are_rebuildable_from_the_append_only_ledger ... ok
+test usage_store::tests::buffered_recorder_flushes_before_shutdown_returns ... ok
+test usage_suggestions::tests::cloud_candidate_cannot_compensate_for_local_only_policy ... ok
+test usage_suggestions::tests::material_cost_gain_with_equal_capability_is_explained ... ok
+test usage_suggestions::tests::missing_required_capabilities_or_context_excludes_candidate ... ok
+test usage_store::tests::manual_budget_round_trips_without_becoming_provider_quota ... ok
+test usage_store::tests::workspace_purge_keeps_user_level_provider_accounting ... ok
+test usage_store::tests::model_routes_keep_equal_models_separate_by_provider ... ok
+test usage_store::tests::null_usage_is_not_coerced_to_zero ... ok
+test usage_store::tests::recovery_appends_abort_without_rewriting_start ... ok
+test usage_store::tests::summary_dominant_model_keeps_its_provider ... ok
+test linked_memory_repair::tests::linked_memory_repair_preview_is_metadata_only_and_checksum_bound ... ok
+test linked_memory_repair::tests::linked_memory_repair_rolls_back_both_databases_on_failure ... ok
+test linked_memory_repair::tests::linked_memory_repair_is_backed_up_conservative_and_idempotent ... ok
+
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src/bin/homun-linux-sandbox.rs (target/debug/deps/homun_linux_sandbox-2906d6dbeeffa78a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/local_first_desktop_gateway-6c01101f1cc42802)
+
+running 841 tests
+test apply_patch::tests::add_empty_file_single_empty_plus_line ... ok
+test agent_journal::tests::sensitive_json_keys_are_redacted_even_when_the_value_has_no_marker ... ok
+test agent_journal::tests::nested_strings_are_redacted_without_reordering_arrays ... ok
+test apply_patch::tests::add_file_body_lines_must_start_with_plus ... ok
+test apply_patch::tests::add_over_existing_is_rejected ... ok
+test apply_patch::tests::add_new_file_writes_contents ... ok
+test agent_journal::tests::persisted_prompt_payload_is_redacted_and_keeps_data_url_metadata_only ... ok
+test agent_journal::tests::unavailable_store_is_counted_as_dropped_observability ... ok
+test apply_patch::tests::ambiguous_no_hint_first_exact_match_wins ... ok
+test apply_patch::tests::apply_under_root_move_dest_is_jailed ... ok
+test apply_patch::tests::apply_under_root_jail_violation_writes_nothing ... ok
+test apply_patch::tests::apply_under_root_context_not_found_writes_nothing ... ok
+test apply_patch::tests::apply_under_root_add_update_delete_success ... ok
+test apply_patch::tests::bad_body_line_is_unexpected_line ... ok
+test apply_patch::tests::apply_under_root_rename_writes_dest_removes_source ... ok
+test apply_patch::tests::bare_at_at_has_no_hint ... ok
+test apply_patch::tests::context_and_prefixes_parsed ... ok
+test apply_patch::tests::context_fuzzy_matches_trailing_whitespace ... ok
+test apply_patch::tests::context_not_found_is_rejected ... ok
+test apply_patch::tests::delete_missing_file_is_rejected ... ok
+test apply_patch::tests::empty_hunk_is_rejected ... ok
+test apply_patch::tests::environment_id_line_is_ignored ... ok
+test apply_patch::tests::hunk_ends_with_end_of_file_sentinel ... ok
+test apply_patch::tests::hint_exact_trim_outranks_earlier_substring_line ... ok
+test apply_patch::tests::move_to_produces_rename ... ok
+test apply_patch::tests::multi_hunk_no_backward_reanchor_to_earlier_duplicate ... ok
+test apply_patch::tests::out_of_order_hunks_are_rejected ... ok
+test apply_patch::tests::parses_add_update_move_delete ... ok
+test apply_patch::tests::parses_multi_hunk_update_without_move ... ok
+test apply_patch::tests::rejects_missing_envelope ... ok
+test apply_patch::tests::repeated_snippet_disambiguated_by_hint ... ok
+test apply_patch::tests::trailing_newline_optional ... ok
+test apply_patch::tests::two_hunks_in_one_file_both_applied_in_order ... ok
+test apply_patch::tests::unrecognised_header_is_bad_header ... ok
+test apply_patch::tests::update_applies_hunk_by_context_not_line_number ... ok
+test apply_patch::tests::update_missing_file_is_rejected ... ok
+test apply_patch::tests::update_only_adds_lines ... ok
+test apply_patch::tests::update_only_removes_lines ... ok
+test apply_patch::tests::update_preserves_absent_trailing_newline ... ok
+test attachments::tests::odt_ingestion_smoke ... ignored, needs HOMUN_TEST_ODT to point at a real OpenDocument file
+test attachments::tests::missing_file_degrades_to_a_note_not_a_panic ... ok
+test attachments::tests::pdfium_ingestion_smoke ... ignored, needs pdfium lib installed + HOMUN_TEST_PDF set
+test attachments::tests::corrupt_odt_degrades_without_panicking ... ok
+test attachments::tests::text_file_is_read_as_a_text_block ... ok
+test attachments::tests::odt_without_content_xml_degrades_to_a_specific_note ... ok
+test attachments::tests::odt_mime_is_recognized_without_an_extension ... ok
+test attachments::tests::odt_file_extracts_structured_text ... ok
+test attachments::tests::powerpoint_file_extracts_slide_text ... ok
+test browser_safety::tests::allows_type_into_field ... ok
+test browser_safety::tests::allows_click_on_search ... ok
+test browser_safety::tests::allows_hold_on_human_challenge ... ok
+test browser_safety::tests::blocks_click_on_purchase_label ... ok
+test browser_safety::tests::blocks_evaluate ... ok
+test browser_safety::tests::committing_detects_enter_press ... ok
+test browser_safety::tests::blocks_hold_on_purchase_label ... ok
+test browser_safety::tests::hold_is_not_a_blanket_commit ... ok
+test browser_safety::tests::final_payment_click_requires_matching_payment_approval ... ok
+test attachments::tests::unsupported_type_is_noted ... ok
+test chat_store::tests::channel_thread_recipient_does_not_downgrade_whatsapp_pn_to_lid ... ok
+test chat_store::tests::channel_thread_remembers_reply_recipient_for_app_side_continuity ... ok
+test chat_store::tests::chat_thread_title_is_synthesized_from_first_user_prompt ... ok
+test chat_store::tests::append_assistant_event_part_is_scoped_idempotent_and_preserves_existing_parts ... ok
+test chat_store::tests::assistant_delivery_state_round_trips_through_sqlite ... ok
+test chat_store::tests::append_recall_part_accepts_an_empty_placeholder ... ok
+test chat_store::tests::atomic_enqueue_prompt_is_one_tree_node_then_reused_by_commit ... ok
+test agent_journal::tests::flush_persists_all_accepted_events_before_returning ... ok
+test agent_journal::tests::close_and_flush_rejects_late_events ... ok
+test chat_store::tests::chat_tree_backfill_linearizes_legacy_rows ... ok
+test chat_store::tests::chat_tree_links_parents_and_active_leaf ... ok
+test chat_store::tests::committed_chat_message_attachments_survive_reload ... ok
+test chat_store::tests::chat_tree_edit_and_regenerate_create_sibling_branches ... ok
+test chat_store::tests::committed_chat_message_derives_event_parts_for_legacy_markers ... ok
+test chat_store::tests::committed_chat_message_ignores_card_markers_inside_reasoning ... ok
+test chat_store::tests::committed_chat_message_preserves_explicit_event_parts_without_markers ... ok
+test agent_run_api_tests::runtime_plan_control_store_is_authoritative_and_workspace_scoped ... ok
+test agent_run_api_tests::agent_run_api_is_ordered_cursor_based_and_scope_checked ... ok
+test agent_run_api_tests::runtime_plan_control_store_owns_stall_bookkeeping ... ok
+test chat_store::tests::finalization_drops_reasoning_parts_but_keeps_recall ... ok
+test chat_store::tests::delete_thread_clears_its_routing_binding ... ok
+test chat_store::tests::complete_and_local_legacy_recall_derive_distinct_policies ... ok
+test chat_store::tests::finalization_can_atomically_leave_an_approval_card_waiting_for_user ... ok
+test chat_store::tests::deleting_thread_removes_terminal_receipt ... ok
+test chat_store::tests::finalization_failure_does_not_create_a_delivered_fallback_message ... ok
+test chat_store::tests::finalization_preserves_actionable_card_envelope_for_reload ... ok
+test chat_store::tests::finalization_strips_malformed_actionable_marker_from_delivered_message ... ok
+test chat_store::tests::finalizing_assistant_message_marks_it_delivered ... ok
+test chat_store::tests::parse_optional_json_array_fails_open_on_corruption ... ok
+test chat_store::tests::finalize_assistant_message_is_atomic ... ok
+test chat_store::tests::fresh_store_seeds_the_real_base_workspace_and_reuses_its_starter_once ... ok
+test chat_store::tests::local_store_tables_have_explicit_memory_boundary_audit ... ok
+test chat_store::tests::linked_user_message_keeps_inline_image_preview_after_reload ... ok
+test chat_store::tests::linked_legacy_event_fails_closed ... ok
+test chat_store::tests::linked_turn_insert_preallocates_one_assistant_leaf_idempotently ... ok
+test chat_store::tests::member_tasks_resolve_to_owning_thread_without_shadowing_primary ... ok
+test chat_store::tests::message_lookup_reads_attachment_column ... ok
+test chat_store::tests::mismatched_or_corrupt_envelopes_fail_closed ... ok
+test chat_store::tests::plugin_enabled_defaults_on_and_toggles ... ok
+test chat_store::tests::purge_workspace_removes_threads_settings_and_tags_and_is_idempotent ... ok
+test chat_store::tests::recent_feedback_returns_acted_cards_scoped ... ok
+test chat_store::tests::remote_approval_persists_binding_and_claims_once ... ok
+test chat_store::tests::selecting_thread_does_not_change_activity_timestamp ... ok
+test chat_store::tests::seen_terminal_cursor_is_monotonic ... ok
+test chat_store::tests::set_message_delivery_state_is_scoped_to_the_thread_and_message ... ok
+test chat_store::tests::set_threads_order_persists_manual_order ... ok
+test chat_store::tests::sqlite_default_marks_legacy_message_rows_delivered ... ok
+test db_migrate::tests::fresh_install_is_noop ... ok
+test db_migrate::tests::already_unified_is_noop ... ok
+test document_content::tests::assemble_carries_skeleton_chrome_and_lets_model_content_win ... ok
+test document_content::tests::assemble_keeps_model_eyebrow_but_restores_default_when_blank ... ok
+test document_content::tests::assemble_reorders_slots_and_fails_on_missing ... ok
+test document_content::tests::content_schema_fails_loud_on_unregistered_block_type ... ok
+test document_content::tests::content_schema_is_strict_slot_filling ... ok
+test document_content::tests::every_registered_block_type_has_a_schema ... ok
+test document_content::tests::schema_injects_eyebrow_slot_only_where_skeleton_has_one ... ok
+test document_content::tests::skeleton_extracts_ordered_slots ... ok
+test host_computer_gateway::tests::approval_event_contains_summary_but_never_action_value ... ok
+test host_computer_gateway::tests::approval_summaries_are_bounded_and_redact_private_labels ... ok
+test host_computer_gateway::tests::beta_state_is_disabled_before_permissions_and_never_ready_on_unsupported_hosts ... ok
+test host_computer_gateway::tests::host_computer_disable_clears_runtime_state ... ok
+test host_computer_gateway::tests::host_computer_revoke_cancels_active_session ... ok
+test host_computer_gateway::tests::manager_tool_requires_opt_in_permissions_and_a_valid_grant ... ok
+test host_computer_gateway::tests::terminal_actions_are_hard_denied_and_press_is_not_assumed_reversible ... ok
+test host_computer_tool_contract_tests::manager_schema_is_single_bounded_delegate ... ok
+test model_client::tests::ollama_usage_maps_native_terminal_counts ... ok
+test model_client::tests::openai_usage_keeps_reasoning_cache_and_exact_cost ... ok
+test model_client::tests::retry_records_each_transport_attempt_under_one_call ... ok
+test chat_store::tests::store_seeds_and_commits_chat_messages ... ok
+test model_registry::tests::auto_role_falls_back_to_active_model_without_catalog ... ok
+test chat_store::tests::suggestion_roundtrip_keeps_source_and_expiry ... ok
+test model_registry::tests::auto_role_picks_largest_context_text_tool_model ... ok
+test model_registry::tests::capability_inference_distinguishes_modalities ... ok
+test model_registry::tests::eligible_models_apply_the_capability_gate ... ok
+test model_registry::tests::generic_catalog_without_price_keeps_cost_unknown ... ok
+test model_registry::tests::disabled_provider_is_excluded_from_routing ... ok
+test model_registry::tests::image_generation_role_gates_on_image_modality ... ok
+test model_registry::tests::manual_binding_overrides_auto ... ok
+test model_registry::tests::manual_binding_reports_only_explicit_enabled_pins ... ok
+test model_registry::tests::model_profiles_classify_models_in_use ... ok
+test model_registry::tests::ollama_models_endpoint_uses_api_tags ... ok
+test model_registry::tests::openrouter_catalog_price_converts_per_token_strings_to_microusd_per_million ... ok
+test model_registry::tests::orchestrator_prefers_reasoning_tier_over_balanced ... ok
+test model_registry::tests::remove_reassigns_active ... ok
+test model_registry::tests::slugify_makes_stable_ids ... ok
+test model_registry::tests::parse_ollama_and_openai_lists ... ok
+test model_registry::tests::upsert_preserves_cached_models_and_sets_active ... ok
+test model_registry::tests::tier_does_not_mistake_large_param_sizes_for_fast ... ok
+test model_registry::tests::vision_role_auto_picks_a_model_that_can_actually_see ... ok
+test novnc_proxy::tests::novnc_origin_parses_env ... ok
+test panic_log::tests::install_hook_writes_files_end_to_end ... ignored, mutates the global panic hook; run serially with --ignored
+test novnc_proxy::tests::ticket_roundtrip_and_expiry ... ok
+test panic_log::tests::render_entry_is_self_contained ... ok
+test panic_log::tests::render_marker_is_valid_json ... ok
+test pdf_render::tests::renders_markdown_to_valid_pdf ... ok
+test pdf_render::tests::wrap_breaks_long_text ... ok
+test plugin_packages::tests::cached_plugin_registry_rejects_duplicate_plugin_ids ... ok
+test panic_log::tests::writers_persist_files_owner_only ... ok
+test plugin_packages::tests::hplugin_archive_inspection_rejects_digest_mismatch ... ok
+test plugin_packages::tests::cached_plugin_registry_saves_loads_and_validates_entries ... ok
+test plugin_packages::tests::hplugin_archive_inspection_validates_manifest_and_declared_digests ... ok
+test plugin_packages::tests::hplugin_archive_staging_blocks_critical_security_findings ... ok
+test plugin_packages::tests::hplugin_archive_staging_writes_only_valid_declared_files ... ok
+test plugin_packages::tests::hplugin_package_install_rejects_package_identity_mismatch ... ok
+test plugin_packages::tests::hplugin_package_install_can_replace_existing_when_explicit ... ok
+test plugin_packages::tests::installed_plugin_registry_upserts_atomically_and_replaces_existing ... ok
+test plugin_packages::tests::plugin_license_store_rejects_expired_tokens ... ok
+test plugin_packages::tests::hplugin_package_install_verifies_and_activates_atomically ... ok
+test plugin_packages::tests::trusted_plugin_public_keys_reject_invalid_keys ... ok
+test plugin_packages::tests::trusted_plugin_public_keys_save_load_normalizes_and_dedups ... ok
+test privacy_guard::tests::deterministic_guard_detects_vehicle_plate_and_redacts_text ... ok
+test privacy_guard::tests::deterministic_guard_ignores_non_sensitive_preference ... ok
+test plugin_packages::tests::plugin_license_store_upserts_only_verified_tokens ... ok
+test privacy_guard::tests::model_and_deterministic_detections_are_merged_without_exposing_values ... ok
+test privacy_guard::tests::model_output_builds_decision_only_for_values_present_in_prompt ... ok
+test privacy_guard::tests::pending_proposal_store_consumes_secret_once ... ok
+test privacy_guard::tests::unavailable_guard_blocks_remote_but_allows_local_deterministic_fallback ... ok
+test privacy_guard::tests::sensitive_turn_builds_redacted_user_and_vault_proposal_answer ... ok
+test provider_usage::tests::anthropic_standard_key_is_explicitly_unsupported_for_org_usage ... ok
+test provider_usage::tests::openrouter_key_response_becomes_a_credit_snapshot ... ok
+test sandbox::platform_tests::contained_computer_run_args_preserve_runtime_contract ... ok
+test sandbox::platform_tests::explicit_docker_binary_has_priority_on_every_platform ... ok
+test sandbox::platform_tests::windows_docker_candidates_follow_program_files_without_path_restart ... ok
+test sandbox::platform_tests::windows_home_falls_back_to_userprofile ... ok
+test chat_store::tests::suggestions_dedup_list_and_act ... ok
+test chat_store::tests::tags_crud_assign_and_cross_project_filter ... ok
+test seatbelt::tests::danger_full_access_has_no_profile ... ok
+test seatbelt::tests::escape_sb_path_escapes_quotes_and_backslashes ... ok
+test seatbelt::tests::multiple_writable_roots_each_get_their_own_subpath ... ok
+test seatbelt::tests::quoted_root_is_escaped_in_the_generated_profile ... ok
+test seatbelt::tests::read_only_profile_has_base_and_reads_but_no_project_writes ... ok
+test seatbelt::tests::read_only_profile_has_no_project_root_subpath ... ok
+test seatbelt::tests::workspace_write_no_network_allows_the_root_and_tmp_but_not_network ... ok
+test seatbelt::tests::workspace_write_with_network_allows_network ... ok
+test seatbelt::tests::writable_roots_are_canonicalized_symlinks_resolved ... ok
+test semantic_decision::tests::malformed_or_contradictory_model_output_uses_safe_fallback ... ok
+test semantic_decision::tests::new_turn_fallback_is_read_only_agent_loop ... ok
+test semantic_decision::tests::objective_contract_uses_semantic_decision_fields ... ok
+test semantic_decision::tests::prompt_contains_state_binding_and_effectful_capabilities ... ok
+test semantic_decision::tests::read_only_decision_rejects_effectful_workflow ... ok
+test semantic_decision::tests::semantic_decision_journal_payload_is_bounded_and_redacted ... ok
+test semantic_decision::tests::steering_confirmation_depends_on_model_relationship_and_effect_delta ... ok
+test semantic_decision::tests::unknown_capability_is_rejected ... ok
+test setup_computer::tests::coordinator_deduplicates_active_bootstrap ... ok
+test setup_computer::tests::coordinator_retries_after_failure_and_ignores_stale_updates ... ok
+test setup_computer::tests::observed_healthy_container_is_immediately_ready ... ok
+test chat_store::tests::thread_routing_binding_round_trips_and_clears ... ok
+test setup_computer::tests::sandbox_phases_map_to_stable_setup_phases ... ok
+test setup_computer::tests::status_serializes_stable_phase_names ... ok
+test skill_security::tests::clean_text_has_zero_risk ... ok
+test skill_security::tests::flags_destructive_and_pipe_to_shell ... ok
+test skill_security::tests::flags_prompt_injection ... ok
+test skills::tests::folded_description_and_inline_tools ... ok
+test skills::tests::comma_separated_tools_and_quotes ... ok
+test chat_store::tests::thread_attachments_persist_and_replace_by_name ... ok
+test skills::tests::no_frontmatter_returns_whole_body ... ok
+test skills::tests::parses_block_scalar_description_and_tools_list ... ok
+test skills::tests::parses_sensitive_categories_inline ... ok
+test skills::tests::parses_simple_frontmatter ... ok
+test skills::tests::rejects_unsafe_ids ... ok
+test skills::tests::sensitive_absent_is_empty ... ok
+test skills::tests::sensitive_block_list_aliases_unknowns_and_dedup ... ok
+test skills_catalog::tests::category_classifier_buckets ... ok
+test skills_catalog::tests::download_error_keeps_bounded_upstream_explanation ... ok
+test skills_catalog::tests::download_url_includes_owner_handle_when_known ... ok
+test skills_catalog::tests::remote_search_keeps_same_slug_from_distinct_publishers ... ok
+test skills_catalog::tests::search_filters_and_ranks ... ok
+[store-integrity] broken failed quick_check → quarantined to *.corrupt-*.bak (fresh store will be created): /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/homun-integrity-test-corrupt-17416/broken.sqlite
+test chat_store::tests::threads_are_scoped_per_project_with_independent_active_pointer ... ok
+test store_integrity::tests::missing_store_is_healthy ... ok
+test store_integrity::tests::corrupt_store_is_quarantined_and_reported ... ok
+test task_registry::tests::registry_resolves_specific_patterns_before_fallbacks ... ok
+test template_packs::tests::bundled_pack_without_manifest_is_skipped ... ok
+test store_integrity::tests::healthy_store_is_untouched ... ok
+test chat_store::wal_tests::open_sets_wal_mode ... ok
+test template_packs::tests::bundled_provider_discovers_packs_with_live_preview_refs ... ok
+test template_packs::tests::every_bundled_pack_declares_a_category ... ok
+test template_packs::tests::repo_templates_dir_ships_the_v1_packs ... ok
+test sandbox::platform_tests::contained_computer_hash_is_deterministic_and_tracks_inputs ... ok
+test temporal::tests::de_uebermorgen_via_json ... ok
+test temporal::tests::it_domani_mattina_verso_le_7 ... ok
+test temporal::tests::es_pasado_manana ... ok
+test temporal::tests::fr_dans_3_jours ... ok
+test temporal::tests::en_next_monday_at_9 ... ok
+test temporal::tests::past_time_today_is_rejected ... ok
+test temporal::tests::json_multilingual_weekday_and_part ... ok
+test temporal::tests::this_monday_can_be_in_the_past_this_week ... ok
+test temporal::tests::today_as_a_date_is_allowed ... ok
+test tests::act_gate_allows_typing_into_field ... ok
+test tests::act_gate_blocks_purchase_click ... ok
+test tests::a_silent_provider_and_a_retired_model_are_not_the_same_thing ... ok
+test tests::actionable_cards_classify_local_confirms_and_native_waiting_cards ... ok
+test tests::active_binding_forces_workflow_route_over_semantic_default ... ok
+test tests::active_model_anthropic_with_key_is_capable_cloud ... ok
+test tests::active_model_anthropic_without_key_resolves_to_openai_compat ... ok
+test tests::active_model_default_and_unknown_backends_resolve_to_openai_compat ... ok
+test tests::active_model_openai_cloud_without_key_is_capable_but_flags_missing ... ok
+test tests::active_model_openai_local_keyless_is_not_flagged ... ok
+test tests::adapt_skill_body_substitutes_base_dir ... ok
+test tests::agent_loop_route_does_not_depend_on_prompt_retrieval_rank ... ok
+test tests::advance_plan_frontier_moves_the_doing_pointer ... ok
+test tests::agent_output_plan_guard_allows_completed_plan_answer ... ok
+test tests::agent_output_plan_guard_rejects_missing_reply ... ok
+test tests::agent_output_plan_guard_rejects_incomplete_plan_answer ... ok
+test tests::aggregate_session_state_reflects_member_progress ... ok
+test tests::answer_concludes_plan_only_when_substantial_and_last_step_open ... ok
+test tests::approval_continuation_visible_text_is_short_and_explicit ... ok
+test tests::answer_body_is_empty_detects_reasoning_only_completions ... ok
+test tests::approval_resume_prompt_anchors_to_source_request_and_approved_args ... ok
+test tests::artifact_memories_do_not_participate_in_semantic_dedup ... ok
+test tests::absolute_jail_accepts_nested_new_path_and_rejects_escape ... ok
+test tests::active_llm_concurrency_honors_env_override ... ok
+test tests::artifact_memory_delete_path_is_jail_scoped ... ok
+test tests::artifact_memory_links_explicit_decision_affects_to_provenance_graph ... ok
+test tests::artifact_zip_entry_names_are_safe_and_unique ... ok
+test tests::attachment_prompt_distinguishes_ready_content_from_extraction_issues ... ok
+test tests::auto_confirm_only_low_risk ... ok
+test tests::auto_confirm_promotes_private_personal_facts_but_gates_pii ... ok
+test tests::automatic_recall_payload_keeps_an_empty_recall_visible_to_the_stream ... ok
+test tests::artifact_memory_links_only_explicit_metadata_source_refs ... ok
+test tests::automatic_recall_seeds_the_loop_read_set ... ok
+test tests::artifact_provenance_context_surfaces_make_document_workflow ... ok
+test tests::automatic_recall_payload_preserves_graph_path ... ok
+test tests::automation_workspace_scope_defaults_and_trims ... ok
+test tests::artifact_memory_upsert_creates_single_record_and_graph_entity ... ok
+test tests::block_stalled_step_blocks_the_first_runnable_and_records_why ... ok
+test tests::bm25_rank_orders_by_relevance ... ok
+test tests::booking_assumption_instruction_requires_choice_card_before_proceeding ... ok
+test tests::bound_template_ref_is_injected_when_model_omits_it ... ok
+test tests::bound_template_ref_wins_over_a_different_model_supplied_ref ... ok
+test tests::artifact_provenance_context_surfaces_managed_path_and_make_deck_workflow ... ok
+test tests::briefing_and_recall_hits_share_one_deduplicated_turn_attestation ... ok
+test tests::base_workspace_never_creates_a_legacy_memory_scope_root ... ok
+test tests::automation_memory_cleanup_tombstones_matching_records ... ok
+test tests::briefing_attestation_survives_atomic_assistant_finalization ... ok
+test tests::automation_run_updates_rule_in_task_scope_not_gateway_scope ... ok
+test model_client::tests::send_with_headers_timeout_gives_up_when_upstream_withholds_headers ... ok
+test tests::broker_enqueue_preallocates_one_linked_user_and_assistant ... ok
+test tests::broker_enqueue_rejects_changed_payload_for_terminal_same_thread_turn ... ok
+test tests::broker_stream_extracts_redacted_user_text_from_terminal_event ... ok
+test tests::browser_executor_uses_read_only_search_urls ... ok
+test tests::browser_is_headless_by_default ... ok
+test tests::browser_method_guides_open_ended_news_through_discovery_first ... ok
+test tests::browser_path_is_general_with_no_train_specialization ... ok
+test tests::browser_registry_tools_mirror_the_chat_tools_with_real_schemas ... ok
+test tests::browser_tool_name_recovers_typos_and_leaves_others_untouched ... ok
+test tests::budgeted_briefing_attests_only_linked_items_that_enter_the_prompt ... ok
+test tests::budgets_scale_with_model_context_window ... ok
+test tests::build_browse_goal_parses_goal_and_folds_hints ... ok
+test tests::build_chat_payload_forced_tool_has_no_effect_without_an_offered_toolset ... ok
+test tests::build_chat_payload_forces_tool_choice_when_requested ... ok
+test tests::bundled_entries_do_not_report_as_imported ... ok
+test tests::broker_enqueue_rejects_cross_thread_request_id_collision_without_mutating_first_turn ... ok
+test db_migrate::tests::fuses_legacy_chat_and_task_into_unified ... ok
+test tests::broker_enqueue_rolls_back_user_assistant_and_task_when_placeholder_is_rejected ... ok
+test tests::capability_browser_tool_names_resolve_to_browser_methods ... ok
+test tests::capability_completed_outcome_keeps_raw_output_out_of_redacted_and_chat ... ok
+test tests::capability_discovery_trace_records_typed_sources ... ok
+test tests::catalog_owner_validation_rejects_path_or_query_injection ... ok
+test tests::cdp_wedge_matched_only_for_connect_over_cdp_timeout ... ok
+test tests::channel_agent_stream_lines_accumulate_delta_and_done_text ... ok
+test tests::brief_via_service_matches_inline_assembly_personal_and_project ... ok
+test tests::channel_message_event_envelope_is_stable_and_visible ... ok
+test tests::chat_payload_max_tokens_override_skips_forced_synthesis ... ok
+test tests::briefing_cache_invalidates_after_memory_write ... ok
+test sandbox::tests::graphify_managed_mirror_is_absolute_when_output_root_is_relative ... ok
+test tests::clawhub_origin_is_publisher_specific_and_legacy_compatible ... ok
+test tests::collapse_plan_markers_keeps_first_position ... ok
+test tests::collapse_plan_markers_keeps_only_latest ... ok
+test tests::collapse_plan_markers_noop_for_single_or_none ... ok
+test tests::composio_tool_read_write_classification ... ok
+test tests::channel_fallback_failure_marks_the_preallocated_assistant_bubble_failed ... ok
+test tests::connect_suggest_mark_flags_only_the_matching_item ... ok
+test tests::connected_capability_execution_trace_records_source ... ok
+test tests::connector_errors_classify_into_actionable_kinds ... ok
+test tests::connector_hits_are_typed_capability_entries ... ok
+test tests::connector_poll_event_envelope_is_stable_and_visible ... ok
+test tests::connector_search_returns_typed_toolkit_entries ... ok
+test tests::contact_memory_deny_cannot_use_linked_sources ... ok
+test tests::contact_relationships_are_mirrored_into_canonical_memory_graph ... ok
+test tests::contained_computer_cdp_resolves_from_config ... ok
+test tests::contained_computer_novnc_resolves_when_enabled ... ok
+test tests::context_budget_follows_real_window_with_env_override ... ok
+test tests::context_compaction_span_preserves_head_tail_and_avoids_orphan_tool ... ok
+test tests::broker_steering_stays_out_of_transcript_until_claim ... ok
+test tests::cors_preflight_allows_patch_for_browser_gateway_writes ... ok
+test tests::cancelling_an_actionable_source_leaves_no_waiting_message_or_task ... ok
+test tests::customized_brand_kit_is_materialized ... ok
+test tests::danger_mode_resolves_to_danger_full_access_but_the_os_fence_is_separate ... ok
+test tests::dead_sidecar_errors_trigger_respawn_others_do_not ... ok
+test tests::deck_artifact_metadata_includes_imported_template_attribution ... ok
+test tests::deck_content_schema_exposes_refinable_eyebrow ... ok
+test tests::deck_design_components_materialize_renderer_supported_layouts ... ok
+test tests::deck_design_theme_materializes_renderer_theme_tokens ... ok
+test tests::deck_design_theme_passes_editorial_name_through_for_surface_ink_resolution ... ok
+test tests::deck_quality_guardrails_bound_text_before_render ... ok
+test tests::deck_quality_guardrails_remove_duplicate_and_title_repeated_bullets ... ok
+test tests::deck_slide_image_prompt_avoids_rendering_title_text ... ok
+test tests::deck_template_chrome_overlays_cover_and_section ... ok
+test tests::deck_template_chrome_uses_pack_eyebrow_when_model_blank_and_is_failopen ... ok
+test tests::dedup_folds_paraphrased_decisions ... ok
+test tests::default_brand_kit_is_not_materialized ... ok
+test tests::delete_chat_thread_preserves_artifact_lifecycle ... ok
+test tests::cancelling_linked_proactive_action_card_terminalizes_its_exact_task_and_bubble ... ok
+test tests::delete_imported_template_pack_removes_local_pack_only ... ok
+test tests::deliverable_design_components_schema_is_shared_by_deck_and_document ... ok
+test tests::deliverable_design_profile_schema_is_shared_by_deck_and_document ... ok
+test tests::deliverable_design_template_expands_to_defaults_without_overriding_explicit_args ... ok
+test tests::deliverable_design_template_schema_is_shared_by_deck_and_document ... ok
+test tests::deliverable_design_theme_directive_covers_all_editorial_themes ... ok
+test tests::deliverable_design_theme_schema_is_medium_aware ... ok
+test tests::delivered_image_rejection_marks_outcome_delivered ... ok
+test tests::discovery_search_ranks_relevant_tools_first ... ok
+test tests::doc_json_to_docx_renders_blocks_structurally ... ok
+test tests::doc_table_rows_clamp_to_header_width ... ok
+test tests::document_design_components_append_renderable_markdown_blocks ... ok
+test tests::document_design_components_render_as_docx_tables ... ok
+test tests::document_generation_options_drops_dark_editorial_theme ... ok
+test tests::document_quality_guardrail_accepts_structured_markdown ... ok
+test tests::document_quality_guardrail_flags_unrenderable_markdown ... ok
+test tests::document_quality_guardrails_normalize_table_cells_before_render ... ok
+test tests::document_render_command_is_container_relative_and_qa_gated ... ok
+test tests::document_template_families_are_whitelisted_with_defaults ... ok
+test tests::document_template_pack_requires_document_kind_bundled_and_pack_root ... ok
+test tests::docx_artifacts_register_as_documents ... ok
+test tests::docx_cover_blocks_render_eyebrow_before_title ... ok
+test tests::editorial_themes_use_bundled_serif_not_georgia ... ok
+test tests::effective_approval_forces_never_only_when_autonomous ... ok
+test tests::emit_stream_event_publishes_structured_event_without_legacy_marker_delta_by_default ... ok
+test tests::estimate_tokens_counts_serialized_chars_over_four ... ok
+test tests::evented_proactive_task_uses_owning_thread_metadata ... ok
+test tests::executor_needs_approval_is_not_treated_as_generic_block ... ok
+test tests::expanded_template_catalog_routes_common_pmi_deliverables ... ok
+test tests::create_automation_from_chat_uses_active_scope ... ok
+test tests::explicit_recall_payload_becomes_tool_memory_read_effects ... ok
+test tests::extract_poll_items_finds_array_by_key_field ... ok
+test tests::extract_source_urls_finds_and_trims ... ok
+test tests::chat_turn_delivery_transitions_target_the_preallocated_assistant ... ok
+test tests::fanout_recall_preserves_the_payload_and_uses_recall_kind ... ok
+test tests::file_template_catalog_entry_parses_category_with_fallback ... ok
+test tests::file_template_catalog_entry_parses_intake_questions ... ok
+test tests::file_template_catalog_entry_parses_localized_names ... ok
+test tests::file_template_catalog_provider_ignores_unsafe_preview_refs ... ok
+test tests::file_template_catalog_provider_loads_manifest_from_path ... ok
+test tests::file_template_catalog_provider_loads_valid_manifest ... ok
+test tests::file_template_catalog_provider_rejects_invalid_manifest_identity ... ok
+test tests::fonti_section_skips_when_already_cited ... ok
+test tests::forced_tool_for_turn_requires_specific_forcing_and_turn_index_two ... ok
+test tests::format_recall_entry_surfaces_decision_why ... ok
+test tests::fs_authorize_card_requires_the_exact_path_and_operation ... ok
+test tests::extracted_project_graph_stays_in_project_scope_with_evidence_and_deduplicates ... ok
+test tests::fs_authorize_rewrite_drops_card_marker ... ok
+test tests::fs_native_jail_and_path_expansion ... ok
+test tests::graph_entity_alias_detail_deduplicates_and_hides_self_aliases ... ok
+test tests::graph_projection_deduplicates_identical_edges ... ok
+test tests::cached_briefing_is_rejected_when_grant_is_revoked_after_lookup ... ok
+test tests::hybrid_memory_ranking_fuses_then_refines_by_importance_and_recency ... ok
+test tests::chat_turn_retry_and_terminal_failure_update_the_stable_assistant ... ok
+test tests::idle_stream_entry_counts_as_stale_for_activity ... ok
+test tests::concurrent_actionable_claim_allows_exactly_one_execution ... ok
+[store-integrity] live: inconclusive (locked/unreadable) — leaving untouched: /var/folders/nb/r6fbsdsn3z58bkbb9w55nn780000gn/T/homun-integrity-test-locked-17416/live.sqlite
+test store_integrity::tests::locked_healthy_store_is_not_quarantined ... ok
+test tests::hygiene_suggestions_find_same_person_names_without_auto_merge ... ok
+test tests::imported_template_pack_rejects_missing_source_pptx ... ok
+test tests::inbound_action_kill_switch_allowlist_and_master_toggle ... ok
+test tests::imported_template_pack_manifest_loads_real_pptx_metadata ... ok
+test sandbox::tests::graphify_runs_from_gateway_managed_mirror ... ok
+test tests::delete_chat_thread_purges_its_execution_journal ... ok
+test tests::legacy_card_marker_deltas_expand_to_structured_stream_events ... ok
+test tests::legacy_data_dir_decision ... ok
+test tests::legacy_marker_delta_expansion_can_keep_delta_for_compat_clients ... ok
+test tests::legacy_marker_deltas_expand_to_structured_stream_events ... ok
+test tests::llm_concurrency_view_reports_effective_and_locality ... ok
+test tests::local_executor_understands_simple_arithmetic ... ok
+test tests::low_value_source_urls_are_filtered ... ok
+test tests::mac_apps_beta_is_off_for_legacy_settings_and_survives_partial_patches ... ok
+test tests::make_deck_and_document_accept_template_ref ... ok
+test tests::make_deck_content_failure_distinguishes_template_from_provider ... ok
+test tests::make_deck_workflow_definition_projects_execution_plan ... ok
+test tests::fs_authorize_rejects_mismatched_card_without_grant_or_lifecycle_change ... ok
+test tests::make_document_formats_preserve_explicit_pdf_outputs ... ok
+test tests::make_document_formats_support_editable_docx_outputs ... ok
+test tests::make_document_generation_options_are_explicit_and_bounded ... ok
+test tests::make_document_tool_requires_artifact_name ... ok
+test tests::make_deck_workflow_plan_runs_through_brain_without_planner ... ok
+test tests::make_document_workflow_definition_projects_execution_plan ... ok
+test tests::expiry_and_source_update_change_briefing_fingerprint ... ok
+test tests::malformed_linked_attestation_is_omitted_from_model_context ... ok
+test tests::managed_artifact_export_rejects_path_escape ... ok
+test tests::managed_tool_authorization_is_fail_closed_and_policy_gated ... ok
+test tests::markdown_to_docx_promotes_plain_first_line_to_title ... ok
+test tests::markdown_to_docx_renders_pipe_tables ... ok
+test tests::markdown_to_docx_writes_valid_word_package ... ok
+test tests::materialize_deck_template_source_copies_imported_pptx_for_renderer ... ok
+test tests::mcp_chat_tool_name_round_trips_collision_safe ... ok
+test tests::mcp_confirm_match_requires_exact_tool_and_arguments ... ok
+test tests::mcp_filesystem_artifact_detection_accepts_namespaced_provider ... ok
+test tests::mcp_http_connection_fails_closed_when_secret_is_missing ... ok
+test tests::mcp_http_connection_restores_headers_from_secret_store ... ok
+test tests::mcp_http_connection_without_secret_is_unauthenticated ... ok
+test tests::mcp_http_headers_reject_malformed_secret_material ... ok
+test tests::mcp_http_headers_round_trip_as_secret_material ... ok
+test tests::mcp_http_metadata_never_contains_headers ... ok
+test tests::make_document_workflow_plan_runs_through_brain_without_planner ... ok
+test tests::mcp_metadata_round_trips_between_connect_and_executor ... ok
+test tests::mcp_metadata_round_trips_with_empty_args_and_env ... ok
+test tests::mcp_provider_slug_sanitizes_names ... ok
+test tests::malformed_actionable_marker_is_not_persisted_into_delivered_model_context ... ok
+test tests::integrity_audit_returns_counts_and_graph_freshness_without_content ... ok
+test tests::mcp_stdio_config_parses_command_args_env ... ok
+test tests::mcp_tools_contribute_typed_entries_to_capability_corpus ... ok
+test tests::mcp_legacy_header_migration_moves_plaintext_into_secret_store ... ok
+test tests::memory_block_is_none_when_empty_or_zero_budget ... ok
+test tests::memory_block_labels_sections_and_includes_text ... ok
+test tests::memory_block_puts_open_loops_first ... ok
+test tests::memory_block_respects_budget_and_marks_truncation ... ok
+test tests::mcp_reconnect_without_auth_deletes_previous_secret ... ok
+test tests::memory_eval_surfaces_artifact_provenance_and_decision_why ... ok
+test tests::memory_eval_surfaces_workflow_status_and_why ... ok
+test tests::memory_intent_drives_injection_without_prompt_keywords ... ok
+test tests::memory_intent_standalone_choice_suppresses_unrelated_global_context ... ok
+test tests::memory_guardrail_release_gate_covers_artifact_and_workflow_recall ... ok
+test tests::memory_query_embedding_cache_key_normalizes_workspace_query ... ok
+test tests::memory_query_embedding_cache_reuses_and_evicts_lru ... ok
+test tests::memory_recall_timing_trace_is_stable_and_redacted ... ok
+test tests::memory_service_flag_off_keeps_single_scope_recall ... ok
+test tests::member_counts_read_real_task_statuses_and_drive_aggregate_state ... ok
+test tests::mcp_secret_lifecycle_persists_outside_metadata_and_deletes_on_disconnect ... ok
+test tests::memory_source_candidates_are_redacted_mapped_and_never_secret ... ok
+test tests::memory_source_facade_conflicts_map_to_http_409 ... ok
+test tests::memory_source_flag_defaults_on_and_only_off_variants_disable ... ok
+test tests::memory_source_grant_builder_starts_at_one_and_preserves_identity_on_update ... ok
+test tests::memory_source_grant_views_fall_back_to_workspace_ids_for_blank_labels ... ok
+test tests::memory_source_grant_views_keep_local_first_and_deleted_sources_revocable ... ok
+test tests::memory_source_input_rejects_empty_duplicate_and_unsafe_policy_values ... ok
+test tests::memory_source_input_rejects_malformed_noncanonical_and_wrong_source_refs ... ok
+test tests::memory_source_input_rejects_self_source_and_unknown_collection ... ok
+test tests::memory_source_input_requires_exact_collection_sensitivity_and_effect_tokens ... ok
+test tests::integrity_repair_apply_creates_private_backup_without_exposing_paths ... ok
+test tests::integrity_repair_apply_requires_matching_preview_token_and_confirmation ... ok
+test tests::memory_source_override_validation_rejects_missing_wrong_owner_secret_and_vault ... ok
+test tests::memory_publication_routes_reload_local_source_require_decision_and_reject_foreign_actor ... ok
+test tests::memory_service_on_and_off_use_same_linked_source_coordinator ... ok
+test tests::memory_source_authorization_registry_requires_a_nonempty_parseable_file ... ok
+test tests::memory_source_list_route_exposes_last_scoped_access_timestamp_when_present ... ok
+test tests::controlled_checkout_approval_flow_rewrites_transcript_and_consumes_cvv ... ok
+test tests::memory_source_list_route_roundtrips_typed_allow_and_deny_overrides ... ok
+test tests::memory_source_routes_keep_unavailable_grants_listable_and_revocable ... ok
+test tests::memory_source_routes_list_only_local_when_disabled ... ok
+test tests::memory_source_scoped_revoke_cannot_target_another_consumer ... ok
+test tests::memory_source_workspace_validation_canonicalizes_the_base_workspace_as_personal ... ok
+test tests::memory_source_workspace_validation_uses_snapshot_and_allows_personal_source ... ok
+test tests::memory_status_distinguishes_empty_from_unavailable ... ok
+test tests::memory_source_routes_normalize_default_source_and_reject_default_consumer ... ok
+test tests::merge_execution_plan_is_runtime_canonical_state ... ok
+test tests::merge_execution_plan_preserves_plan_and_step_contract_metadata ... ok
+test tests::merge_plan_creates_then_keeps_stable_ids ... ok
+test tests::merge_plan_done_is_sticky_no_reset_loop ... ok
+test tests::merge_plan_id_only_advance_no_title ... ok
+test tests::merge_plan_id_only_for_missing_step_is_ignored ... ok
+test tests::merge_plan_keeps_blocked_steps_sticky ... ok
+test tests::merge_plan_matches_by_id_despite_rephrased_title ... ok
+test tests::merge_plan_new_done_claim_is_held_doing_for_verification ... ok
+test tests::merge_plan_preserves_explicit_dependencies ... ok
+test tests::merge_workspace_policy_handles_skill_confirmations ... ok
+test tests::merge_workspace_policy_handles_writable_roots ... ok
+test tests::merge_workspace_policy_is_partial_and_normalizes ... ok
+test tests::memory_source_routes_persist_upsert_list_and_revoke ... ok
+test tests::model_round_consumes_durable_steering_exactly_once ... ok
+test tests::monotonic_progress_closes_stale_doing_before_frontier ... ok
+test tests::monotonic_progress_completes_steps_before_the_frontier ... ok
+test tests::monotonic_progress_preserves_blocked_and_no_frontier ... ok
+test tests::memory_source_routes_reject_oversized_enabled_body_and_invalid_pages ... ok
+test tests::native_atomic_registry_maps_pdf_atomic_to_real_tool_schema ... ok
+test tests::navigate_failure_hint_escalates_to_search_pivot_on_repeat ... ok
+test tests::needs_context_compaction_respects_threshold_and_unknown_window ... ok
+test tests::multiple_attested_linked_reads_remain_available_as_one_historical_message ... ok
+test tests::normalize_browser_call_manages_tab_for_planner_steps ... ok
+test tests::ollama_capabilities_parsed_from_show_body ... ok
+test tests::ollama_native_root_strips_v1 ... ok
+test tests::ollama_native_routing_and_message_conversion ... ok
+test tests::no_grants_are_created_for_existing_projects ... ok
+test tests::open_loop_closure_marks_matching_loop_stale_only_with_overlap ... ok
+test tests::orchestrated_brain_drives_plan_on_gemma4 ... ignored, hits the live Ollama gemma4 endpoint; run manually
+test tests::orchestrated_planner_sees_browser_on_gemma4 ... ignored, hits the live Ollama gemma4 endpoint; run manually
+test tests::orchestrated_subagent_gathers_on_gemma4 ... ignored, hits the live Ollama gemma4 endpoint; run manually
+test tests::orchestration_completion_judge_uses_strict_schema ... ok
+test tests::orchestration_plan_tools_expose_strict_schemas ... ok
+test tests::owner_channel_match_accepts_configured_approval_identity ... ok
+test tests::parse_approval_reply_parses_verb_and_code ... ok
+test tests::open_loop_dedup_supersedes_duplicate_records ... ok
+test tests::payment_approval_marker_wraps_snapshot_payload ... ok
+test tests::payment_approval_secret_injects_cvv_once ... ok
+test tests::perimeter_classifies_calendar_and_contacts_connectors ... ok
+test tests::persisted_remote_approval_event_part_authorizes_the_exact_card ... ok
+test tests::persisted_thread_context_is_filtered_server_side ... ok
+test tests::plan_completion_requires_every_step_done ... ok
+test tests::plan_is_settled_when_every_step_done_or_blocked ... ok
+test tests::plan_marker_round_trips ... ok
+test tests::plan_reconcile_on_delivery_is_default_on_with_explicit_opt_out ... ok
+test tests::plan_stall_counts_no_progress_resumes_and_resets_on_progress ... ok
+test tests::privacy_guard_auto_resolution_uses_the_smallest_qualified_local_model ... ok
+test tests::privacy_guard_default_config_does_not_depend_on_a_fresh_provider_catalog ... ok
+test tests::privacy_guard_does_not_resolve_an_unqualified_local_model ... ok
+test tests::privacy_guard_payload_disables_reasoning_and_requires_json_content ... ok
+test tests::privacy_guard_prompt_defines_contextual_credentials_without_keywords ... ok
+test tests::proactive_action_memory_writeback_maps_statuses ... ok
+test tests::proactive_answer_capture_is_a_recallable_preference ... ok
+test tests::proactive_dedup_key_is_semantic_and_stable ... ok
+test tests::proactive_fuzzy_dedup_blocks_paraphrases ... ok
+test tests::proactive_parse_builds_card ... ok
+test tests::proactive_parse_declines_cleanly ... ok
+test tests::proactive_parse_extracts_choices ... ok
+test tests::memory_source_routes_return_disabled_before_body_or_query_parsing ... ok
+test tests::profile_wiki_excludes_candidate_memories ... ok
+test tests::project_access_defaults_to_no_grants ... ok
+test tests::project_access_upsert_lists_and_removes_grants ... ok
+test tests::memory_source_routes_return_typed_input_errors_when_enabled ... ok
+test tests::proactive_visible_turn_persists_generated_source_ids_on_owning_task ... ok
+test tests::memory_source_routes_scope_revoke_and_missing_revoke_are_not_found ... ok
+purge_workspace: completed memorybench_6145e9c61e162307e8e09521cbcc753a (chat=0, tasks=0, memory=4, graph_cache=false)
+test tests::memorybench_routes_ingest_search_status_and_governed_clear ... ok
+test tests::missing_workspace_registry_never_authorizes_the_default_project_source ... ok
+test tests::project_briefing_does_not_promote_individual_allow_outside_preferences_collection ... ok
+test tests::project_briefing_enforces_compiled_personal_source_policy ... ok
+test tests::project_briefing_requires_personal_preferences_grant ... ok
+test tests::project_context_exposes_objective_from_goal_memory ... ok
+test tests::project_context_objective_follows_request_workspace_not_global ... ok
+test tests::project_filesystem_mcp_instruction_binds_connected_mcp_to_thread_root ... ok
+project-graph: build failed for project-a at import_failed: project graph import failed: forced import failure
+test tests::project_graph_end_to_end_reanalysis_converges_and_failed_import_never_publishes_ready ... ok
+test tests::project_graph_projection_hides_project_entities_that_duplicate_root_label ... ok
+test tests::project_graph_projection_links_detached_components_to_project_root ... ok
+test tests::project_graph_projection_links_orphan_nodes_to_project_root ... ok
+test tests::project_path_jail_blocks_escapes ... ok
+test tests::project_policy_allows_self_contact_without_project_grant ... ok
+test tests::project_policy_composes_grant_with_contact_perimeter_denies ... ok
+test tests::project_policy_denies_when_contact_not_authorized ... ok
+test tests::project_scope_demotes_extracted_project_entities_that_are_not_workspace_root ... ok
+test tests::project_skill_confirmations_force_confirm_with_no_skill_active ... ok
+test tests::prune_keeps_only_latest_browser_snapshot ... ok
+test tests::prune_keeps_only_latest_image_message ... ok
+test tests::prune_noop_without_browser_ids ... ok
+test tests::prune_removes_denied_tools_not_just_retains_route_tool ... ok
+test tests::publication_rejects_active_revoked_and_expired_linked_sources ... ok
+test tests::queue_hides_internal_subtasks_and_humanizes_kinds ... ok
+test tests::read_only_blocks_any_committing_action ... ok
+test tests::read_only_card_marker_wraps_target_for_a_block ... ok
+test tests::read_only_mode_refuses_write_project_file_without_writing ... ok
+test tests::read_only_objective_blocks_mutating_tools_but_keeps_analysis_tools ... ok
+test tests::read_only_objective_prunes_writes_but_keeps_directory_analysis ... ok
+test tests::readiness_requires_container_cdp_and_novnc ... ok
+test tests::reassemble_streamed_content_and_tool_calls ... ok
+test tests::recall_excludes_removed_project_sources_but_keeps_local_and_available_sources ... ok
+test tests::recall_memory_does_not_relabel_thread_episodes_as_local_hits ... ok
+test tests::project_change_fingerprint_tracks_git_ignored_source_content ... ok
+test tests::project_change_fingerprint_tracks_repeated_content_edits_to_an_untracked_file ... ok
+test tests::project_change_fingerprint_tracks_repeated_edits_in_a_scoped_subdirectory ... ok
+test tests::reconcile_final_plan_marker_does_not_close_open_step_from_answer_length ... ok
+test tests::reconcile_final_plan_noop_on_short_answer ... ok
+test tests::reconcile_final_plan_preserves_all_evidence_free_open_steps ... ok
+test tests::project_change_fingerprint_tracks_repeated_content_edits_to_the_same_dirty_file ... ok
+test tests::recall_memory_tool_uses_linked_sources_only_from_projects ... ok
+test tests::remote_approval_requires_its_exact_persisted_card_id ... ok
+test tests::removed_contact_relationship_tombstones_canonical_graph_edge ... ok
+test tests::recovery_reuses_the_existing_assistant_message ... ok
+test tests::rendered_deck_qa_failure_is_extracted_from_renderer_output ... ok
+test tests::rendered_deck_qa_metadata_is_structured_for_artifacts ... ok
+test tests::replace_latest_plan_marker_updates_delivered_plan_status ... ok
+test tests::resolve_approval_policy_core_precedence_env_beats_workspace_beats_global ... ok
+test tests::resolve_extra_roots_override_replaces_global ... ok
+test tests::resolve_sandbox_mode_core_precedence_env_beats_workspace_beats_global ... ok
+test tests::removed_source_is_degraded_before_intent_filter_without_an_access_event ... ok
+test tests::project_change_fingerprint_tracks_repeated_staged_content_edits ... ok
+test tests::remote_actionable_claim_after_stop_executes_nothing ... ok
+test tests::resolved_approval_policy_precedence_env_beats_persisted_beats_default ... ok
+test tests::response_language_instruction_matches_latest_user_message_first ... ok
+test tests::retired_models_are_removed_from_the_refreshed_catalog ... ok
+test tests::revoked_linked_answer_stays_available_in_its_existing_thread_context ... ok
+test tests::resolving_an_actionable_source_unblocks_only_its_exact_waiting_turn ... ok
+test tests::resolving_linked_proactive_action_card_terminalizes_its_exact_task_and_bubble ... ok
+test tests::rewrite_confirm_marker_to_done ... ok
+test tests::rewrite_payment_approval_removes_card_and_leaves_approved_id ... ok
+test tests::runtime_log_redaction_hides_tokens ... ok
+test tests::runtime_log_redaction_strips_terminal_control_sequences ... ok
+test tests::runtime_plan_memory_is_staled_when_complete ... ok
+test tests::resolved_sandbox_mode_precedence_env_beats_persisted_beats_default ... ok
+test tests::runtime_plan_memory_materializes_plan_step_graph ... ok
+test tests::runtime_plan_memory_projects_execution_plan_contract ... ok
+test tests::runtime_plan_memory_upserts_single_open_loop ... ok
+test tests::runtime_settings_discard_retired_adaptive_floor_field ... ok
+test tests::sandbox_escalate_matches_only_the_proposed_command ... ok
+test tests::sandbox_escalate_rewrite_drops_card_marker ... ok
+test tests::recall_memory_falls_back_to_vault_metadata_without_exposing_tool_or_secret ... ok
+test tests::runtime_plan_step_outcome_writes_confirmed_fact_memory ... ok
+test tests::sandbox_escalation_provenance_rejects_substituted_cwd ... ok
+test tests::sandbox_terminal_owner_is_only_live_while_command_runs ... ok
+test tests::recall_memory_still_offers_vault_reveal_when_memory_mentions_record ... ok
+test tests::runner_does_not_duplicate_linked_proactive_approval_already_persisted_in_chat ... ok
+test tests::scheduled_proactive_task_keeps_stable_scheduled_thread_plan ... ok
+test tests::scheduled_turn_with_an_action_card_is_nonterminal ... ok
+test tests::scheduled_automation_materializes_visible_proactive_task ... ok
+test tests::scheduled_occurrences_reuse_one_visible_thread ... ok
+test tests::revoking_grant_changes_briefing_fingerprint ... ok
+test tests::scope_from_active_workspace_projects_personal_and_project ... ok
+test tests::seeded_browser_tools_are_retrievable_by_the_planner_ranker ... ok
+test tests::seed_browser_provider_is_idempotent_and_drops_stale_dot_named_tools ... ok
+test tests::semantic_decision_routes_to_the_selected_workflow ... ok
+test tests::semantic_document_decision_produces_document_workflow_trace ... ok
+test tests::semantic_document_route_prunes_to_document_workflow ... ok
+test tests::sensitive_skill_forces_confirm_only_on_effectful ... ok
+test tests::seeded_browser_tools_enforce_their_arg_contracts_through_the_facade ... ok
+test tests::silent_stream_entry_counts_as_stale_for_activity ... ok
+test tests::set_runtime_settings_merges_partial_updates ... ok
+test tests::skill_id_from_command_extracts_id ... ok
+test tests::skill_confirmations_fields_and_resolution ... ok
+test tests::snapshot_text_reads_snapshot_field ... ok
+bash: /Users/fabio/homun_fence_probe_17416.txt: Operation not permitted
+test tests::seatbelt_fence_allows_in_root_denies_out_of_root ... ok
+test tests::stale_ref_recovery_message_forbids_reusing_the_old_ref ... ok
+test tests::skill_tree_hash_tracks_script_changes ... ok
+test tests::status_wiki_has_empty_state_when_no_open_loops_exist ... ok
+test tests::status_wiki_projects_open_loops_with_refs_and_dedup ... ok
+test tests::stream_entry_terminal_event_counts_as_finished_for_activity ... ok
+test tests::stream_memory_reuse_collector_attests_linked_reads ... ok
+test tests::stream_memory_reuse_collector_fails_closed_on_corrupt_recall ... ok
+test tests::strip_chat_markers_removes_app_only_markers_for_channels ... ok
+test tests::strip_fences_and_normalize ... ok
+test tests::sandbox_escalation_missing_root_fails_exact_source ... ok
+test tests::subagent_task_outcome_writes_runtime_plan_step_fact ... ok
+test tests::summarize_tool_action_captures_mutations_skips_reads ... ok
+test tests::task_effective_goal_uses_redacted_prompt_for_execution ... ok
+bash: /Users/fabio/homun_extra_probe_17416.txt: Operation not permitted
+test tests::seatbelt_fence_allows_per_project_extra_writable_folder ... ok
+test tests::task_executor_worker_count_clamps_and_defaults ... ok
+test tests::task_executor_worker_id_is_stable_per_index ... ok
+test tests::task_goal_summary_redacts_and_compacts_prompt ... ok
+test tests::task_queue_response_serializes_ui_read_model_for_renderer ... ok
+test tests::telegram_approval_progress_messages_are_actionable ... ok
+test tests::telegram_rebind_keeps_a_compatible_sidecar ... ok
+test tests::telegram_rebind_replaces_legacy_or_failed_sidecars ... ok
+test tests::telegram_rebind_waits_only_for_its_starting_child ... ok
+test tests::template_catalog_capability_text_includes_selection_notes ... ok
+test tests::template_catalog_collects_multiple_providers_without_duplicate_ids ... ok
+test tests::template_catalog_entries_are_searchable_but_not_callable ... ok
+test tests::sandbox_escalation_nonzero_exit_fails_source_without_continuation ... ok
+test tests::template_catalog_ref_resolves_deck_design_defaults ... ok
+test tests::template_catalog_response_exposes_read_only_gallery_metadata ... ok
+test tests::template_catalog_entries_include_imported_template_packs_after_bundled_templates ... ok
+test tests::template_preview_relative_paths_are_jailed_to_known_assets ... ok
+test tests::templated_document_delivered_agrees_with_outcome_success ... ok
+test tests::templated_document_delivered_is_false_on_qa_failure ... ok
+test tests::templated_document_delivered_is_false_when_html_or_pdf_missing ... ok
+test tests::templated_document_delivered_true_only_on_full_success ... ok
+test tests::templated_document_outcome_degrades_when_render_produced_docx_only ... ok
+test tests::templated_document_outcome_reports_qa_failure_even_with_full_render ... ok
+test tests::templated_document_outcome_succeeds_when_all_three_files_land ... ok
+test tests::templated_document_outcome_truncates_diagnostic_tail_to_last_300_chars ... ok
+test tests::terminal_emit_marks_stream_entry_finished ... ok
+test tests::template_catalog_response_exposes_selection_notes_for_gallery ... ok
+test tests::the_provider_report_overrides_the_name_heuristic_both_ways ... ok
+test tests::thread_episode_scope_requires_exact_thread_and_workspace ... ok
+test tests::thread_turn_started_event_carries_visible_message_ids ... ok
+test tests::thread_user_message_count_counts_only_user_role ... ok
+test tests::static_workflow_plan_validation_is_async_runtime_safe ... ok
+test tests::title_model_inputs_strip_plan_markers_from_answer ... ok
+test tests::tool_compatibility_fallback_is_limited_to_a_first_tool_round_bad_request ... ok
+test tests::vault_category_from_marker_rejects_unknown_category ... ok
+test tests::vault_conflict_resolution_add_creates_a_second_record ... ok
+test tests::vault_conflict_resolution_ignore_keeps_existing_and_creates_nothing ... ok
+test tests::vault_conflict_resolution_update_overwrites_the_targeted_value ... ok
+test tests::vault_dedup_creates_when_neither_key_nor_value_match ... ok
+test tests::vault_dedup_ignores_identical_key_and_value ... ok
+test tests::vault_dedup_reports_key_only_conflict ... ok
+test tests::suggestion_lookup_preserves_durable_dedup_key ... ok
+test tests::vault_dedup_reports_value_only_conflict ... ok
+test tests::task_executor_requeues_waiting_resource_before_scheduling ... ok
+test tests::stale_actionable_claim_after_cancel_executes_nothing ... ok
+test tests::thread_user_message_count_fail_open_counts_committed_user_turns ... ok
+test tests::vault_pending_match_tolerates_preview_drift ... ok
+test tests::terminal_execution_error_fails_the_exact_actionable_source ... ok
+test tests::vault_intent_is_required_before_emitting_a_reveal_card ... ok
+test tests::payment_approval_grant_requires_pin_and_one_shot_cvv ... ok
+test tests::vault_pin_setup_rejects_invalid_pin_values ... ok
+test tests::vault_metadata_matches_saved_record_without_secret_material ... ok
+test tests::vault_end_to_end_encrypts_deduplicates_recalls_reveals_and_deletes_without_leakage ... ok
+test tests::vault_proposal_accept_encrypts_secret_value_when_pin_is_provided ... ok
+test tests::import_pptx_template_pack_copies_source_and_writes_manifest ... ok
+test tests::vault_record_from_proposal_creates_metadata_only_record ... ok
+test tests::import_pptx_template_pack_generates_slide_preview_thumbnail ... ok
+test tests::vault_record_summary_lists_redacted_metadata_and_delete_removes_record ... ok
+test tests::vault_proposal_accept_migrates_legacy_pin_without_master_key ... ok
+test tests::vault_reveal_marker_is_appended_when_model_omits_it ... ok
+test tests::vault_save_is_idempotent_across_preview_drift ... ok
+test tests::vault_use_path_reads_value_with_no_pin_after_syskey_save ... ok
+test tests::visible_turn_reuses_preseeded_assistant_across_retries ... ok
+test tests::wiki_title_and_filename_helpers_are_safe ... ok
+test tests::workflow_registry_contributes_native_workflows_to_capability_corpus ... ok
+test tests::workflow_route_blocks_manual_tool_fallbacks ... ok
+test tests::workflow_router_prunes_alternative_tools_for_document_workflow ... ok
+test tests::workspace_filesystem_manifest_allows_only_declared_write_tools ... ok
+test tests::workspace_record_policy_overrides_default_to_none_and_round_trip ... ok
+test tests::workspace_root_entity_keeps_stable_key_and_aliases_across_updates ... ok
+test tests::workspace_scope_requires_a_root_and_an_in_root_manifest_path ... ok
+test tests::workspace_write_roots_include_project_and_home_caches ... ok
+test tests::writable_roots_fields_default_and_round_trip ... ok
+test tests::write_project_file_honors_per_workspace_read_only ... ok
+test thread_attention_handler_tests::seen_cursor_is_clamped_to_the_latest_terminal ... ok
+test tool_exec::tests::a_trivial_executor_routes_through_the_seam ... ok
+test tool_exec::tests::only_result_counts_as_executed ... ok
+test tool_exec::tests::tool_call_constructs_and_carries_fields ... ok
+test tool_safety::tests::apply_patch_is_a_write_with_synthetic_path ... ok
+test tool_safety::tests::ask_for_approval_parses_forgivingly_and_defaults_to_on_request ... ok
+test tool_safety::tests::autoapprove_sandbox_is_none_under_danger_full_access ... ok
+test tool_safety::tests::danger_full_access_maps_to_no_fence ... ok
+test tool_safety::tests::danger_full_access_never_fences_any_footprint ... ok
+test tool_safety::tests::exec_under_read_only_policy_would_fence ... ok
+test tool_safety::tests::exec_under_workspace_write_is_allowed_at_shadow_level ... ok
+test tool_safety::tests::never_autoapproves_even_an_unauthorized_write ... ok
+test tool_safety::tests::non_filesystem_tools_are_non_filesystem ... ok
+test tool_safety::tests::on_request_non_write_read_tool_autoapproves ... ok
+test tool_safety::tests::on_request_write_not_preauthorized_asks_user ... ok
+test tool_safety::tests::on_request_write_preauthorized_autoapproves ... ok
+test tool_safety::tests::read_tools_are_read_only ... ok
+test tool_safety::tests::run_in_project_is_exec ... ok
+test tool_safety::tests::run_in_sandbox_is_contained ... ok
+test tool_safety::tests::safe_footprints_always_allow_regardless_of_policy ... ok
+test tool_safety::tests::sandbox_mode_parses_forgivingly_and_defaults_to_workspace_write ... ok
+test tool_safety::tests::sandbox_mode_resolves_to_policy_per_mode_and_root ... ok
+test tool_safety::tests::unless_trusted_and_on_failure_follow_the_write_table ... ok
+test tool_safety::tests::workspace_write_and_read_only_map_to_seatbelt_on_macos ... ok
+test tool_safety::tests::workspace_write_construction_and_equality ... ok
+test tool_safety::tests::workspace_write_differs_on_network_and_roots ... ok
+test tool_safety::tests::write_tool_missing_path_arg_yields_empty_path ... ok
+test tool_safety::tests::write_tools_capture_the_path_arg ... ok
+test tool_safety::tests::write_under_read_only_policy_would_fence ... ok
+test tool_safety::tests::write_under_workspace_write_allows_only_inside_roots ... ok
+test turn_executor::tests::cancel_notify_aborts_attached_engine_task ... ok
+test turn_executor::tests::cancel_notify_signals_executor ... ok
+test turn_executor::tests::emit_broadcasts_only_the_canonical_terminal ... ok
+test turn_executor::tests::emit_persists_and_broadcasts ... ok
+test turn_executor::tests::persisted_cancel_before_registration_is_latched ... ok
+test turn_executor::tests::register_and_unregister_turn ... ok
+test usage_pricing::tests::local_without_a_price_is_not_billed ... ok
+test usage_pricing::tests::manual_override_wins_over_catalog_for_estimates ... ok
+test usage_pricing::tests::missing_token_component_does_not_become_zero_cost ... ok
+test usage_pricing::tests::provider_reported_cost_wins_unchanged ... ok
+test usage_store::tests::bounded_sender_drops_instead_of_blocking ... ok
+test usage_store::tests::buffered_recorder_flushes_before_shutdown_returns ... ok
+test usage_store::tests::daily_rollups_are_rebuildable_from_the_append_only_ledger ... ok
+test usage_store::tests::daily_series_keeps_real_coverage_start_and_sparse_days ... ok
+test usage_store::tests::daily_series_uses_local_day_and_same_pair_for_dominant_route ... ok
+test usage_store::tests::empty_summary_is_zero_without_a_fake_coverage_start ... ok
+test usage_store::tests::events_are_append_only_idempotent_and_scope_filtered ... ok
+test usage_store::tests::latest_snapshot_is_provider_scoped_and_append_only ... ok
+test usage_store::tests::manual_budget_round_trips_without_becoming_provider_quota ... ok
+test usage_store::tests::model_routes_keep_equal_models_separate_by_provider ... ok
+test usage_store::tests::null_usage_is_not_coerced_to_zero ... ok
+test usage_store::tests::recovery_appends_abort_without_rewriting_start ... ok
+test usage_store::tests::summary_dominant_model_keeps_its_provider ... ok
+test usage_store::tests::workspace_purge_keeps_user_level_provider_accounting ... ok
+test usage_suggestions::tests::cloud_candidate_cannot_compensate_for_local_only_policy ... ok
+test usage_suggestions::tests::material_cost_gain_with_equal_capability_is_explained ... ok
+test usage_suggestions::tests::missing_required_capabilities_or_context_excludes_candidate ... ok
+test vision::tests::a_blind_model_delegates_when_a_vision_model_exists ... ok
+test vision::tests::a_blind_model_with_nowhere_to_delegate_refuses ... ok
+test vision::tests::a_model_in_no_catalog_is_unknown_not_blind ... ok
+test vision::tests::a_seeing_model_takes_the_images_inline ... ok
+test vision::tests::an_undescribed_image_says_so_instead_of_vanishing ... ok
+test vision::tests::an_unknown_model_is_tried_with_a_net_when_one_exists ... ok
+test vision::tests::an_unknown_model_with_no_net_is_still_tried ... ok
+test vision::tests::descriptions_replace_images_in_place_and_in_order ... ok
+test vision::tests::even_a_seeing_model_gets_the_net_when_one_exists ... ok
+test vision::tests::image_parts_are_detected_in_multimodal_messages_only ... ok
+test vision::tests::the_catalog_answers_for_cloud_models_too ... ok
+test vision::tests::the_providers_own_words_for_blindness_are_recognized ... ok
+test vision::tests::unrelated_errors_are_not_mistaken_for_blindness ... ok
+test working_ledger::tests::semantic_decision_ledger_is_bounded_and_omits_prompt_content ... ok
+test working_ledger::tests::working_ledger_is_deterministic_and_metadata_only ... ok
+test tests::vault_record_update_changes_metadata_without_touching_secret_material ... ok
+test working_ledger::tests::working_ledger_projects_objective_and_steering_without_new_files ... ok
+test tests::vault_pin_verify_requires_configured_matching_pin ... ok
+test tests::vault_proposal_accept_stores_pending_value_without_pin_and_consumes_it ... ok
+test tests::health_stays_live_while_a_store_lock_is_held ... ok
+test tests::vault_legacy_pin_wrapped_blocks_no_pin_save_until_migrated ... ok
+test tests::vault_pin_setup_establishes_system_wrapped_master_key_independent_of_pin ... ok
+test tests::vault_pin_change_requires_current_pin_when_already_configured ... ok
+test tests::vault_record_reveal_and_update_secret_require_pin ... ok
+test tests::vault_pin_change_migrates_legacy_pin_wrapped_master_key_to_system ... ok
+
+test result: ok. 835 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 4.96s
+
+     Running tests/inference_transport_inventory.rs (target/debug/deps/inference_transport_inventory-3d3324b3499336d9)
+
+running 1 test
+test inference_transport_inventory ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running tests/linked_memory_read_only.rs (target/debug/deps/linked_memory_read_only-58267daa26ebaa51)
+
+running 2 tests
+test linked_memory_repair_runs_on_explicit_real_database_copies ... ok
+test linked_recall_remains_read_only_across_learning_revocation_and_other_projects ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/linux_sandbox.rs (target/debug/deps/linux_sandbox-f076c4a0d112d932)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/project_graph_commit.rs (target/debug/deps/project_graph_commit-6ba15e71d3c095c1)
+
+running 2 tests
+test failed_import_keeps_previous_artifacts_and_fingerprint ... ok
+test successful_import_publishes_artifacts_and_fingerprint ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/usage_accounting.rs (target/debug/deps/usage_accounting-f9532c786799bf73)
+
+running 4 tests
+test explicitly_not_billed_local_attempts_have_complete_cost_coverage ... ok
+test compact_summary_omits_unbounded_or_baseless_trends ... ok
+test compact_summary_reports_active_providers_dominant_model_and_token_trend ... ok
+test mixed_cost_provenance_and_provider_account_state_remain_separate ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/usage_ledger.rs (target/debug/deps/usage_ledger-bccf4934221eae0c)
+
+running 2 tests
+test file_ledger_aggregates_known_and_unknown_usage_and_purges_exact_scope ... ok
+test ledger_file_never_contains_prompt_content ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/usage_suggestions.rs (target/debug/deps/usage_suggestions-be961641df69ef5f)
+
+running 4 tests
+test apply_requires_explicit_confirmation ... ok
+test dismissed_equivalent_suggestion_is_suppressed_for_thirty_days ... ok
+test failed_client_preference_change_can_remain_actionable ... ok
+test suggestion_history_contains_metadata_only ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/workspace_delete.rs (target/debug/deps/workspace_delete-503926dc48d7c477)
+
+running 3 tests
+test workspace_delete_does_not_save_registry_when_usage_purge_fails ... ok
+test workspace_delete_removes_graph_cache_and_saves_registry_last ... ok
+test workspace_delete_keeps_registry_when_any_purge_step_fails ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests local_first_desktop_gateway
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+== gateway tests: PASS (6s) ==
+== memorybench provider ==
+
+> @homun/memorybench-provider@0.1.0 test
+> node --experimental-strip-types --test test/provider.test.ts
+
+✔ initialize rejects every non-loopback gateway (0.858667ms)
+✔ provider implements ingest, indexing, search, and governed clear (23.051292ms)
+✔ governance fixture covers Homun isolation and safety contracts (2.446459ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 194.437166
+== memorybench provider: PASS (1s) ==
+== desktop attention tests ==
+✔ background completion never changes selection (0.608834ms)
+✔ hydration preserves selection and derives unread from durable cursors (0.075083ms)
+✔ opening the task clears only its unread (0.06025ms)
+✔ completion of the selected task records its terminal cursor as seen (0.042709ms)
+✔ late terminal signals cannot regress the cursor or restore unread (0.046375ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 82.042583
+== desktop attention tests: PASS (0s) ==
+== desktop replay tests ==
+✔ duplicate and post-terminal events are ignored (0.611292ms)
+✔ other turns and out-of-order events cannot mutate the snapshot (0.41325ms)
+✔ attempt abort clears provisional text and keeps the logical turn replayable (0.0535ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 80.501708
+== desktop replay tests: PASS (0s) ==
+== desktop visible content tests ==
+✔ reasoning is discarded from text and structured parts (1.319958ms)
+✔ an unterminated reasoning block cannot leak while streaming (0.099167ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 83.75825
+== desktop visible content tests: PASS (0s) ==
+== desktop electron tests ==
+
+> homun-desktop@0.1.1 test:electron
+> node --test tests/*.test.mjs
+
+✔ packaged contained computer uses native gateway bootstrap (5.317125ms)
+✔ chat noVNC viewer remains executable under the packaged Electron CSP (10.719125ms)
+✔ architecture documents the cross-platform setup contract (2.302792ms)
+✔ the Electron main process references no undefined names (1135.699917ms)
+✔ lease recovery owns the unified database before graph regeneration starts (0.616667ms)
+✔ helper bundle has a stable nested-app layout (1348.217583ms)
+✔ host helper is staged on macOS only (0.655625ms)
+✔ desktop packaging stages the helper and passes only its public path (0.884375ms)
+✔ Mac app access requires an explicit app selection (1.102417ms)
+✔ assembled helper authenticates a real Unix-socket handshake (1475.865209ms)
+✔ factory reset stops managed processes and removes every host-computer state root (16.649042ms)
+✔ factory reset owns the persisted Mac Apps beta opt-in (0.159292ms)
+✔ factory reset refuses broad or unrelated roots (0.080666ms)
+✔ release signing orders nested code before the outer app (1.1405ms)
+✔ Developer ID identity discovery returns only the certificate hash (0.159583ms)
+✔ verification covers strict signatures, Gatekeeper, and stapling (0.126625ms)
+✔ release workflow verifies the first beta as arm64-only (4.36825ms)
+✔ architecture verification rejects universal and Intel binaries (0.759041ms)
+✔ helper entitlement file stays least privilege (0.887583ms)
+✔ packaging preserves the separately signed nested helper (1.513167ms)
+✔ i18n/locales/es.json has the same keys as en (3.919958ms)
+✔ i18n/locales/fr.json has the same keys as en (1.424958ms)
+✔ i18n/locales/de.json has the same keys as en (1.439792ms)
+✔ plugins/presentations/locales/es.json has the same keys as en (0.843417ms)
+✔ plugins/presentations/locales/fr.json has the same keys as en (0.453875ms)
+✔ plugins/presentations/locales/de.json has the same keys as en (0.522791ms)
+✔ plugins/proattivita/locales/es.json has the same keys as en (0.4895ms)
+✔ plugins/proattivita/locales/fr.json has the same keys as en (0.550583ms)
+✔ plugins/proattivita/locales/de.json has the same keys as en (0.712916ms)
+✔ i18n/locales/it.json has complete Settings Usage copy (1.246042ms)
+✔ i18n/locales/es.json has complete Settings Usage copy (0.570542ms)
+✔ i18n/locales/fr.json has complete Settings Usage copy (0.510791ms)
+✔ i18n/locales/de.json has complete Settings Usage copy (0.701041ms)
+✔ rotateLogFile is a no-op when the file is under maxBytes (2.468917ms)
+✔ rotateLogFile shifts file to .1 when over maxBytes (1.17375ms)
+✔ rotateLogFile keeps at most `keep` generations, dropping the oldest (2.107ms)
+✔ createLogWriter appends ISO-timestamped lines (4.032042ms)
+✔ createLogWriter creates the directory when missing (0.901833ms)
+✔ pipeChildStream splits lines and prefixes the label (1.644917ms)
+✔ pipeChildStream is a no-op for a null stream (0.261167ms)
+✔ pipeChildStream swallows stream errors instead of crashing (0.800791ms)
+✔ first crash restarts quickly (0.927416ms)
+✔ delays escalate with each recent restart (0.075875ms)
+✔ gives up (null) after budget exhausted within the window (0.051458ms)
+✔ old restarts outside the window don't count (0.04325ms)
+ℹ tests 45
+ℹ suites 0
+ℹ pass 45
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2935.495959
+== desktop electron tests: PASS (3s) ==
+== contained computer package tests ==
+
+> homun-desktop@0.1.1 test:contained-computer-package
+> node --test tests/contained-computer-package.test.mjs
+
+✔ packaged contained computer uses native gateway bootstrap (2.561208ms)
+✔ chat noVNC viewer remains executable under the packaged Electron CSP (2.703459ms)
+✔ architecture documents the cross-platform setup contract (0.4705ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 81.544041
+== contained computer package tests: PASS (0s) ==
+== host computer package tests ==
+
+> homun-desktop@0.1.1 test:host-computer-package
+> node --test tests/host-computer-package.test.mjs
+
+✔ helper bundle has a stable nested-app layout (986.393667ms)
+✔ host helper is staged on macOS only (0.621833ms)
+✔ desktop packaging stages the helper and passes only its public path (0.994583ms)
+✔ Mac app access requires an explicit app selection (1.281959ms)
+✔ assembled helper authenticates a real Unix-socket handshake (1342.874167ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2425.226083
+== host computer package tests: PASS (3s) ==
+== ui contract ==
+
+> homun-desktop@0.1.1 test:ui-contract
+> node scripts/check-ui-contract.mjs
+
+UI contract checks passed
+== ui contract: PASS (1s) ==
+== desktop build ==
+
+> homun-desktop@0.1.1 build
+> tsc --noEmit && vite build
+
+vite v7.3.5 building client environment for production...
+transforming...
+✓ 4406 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                      0.91 kB │ gzip:     0.54 kB
+dist/assets/jetbrains-mono-greek-400-normal-C190GLew.woff2           4.23 kB
+dist/assets/jetbrains-mono-greek-500-normal-JpySY46c.woff2           4.28 kB
+dist/assets/hanken-grotesk-vietnamese-400-normal-BLrFBAHj.woff2      4.65 kB
+dist/assets/hanken-grotesk-vietnamese-700-normal-C4RNfQp6.woff2      4.67 kB
+dist/assets/hanken-grotesk-vietnamese-500-normal-DxwlvJEc.woff2      4.74 kB
+dist/assets/hanken-grotesk-vietnamese-600-normal-Cp8QQjQf.woff2      4.74 kB
+dist/assets/jetbrains-mono-cyrillic-400-normal-BEIGL1Tu.woff2        5.33 kB
+dist/assets/jetbrains-mono-cyrillic-500-normal-DmUKJPL_.woff2        5.36 kB
+dist/assets/jetbrains-mono-vietnamese-400-normal-CqNFfHCs.woff       5.37 kB
+dist/assets/jetbrains-mono-vietnamese-500-normal-DNRqzVM1.woff       5.48 kB
+dist/assets/jetbrains-mono-greek-400-normal-B9oWc5Lo.woff            5.66 kB
+dist/assets/jetbrains-mono-greek-500-normal-D7SFKleX.woff            5.72 kB
+dist/assets/hanken-grotesk-vietnamese-700-normal-CslVg6dq.woff       6.46 kB
+dist/assets/hanken-grotesk-vietnamese-400-normal-C-iWyKLC.woff       6.50 kB
+dist/assets/hanken-grotesk-vietnamese-600-normal-DHaFH8q1.woff       6.51 kB
+dist/assets/hanken-grotesk-vietnamese-500-normal-DkDHNoXI.woff       6.54 kB
+dist/assets/jetbrains-mono-cyrillic-400-normal-ugxPyKxw.woff         6.98 kB
+dist/assets/jetbrains-mono-cyrillic-500-normal-DJqRU3vO.woff         7.02 kB
+dist/assets/jetbrains-mono-latin-ext-400-normal-Bc8Ftmh3.woff2       7.34 kB
+dist/assets/jetbrains-mono-latin-ext-500-normal-Cut-4mMH.woff2       7.53 kB
+dist/assets/hanken-grotesk-latin-ext-400-normal-DR7lHpW4.woff2       9.05 kB
+dist/assets/hanken-grotesk-latin-ext-700-normal-CK2OfQqO.woff2       9.15 kB
+dist/assets/hanken-grotesk-latin-ext-600-normal-FY8kSObK.woff2       9.23 kB
+dist/assets/hanken-grotesk-latin-ext-500-normal-DLb9JDK8.woff2       9.25 kB
+dist/assets/jetbrains-mono-latin-ext-400-normal-fXTG6kC5.woff       10.13 kB
+dist/assets/jetbrains-mono-latin-ext-500-normal-ckzbgY84.woff       10.34 kB
+dist/assets/hanken-grotesk-latin-ext-700-normal-BXHnjv6S.woff       12.48 kB
+dist/assets/hanken-grotesk-latin-ext-600-normal-DHIm05DD.woff       12.50 kB
+dist/assets/hanken-grotesk-latin-ext-400-normal-DI-aIsWt.woff       12.55 kB
+dist/assets/hanken-grotesk-latin-ext-500-normal-BNvrJ0Ju.woff       12.60 kB
+dist/assets/hanken-grotesk-latin-400-normal-BG6hkEXj.woff2          13.46 kB
+dist/assets/hanken-grotesk-latin-600-normal-CIXX6EOa.woff2          13.78 kB
+dist/assets/hanken-grotesk-latin-500-normal-DrDcrrxK.woff2          13.80 kB
+dist/assets/hanken-grotesk-latin-700-normal-CeQ8H3UY.woff2          13.84 kB
+dist/assets/hanken-grotesk-latin-400-normal-CjyVwvJV.woff           17.24 kB
+dist/assets/hanken-grotesk-latin-600-normal-NEn2C4Q3.woff           17.51 kB
+dist/assets/hanken-grotesk-latin-500-normal-Bo-NxEKf.woff           17.52 kB
+dist/assets/hanken-grotesk-latin-700-normal-6IGCzoPh.woff           17.54 kB
+dist/assets/jetbrains-mono-latin-400-normal-V6pRDFza.woff2          21.17 kB
+dist/assets/jetbrains-mono-latin-500-normal-BWZEU5yA.woff2          21.83 kB
+dist/assets/jetbrains-mono-latin-400-normal-6-qcROiO.woff           27.50 kB
+dist/assets/jetbrains-mono-latin-500-normal-CJOVTJB7.woff           28.21 kB
+dist/assets/index-CCesIYoS.css                                     334.72 kB │ gzip:    71.97 kB
+dist/assets/channel-BF1WMvrT.js                                      0.11 kB │ gzip:     0.13 kB
+dist/assets/chunk-QZHKN3VN-gZwV2RE6.js                               0.19 kB │ gzip:     0.16 kB
+dist/assets/chunk-4BX2VUAB-DZuG7M-2.js                               0.23 kB │ gzip:     0.17 kB
+dist/assets/chunk-55IACEB6-CkEEG-HA.js                               0.26 kB │ gzip:     0.23 kB
+dist/assets/chunk-FMBD7UC4-BqmoOH2i.js                               0.37 kB │ gzip:     0.27 kB
+dist/assets/stateDiagram-v2-BHNVJYJU-33OWUBEN.js                     0.43 kB │ gzip:     0.31 kB
+dist/assets/chunk-2J33WTMH-CNGpEDv7.js                               0.50 kB │ gzip:     0.35 kB
+dist/assets/classDiagram-4FO5ZUOK-LJkOnMSv.js                        0.51 kB │ gzip:     0.34 kB
+dist/assets/classDiagram-v2-Q7XG4LA2-LJkOnMSv.js                     0.51 kB │ gzip:     0.34 kB
+dist/assets/infoDiagram-5YYISTIA-ZmyxMa0R.js                         0.62 kB │ gzip:     0.43 kB
+dist/assets/chunk-ND2GUHAM-C7K-2zrA.js                               1.92 kB │ gzip:     0.85 kB
+dist/assets/diagram-5GNKFQAL-DTz4lE3r.js                             2.80 kB │ gzip:     1.40 kB
+dist/assets/arc-uyP0aC3P.js                                          3.43 kB │ gzip:     1.46 kB
+dist/assets/RichMessageRenderer-CRFf1kE2.js                          4.03 kB │ gzip:     1.74 kB
+dist/assets/diagram-LMA3HP47-DHZVNzRO.js                             4.25 kB │ gzip:     1.84 kB
+dist/assets/defaultLocale-CrowFXzY.js                                4.69 kB │ gzip:     2.17 kB
+dist/assets/pieDiagram-4H26LBE5-Cvf-Z5QU.js                          5.26 kB │ gzip:     2.34 kB
+dist/assets/linear-Bnf9gUmU.js                                       5.61 kB │ gzip:     2.29 kB
+dist/assets/diagram-2AECGRRQ-CCgtIJne.js                             5.86 kB │ gzip:     2.47 kB
+dist/assets/stateDiagram-AJRCARHV-BinO6u0n.js                       10.40 kB │ gzip:     3.65 kB
+dist/assets/diagram-KO2AKTUF-BJkqERqb.js                            10.77 kB │ gzip:     4.17 kB
+dist/assets/dagre-BM42HDAG-DLfDsddh.js                              11.17 kB │ gzip:     4.13 kB
+dist/assets/diagram-OG6HWLK6-CiNM_xpq.js                            15.79 kB │ gzip:     5.65 kB
+dist/assets/ishikawaDiagram-YF4QCWOH-CfmUI8u8.js                    17.51 kB │ gzip:     6.63 kB
+dist/assets/kanban-definition-UN3LZRKU-DDllM-cn.js                  20.34 kB │ gzip:     7.16 kB
+dist/assets/sankeyDiagram-5OEKKPKP-DiIfBHqD.js                      23.09 kB │ gzip:     8.47 kB
+dist/assets/graph-DAWG0edF.js                                       23.14 kB │ gzip:     8.09 kB
+dist/assets/mindmap-definition-RKZ34NQL-PjRdWFTs.js                 23.22 kB │ gzip:     7.77 kB
+dist/assets/journeyDiagram-JHISSGLW-Sy9S14om.js                     23.62 kB │ gzip:     8.33 kB
+dist/assets/wardleyDiagram-YWT4CUSO-Cul0DDNu.js                     25.55 kB │ gzip:     6.78 kB
+dist/assets/erDiagram-TEJ5UH35-B9sYoCUJ.js                          26.91 kB │ gzip:     9.28 kB
+dist/assets/gitGraphDiagram-PVQCEYII-PyUsUgba.js                    29.47 kB │ gzip:     8.70 kB
+dist/assets/timeline-definition-PNZ67QCA-B2yL5Cgu.js                30.88 kB │ gzip:    10.13 kB
+dist/assets/requirementDiagram-4Y6WPE33-D7e4k107.js                 31.05 kB │ gzip:     9.64 kB
+dist/assets/quadrantDiagram-W4KKPZXB-BLjC1WVD.js                    34.04 kB │ gzip:     9.88 kB
+dist/assets/layout-C2rGJQCA.js                                      35.38 kB │ gzip:    12.67 kB
+dist/assets/chunk-AQP2D5EJ-BqZDIhMT.js                              37.11 kB │ gzip:    11.98 kB
+dist/assets/xychartDiagram-2RQKCTM6-Cwi2xaeI.js                     40.37 kB │ gzip:    11.47 kB
+dist/assets/vennDiagram-CIIHVFJN-CY2eZ5z_.js                        41.47 kB │ gzip:    15.36 kB
+dist/assets/chunk-727SXJPM-Hw532bSr.js                              48.98 kB │ gzip:    15.53 kB
+dist/assets/flowDiagram-I6XJVG4X-BVGtJkSZ.js                        60.55 kB │ gzip:    19.12 kB
+dist/assets/ganttDiagram-6RSMTGT7-CmkG3D9M.js                       69.23 kB │ gzip:    23.15 kB
+dist/assets/c4Diagram-AAUBKEIU-CEO9z2Gf.js                          69.99 kB │ gzip:    19.50 kB
+dist/assets/blockDiagram-GPEHLZMM-PBhZ3P0T.js                       73.57 kB │ gzip:    21.09 kB
+dist/assets/cose-bilkent-S5V4N54A-CF91x_Zy.js                       81.75 kB │ gzip:    22.41 kB
+dist/assets/sequenceDiagram-3UESZ5HK-Ct16fLN9.js                   116.91 kB │ gzip:    30.83 kB
+dist/assets/architectureDiagram-3BPJPVTR-B_lCRqoj.js               149.48 kB │ gzip:    41.90 kB
+dist/assets/vendor-markdown-9f8xr4Eh.js                            170.27 kB │ gzip:    52.17 kB
+dist/assets/vendor-katex-HP8lGamR.js                               261.31 kB │ gzip:    77.25 kB
+dist/assets/cytoscape.esm-CkSuTymj.js                              441.80 kB │ gzip:   140.93 kB
+dist/assets/mermaid.core-BTSuN_0X.js                               572.85 kB │ gzip:   133.35 kB
+dist/assets/wardley-L42UT6IY-D5gFrQLR.js                           612.67 kB │ gzip:   146.90 kB
+dist/assets/index-DUH0qXoC.js                                    3,567.38 kB │ gzip: 1,920.84 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.54s
+== desktop build: PASS (10s) ==
+== stability soak unit tests ==
+test_accepts_out_of_order_background_completions (scripts.test_stability_soak.StabilitySoakTest) ... ok
+test_rejects_focus_change_duplicate_terminal_and_reasoning (scripts.test_stability_soak.StabilitySoakTest) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK
+== stability soak unit tests: PASS (0s) ==
+== eval unit tests ==
+test_gateway_capabilities_validator_requires_policy_and_arrays (scripts.test_eval_suite.EvalSuiteTests) ... ok
+test_gateway_checks_fail_closed_on_bad_contract (scripts.test_eval_suite.EvalSuiteTests) ... == gateway contracts :: http://127.0.0.1:18765
+  [FAIL] gateway templates    :: missing startup pitch template
+  [FAIL] gateway capabilities :: missing connections array
+ok
+test_gateway_template_validator_requires_read_only_previewed_templates (scripts.test_eval_suite.EvalSuiteTests) ... ok
+test_default_plan_runs_deterministic_local_checks_only (scripts.test_pre_release_gate.PreReleaseGateTests) ... ok
+test_env_enables_model_and_gateway_eval (scripts.test_pre_release_gate.PreReleaseGateTests) ... ok
+test_gate_stops_at_first_failed_step (scripts.test_pre_release_gate.PreReleaseGateTests) ... ok
+test_live_stability_soak_is_last_when_enabled (scripts.test_pre_release_gate.PreReleaseGateTests) ... ok
+test_stability_steps_are_required (scripts.test_pre_release_gate.PreReleaseGateTests) ... ok
+test_default_scenarios_cover_production_baseline (scripts.test_production_smoke.ProductionSmokeTests) ... ok
+test_select_scenarios_filters_by_id (scripts.test_production_smoke.ProductionSmokeTests) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.001s
+
+OK
+== eval unit tests: PASS (0s) ==
+== eval syntax ==
+== eval syntax: PASS (0s) ==
+== deck renderer tests ==
+/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts_embed.py:22: ResourceWarning: unclosed file <_io.BufferedReader name='/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts/playfair-display-400.woff2'>
+  b64 = base64.b64encode(open(path, "rb").read()).decode()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts_embed.py:22: ResourceWarning: unclosed file <_io.BufferedReader name='/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts/playfair-display-700.woff2'>
+  b64 = base64.b64encode(open(path, "rb").read()).decode()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts_embed.py:22: ResourceWarning: unclosed file <_io.BufferedReader name='/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts/inter-400.woff2'>
+  b64 = base64.b64encode(open(path, "rb").read()).decode()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts_embed.py:22: ResourceWarning: unclosed file <_io.BufferedReader name='/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts/inter-700.woff2'>
+  b64 = base64.b64encode(open(path, "rb").read()).decode()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.........ssss
+----------------------------------------------------------------------
+Ran 13 tests in 4.666s
+
+OK (skipped=4)
+== deck renderer tests: PASS (5s) ==
+== doc renderer tests ==
+...../Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts_embed.py:22: ResourceWarning: unclosed file <_io.BufferedReader name='/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts/inter-400.woff2'>
+  b64 = base64.b64encode(open(path, "rb").read()).decode()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts_embed.py:22: ResourceWarning: unclosed file <_io.BufferedReader name='/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts/inter-700.woff2'>
+  b64 = base64.b64encode(open(path, "rb").read()).decode()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+./Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts_embed.py:22: ResourceWarning: unclosed file <_io.BufferedReader name='/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts/source-serif-4-400.woff2'>
+  b64 = base64.b64encode(open(path, "rb").read()).decode()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts_embed.py:22: ResourceWarning: unclosed file <_io.BufferedReader name='/Users/fabio/Projects/Homun/app/.worktrees/fabio/stable-task-interface/runtimes/contained-computer/fonts/source-serif-4-700.woff2'>
+  b64 = base64.b64encode(open(path, "rb").read()).decode()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..........
+----------------------------------------------------------------------
+Ran 16 tests in 0.007s
+
+OK
+== doc renderer tests: PASS (0s) ==
+== ALL GREEN ==
