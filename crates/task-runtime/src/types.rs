@@ -196,6 +196,12 @@ pub struct TurnEvent {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalWrite {
+    Inserted(TurnEvent),
+    Existing(TurnEvent),
+}
+
 /// One broker attempt through the guarded agent loop. This is operational state, not
 /// semantic memory: it exists so a run can be inspected and recovered without changing recall.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

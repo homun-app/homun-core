@@ -3,8 +3,8 @@ use crate::{
     Automation, AutomationRun, NewAgentRun, NewAgentToolReceipt, ObjectiveContractRecord,
     ObjectiveMode, ResourceClass, RuntimePlanRecord, SubagentInfo, TaskCheckpoint, ToolReceiptClaim,
     TaskDependencyOutput, TaskId, TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus,
-    ActiveTurnProjection, NewTurnSteering, ThreadActivityProjection, ThreadAttention, TurnEvent,
-    TurnEventKind,
+    ActiveTurnProjection, NewTurnSteering, TerminalWrite, ThreadActivityProjection, ThreadAttention,
+    TurnEvent, TurnEventKind,
     TurnSteeringRecord, TurnSteeringStatus, UserId, WorkspaceId,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
@@ -27,6 +27,81 @@ fn subagent_name_from_kind(kind: &str) -> String {
 
 pub struct TaskStore {
     connection: Connection,
+}
+
+fn insert_turn_event_on(
+    connection: &Connection,
+    turn_id: &str,
+    kind: TurnEventKind,
+    payload: Value,
+) -> TaskRuntimeResult<TurnEvent> {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let seq: i64 = connection.query_row(
+        "SELECT COALESCE(MAX(seq), 0) + 1 FROM turn_events WHERE turn_id = ?1",
+        params![turn_id],
+        |row| row.get(0),
+    )?;
+    connection.execute(
+        "INSERT INTO turn_events (turn_id, seq, kind, payload_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            turn_id,
+            seq,
+            kind.as_str(),
+            serde_json::to_string(&payload)?,
+            now
+        ],
+    )?;
+    Ok(TurnEvent {
+        event_id: connection.last_insert_rowid(),
+        turn_id: turn_id.to_string(),
+        seq,
+        kind,
+        payload,
+        created_at: now,
+    })
+}
+
+fn first_terminal_event_on(
+    connection: &Connection,
+    turn_id: &str,
+) -> TaskRuntimeResult<Option<TurnEvent>> {
+    let row = connection
+        .query_row(
+            "SELECT event_id, turn_id, seq, kind, payload_json, created_at
+               FROM turn_events
+              WHERE turn_id = ?1 AND kind IN ('done', 'error', 'cancelled')
+              ORDER BY seq ASC
+              LIMIT 1",
+            params![turn_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            },
+        )
+        .optional()?;
+    row.map(
+        |(event_id, turn_id, seq, kind, payload_json, created_at)| {
+            let kind = TurnEventKind::parse(&kind).ok_or_else(|| {
+                TaskRuntimeError::Store("unknown terminal turn event kind".to_string())
+            })?;
+            Ok(TurnEvent {
+                event_id,
+                turn_id,
+                seq,
+                kind,
+                payload: serde_json::from_str(&payload_json)?,
+                created_at,
+            })
+        },
+    )
+    .transpose()
 }
 
 impl TaskStore {
@@ -1637,20 +1712,36 @@ impl TaskStore {
         kind: TurnEventKind,
         payload: Value,
     ) -> TaskRuntimeResult<TurnEvent> {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        // next seq per turn_id
-        let seq: i64 = self.connection.query_row(
-            "SELECT COALESCE(MAX(seq), 0) + 1 FROM turn_events WHERE turn_id = ?1",
-            params![turn_id],
-            |row| row.get(0),
-        )?;
-        self.connection.execute(
-            "INSERT INTO turn_events (turn_id, seq, kind, payload_json, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![turn_id, seq, kind.as_str(), serde_json::to_string(&payload)?, now],
-        )?;
-        let event_id = self.connection.last_insert_rowid();
-        Ok(TurnEvent { event_id, turn_id: turn_id.to_string(), seq, kind, payload, created_at: now })
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let event = insert_turn_event_on(&tx, turn_id, kind, payload)?;
+        tx.commit()?;
+        Ok(event)
+    }
+
+    /// Atomically commits the first logical terminal for a turn. Later terminal
+    /// attempts return the canonical event and must not be broadcast again.
+    pub fn insert_terminal_event_once(
+        &self,
+        turn_id: &str,
+        kind: TurnEventKind,
+        payload: Value,
+    ) -> TaskRuntimeResult<TerminalWrite> {
+        if !matches!(
+            kind,
+            TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
+        ) {
+            return Err(TaskRuntimeError::InvalidTransition(
+                "non-terminal turn event kind".to_string(),
+            ));
+        }
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        if let Some(existing) = first_terminal_event_on(&tx, turn_id)? {
+            tx.commit()?;
+            return Ok(TerminalWrite::Existing(existing));
+        }
+        let event = insert_turn_event_on(&tx, turn_id, kind, payload)?;
+        tx.commit()?;
+        Ok(TerminalWrite::Inserted(event))
     }
 
     /// Reads a turn's events with seq > since (for stream resume). Returned in
@@ -3107,6 +3198,21 @@ mod turn_event_tests {
         assert_eq!(e1.seq, 1);
         assert_eq!(e2.seq, 2);
         assert_eq!(e3.seq, 1, "seq is per turn_id, independent across turns");
+    }
+
+    #[test]
+    fn terminal_event_is_written_once() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .insert_terminal_event_once("turn", TurnEventKind::Done, json!({"attempt": 2}))
+            .unwrap();
+        let late = store
+            .insert_terminal_event_once("turn", TurnEventKind::Error, json!({"attempt": 1}))
+            .unwrap();
+
+        assert!(matches!(first, TerminalWrite::Inserted(_)));
+        assert!(matches!(late, TerminalWrite::Existing(_)));
+        assert_eq!(store.read_turn_events("turn", 0).unwrap().len(), 1);
     }
 
     #[test]

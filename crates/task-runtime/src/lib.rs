@@ -37,6 +37,7 @@ pub use types::{
     NewAgentToolReceipt, ObjectiveContractRecord, ObjectiveMode, ResourceRequirement, RetryPolicy,
     ActiveTurnProjection, NewTurnSteering, RuntimePlanRecord, TaskId,
     TaskPriority, TaskRecord, TaskStatus, SubagentInfo, ThreadActivityProjection, ThreadAttention,
-    ToolReceiptClaim, TurnEvent, TurnEventKind, TurnSteeringRecord, TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
+    TerminalWrite, ToolReceiptClaim, TurnEvent, TurnEventKind, TurnSteeringRecord,
+    TurnSteeringStatus, UserId, WorkflowId, WorkspaceId,
 };
 pub use ui::{TaskQueueSnapshot, TaskUiDetail, TaskUiItem, TaskUiReadModel};

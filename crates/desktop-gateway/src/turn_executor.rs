@@ -177,7 +177,17 @@ pub fn emit_turn_event(
     kind: TurnEventKind,
     payload: Value,
 ) -> TaskRuntimeResult<()> {
-    let event = store.insert_turn_event(turn_id, kind, payload.clone())?;
+    let event = if matches!(
+        kind,
+        TurnEventKind::Done | TurnEventKind::Error | TurnEventKind::Cancelled
+    ) {
+        match store.insert_terminal_event_once(turn_id, kind, payload.clone())? {
+            local_first_task_runtime::TerminalWrite::Inserted(event) => event,
+            local_first_task_runtime::TerminalWrite::Existing(_) => return Ok(()),
+        }
+    } else {
+        store.insert_turn_event(turn_id, kind, payload.clone())?
+    };
     // Best-effort live broadcast on the per-turn channel (NDJSON stream — transitional).
     // No receivers is fine (broadcast::send errors are benign).
     if let Ok(map) = turn_broadcast_registry().lock() {
@@ -817,6 +827,41 @@ mod tests {
         // published on the unified WS (no subscribers → noop, but must not panic)
         assert_eq!(state.ws_registry.subscriber_count(), 0);
         unregister_turn("turn_test_emit");
+    }
+
+    #[test]
+    fn emit_broadcasts_only_the_canonical_terminal() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let state = AppState::for_tests();
+        let broadcast = register_turn("turn_test_terminal");
+        let mut rx = broadcast.tx.subscribe();
+
+        emit_turn_event(
+            &state,
+            &store,
+            "turn_test_terminal",
+            TurnEventKind::Done,
+            json!({"attempt": 2}),
+        )
+        .unwrap();
+        emit_turn_event(
+            &state,
+            &store,
+            "turn_test_terminal",
+            TurnEventKind::Error,
+            json!({"attempt": 1}),
+        )
+        .unwrap();
+
+        let events = store.read_turn_events("turn_test_terminal", 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TurnEventKind::Done);
+        assert_eq!(rx.try_recv().unwrap().kind, "done");
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        unregister_turn("turn_test_terminal");
     }
 
     #[test]

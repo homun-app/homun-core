@@ -492,7 +492,7 @@ pub fn enqueue_or_steer_chat_turn_atomic<F, G>(
     workspace_id: &WorkspaceId,
     input: &ChatTurnInput,
     insert_turn_messages: F,
-    _insert_steering_user_message: G,
+    insert_steering_user_message: G,
 ) -> Result<EnqueueTurnOutcome, EnqueueError>
 where
     F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
@@ -529,6 +529,7 @@ where
         if input.source != ChatTurnSource::Interactive {
             return Ok(EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id));
         }
+        insert_steering_user_message(tx)?;
         tx.execute(
             "INSERT INTO turn_steering (
                 user_id, workspace_id, thread_id, active_turn_id, source_message_id,
@@ -687,7 +688,7 @@ pub fn cancel_chat_turn(
         user_id.as_str(), workspace_id.as_str(), task_id.as_str(),
     )?;
     store.insert_chat_turn(&task, &thread_id, &request_id, source, approval)?;
-    store.insert_turn_event(
+    let _ = store.insert_terminal_event_once(
         task_id.as_str(),
         TurnEventKind::Cancelled,
         serde_json::json!({ "reason": "user_cancel", "at": now.unix_timestamp() }),
