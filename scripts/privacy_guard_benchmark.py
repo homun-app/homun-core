@@ -113,7 +113,15 @@ def classify_case(base_url, model, case, timeout_seconds):
         if case["sensitive"]:
             detected = detected and all(value in extracted for value in case["expected_values"])
         return detected, True, (time.perf_counter() - started) * 1000.0, None
-    except (urllib.error.URLError, TimeoutError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as error:
         return False, False, (time.perf_counter() - started) * 1000.0, type(error).__name__
 
 

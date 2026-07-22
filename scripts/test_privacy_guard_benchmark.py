@@ -1,6 +1,7 @@
 import unittest
+from unittest import mock
 
-from scripts.privacy_guard_benchmark import score
+from scripts.privacy_guard_benchmark import classify_case, score
 
 
 class PrivacyGuardBenchmarkScoreTests(unittest.TestCase):
@@ -25,6 +26,21 @@ class PrivacyGuardBenchmarkScoreTests(unittest.TestCase):
         self.assertEqual(result["recall"], 1.0)
         self.assertEqual(result["specificity"], 1.0)
         self.assertEqual(result["valid_json"], 1.0)
+
+    @mock.patch("scripts.privacy_guard_benchmark.urllib.request.urlopen")
+    def test_socket_timeout_is_a_scored_invalid_case(self, urlopen):
+        urlopen.side_effect = OSError("timed out")
+
+        detected, valid, _latency_ms, error = classify_case(
+            "http://127.0.0.1:11434/v1",
+            "slow-model",
+            {"text": "hello", "sensitive": False, "expected_values": []},
+            0.01,
+        )
+
+        self.assertFalse(detected)
+        self.assertFalse(valid)
+        self.assertEqual(error, "OSError")
 
 
 if __name__ == "__main__":
