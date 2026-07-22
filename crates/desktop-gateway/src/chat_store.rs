@@ -3,6 +3,7 @@ use local_first_desktop_gateway::{
     MemoryReuseEnvelope, MessageDeliveryState, compact_thread_title, seeded_ready_message,
     strip_display_markers,
 };
+use local_first_engine::markers::actionable_marker_blocks;
 // The generic marker parsers live in the single `markers` module now; aliased so the local
 // call sites read unchanged.
 use local_first_desktop_gateway::markers::{
@@ -1361,7 +1362,17 @@ impl ChatStore {
         // Internal reasoning/activity/plan protocol blocks are represented by
         // event_parts. Persist only the readable answer in the transcript so a
         // later prompt cannot reinterpret UI/control metadata as conversation.
-        let clean_text = strip_display_markers(text).trim().to_string();
+        let mut clean_text = strip_display_markers(text).trim().to_string();
+        // Confirmation and native authorization cards are executable only from
+        // their exact persisted envelope. Keep those safe card payloads for the
+        // desktop renderer and endpoint provenance; `WaitingUser` keeps the
+        // entire provisional assistant message out of future model context.
+        for card in actionable_marker_blocks(text) {
+            if !clean_text.is_empty() {
+                clean_text.push('\n');
+            }
+            clean_text.push_str(&card.raw);
+        }
         let event_parts_json = serde_json::to_string(event_parts).map_err(json_error)?;
         let derived = memory_reuse_from_event_parts(event_parts);
         let envelope = if &derived == requested_envelope {
@@ -4111,6 +4122,34 @@ mod tests {
             .message(&thread.thread_id, "missing-assistant")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn finalization_preserves_actionable_card_envelope_for_reload() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "assistant-card".to_string(),
+        );
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let raw = "Please approve. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{\"path\":\"/tmp/a\"}}‹‹/MCP_CONFIRM››";
+
+        let saved = store
+            .finalize_assistant_message_with_delivery_state(
+                &thread.thread_id,
+                &assistant.id,
+                raw,
+                &[],
+                &MemoryReuseEnvelope::normal(),
+                MessageDeliveryState::WaitingUser,
+            )
+            .unwrap();
+
+        assert!(saved.text.contains("‹‹MCP_CONFIRM››"));
+        assert_eq!(saved.delivery_state, MessageDeliveryState::WaitingUser);
     }
 
     #[test]

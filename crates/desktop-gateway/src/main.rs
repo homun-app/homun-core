@@ -688,7 +688,7 @@ struct PendingExecutorApproval {
     risk_level: String,
     data_boundary: String,
     explanation: String,
-    remote_approval_id: Option<String>,
+    inline_action_card: bool,
 }
 
 struct TaskArtifactOutput {
@@ -2977,8 +2977,11 @@ pub(crate) async fn activate_remote_approvals_from_message(
     message: &ChatMessage,
 ) {
     for intent in remote_approval_intents_from_message(message) {
+        let Some(approval_id) = intent.approval_id.as_deref() else {
+            continue;
+        };
         let row = lock_store(state).ok().and_then(|store| {
-            let pending = store.remote_approval_by_id(&intent.approval_id).ok().flatten()?;
+            let pending = store.remote_approval_by_id(approval_id).ok().flatten()?;
             let expected_protocol = if pending.tool.starts_with("mcp__") {
                 "mcp"
             } else {
@@ -2991,7 +2994,7 @@ pub(crate) async fn activate_remote_approvals_from_message(
                 return None;
             }
             store
-                .bind_remote_approval_source(&intent.approval_id, thread_id, &message.id)
+                .bind_remote_approval_source(approval_id, thread_id, &message.id)
                 .ok()
                 .flatten()
         });
@@ -3016,7 +3019,7 @@ pub(crate) async fn activate_remote_approvals_from_message(
 #[derive(Debug, Clone, PartialEq)]
 struct RemoteApprovalIntent {
     protocol: &'static str,
-    approval_id: String,
+    approval_id: Option<String>,
     tool: String,
     arguments: serde_json::Value,
 }
@@ -3028,16 +3031,19 @@ fn remote_approval_intent_from_marker(
     close_tag: &str,
 ) -> Option<RemoteApprovalIntent> {
     let marker = confirm_marker_value(text, open_tag, close_tag)?;
-    let approval_id = marker.get("approval_id")?.as_str()?.to_string();
+    let approval_id = marker
+        .get("approval_id")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string);
     let tool = marker.get("tool")?.as_str()?.to_string();
     let arguments = marker
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
     let valid = if protocol == "mcp" {
-        mcp_confirm_matches_approval(text, &approval_id, &tool, &arguments)
+        mcp_confirm_matches(text, &tool, &arguments)
     } else {
-        composio_confirm_matches_approval(text, &approval_id, &tool, &arguments)
+        composio_confirm_matches(text, &tool, &arguments)
     };
     valid.then_some(RemoteApprovalIntent {
         protocol,
@@ -3070,6 +3076,35 @@ fn remote_approval_event_part(intent: &RemoteApprovalIntent) -> serde_json::Valu
     })
 }
 
+#[derive(Debug, Clone)]
+struct ActionableCard {
+    kind: &'static str,
+    raw: String,
+    payload: serde_json::Value,
+    requires_user: bool,
+}
+
+fn actionable_cards_from_raw_text(text: &str) -> Vec<ActionableCard> {
+    local_first_desktop_gateway::markers::actionable_marker_blocks(text)
+        .into_iter()
+        .filter_map(|block| {
+            let open = local_first_desktop_gateway::markers::open(block.marker);
+            let close = local_first_desktop_gateway::markers::close(block.marker);
+            let body = block
+                .raw
+                .strip_prefix(&open)?
+                .strip_suffix(&close)?;
+            let payload = serde_json::from_str(body).ok()?;
+            Some(ActionableCard {
+                kind: block.marker,
+                raw: block.raw,
+                payload,
+                requires_user: true,
+            })
+        })
+        .collect()
+}
+
 fn remote_approval_intents_from_message(message: &ChatMessage) -> Vec<RemoteApprovalIntent> {
     let structured: Vec<_> = message
         .event_parts
@@ -3083,7 +3118,10 @@ fn remote_approval_intents_from_message(message: &ChatMessage) -> Vec<RemoteAppr
             };
             Some(RemoteApprovalIntent {
                 protocol,
-                approval_id: part.get("approval_id")?.as_str()?.to_string(),
+                approval_id: part
+                    .get("approval_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string),
                 tool: part.get("tool")?.as_str()?.to_string(),
                 arguments: part.get("arguments").cloned().unwrap_or_else(|| serde_json::json!({})),
             })
@@ -3105,7 +3143,7 @@ fn remote_approval_matches_persisted_message(
     arguments: &serde_json::Value,
 ) -> bool {
     remote_approval_intents_from_message(message).iter().any(|intent| {
-        intent.approval_id == approval_id
+        intent.approval_id.as_deref() == Some(approval_id)
             && intent.tool == tool
             && &intent.arguments == arguments
             && (if tool.starts_with("mcp__") {
@@ -32515,6 +32553,15 @@ async fn handle_channel_inbound(
                         }
                     },
                     None => {
+                        if let (Some(tid), Some(turn)) =
+                            (thread_id.as_deref(), visible_turn.as_ref())
+                        {
+                            mark_visible_assistant_message_failed(
+                                &st,
+                                tid,
+                                &turn.assistant_message_id,
+                            );
+                        }
                         let _ = channel_set_presence(&st, port, &reply_to, "paused").await;
                         eprintln!("channel/{channel}: no reply generated for {reply_to}");
                     }
@@ -33396,6 +33443,29 @@ fn update_channel_assistant_message(
     }));
 }
 
+fn mark_visible_assistant_message_failed(state: &AppState, thread_id: &str, message_id: &str) {
+    if let Ok(store) = lock_store(state) {
+        let _ = mark_assistant_message_failed_in_store(&store, thread_id, message_id);
+    }
+    publish_app_event(serde_json::json!({
+        "type": "thread.updated",
+        "thread_id": thread_id,
+        "workspace": base_workspace_id(),
+    }));
+}
+
+fn mark_assistant_message_failed_in_store(
+    store: &ChatStore,
+    thread_id: &str,
+    message_id: &str,
+) -> rusqlite::Result<bool> {
+    store.set_message_delivery_state(
+        thread_id,
+        message_id,
+        local_first_desktop_gateway::MessageDeliveryState::Failed,
+    )
+}
+
 fn memory_reuse_envelope_from_read_set(
     reads: &local_first_engine::events::TurnMemoryReadSet,
 ) -> local_first_memory::MemoryReuseEnvelope {
@@ -33462,6 +33532,20 @@ impl StreamMemoryReuseCollector {
         }
     }
 
+    fn observe_actionable_cards(&mut self, cards: &[ActionableCard]) {
+        for card in cards {
+            let part = serde_json::json!({
+                "type": "actionable_card",
+                "kind": card.kind,
+                "payload": card.payload,
+                "raw": card.raw,
+            });
+            if !self.event_parts.contains(&part) {
+                self.event_parts.push(part);
+            }
+        }
+    }
+
     fn envelope(&self) -> local_first_memory::MemoryReuseEnvelope {
         memory_reuse_envelope_from_read_set(&self.reads)
     }
@@ -33476,7 +33560,10 @@ fn finalize_streamed_assistant_message(
     requested_delivery_state: local_first_desktop_gateway::MessageDeliveryState,
 ) -> Result<(), String> {
     let delivery_state = if collector.event_parts().iter().any(|part| {
-        part.get("type").and_then(serde_json::Value::as_str) == Some("remote_approval")
+        matches!(
+            part.get("type").and_then(serde_json::Value::as_str),
+            Some("remote_approval") | Some("actionable_card")
+        )
     }) {
         local_first_desktop_gateway::MessageDeliveryState::WaitingUser
     } else {
@@ -33505,6 +33592,11 @@ fn finalize_streamed_assistant_message(
 struct AgentTurnResult {
     text: String,
     remote_approval: Option<RemoteApprovalIntent>,
+    actionable_cards: Vec<ActionableCard>,
+}
+
+pub(crate) fn agent_turn_waits_for_user(result: Option<&AgentTurnResult>) -> bool {
+    result.is_some_and(|result| result.actionable_cards.iter().any(|card| card.requires_user))
 }
 
 async fn drain_agent_stream_into_message(
@@ -33574,24 +33666,30 @@ async fn drain_agent_stream_into_message(
 
     let raw_final_text = final_text.unwrap_or(streamed_text);
     let remote_approval = remote_approval_intent_from_raw_text(&raw_final_text);
+    let actionable_cards = actionable_cards_from_raw_text(&raw_final_text);
     if let Some(intent) = remote_approval.as_ref() {
         memory_reuse.observe_remote_approval(intent);
     }
-    let final_text = strip_chat_markers(&raw_final_text);
-    if final_text.is_empty() {
+    memory_reuse.observe_actionable_cards(&actionable_cards);
+    let mut final_text = strip_chat_markers(&raw_final_text);
+    if final_text.is_empty() && actionable_cards.is_empty() {
         return Ok(None);
+    }
+    if final_text.is_empty() {
+        final_text = "Waiting for your approval.".to_string();
     }
     finalize_streamed_assistant_message(
         state,
         thread_id,
         assistant_message_id,
-        &final_text,
+        &raw_final_text,
         &memory_reuse,
         requested_delivery_state,
     )?;
     Ok(Some(AgentTurnResult {
         text: final_text,
         remote_approval,
+        actionable_cards,
     }))
 }
 
@@ -33792,24 +33890,30 @@ async fn drain_agent_stream_into_message_with_fanout(
 
     let raw_final_text = final_text.unwrap_or(streamed_text);
     let remote_approval = remote_approval_intent_from_raw_text(&raw_final_text);
+    let actionable_cards = actionable_cards_from_raw_text(&raw_final_text);
     if let Some(intent) = remote_approval.as_ref() {
         memory_reuse.observe_remote_approval(intent);
     }
-    let final_text = strip_chat_markers(&raw_final_text);
-    if final_text.is_empty() {
+    memory_reuse.observe_actionable_cards(&actionable_cards);
+    let mut final_text = strip_chat_markers(&raw_final_text);
+    if final_text.is_empty() && actionable_cards.is_empty() {
         return Ok(None);
+    }
+    if final_text.is_empty() {
+        final_text = "Waiting for your approval.".to_string();
     }
     finalize_streamed_assistant_message(
         state,
         thread_id,
         assistant_message_id,
-        &final_text,
+        &raw_final_text,
         &memory_reuse,
         requested_delivery_state,
     )?;
     Ok(Some(AgentTurnResult {
         text: final_text,
         remote_approval,
+        actionable_cards,
     }))
 }
 
@@ -37760,7 +37864,7 @@ fn request_task_executor_approval(
     approval: &PendingExecutorApproval,
 ) -> Result<(), GatewayError> {
     let store = lock_task_store(state)?;
-    if approval.remote_approval_id.is_some() {
+    if approval.inline_action_card {
         task.status = TaskStatus::WaitingUserApproval;
         task.blocked_reason = Some(format!("approval required: {}", approval.action));
         task.lease_owner = None;
@@ -38388,18 +38492,41 @@ fn execute_proactive_prompt_task(
             &visible_turn.assistant_message_id,
             local_first_desktop_gateway::MessageDeliveryState::Delivered,
         ));
-    let answer = result.ok().flatten().map(|result| result.text);
+    let agent_result = result.ok().flatten();
+    let waiting_for_user = agent_turn_waits_for_user(agent_result.as_ref());
+    let waiting_action = agent_result
+        .as_ref()
+        .and_then(|result| result.actionable_cards.first())
+        .map(|card| card.kind.to_string());
+    let has_dispatchable_remote_approval = agent_result
+        .as_ref()
+        .and_then(|result| result.remote_approval.as_ref())
+        .is_some_and(|intent| intent.approval_id.is_some());
+    let answer = agent_result.as_ref().map(|result| result.text.clone());
     let incomplete_reason = answer
         .as_deref()
         .and_then(agent_output_incomplete_reason)
         .or_else(|| answer.is_none().then(|| "scheduled task produced no final reply".to_string()));
 
     if answer.is_none() {
-        if let Ok(store) = lock_store(state) {
-            let _ = store.set_message_delivery_state(
-                &thread_id,
-                &visible_turn.assistant_message_id,
-                local_first_desktop_gateway::MessageDeliveryState::Failed,
+        mark_visible_assistant_message_failed(
+            state,
+            &thread_id,
+            &visible_turn.assistant_message_id,
+        );
+    }
+    if has_dispatchable_remote_approval {
+        let persisted_card = lock_store(state)
+            .ok()
+            .and_then(|store| {
+                store
+                    .message(&thread_id, &visible_turn.assistant_message_id)
+                    .ok()
+                    .flatten()
+            });
+        if let Some(message) = persisted_card {
+            tokio::runtime::Handle::current().block_on(
+                activate_remote_approvals_from_message(state, &thread_id, &message),
             );
         }
     }
@@ -38410,20 +38537,38 @@ fn execute_proactive_prompt_task(
         "channel": thread_plan.channel.as_deref().unwrap_or(thread_plan.source.as_str()),
     }));
 
-    let completed = incomplete_reason.is_none();
-    let summary = incomplete_reason
+    let completed = incomplete_reason.is_none() && !waiting_for_user;
+    let blocked_reason = if waiting_for_user {
+        Some("scheduled task is waiting for a user action".to_string())
+    } else {
+        incomplete_reason.clone()
+    };
+    let summary = blocked_reason
         .clone()
-        .unwrap_or_else(|| "Scheduled task executed.".to_string());
+        .unwrap_or_else(|| {
+            if waiting_for_user {
+                "Scheduled task is waiting for a user action.".to_string()
+            } else {
+                "Scheduled task executed.".to_string()
+            }
+        });
     Ok(TaskExecutionOutcome {
         completed,
-        blocked_reason: incomplete_reason,
-        pending_approval: None,
+        blocked_reason,
+        pending_approval: waiting_for_user.then(|| PendingExecutorApproval {
+            action: waiting_action.clone().unwrap_or_else(|| "action card".to_string()),
+            risk_level: "high".to_string(),
+            data_boundary: "in-chat action card".to_string(),
+            explanation: "The scheduled task is waiting for its persisted action card.".to_string(),
+            inline_action_card: true,
+        }),
         summary,
         checkpoint_payload: serde_json::json!({
             "kind": "proactive_prompt",
             "goal": goal,
             "thread_id": thread_id,
             "completed": completed,
+            "waiting_user_action": waiting_for_user,
         }),
         checkpoint_redacted: serde_json::json!({
             "kind": "proactive_prompt",
@@ -38433,16 +38578,22 @@ fn execute_proactive_prompt_task(
         surface: SurfaceKind::Logs,
         event_kind: if completed {
             "proactive_prompt_completed".to_string()
+        } else if waiting_for_user {
+            "proactive_prompt_waiting_approval".to_string()
         } else {
             "proactive_prompt_incomplete".to_string()
         },
         event_title: if completed {
             "Scheduled task completed".to_string()
+        } else if waiting_for_user {
+            "Scheduled task waiting approval".to_string()
         } else {
             "Scheduled task incomplete".to_string()
         },
         event_subtitle: if completed {
             "Scheduled proactive execution.".to_string()
+        } else if waiting_for_user {
+            "A persisted action card requires user confirmation.".to_string()
         } else {
             "Scheduled task stopped before finishing its plan.".to_string()
         },
@@ -44306,7 +44457,7 @@ fn task_execution_outcome_from_executor_result(
                 risk_level: risk_level.clone(),
                 data_boundary: data_boundary.clone(),
                 explanation: explanation.clone(),
-                remote_approval_id: None,
+                inline_action_card: false,
             }),
             summary: "Task in attesa di approval.".to_string(),
             checkpoint_payload: serde_json::json!({
@@ -60732,6 +60883,68 @@ prs.save(Path({path:?}))
             tool,
             &serde_json::json!({ "path": "/tmp/a", "content": "x" }),
         ));
+    }
+
+    #[test]
+    fn actionable_cards_classify_local_confirms_and_native_waiting_cards() {
+        let local_mcp = "Approve this. ‹‹MCP_CONFIRM››{\"tool\":\"mcp__filesystem__create\",\"arguments\":{\"path\":\"/tmp/a\"}}‹‹/MCP_CONFIRM››";
+        let local_composio = "Approve this. ‹‹COMPOSIO_CONFIRM››{\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{\"to\":\"a@example.test\"}}‹‹/COMPOSIO_CONFIRM››";
+        let native = "‹‹FS_AUTHORIZE››{\"path\":\"/tmp\",\"op\":\"list\"}‹‹/FS_AUTHORIZE››\n‹‹SANDBOX_ESCALATE››{\"tool\":\"run_in_project\",\"arguments\":{\"command\":\"pwd\"}}‹‹/SANDBOX_ESCALATE››\n‹‹CONNECT_SUGGEST››{\"items\":[{\"name\":\"Drive\"}]}‹‹/CONNECT_SUGGEST››";
+
+        let mcp_cards = super::actionable_cards_from_raw_text(local_mcp);
+        let composio_cards = super::actionable_cards_from_raw_text(local_composio);
+        let native_cards = super::actionable_cards_from_raw_text(native);
+
+        assert!(mcp_cards.iter().any(|card| card.kind == "MCP_CONFIRM"));
+        assert!(composio_cards
+            .iter()
+            .any(|card| card.kind == "COMPOSIO_CONFIRM"));
+        assert_eq!(native_cards.len(), 3);
+        assert!(native_cards.iter().all(|card| card.requires_user));
+    }
+
+    #[test]
+    fn scheduled_turn_with_an_action_card_is_nonterminal() {
+        let cards = super::actionable_cards_from_raw_text(
+            "‹‹COMPOSIO_CONFIRM››{\"tool\":\"GMAIL_SEND_EMAIL\",\"arguments\":{}}‹‹/COMPOSIO_CONFIRM››",
+        );
+        let result = super::AgentTurnResult {
+            text: "Please approve this send.".to_string(),
+            remote_approval: None,
+            actionable_cards: cards,
+        };
+
+        assert!(super::agent_turn_waits_for_user(Some(&result)));
+        assert!(!super::agent_turn_waits_for_user(None));
+    }
+
+    #[test]
+    fn channel_fallback_failure_marks_the_preallocated_assistant_bubble_failed() {
+        let store = super::ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let mut assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "assistant-fallback".to_string(),
+        );
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        assert!(super::mark_assistant_message_failed_in_store(
+            &store,
+            &thread.thread_id,
+            &assistant.id,
+        )
+        .unwrap());
+        assert_eq!(
+            store
+                .message(&thread.thread_id, &assistant.id)
+                .unwrap()
+                .unwrap()
+                .delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Failed
+        );
     }
 
     #[test]

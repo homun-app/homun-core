@@ -506,9 +506,15 @@ pub fn execute_chat_turn_task(
     }
     let cancelled = run.is_none();
     let agent_result = run.and_then(|result| result.ok()).flatten();
-    let waiting_remote_approval = agent_result
+    let waiting_for_user = crate::agent_turn_waits_for_user(agent_result.as_ref());
+    let waiting_action = agent_result
         .as_ref()
-        .and_then(|result| result.remote_approval.clone());
+        .and_then(|result| result.actionable_cards.first())
+        .map(|card| card.kind.to_string());
+    let has_dispatchable_remote_approval = agent_result
+        .as_ref()
+        .and_then(|result| result.remote_approval.as_ref())
+        .is_some_and(|intent| intent.approval_id.is_some());
     let answer = agent_result
         .map(|result| result.text)
         .unwrap_or_default();
@@ -584,7 +590,7 @@ pub fn execute_chat_turn_task(
     // assistant-message finalize and the `done` event: `cancel_chat_turn` already persisted
     // the `Cancelled` status and emitted the `Cancelled` turn event, so writing a `done`/full
     // answer here would resurrect a cancelled turn.
-    if generated && waiting_remote_approval.is_none() {
+    if generated && !waiting_for_user {
         // 6. Finalize the assistant message. The legacy path persists the full
         // streamed text (which includes ‹‹ACT›› activity markers as inline deltas),
         // so the working island can parse them out of `message.text`. The broker
@@ -641,20 +647,22 @@ pub fn execute_chat_turn_task(
         // The drainer has already atomically persisted the visible card, its
         // structured approval provenance and `WaitingUser`. Bind/dispatch only
         // from that saved card: never reconstruct a marker from display text.
-        let approval_message = state
-            .chat_store
-            .lock()
-            .ok()
-            .and_then(|store| {
-                store
-                    .message(thread_id, &visible_turn.assistant_message_id)
-                    .ok()
-                    .flatten()
-            });
-        if let Some(message) = approval_message {
-            tokio::runtime::Handle::current().block_on(
-                crate::activate_remote_approvals_from_message(state, thread_id, &message),
-            );
+        if has_dispatchable_remote_approval {
+            let approval_message = state
+                .chat_store
+                .lock()
+                .ok()
+                .and_then(|store| {
+                    store
+                        .message(thread_id, &visible_turn.assistant_message_id)
+                        .ok()
+                        .flatten()
+                });
+            if let Some(message) = approval_message {
+                tokio::runtime::Handle::current().block_on(
+                    crate::activate_remote_approvals_from_message(state, thread_id, &message),
+                );
+            }
         }
         tracing::info!(target: "broker::executor", turn_id = %turn_id, "approval card persisted; skipping channel mirror and terminal done event");
     } else {
@@ -667,7 +675,7 @@ pub fn execute_chat_turn_task(
     // 9. Build the outcome — same shape as `execute_proactive_prompt_task`. A cancelled
     // turn is never "completed"; the runner sees completed=false + the store's Cancelled
     // status and closes out without overwriting it.
-    let completed = generated && waiting_remote_approval.is_none();
+    let completed = generated && !waiting_for_user;
     tracing::info!(
         target: "broker::executor",
         turn_id = %turn_id,
@@ -678,21 +686,21 @@ pub fn execute_chat_turn_task(
         completed,
         blocked_reason: if completed {
             None
-        } else if waiting_remote_approval.is_some() {
-            Some("chat turn is waiting for remote approval".to_string())
+        } else if waiting_for_user {
+            Some("chat turn is waiting for a user action".to_string())
         } else {
             Some("chat turn produced no final reply".to_string())
         },
-        pending_approval: waiting_remote_approval.as_ref().map(|intent| crate::PendingExecutorApproval {
-            action: intent.tool.clone(),
+        pending_approval: waiting_for_user.then(|| crate::PendingExecutorApproval {
+            action: waiting_action.clone().unwrap_or_else(|| "action card".to_string()),
             risk_level: "high".to_string(),
-            data_boundary: "remote approval".to_string(),
-            explanation: "The chat turn is waiting for the persisted remote approval card.".to_string(),
-            remote_approval_id: Some(intent.approval_id.clone()),
+            data_boundary: "in-chat action card".to_string(),
+            explanation: "The chat turn is waiting for its persisted action card.".to_string(),
+            inline_action_card: true,
         }),
         summary: if completed {
             "Chat turn executed.".to_string()
-        } else if waiting_remote_approval.is_some() {
+        } else if waiting_for_user {
             "Chat turn is waiting for approval.".to_string()
         } else {
             "Chat turn produced no reply.".to_string()
@@ -703,7 +711,7 @@ pub fn execute_chat_turn_task(
             "assistant_message_id": visible_turn.assistant_message_id,
             "user_message_id": visible_turn.user_message_id,
             "completed": completed,
-            "waiting_remote_approval": waiting_remote_approval.is_some(),
+            "waiting_user_action": waiting_for_user,
         }),
         checkpoint_redacted: serde_json::json!({
             "kind": "chat_turn",
@@ -713,21 +721,21 @@ pub fn execute_chat_turn_task(
         surface: crate::SurfaceKind::Logs,
         event_kind: if completed {
             "chat_turn_completed".to_string()
-        } else if waiting_remote_approval.is_some() {
+        } else if waiting_for_user {
             "chat_turn_waiting_approval".to_string()
         } else {
             "chat_turn_incomplete".to_string()
         },
         event_title: if completed {
             "Chat turn completed".to_string()
-        } else if waiting_remote_approval.is_some() {
+        } else if waiting_for_user {
             "Chat turn waiting approval".to_string()
         } else {
             "Chat turn incomplete".to_string()
         },
         event_subtitle: if completed {
             "Interactive chat turn.".to_string()
-        } else if waiting_remote_approval.is_some() {
+        } else if waiting_for_user {
             "Remote approval required before the turn can continue.".to_string()
         } else {
             "Chat turn stopped before producing a reply.".to_string()

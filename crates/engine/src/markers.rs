@@ -105,6 +105,58 @@ const DISPLAY_MARKER_TAGS: [&str; 19] = [
     "GOAL_PROPOSE",
 ];
 
+/// Cards that leave a turn blocked until a person makes a decision. Keep this
+/// list adjacent to the canonical display-marker list: lifecycle state must
+/// follow the same protocol the desktop renderer uses, not ad-hoc string tests
+/// in individual executors.
+pub const ACTIONABLE_CARD_MARKER_TAGS: [&str; 5] = [
+    "COMPOSIO_CONFIRM",
+    "MCP_CONFIRM",
+    "FS_AUTHORIZE",
+    "SANDBOX_ESCALATE",
+    "CONNECT_SUGGEST",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionableMarkerBlock {
+    pub marker: &'static str,
+    pub raw: String,
+}
+
+/// Extract complete actionable card envelopes in their original order. The raw
+/// envelopes are intentionally retained: the desktop renderer and approval
+/// endpoints use their payload after a reload, while the chat lifecycle keeps
+/// the whole message out of model context until it is resolved.
+pub fn actionable_marker_blocks(text: &str) -> Vec<ActionableMarkerBlock> {
+    let mut blocks = Vec::new();
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let next = ACTIONABLE_CARD_MARKER_TAGS
+            .iter()
+            .filter_map(|marker| {
+                let open_tag = open(marker);
+                text[cursor..]
+                    .find(&open_tag)
+                    .map(|offset| (cursor + offset, *marker, open_tag, close(marker)))
+            })
+            .min_by_key(|(start, _, _, _)| *start);
+        let Some((start, marker, open_tag, close_tag)) = next else {
+            break;
+        };
+        let body_start = start + open_tag.len();
+        let Some(close_offset) = text[body_start..].find(&close_tag) else {
+            break;
+        };
+        let end = body_start + close_offset + close_tag.len();
+        blocks.push(ActionableMarkerBlock {
+            marker,
+            raw: text[start..end].to_string(),
+        });
+        cursor = end;
+    }
+    blocks
+}
+
 /// Strip every display-only marker block, leaving only the answer prose. The canonical stripper
 /// shared by the in-app context renderer, the channel mirror, and the loop's empty-answer check.
 pub fn strip_display_markers(text: &str) -> String {
