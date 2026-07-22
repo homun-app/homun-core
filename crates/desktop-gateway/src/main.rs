@@ -35559,6 +35559,7 @@ fn enqueue_or_steer_chat_turn_core(
         &workspace_id,
         input,
         |tx| insert_broker_turn_messages(tx, input),
+        |tx| insert_broker_steering_user_message(tx, input),
     )
 }
 
@@ -35575,6 +35576,22 @@ fn insert_broker_turn_messages(
     user.attachments = broker_turn_message_attachments(input);
     let assistant = channel_chat_message_with_id("assistant", "", &input.assistant_message_id);
     ChatStore::insert_linked_turn_messages(tx, &input.thread_id, &user, &assistant)
+    .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
+}
+
+fn insert_broker_steering_user_message(
+    tx: &rusqlite::Transaction<'_>,
+    input: &local_first_task_runtime::broker::ChatTurnInput,
+) -> local_first_task_runtime::TaskRuntimeResult<()> {
+    let visible_prompt = input.visible_prompt.as_deref().unwrap_or(&input.prompt);
+    ChatStore::insert_linked_user_message(
+        tx,
+        &input.thread_id,
+        &format!("local_user_{}", input.request_id),
+        visible_prompt,
+        &now_epoch_secs().to_string(),
+        &broker_turn_message_attachments(input),
+    )
     .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
 }
 
@@ -74088,6 +74105,167 @@ data: [DONE]\n";
                 .last()
                 .map(|message| message.id.as_str()),
             Some("local_assistant_r1")
+        );
+    }
+
+    #[test]
+    fn broker_steering_adds_only_the_user_message_without_an_assistant_placeholder() {
+        let root = isolated_gateway_test_dir("broker-steering-no-assistant");
+        std::fs::create_dir_all(&root).unwrap();
+        let database = root.join("homun.sqlite");
+        let chat = ChatStore::open(&database).unwrap();
+        let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+        let thread = chat.create_thread("workspace_test").unwrap();
+        let user_id = super::gateway_user_id();
+        let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_test");
+        let first = local_first_task_runtime::broker::ChatTurnInput {
+            thread_id: thread.thread_id.clone(),
+            request_id: "r1".to_string(),
+            assistant_message_id: "local_assistant_r1".to_string(),
+            prompt: "first prompt".to_string(),
+            visible_prompt: None,
+            images: Vec::new(),
+            attachments: None,
+            mode: None,
+            model: None,
+            source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+            approval: local_first_task_runtime::broker::TurnApproval::Full,
+        };
+        let first_outcome = local_first_task_runtime::broker::enqueue_or_steer_chat_turn_atomic(
+            &tasks,
+            &user_id,
+            &workspace_id,
+            &first,
+            |tx| super::insert_broker_turn_messages(tx, &first),
+            |tx| super::insert_broker_steering_user_message(tx, &first),
+        )
+        .unwrap();
+        assert!(matches!(
+            first_outcome,
+            local_first_task_runtime::broker::EnqueueTurnOutcome::Enqueued(_)
+        ));
+        let steering = local_first_task_runtime::broker::ChatTurnInput {
+            request_id: "r2".to_string(),
+            assistant_message_id: "local_assistant_r2".to_string(),
+            prompt: "steer the active turn".to_string(),
+            ..first.clone()
+        };
+
+        let outcome = local_first_task_runtime::broker::enqueue_or_steer_chat_turn_atomic(
+            &tasks,
+            &user_id,
+            &workspace_id,
+            &steering,
+            |tx| super::insert_broker_turn_messages(tx, &steering),
+            |tx| super::insert_broker_steering_user_message(tx, &steering),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            outcome,
+            local_first_task_runtime::broker::EnqueueTurnOutcome::SteeringQueued { .. }
+        ));
+        let messages = chat.messages(&thread.thread_id).unwrap().messages;
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message.id == "local_user_r2")
+                .count(),
+            1
+        );
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.id != "local_assistant_r2")
+        );
+        assert_eq!(
+            messages.last().map(|message| message.id.as_str()),
+            Some("local_user_r2")
+        );
+        assert!(
+            tasks
+                .get_task(
+                    &local_first_task_runtime::TaskId::new("turn_r2"),
+                    &user_id,
+                    &workspace_id,
+                )
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn broker_enqueue_rolls_back_user_assistant_and_task_when_placeholder_is_rejected() {
+        let root = isolated_gateway_test_dir("broker-preallocated-rollback");
+        std::fs::create_dir_all(&root).unwrap();
+        let database = root.join("homun.sqlite");
+        let chat = ChatStore::open(&database).unwrap();
+        let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+        let thread = chat.create_thread("workspace_test").unwrap();
+        let leaf_before = chat
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages
+            .last()
+            .unwrap()
+            .id
+            .clone();
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .execute_batch(
+                "create trigger reject_preallocated_assistant
+                 before insert on chat_messages
+                 when new.id = 'local_assistant_rejected'
+                 begin select raise(abort, 'assistant rejected'); end;",
+            )
+            .unwrap();
+        let input = local_first_task_runtime::broker::ChatTurnInput {
+            thread_id: thread.thread_id.clone(),
+            request_id: "rejected".to_string(),
+            assistant_message_id: "local_assistant_rejected".to_string(),
+            prompt: "prompt".to_string(),
+            visible_prompt: None,
+            images: Vec::new(),
+            attachments: None,
+            mode: None,
+            model: None,
+            source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+            approval: local_first_task_runtime::broker::TurnApproval::Full,
+        };
+        let user_id = super::gateway_user_id();
+        let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_test");
+
+        let error = local_first_task_runtime::broker::enqueue_chat_turn_atomic(
+            &tasks,
+            &user_id,
+            &workspace_id,
+            &input,
+            |tx| super::insert_broker_turn_messages(tx, &input),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("assistant rejected"));
+        let messages = chat.messages(&thread.thread_id).unwrap().messages;
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.id != "local_user_rejected")
+        );
+        assert!(
+            messages
+                .iter()
+                .all(|message| message.id != "local_assistant_rejected")
+        );
+        assert_eq!(messages.last().map(|message| message.id.as_str()), Some(leaf_before.as_str()));
+        assert!(
+            tasks
+                .get_task(
+                    &local_first_task_runtime::TaskId::new("turn_rejected"),
+                    &user_id,
+                    &workspace_id,
+                )
+                .unwrap()
+                .is_none()
         );
     }
 

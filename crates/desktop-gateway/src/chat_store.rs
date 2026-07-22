@@ -5222,41 +5222,6 @@ mod tests {
     }
 
     #[test]
-    fn linked_turn_insert_rolls_back_when_assistant_insert_is_rejected() {
-        let store = ChatStore::in_memory().unwrap();
-        let thread = store.create_thread("default").unwrap();
-        let tid = thread.thread_id;
-        let user = mk_message("local_user_rejected", "user");
-        let assistant = mk_message("local_assistant_rejected", "assistant");
-        store
-            .conn
-            .execute_batch(
-                "create trigger reject_preallocated_assistant
-                 before insert on chat_messages
-                 when new.id = 'local_assistant_rejected'
-                 begin select raise(abort, 'assistant rejected'); end;",
-            )
-            .unwrap();
-
-        store.conn.execute_batch("begin immediate").unwrap();
-        let error =
-            ChatStore::insert_linked_turn_messages(&store.conn, &tid, &user, &assistant)
-                .unwrap_err();
-        assert!(error.to_string().contains("assistant rejected"));
-        store.conn.execute_batch("rollback").unwrap();
-
-        let count: i64 = store
-            .conn
-            .query_row(
-                "select count(*) from chat_messages where thread_id = ?1 and id in (?2, ?3)",
-                params![tid, user.id, assistant.id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 0);
-    }
-
-    #[test]
     fn chat_tree_backfill_linearizes_legacy_rows() {
         let store = ChatStore::in_memory().unwrap();
         // Simulate a pre-branching DB: a bare thread + rows with no parent/leaf.

@@ -7,6 +7,7 @@ use crate::{
 };
 use serde_json::{json, Value};
 use time::OffsetDateTime;
+use rusqlite::{Connection, OptionalExtension};
 
 /// Input for a new chat_turn. Prompt is embedded for atomicity.
 #[derive(Debug, Clone)]
@@ -107,6 +108,11 @@ pub enum EnqueueTurnOutcome {
         source_message_id: String,
         objective_revision: u64,
     },
+}
+
+enum EnqueueOrSteerTransactionOutcome {
+    Outcome(EnqueueTurnOutcome),
+    ThreadBusy(String),
 }
 
 /// Generates a chat_turn task_id. Stable, debuggable.
@@ -254,27 +260,14 @@ fn count_queued_chat_turns_for_thread(
 /// the user message row (the caller knows the chat_messages schema, which lives
 /// in chat_store). It should be idempotent on the request_id (use INSERT OR IGNORE)
 /// so re-enqueue after a crash doesn't duplicate.
-pub fn enqueue_chat_turn_atomic<F>(
-    store: &TaskStore,
+fn queued_chat_turn_task(
     user_id: &UserId,
     workspace_id: &WorkspaceId,
     input: &ChatTurnInput,
-    insert_user_message: F,
-) -> Result<EnqueuedTurn, EnqueueError>
-where
-    F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
-{
-    // Pre-check (the tx below hardens against races).
-    if let Some(active) = store.active_chat_turn_for_thread(&input.thread_id)? {
-        return Err(EnqueueError::ThreadBusy {
-            thread_id: input.thread_id.clone(),
-            active_turn_id: active,
-        });
-    }
-
+) -> TaskRecord {
     let task_id = chat_turn_task_id(&input.request_id);
     let now = OffsetDateTime::now_utc();
-    let input_json = serde_json::json!({
+    let input_json = json!({
         "thread_id": input.thread_id,
         "request_id": input.request_id,
         "assistant_message_id": input.assistant_message_id,
@@ -287,7 +280,6 @@ where
         "source": input.source.as_str(),
         "approval": input.approval.as_str(),
     });
-
     let mut task = TaskRecord::new(
         task_id.as_str(),
         user_id.clone(),
@@ -306,69 +298,99 @@ where
     task.resource_requirements = chat_turn_resource_requirements();
     task.created_at = now;
     task.updated_at = now;
+    task
+}
 
-    // Atomic section: insert_user_message + insert task in one tx.
-    let task_clone = task.clone();
-    let thread_id = input.thread_id.clone();
-    let request_id = input.request_id.clone();
-    let source = input.source.as_str().to_string();
-    let approval = input.approval.as_str().to_string();
-    store.with_transaction(|tx| {
-        // Caller inserts the chat message in the same tx.
-        insert_user_message(tx)?;
+fn active_chat_turn_on(conn: &Connection, thread_id: &str) -> TaskRuntimeResult<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT task_id FROM tasks
+             WHERE thread_id = ?1 AND kind = 'chat_turn'
+               AND status NOT IN ('completed', 'failed', 'cancelled', 'expired')
+             LIMIT 1",
+            rusqlite::params![thread_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
 
-        // Insert the task + indexed columns in the same tx.
-        let task_json = serde_json::to_string(&task_clone)
-            .map_err(|e| TaskRuntimeError::Store(e.to_string()))?;
-        tx.execute(
-            "INSERT INTO tasks (
-                task_id, user_id, workspace_id, workflow_id, kind, status, priority,
-                created_at, updated_at, blocked_reason, task_json
-            )
-            VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, NULL, ?9)
-            ON CONFLICT(task_id, user_id, workspace_id) DO UPDATE SET
-                kind = excluded.kind, status = excluded.status, priority = excluded.priority,
-                updated_at = excluded.updated_at, task_json = excluded.task_json",
-            rusqlite::params![
-                task_clone.task_id.as_str(),
-                task_clone.user_id.as_str(),
-                task_clone.workspace_id.as_str(),
-                task_clone.kind,
-                "queued",
-                "high",
-                now.unix_timestamp(),
-                now.unix_timestamp(),
-                task_json,
-            ],
-        )?;
-        tx.execute(
-            "UPDATE tasks SET thread_id = ?1, request_id = ?2, source = ?3, approval = ?4
-             WHERE task_id = ?5 AND user_id = ?6 AND workspace_id = ?7",
-            rusqlite::params![
-                thread_id, request_id, source, approval,
-                task_clone.task_id.as_str(),
-                task_clone.user_id.as_str(),
-                task_clone.workspace_id.as_str(),
-            ],
-        )?;
-        Ok(())
-    })?;
+fn insert_chat_turn_on(
+    tx: &rusqlite::Transaction<'_>,
+    task: &TaskRecord,
+    input: &ChatTurnInput,
+) -> TaskRuntimeResult<()> {
+    let task_json =
+        serde_json::to_string(task).map_err(|error| TaskRuntimeError::Store(error.to_string()))?;
+    tx.execute(
+        "INSERT INTO tasks (
+            task_id, user_id, workspace_id, workflow_id, kind, status, priority,
+            created_at, updated_at, blocked_reason, task_json
+        )
+        VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, NULL, ?9)
+        ON CONFLICT(task_id, user_id, workspace_id) DO UPDATE SET
+            kind = excluded.kind, status = excluded.status, priority = excluded.priority,
+            updated_at = excluded.updated_at, task_json = excluded.task_json",
+        rusqlite::params![
+            task.task_id.as_str(),
+            task.user_id.as_str(),
+            task.workspace_id.as_str(),
+            task.kind,
+            "queued",
+            "high",
+            task.created_at.unix_timestamp(),
+            task.updated_at.unix_timestamp(),
+            task_json,
+        ],
+    )?;
+    tx.execute(
+        "UPDATE tasks SET thread_id = ?1, request_id = ?2, source = ?3, approval = ?4
+         WHERE task_id = ?5 AND user_id = ?6 AND workspace_id = ?7",
+        rusqlite::params![
+            input.thread_id,
+            input.request_id,
+            input.source.as_str(),
+            input.approval.as_str(),
+            task.task_id.as_str(),
+            task.user_id.as_str(),
+            task.workspace_id.as_str(),
+        ],
+    )?;
+    Ok(())
+}
 
-    // Post-insert double-check (outside tx).
-    if let Some(a) = store.active_chat_turn_for_thread(&input.thread_id)? {
-        if a != task.task_id.as_str() {
-            store.update_task_status(
-                &task.task_id,
-                user_id,
-                workspace_id,
-                TaskStatus::Cancelled,
-                Some("race lost on thread enqueue"),
-            )?;
-            return Err(EnqueueError::ThreadBusy {
-                thread_id: input.thread_id.clone(),
-                active_turn_id: a,
-            });
+pub fn enqueue_chat_turn_atomic<F>(
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    input: &ChatTurnInput,
+    insert_user_message: F,
+) -> Result<EnqueuedTurn, EnqueueError>
+where
+    F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
+{
+    // Pre-check (the tx below hardens against races).
+    if let Some(active) = store.active_chat_turn_for_thread(&input.thread_id)? {
+        return Err(EnqueueError::ThreadBusy {
+            thread_id: input.thread_id.clone(),
+            active_turn_id: active,
+        });
+    }
+
+    let task = queued_chat_turn_task(user_id, workspace_id, input);
+    let task_id = task.task_id.clone();
+    let active = store.with_transaction(|tx| {
+        if let Some(active) = active_chat_turn_on(tx, &input.thread_id)? {
+            return Ok(Some(active));
         }
+        insert_user_message(tx)?;
+        insert_chat_turn_on(tx, &task, input)?;
+        Ok(None)
+    })?;
+    if let Some(active_turn_id) = active {
+        return Err(EnqueueError::ThreadBusy {
+            thread_id: input.thread_id.clone(),
+            active_turn_id,
+        });
     }
 
     Ok(EnqueuedTurn {
@@ -381,35 +403,41 @@ where
 /// Interactive input submitted while a thread is active is user steering for
 /// that run, not a competing turn. Persist the transcript row and steering row
 /// in one transaction so the executor can consume exactly what the user sees.
-pub fn enqueue_or_steer_chat_turn_atomic<F>(
+pub fn enqueue_or_steer_chat_turn_atomic<F, G>(
     store: &TaskStore,
     user_id: &UserId,
     workspace_id: &WorkspaceId,
     input: &ChatTurnInput,
-    insert_user_message: F,
+    insert_turn_messages: F,
+    insert_steering_user_message: G,
 ) -> Result<EnqueueTurnOutcome, EnqueueError>
 where
     F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
+    G: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
 {
-    let Some(active_turn_id) = store.active_chat_turn_for_thread(&input.thread_id)? else {
-        return enqueue_chat_turn_atomic(store, user_id, workspace_id, input, insert_user_message)
-            .map(EnqueueTurnOutcome::Enqueued);
-    };
-    if input.source != ChatTurnSource::Interactive {
-        return Err(EnqueueError::ThreadBusy {
-            thread_id: input.thread_id.clone(),
-            active_turn_id,
-        });
-    }
-
     let objective_revision = store
         .load_objective_contract(user_id.as_str(), workspace_id.as_str(), &input.thread_id)?
         .map(|objective| objective.revision)
         .unwrap_or(0);
     let source_message_id = format!("local_user_{}", input.request_id);
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    store.with_transaction(|tx| {
-        insert_user_message(tx)?;
+    let task = queued_chat_turn_task(user_id, workspace_id, input);
+    let outcome = store.with_transaction(|tx| {
+        let Some(active_turn_id) = active_chat_turn_on(tx, &input.thread_id)? else {
+            insert_turn_messages(tx)?;
+            insert_chat_turn_on(tx, &task, input)?;
+            return Ok(EnqueueOrSteerTransactionOutcome::Outcome(
+                EnqueueTurnOutcome::Enqueued(EnqueuedTurn {
+                    task_id: task.task_id.clone(),
+                    thread_id: input.thread_id.clone(),
+                    position_in_queue: 0,
+                }),
+            ));
+        };
+        if input.source != ChatTurnSource::Interactive {
+            return Ok(EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id));
+        }
+        insert_steering_user_message(tx)?;
         tx.execute(
             "INSERT INTO turn_steering (
                 user_id, workspace_id, thread_id, active_turn_id, source_message_id,
@@ -427,15 +455,24 @@ where
                 now,
             ],
         )?;
-        Ok(())
+        Ok(EnqueueOrSteerTransactionOutcome::Outcome(
+            EnqueueTurnOutcome::SteeringQueued {
+                thread_id: input.thread_id.clone(),
+                active_turn_id,
+                source_message_id: source_message_id.clone(),
+                objective_revision,
+            },
+        ))
     })?;
-
-    Ok(EnqueueTurnOutcome::SteeringQueued {
-        thread_id: input.thread_id.clone(),
-        active_turn_id,
-        source_message_id,
-        objective_revision,
-    })
+    match outcome {
+        EnqueueOrSteerTransactionOutcome::Outcome(outcome) => Ok(outcome),
+        EnqueueOrSteerTransactionOutcome::ThreadBusy(active_turn_id) => {
+            Err(EnqueueError::ThreadBusy {
+                thread_id: input.thread_id.clone(),
+                active_turn_id,
+            })
+        }
+    }
 }
 
 
@@ -892,6 +929,7 @@ mod atomic_tests {
             &UserId::new("u"),
             &WorkspaceId::new("w"),
             &make_input("r2", "t1"),
+            |_tx| Ok(()),
             |_tx| {
                 *called_clone.lock().unwrap() = true;
                 Ok(())
