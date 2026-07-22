@@ -12,7 +12,7 @@
 //! The markdown→HTML + message-splitting helpers are ported from Homun's
 //! `channels/telegram.rs`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -63,14 +63,21 @@ struct BridgeState {
     bot: Arc<Bot>,
     control_token: Arc<str>,
     target: Arc<std::sync::RwLock<Option<GatewayTarget>>>,
+    status_path: Arc<PathBuf>,
 }
 
 impl BridgeState {
-    fn new(bot: Arc<Bot>, control_token: impl Into<Arc<str>>, target: Option<GatewayTarget>) -> Self {
+    fn new(
+        bot: Arc<Bot>,
+        control_token: impl Into<Arc<str>>,
+        target: Option<GatewayTarget>,
+        status_path: impl Into<PathBuf>,
+    ) -> Self {
         Self {
             bot,
             control_token: control_token.into(),
             target: Arc::new(std::sync::RwLock::new(target)),
+            status_path: Arc::new(status_path.into()),
         }
     }
 
@@ -80,6 +87,7 @@ impl BridgeState {
             Arc::new(Bot::new(control_token)),
             Arc::<str>::from(control_token),
             Some(target),
+            status_path(),
         )
     }
 
@@ -115,9 +123,12 @@ fn status_path() -> PathBuf {
 }
 
 fn write_status(status: &Status) {
-    if let Ok(json) = serde_json::to_string_pretty(status) {
-        let _ = std::fs::write(status_path(), json);
-    }
+    let _ = write_status_to(&status_path(), status);
+}
+
+fn write_status_to(path: &Path, status: &Status) -> std::io::Result<()> {
+    let json = serde_json::to_vec_pretty(status).map_err(std::io::Error::other)?;
+    std::fs::write(path, json)
 }
 
 /// File holding the last-confirmed getUpdates offset, so a restart resumes from
@@ -151,9 +162,15 @@ struct SendRequest {
     buttons: Vec<[String; 2]>,
 }
 
-async fn send_handler(State(state): State<BridgeState>, Json(request): Json<SendRequest>) -> StatusCode {
+async fn send_handler(
+    State(state): State<BridgeState>,
+    Json(request): Json<SendRequest>,
+) -> StatusCode {
     let Ok(chat_id) = request.recipient.trim().parse::<i64>() else {
-        eprintln!("recipient non valido (atteso chat_id numerico): {}", request.recipient);
+        eprintln!(
+            "recipient non valido (atteso chat_id numerico): {}",
+            request.recipient
+        );
         return StatusCode::BAD_REQUEST;
     };
 
@@ -169,7 +186,9 @@ async fn send_handler(State(state): State<BridgeState>, Json(request): Json<Send
                     .build()
             })
             .collect();
-        let markup = InlineKeyboardMarkup::builder().inline_keyboard(vec![row]).build();
+        let markup = InlineKeyboardMarkup::builder()
+            .inline_keyboard(vec![row])
+            .build();
         let params = SendMessageParams::builder()
             .chat_id(ChatId::Integer(chat_id))
             .text(&request.text)
@@ -269,14 +288,43 @@ async fn configure_gateway_handler(
     if !is_loopback_gateway_url(request.gateway_url.trim()) {
         return StatusCode::BAD_REQUEST;
     }
-    if state.reconfigure(
+    if control_token != state.control_token.as_ref() {
+        return StatusCode::UNAUTHORIZED;
+    }
+
+    let identity = match state.bot.get_me().await {
+        Ok(identity) => identity,
+        Err(_) => {
+            let _ = write_status_to(
+                &state.status_path,
+                &Status {
+                    connected: false,
+                    error: Some("getMe non riuscito".to_string()),
+                    ..Default::default()
+                },
+            );
+            return StatusCode::BAD_GATEWAY;
+        }
+    };
+    if !state.reconfigure(
         control_token,
         GatewayTarget::new(request.gateway_url.trim(), request.gateway_token),
     ) {
-        StatusCode::NO_CONTENT
-    } else {
-        StatusCode::UNAUTHORIZED
+        return StatusCode::BAD_GATEWAY;
     }
+    if write_status_to(
+        &state.status_path,
+        &Status {
+            connected: true,
+            bot_username: identity.result.username,
+            error: None,
+        },
+    )
+    .is_err()
+    {
+        return StatusCode::BAD_GATEWAY;
+    }
+    StatusCode::NO_CONTENT
 }
 
 async fn serve_http(state: BridgeState, port: u16) {
@@ -364,7 +412,10 @@ async fn forward_inbound(
                 attempt + 1
             ),
             Err(error) => {
-                eprintln!("inbound: inoltro al gateway fallito (tentativo {}): {error}", attempt + 1)
+                eprintln!(
+                    "inbound: inoltro al gateway fallito (tentativo {}): {error}",
+                    attempt + 1
+                )
             }
         }
         tokio::time::sleep(std::time::Duration::from_secs(attempt as u64 + 1)).await;
@@ -459,13 +510,22 @@ fn main() -> anyhow::Result<()> {
         // Where to forward inbound messages and approval callbacks. The mutable target lets a
         // restarted gateway rebind an already-running bridge without dropping Telegram polling.
         let target = match (
-            std::env::var("TG_GATEWAY_URL").ok().filter(|s| !s.is_empty()),
-            std::env::var("TG_GATEWAY_TOKEN").ok().filter(|s| !s.is_empty()),
+            std::env::var("TG_GATEWAY_URL")
+                .ok()
+                .filter(|s| !s.is_empty()),
+            std::env::var("TG_GATEWAY_TOKEN")
+                .ok()
+                .filter(|s| !s.is_empty()),
         ) {
             (Some(url), Some(token)) => Some(GatewayTarget::new(url, token)),
             _ => None,
         };
-        let bridge_state = BridgeState::new(bot.clone(), Arc::<str>::from(token.as_str()), target);
+        let bridge_state = BridgeState::new(
+            bot.clone(),
+            Arc::<str>::from(token.as_str()),
+            target,
+            status_path(),
+        );
 
         // Expose /send + /chatstate for the gateway.
         let port: u16 = std::env::var("TG_HTTP_PORT")
@@ -485,10 +545,7 @@ fn main() -> anyhow::Result<()> {
                 offset: Some(offset as i64),
                 limit: Some(100),
                 timeout: Some(60),
-                allowed_updates: Some(vec![
-                    AllowedUpdate::Message,
-                    AllowedUpdate::CallbackQuery,
-                ]),
+                allowed_updates: Some(vec![AllowedUpdate::Message, AllowedUpdate::CallbackQuery]),
             };
             match bot.get_updates(&params).await {
                 Ok(response) => {
@@ -499,12 +556,9 @@ fn main() -> anyhow::Result<()> {
                         // the batch and re-fetch from the same offset next poll.
                         match update.content {
                             UpdateContent::Message(message) => {
-                                let delivered = forward_inbound(
-                                    &http,
-                                    bridge_state.gateway_target(),
-                                    *message,
-                                )
-                                .await;
+                                let delivered =
+                                    forward_inbound(&http, bridge_state.gateway_target(), *message)
+                                        .await;
                                 if !delivered {
                                     break;
                                 }
@@ -519,12 +573,9 @@ fn main() -> anyhow::Result<()> {
                                             .build(),
                                     )
                                     .await;
-                                let outcome = forward_callback(
-                                    &http,
-                                    bridge_state.gateway_target(),
-                                    &cb,
-                                )
-                                .await;
+                                let outcome =
+                                    forward_callback(&http, bridge_state.gateway_target(), &cb)
+                                        .await;
                                 eprintln!(
                                     "telegram callback forward: outcome={}",
                                     callback_outcome_label(outcome)
@@ -675,6 +726,24 @@ fn split_message(text: &str, max_len: usize) -> Vec<String> {
 mod tests {
     use super::*;
 
+    async fn fake_telegram_api(status: StatusCode, body: serde_json::Value) -> String {
+        let app = Router::new().route(
+            "/getMe",
+            post(move || {
+                let body = body.clone();
+                async move { (status, Json(body)) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{address}")
+    }
+
     #[test]
     fn markdown_bold_and_code() {
         assert_eq!(markdown_to_html("This is **bold**"), "This is <b>bold</b>");
@@ -712,10 +781,7 @@ mod tests {
             "bot-secret",
             GatewayTarget::new("http://127.0.0.1:18765", "old"),
         );
-        assert!(!state.reconfigure(
-            "wrong",
-            GatewayTarget::new("http://127.0.0.1:18765", "new"),
-        ));
+        assert!(!state.reconfigure("wrong", GatewayTarget::new("http://127.0.0.1:18765", "new"),));
         assert_eq!(state.gateway_target().unwrap().token, "old");
     }
 
@@ -725,5 +791,89 @@ mod tests {
         assert_eq!(label, "http_401");
         assert!(!label.contains("bot-secret"));
         assert!(!label.contains("gateway-token"));
+    }
+
+    #[tokio::test]
+    async fn configure_gateway_refreshes_connected_status() {
+        let api_url = fake_telegram_api(
+            StatusCode::OK,
+            serde_json::json!({
+                "ok": true,
+                "result": {
+                    "id": 42,
+                    "is_bot": true,
+                    "first_name": "Homun",
+                    "username": "HomunBot_bot"
+                }
+            }),
+        )
+        .await;
+        let temp = tempfile::tempdir().unwrap();
+        let status_file = temp.path().join("telegram-status.json");
+        let state = BridgeState::new(
+            Arc::new(Bot::new_url(api_url)),
+            Arc::<str>::from("bot-secret"),
+            Some(GatewayTarget::new("http://127.0.0.1:18765", "old")),
+            status_file.clone(),
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer bot-secret".parse().unwrap());
+
+        let response = configure_gateway_handler(
+            State(state),
+            headers,
+            Json(ConfigureGatewayRequest {
+                gateway_url: "http://127.0.0.1:18765".to_string(),
+                gateway_token: "current".to_string(),
+            }),
+        )
+        .await;
+
+        assert_eq!(response, StatusCode::NO_CONTENT);
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(status_file).unwrap()).unwrap();
+        assert_eq!(persisted["connected"], true);
+        assert_eq!(persisted["bot_username"], "HomunBot_bot");
+        assert!(persisted["error"].is_null());
+    }
+
+    #[tokio::test]
+    async fn configure_gateway_records_redacted_identity_failure() {
+        let api_url = fake_telegram_api(
+            StatusCode::UNAUTHORIZED,
+            serde_json::json!({
+                "ok": false,
+                "error_code": 401,
+                "description": "Unauthorized"
+            }),
+        )
+        .await;
+        let temp = tempfile::tempdir().unwrap();
+        let status_file = temp.path().join("telegram-status.json");
+        let state = BridgeState::new(
+            Arc::new(Bot::new_url(api_url)),
+            Arc::<str>::from("bot-secret"),
+            Some(GatewayTarget::new("http://127.0.0.1:18765", "old")),
+            status_file.clone(),
+        );
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer bot-secret".parse().unwrap());
+
+        let response = configure_gateway_handler(
+            State(state),
+            headers,
+            Json(ConfigureGatewayRequest {
+                gateway_url: "http://127.0.0.1:18765".to_string(),
+                gateway_token: "current".to_string(),
+            }),
+        )
+        .await;
+
+        assert_eq!(response, StatusCode::BAD_GATEWAY);
+        let raw = std::fs::read_to_string(status_file).unwrap();
+        let persisted: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(persisted["connected"], false);
+        assert!(!raw.contains("bot-secret"));
+        assert!(!raw.contains("current"));
     }
 }
