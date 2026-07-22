@@ -74245,17 +74245,17 @@ data: [DONE]\n";
         .unwrap_err();
 
         assert!(error.to_string().contains("assistant rejected"));
+        assert!(
+            chat.message(&thread.thread_id, "local_user_rejected")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            chat.message(&thread.thread_id, "local_assistant_rejected")
+                .unwrap()
+                .is_none()
+        );
         let messages = chat.messages(&thread.thread_id).unwrap().messages;
-        assert!(
-            messages
-                .iter()
-                .all(|message| message.id != "local_user_rejected")
-        );
-        assert!(
-            messages
-                .iter()
-                .all(|message| message.id != "local_assistant_rejected")
-        );
         assert_eq!(messages.last().map(|message| message.id.as_str()), Some(leaf_before.as_str()));
         assert!(
             tasks
