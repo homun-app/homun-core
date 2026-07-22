@@ -49,6 +49,7 @@ mod privacy_guard;
 #[cfg(target_os = "linux")]
 mod landlock_fence;
 mod sandbox;
+mod setup_computer;
 // macOS Seatbelt (`sandbox-exec`) profile generator from a SandboxPolicy (ADR 0023,
 // step 3; pure string generation — not wired yet).
 mod seatbelt;
@@ -262,6 +263,7 @@ pub(crate) struct AppState {
     /// thread archive/close/delete.
     browser_thread_sessions: Arc<Mutex<std::collections::HashMap<String, ThreadBrowserSession>>>,
     payment_approvals: Arc<Mutex<std::collections::HashMap<String, PaymentApprovalGrant>>>,
+    setup_computer: Arc<setup_computer::SetupComputerCoordinator>,
     secret_store: Arc<EncryptedFileSecretStore<DevelopmentSecretKeyProvider>>,
     auth_token: Arc<str>,
     /// Short-lived tickets authorizing the noVNC live-view proxy. The iframe and
@@ -502,6 +504,7 @@ impl AppState {
             browser_capability_client: Arc::new(Mutex::new(None)),
             browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            setup_computer: Arc::new(setup_computer::SetupComputerCoordinator::default()),
             secret_store: Arc::new(secret_store),
             auth_token: "test-token".into(),
             novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -1047,6 +1050,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         browser_capability_client: Arc::new(Mutex::new(None)),
         browser_thread_sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
         payment_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        setup_computer: Arc::new(setup_computer::SetupComputerCoordinator::default()),
         secret_store: Arc::new(open_gateway_secret_store()?),
         auth_token: resolve_gateway_auth_token()?.into(),
         novnc_tickets: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -1304,6 +1308,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/setup/complete", post(complete_setup))
         .route("/api/setup/ollama", get(get_ollama_setup))
         .route("/api/setup/pull-model", post(pull_model))
+        .route(
+            "/api/setup/computer/prepare",
+            post(prepare_setup_computer),
+        )
+        .route(
+            "/api/setup/computer/status",
+            get(get_setup_computer_status),
+        )
         .route(
             "/api/prefs/approval-routing",
             get(get_approval_routing).post(set_approval_routing),
@@ -1740,13 +1752,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Behavior depends on the user's `local_computer_autostart` setting (default ON):
     //   ON  → start it eagerly, OPENING Docker if it's closed (ensure_contained_computer).
     //   OFF → stay non-intrusive: only warm up when Docker is already running.
-    std::thread::spawn(|| {
+    let computer_warmup_state = startup_state.clone();
+    tokio::spawn(async move {
         if sandbox::container_up() {
             return;
         }
         let autostart = load_runtime_settings().local_computer_autostart;
         if autostart || sandbox::docker_running() {
-            let _ = sandbox::ensure_contained_computer();
+            let _ = begin_setup_computer(computer_warmup_state).await;
         }
     });
     let listener = TcpListener::bind(addr).await?;
@@ -28671,6 +28684,99 @@ async fn get_setup_status() -> Json<SetupStatus> {
         has_provider,
         provider_kind,
     })
+}
+
+async fn setup_computer_endpoint_ok(http: &reqwest::Client, url: &str) -> bool {
+    http.get(url)
+        .timeout(std::time::Duration::from_millis(1_500))
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+}
+
+async fn setup_computer_observed_healthy(http: &reqwest::Client) -> bool {
+    if !sandbox::container_up() {
+        return false;
+    }
+    let (browser_ready, live_view_ready) = tokio::join!(
+        setup_computer_endpoint_ok(http, "http://127.0.0.1:9222/json/version"),
+        setup_computer_endpoint_ok(http, "http://127.0.0.1:6080/vnc.html"),
+    );
+    browser_ready && live_view_ready
+}
+
+async fn verify_setup_computer(http: &reqwest::Client) -> Result<(), String> {
+    let mut browser_ready = false;
+    let mut live_view_ready = false;
+    for _ in 0..60 {
+        let (browser, live_view) = tokio::join!(
+            setup_computer_endpoint_ok(http, "http://127.0.0.1:9222/json/version"),
+            setup_computer_endpoint_ok(http, "http://127.0.0.1:6080/vnc.html"),
+        );
+        browser_ready |= browser;
+        live_view_ready |= live_view;
+        if browser_ready && live_view_ready {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    if !browser_ready {
+        Err("Homun Computer started, but its browser did not become ready.".to_string())
+    } else {
+        Err("Homun Computer started, but its live view did not become ready.".to_string())
+    }
+}
+
+async fn begin_setup_computer(state: AppState) -> setup_computer::SetupComputerStatus {
+    let observed_healthy = setup_computer_observed_healthy(&state.http).await;
+    if let setup_computer::BeginSetup::Start { generation } =
+        state.setup_computer.begin(observed_healthy)
+    {
+        let coordinator = state.setup_computer.clone();
+        let http = state.http.clone();
+        tokio::spawn(async move {
+            let progress_coordinator = coordinator.clone();
+            let bootstrap = tokio::task::spawn_blocking(move || {
+                sandbox::ensure_contained_computer_with_progress(|phase| {
+                    progress_coordinator.advance(
+                        generation,
+                        setup_computer::phase_from_sandbox(phase),
+                    );
+                })
+            })
+            .await;
+            match bootstrap {
+                Ok(Ok(())) => {
+                    coordinator.advance(
+                        generation,
+                        setup_computer::SetupComputerPhase::VerifyingBrowser,
+                    );
+                    match verify_setup_computer(&http).await {
+                        Ok(()) => coordinator.ready(generation),
+                        Err(message) => coordinator.fail(generation, message),
+                    }
+                }
+                Ok(Err(message)) => coordinator.fail(generation, message),
+                Err(_) => coordinator.fail(
+                    generation,
+                    "Homun Computer preparation stopped unexpectedly.",
+                ),
+            }
+        });
+    }
+    state.setup_computer.status()
+}
+
+async fn prepare_setup_computer(
+    State(state): State<AppState>,
+) -> Json<setup_computer::SetupComputerStatus> {
+    Json(begin_setup_computer(state).await)
+}
+
+async fn get_setup_computer_status(
+    State(state): State<AppState>,
+) -> Json<setup_computer::SetupComputerStatus> {
+    Json(state.setup_computer.status())
 }
 
 /// Request body for POST /api/setup/validate-llm — tests an LLM configuration
@@ -68445,6 +68551,9 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
             payment_approvals: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
+            setup_computer: std::sync::Arc::new(
+                crate::setup_computer::SetupComputerCoordinator::default(),
+            ),
             secret_store: std::sync::Arc::new(secret_store),
             auth_token: "test-token".into(),
             novnc_tickets: std::sync::Arc::new(std::sync::Mutex::new(
