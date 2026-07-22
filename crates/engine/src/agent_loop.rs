@@ -35,6 +35,7 @@ use crate::plan::{
 use crate::text::{extract_source_urls, fonti_section, is_low_value_source_url};
 use crate::tools::{connected_capability_execution_trace_line, summarize_tool_action};
 use crate::{LoopState, TurnConfig, TurnDelivery};
+use std::time::Instant;
 
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
 const MAX_PLAN_NUDGES: u32 = 8;
@@ -183,7 +184,30 @@ where
     E: EventSink,
 {
     let mut delivery = TurnDelivery::NoVisibleAnswer;
+    let turn_started_at = Instant::now();
     for round in 0..cfg.hard_round_ceiling {
+        if ls.browser_used {
+            let elapsed_ms = u64::try_from(turn_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+            if let Some(reason) = cfg.browser_budget.stop_reason(
+                elapsed_ms,
+                ls.browser_failed_navigations,
+                ls.browser_no_progress,
+            ) {
+                execution_journal.record(AgentExecutionEvent::BrowserBudgetExceeded {
+                    round,
+                    reason: reason.as_str().to_string(),
+                    elapsed_ms,
+                    failed_navigations: ls.browser_failed_navigations,
+                    no_progress: ls.browser_no_progress,
+                });
+                let _ = event_sink
+                    .emit(GenerateStreamEvent::Activity {
+                        text: format!("browser_budget_exceeded:{}", reason.as_str()),
+                    })
+                    .await;
+                break;
+            }
+        }
         let max_rounds = if ls.browser_used {
             cfg.browser_max_rounds
         } else {
@@ -621,14 +645,28 @@ missing, give what you have and note the gap in one short line.",
                         outcome: outcome.to_string(),
                         result_fingerprint,
                     });
-                let no_progress_count = ls.observe_tool_outcome(&tool_family(name), outcome);
-                if no_progress_count > 0 {
-                    if no_progress_count == 2 {
-                        nudge_no_progress = true;
-                    } else if no_progress_count >= 3 {
-                        stop_for_no_progress = true;
+                    if is_browser_granular_tool(name) {
+                        let stalled = matches!(outcome, "empty" | "error" | "blocked" | "no_progress");
+                        if stalled {
+                            ls.browser_no_progress = ls.browser_no_progress.saturating_add(1);
+                            if name == "browser_navigate" {
+                                ls.browser_failed_navigations =
+                                    ls.browser_failed_navigations.saturating_add(1);
+                            }
+                        } else {
+                            ls.browser_no_progress = 0;
+                        }
+                    } else {
+                        let no_progress_count =
+                            ls.observe_tool_outcome(&tool_family(name), outcome);
+                        if no_progress_count > 0 {
+                            if no_progress_count == 2 {
+                                nudge_no_progress = true;
+                            } else if no_progress_count >= 3 {
+                                stop_for_no_progress = true;
+                            }
+                        }
                     }
-                }
                     if matches!(name, "update_plan" | "step_advance") {
                         execution_journal.record(AgentExecutionEvent::PlanUpdated {
                             round,
@@ -1382,6 +1420,75 @@ mod tests {
         }
         async fn close_session(&mut self, _b: bool) {}
     }
+
+    #[derive(Default)]
+    struct BlockedBrowserModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for BlockedBrowserModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call.is_final_round {
+                let content = "Non sono riuscito ad accedere alle pagine richieste. Puoi riprovare.";
+                on_delta(content);
+                return Ok(ModelRoundOutput {
+                    message: json!({ "role": "assistant", "content": content }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": format!("browser_{call_index}"),
+                        "type": "function",
+                        "function": {
+                            "name": "browser_navigate",
+                            "arguments": format!("{{\"url\":\"https://example.com/{call_index}\"}}")
+                        },
+                    }],
+                }),
+                provider,
+                finish_reason: Some("tool_calls".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct BlockedBrowser;
+
+    impl BrowserExecutor for BlockedBrowser {
+        async fn execute_browser(
+            &mut self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> String {
+            state.browser_used = true;
+            json!({ "status": "blocked" }).to_string()
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
     struct NoPlan;
     impl PlanProgress for NoPlan {
         async fn persist_plan(&self, _t: Option<&str>, _s: &[Value]) {}
@@ -1733,6 +1840,83 @@ mod tests {
             })
             .expect("forced synthesis must emit Done");
         assert_eq!(done_text, expected);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_circuit_breaker_synthesizes_once() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = BlockedBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 12;
+        turn_cfg.browser_nav_cap = 12;
+        turn_cfg.browser_budget.max_no_progress = 2;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &BlockedBrowserModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            1
+        );
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "forced_synthesis")
+                .count(),
+            1
+        );
+        drop(journal_events);
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert!(outcome.memory_answer.contains("Non sono riuscito"));
     }
 
     #[derive(Default)]

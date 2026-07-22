@@ -17770,6 +17770,29 @@ fn chat_browser_nav_cap() -> usize {
         .unwrap_or(MAX_BROWSER_NAVS_PER_STEP)
 }
 
+fn chat_browser_budget() -> local_first_engine::BrowserBudget {
+    let max_elapsed_ms = env::var("HOMUN_CHAT_BROWSER_MAX_ELAPSED_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .map(|value| value.clamp(1_000, 600_000))
+        .unwrap_or(300_000);
+    let max_failed_navigations = env::var("HOMUN_CHAT_BROWSER_MAX_FAILED_NAVIGATIONS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .map(|value| value.clamp(1, 32))
+        .unwrap_or(8);
+    let max_no_progress = env::var("HOMUN_CHAT_BROWSER_MAX_NO_PROGRESS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .map(|value| value.clamp(1, 20))
+        .unwrap_or(5);
+    local_first_engine::BrowserBudget {
+        max_elapsed_ms,
+        max_failed_navigations,
+        max_no_progress,
+    }
+}
+
 /// How many connected-service tools to pull into the searchable catalog (NOT
 /// sent to the model — only searched by `find_connected_tools`).
 const COMPOSIO_CATALOG_CAP: usize = 200;
@@ -26424,11 +26447,7 @@ impl GatewayBrowseExecutor<'_> {
             max_rounds: chat_browser_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
-            browser_budget: local_first_engine::BrowserBudget {
-                max_elapsed_ms: 300_000,
-                max_failed_navigations: 8,
-                max_no_progress: 5,
-            },
+            browser_budget: chat_browser_budget(),
             // Browse sub-turn does NO token-budget compaction (NoContextCompactor); the browser
             // history hygiene it needs is `prune_browser_history`. Unknown window → fail-open anyway.
             context_window: None,
@@ -26517,9 +26536,7 @@ impl GatewayComputerExecutor<'_> {
             ls,
             local_first_engine::TurnConfig {
                 hard_round_ceiling: 24, max_rounds: 16, browser_max_rounds: 0, browser_nav_cap: 0,
-                browser_budget: local_first_engine::BrowserBudget {
-                    max_elapsed_ms: 300_000, max_failed_navigations: 8, max_no_progress: 5,
-                },
+                browser_budget: chat_browser_budget(),
                 context_window: None, reconcile_on_delivery: false, autoadvance_from_evidence: false,
                 step_verification: false, verbose: verbose_debug(), forced_tool: None,
             },
@@ -28215,11 +28232,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             max_rounds: chat_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
-            browser_budget: local_first_engine::BrowserBudget {
-                max_elapsed_ms: 300_000,
-                max_failed_navigations: 8,
-                max_no_progress: 5,
-            },
+            browser_budget: chat_browser_budget(),
             // Fase 1.1: the model's real context window (catalog `context_window`, resolved above)
             // drives token-budget auto-compaction. `None` → fail-open (no budget compaction).
             context_window: model_context_window,

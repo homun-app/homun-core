@@ -17,6 +17,16 @@ pub enum BrowserStopReason {
     NoProgress,
 }
 
+impl BrowserStopReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::WallClock => "wall_clock",
+            Self::FailedNavigations => "failed_navigations",
+            Self::NoProgress => "no_progress",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrowserBudget {
     pub max_elapsed_ms: u64,

@@ -78,6 +78,13 @@ pub enum AgentExecutionEvent {
         round: Option<usize>,
         reason: String,
     },
+    BrowserBudgetExceeded {
+        round: usize,
+        reason: String,
+        elapsed_ms: u64,
+        failed_navigations: u32,
+        no_progress: u32,
+    },
     RunCompleted {
         reason: String,
     },
@@ -149,6 +156,22 @@ impl AgentExecutionEvent {
             Self::ForcedSynthesis { round, reason } => {
                 ("forced_synthesis", round, json!({"reason": reason}))
             }
+            Self::BrowserBudgetExceeded {
+                round,
+                reason,
+                elapsed_ms,
+                failed_navigations,
+                no_progress,
+            } => (
+                "browser_budget_exceeded",
+                Some(round),
+                json!({
+                    "reason": reason,
+                    "elapsed_ms": elapsed_ms,
+                    "failed_navigations": failed_navigations,
+                    "no_progress": no_progress,
+                }),
+            ),
             Self::RunCompleted { reason } => ("run_completed", None, json!({"reason": reason})),
             Self::RunFailed { reason } => ("run_failed", None, json!({"reason": reason})),
             Self::RunAborted { reason } => ("run_aborted", None, json!({"reason": reason})),
