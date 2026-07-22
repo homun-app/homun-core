@@ -23,7 +23,8 @@ use crate::execution_journal::{
     AgentExecutionEvent, classify_tool_result, tool_family, tool_result_fingerprint,
 };
 use crate::markers::{
-    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker, visible_answer,
+    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker,
+    preserved_display_marker_blocks, visible_answer,
 };
 use crate::model_normalize;
 use crate::plan::{
@@ -1116,8 +1117,13 @@ missing, give what you have and note the gap in one short line.",
         }
         // synth_text was already streamed live by the collector; commit it only when it contains
         // visible prose. If it does not, the accumulated turn text gets the same validation.
-        let candidate = if visible_answer(&synth_text).is_some() {
-            Some(synth_text)
+        let candidate = if let Some(synth_prose) = visible_answer(&synth_text) {
+            let preserved_blocks = preserved_display_marker_blocks(&ls.accumulated);
+            Some(if preserved_blocks.is_empty() {
+                synth_prose
+            } else {
+                format!("{preserved_blocks}\n{synth_prose}")
+            })
         } else if visible_answer(&ls.accumulated).is_some() {
             Some(ls.accumulated.clone())
         } else {
@@ -1228,6 +1234,81 @@ mod tests {
                 usage: Default::default(),
                 latency_ms: None,
                 time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct ToolThenForcedSynthesisModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for ToolThenForcedSynthesisModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call_index < 2 {
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": format!("tool_{call_index}"),
+                            "type": "function",
+                            "function": { "name": "make_document", "arguments": "{}" },
+                        }],
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            let content = "Forced synthesis answer.";
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
+                provider,
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct StructuredOutputTool {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CapabilityExecutor for StructuredOutputTool {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            let first = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
+            Ok(ToolOutcome {
+                result: "document created".to_string(),
+                effects: ToolEffects {
+                    append_output: first.then(|| {
+                        "‹‹PLAN››- [x] Deliver result‹‹/PLAN››\n‹‹ARTIFACT››report.md‹‹/ARTIFACT››\n"
+                            .to_string()
+                    }).into_iter().collect(),
+                    ..ToolEffects::default()
+                },
             })
         }
     }
@@ -1570,6 +1651,70 @@ mod tests {
             .expect("visible answer must emit Done");
         assert!(done_text.contains("‹‹PLAN››"));
         assert!(done_text.contains("‹‹ARTIFACT››"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn forced_synthesis_keeps_prior_structured_output() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "make a document" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let model = ToolThenForcedSynthesisModel::default();
+        let tool = StructuredOutputTool::default();
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "make a document".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert!(outcome.memory_answer.contains("Forced synthesis answer."));
+        assert!(outcome.memory_answer.contains("‹‹PLAN››"));
+        assert!(outcome.memory_answer.contains("‹‹ARTIFACT››report.md‹‹/ARTIFACT››"));
+        let done_text = sink
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|event| match event {
+                GenerateStreamEvent::Done { text, .. } => Some(text.to_string()),
+                _ => None,
+            })
+            .expect("forced synthesis must emit Done");
+        assert!(done_text.contains("Forced synthesis answer."));
+        assert!(done_text.contains("‹‹PLAN››"));
+        assert!(done_text.contains("‹‹ARTIFACT››report.md‹‹/ARTIFACT››"));
     }
 
     #[derive(Default)]

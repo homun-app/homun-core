@@ -28044,6 +28044,17 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         .expect("valid streaming response"))
 }
 
+/// Build the terminal outcome for an image rejection that has already been surfaced with `Done`.
+/// Keeping this pure makes the stream event and outcome delivery state move together.
+fn delivered_image_rejection_outcome(
+    mut outcome: local_first_engine::TurnOutcome,
+    rejection: String,
+) -> local_first_engine::TurnOutcome {
+    outcome.memory_answer = rejection;
+    outcome.delivery = local_first_engine::TurnDelivery::Delivered;
+    outcome
+}
+
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn
 // learn, extracted VERBATIM from the tokio::spawn body of stream_chat_via_openai. The
 // signature (the captured turn state) is what becomes engine::run_turn's interface at 5.D1c.
@@ -28242,10 +28253,7 @@ async fn run_agent_rounds(
             },
         )
         .await;
-        return local_first_engine::TurnOutcome {
-            memory_answer: rejection,
-            ..outcome
-        };
+        return delivered_image_rejection_outcome(outcome, rejection);
     };
 
     let readers = vision_model_candidates();
@@ -28260,10 +28268,7 @@ async fn run_agent_rounds(
             },
         )
         .await;
-        return local_first_engine::TurnOutcome {
-            memory_answer: rejection,
-            ..outcome
-        };
+        return delivered_image_rejection_outcome(outcome, rejection);
     }
 
     // Recover: describe the images the manager was refused, put the text where they were, run again.
@@ -57036,6 +57041,22 @@ mod tests {
     // 5.D1c.2: test-only engine helpers (not used by non-test gateway code, so imported here, not at
     // the crate top where they'd read as unused).
     use local_first_engine::browser::{message_has_image_url, PRUNED_SNAPSHOT_STUB};
+
+    #[test]
+    fn delivered_image_rejection_marks_outcome_delivered() {
+        let outcome = super::delivered_image_rejection_outcome(
+            local_first_engine::TurnOutcome::default(),
+            "The selected model cannot inspect this image.".to_string(),
+        );
+        assert_eq!(
+            outcome.delivery,
+            local_first_engine::TurnDelivery::Delivered
+        );
+        assert_eq!(
+            outcome.memory_answer,
+            "The selected model cannot inspect this image."
+        );
+    }
 
     #[test]
     fn clawhub_origin_is_publisher_specific_and_legacy_compatible() {

@@ -83,7 +83,7 @@ pub fn strip_blocks(text: &str, marker: &str) -> String {
 /// reasoning trace, confirmation cards) but they are NOT answer prose. The canonical list for the
 /// whole backend (ADR 0024 inc 5, 5.D1c: relocated here from the gateway — caposaldo #5, "one strip
 /// primitive for the whole backend").
-const DISPLAY_MARKER_TAGS: [&str; 7] = [
+const DISPLAY_MARKER_TAGS: [&str; 19] = [
     "PLAN",
     "ACT",
     "ARTIFACT",
@@ -91,6 +91,18 @@ const DISPLAY_MARKER_TAGS: [&str; 7] = [
     "COMPOSIO_CONFIRM",
     "COMPOSIO_DONE",
     "COMPOSIO_RECONNECT",
+    "DIFF",
+    "CHOICES",
+    "MCP_CONFIRM",
+    "FS_AUTHORIZE",
+    "SANDBOX_ESCALATE",
+    "SANDBOX_READONLY",
+    "CONNECT_SUGGEST",
+    "VAULT_PROPOSE",
+    "VAULT_REVEAL",
+    "PAYMENT_APPROVAL",
+    "PLAN_PROPOSE",
+    "GOAL_PROPOSE",
 ];
 
 /// Strip every display-only marker block, leaving only the answer prose. The canonical stripper
@@ -108,6 +120,37 @@ pub fn strip_display_markers(text: &str) -> String {
 pub fn visible_answer(text: &str) -> Option<String> {
     let visible = strip_display_markers(text).trim().to_string();
     (!visible.is_empty()).then_some(visible)
+}
+
+/// Extract complete display blocks in their original order for a later final delivery. Reasoning is
+/// intentionally excluded: forced synthesis must retain tool-produced cards, not revive provisional
+/// chain-of-thought text from an earlier round.
+pub fn preserved_display_marker_blocks(text: &str) -> String {
+    let mut blocks = String::new();
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let next = DISPLAY_MARKER_TAGS
+            .iter()
+            .filter(|tag| **tag != "REASONING")
+            .filter_map(|tag| {
+                let open_tag = open(tag);
+                text[cursor..]
+                    .find(&open_tag)
+                    .map(|offset| (cursor + offset, open_tag, close(tag)))
+            })
+            .min_by_key(|(start, _, _)| *start);
+        let Some((start, open_tag, close_tag)) = next else {
+            break;
+        };
+        let body_start = start + open_tag.len();
+        let Some(close_offset) = text[body_start..].find(&close_tag) else {
+            break;
+        };
+        let end = body_start + close_offset + close_tag.len();
+        blocks.push_str(&text[start..end]);
+        cursor = end;
+    }
+    blocks
 }
 
 /// True when the turn produced NO answer body — only display markers (chiefly a `‹‹REASONING››`
@@ -342,6 +385,50 @@ mod tests {
             visible_answer("‹‹REASONING››hidden‹‹/REASONING››\n  Risposta finale.  "),
             Some("Risposta finale.".to_string()),
         );
+    }
+
+    #[test]
+    fn visible_answer_rejects_choices_and_mcp_confirm_only_text() {
+        assert_eq!(visible_answer("‹‹CHOICES››pick one‹‹/CHOICES››"), None);
+        assert_eq!(
+            visible_answer("‹‹MCP_CONFIRM››approve this action‹‹/MCP_CONFIRM››"),
+            None,
+        );
+    }
+
+    #[test]
+    fn visible_answer_rejects_every_canonical_display_marker() {
+        let expected_display_tags = [
+            "PLAN",
+            "ACT",
+            "ARTIFACT",
+            "REASONING",
+            "COMPOSIO_CONFIRM",
+            "COMPOSIO_DONE",
+            "COMPOSIO_RECONNECT",
+            "DIFF",
+            "CHOICES",
+            "MCP_CONFIRM",
+            "FS_AUTHORIZE",
+            "SANDBOX_ESCALATE",
+            "SANDBOX_READONLY",
+            "CONNECT_SUGGEST",
+            "VAULT_PROPOSE",
+            "VAULT_REVEAL",
+            "PAYMENT_APPROVAL",
+            "PLAN_PROPOSE",
+            "GOAL_PROPOSE",
+        ];
+        assert_eq!(DISPLAY_MARKER_TAGS, expected_display_tags);
+        for tag in expected_display_tags {
+            let block = format!("‹‹{tag}››payload‹‹/{tag}››");
+            assert_eq!(visible_answer(&block), None, "{tag} must stay out-of-band");
+            assert_eq!(
+                visible_answer(&format!("{block}\nVisible prose.")),
+                Some("Visible prose.".to_string()),
+                "{tag} must not consume adjacent prose"
+            );
+        }
     }
 
     // GOLDEN: the recurring reasoning-flood. A weak browser model degenerated into MALFORMED

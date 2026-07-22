@@ -211,7 +211,7 @@ mod tests {
     fn legacy_no_answer_text_maps_to_not_found() {
         // Historical data carrying this phrase remains a NOT-FOUND result.
         let outcome = TurnOutcome {
-            delivery: TurnDelivery::NoVisibleAnswer,
+            delivery: TurnDelivery::Delivered,
             memory_answer: "I completed the steps but couldn't produce a final answer. \
 Tell me if you want me to retry or rephrase."
                 .to_string(),
