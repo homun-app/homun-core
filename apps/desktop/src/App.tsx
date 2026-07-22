@@ -160,7 +160,10 @@ function mapCoreChatEventParts(parts: unknown[] | null | undefined): ChatEventPa
     }
     const record = part as Record<string, unknown>;
     const type = record.type;
-    if (type === "reasoning" || type === "activity") {
+    if (type === "reasoning") {
+      continue;
+    }
+    if (type === "activity") {
       if (typeof record.text === "string") {
         mapped.push({ type, text: record.text });
       }

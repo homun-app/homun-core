@@ -93,7 +93,6 @@ import type {
 } from "./lib/coreBridge";
 
 export type ChatEventPart =
-  | { type: "reasoning"; text: string }
   | { type: "activity"; text: string }
   | { type: "plan_update"; markdown: string }
   | { type: "choice_prompt"; payload: ChoicePromptPayload }

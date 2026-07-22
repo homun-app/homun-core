@@ -272,7 +272,7 @@ type ChatStreamPhase = "accepted" | "thinking" | "writing" | "recalling";
 function chatEventPartFromStream(event: CoreChatStreamEvent): ChatEventPart | null {
   switch (event.type) {
     case "reasoning":
-      return { type: "reasoning", text: event.text };
+      return null;
     case "activity":
       return { type: "activity", text: event.text };
     case "plan_update":
@@ -297,6 +297,7 @@ function normalizeChatEventParts(parts: unknown[] | undefined): ChatEventPart[] 
     const item = part as Record<string, unknown>;
     switch (item.type) {
       case "reasoning":
+        return [];
       case "activity":
         return typeof item.text === "string" ? [{ type: item.type, text: item.text }] : [];
       case "plan_update":
@@ -7055,7 +7056,7 @@ const AssistantMessageBody = memo(
   const readable = useMemo(() => humanizeToolSlugs(visible), [visible]);
   return (
     <>
-      {readable && <RichMessage text={readable} streaming={streaming} eventParts={eventParts} />}
+      {readable && <RichMessage text={readable} streaming={streaming} />}
       {!streaming && onOpenArtifact && <MessageArtifacts text={text} onOpen={onOpenArtifact} />}
       {doneTool && !streaming && (
         <div className="cmp-confirm done">
