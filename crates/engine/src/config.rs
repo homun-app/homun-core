@@ -10,6 +10,39 @@
 
 /// The loop's turn-constant configuration. Built by the gateway before the turn from the corresponding
 /// config getters; the loop reads these fields instead of calling env-backed functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserStopReason {
+    WallClock,
+    FailedNavigations,
+    NoProgress,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrowserBudget {
+    pub max_elapsed_ms: u64,
+    pub max_failed_navigations: u32,
+    pub max_no_progress: u32,
+}
+
+impl BrowserBudget {
+    pub fn stop_reason(
+        self,
+        elapsed_ms: u64,
+        failed_navigations: u32,
+        no_progress: u32,
+    ) -> Option<BrowserStopReason> {
+        if elapsed_ms >= self.max_elapsed_ms {
+            Some(BrowserStopReason::WallClock)
+        } else if failed_navigations >= self.max_failed_navigations {
+            Some(BrowserStopReason::FailedNavigations)
+        } else if no_progress >= self.max_no_progress {
+            Some(BrowserStopReason::NoProgress)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TurnConfig {
     /// Absolute upper bound on ReAct rounds (the outer `for round in 0..hard_round_ceiling()`).
@@ -20,6 +53,8 @@ pub struct TurnConfig {
     pub browser_max_rounds: usize,
     /// Wander-cap: max `browser_navigate` calls for the CURRENT step before forcing synthesis.
     pub browser_nav_cap: usize,
+    /// Wall-clock and stagnation limits for browser work inside this turn.
+    pub browser_budget: BrowserBudget,
     /// The active model's context window in tokens, if known (catalog `context_window`, Fase 1.1).
     /// Feeds token-budget auto-compaction (`ContextCompactor::compact_for_budget`): `None` → the
     /// window is unknown → fail-open (no budget compaction, only the existing round-based hygiene).
@@ -49,4 +84,32 @@ pub struct TurnConfig {
     /// force ANOTHER call to the same tool (a duplicate render, and by then the routing binding is
     /// already cleared so it would go through generic/unbound).
     pub forced_tool: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_budget_stops_on_time_or_stagnation() {
+        let budget = BrowserBudget {
+            max_elapsed_ms: 300_000,
+            max_failed_navigations: 8,
+            max_no_progress: 5,
+        };
+
+        assert_eq!(
+            budget.stop_reason(300_001, 0, 0),
+            Some(BrowserStopReason::WallClock)
+        );
+        assert_eq!(
+            budget.stop_reason(1_000, 8, 0),
+            Some(BrowserStopReason::FailedNavigations)
+        );
+        assert_eq!(
+            budget.stop_reason(1_000, 0, 5),
+            Some(BrowserStopReason::NoProgress)
+        );
+        assert_eq!(budget.stop_reason(1_000, 7, 4), None);
+    }
 }

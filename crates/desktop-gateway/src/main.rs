@@ -26424,6 +26424,11 @@ impl GatewayBrowseExecutor<'_> {
             max_rounds: chat_browser_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
+            browser_budget: local_first_engine::BrowserBudget {
+                max_elapsed_ms: 300_000,
+                max_failed_navigations: 8,
+                max_no_progress: 5,
+            },
             // Browse sub-turn does NO token-budget compaction (NoContextCompactor); the browser
             // history hygiene it needs is `prune_browser_history`. Unknown window → fail-open anyway.
             context_window: None,
@@ -26512,6 +26517,9 @@ impl GatewayComputerExecutor<'_> {
             ls,
             local_first_engine::TurnConfig {
                 hard_round_ceiling: 24, max_rounds: 16, browser_max_rounds: 0, browser_nav_cap: 0,
+                browser_budget: local_first_engine::BrowserBudget {
+                    max_elapsed_ms: 300_000, max_failed_navigations: 8, max_no_progress: 5,
+                },
                 context_window: None, reconcile_on_delivery: false, autoadvance_from_evidence: false,
                 step_verification: false, verbose: verbose_debug(), forced_tool: None,
             },
@@ -28207,6 +28215,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             max_rounds: chat_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
+            browser_budget: local_first_engine::BrowserBudget {
+                max_elapsed_ms: 300_000,
+                max_failed_navigations: 8,
+                max_no_progress: 5,
+            },
             // Fase 1.1: the model's real context window (catalog `context_window`, resolved above)
             // drives token-budget auto-compaction. `None` → fail-open (no budget compaction).
             context_window: model_context_window,

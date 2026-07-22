@@ -1453,6 +1453,11 @@ mod tests {
             max_rounds: 2,
             browser_max_rounds: 8,
             browser_nav_cap: 6,
+            browser_budget: crate::BrowserBudget {
+                max_elapsed_ms: 300_000,
+                max_failed_navigations: 8,
+                max_no_progress: 5,
+            },
             context_window: None,
             reconcile_on_delivery: true,
             autoadvance_from_evidence: true,
