@@ -76658,6 +76658,14 @@ data: [DONE]\n";
             .unwrap()
             .append_assistant_message(&thread.thread_id, &assistant)
             .unwrap();
+        let initial_assistant_count = super::lock_store(&state)
+            .unwrap()
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages
+            .iter()
+            .filter(|message| message.role == "assistant")
+            .count();
         let mut task = TaskRecord::new(
             "turn_retry_failure",
             UserId::new("user_test"),
@@ -76685,6 +76693,18 @@ data: [DONE]\n";
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Retrying
         );
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .messages(&thread.thread_id)
+                .unwrap()
+                .messages
+                .iter()
+                .filter(|message| message.role == "assistant")
+                .count(),
+            initial_assistant_count,
+            "retry must update the stable assistant instead of appending a bubble"
+        );
 
         super::handle_failed_task_run(&state, &mut task, true, "terminal failure").unwrap();
         assert_eq!(task.status, TaskStatus::Failed);
@@ -76696,6 +76716,18 @@ data: [DONE]\n";
                 .expect("stable assistant")
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Failed
+        );
+        assert_eq!(
+            super::lock_store(&state)
+                .unwrap()
+                .messages(&thread.thread_id)
+                .unwrap()
+                .messages
+                .iter()
+                .filter(|message| message.role == "assistant")
+                .count(),
+            initial_assistant_count,
+            "terminal failure must update the same assistant bubble"
         );
     }
 

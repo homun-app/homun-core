@@ -1409,8 +1409,16 @@ impl ChatStore {
             }
             clean_text.push_str(&card.raw);
         }
-        let event_parts_json = serde_json::to_string(event_parts).map_err(json_error)?;
-        let derived = memory_reuse_from_event_parts(event_parts);
+        let persisted_event_parts = event_parts
+            .iter()
+            .filter(|part| {
+                part.get("type").and_then(serde_json::Value::as_str) != Some("reasoning")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let event_parts_json =
+            serde_json::to_string(&persisted_event_parts).map_err(json_error)?;
+        let derived = memory_reuse_from_event_parts(&persisted_event_parts);
         let envelope = if &derived == requested_envelope {
             requested_envelope.clone()
         } else {
@@ -4188,6 +4196,37 @@ mod tests {
         assert_eq!(saved.text, "Answer");
         assert_eq!(saved.event_parts, vec![recall_part]);
         assert_eq!(saved.memory_reuse, Some(envelope));
+    }
+
+    #[test]
+    fn finalization_drops_reasoning_parts_but_keeps_recall() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let assistant = local_first_desktop_gateway::seeded_ready_message(
+            &thread.thread_id,
+            "assistant-reasoning-filter".to_string(),
+        );
+        store
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+        let parts = vec![
+            serde_json::json!({"type": "reasoning", "text": "private"}),
+            serde_json::json!({"type": "recall", "payload": {"hits": []}}),
+        ];
+
+        let saved = store
+            .finalize_assistant_message(
+                &thread.thread_id,
+                &assistant.id,
+                "Risposta finale.",
+                &parts,
+                &MemoryReuseEnvelope::normal(),
+            )
+            .unwrap();
+
+        assert_eq!(saved.text, "Risposta finale.");
+        assert_eq!(saved.event_parts.len(), 1);
+        assert_eq!(saved.event_parts[0]["type"], "recall");
     }
 
     #[test]

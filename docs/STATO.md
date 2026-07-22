@@ -5,6 +5,25 @@
 > compattazione o a inizio sessione.
 > **Ultimo aggiornamento: 2026-07-22.**
 
+## ⭐ CHECKPOINT 2026-07-22 — Transcript stabile e reasoning isolato
+
+La risposta visibile ora attraversa un unico quality gate: output vuoto, reasoning-only o con
+ripetizioni patologiche non può diventare un completamento e segue il percorso canonico di
+retry/fallimento. Nel desktop il reasoning grezzo viene scartato sia dagli eventi strutturati sia
+dal testo, inclusi i blocchi ancora aperti durante lo streaming; l'Activity sintetica resta
+disponibile fuori dal transcript.
+
+La finalizzazione gateway filtra inoltre le parti `reasoning` prima della persistenza del messaggio,
+conservando recall e provenance. Retry e fallimento terminale aggiornano sempre la stessa bolla
+assistant preallocata: non viene aggiunta una seconda risposta.
+
+**Gate mirati eseguiti:**
+| Gate | Esito |
+| --- | --- |
+| Engine `delivery_text_`, `visible_answer_`, `agent_loop::tests` | OK |
+| Desktop `chatVisibleContent.test.mjs`, UI contract e build | OK |
+| Gateway filtro reasoning + bolla stabile retry/failure | OK |
+
 ## ⭐ CHECKPOINT 2026-07-22 — Catalogo skill ClawHub publisher-aware
 
 Risolto il `409 Conflict` incontrato installando `weather`: su ClawHub lo stesso slug può
