@@ -23,8 +23,7 @@ use crate::execution_journal::{
     AgentExecutionEvent, classify_tool_result, tool_family, tool_result_fingerprint,
 };
 use crate::markers::{
-    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker, strip_display_markers,
-    visible_answer,
+    append_vault_reveal_marker_if_missing, extract_vault_reveal_marker, visible_answer,
 };
 use crate::model_normalize;
 use crate::plan::{
@@ -770,7 +769,7 @@ missing, give what you have and note the gap in one short line.",
                     collapse_plan_markers(&ls.accumulated),
                     ls.pending_vault_reveal_marker.as_deref(),
                 );
-                if let Some(final_text) = visible_answer(&final_text) {
+                if visible_answer(&final_text).is_some() {
                     let _ = event_sink
                         .emit(GenerateStreamEvent::Done {
                             text: final_text.clone(),
@@ -983,7 +982,7 @@ missing, give what you have and note the gap in one short line.",
         // Reconcile the plan ONE last time on delivery — mark every still-open step done
         // (see plan_steps_reconciled_on_delivery) — and PERSIST it, so the runtime plan is
         // settled → the next turn won't falsely resume a plan this answer already finished.
-        let delivered = strip_display_markers(&collapse_plan_markers(&ls.accumulated));
+        let delivered = collapse_plan_markers(&ls.accumulated);
         if visible_answer(&delivered).is_none() {
             break;
         }
@@ -1014,7 +1013,7 @@ missing, give what you have and note the gap in one short line.",
             delivered,
             ls.pending_vault_reveal_marker.as_deref(),
         );
-        if let Some(final_answer) = visible_answer(&final_answer) {
+        if visible_answer(&final_answer).is_some() {
             memory_answer = final_answer.clone();
             let _ = event_sink
                 .emit(GenerateStreamEvent::Done {
@@ -1117,15 +1116,20 @@ missing, give what you have and note the gap in one short line.",
         }
         // synth_text was already streamed live by the collector; commit it only when it contains
         // visible prose. If it does not, the accumulated turn text gets the same validation.
-        if let Some(mut final_text) =
-            visible_answer(&synth_text).or_else(|| visible_answer(&ls.accumulated))
-        {
+        let candidate = if visible_answer(&synth_text).is_some() {
+            Some(synth_text)
+        } else if visible_answer(&ls.accumulated).is_some() {
+            Some(ls.accumulated.clone())
+        } else {
+            None
+        };
+        if let Some(mut final_text) = candidate {
             if let Some(fonti) = fonti_section(&browse_sources, &final_text) {
                 final_text.push_str(&fonti);
             }
             // Anti-churn safety net for the accumulated fallback (synthesis normally has no plan
             // blocks). Reconcile + persist only after a visible delivery candidate exists.
-            let delivered = strip_display_markers(&collapse_plan_markers(&final_text));
+            let delivered = collapse_plan_markers(&final_text);
             let delivered = match plan_progress.reconcile_on_delivery(&ls.plan, &delivered) {
                 Some(reconciled) => {
                     plan_progress
@@ -1139,7 +1143,7 @@ missing, give what you have and note the gap in one short line.",
                 delivered,
                 ls.pending_vault_reveal_marker.as_deref(),
             );
-            if let Some(final_text) = visible_answer(&final_text) {
+            if visible_answer(&final_text).is_some() {
                 memory_answer = final_text.clone();
                 let _ = event_sink
                     .emit(GenerateStreamEvent::Done {
@@ -1190,6 +1194,31 @@ mod tests {
             on_delta("Final answer.");
             Ok(ModelRoundOutput {
                 message: json!({ "role": "assistant", "content": "Final answer." }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct StructuredAnswerModel;
+
+    impl ModelClient for StructuredAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let content = "‹‹PLAN››- [x] Deliver result‹‹/PLAN››\n‹‹ARTIFACT››report.md‹‹/ARTIFACT››\nFinal answer.";
+            on_delta(content);
+            Ok(ModelRoundOutput {
+                message: json!({ "role": "assistant", "content": content }),
                 provider: ProviderBinding {
                     model: call.model.to_string(),
                     base_url: call.base_url.to_string(),
@@ -1481,6 +1510,66 @@ mod tests {
                 .any(|e| matches!(e, GenerateStreamEvent::Done { .. })),
             "display-only text must not emit Done"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn visible_answer_validation_preserves_structured_markers_in_done() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "hi" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &StructuredAnswerModel,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "hi".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert!(outcome.memory_answer.contains("‹‹PLAN››"));
+        assert!(outcome.memory_answer.contains("‹‹ARTIFACT››"));
+        let done_text = sink
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|event| match event {
+                GenerateStreamEvent::Done { text, .. } => Some(text.to_string()),
+                _ => None,
+            })
+            .expect("visible answer must emit Done");
+        assert!(done_text.contains("‹‹PLAN››"));
+        assert!(done_text.contains("‹‹ARTIFACT››"));
     }
 
     #[derive(Default)]
