@@ -126,6 +126,12 @@ import {
   type SteeringQueueState,
 } from "../lib/chatSteeringState";
 import {
+  applyTurnEvent,
+  createTurnReplayState,
+  type TurnReplayState,
+  type TurnReplayStatus,
+} from "../lib/turnReplayState";
+import {
   createLoadingComputerSession,
   createUnavailableComputerSession,
   mapCoreComputerSession,
@@ -333,12 +339,21 @@ export interface ChatStreamStatus {
 // Missing backend fields stay absent; the view never invents retry/backoff metadata.
 interface ActiveTurnProjection {
   turn_id: string;
+  last_event_seq: number;
   status: string;
   attempt: number;
   max_attempts: number;
   not_before: number | null;
   blocked_reason: string | null;
   updated_at: number;
+}
+
+function replayStatusFromProjection(status: string): TurnReplayStatus {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
+  if (["retrying", "retry_waiting"].includes(status)) return "retrying";
+  return "running";
 }
 
 interface ChatTurnState {
@@ -431,6 +446,7 @@ export function ChatView({
   // Track the active turn_id for WS event filtering. Set when a turn starts,
   // cleared when it ends. Used by the wsSubscription subscriber to route events.
   const activeTurnIdRef = useRef<string | null>(null);
+  const turnReplayRef = useRef<TurnReplayState | null>(null);
   // Turn ids of background turns we've already attached to (via incomingBackgroundTurn), so a
   // re-fired `thread.turn_started` or a messages re-render never double-attaches the same turn.
   const handledBackgroundTurnsRef = useRef<Set<string>>(new Set());
@@ -546,10 +562,10 @@ export function ChatView({
     });
     return unsubscribe;
   }, [refreshPendingSteering, thread.threadId]);
-  // ── Unified WS subscription for turn events ──
-  // Listens for turn.event messages on the WS for the currently-active turn.
-  // Feeds the island (activity steps + plan markdown) in real-time, independent
-  // of the bridge NDJSON stream. This is the primary live channel for the island.
+  // The global WS provides a second observation of turn state. The monotonic
+  // reducer makes it safe to overlap with the durable per-turn stream; content
+  // rendering stays on that replayable stream, while WS terminal/abort state
+  // keeps the cockpit current across windows.
   useEffect(() => {
     const unsub = wsSubscription.subscribe((msg) => {
       if (msg.type !== "turn.event") return;
@@ -557,12 +573,25 @@ export function ChatView({
       if (!turnId || turnId !== activeTurnIdRef.current) return;
       const kind = msg.kind as string;
       const payload = msg.payload as Record<string, unknown> | undefined;
-      if (kind === "activity" && payload?.text) {
-        setLiveActivitySteps((prev) =>
-          [...prev, String(payload.text).trim()].filter((s) => s.length > 0),
-        );
-      } else if (kind === "plan_update" && payload?.markdown) {
-        setLivePlanMarkdown(String(payload.markdown));
+      const seq = Number(msg.seq);
+      if (!Number.isFinite(seq)) return;
+      const current = turnReplayRef.current?.turnId === turnId
+        ? turnReplayRef.current
+        : createTurnReplayState(turnId);
+      const next = applyTurnEvent(current, {
+        turn_id: turnId,
+        seq,
+        kind,
+        payload,
+      });
+      if (next === current) return;
+      turnReplayRef.current = next;
+      if (kind === "aborted") {
+        setLiveActivitySteps([]);
+        setLivePlanMarkdown(null);
+      }
+      if (["completed", "failed", "cancelled"].includes(next.status)) {
+        setProjectedTurnStatus(next.status);
       }
     });
     return unsub;
@@ -711,6 +740,7 @@ export function ChatView({
     setProjectedTurnStatus(null);
     setProjectedSubagents([]);
     setProjectedActiveTurn(null);
+    turnReplayRef.current = null;
     setProjectionLoaded(false);
   }, [thread.threadId]);
   // Load the durable island projection on thread change and when a turn ENDS (isStreaming →
@@ -731,7 +761,20 @@ export function ChatView({
           projection as typeof projection & { active_turn?: ActiveTurnProjection | null }
         ).active_turn ?? null;
         setProjectedActiveTurn(activeTurn);
-        if (activeTurn) activeTurnIdRef.current = activeTurn.turn_id;
+        if (activeTurn) {
+          activeTurnIdRef.current = activeTurn.turn_id;
+          const currentReplay = turnReplayRef.current;
+          if (
+            currentReplay?.turnId !== activeTurn.turn_id
+            || currentReplay.lastSeq < activeTurn.last_event_seq
+          ) {
+            turnReplayRef.current = createTurnReplayState(activeTurn.turn_id, {
+              lastSeq: activeTurn.last_event_seq,
+              status: replayStatusFromProjection(activeTurn.status),
+              text: currentReplay?.turnId === activeTurn.turn_id ? currentReplay.text : "",
+            });
+          }
+        }
         setProjectionLoaded(true);
       })
       .catch(() => {
@@ -1099,6 +1142,7 @@ export function ChatView({
     const promptMessages = [...conversationBase, userMessage];
     const requestId = `chat_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     activeTurnIdRef.current = `turn_${requestId}`;
+    turnReplayRef.current = createTurnReplayState(activeTurnIdRef.current);
     setStreamStatus({
       requestId,
       phase: "accepted",
@@ -1195,6 +1239,29 @@ export function ChatView({
       unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
         if (cancelledStreamIdsRef.current.has(requestId)) return;
+        if (payload.type === "aborted") {
+          streamedText = "";
+          streamEventParts = [];
+          setStreamStatus({
+            requestId,
+            phase: "thinking",
+            title: t("chat.resumingResponse"),
+            detail: t("chat.reattachingGeneration"),
+          });
+          scheduleStreamingMessage();
+          return;
+        }
+        if (payload.type === "retry" || payload.type === "queued") {
+          setStreamStatus({
+            requestId,
+            phase: "thinking",
+            title: payload.type === "retry"
+              ? t("chat.retrying", { defaultValue: "Riprovo…" })
+              : t("chat.promptReceived"),
+            detail: String(payload.payload.reason ?? payload.payload.detail ?? ""),
+          });
+          return;
+        }
         const part = chatEventPartFromStream(payload);
         if (part) {
           // ADR 0022 (Piano UI A2): quando arriva un evento recall, mostra la fase
@@ -1437,6 +1504,7 @@ export function ChatView({
     // `thread.turn_started` (the visible turn adopts the broker id — see start_visible_
     // conversation_turn). Set BEFORE any await so the first replayed event is already accepted.
     activeTurnIdRef.current = `turn_${requestId}`;
+    turnReplayRef.current = createTurnReplayState(activeTurnIdRef.current);
     const userMessage: ChatMessage = {
       id: `resume_user_${Date.now()}`,
       role: "user",
@@ -1493,6 +1561,23 @@ export function ChatView({
     try {
       unlistenStream = await coreBridge.listenChatStreamEvent((payload) => {
         if (payload.request_id !== requestId) return;
+        if (payload.type === "aborted") {
+          streamedText = "";
+          streamEventParts = [];
+          scheduleStreamingMessage();
+          return;
+        }
+        if (payload.type === "retry" || payload.type === "queued") {
+          setStreamStatus({
+            requestId,
+            phase: "thinking",
+            title: payload.type === "retry"
+              ? t("chat.retrying", { defaultValue: "Riprovo…" })
+              : t("chat.promptReceived"),
+            detail: String(payload.payload.reason ?? payload.payload.detail ?? ""),
+          });
+          return;
+        }
         const part = chatEventPartFromStream(payload);
         if (part) {
           streamEventParts = [...streamEventParts, part];

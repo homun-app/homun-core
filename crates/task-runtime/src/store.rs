@@ -2237,6 +2237,17 @@ impl TaskStore {
             .optional()?;
         let latest_turn_id = latest_turn.as_ref().map(|(id, _, _, _, _)| id.clone());
         let latest_turn_status = latest_turn.as_ref().map(|(_, status, _, _, _)| status.clone());
+        let latest_turn_last_seq = latest_turn_id
+            .as_deref()
+            .map(|turn_id| {
+                self.connection.query_row(
+                    "SELECT COALESCE(MAX(seq), 0) FROM turn_events WHERE turn_id = ?1",
+                    params![turn_id],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .transpose()?
+            .unwrap_or(0);
         let active_turn = latest_turn.as_ref().and_then(|(turn_id, status, task_json, updated_at, blocked_reason)| {
             if matches!(status.as_str(), "completed" | "failed" | "cancelled" | "expired" | "finalizing") {
                 return None;
@@ -2244,6 +2255,7 @@ impl TaskStore {
             let task = serde_json::from_str::<TaskRecord>(task_json).ok()?;
             Some(ActiveTurnProjection {
                 turn_id: turn_id.clone(),
+                last_event_seq: latest_turn_last_seq,
                 status: status.clone(),
                 attempt: task.attempt_count,
                 max_attempts: task.retry_policy.max_attempts,
@@ -3588,6 +3600,33 @@ mod chat_turn_query_tests {
             .execute("UPDATE tasks SET thread_id = 'thread_x' WHERE task_id = 'bg1'", [])
             .unwrap();
         assert_eq!(s.active_chat_turn_for_thread("thread_x").unwrap(), None);
+    }
+
+    #[test]
+    fn active_turn_projection_exposes_the_replay_cursor() {
+        let s = store();
+        let task = make_chat_turn("turn_cursor", "thread_cursor", TaskStatus::Running);
+        s.insert_chat_turn(
+            &task,
+            "thread_cursor",
+            "request_cursor",
+            "interactive",
+            "full",
+        )
+        .unwrap();
+        s.insert_turn_event("turn_cursor", TurnEventKind::Delta, json!({"text": "A"}))
+            .unwrap();
+        let last = s
+            .insert_turn_event("turn_cursor", TurnEventKind::Activity, json!({"text": "B"}))
+            .unwrap();
+
+        let active = s
+            .project_thread_activity("thread_cursor", 200)
+            .unwrap()
+            .active_turn
+            .expect("active turn projection");
+        assert_eq!(active.turn_id, "turn_cursor");
+        assert_eq!(active.last_event_seq, last.seq);
     }
 
     #[test]

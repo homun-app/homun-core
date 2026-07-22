@@ -480,6 +480,7 @@ pub struct ThreadActivityProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveTurnProjection {
     pub turn_id: String,
+    pub last_event_seq: i64,
     pub status: String,
     pub attempt: u32,
     pub max_attempts: u32,
