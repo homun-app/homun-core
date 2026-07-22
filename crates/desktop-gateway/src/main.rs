@@ -1054,6 +1054,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ws_registry: ws_registry_arc,
         recovered_stores: recovered_stores.clone(),
     };
+    migrate_legacy_mcp_http_header_secrets(&state)
+        .map_err(|error| std::io::Error::other(error.message))?;
     // ADR 0022 — Tappa 1: se il flag è ON, costruisci il service memoria che
     // incapsula brief/recall/learn. Costruito dopo il letterale perché
     // `InProcessMemoryRecallService` prende in prestito lo stesso `AppState`.
@@ -38631,6 +38633,114 @@ fn mcp_http_headers_from_secret(
     Ok(headers)
 }
 
+fn legacy_mcp_http_headers(
+    metadata: &Value,
+) -> Result<Option<std::collections::HashMap<String, String>>, String> {
+    if metadata.get("transport").and_then(Value::as_str) != Some("http") {
+        return Ok(None);
+    }
+    let Some(raw_headers) = metadata.get("headers") else {
+        return Ok(None);
+    };
+    let object = raw_headers
+        .as_object()
+        .ok_or_else(|| "Legacy MCP HTTP headers have an invalid format".to_string())?;
+    if object.is_empty() {
+        return Ok(None);
+    }
+    let headers = object
+        .iter()
+        .map(|(name, value)| {
+            value
+                .as_str()
+                .map(|value| (name.clone(), value.to_string()))
+                .ok_or_else(|| "Legacy MCP HTTP headers have an invalid format".to_string())
+        })
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+    validate_mcp_http_headers(&headers)?;
+    Ok(Some(headers))
+}
+
+/// Moves credentials written by older Homun builds from connection metadata
+/// into the encrypted Secret Store. The deterministic reference makes this
+/// safe to retry after an interrupted startup.
+fn migrate_legacy_mcp_http_header_secrets(state: &AppState) -> Result<usize, GatewayError> {
+    let user = gateway_capability_user_id();
+    let workspace = gateway_capability_workspace_id();
+    let connections = lock_capability_registry(state)?
+        .connection_configs(&user, &workspace)
+        .map_err(GatewayError::capability)?;
+    let mut migrated = 0;
+
+    for connection in connections {
+        if !connection.provider_id.as_str().starts_with("mcp:") {
+            continue;
+        }
+        let Some(headers) =
+            legacy_mcp_http_headers(&connection.metadata).map_err(|message| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_legacy_headers_invalid",
+                message,
+            })?
+        else {
+            continue;
+        };
+        let secret_ref = SecretRef::new(
+            connection.user_id.as_str(),
+            connection.workspace_id.as_str(),
+            connection.provider_id.as_str(),
+            connection.connection_id.as_str(),
+        )
+        .map_err(|error| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "mcp_secret_ref_invalid",
+            message: error.to_string(),
+        })?;
+        let material = mcp_http_headers_to_secret(&headers).map_err(|message| GatewayError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "mcp_legacy_headers_invalid",
+            message,
+        })?;
+        let previous_secret =
+            state
+                .secret_store
+                .get(&secret_ref)
+                .map_err(|error| GatewayError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "mcp_secret_read_failed",
+                    message: error.to_string(),
+                })?;
+        state
+            .secret_store
+            .put(secret_ref.clone(), material)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_secret_store_failed",
+                message: error.to_string(),
+            })?;
+
+        let mut secured = connection;
+        secured.secret_ref = secret_ref.as_str().to_string();
+        if let Some(metadata) = secured.metadata.as_object_mut() {
+            metadata.remove("headers");
+        }
+        let persist_result = lock_capability_registry(state)?
+            .upsert_connection_config(&secured)
+            .map_err(GatewayError::capability);
+        if let Err(error) = persist_result {
+            if let Some(material) = previous_secret {
+                let _ = state.secret_store.put(secret_ref, material);
+            } else {
+                let _ = state.secret_store.delete(&secret_ref);
+            }
+            return Err(error);
+        }
+        migrated += 1;
+    }
+
+    Ok(migrated)
+}
+
 /// One transport type covering both MCP flavors, so a single
 /// `McpCapabilityProvider<McpAnyTransport>` handles stdio AND remote servers.
 enum McpAnyTransport {
@@ -38792,6 +38902,18 @@ fn connect_mcp_blocking(
     let connection_id = format!("mcp-{slug}");
     let user = gateway_capability_user_id();
     let workspace = gateway_capability_workspace_id();
+    let previous_connection_secret_ref = lock_capability_registry(state)?
+        .connection_configs(&user, &workspace)
+        .map_err(GatewayError::capability)?
+        .into_iter()
+        .find(|connection| connection.connection_id == connection_id)
+        .and_then(|connection| {
+            connection
+                .secret_ref
+                .starts_with("secret://")
+                .then(|| connection.secret_ref.parse::<SecretRef>().ok())
+                .flatten()
+        });
     let mut stored_secret_ref: Option<SecretRef> = None;
     let mut previous_secret: Option<SecretMaterial> = None;
     // Remote (http) when a url is given, else local stdio.
@@ -38818,14 +38940,15 @@ fn connect_mcp_blocking(
                         message,
                     }
                 })?;
-                previous_secret = state
-                    .secret_store
-                    .get(&secret_ref)
-                    .map_err(|error| GatewayError {
-                        status: StatusCode::INTERNAL_SERVER_ERROR,
-                        code: "mcp_secret_read_failed",
-                        message: error.to_string(),
-                    })?;
+                previous_secret =
+                    state
+                        .secret_store
+                        .get(&secret_ref)
+                        .map_err(|error| GatewayError {
+                            status: StatusCode::INTERNAL_SERVER_ERROR,
+                            code: "mcp_secret_read_failed",
+                            message: error.to_string(),
+                        })?;
                 state
                     .secret_store
                     .put(secret_ref.clone(), material)
@@ -38890,14 +39013,26 @@ fn connect_mcp_blocking(
         Ok(())
     })();
     if let Err(error) = persist_result {
-        if let Some(secret_ref) = stored_secret_ref {
+        if let Some(secret_ref) = stored_secret_ref.as_ref() {
             if let Some(material) = previous_secret {
-                let _ = state.secret_store.put(secret_ref, material);
+                let _ = state.secret_store.put(secret_ref.clone(), material);
             } else {
-                let _ = state.secret_store.delete(&secret_ref);
+                let _ = state.secret_store.delete(secret_ref);
             }
         }
         return Err(error);
+    }
+    if let Some(previous_ref) = previous_connection_secret_ref.filter(|previous_ref| {
+        stored_secret_ref.as_ref().map(SecretRef::as_str) != Some(previous_ref.as_str())
+    }) {
+        state
+            .secret_store
+            .delete(&previous_ref)
+            .map_err(|error| GatewayError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "mcp_secret_delete_failed",
+                message: error.to_string(),
+            })?;
     }
 
     // Best-effort discovery: connect (spawn/HTTP), MCP-initialize, list tools,
@@ -72699,6 +72834,141 @@ data: [DONE]\n";
                 .get(&secret_ref)
                 .expect("read deleted secret")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn mcp_reconnect_without_auth_deletes_previous_secret() {
+        use local_first_secrets::SecretStore;
+
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().expect("memory store"),
+        );
+        let state = test_app_state_for_brief(facade);
+        crate::connect_mcp_blocking(
+            &state,
+            crate::ConnectMcpRequest {
+                name: "Orion Moon".to_string(),
+                command: String::new(),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+                url: Some("http://127.0.0.1:1/mcp".to_string()),
+                headers: std::collections::HashMap::from([(
+                    "Authorization".to_string(),
+                    "Bearer replaced-secret".to_string(),
+                )]),
+            },
+        )
+        .expect("register authenticated MCP");
+        let secret_ref = local_first_secrets::SecretRef::new(
+            crate::gateway_capability_user_id().as_str(),
+            crate::gateway_capability_workspace_id().as_str(),
+            "mcp:orion-moon",
+            "mcp-orion-moon",
+        )
+        .expect("secret ref");
+        assert!(
+            state
+                .secret_store
+                .get(&secret_ref)
+                .expect("read secret")
+                .is_some()
+        );
+
+        crate::connect_mcp_blocking(
+            &state,
+            crate::ConnectMcpRequest {
+                name: "Orion Moon".to_string(),
+                command: String::new(),
+                args: Vec::new(),
+                env: std::collections::HashMap::new(),
+                url: Some("http://127.0.0.1:1/mcp".to_string()),
+                headers: std::collections::HashMap::new(),
+            },
+        )
+        .expect("replace with unauthenticated MCP");
+
+        assert!(
+            state
+                .secret_store
+                .get(&secret_ref)
+                .expect("read replaced secret")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn mcp_legacy_header_migration_moves_plaintext_into_secret_store() {
+        use local_first_secrets::SecretStore;
+
+        let facade = local_first_memory::MemoryFacade::new(
+            local_first_memory::SQLiteMemoryStore::open_in_memory().expect("memory store"),
+        );
+        let state = test_app_state_for_brief(facade);
+        let user = crate::gateway_capability_user_id();
+        let workspace = crate::gateway_capability_workspace_id();
+        let provider = local_first_capabilities::ProviderId::new("mcp:legacy");
+        let legacy = local_first_capabilities::CapabilityConnectionConfig::new(
+            "mcp-legacy",
+            provider.clone(),
+            user.clone(),
+            workspace.clone(),
+            "Legacy MCP",
+            "http:legacy",
+        )
+        .with_metadata(serde_json::json!({
+            "transport": "http",
+            "url": "https://example.com/mcp",
+            "headers": { "Authorization": "Bearer legacy-secret" }
+        }));
+        {
+            let registry = state.capability_registry.lock().expect("registry lock");
+            registry
+                .upsert_provider_config(
+                    &local_first_capabilities::CapabilityProviderConfig::new(
+                        provider.clone(),
+                        local_first_capabilities::CapabilityProviderKind::Mcp,
+                        "Legacy MCP".to_string(),
+                        true,
+                    ),
+                )
+                .expect("provider config");
+            registry
+                .upsert_connection_config(&legacy)
+                .expect("legacy connection");
+        }
+
+        assert_eq!(
+            crate::migrate_legacy_mcp_http_header_secrets(&state).expect("migration"),
+            1
+        );
+
+        let migrated = state
+            .capability_registry
+            .lock()
+            .expect("registry lock")
+            .connection_configs(&user, &workspace)
+            .expect("connection configs")
+            .into_iter()
+            .find(|connection| connection.provider_id == provider)
+            .expect("migrated connection");
+        let serialized = serde_json::to_string(&migrated).expect("serialize connection");
+        assert!(migrated.metadata.get("headers").is_none());
+        assert!(!serialized.contains("legacy-secret"));
+        let secret_ref = migrated
+            .secret_ref
+            .parse::<local_first_secrets::SecretRef>()
+            .expect("secret ref");
+        let material = state
+            .secret_store
+            .get(&secret_ref)
+            .expect("read secret")
+            .expect("migrated secret");
+        let headers = crate::mcp_http_headers_from_secret(material).expect("decode headers");
+        assert_eq!(headers["Authorization"], "Bearer legacy-secret");
+        assert_eq!(
+            crate::migrate_legacy_mcp_http_header_secrets(&state).expect("idempotent migration"),
+            0
         );
     }
 
