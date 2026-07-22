@@ -35574,7 +35574,8 @@ fn insert_broker_turn_messages(
         &format!("local_user_{}", input.request_id),
     );
     user.attachments = broker_turn_message_attachments(input);
-    let assistant = channel_chat_message_with_id("assistant", "", &input.assistant_message_id);
+    let mut assistant = channel_chat_message_with_id("assistant", "", &input.assistant_message_id);
+    assistant.memory_reuse = Some(local_first_memory::MemoryReuseEnvelope::blocked_unknown());
     ChatStore::insert_linked_turn_messages(tx, &input.thread_id, &user, &assistant)
     .map_err(|e| local_first_task_runtime::TaskRuntimeError::Store(e.to_string()))
 }
@@ -74106,6 +74107,140 @@ data: [DONE]\n";
                 .map(|message| message.id.as_str()),
             Some("local_assistant_r1")
         );
+        assert_eq!(
+            chat.message(&thread.thread_id, "local_assistant_r1")
+                .unwrap()
+                .unwrap()
+                .memory_reuse
+                .unwrap()
+                .write_policy,
+            local_first_memory::MemoryWritePolicy::BlockedUnknown
+        );
+    }
+
+    #[test]
+    fn broker_enqueue_rejects_cross_thread_request_id_collision_without_mutating_first_turn() {
+        let root = isolated_gateway_test_dir("broker-cross-thread-request-id-collision");
+        std::fs::create_dir_all(&root).unwrap();
+        let database = root.join("homun.sqlite");
+        let chat = ChatStore::open(&database).unwrap();
+        let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+        let thread_a = chat.create_thread("workspace_test").unwrap();
+        let thread_b = chat.create_thread("workspace_test").unwrap();
+        let leaf_b_before = chat
+            .messages(&thread_b.thread_id)
+            .unwrap()
+            .messages
+            .last()
+            .unwrap()
+            .id
+            .clone();
+        let input_a = local_first_task_runtime::broker::ChatTurnInput {
+            thread_id: thread_a.thread_id.clone(),
+            request_id: "same-request".to_string(),
+            assistant_message_id: "local_assistant_same-request".to_string(),
+            prompt: "first prompt".to_string(),
+            visible_prompt: None,
+            images: Vec::new(),
+            attachments: None,
+            mode: None,
+            model: None,
+            source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+            approval: local_first_task_runtime::broker::TurnApproval::Full,
+        };
+        let user_id = super::gateway_user_id();
+        let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_test");
+
+        local_first_task_runtime::broker::enqueue_chat_turn_atomic(
+            &tasks,
+            &user_id,
+            &workspace_id,
+            &input_a,
+            |tx| super::insert_broker_turn_messages(tx, &input_a),
+        )
+        .unwrap();
+        let task_id = local_first_task_runtime::TaskId::new("turn_same-request");
+        let task_before = tasks
+            .get_task(&task_id, &user_id, &workspace_id)
+            .unwrap()
+            .unwrap();
+        let input_b = local_first_task_runtime::broker::ChatTurnInput {
+            thread_id: thread_b.thread_id.clone(),
+            prompt: "second prompt".to_string(),
+            ..input_a.clone()
+        };
+
+        let error = local_first_task_runtime::broker::enqueue_chat_turn_atomic(
+            &tasks,
+            &user_id,
+            &workspace_id,
+            &input_b,
+            |tx| super::insert_broker_turn_messages(tx, &input_b),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            local_first_task_runtime::broker::EnqueueError::Store(_)
+        ));
+        let task_after = tasks
+            .get_task(&task_id, &user_id, &workspace_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(task_after.status, task_before.status);
+        assert_eq!(task_after.input_json["thread_id"], thread_a.thread_id);
+        assert_eq!(task_after.input_json["request_id"], "same-request");
+        assert!(
+            chat.message(&thread_a.thread_id, "local_user_same-request")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            chat.message(&thread_a.thread_id, "local_assistant_same-request")
+                .unwrap()
+                .is_some()
+        );
+        let (assistant_parent, leaf_a): (Option<String>, Option<String>) =
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .query_row(
+                    "select message.parent_id, thread.active_leaf_id
+                       from chat_messages message
+                       join chat_threads thread on thread.thread_id = message.thread_id
+                      where message.id = ?1",
+                    ["local_assistant_same-request"],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+        assert_eq!(assistant_parent.as_deref(), Some("local_user_same-request"));
+        assert_eq!(leaf_a.as_deref(), Some("local_assistant_same-request"));
+        assert!(
+            chat.message(&thread_b.thread_id, "local_user_same-request")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            chat.message(&thread_b.thread_id, "local_assistant_same-request")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            chat.messages(&thread_b.thread_id)
+                .unwrap()
+                .messages
+                .last()
+                .map(|message| message.id.as_str()),
+            Some(leaf_b_before.as_str())
+        );
+        let b_task_count: i64 = rusqlite::Connection::open(&database)
+            .unwrap()
+            .query_row(
+                "select count(*) from tasks where thread_id = ?1",
+                [thread_b.thread_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(b_task_count, 0);
     }
 
     #[test]

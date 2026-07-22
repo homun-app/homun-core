@@ -253,13 +253,14 @@ fn count_queued_chat_turns_for_thread(
 }
 
 /// Atomic variant of `enqueue_chat_turn`: runs the broker insert AND a
-/// caller-provided chat_message insert in the SAME SQLite transaction. If either
+/// caller-provided user+assistant turn-message insert in the SAME SQLite transaction. If either
 /// fails, both roll back — guaranteeing the prompt+turn atomicity invariant.
 ///
-/// The `insert_user_message` closure receives a `&Transaction` and must insert
-/// the user message row (the caller knows the chat_messages schema, which lives
-/// in chat_store). It should be idempotent on the request_id (use INSERT OR IGNORE)
-/// so re-enqueue after a crash doesn't duplicate.
+/// The `insert_turn_messages` closure receives a `&Transaction` and must insert
+/// the linked user and assistant rows atomically (the caller owns the
+/// chat_messages schema). It is responsible for checking same-turn idempotency
+/// and rejecting incompatible message-id collisions; this crate deliberately
+/// does not depend on chat_messages.
 fn queued_chat_turn_task(
     user_id: &UserId,
     workspace_id: &WorkspaceId,
@@ -319,6 +320,35 @@ fn insert_chat_turn_on(
     task: &TaskRecord,
     input: &ChatTurnInput,
 ) -> TaskRuntimeResult<()> {
+    let existing = tx
+        .query_row(
+            "SELECT task_json FROM tasks
+             WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3",
+            rusqlite::params![
+                task.task_id.as_str(),
+                task.user_id.as_str(),
+                task.workspace_id.as_str(),
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if let Some(existing) = existing {
+        let existing: TaskRecord = serde_json::from_str(&existing)
+            .map_err(|error| TaskRuntimeError::Store(error.to_string()))?;
+        let compatible = existing.kind == "chat_turn"
+            && existing.input_json["thread_id"] == input.thread_id
+            && existing.input_json["request_id"] == input.request_id
+            && existing.input_json["assistant_message_id"] == input.assistant_message_id;
+        if !compatible {
+            return Err(TaskRuntimeError::Store(format!(
+                "chat turn task id collision for {}",
+                task.task_id.as_str()
+            )));
+        }
+        // Same logical turn: preserve its stored status (including running or
+        // terminal) rather than re-queueing it during a crash retry.
+        return Ok(());
+    }
     let task_json =
         serde_json::to_string(task).map_err(|error| TaskRuntimeError::Store(error.to_string()))?;
     tx.execute(
@@ -327,9 +357,7 @@ fn insert_chat_turn_on(
             created_at, updated_at, blocked_reason, task_json
         )
         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, NULL, ?9)
-        ON CONFLICT(task_id, user_id, workspace_id) DO UPDATE SET
-            kind = excluded.kind, status = excluded.status, priority = excluded.priority,
-            updated_at = excluded.updated_at, task_json = excluded.task_json",
+        ",
         rusqlite::params![
             task.task_id.as_str(),
             task.user_id.as_str(),
@@ -363,7 +391,7 @@ pub fn enqueue_chat_turn_atomic<F>(
     user_id: &UserId,
     workspace_id: &WorkspaceId,
     input: &ChatTurnInput,
-    insert_user_message: F,
+    insert_turn_messages: F,
 ) -> Result<EnqueuedTurn, EnqueueError>
 where
     F: FnOnce(&rusqlite::Transaction<'_>) -> TaskRuntimeResult<()>,
@@ -382,7 +410,7 @@ where
         if let Some(active) = active_chat_turn_on(tx, &input.thread_id)? {
             return Ok(Some(active));
         }
-        insert_user_message(tx)?;
+        insert_turn_messages(tx)?;
         insert_chat_turn_on(tx, &task, input)?;
         Ok(None)
     })?;
@@ -872,13 +900,42 @@ mod atomic_tests {
         input.assistant_message_id = "local_assistant_r1".into();
         let user = UserId::new("u");
         let workspace = WorkspaceId::new("w");
-        let enqueued =
-            enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |_tx| Ok(())).unwrap();
+        let closure_called = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let called = closure_called.clone();
+        let enqueued = enqueue_chat_turn_atomic(&store, &user, &workspace, &input, move |_tx| {
+            *called.lock().unwrap() = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(*closure_called.lock().unwrap());
         let task = store
             .get_task(&enqueued.task_id, &user, &workspace)
             .unwrap()
             .unwrap();
         assert_eq!(task.input_json["assistant_message_id"], "local_assistant_r1");
+    }
+
+    #[test]
+    fn same_logical_turn_retry_preserves_terminal_task_state() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let input = make_input("r1", "t1");
+        let first = enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |_tx| Ok(())).unwrap();
+        store
+            .update_task_status(&first.task_id, &user, &workspace, TaskStatus::Completed, None)
+            .unwrap();
+
+        let retried = enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |_tx| Ok(())).unwrap();
+
+        assert_eq!(retried.task_id, first.task_id);
+        let task = store
+            .get_task(&first.task_id, &user, &workspace)
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::Completed);
+        assert_eq!(task.input_json["thread_id"], "t1");
+        assert_eq!(task.input_json["request_id"], "r1");
     }
 
     #[test]

@@ -18,6 +18,13 @@ pub struct ChatStore {
     conn: Connection,
 }
 
+struct LinkedTurnMessageRow {
+    thread_id: String,
+    role: String,
+    linked_task_id: Option<String>,
+    parent_id: Option<String>,
+}
+
 /// A node on the active conversation path that has alternative siblings — drives
 /// the ‹ n/m › branch switcher. `node_id` is the displayed message; `options` are
 /// all of its parent's children (in creation order), each carrying the leaf to
@@ -3389,17 +3396,77 @@ impl ChatStore {
         user: &ChatMessage,
         assistant: &ChatMessage,
     ) -> rusqlite::Result<()> {
+        if user.id == assistant.id {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "linked turn user and assistant ids must differ".to_string(),
+            ));
+        }
+        let existing_user = Self::linked_turn_message_on(conn, &user.id)?;
+        let existing_assistant = Self::linked_turn_message_on(conn, &assistant.id)?;
+        match (existing_user, existing_assistant) {
+            (None, None) => {}
+            (Some(user_row), Some(assistant_row)) => {
+                let user_matches = user_row.thread_id == thread_id
+                    && user_row.role == user.role
+                    && user_row.linked_task_id == user.linked_task_id;
+                let assistant_matches = assistant_row.thread_id == thread_id
+                    && assistant_row.role == assistant.role
+                    && assistant_row.linked_task_id == assistant.linked_task_id
+                    && assistant_row.parent_id.as_deref() == Some(user.id.as_str());
+                if user_matches && assistant_matches {
+                    // The complete pair is already persisted for this exact
+                    // logical turn. Do not calculate a new parent from the
+                    // current assistant leaf or advance the leaf again.
+                    return Ok(());
+                }
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "incompatible linked turn message pair".to_string(),
+                ));
+            }
+            _ => {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "incomplete linked turn message pair".to_string(),
+                ));
+            }
+        }
         let parent_id = Self::active_leaf_on(conn, thread_id)?;
-        Self::insert_message_on(conn, thread_id, user, parent_id.as_deref())?;
+        if !Self::insert_message_on(conn, thread_id, user, parent_id.as_deref())? {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "linked turn user message id collision".to_string(),
+            ));
+        }
         let assistant_inserted =
             Self::insert_message_on(conn, thread_id, assistant, Some(&user.id))?;
-        if assistant_inserted {
-            conn.execute(
-                "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
-                params![assistant.id, thread_id],
-            )?;
+        if !assistant_inserted {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "linked turn assistant message id collision".to_string(),
+            ));
         }
+        conn.execute(
+            "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
+            params![assistant.id, thread_id],
+        )?;
         Ok(())
+    }
+
+    fn linked_turn_message_on(
+        conn: &Connection,
+        message_id: &str,
+    ) -> rusqlite::Result<Option<LinkedTurnMessageRow>> {
+        conn.query_row(
+            "select thread_id, role, linked_task_id, parent_id
+               from chat_messages where id = ?1",
+            params![message_id],
+            |row| {
+                Ok(LinkedTurnMessageRow {
+                    thread_id: row.get(0)?,
+                    role: row.get(1)?,
+                    linked_task_id: row.get(2)?,
+                    parent_id: row.get(3)?,
+                })
+            },
+        )
+        .optional()
     }
 
     fn upsert_message(
