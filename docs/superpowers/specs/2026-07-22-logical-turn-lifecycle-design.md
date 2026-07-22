@@ -3,6 +3,7 @@
 **Data:** 2026-07-22
 **Stato:** design approvato in conversazione; documento in revisione
 **Ambito:** engine, turn broker, transcript, WebSocket e proiezione desktop
+**Revisione:** steering FIFO modificabile e stato operativo vicino alla chat
 **Spec estese:** `2026-07-05-turn-queue-broker-design.md`,
 `2026-07-19-agent-execution-journal-prompt-inspector-design.md`
 **Capisaldi:** #5 (un solo motore), #9 (workspace agentico operativo), #11
@@ -36,6 +37,16 @@ architetturale completo:
 Il problema non è specifico di Orion: la stessa sequenza è possibile con qualunque modello
 reasoning, MCP in timeout, browser occupato, provider temporaneamente indisponibile, recovery
 al boot, canale o automazione.
+
+La stessa analisi ha evidenziato un secondo difetto di contratto. Durante un turno attivo il
+composer resta utilizzabile e il backend accetta già input interattivo come steering, ma oggi:
+
+- il messaggio viene proiettato subito come normale bolla utente, quindi sembra già acquisito;
+- l'utente non vede uno stato durevole `In attesa` e non può modificarlo o cancellarlo;
+- `turn_steering` conserva il testo ma non l'intero envelope con allegati, immagini, modalità e
+  modello;
+- lo stato di lavoro è dettagliato nell'Island, ma non rimane stabilmente vicino al composer e
+  alla risposta su cui è concentrata l'attenzione.
 
 ## Decisione
 
@@ -86,6 +97,14 @@ stateDiagram-v2
    effetti usa receipt/idempotency key prima di essere rieseguita.
 8. **Semantica per sorgente, lifecycle comune.** Interactive, Channel, Automation e Connector
    condividono stati ed eventi; cambiano priorità, budget, approvazione e presentazione.
+9. **Steering non ancora consegnato.** Un input `pending` non è una normale bolla utente, non
+   avanza `active_leaf_id` e non entra in contesto o memoria.
+10. **Claim atomico e modifiche ottimistiche.** Il motore e le azioni Modifica/Elimina competono
+    sulla stessa revisione; un solo aggiornamento può vincere.
+11. **Finalization fence.** Prima di terminalizzare, il broker controlla la coda nella stessa
+    sezione atomica che chiude il turno. Se trova steering, il turno continua.
+12. **Stato vicino all'attenzione.** Island, footer della risposta e fascia sopra il composer
+    sono proiezioni dello stesso stato server-owned, non tre lifecycle locali.
 
 ## Contratto degli eventi pubblici
 
@@ -168,6 +187,78 @@ assistant message `delivered`; non usa preview, errori tecnici o placeholder com
 Durante un retry il reducer UI sostituisce la preview del tentativo precedente, ma conserva
 activity e run nell'Execution Inspector. Non concatena due risposte parziali.
 
+## Steering durevole e modificabile
+
+Un invio interactive mentre il thread ha un turno attivo crea uno **steering pendente**, non
+un secondo turno e non un messaggio già consegnato. `turn_steering` è il source of truth fino
+al claim e conserva l'envelope completo:
+
+- `steering_id`, `source_message_id`, `thread_id` e `active_turn_id`;
+- prompt visibile e prompt effettivo;
+- allegati, immagini, modalità, modello e binding necessari alla stessa esecuzione;
+- `status`, `revision`, timestamp di creazione/aggiornamento e dati del claim.
+
+La migrazione è additiva. Gli stati sono:
+
+```text
+pending -> claimed -> applied
+pending -> cancelled
+pending -> held -> promoted
+held -> cancelled
+```
+
+- `pending`: visibile come card `In attesa`, modificabile e cancellabile;
+- `claimed`: acquisito atomicamente da `run_id` e round; non più modificabile;
+- `applied`: incluso nel prompt effettivo e materializzato una sola volta nel transcript;
+- `cancelled`: rimosso dall'interfaccia attiva, conservato per audit tecnico minimo;
+- `held`: il turno è finito con errore/cancellazione prima del claim;
+- `promoted`: l'utente ha scelto `Invia ora` e lo steering è diventato un nuovo turno.
+
+La coda è FIFO e accetta più steering. Al confine sicuro fra round il motore acquisisce in
+un'unica transazione lo snapshot dei record `pending`, ordinati per `steering_id`. I record
+arrivati dopo lo snapshot restano per il confine successivo.
+
+`PATCH` e `DELETE` richiedono `expected_revision`. La modifica aggiorna righe `pending` o
+`held`; l'eliminazione le porta a `cancelled`. Se il claim ha vinto la race su un record
+`pending`, restituiscono un conflitto tipizzato con lo stato corrente; il client sostituisce
+la card senza fingere che la modifica sia riuscita.
+
+Il claim materializza i messaggi utente nel ramo conversazionale in modo idempotente usando
+`source_message_id`, poi li rende disponibili al contesto del round. Un crash fra `claimed` e
+`applied` viene recuperato dal run/checkpoint associato senza duplicare messaggi o prompt.
+
+La chiusura normale del turno usa una finalization fence: se l'enqueue dello steering vince,
+il broker lo vede e continua il turno; se la chiusura vince, la stessa richiesta viene ammessa
+direttamente come nuovo turno. Non esiste una finestra in cui l'input risulti accettato ma non
+appartenga a nessuno dei due.
+
+Su errore terminale o Stop, gli steering non acquisiti diventano `held`: non si perdono e non
+partono da soli. La card espone `Invia ora`, Modifica ed Elimina. `Invia ora` crea il nuovo
+turno e marca il record `promoted` atomicamente.
+
+La lista durevole viene letta tramite un endpoint thread-scoped. Le mutazioni notificano le
+altre finestre con un evento `thread.steering_changed`; non aggiungono eventi dopo il terminale
+del vecchio `turn_id`, preservando l'invariante del terminale unico.
+
+## Stato operativo a fine chat
+
+L'Island resta il cockpit dettagliato di attività, piano, fonti e computer. La chat aggiunge
+due proiezioni compatte dello stesso `TurnProjection` server-owned:
+
+1. un footer sotto la risposta assistant attiva con fase, tempo trascorso, tentativo,
+   conteggio attività, `Attività` e `Stop`;
+2. una fascia stabile sopra il composer con `Homun sta ancora lavorando`, fase corrente,
+   `Attività` e `Stop`.
+
+Fra fascia e composer compaiono le card steering FIFO. Ogni card mostra stato, testo e azioni;
+la modifica avviene inline. Il composer rimane libero e, durante un turno attivo, il controllo
+di invio comunica esplicitamente `Metti in coda` invece di sembrare un nuovo turno immediato.
+
+Retry, backoff, attesa risorsa e reconnect non rimuovono footer o fascia. Scompaiono soltanto
+dopo `done`, `error` o `cancelled` del turno logico. Entrambe le superfici consumano la stessa
+sequenza `turn_events`; `promptSubmitting` locale può ottimizzare il primo paint ma non è fonte
+di verità.
+
 ## Classificazione dei fallimenti
 
 Il confine executor/task runtime usa un esito tipizzato invece della sola coppia
@@ -204,7 +295,9 @@ Una risposta RPC ricevuta con `isError=true` non viene registrata come tool succ
 
 - stessa bolla, stato `Riprovo tra 15 s…`, Stop sempre disponibile;
 - massimo tentativi contenuto;
-- il composer può accettare steering senza creare un secondo turno.
+- il composer accetta una coda FIFO di steering senza creare un secondo turno;
+- ogni steering resta modificabile/cancellabile fino al claim del prossimo confine sicuro;
+- footer assistant e fascia sopra il composer rendono evidente che il turno non è terminato.
 
 ### Channel
 
@@ -230,6 +323,11 @@ Una risposta RPC ricevuta con `isError=true` non viene registrata come tool succ
   un solo `cancelled` e impedisce la partenza del tentativo successivo.
 - **Cancel durante tool/modello:** l'abort chiude il run, preserva solo activity utile e non
   finalizza la preview come risposta.
+- **Steering pending durante Stop/errore:** passa a `held`; nessuna esecuzione automatica.
+- **Reload con steering pending/held:** l'endpoint thread-scoped ricostruisce ordine, revisioni
+  e azioni disponibili senza dipendere dallo stato React.
+- **Race claim/modifica:** il confronto su `revision` rende osservabile chi ha vinto e impedisce
+  aggiornamenti silenziosamente persi.
 
 ## Confine con i connector
 
@@ -267,7 +365,9 @@ le responsabilità necessarie.
 Non necessaria. Il difetto è nel contratto tra strutture esistenti, non nell'assenza delle
 strutture.
 
-## Prima slice implementabile
+## Sequenza di implementazione
+
+### Fase A — terminale del turno e retry
 
 1. **Engine:** validazione visible-answer applicata anche alla sintesi; esito tipizzato
    `NoVisibleAnswer`; test reasoning-only normale + reasoning-only synthesis.
@@ -280,7 +380,17 @@ strutture.
 5. **Context firewall:** preview/failure escluse dal contesto del modello.
 6. **Osservabilità:** tool `isError` registrato come fallimento applicativo.
 
-Il `resource_ref` Orion viene pianificato separatamente dopo questa slice.
+### Fase B — steering e stato vicino alla chat
+
+7. **Steering contract:** envelope completo, status/revision, claim FIFO, finalization fence,
+   endpoint list/edit/delete/send-now e notifica thread-scoped.
+8. **Chat proximity UI:** footer assistant, fascia sopra il composer e card pending/held,
+   tutte alimentate dallo stato durevole.
+
+La Fase B dipende dal terminale unico della Fase A; entrambe sono necessarie per soddisfare i
+criteri di accettazione di questa specifica.
+
+Il `resource_ref` Orion viene pianificato separatamente dopo queste fasi.
 
 ## Test richiesti
 
@@ -300,7 +410,14 @@ Il `resource_ref` Orion viene pianificato separatamente dopo questa slice.
 - terminale dopo esaurimento tentativi è `error`, non una bolla assistant tecnica;
 - cancel durante backoff impedisce il tentativo successivo;
 - recovery chiude il run precedente ma non il turno se la policy consente retry;
-- receipt impedisce la duplicazione di un tool con effetti.
+- receipt impedisce la duplicazione di un tool con effetti;
+- più steering vengono acquisiti in ordine FIFO allo stesso confine sicuro;
+- edit/delete con `expected_revision` vincono oppure restituiscono conflitto dopo il claim;
+- uno steering pending non crea `chat_messages` né avanza `active_leaf_id`;
+- il claim materializza il messaggio una sola volta e lo include nel round;
+- la finalization fence assegna ogni input al turno corrente o a un nuovo turno;
+- Stop/errore trasformano i pending in `held`; `Invia ora` li promuove atomicamente;
+- modifica ed eliminazione restano disponibili sui record `held`.
 
 ### Desktop
 
@@ -309,7 +426,12 @@ Il `resource_ref` Orion viene pianificato separatamente dopo questa slice.
 - il nuovo tentativo sostituisce la preview senza creare messaggi;
 - reload durante backoff e durante attempt 2 ricostruisce lo stesso stato;
 - `done`, `error` e `cancelled` terminano una sola volta;
-- activity resta consultabile senza entrare nella prosa finale.
+- activity resta consultabile senza entrare nella prosa finale;
+- footer e fascia restano visibili attraverso retry, backoff e reconnect;
+- il composer mostra `Metti in coda` durante un turno attivo;
+- le card FIFO supportano modifica inline, eliminazione e conflitto dopo claim;
+- reload ricostruisce steering `pending` e `held` con azioni corrette;
+- Stop non perde né esegue automaticamente le istruzioni non acquisite.
 
 ### Matrice end-to-end
 
@@ -334,6 +456,15 @@ Il `resource_ref` Orion viene pianificato separatamente dopo questa slice.
 6. Chat, channel, automation e connector consumano lo stesso lifecycle.
 7. Gli errori tecnici non entrano nel contesto futuro né nella memoria semantica.
 8. Le tool call con effetti non vengono duplicate da retry o recovery.
+9. Uno steering non appare come consegnato e non entra nel contesto prima del claim.
+10. Ogni steering accettato appartiene al turno attivo oppure a un nuovo turno, mai a nessuno
+    dei due e mai a entrambi.
+11. Modifica ed Elimina sono disponibili fino al claim e producono un conflitto esplicito se
+    il motore ha già acquisito l'istruzione.
+12. Finché il turno non è terminale, la chat mostra sempre lo stato operativo vicino alla
+    risposta e sopra il composer, anche durante retry o reconnect.
+13. Dopo Stop o errore, gli steering non acquisiti restano controllabili ma non partono senza
+    `Invia ora`.
 
 ## Fuori scope
 
