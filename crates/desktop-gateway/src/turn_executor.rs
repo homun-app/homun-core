@@ -9,7 +9,8 @@ use std::sync::{
 };
 
 use local_first_task_runtime::{
-    AgentRunStatus, NewAgentRun, TaskRuntimeResult, TaskStore, TurnEventKind, broker::CancelNotify,
+    AgentRunStatus, NewAgentRun, TaskRuntimeResult, TaskStatus, TaskStore, TurnEventKind,
+    broker::CancelNotify,
 };
 use serde_json::Value;
 #[cfg(test)]
@@ -127,6 +128,17 @@ pub fn register_turn(turn_id: &str) -> Arc<TurnBroadcast> {
         map.insert(turn_id.to_string(), broadcast.clone());
     }
     broadcast
+}
+
+fn apply_persisted_cancellation(
+    broadcast: &TurnBroadcast,
+    persisted_status: Option<TaskStatus>,
+) -> bool {
+    if persisted_status == Some(TaskStatus::Cancelled) {
+        broadcast.cancel.cancel();
+        return true;
+    }
+    false
 }
 
 /// Drop the turn broadcast. Call when the executor finishes (success/failure/cancel).
@@ -425,6 +437,24 @@ pub fn execute_chat_turn_task(
     // 3. Register the live turn broadcast (Task 1a.2). Cancellation + the
     //    per-turn SSE/WS fan-out key off this. Always unregistered on exit.
     let broadcast = register_turn(turn_id);
+    // A worker owns the resource reservation before it reaches register_turn. If the
+    // user cancels inside that short window, the in-process notify has no receiver yet.
+    // Re-read the durable status after registration: either this observes Cancelled,
+    // or a later cancellation sees the registered broadcast and signals it directly.
+    let persisted_status = state
+        .task_store
+        .lock()
+        .ok()
+        .and_then(|store| {
+            store
+                .get_task(&task.task_id, &task.user_id, &task.workspace_id)
+                .ok()
+                .flatten()
+        })
+        .map(|stored| stored.status);
+    if apply_persisted_cancellation(&broadcast, persisted_status) {
+        tracing::info!(target: "broker::executor", turn_id = %turn_id, "latched cancellation registered before executor startup");
+    }
 
     // 4. Open the visible turn: persists user + assistant placeholder messages
     //    and emits `thread.turn_started`. Fail closed if it cannot be persisted
@@ -884,6 +914,19 @@ mod tests {
         });
         wait.join().unwrap();
         unregister_turn("turn_test_cancel");
+    }
+
+    #[test]
+    fn persisted_cancel_before_registration_is_latched() {
+        let broadcast = register_turn("turn_test_persisted_cancel");
+
+        assert!(apply_persisted_cancellation(
+            &broadcast,
+            Some(TaskStatus::Cancelled)
+        ));
+        assert!(broadcast.cancel.is_cancelled());
+
+        unregister_turn("turn_test_persisted_cancel");
     }
 
     #[tokio::test]
