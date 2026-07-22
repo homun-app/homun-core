@@ -335,10 +335,7 @@ fn insert_chat_turn_on(
     if let Some(existing) = existing {
         let existing: TaskRecord = serde_json::from_str(&existing)
             .map_err(|error| TaskRuntimeError::Store(error.to_string()))?;
-        let compatible = existing.kind == "chat_turn"
-            && existing.input_json["thread_id"] == input.thread_id
-            && existing.input_json["request_id"] == input.request_id
-            && existing.input_json["assistant_message_id"] == input.assistant_message_id;
+        let compatible = existing.kind == "chat_turn" && existing.input_json == task.input_json;
         if !compatible {
             return Err(TaskRuntimeError::Store(format!(
                 "chat turn task id collision for {}",
@@ -900,14 +897,48 @@ mod atomic_tests {
         input.assistant_message_id = "local_assistant_r1".into();
         let user = UserId::new("u");
         let workspace = WorkspaceId::new("w");
-        let closure_called = std::sync::Arc::new(std::sync::Mutex::new(false));
-        let called = closure_called.clone();
-        let enqueued = enqueue_chat_turn_atomic(&store, &user, &workspace, &input, move |_tx| {
-            *called.lock().unwrap() = true;
+        store
+            .with_transaction(|tx| {
+                tx.execute_batch(
+                    "create table test_turn_messages (
+                        id text primary key,
+                        role text not null
+                    )",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let user_message_id = "local_user_r1";
+        let assistant_message_id = input.assistant_message_id.clone();
+        let enqueued = enqueue_chat_turn_atomic(&store, &user, &workspace, &input, |tx| {
+            tx.execute(
+                "insert into test_turn_messages (id, role) values (?1, 'user')",
+                rusqlite::params![user_message_id],
+            )?;
+            tx.execute(
+                "insert into test_turn_messages (id, role) values (?1, 'assistant')",
+                rusqlite::params![assistant_message_id],
+            )?;
             Ok(())
         })
         .unwrap();
-        assert!(*closure_called.lock().unwrap());
+        let turn_messages: Vec<(String, String)> = store
+            .with_transaction(|tx| {
+                let mut statement =
+                    tx.prepare("select id, role from test_turn_messages order by role")?;
+                statement
+                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                    .collect::<rusqlite::Result<_>>()
+                    .map_err(Into::into)
+            })
+            .unwrap();
+        assert_eq!(
+            turn_messages,
+            vec![
+                (assistant_message_id, "assistant".to_string()),
+                (user_message_id.to_string(), "user".to_string()),
+            ]
+        );
         let task = store
             .get_task(&enqueued.task_id, &user, &workspace)
             .unwrap()
@@ -964,7 +995,7 @@ mod atomic_tests {
         assert!(matches!(result, Err(EnqueueError::ThreadBusy { .. })));
         assert!(
             !*called.lock().unwrap(),
-            "user_message closure should NOT be called when pre-check fails"
+            "turn_messages closure should NOT be called when pre-check fails"
         );
     }
 

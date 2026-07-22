@@ -74244,6 +74244,96 @@ data: [DONE]\n";
     }
 
     #[test]
+    fn broker_enqueue_rejects_changed_payload_for_terminal_same_thread_turn() {
+        let root = isolated_gateway_test_dir("broker-same-thread-payload-collision");
+        std::fs::create_dir_all(&root).unwrap();
+        let database = root.join("homun.sqlite");
+        let chat = ChatStore::open(&database).unwrap();
+        let tasks = local_first_task_runtime::TaskStore::open(&database).unwrap();
+        let thread = chat.create_thread("workspace_test").unwrap();
+        let input = local_first_task_runtime::broker::ChatTurnInput {
+            thread_id: thread.thread_id.clone(),
+            request_id: "r1".to_string(),
+            assistant_message_id: "local_assistant_r1".to_string(),
+            prompt: "original prompt".to_string(),
+            visible_prompt: None,
+            images: Vec::new(),
+            attachments: None,
+            mode: Some("chat".to_string()),
+            model: None,
+            source: local_first_task_runtime::broker::ChatTurnSource::Interactive,
+            approval: local_first_task_runtime::broker::TurnApproval::Full,
+        };
+        let user_id = super::gateway_user_id();
+        let workspace_id = local_first_task_runtime::WorkspaceId::new("workspace_test");
+
+        let first = local_first_task_runtime::broker::enqueue_chat_turn_atomic(
+            &tasks,
+            &user_id,
+            &workspace_id,
+            &input,
+            |tx| super::insert_broker_turn_messages(tx, &input),
+        )
+        .unwrap();
+        tasks
+            .update_task_status(
+                &first.task_id,
+                &user_id,
+                &workspace_id,
+                local_first_task_runtime::TaskStatus::Completed,
+                None,
+            )
+            .unwrap();
+        let task_before = tasks
+            .get_task(&first.task_id, &user_id, &workspace_id)
+            .unwrap()
+            .unwrap();
+        let messages_before: Vec<(String, String)> = chat
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages
+            .into_iter()
+            .map(|message| (message.id, message.text))
+            .collect();
+        let leaf_before = messages_before.last().unwrap().0.clone();
+        let changed = local_first_task_runtime::broker::ChatTurnInput {
+            prompt: "changed prompt".to_string(),
+            attachments: Some(serde_json::json!({ "document": "new" })),
+            mode: Some("plan".to_string()),
+            ..input.clone()
+        };
+
+        let error = local_first_task_runtime::broker::enqueue_chat_turn_atomic(
+            &tasks,
+            &user_id,
+            &workspace_id,
+            &changed,
+            |tx| super::insert_broker_turn_messages(tx, &changed),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            local_first_task_runtime::broker::EnqueueError::Store(_)
+        ));
+        let task_after = tasks
+            .get_task(&first.task_id, &user_id, &workspace_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(task_after.status, task_before.status);
+        assert_eq!(task_after.input_json, task_before.input_json);
+        let messages_after: Vec<(String, String)> = chat
+            .messages(&thread.thread_id)
+            .unwrap()
+            .messages
+            .into_iter()
+            .map(|message| (message.id, message.text))
+            .collect();
+        assert_eq!(messages_after, messages_before);
+        assert_eq!(messages_after.last().map(|message| message.0.as_str()), Some(leaf_before.as_str()));
+    }
+
+    #[test]
     fn broker_steering_adds_only_the_user_message_without_an_assistant_placeholder() {
         let root = isolated_gateway_test_dir("broker-steering-no-assistant");
         std::fs::create_dir_all(&root).unwrap();
