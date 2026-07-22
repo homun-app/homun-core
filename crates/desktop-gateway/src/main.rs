@@ -15926,11 +15926,25 @@ fn resolve_privacy_guard_role(
     })
 }
 
+fn qualified_privacy_guard_default_config() -> (String, String, Option<String>) {
+    (
+        "http://127.0.0.1:11434/v1".to_string(),
+        QUALIFIED_PRIVACY_GUARD_MODELS[0].to_string(),
+        None,
+    )
+}
+
 fn privacy_guard_openai_config() -> Option<(String, String, Option<String>)> {
     let registry = load_provider_registry();
-    let resolved = resolve_privacy_guard_role(&registry)?;
-    let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
-    Some((resolved.base_url, resolved.model, api_key))
+    if let Some(resolved) = resolve_privacy_guard_role(&registry) {
+        let api_key = provider_api_key(&resolved.provider_id).or_else(env_inference_api_key);
+        return Some((resolved.base_url, resolved.model, api_key));
+    }
+    // The persisted provider catalog can lag behind Ollama after a model pull.
+    // Attempt the benchmark-qualified local default directly; a genuinely
+    // absent model becomes a typed request failure and remote inference still
+    // fails closed. This removes a manual "Refresh models" prerequisite.
+    Some(qualified_privacy_guard_default_config())
 }
 
 fn provider_endpoint_is_local(base_url: &str) -> bool {
@@ -69425,6 +69439,15 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         registry.upsert(ollama);
 
         assert!(super::resolve_privacy_guard_role(&registry).is_none());
+    }
+
+    #[test]
+    fn privacy_guard_default_config_does_not_depend_on_a_fresh_provider_catalog() {
+        let (base_url, model, api_key) = super::qualified_privacy_guard_default_config();
+
+        assert_eq!(base_url, "http://127.0.0.1:11434/v1");
+        assert_eq!(model, "qwen3.5:4b");
+        assert!(api_key.is_none());
     }
 
     #[test]
