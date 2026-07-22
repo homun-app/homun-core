@@ -222,11 +222,14 @@ flowchart TD
 ```
 **HTTP (remoto):**
 ```json
-{ "transport": "http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer ..." } }
+{ "transport": "http", "url": "https://example.com/mcp" }
 ```
 `build_mcp_transport` discrimina sul campo `transport` (default `stdio`). I
-secret/header sono forniti al connect; la registry ufficiale dichiara quali
-`inputs` servono (target `env` / `arg` / `header`).
+secret/header HTTP sono forniti al connect ma vengono serializzati nel Secret
+Store cifrato; nella connection resta soltanto `secret_ref`. Il transport risolve
+e decodifica gli header a ogni discovery o `tools/call`, così nessun bearer token
+finisce nella metadata SQLite. La registry ufficiale dichiara quali `inputs`
+servono (target `env` / `arg` / `header`).
 
 ### Come un tool MCP appare al modello
 
