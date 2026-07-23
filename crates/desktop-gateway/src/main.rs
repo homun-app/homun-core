@@ -22651,14 +22651,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             )
                         };
                         let (client_back, nav_res) =
-                            chat_browser_call(client, open_method, open_params)
+                            chat_browser_call_bounded(client, open_method, open_params)
                                 .await;
                         let nav_err = nav_res.err();
                         // Navigate/Open return no snapshot → snapshot now.
                         let mut client_now = client_back;
                         let snap_result = if nav_err.is_none() {
                             if let Some(c) = client_now.take() {
-                                let (c2, snap) = chat_browser_call(
+                                let (c2, snap) = chat_browser_call_bounded(
                                     c,
                                     BrowserMethod::Snapshot,
                                     browser_chat_snapshot_params(
@@ -22796,7 +22796,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     )
                     .await;
                     let guard = browse_web_lock().lock().await;
-                    let (client_back, snap) = chat_browser_call(
+                    let (client_back, snap) = chat_browser_call_bounded(
                         client,
                         BrowserMethod::Snapshot,
                         browser_chat_snapshot_params(ctx.current_target.as_str()),
@@ -22984,7 +22984,7 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                         let action_kinds = browser_action_kinds(&action);
                         let guard = browse_web_lock().lock().await;
                         let (client_back, act_res) =
-                            chat_browser_call(client, BrowserMethod::Act, action)
+                            chat_browser_call_bounded(client, BrowserMethod::Act, action)
                                 .await;
                         drop(guard);
                         *browser_session = client_back;
@@ -23094,7 +23094,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 match (stale, browser_session.take()) {
                                     (true, Some(c)) => {
                                         let guard = browse_web_lock().lock().await;
-                                        let (c_back, snap_res) = chat_browser_call(
+                                        let (c_back, snap_res) = chat_browser_call_bounded(
                                             c,
                                             BrowserMethod::Snapshot,
                                             browser_chat_snapshot_params(
@@ -23180,7 +23180,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                     let file_name =
                         format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
                     let guard = browse_web_lock().lock().await;
-                    let (client_back, shot_res) = chat_browser_call(
+                    let (client_back, shot_res) = chat_browser_call_bounded(
                         client,
                         BrowserMethod::Screenshot,
                         serde_json::json!({
@@ -23293,7 +23293,7 @@ Use the text snapshot."
                     )
                     .await;
                     let guard = browse_web_lock().lock().await;
-                    let (client_back, tabs_res) = chat_browser_call(
+                    let (client_back, tabs_res) = chat_browser_call_bounded(
                         client,
                         BrowserMethod::Tabs,
                         serde_json::json!({}),
@@ -23377,7 +23377,7 @@ Use the text snapshot."
                     )
                     .await;
                     let guard = browse_web_lock().lock().await;
-                    let (client_back, dialog_res) = chat_browser_call(
+                    let (client_back, dialog_res) = chat_browser_call_bounded(
                         client,
                         BrowserMethod::RespondDialog,
                         serde_json::json!({
@@ -31222,6 +31222,18 @@ fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+/// Per-call gateway deadline for a sidecar RPC. Bounds a wedged CDP call that
+/// the sub-turn's between-rounds budget would otherwise miss until the 300s
+/// manager deadline. All within the 90s sub-turn ceiling.
+fn browser_call_deadline(method: local_first_browser_automation::BrowserMethod) -> std::time::Duration {
+    use local_first_browser_automation::BrowserMethod::*;
+    match method {
+        Navigate => std::time::Duration::from_secs(25),
+        Act => std::time::Duration::from_secs(15),
+        _ => std::time::Duration::from_secs(10),
+    }
+}
+
 /// Runs ONE blocking `client.call` off the async runtime, moving the client in
 /// and handing it back out (so the turn keeps ownership of the warm session —
 /// mirrors `BrowserLoopRunner::into_client`). The global `browse_web_lock` MUST be
@@ -31248,6 +31260,42 @@ async fn chat_browser_call(
         // if it ever fires, the client is gone (we cannot recover a moved value
         // after a panic), so report None and let the next call spawn a fresh one.
         Err(error) => (None, Err(format!("browser call task failed: {error}"))),
+    }
+}
+
+/// Typed error surfaced when a sidecar RPC blows its per-call deadline
+/// (`browser_call_deadline`). The `BROWSER_SIDECAR_TIMEOUT` prefix is the
+/// contract the browse sub-loop keys on to map this into a bundle stop
+/// reason / error observation the same way it handles any other browser
+/// failure string.
+const BROWSER_SIDECAR_TIMEOUT_ERROR: &str =
+    "BROWSER_SIDECAR_TIMEOUT: the browser call exceeded its deadline";
+
+/// Every `chat_browser_call` site in `execute_browser_tool` goes through this
+/// wrapper instead, so each sidecar RPC is bounded by `browser_call_deadline`.
+/// A wedged CDP call would otherwise stall the browse sub-turn until the far
+/// outer 300s manager deadline, since the sub-turn budget is only checked
+/// BETWEEN rounds. On timeout the `spawn_blocking` inside `chat_browser_call`
+/// keeps running in the background (there is no way to cancel a blocking CDP
+/// call) — the moved client is unrecoverable — so this returns `None` (the
+/// next call spawns a fresh client/session) and the typed timeout error, with
+/// NO automatic retry: the calling loop decides against its own budget.
+async fn chat_browser_call_bounded(
+    client: BrowserAutomationClient<BrowserSidecarSession>,
+    method: BrowserMethod,
+    params: serde_json::Value,
+) -> (
+    Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    Result<serde_json::Value, String>,
+) {
+    match tokio::time::timeout(
+        browser_call_deadline(method),
+        chat_browser_call(client, method, params),
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(_elapsed) => (None, Err(BROWSER_SIDECAR_TIMEOUT_ERROR.to_string())),
     }
 }
 
@@ -76824,6 +76872,14 @@ data: [DONE]\n";
 
         let empty = serde_json::json!({ "snapshot": "- button \"Cerca\" [ref=e7]" });
         assert!(super::browser_floor_refs(&empty).is_empty());
+    }
+
+    #[test]
+    fn sidecar_deadlines_match_the_budget() {
+        use std::time::Duration;
+        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Navigate), Duration::from_secs(25));
+        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Act), Duration::from_secs(15));
+        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Snapshot), Duration::from_secs(10));
     }
 
     #[test]
