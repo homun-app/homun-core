@@ -23,6 +23,10 @@ mod provider_usage;
 // Model-output normalization moved WHOLE into the engine crate (ADR 0024 inc 5e.3, pure serde
 // module); re-exported so `model_normalize::…` call sites are unchanged.
 use local_first_engine::model_normalize;
+// Brings `.record(...)` into scope for direct calls on a `GatewayJournal` (C2, browser-protocol
+// metrics); `run_turn`'s own generic `J: ExecutionJournal` parameter doesn't need this import, but
+// calling the method directly outside that generic context does.
+use local_first_engine::ExecutionJournal;
 mod model_registry;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
 mod skills;
@@ -22030,6 +22034,10 @@ struct BrowserToolCtx<'a> {
     prompt: &'a str,
     read_only: bool,
     channel_owner: bool,
+    // Durable sink for redacted browser-protocol boundary metrics (C2). Borrowed from the owning
+    // `GatewayBrowserExecutor` so every boundary this ctx crosses persists the same handle — a real
+    // `GatewayJournal::Durable` when the enclosing run is registered, else the silent `Disabled` arm.
+    journal: &'a agent_journal::GatewayJournal,
 }
 
 /// The NON-browser tool context (ADR 0026 / inc 5): the read-set of `execute_chat_tool` only —
@@ -22735,15 +22743,21 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     format!("navigate {url}"),
                                     "done",
                                 );
+                                let metrics = browser_observation_metrics(
+                                    &value,
+                                    vec!["navigate".to_string()],
+                                    "completed",
+                                );
+                                ctx.journal.record(browser_protocol_journal_event(
+                                    call_id,
+                                    "navigation_observation",
+                                    &metrics,
+                                ));
                                 push_browser_step(
                                     browser_protocol_event_summary(
                                         call_id,
                                         "navigation_observation",
-                                        browser_observation_metrics(
-                                            &value,
-                                            vec!["navigate".to_string()],
-                                            "completed",
-                                        ),
+                                        metrics,
                                     ),
                                     "done",
                                 );
@@ -22798,16 +22812,18 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 *ctx.payment_floor_refs = browser_floor_refs(&value);
                             }
                             push_browser_step("snapshot".to_string(), "done");
+                            let metrics = browser_observation_metrics(
+                                &value,
+                                vec!["snapshot".to_string()],
+                                "completed",
+                            );
+                            ctx.journal.record(browser_protocol_journal_event(
+                                call_id,
+                                "observation",
+                                &metrics,
+                            ));
                             push_browser_step(
-                                browser_protocol_event_summary(
-                                    call_id,
-                                    "observation",
-                                    browser_observation_metrics(
-                                        &value,
-                                        vec!["snapshot".to_string()],
-                                        "completed",
-                                    ),
-                                ),
+                                browser_protocol_event_summary(call_id, "observation", metrics),
                                 "done",
                             );
                             Ok(format!("Page snapshot:\n{snap}"))
@@ -22986,20 +23002,21 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                     *ctx.payment_floor_refs = browser_floor_refs(&value);
                                 }
                                 push_browser_step(format!("{kind}"), "done");
+                                let boundary = if action_kinds.len() > 1 {
+                                    "action_bundle"
+                                } else {
+                                    "browser_act"
+                                };
+                                let metrics = browser_observation_metrics(
+                                    &value,
+                                    action_kinds.clone(),
+                                    "completed",
+                                );
+                                ctx.journal.record(browser_protocol_journal_event(
+                                    call_id, boundary, &metrics,
+                                ));
                                 push_browser_step(
-                                    browser_protocol_event_summary(
-                                        call_id,
-                                        if action_kinds.len() > 1 {
-                                            "action_bundle"
-                                        } else {
-                                            "browser_act"
-                                        },
-                                        browser_observation_metrics(
-                                            &value,
-                                            action_kinds.clone(),
-                                            "completed",
-                                        ),
-                                    ),
+                                    browser_protocol_event_summary(call_id, boundary, metrics),
                                     "done",
                                 );
                                 let mut out = if snap.is_empty() {
@@ -23100,15 +23117,21 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             *ctx.last_snapshot = snap.clone();
                                             *ctx.payment_floor_refs =
                                                 browser_floor_refs(snap_res.as_ref().unwrap());
+                                            let metrics = browser_observation_metrics(
+                                                snap_res.as_ref().unwrap(),
+                                                vec!["snapshot".to_string()],
+                                                "stale_ref_recovered",
+                                            );
+                                            ctx.journal.record(browser_protocol_journal_event(
+                                                call_id,
+                                                "stale_ref_recovery_observation",
+                                                &metrics,
+                                            ));
                                             push_browser_step(
                                                 browser_protocol_event_summary(
                                                     call_id,
                                                     "stale_ref_recovery_observation",
-                                                    browser_observation_metrics(
-                                                        snap_res.as_ref().unwrap(),
-                                                        vec!["snapshot".to_string()],
-                                                        "stale_ref_recovered",
-                                                    ),
+                                                    metrics,
                                                 ),
                                                 "done",
                                             );
@@ -26488,6 +26511,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                     || objective_mode
                         == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
                 channel_owner: self.channel_owner,
+                agent_run_id: self.run_id.map(str::to_string),
             };
             let outcome = browse_executor.browse(request).await;
             ls.browse_calls_completed = ls.browse_calls_completed.saturating_add(1);
@@ -26641,6 +26665,10 @@ struct GatewayBrowserExecutor<'a> {
     prompt: &'a str,
     read_only: bool,
     channel_owner: bool,
+    // C2: durable sink for redacted browser-protocol metrics (never raw page text/snapshots — see
+    // `browser_protocol_journal_event`). `Disabled` when the caller has no registered agent_run_id
+    // (e.g. no journal for this run) — recording is then a silent no-op, never a fabricated id.
+    journal: agent_journal::GatewayJournal,
 }
 
 impl Drop for GatewayBrowserExecutor<'_> {
@@ -26677,15 +26705,17 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
                 payload,
                 self.result_contract.as_ref(),
             );
+            let metrics = serde_json::json!({
+                "stop_reason": stop_reason,
+                "action_kinds": ["browser_done"],
+            });
+            self.journal.record(browser_protocol_journal_event(
+                call_id,
+                "browser_done",
+                &metrics,
+            ));
             push_browser_step(
-                browser_protocol_event_summary(
-                    call_id,
-                    "browser_done",
-                    serde_json::json!({
-                        "stop_reason": stop_reason,
-                        "action_kinds": ["browser_done"],
-                    }),
-                ),
+                browser_protocol_event_summary(call_id, "browser_done", metrics),
                 "done",
             );
             return local_first_engine::browse::browse_result_for_manager(&result);
@@ -26709,6 +26739,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             prompt: self.prompt,
             read_only: self.read_only,
             channel_owner: self.channel_owner,
+            journal: &self.journal,
         };
         execute_browser_tool(&mut bctx, &mut self.browser_session, name, args_raw, call_id).await
     }
@@ -26940,6 +26971,11 @@ struct GatewayBrowseExecutor<'a> {
     prompt: &'a str,
     read_only: bool,
     channel_owner: bool,
+    // C2: the enclosing manager turn's agent_run_id (owned — the executor outlives the borrow that
+    // produced it), used to look up the SAME registered journal the manager's own turn writes to via
+    // `agent_journal::for_run`. `None`/unregistered both resolve to `GatewayJournal::Disabled` (a
+    // silent no-op), never a fabricated id.
+    agent_run_id: Option<String>,
 }
 
 impl GatewayBrowseExecutor<'_> {
@@ -27001,17 +27037,27 @@ impl GatewayBrowseExecutor<'_> {
         usage_context.purpose_detail = Some("browse".to_string());
         usage_context.thread_id = self.thread_id.map(str::to_string);
         let contract_fp = browser_contract_fingerprint(&request.contract);
+        // C2: one durable journal handle for the whole sub-turn — resolves to the SAME registered
+        // journal the enclosing manager turn writes to (`agent_journal::for_run` is a registry lookup
+        // by run_id), or the silent `Disabled` no-op when this run has none registered.
+        let journal = agent_journal::for_run(self.agent_run_id.as_deref());
+        let start_metrics = serde_json::json!({
+            "stop_reason": "started",
+            "action_kinds": ["browse"],
+            "minimum_items": request.contract.as_ref().and_then(|contract| contract.minimum_items).unwrap_or(0),
+            "contract_fields": request.contract.as_ref().map(|contract| contract.fields.len() as u64).unwrap_or(0),
+            "contract_fp": contract_fp,
+        });
+        journal.record(browser_protocol_journal_event(
+            usage_context.call_id.as_str(),
+            "manager_browse_start",
+            &start_metrics,
+        ));
         push_browser_step(
             browser_protocol_event_summary(
                 usage_context.call_id.as_str(),
                 "manager_browse_start",
-                serde_json::json!({
-                    "stop_reason": "started",
-                    "action_kinds": ["browse"],
-                    "minimum_items": request.contract.as_ref().and_then(|contract| contract.minimum_items).unwrap_or(0),
-                    "contract_fields": request.contract.as_ref().map(|contract| contract.fields.len() as u64).unwrap_or(0),
-                    "contract_fp": contract_fp,
-                }),
+                start_metrics,
             ),
             "done",
         );
@@ -27032,6 +27078,7 @@ impl GatewayBrowseExecutor<'_> {
             prompt: self.prompt,
             read_only: self.read_only,
             channel_owner: self.channel_owner,
+            journal: journal.clone(),
         };
         if let Some(hint_url) = request.hint_url.as_deref() {
             let nav_args = serde_json::json!({
@@ -27047,14 +27094,20 @@ impl GatewayBrowseExecutor<'_> {
                 &mut ls,
             )
             .await;
+            let pre_nav_metrics = serde_json::json!({
+                "stop_reason": "completed",
+                "action_kinds": ["navigate"],
+            });
+            journal.record(browser_protocol_journal_event(
+                usage_context.call_id.as_str(),
+                "trusted_pre_navigation",
+                &pre_nav_metrics,
+            ));
             push_browser_step(
                 browser_protocol_event_summary(
                     usage_context.call_id.as_str(),
                     "trusted_pre_navigation",
-                    serde_json::json!({
-                        "stop_reason": "completed",
-                        "action_kinds": ["navigate"],
-                    }),
+                    pre_nav_metrics,
                 ),
                 "done",
             );
@@ -27111,7 +27164,10 @@ impl GatewayBrowseExecutor<'_> {
             &completion_judge,
             &compactor,
             &turn_policy,
-            &local_first_engine::NoopExecutionJournal,
+            // C2: a real journal handle (not a fabricated id) so engine-emitted events for this
+            // sub-turn — including `BrowserBudgetExceeded` — persist alongside the protocol metrics
+            // recorded above/below, when the enclosing run has one registered.
+            &journal,
             &drain,
             0.2, // low temperature: deterministic extraction, not creative writing
             self.thread_id,
@@ -27135,14 +27191,20 @@ impl GatewayBrowseExecutor<'_> {
                 .unwrap_or_else(|_| "\"partial\"".to_string())
                 .trim_matches('"')
                 .to_string();
+            let terminal_metrics = serde_json::json!({
+                "stop_reason": stop_reason,
+                "action_kinds": ["browser_done"],
+            });
+            journal.record(browser_protocol_journal_event(
+                usage_context.call_id.as_str(),
+                "terminal_result",
+                &terminal_metrics,
+            ));
             push_browser_step(
                 browser_protocol_event_summary(
                     usage_context.call_id.as_str(),
                     "terminal_result",
-                    serde_json::json!({
-                        "stop_reason": stop_reason,
-                        "action_kinds": ["browser_done"],
-                    }),
+                    terminal_metrics,
                 ),
                 "done",
             );
@@ -27156,15 +27218,21 @@ impl GatewayBrowseExecutor<'_> {
             sources: outcome.browse_sources.clone(),
             evidence: vec!["Browser sub-turn ended before browser_done.".into()],
         };
+        let timeout_metrics = serde_json::json!({
+            "observation_chars": browser_executor.last_snapshot.chars().count() as u64,
+            "stop_reason": "timeout",
+            "action_kinds": ["browser_done"],
+        });
+        journal.record(browser_protocol_journal_event(
+            usage_context.call_id.as_str(),
+            "timeout_fallback",
+            &timeout_metrics,
+        ));
         push_browser_step(
             browser_protocol_event_summary(
                 usage_context.call_id.as_str(),
                 "timeout_fallback",
-                serde_json::json!({
-                    "observation_chars": browser_executor.last_snapshot.chars().count() as u64,
-                    "stop_reason": "timeout",
-                    "action_kinds": ["browser_done"],
-                }),
+                timeout_metrics,
             ),
             "error",
         );
@@ -29207,6 +29275,10 @@ async fn run_agent_rounds(
         prompt: &prompt,
         read_only,
         channel_owner,
+        // C2: the manager turn's own registered journal — same handle `run_turn` below receives via
+        // `&execution_journal`, so protocol metrics from a manager-level browser call land in the same
+        // run as everything else this turn records.
+        journal: execution_journal.clone(),
     };
     let plan_progress = GatewayPlanProgress { state: state_owned.clone() };
     let compactor = GatewayContextCompactor {
@@ -31577,6 +31649,49 @@ fn browser_protocol_event_summary(
         out.push_str(&format!(" contract_fp={value}"));
     }
     out
+}
+
+/// Build a durable journal event from the same redacted metrics used for the
+/// stderr/activity summary. Only the metric keys are carried — never raw page
+/// text, secrets, or snapshots.
+fn browser_protocol_journal_event(
+    call_id: &str,
+    boundary: &str,
+    metrics: &serde_json::Value,
+) -> local_first_engine::execution_journal::AgentExecutionEvent {
+    const ALLOWED: &[&str] = &[
+        "observation_chars",
+        "refs",
+        "action_kinds",
+        "stop_reason",
+        "generation",
+        "completed_actions",
+        "unexecuted_actions",
+        "minimum_items",
+        "contract_fields",
+        "contract_fp",
+        "item_count",
+        "fields_missing",
+        "status",
+        "elapsed_ms",
+    ];
+    let mut redacted = serde_json::Map::new();
+    redacted.insert(
+        "child_run_id".to_string(),
+        serde_json::Value::String(call_id.to_string()),
+    );
+    if let Some(obj) = metrics.as_object() {
+        for key in ALLOWED {
+            if let Some(v) = obj.get(*key) {
+                redacted.insert((*key).to_string(), v.clone());
+            }
+        }
+    }
+    local_first_engine::execution_journal::AgentExecutionEvent::BrowserProtocol {
+        round: 0,
+        boundary: boundary.to_string(),
+        payload: serde_json::Value::Object(redacted),
+    }
 }
 
 fn browser_action_kinds(action: &serde_json::Value) -> Vec<String> {
@@ -62462,6 +62577,19 @@ mod tests {
         assert!(event.contains("action_kinds=type,click"));
         assert!(!event.contains("secret@example.com"));
         assert!(!event.contains("Departure 09:05"));
+    }
+
+    #[test]
+    fn browser_protocol_journal_event_keeps_metrics_and_drops_page_text() {
+        let metrics = serde_json::json!({
+            "observation_chars": 5000, "refs": 12, "action_kinds": ["click","type"],
+            "stop_reason": "completed", "page_text": "SECRET STATION NAMES"
+        });
+        let event = super::browser_protocol_journal_event("run_1", "action_bundle", &metrics);
+        let (_kind, _round, value) = event.into_parts();
+        assert_eq!(value["boundary"], "action_bundle");
+        assert_eq!(value["stop_reason"], "completed");
+        assert!(value.get("page_text").is_none(), "raw page text must not be journaled");
     }
 
     #[test]
