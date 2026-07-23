@@ -27176,6 +27176,9 @@ impl GatewayBrowseExecutor<'_> {
             // above) — a deterministic plugin routing (S2) never targets one of those, so forcing is
             // never applicable here.
             forced_tool: None,
+            // E2: THIS is the browse sub-turn — `browser_done` is its own completion signal, so the
+            // engine's terminal must be armed here.
+            browser_subturn: true,
         };
 
         let outcome = local_first_engine::agent_loop::run_turn(
@@ -27312,6 +27315,9 @@ impl GatewayComputerExecutor<'_> {
                 browser_budget: chat_browser_budget(),
                 context_window: None, reconcile_on_delivery: false, autoadvance_from_evidence: false,
                 step_verification: false, verbose: verbose_debug(), forced_tool: None,
+                // E2: this is the host-computer sub-turn, NOT the browse sub-turn — it never offers
+                // `browser_done` as a real tool, so the terminal must stay disarmed here.
+                browser_subturn: false,
             },
             &usage_context, &model_client, &capability_executor, &mut browser_executor,
             &NoPlanProgress, &NeverIncompleteJudge, &NoContextCompactor, &OpenTurnPolicy,
@@ -29067,6 +29073,10 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             verbose: verbose_debug(),
             // S2 T5: resolved above from (routing_binding, Forcing::Specific, turn-index).
             forced_tool: forced_tool.clone(),
+            // E2: this is the manager (chat) turn, NOT the browse sub-turn — the granular browser
+            // tools it drives mid-turn can include `browser_done`, but that must never be treated as
+            // ending the WHOLE manager turn (only the browse sub-turn's own terminal should).
+            browser_subturn: false,
         };
         // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern, so it
         // runs HERE after the engine turn returns. Snapshot what it needs before the turn consumes the

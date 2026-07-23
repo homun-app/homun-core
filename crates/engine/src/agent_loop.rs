@@ -778,7 +778,12 @@ missing, give what you have and note the gap in one short line.",
                         outcome: outcome.to_string(),
                         result_fingerprint,
                     });
-                    if name == "browser_done" && !result.trim().is_empty() {
+                    // Scoped to the browse sub-turn (E2): `browser_done` is that sub-turn's own
+                    // completion signal, not a general-purpose terminal. Outside it (`cfg.browser_subturn
+                    // == false`) the name is reachable only via hallucination — no non-subturn turn
+                    // offers it as a real tool — so it must fall through to normal handling instead of
+                    // silently ending the turn on whatever the model made up.
+                    if cfg.browser_subturn && name == "browser_done" && !result.trim().is_empty() {
                         memory_answer = result.trim().to_string();
                         ls.messages.push(serde_json::json!({
                             "role": "tool",
@@ -1742,6 +1747,75 @@ mod tests {
         );
     }
 
+    /// E2: `browser_done` is the browse SUB-turn's own completion signal. Outside that sub-turn
+    /// (`browser_subturn = false`) the same tool name — reached only via hallucination, since
+    /// non-subturn turns never offer it as a real capability — must NOT terminate the turn. The
+    /// turn instead keeps rolling and reaches its normal (forced-synthesis) completion.
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_done_does_not_terminate_a_non_browser_subturn() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.tool_schemas = vec![json!({
+            "type": "function",
+            "function": {
+                "name": "browser_done",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        })];
+        let model = BrowserDoneModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = DoneBrowser;
+        let mut config = cfg();
+        config.browser_subturn = false;
+
+        let outcome = run_turn(
+            ls,
+            config,
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // The browser_done terminal did NOT fire: `memory_answer` is NOT the raw tool result
+        // ("done") and the model was called a SECOND time (forced synthesis actually ran),
+        // unlike the subturn case above where exactly one model call happens.
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_ne!(outcome.memory_answer, "done");
+        assert_eq!(outcome.memory_answer, "forced synthesis should not run");
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            2,
+            "outside the browser sub-turn, browser_done must NOT short-circuit the loop — the turn \
+             continues into a normal second round"
+        );
+    }
+
     #[derive(Default)]
     struct BlockedBrowserModel {
         calls: std::sync::atomic::AtomicUsize,
@@ -1892,6 +1966,10 @@ mod tests {
             step_verification: true,
             verbose: false,
             forced_tool: None,
+            // Default true: most existing browser_done tests in this module drive the browse
+            // sub-turn shape and expect the terminal to fire. Tests that need the OFF behavior
+            // (non-subturn) override this field explicitly.
+            browser_subturn: true,
         }
     }
 

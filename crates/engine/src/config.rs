@@ -94,6 +94,12 @@ pub struct TurnConfig {
     /// force ANOTHER call to the same tool (a duplicate render, and by then the routing binding is
     /// already cleared so it would go through generic/unbound).
     pub forced_tool: Option<String>,
+    /// True ONLY for the browse sub-turn (ADR 0025's recursive browse call): gates whether a
+    /// `browser_done` tool result is treated as an unconditional turn terminal. `browser_done` is
+    /// the sub-turn's own completion signal — it must not end a normal manager turn (chat, computer
+    /// sub-turn) if the model there ever hallucinates that tool name, since none of those turns offer
+    /// it as a real capability. `false` everywhere else.
+    pub browser_subturn: bool,
 }
 
 #[cfg(test)]
