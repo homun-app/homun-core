@@ -1,5 +1,6 @@
 use local_first_browser_automation::{
-    BrowserActionDecision, BrowserAutomationError, BrowserMethod, BrowserPolicy,
+    policy::contains_final_payment_action, BrowserActionDecision, BrowserAutomationError,
+    BrowserMethod, BrowserPolicy,
 };
 
 #[test]
@@ -114,4 +115,22 @@ fn policy_requires_approval_when_batch_contains_manual_action() {
         decision,
         BrowserActionDecision::NeedsApproval { .. }
     ));
+}
+
+#[test]
+fn policy_checks_nested_payment_actions_inside_batch() {
+    let snapshot = "- button \"Paga ora\" [ref=e9]\n- button \"Continua\" [ref=e2]";
+    let action = serde_json::json!({
+        "kind": "batch",
+        "actions": [
+            {"kind": "click", "ref": "e2"},
+            {"kind": "click", "ref": "e9"}
+        ]
+    });
+
+    let reason = BrowserPolicy::default()
+        .classify_tool_call(BrowserMethod::Act, &action);
+
+    assert!(matches!(reason, BrowserActionDecision::NeedsApproval { .. }));
+    assert!(contains_final_payment_action(&action, snapshot));
 }

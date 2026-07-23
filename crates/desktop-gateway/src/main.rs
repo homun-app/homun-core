@@ -17917,7 +17917,7 @@ fn browse_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browse",
-            "description": "Delegate a web-browsing GOAL to an isolated browser sub-agent and get back the result. Use it whenever you need real-time or web data (prices, standings, schedules, facts, availability): state ONE concrete information goal in `goal` (e.g. 'current BTC price on Kraken', 'Serie A standings after matchday 30'). The sub-agent navigates the real browser for you and returns `found` (was the info obtained?), `answer` (the concrete value), `sources` (URLs visited) and `confidence`. You do NOT drive the browser yourself and never see individual pages — issue ONE browse per need, then verify the answer and continue. If `found: false`, the info was unavailable: refine the goal and browse again (at most twice), else tell the user it's unavailable — do not invent it.",
+            "description": "Delegate a web-browsing GOAL to an isolated browser sub-agent and get back the result. Use it whenever you need real-time or web data (prices, standings, schedules, facts, availability): state ONE concrete information goal in `goal` (e.g. 'current BTC price on Kraken', 'Serie A standings after matchday 30'). One delegated browse call should be enough for a concrete goal: include semantic hints/result requirements when useful, then inspect the returned structured result. If the result is partial, blocked, unavailable, or failed, report that grounded state instead of blindly retrying the same browse.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -17938,9 +17938,52 @@ fn browse_tool_schema() -> serde_json::Value {
                                 "description": "A site/section to prefer (e.g. 'wikipedia', 'official schedule')."
                             }
                         }
+                    },
+                    "result_contract": {
+                        "type": "object",
+                        "description": "Structured result requirements derived semantically from the user's request. The model chooses these fields; the gateway validates shape and bounds only.",
+                        "properties": {
+                            "kind": { "type": "string", "enum": ["list", "fact"] },
+                            "minimum_items": { "type": "integer", "minimum": 1, "maximum": 10 },
+                            "fields": {
+                                "type": "array",
+                                "maxItems": 12,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": { "type": "string", "maxLength": 80 },
+                                        "required": { "type": "boolean" }
+                                    },
+                                    "required": ["name", "required"]
+                                }
+                            },
+                            "boundary": { "type": "string", "maxLength": 400 }
+                        }
                     }
                 },
                 "required": ["goal"]
+            }
+        }
+    })
+}
+
+fn browser_done_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_done",
+            "description": "Terminate the browser sub-turn with grounded structured evidence. Use this as soon as the result contract is satisfied, partial, blocked, unavailable, or timed out. Do not write a normal prose answer instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": { "type": "string", "enum": ["completed","partial","blocked","unavailable","timeout"] },
+                    "answer": { "type": "string" },
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "fields_missing": { "type": "array", "items": { "type": "string" } },
+                    "sources": { "type": "array", "items": { "type": "string" } },
+                    "evidence": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["status", "answer"]
             }
         }
     })
@@ -18039,7 +18082,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type', then inspect the updated snapshot and select the intended suggestion when needed. Login and booking actions are allowed when they are part of the user's request. The final action that transfers money requires an approved Payment Approval Card and its exact payment_approval_id. For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button.",
+            "description": "Perform one action or a flat bundle of at most four safe actions selected from the current observation generation, then return the updated observation. For fields with autocomplete use kind='type', then inspect the updated snapshot and select the intended suggestion when needed. Login and booking actions are allowed when they are part of the user's request. The final action that transfers money requires an approved Payment Approval Card and its exact payment_approval_id and cannot run inside a bundle. For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -18058,11 +18101,19 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
                     "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
                     "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
+                    "generation": { "type": "integer", "description": "Observation generation used to choose refs." },
+                    "observationMode": { "type": "string", "enum": ["interact","delta","extract"], "description": "Observation mode to return after the action. Use delta after action bundles and extract when collecting final results." },
+                    "actions": {
+                        "type": "array",
+                        "maxItems": 4,
+                        "description": "Flat bundle of at most four safe actions selected from the current observation. No nested batch. Payment actions are not allowed here.",
+                        "items": { "type": "object" }
+                    },
                     "payment_approval_id": { "type": "string", "description": "Exact id returned by an approved Payment Approval Card. Use only for approved checkout actions and the final payment click; never invent it." },
                     "vault_secret": { "type": "string", "enum": ["cvv_one_shot"], "description": "Use with payment_approval_id to fill the CVV/CV2 field without exposing the CVV to the model. Do not include a text value when using this." },
                     "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
-                "required": ["kind"]
+                "required": []
             }
         }
     })
@@ -18104,6 +18155,51 @@ fn browser_act_error_hint(error: &str) -> &'static str {
     } else {
         ""
     }
+}
+
+fn normalize_browser_action_bundle(
+    action: &mut serde_json::Value,
+    current_target: &str,
+    snapshot: &str,
+) -> Option<String> {
+    let actions = action.get("actions").and_then(serde_json::Value::as_array)?;
+    if actions.len() > 4 {
+        return Some(
+            "Browser action bundle rejected: use at most four actions from the current observation."
+                .to_string(),
+        );
+    }
+    for nested in actions {
+        if nested.get("kind").and_then(serde_json::Value::as_str) == Some("batch")
+            || nested.get("actions").is_some()
+        {
+            return Some("Browser action bundle rejected: nested bundles are not allowed.".to_string());
+        }
+        if browser_safety::is_final_payment_action(nested, snapshot) {
+            return Some(
+                "Payment actions cannot run inside a browser action bundle. Ask for the Payment Approval Card and execute the final payment as a standalone approved action."
+                    .to_string(),
+            );
+        }
+        if let Some(reason) = browser_safety::high_risk_reason(nested, snapshot) {
+            return Some(format!("Browser action bundle rejected: {reason}"));
+        }
+    }
+    if let Some(obj) = action.as_object_mut() {
+        obj.insert("kind".to_string(), serde_json::Value::String("batch".to_string()));
+        obj.insert("chatBundle".to_string(), serde_json::Value::Bool(true));
+    }
+    if let Some(actions) = action.get_mut("actions").and_then(serde_json::Value::as_array_mut) {
+        for nested in actions {
+            if let Some(obj) = nested.as_object_mut() {
+                obj.entry("target_id".to_string())
+                    .or_insert_with(|| serde_json::Value::String(current_target.to_string()));
+                obj.entry("targetId".to_string())
+                    .or_insert_with(|| serde_json::Value::String(current_target.to_string()));
+            }
+        }
+    }
+    None
 }
 
 fn stale_ref_recovery_message(old_ref: Option<&str>, snapshot: &str) -> String {
@@ -22589,6 +22685,15 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             serde_json::Value::String(ctx.current_target.clone()),
                         );
                     }
+                    if let Some(error) = normalize_browser_action_bundle(
+                        &mut action,
+                        ctx.current_target.as_str(),
+                        ctx.last_snapshot,
+                    ) {
+                        *browser_session = Some(client);
+                        push_browser_step("browser action bundle blocked".to_string(), "error");
+                        Err(error)
+                    } else {
                     let mut preflight_error = None;
                     let vault_secret_used =
                         match apply_payment_approval_secret_for_action(
@@ -22804,6 +22909,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 }
                             }
                         }
+                    }
                     }
                 }
                 "browser_screenshot" => {
@@ -26444,19 +26550,45 @@ fn drain_stream_sink() -> StreamSink {
 /// `{ goal, hints?: { url?, container? } }` and folds any hints INTO the goal text (the sub-agent's prompt
 /// is browser-only and has no separate hint slot), so a preferred start URL / source steers it. Returns
 /// "" when `goal` is missing/blank (the caller then refuses the call). Pure — unit-tested below.
+#[derive(Debug, Clone)]
+struct ParsedBrowseRequest {
+    goal: String,
+    hint_url: Option<String>,
+    contract: Option<local_first_engine::browse::BrowseResultContract>,
+}
+
+fn parse_browse_request(args_raw: &str) -> ParsedBrowseRequest {
+    let value: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
+    let goal = value
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let hint_url = value
+        .pointer("/hints/url")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| v.starts_with("https://") || v.starts_with("http://"))
+        .map(str::to_string);
+    let contract = value
+        .get("result_contract")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<local_first_engine::browse::BrowseResultContract>(v).ok());
+    ParsedBrowseRequest { goal, hint_url, contract }
+}
+
 fn build_browse_goal(args_raw: &str) -> String {
-    let v: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
-    let goal = v.get("goal").and_then(|g| g.as_str()).unwrap_or("").trim();
+    let parsed = parse_browse_request(args_raw);
+    let goal = parsed.goal.trim();
     if goal.is_empty() {
         return String::new();
     }
     let mut out = goal.to_string();
+    let v: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
     let hints = v.get("hints");
-    if let Some(url) = hints.and_then(|h| h.get("url")).and_then(|u| u.as_str()) {
-        let url = url.trim();
-        if !url.is_empty() {
-            out.push_str(&format!(" (start at {url})"));
-        }
+    if let Some(url) = parsed.hint_url.as_deref() {
+        out.push_str(&format!(" (start at {url})"));
     }
     if let Some(container) = hints.and_then(|h| h.get("container")).and_then(|c| c.as_str()) {
         let container = container.trim();
@@ -26557,6 +26689,7 @@ impl GatewayBrowseExecutor<'_> {
             browser_navigate_tool_schema(),
             browser_snapshot_tool_schema(),
             browser_act_tool_schema(),
+            browser_done_tool_schema(),
             browser_screenshot_tool_schema(),
             browser_tabs_tool_schema(),
             browser_dialog_tool_schema(),
@@ -61755,6 +61888,34 @@ mod tests {
     }
 
     #[test]
+    fn browse_schema_accepts_result_contract_and_hints() {
+        let schema = super::browse_tool_schema();
+        let params = schema.pointer("/function/parameters/properties").unwrap();
+        assert!(params.get("goal").is_some());
+        assert!(params.get("hints").is_some());
+        assert!(params.get("result_contract").is_some());
+    }
+
+    #[test]
+    fn browser_act_schema_accepts_flat_action_bundles() {
+        let schema = super::browser_act_tool_schema();
+        let props = schema.pointer("/function/parameters/properties").unwrap();
+        assert!(props.get("actions").is_some());
+        assert!(schema.to_string().contains("at most four"));
+    }
+
+    #[test]
+    fn browser_done_schema_is_structured_terminal() {
+        let schema = super::browser_done_tool_schema();
+        assert_eq!(
+            schema.pointer("/function/name").and_then(serde_json::Value::as_str),
+            Some("browser_done")
+        );
+        assert!(schema.to_string().contains("completed"));
+        assert!(schema.to_string().contains("fields_missing"));
+    }
+
+    #[test]
     fn defers_a_second_browse_call_until_the_manager_sees_the_first_result() {
         let messages = vec![serde_json::json!({
             "role": "assistant",
@@ -61776,6 +61937,10 @@ mod tests {
             sources: vec!["https://example.test/source".to_string()],
             confidence: local_first_engine::browse::Confidence::High,
             note: None,
+            status: local_first_engine::browse::BrowserDoneStatus::Completed,
+            items: Vec::new(),
+            fields_missing: Vec::new(),
+            evidence: Vec::new(),
         };
         let found_outcome = delegated_browse_tool_outcome(&found);
         assert!(found_outcome.effects.browser_activity_observed);

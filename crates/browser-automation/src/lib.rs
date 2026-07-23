@@ -2,7 +2,7 @@ mod artifacts;
 mod browser_loop;
 mod client;
 mod error;
-mod policy;
+pub mod policy;
 mod sidecar;
 mod task_executor;
 mod types;
