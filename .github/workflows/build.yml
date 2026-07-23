@@ -83,6 +83,12 @@ jobs:
         working-directory: apps/desktop
         run: npm run package:prepare
 
+      - name: Verify prepared license resources
+        working-directory: apps/desktop
+        run: |
+          npm run test:license-compliance
+          npm run verify:license-compliance
+
       # Gate signing on a run-step output, not a job-level `env` expression:
       # `${{ secrets.X != '' }}` in job env is unreliable for step `if` and was
       # evaluating false even with the secret set (v0.1.0 shipped unsigned). In a
