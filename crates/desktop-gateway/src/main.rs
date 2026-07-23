@@ -8389,6 +8389,7 @@ fn resolve_semantic_decision_for_context(
         ],
         repair: true,
     };
+    let mut effective_resolved = resolved.clone();
     let model_value = match router.generate_json_with(&Requirements::default(), &request) {
         Ok(response) if response.valid => Ok(response.json),
         Ok(response) => {
@@ -8400,16 +8401,47 @@ fn resolve_semantic_decision_for_context(
             Err("invalid_model_output".to_string())
         }
         Err(error) => {
-            tracing::warn!(
-                target: "semantic::decision",
-                ?error,
-                "semantic decision model unavailable; steering will remain pending"
-            );
-            Err("model_unavailable".to_string())
+            if let Some(fallback) = semantic_decision_auth_fallback(&error, resolved.as_ref()) {
+                tracing::warn!(
+                    target: "semantic::decision",
+                    ?error,
+                    from_model = resolved.as_ref().map(|value| value.model.as_str()),
+                    to_model = %fallback.model,
+                    "semantic decision model auth failed; retrying with auth fallback"
+                );
+                let fallback_router = build_router_for_resolved(&fallback);
+                effective_resolved = Some(fallback);
+                match fallback_router.generate_json_with(&Requirements::default(), &request) {
+                    Ok(response) if response.valid => Ok(response.json),
+                    Ok(response) => {
+                        tracing::warn!(
+                            target: "semantic::decision",
+                            errors = ?response.errors,
+                            "semantic fallback decision did not satisfy the structured contract"
+                        );
+                        Err("invalid_model_output".to_string())
+                    }
+                    Err(fallback_error) => {
+                        tracing::warn!(
+                            target: "semantic::decision",
+                            ?fallback_error,
+                            "semantic fallback decision model unavailable; steering will remain pending"
+                        );
+                        Err("model_unavailable".to_string())
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    target: "semantic::decision",
+                    ?error,
+                    "semantic decision model unavailable; steering will remain pending"
+                );
+                Err("model_unavailable".to_string())
+            }
         }
     };
-    let provider = resolved.as_ref().map(|value| value.provider_id.as_str());
-    let model = resolved.as_ref().map(|value| value.model.as_str());
+    let provider = effective_resolved.as_ref().map(|value| value.provider_id.as_str());
+    let model = effective_resolved.as_ref().map(|value| value.model.as_str());
     if steering_control {
         semantic_decision::resolve_steering_model_value(
             model_value,
@@ -8421,6 +8453,16 @@ fn resolve_semantic_decision_for_context(
     } else {
         semantic_decision::resolve_model_value(model_value, &capabilities, active, provider, model)
     }
+}
+
+fn semantic_decision_auth_fallback(
+    error: &local_first_subagents::RuntimeClientError,
+    resolved: Option<&ResolvedRole>,
+) -> Option<ResolvedRole> {
+    if !matches!(error, local_first_subagents::RuntimeClientError::Status(401)) {
+        return None;
+    }
+    semantic_decision_auth_fallback_resolved_role(resolved?.model.as_str())
 }
 
 // Test-only fixture builder: its last production caller was the hardcoded
@@ -17567,14 +17609,25 @@ fn chat_payload_max_tokens(is_final_round: bool, debug_override: Option<&str>) -
         .unwrap_or(DEFAULT_CHAT_MAX_TOKENS)
 }
 
-pub(crate) fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
-    let registry = load_provider_registry();
+fn auth_fallback_resolved_role_from_registry(
+    registry: &ProviderRegistry,
+    failing_model: &str,
+    mut provider_has_key: impl FnMut(&str) -> bool,
+) -> Option<ResolvedRole> {
     // 1) Any provider with a key + a usable model different from the failing one.
     for provider in &registry.providers {
-        if let Some(key) = provider_api_key(&provider.id) {
+        if provider_has_key(&provider.id) {
             if let Some(model) = provider.effective_model() {
                 if model != failing_model {
-                    return Some((provider.base_url.clone(), model, Some(key)));
+                    return Some(ResolvedRole {
+                        role: "auth_fallback".to_string(),
+                        provider_id: provider.id.clone(),
+                        model: model.clone(),
+                        kind: provider.kind,
+                        base_url: provider.base_url.clone(),
+                        auto: true,
+                        tier: registry.tier_for(&provider.id, &model),
+                    });
                 }
             }
         }
@@ -17592,10 +17645,92 @@ pub(crate) fn auth_fallback_config(failing_model: &str) -> Option<(String, Strin
             .map(|m| m.id.clone())
             .find(|id| !id.contains(":cloud") && id != failing_model)
         {
-            return Some((provider.base_url.clone(), model, None));
+            return Some(ResolvedRole {
+                role: "auth_fallback".to_string(),
+                provider_id: provider.id.clone(),
+                model: model.clone(),
+                kind: provider.kind,
+                base_url: provider.base_url.clone(),
+                auto: true,
+                tier: registry.tier_for(&provider.id, &model),
+            });
         }
     }
     None
+}
+
+fn auth_fallback_resolved_role(failing_model: &str) -> Option<ResolvedRole> {
+    let registry = load_provider_registry();
+    auth_fallback_resolved_role_from_registry(&registry, failing_model, |provider_id| {
+        provider_api_key(provider_id).is_some()
+    })
+}
+
+pub(crate) fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
+    let fallback = auth_fallback_resolved_role(failing_model)?;
+    let api_key = provider_api_key(&fallback.provider_id).or_else(env_inference_api_key);
+    Some((fallback.base_url, fallback.model, api_key))
+}
+
+const QUALIFIED_SEMANTIC_DECISION_FALLBACK_MODELS: &[&str] = &["qwen3.5:4b", "qwen3.5:2b"];
+
+fn semantic_decision_auth_fallback_resolved_role_from_registry(
+    registry: &ProviderRegistry,
+    failing_model: &str,
+    provider_has_key: impl FnMut(&str) -> bool,
+) -> Option<ResolvedRole> {
+    auth_fallback_resolved_role_from_registry(registry, failing_model, provider_has_key).and_then(
+        |fallback| {
+            if fallback.base_url.contains("127.0.0.1")
+                || fallback.base_url.contains("localhost")
+            {
+                local_semantic_decision_fallback(registry, failing_model).or(Some(fallback))
+            } else {
+                Some(fallback)
+            }
+        },
+    )
+}
+
+fn local_semantic_decision_fallback(
+    registry: &ProviderRegistry,
+    failing_model: &str,
+) -> Option<ResolvedRole> {
+    for qualified in QUALIFIED_SEMANTIC_DECISION_FALLBACK_MODELS {
+        for provider in &registry.providers {
+            let local =
+                provider.base_url.contains("127.0.0.1") || provider.base_url.contains("localhost");
+            if !local {
+                continue;
+            }
+            if provider
+                .models
+                .iter()
+                .any(|model| model.id == *qualified && model.id != failing_model)
+            {
+                let model = (*qualified).to_string();
+                return Some(ResolvedRole {
+                    role: "semantic_auth_fallback".to_string(),
+                    provider_id: provider.id.clone(),
+                    model: model.clone(),
+                    kind: provider.kind,
+                    base_url: provider.base_url.clone(),
+                    auto: true,
+                    tier: registry.tier_for(&provider.id, &model),
+                });
+            }
+        }
+    }
+    None
+}
+
+fn semantic_decision_auth_fallback_resolved_role(failing_model: &str) -> Option<ResolvedRole> {
+    let registry = load_provider_registry();
+    semantic_decision_auth_fallback_resolved_role_from_registry(
+        &registry,
+        failing_model,
+        |provider_id| provider_api_key(provider_id).is_some(),
+    )
 }
 
 /// A provider can serve normal chat yet reject a tool-bearing request. Recover with
@@ -70432,6 +70567,80 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(base_url, "http://127.0.0.1:11434/v1");
         assert_eq!(model, "qwen3.5:4b");
         assert!(api_key.is_none());
+    }
+
+    #[test]
+    fn semantic_auth_fallback_prefers_a_usable_different_provider() {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut cloud = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        cloud.active_model = Some("deepseek-v4-pro".into());
+        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        registry.upsert(cloud);
+
+        let mut local = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        local.models = vec![
+            super::model_registry::ModelEntry::inferred("deepseek-v4-pro:cloud"),
+            super::model_registry::ModelEntry::inferred("gemma4:12b"),
+        ];
+        registry.upsert(local);
+
+        let fallback =
+            super::auth_fallback_resolved_role_from_registry(&registry, "deepseek-v4-pro", |_| {
+                false
+            })
+            .unwrap();
+
+        assert_eq!(fallback.provider_id, "ollama");
+        assert_eq!(fallback.model, "gemma4:12b");
+        assert_eq!(fallback.kind, super::model_registry::ProviderKind::Ollama);
+    }
+
+    #[test]
+    fn semantic_decision_auth_fallback_prefers_qualified_local_json_model() {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut cloud = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        cloud.active_model = Some("deepseek-v4-pro".into());
+        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        registry.upsert(cloud);
+
+        let mut local = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        local.models = vec![
+            super::model_registry::ModelEntry::inferred("gemma4:12b"),
+            super::model_registry::ModelEntry::inferred("qwen3.5:2b"),
+            super::model_registry::ModelEntry::inferred("qwen3.5:4b"),
+        ];
+        registry.upsert(local);
+
+        let fallback = super::semantic_decision_auth_fallback_resolved_role_from_registry(
+            &registry,
+            "deepseek-v4-pro",
+            |_| false,
+        )
+        .unwrap();
+
+        assert_eq!(fallback.provider_id, "ollama");
+        assert_eq!(fallback.model, "qwen3.5:4b");
+        assert_eq!(fallback.kind, super::model_registry::ProviderKind::Ollama);
     }
 
     #[test]
