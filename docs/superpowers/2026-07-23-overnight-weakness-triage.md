@@ -60,3 +60,29 @@ Hardcoded `true`, never read except one test; `MistralRsProvider::generate_json`
 4. **IMPORTANT 4, 5**; then the minors.
 
 Each should go through the normal spec→plan→subagent-driven flow (steering is safety-adjacent). None were touched overnight.
+
+---
+
+## ⚠️ TOP PRIORITY — Ref-less slice final review: MUST-FIX cluster (the leg is NOT actually closed)
+
+The whole-slice adversarial review of the ref-less payment-context slice (`6dee07ba..505c5665`, model: Fable) returned **must-fix-first**. The slice's plumbing is sound and raise-only, and it DID close the common `press Enter` case — but the *committing-action predicate* it builds on has several **schema-legal bypasses**, so an adversarial/confused (or prompt-injected) model can still submit a payment form ungated. The slice is strictly additive/safer than before (not a regression), but it does not yet achieve its stated goal. Do NOT trust the ref-less leg until this cluster is fixed holistically. Not touched overnight — needs your design calls.
+
+**CRITICAL A — Enter has schema-legal spellings the predicate misses** (`browser_safety.rs:53-58, 82-90`).
+- `{"kind":"press","key":"NumpadEnter"}` → Playwright maps to Enter/keyCode 13 → implicit submit; predicate matches only `enter`/`return` → not committing → no class/floor/card.
+- `{"kind":"press","key":"\n"}` / `"\r"` → Playwright aliases Enter → same.
+- `{"kind":"press_key","key":"KeyA","text":"Enter"}` → gateway reads `key` first ("KeyA", not committing); sidecar executes `text` ("Enter") → field/kind mismatch bypass.
+- `{"kind":"type","ref":"e_cc","text":"4242…\n"}` → `type` without `submit:true` is non-committing, but `\n` makes Playwright press Enter → types the card AND submits, zero gating, even on a floored ref.
+- Fix direction: canonicalize per kind (press→`key`, press_key→`text`; match `numpadenter`/`\n`/`\r`; treat EITHER field meaning enter as committing — raise-only), and gate `type` whose text ends in a newline (or strip it). Caveat to decide: gating type-with-newline over-gates a legit multi-line textarea (fail-closed friction).
+
+**CRITICAL B — `scroll` with a `ref` performs a real click, ungated** (`runtimes/browser-automation/src/browser/actions.ts:396-399`: `if (action.ref) requireRef(...).click()`).
+`{"kind":"scroll","ref":"<floored Pay button>"}` clicks the payment confirm with no class/floor/card and swallows errors. `scroll` is schema-exposed with a `ref`; it is not committing → never gated. This defeats the whole two-slice design assumption that "only committing kinds can click/submit." Fix: make the sidecar `scroll` not click (verify nothing relies on scroll-clicking), or gate any action whose `ref` resolves to a floored ref regardless of kind. Needs a call on where to fix.
+
+**IMPORTANT C — OOPIF focus detection likely fails open for REAL cross-origin PSP iframes** (`snapshot.ts:246-269`). Playwright enables `Emulation.setFocusEmulationEnabled` for the MAIN frame only; a real Stripe/Adyen/PayPal iframe is an out-of-process iframe with its own CDP session and NO focus emulation, so `document.hasFocus()` inside it reflects *actual* OS/tab focus. Whenever the Homun window isn't OS-frontmost (the normal case — the user is looking at the app), `probeFrameFocus` returns false → `focusPaymentContext=false` → Enter unfloored in exactly the flagship PSP scenario. The T2 e2e test can't catch this (same-origin/same-renderer iframe on 127.0.0.1, where main-frame emulation applies). **This means the PSP-iframe leg of `focusPaymentContext` may be structurally false in production.** Must-verify with a two-origin OOPIF e2e test (e.g. 127.0.0.1 + localhost) before trusting the PSP leg; may need a different detection than `document.hasFocus()`.
+
+**IMPORTANT D — `last_focus_payment_context` is a single global bool; cross-tab staleness fails open** (`GatewayBrowserExecutor.last_focus_payment_context`, `main.rs` ~26747; `browser_act` switches tabs inline without a fresh observation). Type card on tab B (ctx→true) → snapshot tab A (ctx→false) → `press Enter target=B action_class:"ordinary"` → not floored → submits tab B's payment form. The ref floor doesn't share this (refs resolve per-page). Fix: key the focus context by `target_id`.
+
+**IMPORTANT E — sidecar honors non-schema fields the gateway never gates** (same hallucination class as `clickCoords`, but not rejected). `type` with `commit:"enter"` presses Enter post-type (`actions.ts:313-322`) while non-committing; `selector` (honored by type/hover/select/hold) types into a cc field with no ref → no ref floor even with `submit:true`, and defeats the ref-keyed bundle-predecessor inference. Apply the same typed-reject/strip at the chokepoint as `clickCoords`.
+
+**MINOR** — bundle rejection message not spec-precise (`main.rs:18367`); spec §3's "any committing kind outside the schema enum" typed-reject only covers `clickCoords` (unknown kinds fall through to the sidecar's fail-closed throw); armed-file-chooser click returns no snapshot (stale-not-reset, safe).
+
+**Recommended holistic fix (one coordinated follow-up, TDD+review):** (1) canonicalize the committing/Enter predicate at the gateway chokepoint over ALL kinds+fields the sidecar can act on (press/press_key/type-newline/scroll-ref/selector/commit) — a single "does this action commit/submit?" function that matches the sidecar's real execution, raise-only; (2) verify OOPIF focus with a two-origin e2e test and, if it fails open, redesign the PSP-frame signal; (3) scope `last_focus_payment_context` per target_id. Until (1)+(2) land, treat the ref-less leg as "defends a cooperative model, not an adversarial one."
