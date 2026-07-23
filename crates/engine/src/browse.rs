@@ -31,6 +31,56 @@ pub enum Confidence {
     Low,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserDoneStatus {
+    Completed,
+    #[default]
+    Partial,
+    Blocked,
+    Unavailable,
+    Timeout,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowseResultKind {
+    #[default]
+    List,
+    Fact,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowseResultField {
+    pub name: String,
+    pub required: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowseResultContract {
+    pub kind: BrowseResultKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum_items: Option<usize>,
+    #[serde(default)]
+    pub fields: Vec<BrowseResultField>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowserDonePayload {
+    pub status: BrowserDoneStatus,
+    pub answer: String,
+    #[serde(default)]
+    pub items: Vec<Value>,
+    #[serde(default)]
+    pub fields_missing: Vec<String>,
+    #[serde(default)]
+    pub sources: Vec<String>,
+    #[serde(default)]
+    pub evidence: Vec<String>,
+}
+
 /// What a `browse(goal)` sub-turn returns to the manager (ADR 0025). The ONLY thing that crosses back
 /// from the isolated sub-loop — the browser's raw activity stays encapsulated. Structured so the
 /// manager can route deterministically: `found=false` / `status=Failed` → mark the step blocked or
@@ -48,13 +98,79 @@ pub struct BrowseResult {
     /// Optional human note, e.g. "not available on Polymarket".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default)]
+    pub status: BrowserDoneStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields_missing: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<String>,
 }
 
 impl BrowseResult {
     /// A NOT-FOUND result (impossible/exhausted goal): the manager marks the step blocked / answers
     /// "unavailable" instead of retrying forever.
     pub fn not_found(note: impl Into<String>) -> Self {
-        Self { found: false, note: Some(note.into()), ..Default::default() }
+        Self {
+            found: false,
+            note: Some(note.into()),
+            status: BrowserDoneStatus::Unavailable,
+            ..Default::default()
+        }
+    }
+}
+
+pub fn validate_browser_done_payload(
+    payload: BrowserDonePayload,
+    contract: Option<&BrowseResultContract>,
+) -> BrowseResult {
+    let mut status = payload.status;
+    let mut missing = payload.fields_missing.clone();
+    if let Some(contract) = contract {
+        if let Some(minimum_items) = contract.minimum_items
+            && payload.items.len() < minimum_items
+            && status == BrowserDoneStatus::Completed
+        {
+            status = BrowserDoneStatus::Partial;
+            push_unique(&mut missing, "minimum_items");
+        }
+        for field in contract.fields.iter().filter(|field| field.required) {
+            let has_field = payload.items.iter().any(|item| {
+                item.get(&field.name)
+                    .map(|value| {
+                        !value.is_null()
+                            && value
+                                .as_str()
+                                .map(|text| !text.trim().is_empty())
+                                .unwrap_or(true)
+                    })
+                    .unwrap_or(false)
+            });
+            if !has_field && status == BrowserDoneStatus::Completed {
+                status = BrowserDoneStatus::Partial;
+                push_unique(&mut missing, &field.name);
+            }
+        }
+    }
+    let found = matches!(status, BrowserDoneStatus::Completed | BrowserDoneStatus::Partial)
+        && (!payload.answer.trim().is_empty() || !payload.items.is_empty());
+    BrowseResult {
+        found,
+        answer: payload.answer.trim().to_string(),
+        sources: payload.sources,
+        confidence: if found { Confidence::High } else { Confidence::Low },
+        note: (!found).then(|| format!("{status:?}")),
+        status,
+        items: payload.items,
+        fields_missing: missing,
+        evidence: payload.evidence,
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    if !values.iter().any(|existing| existing == value) {
+        values.push(value.to_string());
     }
 }
 
@@ -96,7 +212,12 @@ pub fn browse_result_from_outcome(outcome: &TurnOutcome) -> BrowseResult {
         // Impossible/exhausted goal: carry the sub-agent's own words as the note (helps the manager
         // decide retry-vs-block) rather than discarding them.
         let note = (!answer.is_empty()).then(|| answer.clone());
-        return BrowseResult { found: false, note, ..Default::default() };
+        return BrowseResult {
+            found: false,
+            note,
+            status: BrowserDoneStatus::Unavailable,
+            ..Default::default()
+        };
     }
     let confidence = if outcome.browse_sources.is_empty() {
         Confidence::Low
@@ -109,6 +230,8 @@ pub fn browse_result_from_outcome(outcome: &TurnOutcome) -> BrowseResult {
         sources: outcome.browse_sources.clone(),
         confidence,
         note: None,
+        status: BrowserDoneStatus::Completed,
+        ..Default::default()
     }
 }
 
@@ -138,6 +261,8 @@ pub fn browse_result_from_outcome_with_snapshot(
         sources: outcome.browse_sources.clone(),
         confidence: Confidence::Low,
         note: None,
+        status: BrowserDoneStatus::Partial,
+        ..Default::default()
     }
 }
 
@@ -157,7 +282,29 @@ pub fn browse_result_for_manager(result: &BrowseResult) -> String {
         Confidence::High => "high",
         Confidence::Low => "low",
     };
-    let mut out = format!("found: true\nconfidence: {confidence}\nanswer: {}", result.answer);
+    let status = format!("{:?}", result.status).to_lowercase();
+    let mut out = format!(
+        "found: true\nconfidence: {confidence}\nstatus: {status}\nanswer: {}",
+        result.answer
+    );
+    if !result.items.is_empty() {
+        out.push_str("\nitems:");
+        for item in &result.items {
+            out.push_str(&format!("\n- {}", serde_json::to_string(item).unwrap_or_default()));
+        }
+    }
+    if !result.fields_missing.is_empty() {
+        out.push_str("\nfields_missing:");
+        for field in &result.fields_missing {
+            out.push_str(&format!("\n- {field}"));
+        }
+    }
+    if !result.evidence.is_empty() {
+        out.push_str("\nevidence:");
+        for evidence in &result.evidence {
+            out.push_str(&format!("\n- {evidence}"));
+        }
+    }
     if !result.sources.is_empty() {
         out.push_str("\nsources:");
         for url in &result.sources {
@@ -179,6 +326,7 @@ mod tests {
             sources: vec!["https://x".to_string()],
             confidence: Confidence::High,
             note: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&r).unwrap();
         assert!(json.contains("\"confidence\":\"high\""), "got: {json}");
@@ -186,6 +334,73 @@ mod tests {
         let back: BrowseResult = serde_json::from_str(&json).unwrap();
         assert_eq!(back.answer, "42%");
         assert_eq!(back.confidence, Confidence::High);
+    }
+
+    #[test]
+    fn browser_done_completed_is_downgraded_when_minimum_items_missing() {
+        let contract = BrowseResultContract {
+            kind: BrowseResultKind::List,
+            minimum_items: Some(3),
+            fields: vec![
+                BrowseResultField { name: "departure".into(), required: true },
+                BrowseResultField { name: "arrival".into(), required: true },
+                BrowseResultField { name: "duration".into(), required: true },
+                BrowseResultField { name: "price".into(), required: false },
+            ],
+            boundary: Some("Stop before booking or payment".into()),
+        };
+        let payload = BrowserDonePayload {
+            status: BrowserDoneStatus::Completed,
+            answer: "One visible option".into(),
+            items: vec![serde_json::json!({
+                "departure": "09:05",
+                "arrival": "13:40",
+                "duration": "4h 35m"
+            })],
+            fields_missing: vec![],
+            sources: vec!["https://www.trenitalia.com/".into()],
+            evidence: vec!["Visible result card with times".into()],
+        };
+
+        let result = validate_browser_done_payload(payload, Some(&contract));
+
+        assert_eq!(result.status, BrowserDoneStatus::Partial);
+        assert!(result.found);
+        assert_eq!(result.items.len(), 1);
+        assert!(result.fields_missing.contains(&"minimum_items".to_string()));
+    }
+
+    #[test]
+    fn browser_done_completed_keeps_optional_missing_price() {
+        let contract = BrowseResultContract {
+            kind: BrowseResultKind::List,
+            minimum_items: Some(1),
+            fields: vec![
+                BrowseResultField { name: "departure".into(), required: true },
+                BrowseResultField { name: "arrival".into(), required: true },
+                BrowseResultField { name: "duration".into(), required: true },
+                BrowseResultField { name: "price".into(), required: false },
+            ],
+            boundary: Some("Stop before booking or payment".into()),
+        };
+        let payload = BrowserDonePayload {
+            status: BrowserDoneStatus::Completed,
+            answer: "One visible option".into(),
+            items: vec![serde_json::json!({
+                "departure": "09:05",
+                "arrival": "13:40",
+                "duration": "4h 35m",
+                "price": null
+            })],
+            fields_missing: vec!["price".into()],
+            sources: vec!["https://www.trenitalia.com/".into()],
+            evidence: vec!["Price was not visible in the result card".into()],
+        };
+
+        let result = validate_browser_done_payload(payload, Some(&contract));
+
+        assert_eq!(result.status, BrowserDoneStatus::Completed);
+        assert!(result.fields_missing.contains(&"price".to_string()));
     }
 
     #[test]
@@ -292,11 +507,13 @@ Tell me if you want me to retry or rephrase."
             sources: vec!["https://kraken.com/btc".to_string()],
             confidence: Confidence::High,
             note: None,
+            status: BrowserDoneStatus::Completed,
+            ..Default::default()
         };
         let text = browse_result_for_manager(&r);
         assert_eq!(
             text,
-            "found: true\nconfidence: high\nanswer: $63,120\nsources:\n- https://kraken.com/btc"
+            "found: true\nconfidence: high\nstatus: completed\nanswer: $63,120\nsources:\n- https://kraken.com/btc"
         );
     }
 
