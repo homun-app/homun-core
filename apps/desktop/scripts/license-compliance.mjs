@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import {
   copyFile,
-  cp,
   mkdir,
   readFile,
   readdir,
@@ -14,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import parseSpdx from "spdx-expression-parse";
 import spdxLicenses from "spdx-license-list/full.js";
+import { validateFontLicenseCoverage } from "./font-license-coverage.mjs";
 
 export const EXPECTED_LICENSE_SHA256 =
   "5904c160d2d93c62e0113b5cc9d20a6880e04839bff3a130bd622cc141a64429";
@@ -123,7 +123,7 @@ export function licenseIds(expression) {
 function runCargoMetadata(manifestPath) {
   const result = spawnSync(
     "cargo",
-    ["metadata", "--locked", "--format-version", "1", "--manifest-path", manifestPath],
+    ["metadata", "--locked", "--offline", "--format-version", "1", "--manifest-path", manifestPath],
     { encoding: "utf8", maxBuffer: 128 * 1024 * 1024 },
   );
   if (result.status !== 0) {
@@ -344,6 +344,14 @@ export async function stageLicenseCompliance(options = {}) {
     parsed.exceptions.forEach((id) => exceptionIds.add(id));
   }
 
+  const fontRoot = path.join(repoRoot, "runtimes", "contained-computer", "fonts");
+  const fontManifest = validateFontLicenseCoverage({ fontRoot });
+  for (const font of fontManifest.fonts) {
+    const parsed = licenseIds(font.license);
+    parsed.ids.forEach((id) => spdxIds.add(id));
+    parsed.exceptions.forEach((id) => exceptionIds.add(id));
+  }
+
   for (const id of [...spdxIds].sort()) {
     const text = spdxLicenses[id]?.licenseText;
     if (!text) throw new Error(`Unknown SPDX license identifier: ${id}`);
@@ -360,19 +368,26 @@ export async function stageLicenseCompliance(options = {}) {
     );
   }
 
-  const fontRoot = path.join(repoRoot, "runtimes", "contained-computer", "fonts");
   await copyRequiredFile(
     path.join(fontRoot, "THIRD_PARTY_NOTICES.md"),
     path.join(thirdPartyDir, "fonts", "THIRD_PARTY_NOTICES.md"),
     "Font notice index",
   );
-  const fontLicenses = path.join(fontRoot, "licenses");
-  if (!existsSync(fontLicenses)) {
-    throw new Error(`Font license directory is missing: ${fontLicenses}`);
+  await copyRequiredFile(
+    path.join(fontRoot, "LICENSE_MANIFEST.json"),
+    path.join(thirdPartyDir, "fonts", "LICENSE_MANIFEST.json"),
+    "Font license manifest",
+  );
+  const fontLegalFiles = new Set(
+    fontManifest.fonts.flatMap((font) => font.licenseFiles),
+  );
+  for (const relativePath of [...fontLegalFiles].sort()) {
+    await copyRequiredFile(
+      path.join(fontRoot, relativePath),
+      path.join(thirdPartyDir, "fonts", relativePath),
+      `Font legal file ${relativePath}`,
+    );
   }
-  await cp(fontLicenses, path.join(thirdPartyDir, "fonts", "licenses"), {
-    recursive: true,
-  });
   await copyRequiredFile(
     path.join(repoRoot, "resources", "default-skills", "LICENSE.md"),
     path.join(thirdPartyDir, "default-skills", "LICENSE.md"),

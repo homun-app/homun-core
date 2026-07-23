@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { validateFontLicenseCoverage } from "./font-license-coverage.mjs";
 
 const requiredFiles = [
   "LICENSE.md",
@@ -8,6 +9,7 @@ const requiredFiles = [
   "third-party-licenses/electron/LICENSE",
   "third-party-licenses/electron/LICENSES.chromium.html",
   "third-party-licenses/fonts/THIRD_PARTY_NOTICES.md",
+  "third-party-licenses/fonts/LICENSE_MANIFEST.json",
   "third-party-licenses/default-skills/LICENSE.md",
   "third-party-licenses/python-runtime/inventory.json",
   "third-party-licenses/python-runtime/NOTICE.md",
@@ -40,6 +42,10 @@ export function verifyLicenseResources(resourcesDir) {
       throw new Error(`Required license artifact ${relativePath} is empty`);
     }
   }
+  validateFontLicenseCoverage({
+    fontRoot: path.join(resourcesDir, "contained-computer", "fonts"),
+    licenseRoot: path.join(resourcesDir, "third-party-licenses", "fonts"),
+  });
   for (const relativePath of requiredDirectories) {
     const target = path.join(resourcesDir, relativePath);
     if (!existsSync(target)) {

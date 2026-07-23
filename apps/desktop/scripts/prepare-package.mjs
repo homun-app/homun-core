@@ -172,7 +172,7 @@ if (!existsSync(electronChromiumNotice)) {
   );
 }
 
-await stageLicenseCompliance({ repoRoot, outputDir: resourcesDir });
+await stageLicenseCompliance({ repoRoot, resourcesDir });
 
 console.log(`Prepared Electron resources at ${resourcesDir}`);
 console.log(`Gateway: ${relative(repoRoot, gatewayTarget)}`);

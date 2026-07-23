@@ -63,7 +63,7 @@ test("runtime license inventory distinguishes packaged inputs from runtime downl
       name: "graphifyy",
       version: "0.9.25",
       source: "https://pypi.org/project/graphifyy/0.9.25/",
-      license: "MIT",
+      license: "Apache-2.0",
       distribution: "installed-when-container-is-built",
     },
     {

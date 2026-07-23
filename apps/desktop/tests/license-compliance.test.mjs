@@ -52,7 +52,34 @@ async function makeFixture() {
   );
   await write(
     path.join(fixtureRepo, "runtimes", "contained-computer", "fonts", "THIRD_PARTY_NOTICES.md"),
-    "# Font notices\n",
+    "# Font notices\n\n| Family | Package | Version | License |\n| --- | --- | --- | --- |\n| Inter | @fontsource/inter | 5.2.8 | OFL-1.1 |\n",
+  );
+  await write(
+    path.join(fixtureRepo, "runtimes", "contained-computer", "fonts", "LICENSE_MANIFEST.json"),
+    `${JSON.stringify(
+      {
+        fonts: [
+          {
+            family: "Inter",
+            package: "@fontsource/inter",
+            version: "5.2.8",
+            license: "OFL-1.1",
+            fontFiles: ["inter-400.woff2", "inter-700.woff2"],
+            licenseFiles: ["licenses/inter/LICENSE"],
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  await write(
+    path.join(fixtureRepo, "runtimes", "contained-computer", "fonts", "inter-400.woff2"),
+    "font-400",
+  );
+  await write(
+    path.join(fixtureRepo, "runtimes", "contained-computer", "fonts", "inter-700.woff2"),
+    "font-700",
   );
   await write(
     path.join(
@@ -162,6 +189,19 @@ test("package preparation installs Electron notices before compliance staging", 
   const stageIndex = source.lastIndexOf("stageLicenseCompliance");
   assert.ok(installIndex >= 0, "Electron's lazy binary installer must be invoked");
   assert.ok(installIndex < stageIndex, "Electron notices must exist before staging");
+  assert.match(
+    source,
+    /stageLicenseCompliance\(\{ repoRoot, resourcesDir \}\)/,
+    "the environment-selected resources directory must receive the compliance bundle",
+  );
+});
+
+test("Cargo dependency discovery is locked and offline", async () => {
+  const source = await readFile(modulePath, "utf8");
+  assert.match(
+    source,
+    /\["metadata", "--locked", "--offline", "--format-version"/,
+  );
 });
 
 test("npm lock discovery falls back to installed package metadata", async (t) => {
@@ -325,6 +365,7 @@ test("stages a deterministic complete compliance bundle", async (t) => {
     "third-party-licenses/electron/LICENSE",
     "third-party-licenses/electron/LICENSES.chromium.html",
     "third-party-licenses/fonts/THIRD_PARTY_NOTICES.md",
+    "third-party-licenses/fonts/LICENSE_MANIFEST.json",
     "third-party-licenses/fonts/licenses/inter/LICENSE",
     "third-party-licenses/default-skills/LICENSE.md",
     "third-party-licenses/python-runtime/inventory.json",
@@ -391,5 +432,50 @@ test("rejects missing Electron or Chromium notices", async (t) => {
   await assert.rejects(
     () => compliance.stageLicenseCompliance(optionsFor(fixture)),
     /Electron\/Chromium notice is missing.*LICENSES\.chromium\.html/,
+  );
+});
+
+test("rejects a shipped font that is absent from the license manifest", async (t) => {
+  const compliance = await loadModule(t);
+  if (!compliance) return;
+  const fixture = await makeFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  await write(
+    path.join(
+      fixture.fixtureRepo,
+      "runtimes",
+      "contained-computer",
+      "fonts",
+      "untracked-400.woff2",
+    ),
+    "untracked font",
+  );
+
+  await assert.rejects(
+    () => compliance.stageLicenseCompliance(optionsFor(fixture)),
+    /font license manifest does not cover shipped files.*untracked-400\.woff2/i,
+  );
+});
+
+test("rejects a font manifest whose declared legal file is missing", async (t) => {
+  const compliance = await loadModule(t);
+  if (!compliance) return;
+  const fixture = await makeFixture();
+  t.after(() => rm(fixture.root, { recursive: true, force: true }));
+  await rm(
+    path.join(
+      fixture.fixtureRepo,
+      "runtimes",
+      "contained-computer",
+      "fonts",
+      "licenses",
+      "inter",
+      "LICENSE",
+    ),
+  );
+
+  await assert.rejects(
+    () => compliance.stageLicenseCompliance(optionsFor(fixture)),
+    /font legal file.*licenses\/inter\/LICENSE.*missing/i,
   );
 });

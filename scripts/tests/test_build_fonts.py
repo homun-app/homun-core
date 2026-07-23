@@ -81,7 +81,32 @@ class BuildFontsLicenseTests(unittest.TestCase):
             self.assertTrue((fonts / "inter-400.woff2").is_file())
             self.assertTrue((fonts / "roboto-slab-700.woff2").is_file())
             self.assertIn('"Roboto Slab": {', py_manifest.read_text())
-            self.assertIn('"Roboto Slab"', ts_manifest.read_text())
+            self.assertIn(
+                'export const FONT_FAMILIES: string[] = ["Inter", "Roboto Slab"];',
+                ts_manifest.read_text(),
+            )
+            manifest = json.loads((fonts / "LICENSE_MANIFEST.json").read_text())
+            self.assertEqual(
+                manifest["fonts"],
+                [
+                    {
+                        "family": "Inter",
+                        "package": "@fontsource/inter",
+                        "version": "5.2.8",
+                        "license": "OFL-1.1",
+                        "fontFiles": ["inter-400.woff2", "inter-700.woff2"],
+                        "licenseFiles": ["licenses/inter/LICENSE"],
+                    },
+                    {
+                        "family": "Roboto Slab",
+                        "package": "@fontsource/roboto-slab",
+                        "version": "5.2.8",
+                        "license": "Apache-2.0",
+                        "fontFiles": ["roboto-slab-400.woff2", "roboto-slab-700.woff2"],
+                        "licenseFiles": ["licenses/roboto-slab/LICENSE"],
+                    },
+                ],
+            )
 
     def test_module_description_does_not_claim_every_font_is_ofl(self):
         self.assertNotIn("latin woff2, OFL", build_fonts.__doc__)

@@ -24,13 +24,29 @@ async function completeResources() {
     "third-party-licenses/cargo/demo@1.0.0/LICENSE",
     "third-party-licenses/npm/demo@1.0.0/LICENSE",
     "third-party-licenses/fonts/THIRD_PARTY_NOTICES.md",
+    "third-party-licenses/fonts/LICENSE_MANIFEST.json",
     "third-party-licenses/fonts/licenses/demo/LICENSE",
     "third-party-licenses/default-skills/LICENSE.md",
     "third-party-licenses/python-runtime/inventory.json",
     "third-party-licenses/python-runtime/NOTICE.md",
     "third-party-licenses/spdx/MIT.txt",
+    "contained-computer/fonts/demo-400.woff2",
   ]) {
-    await write(path.join(root, relativePath));
+    const contents = relativePath === "third-party-licenses/fonts/LICENSE_MANIFEST.json"
+      ? `${JSON.stringify({
+        fonts: [{
+          family: "Demo",
+          package: "@fontsource/demo",
+          version: "1.0.0",
+          license: "OFL-1.1",
+          fontFiles: ["demo-400.woff2"],
+          licenseFiles: ["licenses/demo/LICENSE"],
+        }],
+      })}\n`
+      : relativePath === "third-party-licenses/fonts/THIRD_PARTY_NOTICES.md"
+        ? "| Demo | @fontsource/demo | 1.0.0 | OFL-1.1 |\n"
+      : "present\n";
+    await write(path.join(root, relativePath), contents);
   }
   return root;
 }
@@ -87,6 +103,7 @@ test("names each required missing license artifact", async (t) => {
     "third-party-licenses/cargo",
     "third-party-licenses/npm",
     "third-party-licenses/fonts/THIRD_PARTY_NOTICES.md",
+    "third-party-licenses/fonts/LICENSE_MANIFEST.json",
     "third-party-licenses/fonts/licenses",
     "third-party-licenses/default-skills/LICENSE.md",
     "third-party-licenses/python-runtime/inventory.json",
@@ -128,5 +145,33 @@ test("rejects empty legal files and empty legal directories", async (t) => {
   assert.throws(
     () => verifier.verifyLicenseResources(emptyDirectoryResources),
     /third-party-licenses\/cargo.*empty/i,
+  );
+});
+
+test("rejects packaged fonts not covered by the font license manifest", async (t) => {
+  const verifier = await loadVerifier(t);
+  if (!verifier) return;
+  const resources = await completeResources();
+  t.after(() => rm(resources, { recursive: true, force: true }));
+  await write(path.join(resources, "contained-computer", "fonts", "rogue-400.woff2"));
+
+  assert.throws(
+    () => verifier.verifyLicenseResources(resources),
+    /font license manifest does not cover shipped files.*rogue-400\.woff2/i,
+  );
+});
+
+test("rejects a packaged font whose declared legal file is missing", async (t) => {
+  const verifier = await loadVerifier(t);
+  if (!verifier) return;
+  const resources = await completeResources();
+  t.after(() => rm(resources, { recursive: true, force: true }));
+  await rm(
+    path.join(resources, "third-party-licenses", "fonts", "licenses", "demo", "LICENSE"),
+  );
+
+  assert.throws(
+    () => verifier.verifyLicenseResources(resources),
+    /font legal file.*licenses\/demo\/LICENSE.*missing/i,
   );
 });
