@@ -10,13 +10,14 @@
 use serde_json::Value;
 
 /// The canonical native browser tool names (the granular set the chat agent drives).
-const NATIVE_BROWSER_TOOLS: [&str; 6] = [
+const NATIVE_BROWSER_TOOLS: [&str; 7] = [
     "browser_navigate",
     "browser_snapshot",
     "browser_act",
     "browser_screenshot",
     "browser_tabs",
     "browser_dialog",
+    "browser_done",
 ];
 
 /// The stub that replaces an OLDER browser snapshot's content once a newer one exists (context
@@ -36,6 +37,7 @@ pub fn is_browser_granular_tool(name: &str) -> bool {
             | "browser_screenshot"
             | "browser_tabs"
             | "browser_dialog"
+            | "browser_done"
     )
 }
 
@@ -204,6 +206,7 @@ mod tests {
         assert_eq!(resolve_browser_chat_tool_name("browser_tavigate"), Some("browser_navigate"));
         assert_eq!(resolve_browser_chat_tool_name("write_file"), None);
         assert!(is_browser_granular_tool("browser_act") && !is_browser_granular_tool("write_file"));
+        assert!(is_browser_granular_tool("browser_done"));
     }
 
     #[test]

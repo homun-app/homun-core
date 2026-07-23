@@ -778,6 +778,24 @@ missing, give what you have and note the gap in one short line.",
                         outcome: outcome.to_string(),
                         result_fingerprint,
                     });
+                    if name == "browser_done" && !result.trim().is_empty() {
+                        memory_answer = result.trim().to_string();
+                        ls.messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": result,
+                        }));
+                        let _ = event_sink
+                            .emit(GenerateStreamEvent::Done {
+                                text: memory_answer.clone(),
+                                metrics: TokenMetrics::zero(),
+                                redacted_user_text: None,
+                            })
+                            .await;
+                        delivery = TurnDelivery::Delivered;
+                        final_done = true;
+                        break 'rounds;
+                    }
                     if is_browser_granular_tool(name) {
                         let stalled = matches!(outcome, "empty" | "error" | "blocked" | "no_progress");
                         if stalled {
@@ -1587,6 +1605,141 @@ mod tests {
             String::new()
         }
         async fn close_session(&mut self, _b: bool) {}
+    }
+
+    #[derive(Default)]
+    struct BrowserDoneModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for BrowserDoneModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if index == 0 {
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_done",
+                            "type": "function",
+                            "function": {
+                                "name": "browser_done",
+                                "arguments": "{\"status\":\"completed\",\"answer\":\"done\",\"items\":[{\"departure\":\"09:05\"}],\"sources\":[\"https://example.test\"],\"evidence\":[\"visible\"]}"
+                            }
+                        }]
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            on_delta("forced synthesis should not run");
+            Ok(ModelRoundOutput {
+                message: json!({"role": "assistant", "content": "forced synthesis should not run"}),
+                provider,
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct DoneBrowser;
+
+    impl BrowserExecutor for DoneBrowser {
+        async fn execute_browser(
+            &mut self,
+            name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> String {
+            assert_eq!(name, "browser_done");
+            state.browser_used = true;
+            "done".to_string()
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_done_tool_terminates_without_forced_synthesis() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.tool_schemas = vec![json!({
+            "type": "function",
+            "function": {
+                "name": "browser_done",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        })];
+        let model = BrowserDoneModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = DoneBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.memory_answer, "done");
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            1,
+            "browser_done must not trigger forced synthesis"
+        );
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            1
+        );
     }
 
     #[derive(Default)]
