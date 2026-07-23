@@ -5885,8 +5885,14 @@ body.resizing-drawer {
   font-size: 13px;
 }
 
-.pending-steering-strip.claimed .pending-steering-prompt {
+.pending-steering-strip.claimed .pending-steering-prompt,
+.pending-steering-strip.interpreted .pending-steering-prompt,
+.pending-steering-strip.applied .pending-steering-prompt {
   color: var(--muted);
+}
+
+.pending-steering-state-icon {
+  animation: spin 0.8s linear infinite;
 }
 
 .pending-steering-attachments {

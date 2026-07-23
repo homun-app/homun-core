@@ -763,7 +763,9 @@ export type EnqueueTurnResponse = QueuedTurnResponse | SteeringQueuedResponse;
 export type TurnSteeringStatus =
   | "pending"
   | "claimed"
+  | "interpreted"
   | "applied"
+  | "completed"
   | "held"
   | "cancelled"
   | "promoted";
@@ -791,6 +793,13 @@ export interface TurnSteeringRecord {
   claimed_at: number | null;
   applied_at: number | null;
   cancelled_at: number | null;
+  consumed_at: number | null;
+  semantic_decision_json: unknown | null;
+  interpreted_at: number | null;
+  completed_at: number | null;
+  last_interpretation_error: string | null;
+  next_retry_at: number | null;
+  interpretation_attempts: number;
 }
 
 export interface SteeringMutation {

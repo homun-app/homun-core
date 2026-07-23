@@ -12,7 +12,9 @@ import {
 
 test("reconciliation is FIFO and drops terminal rows", () => {
   const state = createSteeringQueueState([
-    { steering_id: 5, revision: 1, status: "applied" },
+    { steering_id: 7, revision: 1, status: "completed" },
+    { steering_id: 6, revision: 1, status: "applied" },
+    { steering_id: 5, revision: 1, status: "interpreted" },
     { steering_id: 2, revision: 1, status: "pending" },
     { steering_id: 1, revision: 2, status: "held" },
     { steering_id: 4, revision: 1, status: "promoted" },
@@ -21,9 +23,9 @@ test("reconciliation is FIFO and drops terminal rows", () => {
 
   assert.deepEqual(
     state.rows.map((row) => row.steering_id),
-    [1, 2],
+    [1, 2, 5, 6],
   );
-  assert.deepEqual(state.revisions, { 1: 2, 2: 1, 3: 1, 4: 1, 5: 1 });
+  assert.deepEqual(state.revisions, { 1: 2, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1 });
 });
 
 test("older revisions cannot replace a claimed card", () => {
@@ -69,7 +71,7 @@ test("new rows and newer revisions are reconciled in FIFO order", () => {
   );
 });
 
-test("terminal changes remove visible cards", () => {
+test("only completed and other terminal changes remove visible cards", () => {
   const current = createSteeringQueueState([
     { steering_id: 1, revision: 1, status: "pending" },
     { steering_id: 2, revision: 1, status: "held" },
@@ -86,14 +88,20 @@ test("terminal changes remove visible cards", () => {
     revision: 2,
     status: "promoted",
   });
-  const withoutApplied = applySteeringChange(withoutPromoted, {
+  const withApplied = applySteeringChange(withoutPromoted, {
     steering_id: 3,
     revision: 2,
     status: "applied",
   });
+  const withoutCompleted = applySteeringChange(withApplied, {
+    steering_id: 3,
+    revision: 3,
+    status: "completed",
+  });
 
-  assert.deepEqual(withoutApplied.rows, []);
-  assert.deepEqual(withoutApplied.revisions, { 1: 2, 2: 2, 3: 2 });
+  assert.deepEqual(withApplied.rows, [{ steering_id: 3, revision: 2, status: "applied" }]);
+  assert.deepEqual(withoutCompleted.rows, []);
+  assert.deepEqual(withoutCompleted.revisions, { 1: 2, 2: 2, 3: 3 });
 });
 
 test("a delayed older change cannot resurrect a terminal row", () => {

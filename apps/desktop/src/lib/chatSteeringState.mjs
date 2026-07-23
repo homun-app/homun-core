@@ -1,4 +1,4 @@
-const VISIBLE_STATUSES = new Set(["pending", "held", "claimed"]);
+const VISIBLE_STATUSES = new Set(["pending", "claimed", "interpreted", "applied", "held"]);
 const MUTABLE_STATUSES = new Set(["pending", "held"]);
 
 function isVisible(row) {
