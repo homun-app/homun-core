@@ -1,4 +1,4 @@
-import type { Locator, Page } from "playwright-core";
+import type { Frame, Locator, Page } from "playwright-core";
 
 export type BrowserRef = {
   ref: string;
@@ -209,32 +209,121 @@ export async function computePaymentFloorRefs(
   return floored;
 }
 
-// Machine-only: is the currently-focused element inside a cc-autocomplete
-// form, or a PSP-origin frame? Enter/Return submits the focused form, so this
-// is the signal that a ref-less submit is a payment. Never reads label text.
-async function computeFocusPaymentContext(page: Page): Promise<boolean> {
-  return await page
-    .evaluate((psp) => {
-      const el = document.activeElement as Element | null;
-      if (!el) return false;
-      const form = el.closest("form");
-      if (form && form.querySelector('input[autocomplete^="cc-"]')) return true;
-      let origin = "";
-      try {
-        origin = el.ownerDocument.defaultView?.location.origin ?? "";
-      } catch {
-        origin = "";
+// Exact PSP host-suffix predicate, shared by the Playwright-side frame check
+// below (frameMatchesPspHost). The in-page evaluate closures (this file's
+// browser-context callbacks) cannot call back into Node, so they carry their
+// own inline copy of the same one-liner — this exported copy exists so the
+// matching rule itself has a single, directly unit-testable definition.
+export function hostMatchesPspSuffix(
+  host: string,
+  suffixes: readonly string[] = PSP_HOST_SUFFIXES,
+): boolean {
+  if (!host) {
+    return false;
+  }
+  return suffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
+type FrameFocusProbe = {
+  // True iff THIS frame's own document is the one actually holding focus,
+  // i.e. document.hasFocus() is true AND document.activeElement is a real
+  // (non-iframe-host) element. document.hasFocus() alone is not enough: it
+  // is also true on every ANCESTOR frame of the frame that really holds
+  // focus (focus containment propagates up the chain), but an ancestor's
+  // activeElement there is just the <iframe>/<frame> host element, not the
+  // control the user is actually in.
+  isFocusedFrame: boolean;
+  inCcForm: boolean;
+};
+
+const NO_FOCUS_PROBE: FrameFocusProbe = { isFocusedFrame: false, inCcForm: false };
+
+// Frame-aware per-frame probe (mirrors how computePaymentFloorRefs already
+// gets frames right via locator.evaluate — this uses frame.evaluate instead,
+// since there is no element ref to anchor a locator on here). Wrapped in a
+// Promise.race against PAYMENT_FLOOR_EVAL_TIMEOUT_MS so a frozen/detaching
+// frame degrades to "not focused" rather than hanging the whole snapshot.
+async function probeFrameFocus(frame: Frame): Promise<FrameFocusProbe> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<FrameFocusProbe>((resolve) => {
+    timer = setTimeout(() => resolve(NO_FOCUS_PROBE), PAYMENT_FLOOR_EVAL_TIMEOUT_MS);
+  });
+  const evaluated = frame
+    .evaluate(() => {
+      if (!document.hasFocus()) {
+        return { isFocusedFrame: false, inCcForm: false };
       }
-      const host = (() => {
-        try {
-          return new URL(origin).hostname;
-        } catch {
-          return "";
+      const el = document.activeElement;
+      if (!el) {
+        return { isFocusedFrame: false, inCcForm: false };
+      }
+      const tag = el.tagName.toLowerCase();
+      if (tag === "iframe" || tag === "frame") {
+        // Focus actually lives in a descendant frame's document; this
+        // frame is merely an ancestor of the focused one.
+        return { isFocusedFrame: false, inCcForm: false };
+      }
+      const form = el.closest("form");
+      const inCcForm = !!form && !!form.querySelector('input[autocomplete^="cc-"]');
+      return { isFocusedFrame: true, inCcForm };
+    })
+    .catch(() => NO_FOCUS_PROBE);
+  try {
+    return await Promise.race([evaluated, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Playwright-side (no evaluate needed): does this frame's own document
+// origin match a known PSP host? Only meaningful when paired with
+// isFocusedFrame — a PSP frame sitting elsewhere on the page, not holding
+// focus, must never floor an unrelated Enter.
+function frameMatchesPspHost(frame: Frame): boolean {
+  let url = "";
+  try {
+    url = frame.url();
+  } catch {
+    return false;
+  }
+  let host = "";
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  return hostMatchesPspSuffix(host);
+}
+
+// Machine-only: is the currently-focused element — in ANY frame, including a
+// cross-origin PSP iframe (the standard integration for every PSP in
+// PSP_HOST_SUFFIXES: Stripe Elements, PayPal Buttons, Adyen Drop-in,
+// Braintree Hosted Fields, ...) — inside a cc-autocomplete form, or is the
+// focused frame's own origin a PSP host? Enter/Return submits the focused
+// frame's form, so this is the signal that a ref-less submit is a payment.
+// Never reads label/text content.
+//
+// A single page.evaluate() only ever runs in the main frame: when focus is
+// inside a nested PSP iframe (the common case), the main frame's
+// document.activeElement is just the <iframe> host element, so a main-frame-
+// only check fails open. This walks page.frames() instead so every frame —
+// main and nested — gets checked for its own focus/payment context.
+async function computeFocusPaymentContext(page: Page): Promise<boolean> {
+  try {
+    const frames = page.frames();
+    const checks = await Promise.all(
+      frames.map(async (frame) => {
+        const probe = await probeFrameFocus(frame).catch(() => NO_FOCUS_PROBE);
+        if (!probe.isFocusedFrame) {
+          return false;
         }
-      })();
-      return (psp as string[]).some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
-    }, PSP_HOST_SUFFIXES)
-    .catch(() => false);
+        return probe.inCcForm || frameMatchesPspHost(frame);
+      }),
+    );
+    return checks.some(Boolean);
+  } catch {
+    return false;
+  }
 }
 
 export async function createSnapshot(

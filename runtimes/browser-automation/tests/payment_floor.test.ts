@@ -83,24 +83,83 @@ describe("machine payment floor", () => {
     expect(floorRefs(snapshot)).not.toContain(searchInput!.ref);
   });
 
-  it("focusPaymentContext is true when a cc-form field is focused, false for the search field", async () => {
+  it("focusPaymentContext is true when a cc-form field is focused, false for the search field (via act() and snapshot())", async () => {
     await manager.start();
     await manager.open({ url: baseUrl, label: "checkout" });
 
     let snapshot = await manager.snapshot({ targetId: "checkout", observationMode: "interact" } as never);
     const ccInput = snapshot.refs.find((ref) => ref.name === "Card number");
     expect(ccInput?.ref).toBeDefined();
-    await manager.act({ targetId: "checkout", kind: "click", ref: ccInput!.ref } as never);
+
+    // act()'s own returned result embeds a fresh post-action snapshot (see
+    // shouldSnapshotAfterAction for "click"); assert the field is carried
+    // there directly, not only via a follow-up snapshot() call.
+    let actResult = await manager.act({ targetId: "checkout", kind: "click", ref: ccInput!.ref } as never);
+    expect((actResult as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(true);
 
     snapshot = await manager.snapshot({ targetId: "checkout", observationMode: "interact" } as never);
     expect((snapshot as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(true);
 
     const searchInput = snapshot.refs.find((ref) => ref.name === "Termine ricerca");
     expect(searchInput?.ref).toBeDefined();
-    await manager.act({ targetId: "checkout", kind: "click", ref: searchInput!.ref } as never);
+
+    actResult = await manager.act({ targetId: "checkout", kind: "click", ref: searchInput!.ref } as never);
+    expect((actResult as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(false);
 
     snapshot = await manager.snapshot({ targetId: "checkout", observationMode: "interact" } as never);
     expect((snapshot as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(false);
+  });
+
+  it("focusPaymentContext is true when focus is inside a nested cc-form iframe (frame-aware; fails on a main-frame-only check)", async () => {
+    // Outer document has NO cc-form of its own; the cc-autocomplete input
+    // lives only in a separate document loaded via <iframe src="/psp-frame.html">.
+    // computeFocusPaymentContext must be frame-aware: with focus inside the
+    // iframe, the main frame's own document.activeElement is just the
+    // <iframe> host element, so a main-frame-only page.evaluate() check would
+    // report false here (fail-open on the ref-less payment floor) — this is
+    // the exact bug this fix addresses. Cross-origin PSP hostname matching
+    // (frameMatchesPspHost / hostMatchesPspSuffix) is covered separately by a
+    // direct unit test below, since binding a local node:http server to a
+    // real PSP hostname would require system-level DNS/hosts changes that are
+    // out of scope for this harness.
+    const outerFixture = path.join(import.meta.dirname, "fixtures", "checkout-iframe.html");
+    const innerFixture = path.join(import.meta.dirname, "fixtures", "psp-frame.html");
+    const outerHtml = await readFile(outerFixture, "utf8");
+    const innerHtml = await readFile(innerFixture, "utf8");
+    const iframeServer = createServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(req.url === "/psp-frame.html" ? innerHtml : outerHtml);
+    });
+    await new Promise<void>((resolve) => iframeServer.listen(0, "127.0.0.1", resolve));
+    const address = iframeServer.address();
+    if (!address || typeof address === "string") {
+      throw new Error("iframe fixture server did not start");
+    }
+    const iframeBaseUrl = `http://127.0.0.1:${address.port}`;
+    try {
+      await manager.start();
+      await manager.open({ url: iframeBaseUrl, label: "iframe-checkout" });
+
+      // The "ai" aria snapshot includes iframe content with its own refs
+      // (Playwright's aria-ref locators resolve across frames via CDP), the
+      // same mechanism computePaymentFloorRefs already relies on.
+      let snapshot = await manager.snapshot({ targetId: "iframe-checkout", observationMode: "interact" } as never);
+      const ccInput = snapshot.refs.find((ref) => ref.name === "Card number");
+      expect(ccInput?.ref).toBeDefined();
+
+      const actResult = await manager.act({
+        targetId: "iframe-checkout",
+        kind: "click",
+        ref: ccInput!.ref,
+      } as never);
+      expect((actResult as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(true);
+
+      snapshot = await manager.snapshot({ targetId: "iframe-checkout", observationMode: "interact" } as never);
+      expect((snapshot as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(true);
+    } finally {
+      iframeServer.closeAllConnections();
+      await new Promise<void>((resolve) => iframeServer.close(() => resolve()));
+    }
   });
 
   it("floors nothing on a page with no cc-form and no PSP frame (train fixture)", async () => {
@@ -121,9 +180,33 @@ describe("machine payment floor", () => {
       await manager.open({ url: trainBaseUrl, label: "train" });
       const snapshot = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
       expect(floorRefs(snapshot)).toEqual([]);
+      // Explicit focusPaymentContext assertion on a page with no cc-form and
+      // no PSP frame anywhere: whatever holds focus after load, it must not
+      // be floored.
+      expect((snapshot as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(false);
     } finally {
       trainServer.closeAllConnections();
       await new Promise<void>((resolve) => trainServer.close(() => resolve()));
     }
+  });
+});
+
+describe("hostMatchesPspSuffix (exact/`.`-suffix host matching used by frameMatchesPspHost)", () => {
+  // Direct unit coverage of the PSP hostname-matching predicate itself,
+  // independent of any real network/DNS resolution — binding a local
+  // node:http test server to an actual PSP hostname (e.g. js.stripe.com)
+  // would require system-level hosts-file/DNS changes that are out of scope
+  // for this harness. The predicate is the only part of
+  // computeFocusPaymentContext's PSP-origin branch that isn't already
+  // exercised end-to-end by the iframe test above.
+  it("matches an exact PSP host and any subdomain of it, never a substring/fuzzy suffix", async () => {
+    const { hostMatchesPspSuffix } = await import("../src/browser/snapshot.js");
+    expect(hostMatchesPspSuffix("js.stripe.com")).toBe(true);
+    expect(hostMatchesPspSuffix("checkout.stripe.com")).toBe(true);
+    expect(hostMatchesPspSuffix("stripe.com")).toBe(true);
+    expect(hostMatchesPspSuffix("sub.checkout.stripe.com")).toBe(true);
+    expect(hostMatchesPspSuffix("notstripe.com")).toBe(false);
+    expect(hostMatchesPspSuffix("stripe.com.evil.example")).toBe(false);
+    expect(hostMatchesPspSuffix("")).toBe(false);
   });
 });
