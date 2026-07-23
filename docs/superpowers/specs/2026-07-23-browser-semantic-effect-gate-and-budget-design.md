@@ -53,7 +53,7 @@ Two independent defects and two hardening items in the bounded browser protocol,
 
 These are exactly the action classes of the approved *Browser Effects* design; no new vocabulary is introduced. Non-committing actions (`type`, `hover`, `scroll`, `wait`, `select`) do not require a class.
 
-**Schema enforcement.** `browser_act_tool_schema` requires `action_class` on committing actions. The facade schema gate (`crates/capabilities/src/facade.rs`) and `normalize_browser_action_bundle` reject a committing action with no class as typed `BROWSER_ACTION_CLASS_MISSING`; the bundle does not execute and the model re-declares. This is the fail-closed default: absence never means "ordinary".
+**Schema enforcement.** `browser_act_tool_schema` requires `action_class` on committing actions (the schema *advertises* the requirement to the model). The binding enforcement is deterministic and lives at the gateway, not at the capability facade: `browser_safety::effective_action_class` (via `evaluate_browser_action`) and `normalize_browser_action_bundle` reject a committing action with no class as typed `BROWSER_ACTION_CLASS_MISSING`; the bundle does not execute and the model re-declares. (Note: `crates/capabilities/src/facade.rs::validate_arguments` checks only top-level `required` + primitive types — it does *not* enforce enums or per-item `actions` shape; that is why the fail-closed enforcement must be — and is — in the gateway gate, not the facade.) This is the fail-closed default: absence never means "ordinary".
 
 **Machine floors (raise-only).** At observe time the sidecar annotates each ref with a machine-derived floor, computed **only** from machine contracts, never from label text:
 
@@ -64,7 +64,7 @@ The effective class is `max(declared, floor)` over a fixed lattice `ordinary < a
 
 **Enforcement (unchanged hard point).** `payment_commit` requires a matching, unconsumed Payment Approval Card, consumed atomically, as a standalone action (payment inside a multi-action bundle stays forbidden). `ordinary`/`account`/`booking` are permitted within the user's request. The `PaymentApprovalGrant` flow, CVV one-shot vault handling, and TTL pruning are unchanged.
 
-**Keyword removal.** `FINAL_PAYMENT_LABEL_PATTERNS` and its enforcement in `browser_safety.rs`, and the mirror `is_final_payment_action`/`contains_final_payment_action` in `crates/browser-automation/src/policy.rs`, are **deleted** (converge, don't duplicate). No raise-only tripwire is retained: the raise role is served by machine floors, and consistency with the no-lexical-semantics principle outweighs the redundancy. The `snapshot_label_for_ref` label is retained only for approval-card binding/display; when a control has no label, the card binds on `ref` + snapshot generation fingerprint.
+**Keyword removal.** `FINAL_PAYMENT_LABEL_PATTERNS` and its enforcement in `browser_safety.rs`, and the mirror `is_final_payment_action`/`contains_final_payment_action` in `crates/browser-automation/src/policy.rs`, are **deleted** (converge, don't duplicate). No raise-only tripwire is retained: the raise role is served by machine floors, and consistency with the no-lexical-semantics principle outweighs the redundancy. The `snapshot_label_for_ref` helper is retained for a future approval-card binding/display use, but as of this slice it has **no caller** — the approval grant is bound to id/thread/TTL/one-shot only (`claim_payment_approval_from_map`). Binding the grant to the specific control (ref + snapshot generation) and to merchant/amount/currency (`crates/vault/src/payment.rs::validate_payment_approval`, currently unwired — zero production callers) is a **follow-up**, tracked in "Known residual gaps" below.
 
 **Prompt-injection note.** The label and page context the model reads are site-controlled and therefore an injection channel. The gate is structured so the model can decide *when to ask* but can never *grant*: the grant is the user-signed card bound to merchant/amount/currency in code. A deceived classifier at worst omits an ask a floor does not cover — which is exactly the case the fail-closed default on committing actions with no resolvable class must cover.
 
@@ -96,7 +96,7 @@ Each sidecar RPC (`navigate`, `act`, `snapshot`, `screenshot`) is wrapped in a g
 
 ### 5. Minor hardening
 
-- **Per-item bundle schema.** `browser_act_tool_schema` `actions.items` moves from `{"type":"object"}` to a real schema: a `kind` enum and per-kind required fields (e.g. `ref` for click/type). Malformed items are rejected at the facade schema gate, not at runtime execution.
+- **Per-item bundle schema.** `browser_act_tool_schema` `actions.items` moves from `{"type":"object"}` to a real schema: a `kind` enum and per-kind fields (with `kind` required). This is model-facing guidance; runtime rejection of a malformed/unknown-kind item happens in `normalize_browser_action_bundle` (gateway) and the sidecar's unknown-kind executor error, not at the capability facade (which does not validate the `actions` array shape).
 - **`browser_done` scope.** The turn-terminal special case in `agent_loop.rs` (`if name == "browser_done" …`) is gated on a `browser_subturn` flag on `TurnConfig`. A `browser_done` emitted outside the browser sub-turn (e.g. hallucinated by the manager) receives a typed error instead of terminating the turn.
 
 ## Safety invariants
@@ -139,6 +139,17 @@ The effect gate and budget policy ship behind the existing temporary browser-pro
 - **A page hides payment intent from both model and floors** (novel PSP, no cc-autocomplete). The fail-closed default still requires a class; an unrecognized committing control with an `ordinary` declaration executes only if no floor fires — the residual risk the future independent verifier addresses. Documented, not silently accepted.
 - **Contract-scaled rounds under-budget a hard site.** The progress limiter, not the round count, is primary; a genuinely progressing run reaches the round cap (10), and the future checkpoint/continuation path covers the rest.
 - **Journal growth.** Only bounded redacted summaries are recorded, one per boundary, same volume as the existing stderr line.
+
+## Known residual gaps / follow-ups
+
+Surfaced by the final whole-branch review (2026-07-23). The implemented slice is **strictly safer** than the keyword gate it replaced (the old gate failed open on unlabeled and foreign-language controls); these are improvements on top, not regressions.
+
+- **Ref-less committing actions are not floored (open design decision).** The machine floor keys on `action.ref`. A committing action with no ref — `press`/`press_key` Enter/Return (form submit), or a coordinate `clickCoords` — cannot be floored, so on a payment page a model that under-declares it `ordinary` is not backstopped by the floor (the approval card still gates any *declared* payment). The `type submit=true` case on a credit-card field is now covered (cc-form input refs are floored). Closing the ref-less case needs a **page-level payment-context** notion (if the current snapshot contains any cc/PSP floor, treat ref-less committing actions as payment-context and require a class/approval, and/or reject `clickCoords`/unknown kinds in the browse act path since the schema already excludes them). Deferred pending that decision.
+- **Approval grant is not machine-bound to the transaction (highest-value follow-up).** `claim_payment_approval_from_map` validates id + thread + TTL + one-shot only. `crates/vault/src/payment.rs::validate_payment_approval` (merchant/domain/amount/currency/fingerprint) exists but has **zero production callers**, so a valid grant can be spent on any control the model declares `payment_commit` in the same thread. Wiring this binding (and the control-level ref/generation binding above) is the natural next slice.
+- **Payment-Act timeout could double-consume.** The grant is consumed before dispatch; a `BROWSER_SIDECAR_TIMEOUT` on a payment action abandons a background CDP call that may still land. At-most-once *authorization* holds, but a re-approval after such a timeout could double-pay — warrants a user-facing warning on payment-action timeout.
+- **PSP full-page checkouts over-floor.** On a full-page PSP redirect (e.g. `checkout.stripe.com`) every control is floored, so benign "back"/"edit" clicks yield `CLASS_CONFLICT` and needless approval asks — consider scoping the origin floor to embedded PSP frames or to controls in/near the cc-form.
+- **Observability granularity.** `browser_protocol_journal_event` records `round: 0` (round not yet threaded) and four allow-list keys are not yet populated by current metric producers — forward-compatible, populate when threadable.
+- **Pre-existing, out of slice.** A stale comment/test around `read_only` in `execute_browser_tool` describes a dispatch check that does not exist (`read_only` gates only dialog acceptance); flagged for a separate cleanup.
 
 ## Delivery boundary
 
