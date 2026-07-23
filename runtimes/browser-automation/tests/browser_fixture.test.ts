@@ -378,6 +378,65 @@ describe("browser sidecar engine", () => {
     ).rejects.toMatchObject({ code: "BROWSER_STALE_GENERATION" });
   });
 
+  it("fills train search with bounded bundles and extracts three result cards", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/train`, label: "train" });
+    const first = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const accept = first.refs.find((ref) => ref.name === "Accetta tutto");
+    if (accept) {
+      await manager.act({
+        targetId: "train",
+        kind: "batch",
+        chatBundle: true,
+        generation: first.generation,
+        actions: [{ targetId: "train", kind: "click", ref: accept.ref }],
+        observationMode: "delta",
+      } as never);
+    }
+
+    const form = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const from = form.refs.find((ref) => ref.name === "Da");
+    const to = form.refs.find((ref) => ref.name === "A");
+    const typed = await manager.act({
+      targetId: "train",
+      kind: "batch",
+      chatBundle: true,
+      generation: form.generation,
+      actions: [
+        { targetId: "train", kind: "type", ref: from!.ref, text: "Nap" },
+        { targetId: "train", kind: "type", ref: to!.ref, text: "Mil" },
+      ],
+      observationMode: "delta",
+    } as never);
+    expect(typed.completedActions).toBe(2);
+
+    const ready = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const date = ready.refs.find((ref) => ref.name === "Scegli data");
+    const search = ready.refs.find((ref) => ref.name === "Cerca");
+    await manager.act({
+      targetId: "train",
+      kind: "batch",
+      chatBundle: true,
+      generation: ready.generation,
+      actions: [
+        { targetId: "train", kind: "click", ref: date!.ref },
+        { targetId: "train", kind: "wait", text: "10 giugno 2026", timeoutMs: 2_000 },
+        { targetId: "train", kind: "click", ref: search!.ref },
+        { targetId: "train", kind: "wait", text: "FR 9512", timeoutMs: 3_000 },
+      ],
+      observationMode: "extract",
+    } as never);
+
+    const extract = await manager.snapshot({ targetId: "train", observationMode: "extract" } as never);
+    const text = extract.snapshot;
+    expect(text).toContain("FR 9512");
+    expect(text).toContain("Intercity 590");
+    expect(text).toContain("Italo 9920");
+    expect(text).toContain("€49.90");
+    expect(text).toContain("€39.90");
+    expect(text).toContain("€54.90");
+  });
+
   it("selects options and can snapshot after an explicit fill_form request", async () => {
     await manager.start();
     await manager.open({ url: baseUrl, label: "booking" });
