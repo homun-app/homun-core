@@ -18225,7 +18225,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform one action or a flat bundle of at most four safe actions selected from the current observation generation, then return the updated observation. For fields with autocomplete use kind='type', then inspect the updated snapshot and select the intended suggestion when needed. Login and booking actions are allowed when they are part of the user's request. The final action that transfers money requires an approved Payment Approval Card and its exact payment_approval_id and cannot run inside a bundle. For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button.",
+            "description": "Perform one action or a flat bundle of at most four safe actions selected from the current observation generation, then return the updated observation. For fields with autocomplete use kind='type', then inspect the updated snapshot and select the intended suggestion when needed. Login and booking actions are allowed when they are part of the user's request. The final action that transfers money requires an approved Payment Approval Card and its exact payment_approval_id and cannot run inside a bundle. For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button. Every committing action — a click, a submit (kind='type' with submit=true), pressing Enter/Return, or a 'hold' — must declare action_class, judged by what the action actually does on the page, not by button wording: 'ordinary' for everyday navigation/interaction with no lasting effect (following a link, opening a menu, dismissing a dialog); 'account' for anything that changes signed-in identity or account state (logging in/out, registering, changing account settings); 'booking' for reserving/scheduling/ordering something that is not yet a completed purchase (adding to cart, selecting a flight/room/slot, confirming a reservation); 'payment_commit' for the action that actually commits money (placing an order, confirming checkout, submitting a payment form) — this class additionally requires a matching, unapproved-otherwise payment_approval_id and can never run inside a bundle.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -18246,11 +18246,36 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
                     "generation": { "type": "integer", "description": "Observation generation used to choose refs." },
                     "observationMode": { "type": "string", "enum": ["interact","delta","extract"], "description": "Observation mode to return after the action. Use delta after action bundles and extract when collecting final results." },
+                    "action_class": {
+                        "type": "string",
+                        "enum": ["ordinary","account","booking","payment_commit"],
+                        "description": "Required on every committing action (click, submit, Enter, hold). Judge by real-world effect: 'ordinary' = everyday navigation with no lasting effect; 'account' = changes signed-in identity or account state; 'booking' = reserves/selects/orders something not yet a completed purchase; 'payment_commit' = actually commits money and requires an approved payment_approval_id."
+                    },
                     "actions": {
                         "type": "array",
                         "maxItems": 4,
                         "description": "Flat bundle of at most four safe actions selected from the current observation. No nested batch. Payment actions are not allowed here.",
-                        "items": { "type": "object" }
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["click","type","fill","select","select_option","press","press_key","hover","hold","scroll","scrollIntoView","wait"],
+                                    "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
+                                },
+                                "ref": { "type": "string", "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])." },
+                                "text": { "type": "string", "description": "Text to type (kind='type') or value (kind='fill')." },
+                                "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
+                                "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
+                                "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
+                                "action_class": {
+                                    "type": "string",
+                                    "enum": ["ordinary","account","booking","payment_commit"],
+                                    "description": "Required on this item when it is a committing action (click, submit, Enter, hold). Same meaning as the top-level action_class."
+                                }
+                            },
+                            "required": ["kind"]
+                        }
                     },
                     "payment_approval_id": { "type": "string", "description": "Exact id returned by an approved Payment Approval Card. Use only for approved checkout actions and the final payment click; never invent it." },
                     "vault_secret": { "type": "string", "enum": ["cvv_one_shot"], "description": "Use with payment_approval_id to fill the CVV/CV2 field without exposing the CVV to the model. Do not include a text value when using this." },
@@ -62596,6 +62621,15 @@ mod tests {
         let props = schema.pointer("/function/parameters/properties").unwrap();
         assert!(props.get("actions").is_some());
         assert!(schema.to_string().contains("at most four"));
+    }
+
+    #[test]
+    fn browser_act_bundle_items_have_a_real_schema() {
+        let schema = super::browser_act_tool_schema();
+        let items = &schema["function"]["parameters"]["properties"]["actions"]["items"];
+        let kinds = items["properties"]["kind"]["enum"].as_array().expect("kind enum");
+        assert!(kinds.iter().any(|k| k == "click"));
+        assert!(items["required"].as_array().expect("required").iter().any(|r| r == "kind"));
     }
 
     #[test]
