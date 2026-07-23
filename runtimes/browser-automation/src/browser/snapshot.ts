@@ -122,50 +122,83 @@ const PSP_HOST_SUFFIXES = [
   "satispay.com",
 ];
 
-// Machine-only floor: a committing-capable ref (button/link) is a payment
-// control when its element sits in a <form> containing a cc-autocomplete
-// input, OR inside a frame/document whose origin is a known PSP host. This
-// NEVER reads visible label/text content — only DOM structure, the
-// `autocomplete` attribute contract, and frame/document origin. Raise-only:
-// callers use this set to raise an action's effective payment class, never
-// to lower it.
+// Roles that can carry a committing action (a plain click/submit, or a
+// type-and-submit on a field) and are therefore eligible for the payment
+// floor. Deliberately narrower than INTERACTIVE_ROLES: e.g. "checkbox" or
+// "slider" cannot themselves submit a payment form.
+const FLOOR_ELIGIBLE_ROLES = new Set([
+  "button",
+  "link",
+  "textbox",
+  "combobox",
+  "searchbox",
+  "spinbutton",
+]);
+
+// Per-ref evaluate timeout (ms). Short and explicit: a ref that detached
+// between snapshot and evaluation (or a slow/hung frame) must fail fast
+// rather than ride Playwright's 30s default, which would blow the gateway's
+// per-call sidecar deadline (10s snapshot / 15s act) and kill the warm
+// browser session. A timed-out/erroring ref is simply not floored — the
+// model's declared class + approval-card gate is the pre-existing fallback.
+const PAYMENT_FLOOR_EVAL_TIMEOUT_MS = 1_500;
+
+// Machine-only floor: a committing-capable ref (button/link/textbox/combobox/
+// searchbox/spinbutton) is a payment control when its element sits in a
+// <form> containing a cc-autocomplete input, OR inside a frame/document whose
+// origin is a known PSP host. This NEVER reads visible label/text content —
+// only DOM structure, the `autocomplete` attribute contract, and frame/
+// document origin. Raise-only: callers use this set to raise an action's
+// effective payment class, never to lower it.
+//
+// Per-ref checks run concurrently (Promise.all) and are individually
+// timeboxed — see PAYMENT_FLOOR_EVAL_TIMEOUT_MS — since this runs on every
+// observation and sequential awaits here are a hot-path latency cost.
+// Output order is the original ref order, not completion order, so callers
+// see a deterministic paymentFloorRefs list.
 export async function computePaymentFloorRefs(
   refs: BrowserRef[],
   refLocators: Map<string, Locator>,
 ): Promise<string[]> {
+  const eligible = refs.filter((ref) => FLOOR_ELIGIBLE_ROLES.has(ref.role));
+  const checks = await Promise.all(
+    eligible.map(async (ref) => {
+      const locator = refLocators.get(ref.ref);
+      if (!locator) {
+        return false;
+      }
+      return locator
+        .evaluate(
+          (el, pspSuffixes) => {
+            const form = el.closest("form");
+            const inCcForm = !!form && !!form.querySelector('input[autocomplete^="cc-"]');
+            let origin = "";
+            try {
+              origin = el.ownerDocument.defaultView?.location.origin ?? "";
+            } catch {
+              origin = "";
+            }
+            let host = "";
+            try {
+              host = new URL(origin).hostname;
+            } catch {
+              host = "";
+            }
+            const inPspFrame = (pspSuffixes as string[]).some(
+              (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+            );
+            return inCcForm || inPspFrame;
+          },
+          PSP_HOST_SUFFIXES,
+          { timeout: PAYMENT_FLOOR_EVAL_TIMEOUT_MS },
+        )
+        .catch(() => false);
+    }),
+  );
   const floored: string[] = [];
-  for (const ref of refs) {
-    if (ref.role !== "button" && ref.role !== "link") {
-      continue;
-    }
-    const locator = refLocators.get(ref.ref);
-    if (!locator) {
-      continue;
-    }
-    const isPaymentControl = await locator
-      .evaluate((el, pspSuffixes) => {
-        const form = el.closest("form");
-        const inCcForm = !!form && !!form.querySelector('input[autocomplete^="cc-"]');
-        let origin = "";
-        try {
-          origin = el.ownerDocument.defaultView?.location.origin ?? "";
-        } catch {
-          origin = "";
-        }
-        let host = "";
-        try {
-          host = new URL(origin).hostname;
-        } catch {
-          host = "";
-        }
-        const inPspFrame = (pspSuffixes as string[]).some(
-          (suffix) => host === suffix || host.endsWith(`.${suffix}`),
-        );
-        return inCcForm || inPspFrame;
-      }, PSP_HOST_SUFFIXES)
-      .catch(() => false);
-    if (isPaymentControl) {
-      floored.push(ref.ref);
+  for (let i = 0; i < eligible.length; i++) {
+    if (checks[i]) {
+      floored.push(eligible[i].ref);
     }
   }
   return floored;
