@@ -1,0 +1,31 @@
+{
+  "packages": [
+    {
+      "name": "faster-whisper",
+      "version": "1.2.1",
+      "source": "https://pypi.org/project/faster-whisper/1.2.1/",
+      "license": "MIT",
+      "distribution": "installed-when-container-is-built"
+    },
+    {
+      "name": "graphifyy",
+      "version": "0.9.25",
+      "source": "https://pypi.org/project/graphifyy/0.9.25/",
+      "license": "MIT",
+      "distribution": "installed-when-container-is-built"
+    },
+    {
+      "name": "python-pptx",
+      "version": "1.0.2",
+      "source": "https://pypi.org/project/python-pptx/1.0.2/",
+      "license": "MIT",
+      "distribution": "installed-when-container-is-built"
+    }
+  ],
+  "model": {
+    "name": "faster-whisper-large-v3-turbo",
+    "source": "https://huggingface.co/dropbox-dash/faster-whisper-large-v3-turbo",
+    "license": "MIT",
+    "distribution": "downloaded-at-runtime"
+  }
+}

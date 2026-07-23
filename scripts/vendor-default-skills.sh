@@ -18,6 +18,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${HOMUN_DATA_DIR:-$HOME/.homun}/skills"
 DEST="$HERE/resources/default-skills"
 MANIFEST="$SRC/homuncoder-skills.txt"
+LICENSE="$DEST/LICENSE.md"
 
 if [[ ! -f "$MANIFEST" ]]; then
   echo "✗ manifest non trovato: $MANIFEST" >&2
@@ -25,8 +26,18 @@ if [[ ! -f "$MANIFEST" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$LICENSE" ]]; then
+  echo "✗ licenza MIT dello snapshot non trovata: $LICENSE" >&2
+  exit 1
+fi
+
+license_backup="$(mktemp)"
+trap 'rm -f "$license_backup"' EXIT
+cp "$LICENSE" "$license_backup"
+
 rm -rf "$DEST"
 mkdir -p "$DEST"
+cp "$license_backup" "$DEST/LICENSE.md"
 cp "$MANIFEST" "$DEST/homuncoder-skills.txt"
 
 count=0
