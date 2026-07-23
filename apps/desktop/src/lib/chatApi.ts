@@ -1004,6 +1004,22 @@ export async function openTurnStream(turnId: string, since: number = 0): Promise
   return res;
 }
 
+export interface TurnStatusResponse {
+  turn_id: string;
+  thread_id: string | null;
+  request_id: string | null;
+  status: string;
+  source: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function fetchTurnStatus(turnId: string): Promise<TurnStatusResponse> {
+  return gatewayJson<TurnStatusResponse>(
+    `/api/chat/turns/${encodeURIComponent(turnId)}`,
+  );
+}
+
 /** Durable cockpit projection for the working island (mirrors the Rust
  *  `ThreadActivityProjection`): the latest plan across the thread, activity
  *  accumulated cross-turn, and the latest turn's status. Read at rest so the
