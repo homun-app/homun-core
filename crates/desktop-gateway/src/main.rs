@@ -31228,7 +31228,10 @@ fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
 fn browser_call_deadline(method: local_first_browser_automation::BrowserMethod) -> std::time::Duration {
     use local_first_browser_automation::BrowserMethod::*;
     match method {
-        Navigate => std::time::Duration::from_secs(25),
+        // `Open` creates the managed tab AND does the first navigation (a superset
+        // of `Navigate`'s work, typically the slowest step of a session on a cold
+        // tab), so it gets at least `Navigate`'s budget — never the 10s catch-all.
+        Navigate | Open => std::time::Duration::from_secs(25),
         Act => std::time::Duration::from_secs(15),
         _ => std::time::Duration::from_secs(10),
     }
@@ -76878,6 +76881,8 @@ data: [DONE]\n";
     fn sidecar_deadlines_match_the_budget() {
         use std::time::Duration;
         assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Navigate), Duration::from_secs(25));
+        // Open creates+navigates a fresh tab (heavier than Navigate) → same 25s, not the 10s catch-all.
+        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Open), Duration::from_secs(25));
         assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Act), Duration::from_secs(15));
         assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Snapshot), Duration::from_secs(10));
     }
