@@ -1,7 +1,11 @@
 [package]
 name = "local-first-engine"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 # The agentic ReAct loop (motore #1, ADR 0021) extracted out of the gateway monolith
 # (ADR 0024). The gateway becomes the postman (HTTP/auth/transport); the engine owns the

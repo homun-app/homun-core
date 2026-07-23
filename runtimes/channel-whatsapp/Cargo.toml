@@ -5,6 +5,10 @@
 name = "channel-whatsapp"
 version = "0.1.0"
 edition = "2024"
+authors = ["Fabio Cantone"]
+license = "FSL-1.1-ALv2"
+repository = "https://github.com/homun-app/homun-core"
+homepage = "https://homun.app"
 description = "WhatsApp channel bridge sidecar (wa-rs) for the local-first assistant"
 
 # Empty [workspace] detaches this crate from the parent repo's workspace.

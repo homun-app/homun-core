@@ -118,5 +118,6 @@ tools, channels, connectors, or remote access.
 
 ## License
 
-[Functional Source License v1.1](LICENSE.md) (FSL-1.1), converting to Apache 2.0 over
-time. See [LICENSE.md](LICENSE.md) for the full terms.
+[Functional Source License v1.1](LICENSE.md) (`FSL-1.1-ALv2`). Each FSL-licensed
+version becomes Apache-2.0 two years after that version is made available. See
+[LICENSE.md](LICENSE.md) for the complete terms.
