@@ -3,6 +3,7 @@ import { existsSync, rmSync, mkdirSync, cpSync, chmodSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildHostComputerHelper } from "./build-host-computer-helper.mjs";
+import { stageLicenseCompliance } from "./license-compliance.mjs";
 
 const appRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const repoRoot = resolve(appRoot, "../..");
@@ -152,6 +153,26 @@ for (const entry of ["tsconfig.json", "package-lock.json"]) {
   const from = join(baSource, entry);
   if (existsSync(from)) cpSync(from, join(baTarget, entry));
 }
+
+const electronChromiumNotice = join(
+  appRoot,
+  "node_modules",
+  "electron",
+  "dist",
+  "LICENSES.chromium.html",
+);
+if (!existsSync(electronChromiumNotice)) {
+  // Electron 42 downloads its platform binary lazily instead of through an npm
+  // install hook. The release archive also supplies the Chromium notice that
+  // must be bundled, so materialize it before the fail-closed compliance pass.
+  run(
+    process.execPath,
+    [join(appRoot, "node_modules", "electron", "install.js")],
+    appRoot,
+  );
+}
+
+await stageLicenseCompliance({ repoRoot, outputDir: resourcesDir });
 
 console.log(`Prepared Electron resources at ${resourcesDir}`);
 console.log(`Gateway: ${relative(repoRoot, gatewayTarget)}`);
