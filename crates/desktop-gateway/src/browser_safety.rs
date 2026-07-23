@@ -8,6 +8,30 @@
 
 use serde_json::Value;
 
+/// The effect class of a committing browser action. Ordering is the safety
+/// lattice: a machine floor may only raise the class, never lower it, so
+/// `declared.max(floor)` is the effective class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ActionClass {
+    Ordinary,
+    Account,
+    Booking,
+    PaymentCommit,
+}
+
+/// The class the model declared on the action. `None` means it declared none —
+/// which, for a committing action, is a fail-closed rejection (see
+/// `evaluate_browser_action`), never an implicit "ordinary".
+pub fn declared_action_class(action: &Value) -> Option<ActionClass> {
+    match action.get("action_class").and_then(Value::as_str)? {
+        "ordinary" => Some(ActionClass::Ordinary),
+        "account" => Some(ActionClass::Account),
+        "booking" => Some(ActionClass::Booking),
+        "payment_commit" => Some(ActionClass::PaymentCommit),
+        _ => None,
+    }
+}
+
 /// Substring patterns (EN + IT) that mark a control as high-risk. Matching is
 /// conservative substring on the element label. Search/`cerca` is deliberately
 /// NOT here — running a search is allowed; buying/booking/logging in is not.
@@ -223,5 +247,23 @@ mod tests {
         assert!(
             high_risk_reason_with_payment_approval(&approved, snapshot, Some("pay_123")).is_none()
         );
+    }
+
+    #[test]
+    fn declared_class_parses_the_four_names_and_rejects_unknown() {
+        assert_eq!(declared_action_class(&json!({"action_class":"ordinary"})), Some(ActionClass::Ordinary));
+        assert_eq!(declared_action_class(&json!({"action_class":"account"})), Some(ActionClass::Account));
+        assert_eq!(declared_action_class(&json!({"action_class":"booking"})), Some(ActionClass::Booking));
+        assert_eq!(declared_action_class(&json!({"action_class":"payment_commit"})), Some(ActionClass::PaymentCommit));
+        assert_eq!(declared_action_class(&json!({"action_class":"wat"})), None);
+        assert_eq!(declared_action_class(&json!({"kind":"click"})), None);
+    }
+
+    #[test]
+    fn action_class_lattice_orders_payment_highest() {
+        assert!(ActionClass::PaymentCommit > ActionClass::Booking);
+        assert!(ActionClass::Booking > ActionClass::Account);
+        assert!(ActionClass::Account > ActionClass::Ordinary);
+        assert_eq!(ActionClass::Ordinary.max(ActionClass::PaymentCommit), ActionClass::PaymentCommit);
     }
 }
