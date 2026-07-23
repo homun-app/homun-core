@@ -16777,10 +16777,22 @@ pub(crate) async fn collect_openai_stream(
     let mut markers = local_first_desktop_gateway::markers::StreamMarkerFilter::default();
     let mut done = false;
     let mut got_any = false;
+    let mut saw_finish_reason = false;
     while !done {
         // First chunk gets a generous budget (cold model load / connect latency);
         // subsequent chunks use the tighter inter-token idle.
-        let wait = if got_any { idle } else { first_token };
+        // Some OpenAI-compatible providers emit a non-null `finish_reason` but
+        // omit `[DONE]` and keep the HTTP connection alive. Once the semantic
+        // terminal signal arrives, allow only a short grace window for a
+        // trailing usage event instead of holding the whole turn until the
+        // multi-minute idle timeout.
+        let wait = if saw_finish_reason {
+            std::time::Duration::from_millis(750)
+        } else if got_any {
+            idle
+        } else {
+            first_token
+        };
         match tokio::time::timeout(wait, stream.next()).await {
             Err(_) => {
                 // Idle stall: if tokens already arrived, SALVAGE the partial response
@@ -16813,6 +16825,15 @@ pub(crate) async fn collect_openai_stream(
                         continue;
                     }
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        if json
+                            .get("choices")
+                            .and_then(|choices| choices.get(0))
+                            .and_then(|choice| choice.get("finish_reason"))
+                            .and_then(|reason| reason.as_str())
+                            .is_some_and(|reason| !reason.is_empty())
+                        {
+                            saw_finish_reason = true;
+                        }
                         if let Some(fragment) = json
                             .get("choices")
                             .and_then(|c| c.get(0))
@@ -73978,6 +73999,65 @@ data: [DONE]\n";
         let plain = "{\"choices\":[{\"message\":{\"content\":\"hi\"}}]}";
         let body3 = crate::reassemble_openai_stream(plain);
         assert_eq!(body3["choices"][0]["message"]["content"], "hi");
+    }
+
+    #[tokio::test]
+    async fn openai_stream_finishes_when_provider_sends_finish_reason_but_keeps_socket_open() {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test stream");
+        let address = listener.local_addr().expect("test stream address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept test stream");
+            let payload = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"final answer\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: keep-alive\r\n\r\n{:X}\r\n{}\r\n",
+                payload.len(),
+                payload,
+            );
+            socket.write_all(response.as_bytes()).await.expect("write test stream");
+            socket.flush().await.expect("flush test stream");
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        });
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .expect("open test stream");
+        let (mpsc, _mpsc_rx) = tokio::sync::mpsc::channel(4);
+        let (tx, _) = tokio::sync::broadcast::channel(4);
+        let sink = super::StreamSink {
+            mpsc,
+            entry: std::sync::Arc::new(super::StreamEntry {
+                lines: std::sync::Mutex::new(Vec::new()),
+                tx,
+                finished: std::sync::atomic::AtomicBool::new(false),
+                last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+                thread_id: None,
+            }),
+        };
+
+        let body = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            super::collect_openai_stream(
+                response,
+                std::time::Duration::from_secs(1),
+                std::time::Duration::from_secs(30),
+                &sink,
+            ),
+        )
+        .await
+        .expect("finish_reason must terminate a stream without waiting for the idle timeout")
+        .expect("stream is valid");
+
+        server.abort();
+        assert_eq!(body["choices"][0]["message"]["content"], "final answer");
+        assert_eq!(body["choices"][0]["finish_reason"], "stop");
     }
 
     #[test]
