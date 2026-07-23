@@ -29073,9 +29073,9 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             verbose: verbose_debug(),
             // S2 T5: resolved above from (routing_binding, Forcing::Specific, turn-index).
             forced_tool: forced_tool.clone(),
-            // E2: this is the manager (chat) turn, NOT the browse sub-turn — the granular browser
-            // tools it drives mid-turn can include `browser_done`, but that must never be treated as
-            // ending the WHOLE manager turn (only the browse sub-turn's own terminal should).
+            // E2: this is the manager (chat) turn, NOT the browse sub-turn. Its browser tool set
+            // (`browser_registry_cached_tools`) deliberately excludes `browser_done` — reaching this
+            // turn's dispatcher is a hallucination — so the terminal must stay disarmed here.
             browser_subturn: false,
         };
         // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern, so it
