@@ -12,7 +12,6 @@ const FINAL_PAYMENT_LABEL_PATTERNS: &[&str] = &[
     "buy",
     "pay",
     "payment",
-    "checkout",
     "purchase",
     "place order",
     "order now",
@@ -133,7 +132,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const SNAP: &str = "- textbox \"Da\" [ref=e1]\n- button \"Acquista ora\" [ref=e9]\n- button \"Cerca\" [ref=e7]\n- button \"Accedi\" [ref=e8]\n- button \"Prenota\" [ref=e11]\n- button \"Tieni premuto per confermare di essere umano\" [ref=e3]";
+    const SNAP: &str = "- textbox \"Da\" [ref=e1]\n- button \"Acquista ora\" [ref=e9]\n- button \"Cerca\" [ref=e7]\n- button \"Accedi\" [ref=e8]\n- button \"Prenota\" [ref=e11]\n- button \"Vai al checkout\" [ref=e12]\n- button \"Tieni premuto per confermare di essere umano\" [ref=e3]";
 
     #[test]
     fn blocks_evaluate() {
@@ -152,7 +151,7 @@ mod tests {
 
     #[test]
     fn allows_login_and_booking_but_blocks_payment() {
-        for reference in ["e7", "e8", "e11"] {
+        for reference in ["e7", "e8", "e11", "e12"] {
             assert!(
                 high_risk_reason(&json!({"kind":"click","ref":reference}), SNAP).is_none(),
                 "{reference} should be allowed"
