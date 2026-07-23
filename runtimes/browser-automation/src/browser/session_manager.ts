@@ -42,6 +42,9 @@ type PageState = {
   page: Page;
   label?: string;
   refs: Map<string, Locator>;
+  generation: number;
+  lastSnapshot?: string;
+  lastSnapshotFingerprint?: string;
   consoleMessages: ConsoleEntry[];
   pendingDialog?: Dialog;
   dialogWaiters: Array<(dialog: Dialog) => void>;
@@ -225,6 +228,9 @@ export class BrowserSessionManager {
       chars: number;
       refs: number;
     };
+    generation: number;
+    fingerprint: string;
+    observationMode: "interact" | "delta" | "extract";
   }> {
     const state = await this.resolvePage(params.targetId);
     // Let late content settle before snapshotting: a static page (Wikipedia) is already
@@ -233,8 +239,15 @@ export class BrowserSessionManager {
     // snapshotting an empty shell. Bounded so it never hangs on a never-idle SPA.
     await state.page.waitForLoadState("networkidle", { timeout: 2_500 }).catch(() => {});
     await dismissCommonOverlays(state.page);
-    const snapshot = await createSnapshot(state.page, params.targetId, params);
+    state.generation += 1;
+    const snapshot = await createSnapshot(state.page, params.targetId, {
+      ...params,
+      previousSnapshot: state.lastSnapshot,
+      generation: state.generation,
+    });
     state.refs = snapshot.refLocators;
+    state.lastSnapshot = snapshot.snapshot;
+    state.lastSnapshotFingerprint = snapshot.fingerprint;
     return {
       targetId: snapshot.targetId,
       url: snapshot.url,
@@ -243,6 +256,9 @@ export class BrowserSessionManager {
       refsMode: snapshot.refsMode,
       snapshotFormat: snapshot.snapshotFormat,
       stats: snapshot.stats,
+      generation: snapshot.generation,
+      fingerprint: snapshot.fingerprint,
+      observationMode: snapshot.observationMode,
     };
   }
 
@@ -264,8 +280,15 @@ export class BrowserSessionManager {
       return result;
     }
     await waitForPageToSettle(state.page, action);
-    const snapshot = await createSnapshot(state.page, action.targetId);
+    state.generation += 1;
+    const snapshot = await createSnapshot(state.page, action.targetId, {
+      ...(action as Record<string, unknown>),
+      previousSnapshot: state.lastSnapshot,
+      generation: state.generation,
+    } as BrowserSnapshotOptions);
     state.refs = snapshot.refLocators;
+    state.lastSnapshot = snapshot.snapshot;
+    state.lastSnapshotFingerprint = snapshot.fingerprint;
     return {
       ...result,
       targetId: snapshot.targetId,
@@ -274,6 +297,9 @@ export class BrowserSessionManager {
       refsMode: snapshot.refsMode,
       snapshotFormat: snapshot.snapshotFormat,
       stats: snapshot.stats,
+      generation: snapshot.generation,
+      fingerprint: snapshot.fingerprint,
+      observationMode: snapshot.observationMode,
     };
   }
 
@@ -470,6 +496,7 @@ export class BrowserSessionManager {
       page,
       label,
       refs: new Map(),
+      generation: 0,
       consoleMessages: [],
       dialogWaiters: [],
     };

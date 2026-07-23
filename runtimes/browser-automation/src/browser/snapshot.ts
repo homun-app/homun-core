@@ -20,7 +20,12 @@ export type BrowserSnapshot = {
     chars: number;
     refs: number;
   };
+  generation: number;
+  fingerprint: string;
+  observationMode: BrowserObservationMode;
 };
+
+export type BrowserObservationMode = "interact" | "delta" | "extract";
 
 export type BrowserSnapshotOptions = {
   snapshotFormat?: "ai" | "legacy";
@@ -32,6 +37,15 @@ export type BrowserSnapshotOptions = {
   timeoutMs?: number;
   maxChars?: number;
   urls?: boolean;
+  observationMode?: BrowserObservationMode;
+  previousSnapshot?: string;
+  generation?: number;
+};
+
+const OBSERVATION_LIMITS: Record<BrowserObservationMode, number> = {
+  interact: 6_000,
+  delta: 8_000,
+  extract: 16_000,
 };
 
 // Role grouping follows the OpenClaw browser snapshot contract (MIT) so our
@@ -145,6 +159,7 @@ async function createAiSnapshot(
   targetId: string,
   options?: BrowserSnapshotOptions,
 ): Promise<BrowserSnapshot> {
+  const observedMode = observationMode(options);
   await enrichPageAccessibility(page);
   const timeout = Math.max(500, Math.min(60_000, Math.floor(options?.timeoutMs ?? 5_000)));
   const ariaSnapshot = await page.ariaSnapshot({ mode: "ai", timeout });
@@ -155,14 +170,13 @@ async function createAiSnapshot(
   const rawSnapshot = options?.urls
     ? appendSnapshotUrls(builtSnapshot.snapshot, await collectSnapshotUrls(page))
     : builtSnapshot.snapshot;
-  const limit =
-    typeof options?.maxChars === "number" && Number.isFinite(options.maxChars) && options.maxChars > 0
-      ? Math.floor(options.maxChars)
-      : undefined;
+  const observedSnapshot =
+    observedMode === "delta" ? structuralDelta(options?.previousSnapshot, rawSnapshot) : rawSnapshot;
+  const limit = limitForObservation(observedMode, options?.maxChars);
   const snapshot =
-    limit && rawSnapshot.length > limit
-      ? `${rawSnapshot.slice(0, limit)}\n\n[...TRUNCATED - page too large]`
-      : rawSnapshot;
+    observedSnapshot.length > limit
+      ? `${observedSnapshot.slice(0, limit)}\n\n[...TRUNCATED - page too large]`
+      : observedSnapshot;
   const refs = roleOptions ? refsFromAiSnapshot(snapshot) : builtSnapshot.refs;
   const refLocators = new Map<string, Locator>();
   for (const ref of refs) {
@@ -177,6 +191,9 @@ async function createAiSnapshot(
     refsMode: "aria",
     snapshotFormat: "ai",
     stats: snapshotStats(snapshot, refs.length),
+    generation: normalizedGeneration(options?.generation),
+    fingerprint: fingerprintSnapshot(snapshot),
+    observationMode: observedMode,
   };
 }
 
@@ -207,6 +224,14 @@ type RoleSnapshotOptions = {
 };
 
 function roleSnapshotOptions(options?: BrowserSnapshotOptions): RoleSnapshotOptions | null {
+  const observedMode = observationMode(options);
+  if (observedMode === "interact") {
+    return {
+      interactive: options?.interactive ?? true,
+      compact: options?.compact ?? true,
+      maxDepth: typeof options?.depth === "number" && Number.isFinite(options.depth) ? options.depth : 12,
+    };
+  }
   if (
     options?.mode !== "efficient" &&
     options?.interactive !== true &&
@@ -357,6 +382,9 @@ async function createLegacySnapshot(page: Page, targetId: string): Promise<Brows
     refsMode: "locator",
     snapshotFormat: "legacy",
     stats: snapshotStats(snapshot, refs.length),
+    generation: 0,
+    fingerprint: fingerprintSnapshot(snapshot),
+    observationMode: "extract",
   };
 }
 
@@ -366,6 +394,43 @@ function snapshotStats(snapshot: string, refs: number): BrowserSnapshot["stats"]
     chars: snapshot.length,
     refs,
   };
+}
+
+function observationMode(options?: BrowserSnapshotOptions): BrowserObservationMode {
+  const mode = options?.observationMode;
+  return mode === "delta" || mode === "extract" || mode === "interact" ? mode : "extract";
+}
+
+function limitForObservation(mode: BrowserObservationMode, maxChars?: number): number {
+  const cap = OBSERVATION_LIMITS[mode];
+  if (typeof maxChars === "number" && Number.isFinite(maxChars) && maxChars > 0) {
+    return Math.min(Math.floor(maxChars), cap);
+  }
+  return cap;
+}
+
+function normalizedGeneration(generation?: number): number {
+  return typeof generation === "number" && Number.isFinite(generation) && generation > 0 ? Math.floor(generation) : 0;
+}
+
+function fingerprintSnapshot(snapshot: string): string {
+  let hash = 5381;
+  for (let index = 0; index < snapshot.length; index += 1) {
+    hash = ((hash << 5) + hash) ^ snapshot.charCodeAt(index);
+  }
+  return `snap_${(hash >>> 0).toString(16)}`;
+}
+
+function structuralDelta(previous: string | undefined, current: string): string {
+  if (!previous) {
+    return current;
+  }
+  const oldLines = new Set(previous.split("\n").map((line) => line.trim()).filter(Boolean));
+  const added = current
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !oldLines.has(line));
+  return added.length ? added.join("\n") : "[no structural changes detected]";
 }
 
 async function resolveRole(locator: Locator): Promise<string> {

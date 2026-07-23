@@ -256,6 +256,45 @@ describe("browser sidecar engine", () => {
     expect(snapshot.snapshot).toContain("/docs");
   });
 
+  it("returns bounded interact, delta and extract observations", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/train`, label: "train" });
+
+    const interact = await manager.snapshot({
+      targetId: "train",
+      observationMode: "interact",
+    } as never);
+    expect(interact.observationMode).toBe("interact");
+    expect(interact.generation).toBeGreaterThan(0);
+    expect(interact.fingerprint).toMatch(/^snap_/);
+    expect(interact.stats.chars).toBeLessThanOrEqual(6_200);
+    expect(interact.snapshot).toContain('textbox "Da"');
+
+    const from = interact.refs.find((ref) => ref.name === "Da");
+    const typed = await manager.act({
+      targetId: "train",
+      kind: "type",
+      ref: from!.ref,
+      text: "Nap",
+      observationMode: "delta",
+      generation: interact.generation,
+    } as never);
+    expect(typed.observationMode).toBe("delta");
+    expect(typed.generation).toBeGreaterThan(interact.generation);
+    expect(typed.fingerprint).toMatch(/^snap_/);
+    expect(typed.stats!.chars).toBeLessThanOrEqual(8_200);
+    expect(JSON.stringify(typed)).toContain("Napoli Centrale");
+
+    const extract = await manager.snapshot({
+      targetId: "train",
+      observationMode: "extract",
+      maxChars: 16_000,
+    } as never);
+    expect(extract.observationMode).toBe("extract");
+    expect(extract.generation).toBeGreaterThan(typed.generation!);
+    expect(extract.stats.chars).toBeLessThanOrEqual(16_200);
+  });
+
   it("selects options and can snapshot after an explicit fill_form request", async () => {
     await manager.start();
     await manager.open({ url: baseUrl, label: "booking" });

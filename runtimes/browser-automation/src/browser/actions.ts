@@ -1,5 +1,6 @@
 import type { Locator, Page } from "playwright-core";
 import { BrowserAutomationError } from "../contracts.js";
+import type { BrowserObservationMode } from "./snapshot.js";
 
 type SnapshotAfterAction = {
   snapshotAfter?: boolean;
@@ -31,6 +32,9 @@ export type BrowserActionResult = {
     chars: number;
     refs: number;
   };
+  generation?: number;
+  fingerprint?: string;
+  observationMode?: BrowserObservationMode;
   filledRefs?: string[];
   failedRefs?: Array<{ ref: string; error: string }>;
   batchResults?: Array<BrowserActionResult | { ok: false; error: string }>;
