@@ -721,8 +721,8 @@ pub fn cancel_chat_turn(
     task.status = TaskStatus::Cancelled;
     task.blocked_reason = Some("cancelled by user/server".into());
     task.updated_at = now;
+    store.release_resources(&task)?;
     if !was_running {
-        store.release_resources(&task)?;
         task.lease_owner = None;
         task.lease_expires_at = None;
         task.last_heartbeat_at = None;
@@ -1039,6 +1039,33 @@ mod cancel_tests {
 
         assert!(cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
 
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn cancel_releases_resources_when_turn_is_running_but_preserves_lease() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let mut task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("1:worker-a".into());
+        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full").unwrap();
+        s.reserve_resources(&task, "worker-a").unwrap();
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            1
+        );
+
+        assert!(cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
+
+        let cancelled = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+        assert_eq!(cancelled.lease_owner.as_deref(), Some("1:worker-a"));
         assert_eq!(
             s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
             0
