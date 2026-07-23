@@ -140,7 +140,7 @@ fn interpret_pending_turn(state: &crate::AppState, pending: &TurnSteeringRecord)
 
     let binding = crate::active_routing_binding(state, Some(&pending.thread_id));
     for steering in claimed {
-        let decision = crate::resolve_semantic_decision(
+        let decision = crate::resolve_steering_semantic_decision(
             state,
             Some(&steering.thread_id),
             &steering.content,

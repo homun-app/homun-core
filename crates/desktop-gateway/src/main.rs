@@ -8315,6 +8315,27 @@ pub(crate) fn resolve_semantic_decision(
     active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
     binding: Option<&RoutingBinding>,
 ) -> semantic_decision::ValidatedSemanticDecision {
+    resolve_semantic_decision_for_context(state, thread_id, prompt, active, binding, false)
+}
+
+pub(crate) fn resolve_steering_semantic_decision(
+    state: &AppState,
+    thread_id: Option<&str>,
+    prompt: &str,
+    active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
+    binding: Option<&RoutingBinding>,
+) -> semantic_decision::ValidatedSemanticDecision {
+    resolve_semantic_decision_for_context(state, thread_id, prompt, active, binding, true)
+}
+
+fn resolve_semantic_decision_for_context(
+    state: &AppState,
+    thread_id: Option<&str>,
+    prompt: &str,
+    active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
+    binding: Option<&RoutingBinding>,
+    steering_control: bool,
+) -> semantic_decision::ValidatedSemanticDecision {
     let capabilities = semantic_capability_registry();
     let recent_thread_context = bounded_thread_context(state, thread_id);
     let input = semantic_decision::SemanticDecisionInput {
@@ -8387,13 +8408,19 @@ pub(crate) fn resolve_semantic_decision(
             Err("model_unavailable".to_string())
         }
     };
-    semantic_decision::resolve_model_value(
-        model_value,
-        &capabilities,
-        active,
-        resolved.as_ref().map(|value| value.provider_id.as_str()),
-        resolved.as_ref().map(|value| value.model.as_str()),
-    )
+    let provider = resolved.as_ref().map(|value| value.provider_id.as_str());
+    let model = resolved.as_ref().map(|value| value.model.as_str());
+    if steering_control {
+        semantic_decision::resolve_steering_model_value(
+            model_value,
+            &capabilities,
+            active,
+            provider,
+            model,
+        )
+    } else {
+        semantic_decision::resolve_model_value(model_value, &capabilities, active, provider, model)
+    }
 }
 
 // Test-only fixture builder: its last production caller was the hardcoded

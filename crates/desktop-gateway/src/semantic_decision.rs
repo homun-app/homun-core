@@ -501,11 +501,32 @@ pub(crate) fn resolve_model_value(
     provider: Option<&str>,
     model: Option<&str>,
 ) -> ValidatedSemanticDecision {
+    resolve_model_value_for_context(value, registry, active, provider, model, false)
+}
+
+pub(crate) fn resolve_steering_model_value(
+    value: Result<serde_json::Value, String>,
+    registry: &[CapabilitySemanticEntry],
+    active: Option<&ObjectiveContractRecord>,
+    provider: Option<&str>,
+    model: Option<&str>,
+) -> ValidatedSemanticDecision {
+    resolve_model_value_for_context(value, registry, active, provider, model, true)
+}
+
+fn resolve_model_value_for_context(
+    value: Result<serde_json::Value, String>,
+    registry: &[CapabilitySemanticEntry],
+    active: Option<&ObjectiveContractRecord>,
+    provider: Option<&str>,
+    model: Option<&str>,
+    steering_control: bool,
+) -> ValidatedSemanticDecision {
     let value = match value {
         Ok(value) => value,
         Err(reason) => return safe_fallback(active, &reason),
     };
-    let decision = match serde_json::from_value::<SemanticDecision>(value) {
+    let mut decision = match serde_json::from_value::<SemanticDecision>(value) {
         Ok(decision) => decision,
         Err(_) => {
             let mut fallback = safe_fallback(active, "invalid_model_output");
@@ -517,6 +538,16 @@ pub(crate) fn resolve_model_value(
         let mut fallback = safe_fallback(active, "low_confidence");
         fallback.provenance.validator_rejection_code = Some("low_confidence".to_string());
         return fallback;
+    }
+    if steering_control {
+        // A steering message controls the already-running execution. Its semantic
+        // relationship and disposition are authoritative; a newly proposed route is
+        // neither executed nor needed to apply that control. Providers sometimes fill
+        // `execution_shape=workflow` while leaving `selected_capability` null, which is
+        // invalid for a new objective but must not discard an otherwise valid stop,
+        // replan, finalize, or continue decision.
+        decision.execution_shape = ExecutionShape::AgentLoop;
+        decision.selected_capability = None;
     }
     match validate_decision(decision, registry, active) {
         Ok(mut validated) => {
@@ -851,6 +882,31 @@ mod tests {
         let decision: SemanticDecision = serde_json::from_value(value).unwrap();
         let validated = validate_decision(decision, &registry(), None).unwrap();
 
+        assert_eq!(
+            validated.decision.steering_disposition,
+            SteeringDisposition::FinalizeWithCurrentEvidence
+        );
+    }
+
+    #[test]
+    fn steering_control_ignores_irrelevant_incomplete_execution_routing() {
+        let mut decision = read_only_decision();
+        decision.relationship_to_active_objective = ObjectiveRelationship::SameObjective;
+        decision.steering_disposition = SteeringDisposition::FinalizeWithCurrentEvidence;
+        decision.execution_shape = ExecutionShape::Workflow;
+        decision.selected_capability = None;
+
+        let validated = resolve_steering_model_value(
+            Ok(serde_json::to_value(decision).unwrap()),
+            &registry(),
+            None,
+            Some("provider"),
+            Some("model"),
+        );
+
+        assert_eq!(validated.provenance.fallback_reason, None);
+        assert_eq!(validated.decision.execution_shape, ExecutionShape::AgentLoop);
+        assert_eq!(validated.decision.selected_capability, None);
         assert_eq!(
             validated.decision.steering_disposition,
             SteeringDisposition::FinalizeWithCurrentEvidence
