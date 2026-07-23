@@ -432,6 +432,12 @@ impl TaskStore {
             ("claimed_at", "INTEGER"),
             ("applied_at", "INTEGER"),
             ("cancelled_at", "INTEGER"),
+            ("semantic_decision_json", "TEXT"),
+            ("interpreted_at", "INTEGER"),
+            ("completed_at", "INTEGER"),
+            ("last_interpretation_error", "TEXT"),
+            ("next_retry_at", "INTEGER"),
+            ("interpretation_attempts", "INTEGER NOT NULL DEFAULT 0"),
         ];
         for (column, definition) in steering_columns {
             if !column_exists(&self.connection, "turn_steering", column) {
@@ -446,7 +452,7 @@ impl TaskStore {
             [],
         )?;
         self.connection.execute(
-            "UPDATE task_runtime_metadata SET value = '9' WHERE key = 'schema_version'",
+            "UPDATE task_runtime_metadata SET value = '10' WHERE key = 'schema_version'",
             [],
         )?;
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
@@ -745,22 +751,27 @@ impl TaskStore {
                 "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
                         source_message_id, content, payload_json, objective_revision, status,
                         revision, created_at, updated_at, claimed_run_id, claimed_round,
-                        claimed_at, applied_at, cancelled_at, consumed_at
+                        claimed_at, applied_at, cancelled_at, consumed_at,
+                        semantic_decision_json, interpreted_at, completed_at,
+                        last_interpretation_error, next_retry_at, interpretation_attempts
                  FROM turn_steering
                  WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
                    AND active_turn_id = ?4 AND status = 'pending'
+                   AND (next_retry_at IS NULL OR next_retry_at <= ?5)
                  ORDER BY steering_id ASC",
             )?;
             statement
-                .query_map(params![user_id, workspace_id, thread_id, active_turn_id], map_turn_steering_row)?
+                .query_map(params![user_id, workspace_id, thread_id, active_turn_id, now], map_turn_steering_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
         tx.execute(
             "UPDATE turn_steering
              SET status = 'claimed', claimed_run_id = ?1, claimed_round = ?2,
-                 claimed_at = ?3, consumed_at = ?3, updated_at = ?3
+                 claimed_at = ?3, consumed_at = ?3, updated_at = ?3,
+                 revision = revision + 1
              WHERE user_id = ?4 AND workspace_id = ?5 AND thread_id = ?6
-               AND active_turn_id = ?7 AND status = 'pending'",
+               AND active_turn_id = ?7 AND status = 'pending'
+               AND (next_retry_at IS NULL OR next_retry_at <= ?3)",
             params![run_id, round as i64, now, user_id, workspace_id, thread_id, active_turn_id],
         )?;
         tx.commit()?;
@@ -773,6 +784,7 @@ impl TaskStore {
                 record.claimed_at = Some(now);
                 record.updated_at = now;
                 record.consumed_at = Some(now);
+                record.revision += 1;
                 record
             })
             .collect())
@@ -800,7 +812,9 @@ impl TaskStore {
             "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
                     source_message_id, content, payload_json, objective_revision, status,
                     revision, created_at, updated_at, claimed_run_id, claimed_round,
-                    claimed_at, applied_at, cancelled_at, consumed_at
+                    claimed_at, applied_at, cancelled_at, consumed_at,
+                    semantic_decision_json, interpreted_at, completed_at,
+                    last_interpretation_error, next_retry_at, interpretation_attempts
              FROM turn_steering
              WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
              ORDER BY steering_id ASC",
@@ -884,17 +898,100 @@ impl TaskStore {
         ).optional().map_err(Into::into)
     }
 
-    pub fn mark_turn_steering_applied(&self, ids: &[i64], run_id: &str) -> TaskRuntimeResult<()> {
-        if ids.is_empty() { return Ok(()); }
+    pub fn mark_turn_steering_interpreted(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        semantic_decision_json: &Value,
+        run_id: &str,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        let tx = self.connection.unchecked_transaction()?;
-        for id in ids {
-            tx.execute("UPDATE turn_steering SET status='applied', applied_at=?1, updated_at=?1
-                        WHERE steering_id=?2 AND status='claimed' AND claimed_run_id=?3",
-                params![now, id, run_id])?;
+        let changed = self.connection.execute(
+            "UPDATE turn_steering
+             SET status='interpreted', semantic_decision_json=?1, interpreted_at=?2,
+                 last_interpretation_error=NULL, next_retry_at=NULL,
+                 revision=revision+1, updated_at=?2
+             WHERE steering_id=?3 AND revision=?4 AND status='claimed' AND claimed_run_id=?5",
+            params![serde_json::to_string(semantic_decision_json)?, now, steering_id, expected_revision as i64, run_id],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict("steering changed before interpretation".into()));
         }
-        tx.commit()?;
-        Ok(())
+        load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
+    pub fn mark_turn_steering_applied(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        run_id: &str,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        self.transition_interpreted_steering(
+            steering_id, expected_revision, run_id, "interpreted", "applied", "applied_at",
+        )
+    }
+
+    pub fn mark_turn_steering_completed(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        run_id: &str,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        self.transition_interpreted_steering(
+            steering_id, expected_revision, run_id, "applied", "completed", "completed_at",
+        )
+    }
+
+    fn transition_interpreted_steering(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        run_id: &str,
+        from_status: &str,
+        to_status: &str,
+        timestamp_column: &str,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let sql = format!(
+            "UPDATE turn_steering SET status=?1, {timestamp_column}=?2,
+                    revision=revision+1, updated_at=?2
+             WHERE steering_id=?3 AND revision=?4 AND status=?5 AND claimed_run_id=?6"
+        );
+        let changed = self.connection.execute(
+            &sql,
+            params![to_status, now, steering_id, expected_revision as i64, from_status, run_id],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict(format!("steering changed before transition to {to_status}")));
+        }
+        load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
+    pub fn release_turn_steering_for_retry(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        error: &str,
+        next_retry_at: i64,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE turn_steering
+             SET status='pending', claimed_run_id=NULL, claimed_round=NULL, claimed_at=NULL,
+                 semantic_decision_json=NULL, interpreted_at=NULL,
+                 last_interpretation_error=?1, next_retry_at=?2,
+                 interpretation_attempts=interpretation_attempts+1,
+                 revision=revision+1, updated_at=?3
+             WHERE steering_id=?4 AND revision=?5 AND status='claimed'",
+            params![error, next_retry_at, now, steering_id, expected_revision as i64],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict("steering changed before retry release".into()));
+        }
+        load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
     }
 
     pub fn hold_pending_turn_steering(&self, user_id: &str, workspace_id: &str, active_turn_id: &str) -> TaskRuntimeResult<usize> {
@@ -2742,6 +2839,14 @@ fn map_turn_steering_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnSteeri
         applied_at: row.get(16)?,
         cancelled_at: row.get(17)?,
         consumed_at: row.get(18)?,
+        semantic_decision_json: row
+            .get::<_, Option<String>>(19)?
+            .and_then(|raw| serde_json::from_str(&raw).ok()),
+        interpreted_at: row.get(20)?,
+        completed_at: row.get(21)?,
+        last_interpretation_error: row.get(22)?,
+        next_retry_at: row.get(23)?,
+        interpretation_attempts: row.get::<_, i64>(24)? as u32,
     })
 }
 
@@ -2756,7 +2861,9 @@ pub(crate) fn load_turn_steering_by_source_message(
         "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
                 source_message_id, content, payload_json, objective_revision, status,
                 revision, created_at, updated_at, claimed_run_id, claimed_round,
-                claimed_at, applied_at, cancelled_at, consumed_at
+                claimed_at, applied_at, cancelled_at, consumed_at,
+                semantic_decision_json, interpreted_at, completed_at,
+                last_interpretation_error, next_retry_at, interpretation_attempts
          FROM turn_steering
          WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3 AND source_message_id = ?4",
         params![user_id, workspace_id, thread_id, source_message_id],
@@ -2776,9 +2883,28 @@ fn load_turn_steering_by_id_on(
         "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
                 source_message_id, content, payload_json, objective_revision, status,
                 revision, created_at, updated_at, claimed_run_id, claimed_round,
-                claimed_at, applied_at, cancelled_at, consumed_at
+                claimed_at, applied_at, cancelled_at, consumed_at,
+                semantic_decision_json, interpreted_at, completed_at,
+                last_interpretation_error, next_retry_at, interpretation_attempts
          FROM turn_steering WHERE steering_id=?1 AND user_id=?2 AND workspace_id=?3",
         params![steering_id, user_id, workspace_id],
+        map_turn_steering_row,
+    ).optional().map_err(Into::into)
+}
+
+fn load_turn_steering_unscoped_by_id(
+    conn: &Connection,
+    steering_id: i64,
+) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+    conn.query_row(
+        "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                source_message_id, content, payload_json, objective_revision, status,
+                revision, created_at, updated_at, claimed_run_id, claimed_round,
+                claimed_at, applied_at, cancelled_at, consumed_at,
+                semantic_decision_json, interpreted_at, completed_at,
+                last_interpretation_error, next_retry_at, interpretation_attempts
+         FROM turn_steering WHERE steering_id=?1",
+        params![steering_id],
         map_turn_steering_row,
     ).optional().map_err(Into::into)
 }
@@ -2872,7 +2998,7 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
@@ -3117,6 +3243,59 @@ mod turn_steering_tests {
         let edited = store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("edited")).unwrap();
         assert!(matches!(store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("stale")), Err(TaskRuntimeError::Conflict(_))));
         assert_eq!(store.cancel_turn_steering(row.steering_id, "u", "w", edited.revision).unwrap().status, TurnSteeringStatus::Cancelled);
+    }
+
+    #[test]
+    fn steering_lifecycle_is_revision_guarded_until_runtime_completion() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("answer from current evidence"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 2).unwrap().remove(0);
+        let interpreted = store.mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
+            "run-1",
+        ).unwrap();
+        assert_eq!(interpreted.status, TurnSteeringStatus::Interpreted);
+        assert_eq!(interpreted.semantic_decision_json, Some(serde_json::json!({"steering_disposition": "finalize_with_current_evidence"})));
+
+        let applied = store.mark_turn_steering_applied(interpreted.steering_id, interpreted.revision, "run-1").unwrap();
+        assert_eq!(applied.status, TurnSteeringStatus::Applied);
+        let completed = store.mark_turn_steering_completed(applied.steering_id, applied.revision, "run-1").unwrap();
+        assert_eq!(completed.status, TurnSteeringStatus::Completed);
+        assert!(completed.completed_at.is_some());
+        assert!(matches!(
+            store.mark_turn_steering_completed(applied.steering_id, applied.revision, "run-1"),
+            Err(TaskRuntimeError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn unavailable_interpreter_returns_steering_to_pending_with_retry_time() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("use what you already found"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 3).unwrap().remove(0);
+        let pending = store.release_turn_steering_for_retry(
+            claimed.steering_id, claimed.revision, "model_unavailable", 12345,
+        ).unwrap();
+        assert_eq!(pending.status, TurnSteeringStatus::Pending);
+        assert_eq!(pending.next_retry_at, Some(12345));
+        assert_eq!(pending.last_interpretation_error.as_deref(), Some("model_unavailable"));
+        assert_eq!(pending.interpretation_attempts, 1);
+        assert!(pending.applied_at.is_none());
+    }
+
+    #[test]
+    fn retry_backoff_rows_are_not_claimed_early() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("wait for semantic model"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
+        store.release_turn_steering_for_retry(
+            claimed.steering_id, claimed.revision, "model_unavailable", i64::MAX,
+        ).unwrap();
+
+        assert!(store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-2", 2).unwrap().is_empty());
+        assert_eq!(store.list_turn_steering("u", "w", "thread").unwrap().remove(0).status, TurnSteeringStatus::Pending);
     }
 }
 
@@ -3785,7 +3964,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {

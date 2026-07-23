@@ -289,6 +289,12 @@ pub struct TurnSteeringRecord {
     pub applied_at: Option<i64>,
     pub cancelled_at: Option<i64>,
     pub consumed_at: Option<i64>,
+    pub semantic_decision_json: Option<Value>,
+    pub interpreted_at: Option<i64>,
+    pub completed_at: Option<i64>,
+    pub last_interpretation_error: Option<String>,
+    pub next_retry_at: Option<i64>,
+    pub interpretation_attempts: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -296,7 +302,9 @@ pub struct TurnSteeringRecord {
 pub enum TurnSteeringStatus {
     Pending,
     Claimed,
+    Interpreted,
     Applied,
+    Completed,
     Held,
     Cancelled,
     Promoted,
@@ -307,7 +315,9 @@ impl TurnSteeringStatus {
         match self {
             Self::Pending => "pending",
             Self::Claimed => "claimed",
+            Self::Interpreted => "interpreted",
             Self::Applied => "applied",
+            Self::Completed => "completed",
             Self::Held => "held",
             Self::Cancelled => "cancelled",
             Self::Promoted => "promoted",
@@ -327,7 +337,9 @@ impl std::str::FromStr for TurnSteeringStatus {
         match value {
             "pending" => Ok(Self::Pending),
             "claimed" | "consumed" => Ok(Self::Claimed),
+            "interpreted" => Ok(Self::Interpreted),
             "applied" => Ok(Self::Applied),
+            "completed" => Ok(Self::Completed),
             "held" => Ok(Self::Held),
             "cancelled" => Ok(Self::Cancelled),
             "promoted" => Ok(Self::Promoted),
