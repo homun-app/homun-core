@@ -617,6 +617,9 @@ assertContains("src/lib/contextBudget.ts", "redactSensitiveText", "Electron cont
 assertContains("src/lib/contextBudget.ts", "context compressed: earlier chat", "Electron context budget must mark compressed older chat context");
 assertContains("src/lib/chatApi.ts", "rawRecentChatContext(threadId", "Electron gateway requests must include recent thread context");
 assertContains("src/lib/chatApi.ts", "streamListeners", "chat streaming must use local browser listener dispatch");
+assertContains("src/lib/chatApi.ts", "publishedStreamSequences.accept(payload)", "chat streaming must deduplicate sequenced publication before listener side effects");
+assertContains("src/components/ChatView.tsx", "handledBackgroundTurnsRef.current.add(localTurnId)", "locally started turns must be claimed before background attachment can race");
+assertContains("src/components/ChatView.tsx", "streamOwnerTurnRef.current = localTurnId", "a local turn must have one visible stream owner");
 assertContains("src/lib/chatApi.ts", "/create_task", "chat message task actions must call the local gateway");
 assertNotContains("src/lib/coreBridge.ts", "invoke<", "frontend bridge must not call removed native invoke");
 assertNotContains("src/lib/coreBridge.ts", removedShellGlobal, "frontend bridge must not inspect removed shell globals");

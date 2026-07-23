@@ -11,6 +11,7 @@ import type {
 } from "./coreBridge";
 import { buildJuicePromptChatContext } from "./contextBudget";
 import { DESKTOP_GATEWAY_URL, gatewayHeaders } from "./gatewayConfig";
+import { createStreamSequenceGate } from "./streamSequenceGate";
 
 // One alternative at a branch point: the sibling node and the leaf to activate to
 // display its branch, plus an optional name (Phase 4).
@@ -28,6 +29,7 @@ export interface CoreBranchPoint {
 
 const streamEventListeners = new Set<(payload: CoreChatStreamEvent) => void>();
 const streamListeners = new Set<(payload: CoreChatStreamDelta) => void>();
+const publishedStreamSequences = createStreamSequenceGate();
 let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
   {
@@ -525,6 +527,7 @@ function notifyChatStreamDelta(payload: CoreChatStreamDelta) {
 }
 
 function notifyChatStreamEvent(payload: CoreChatStreamEvent) {
+  if (!publishedStreamSequences.accept(payload)) return;
   for (const listener of streamEventListeners) {
     listener(payload);
   }
