@@ -18117,6 +18117,10 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "vault_secret": { "type": "string", "enum": ["cvv_one_shot"], "description": "Use with payment_approval_id to fill the CVV/CV2 field without exposing the CVV to the model. Do not include a text value when using this." },
                     "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
+                "anyOf": [
+                    { "required": ["kind"] },
+                    { "required": ["actions"] }
+                ],
                 "required": []
             }
         }
@@ -66109,7 +66113,25 @@ prs.save(Path({path:?}))
                 missing_kind,
                 super::CapabilityError::SchemaValidationFailed(_)
             ),
-            "act without kind must be a typed validation error, got {missing_kind:?}"
+            "act without kind/actions must be a typed validation error, got {missing_kind:?}"
+        );
+        let valid_bundle = facade
+            .call_tool(
+                &policy,
+                call(
+                    "browser_act",
+                    serde_json::json!({
+                        "actions": [
+                            {"kind": "type", "ref": "e1", "text": "Napoli"},
+                            {"kind": "click", "ref": "e2"}
+                        ]
+                    }),
+                ),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(valid_bundle, super::CapabilityError::ProviderUnavailable(_)),
+            "a well-formed action bundle must clear validation and reach the executor, got {valid_bundle:?}"
         );
 
         // Valid args PASS validation — proven because execution is reached and the

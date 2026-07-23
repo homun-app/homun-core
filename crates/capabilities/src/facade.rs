@@ -216,6 +216,31 @@ fn validate_arguments(
         }
     }
 
+    if let Some(any_of) = schema.get("anyOf").and_then(|value| value.as_array()) {
+        let mut errors = Vec::new();
+        let mut matched = false;
+        for branch in any_of {
+            match validate_arguments(branch, arguments) {
+                Ok(()) => {
+                    matched = true;
+                    break;
+                }
+                Err(CapabilityError::SchemaValidationFailed(error)) => errors.push(error),
+                Err(error) => return Err(error),
+            }
+        }
+        if !matched {
+            let detail = if errors.is_empty() {
+                "no schema branch matched".to_string()
+            } else {
+                errors.join("; ")
+            };
+            return Err(CapabilityError::SchemaValidationFailed(format!(
+                "arguments must match one schema branch: {detail}"
+            )));
+        }
+    }
+
     if let Some(properties) = schema.get("properties").and_then(|value| value.as_object()) {
         for (field, field_schema) in properties {
             let Some(value) = arguments.get(field) else {
