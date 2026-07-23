@@ -22892,7 +22892,20 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     // read-only mode must not be reused as an origin-trust gate.
                     // The decision is on the EFFECTIVE action class (declared ⊔
                     // machine floor), never on control label text.
-                    let approved_payment_id = if browser_safety::action_is_payment_commit(
+                    //
+                    // Claiming (consuming) the one-shot grant is gated on
+                    // `should_claim_payment_approval`, which is intentionally
+                    // NARROWER than `action_is_payment_commit`: the latter also
+                    // treats a class error (missing/conflicting action_class) as
+                    // "payment" so the gate below re-rejects it fail-closed —
+                    // right for the gate, wrong for claiming. Claiming on a class
+                    // error would burn the grant on an under-declared action and
+                    // then still reject it for the class error, forcing full
+                    // re-approval on the corrected retry even though nothing
+                    // unauthorized executed. Claim only when the effective class
+                    // GENUINELY resolves to payment; on a class error, leave the
+                    // grant unconsumed so the re-declared retry can use it.
+                    let approved_payment_id = if should_claim_payment_approval(
                         &action,
                         ctx.payment_floor_refs,
                     ) {
@@ -44663,6 +44676,25 @@ fn rewrite_payment_approval_to_done(
     out
 }
 
+/// Whether the `browser_act` enforcement site should CLAIM (consume) a
+/// Payment Approval Card grant for this action. Deliberately narrower than
+/// `browser_safety::action_is_payment_commit`: that helper also treats a
+/// class error (`BROWSER_ACTION_CLASS_MISSING`/`_CONFLICT`) as "payment" so
+/// `evaluate_browser_action` re-rejects it fail-closed — correct for the
+/// gate, wrong for claiming. Claim only on a genuinely resolved
+/// `PaymentCommit`; on a class error, do not claim, so the grant survives
+/// for a correctly re-declared retry (see the call site comment in
+/// `execute_browser_tool`).
+fn should_claim_payment_approval(
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+) -> bool {
+    matches!(
+        browser_safety::effective_action_class(action, payment_floor_refs),
+        Ok(browser_safety::ActionClass::PaymentCommit)
+    )
+}
+
 fn claim_payment_approval_for_action(
     state: &AppState,
     action: &serde_json::Value,
@@ -65020,6 +65052,119 @@ prs.save(Path({path:?}))
         assert!(super::claim_payment_approval_from_map(
             &mut approvals,
             &action,
+            &payment_floor,
+            Some("thread_1")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn payment_grant_survives_a_class_error_and_the_redeclared_retry_succeeds_once() {
+        // Regression for the A2/A3 review finding: a committing action that
+        // carries a valid, unconsumed payment_approval_id but omits (or
+        // conflicts on) action_class must NOT burn the one-shot grant. Only
+        // the enforcement site's CLAIM decision differs from the gate's
+        // REJECT decision: the gate still fail-closed rejects a class error;
+        // claiming must require a genuinely resolved PaymentCommit.
+        let mut approvals = std::collections::HashMap::from([(
+            "pay_test".to_string(),
+            super::PaymentApprovalGrant {
+                snapshot: payment_snapshot(),
+                cvv_one_shot: Some("123".to_string()),
+                thread_id: "thread_1".to_string(),
+                consumed: false,
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+            },
+        )]);
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Under-declared action: a valid payment_approval_id but no
+        // action_class at all (model typo / omission on a committing click).
+        let missing_class_action = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "payment_approval_id": "pay_test"
+        });
+        assert!(
+            browser_safety::effective_action_class(&missing_class_action, &payment_floor).is_err(),
+            "discriminator the fix relies on: an under-declared committing action is a class error"
+        );
+
+        // Enforcement-site decision: must NOT claim on a class error.
+        let should_claim =
+            super::should_claim_payment_approval(&missing_class_action, &payment_floor);
+        assert!(
+            !should_claim,
+            "a class error must never trigger consuming the one-shot grant"
+        );
+        if should_claim {
+            // Only reachable if the enforcement gate regresses to the old
+            // `action_is_payment_commit`-based decision (which also treats a
+            // class error as "payment"); mirrors the real call site so this
+            // branch, if ever taken, burns the grant just like the bug did.
+            let _ = super::claim_payment_approval_from_map(
+                &mut approvals,
+                &missing_class_action,
+                &payment_floor,
+                Some("thread_1"),
+            );
+        }
+
+        // The gate still fail-closed rejects the action on the class error —
+        // no approved id was ever produced, so nothing unauthorized executes.
+        let blocked =
+            browser_safety::evaluate_browser_action(&missing_class_action, &payment_floor, None);
+        assert!(
+            blocked
+                .as_deref()
+                .is_some_and(|reason| reason.contains("BROWSER_ACTION_CLASS_MISSING")),
+            "expected a BROWSER_ACTION_CLASS_MISSING rejection, got {blocked:?}"
+        );
+
+        // The grant must still be unconsumed: the corrected retry can reuse it.
+        assert!(
+            !approvals.get("pay_test").unwrap().consumed,
+            "grant must not be burned by a class-error action"
+        );
+
+        // A correctly re-declared retry with the SAME approval id resolves to
+        // a genuine PaymentCommit and succeeds exactly once.
+        let declared_payment_action = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "action_class": "payment_commit",
+            "payment_approval_id": "pay_test"
+        });
+        assert_eq!(
+            browser_safety::effective_action_class(&declared_payment_action, &payment_floor),
+            Ok(browser_safety::ActionClass::PaymentCommit)
+        );
+        assert!(super::should_claim_payment_approval(
+            &declared_payment_action,
+            &payment_floor
+        ));
+        let claimed = super::claim_payment_approval_from_map(
+            &mut approvals,
+            &declared_payment_action,
+            &payment_floor,
+            Some("thread_1"),
+        )
+        .expect("retry should successfully claim the still-unconsumed grant");
+        assert_eq!(claimed, "pay_test");
+        assert!(
+            browser_safety::evaluate_browser_action(
+                &declared_payment_action,
+                &payment_floor,
+                Some(&claimed)
+            )
+            .is_none(),
+            "declared payment_commit with matching approval id must be allowed"
+        );
+
+        // One-shot: the grant is now burned, a second attempt fails.
+        assert!(super::claim_payment_approval_from_map(
+            &mut approvals,
+            &declared_payment_action,
             &payment_floor,
             Some("thread_1")
         )
