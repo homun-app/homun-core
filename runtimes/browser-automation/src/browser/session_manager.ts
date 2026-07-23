@@ -232,6 +232,7 @@ export class BrowserSessionManager {
     fingerprint: string;
     observationMode: "interact" | "delta" | "extract";
     paymentFloorRefs: string[];
+    focusPaymentContext: boolean;
   }> {
     const state = await this.resolvePage(params.targetId);
     // Let late content settle before snapshotting: a static page (Wikipedia) is already
@@ -261,6 +262,7 @@ export class BrowserSessionManager {
       fingerprint: snapshot.fingerprint,
       observationMode: snapshot.observationMode,
       paymentFloorRefs: snapshot.paymentFloorRefs,
+      focusPaymentContext: snapshot.focusPaymentContext,
     };
   }
 
@@ -311,6 +313,7 @@ export class BrowserSessionManager {
       fingerprint: snapshot.fingerprint,
       observationMode: snapshot.observationMode,
       paymentFloorRefs: snapshot.paymentFloorRefs,
+      focusPaymentContext: snapshot.focusPaymentContext,
     };
   }
 

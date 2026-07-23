@@ -27,6 +27,11 @@ export type BrowserSnapshot = {
   // can only RAISE the gateway's effective action_class for that action, never
   // lower it. Populated by computePaymentFloorRefs from DOM/frame contracts only.
   paymentFloorRefs: string[];
+  // Machine-only: is document.activeElement currently inside a cc-autocomplete
+  // form, or a PSP-origin frame? Enter/Return submits the *focused* form, so a
+  // ref-less committing action needs this rather than paymentFloorRefs (which
+  // is keyed on explicit refs). Never derived from label/text.
+  focusPaymentContext: boolean;
 };
 
 export type BrowserObservationMode = "interact" | "delta" | "extract";
@@ -204,6 +209,34 @@ export async function computePaymentFloorRefs(
   return floored;
 }
 
+// Machine-only: is the currently-focused element inside a cc-autocomplete
+// form, or a PSP-origin frame? Enter/Return submits the focused form, so this
+// is the signal that a ref-less submit is a payment. Never reads label text.
+async function computeFocusPaymentContext(page: Page): Promise<boolean> {
+  return await page
+    .evaluate((psp) => {
+      const el = document.activeElement as Element | null;
+      if (!el) return false;
+      const form = el.closest("form");
+      if (form && form.querySelector('input[autocomplete^="cc-"]')) return true;
+      let origin = "";
+      try {
+        origin = el.ownerDocument.defaultView?.location.origin ?? "";
+      } catch {
+        origin = "";
+      }
+      const host = (() => {
+        try {
+          return new URL(origin).hostname;
+        } catch {
+          return "";
+        }
+      })();
+      return (psp as string[]).some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+    }, PSP_HOST_SUFFIXES)
+    .catch(() => false);
+}
+
 export async function createSnapshot(
   page: Page,
   targetId: string,
@@ -285,6 +318,7 @@ async function createAiSnapshot(
     refLocators.set(ref.ref, page.locator(`aria-ref=${ref.ref}`));
   }
   const paymentFloorRefs = await computePaymentFloorRefs(refs, refLocators);
+  const focusPaymentContext = await computeFocusPaymentContext(page);
   return {
     targetId,
     url: page.url(),
@@ -298,6 +332,7 @@ async function createAiSnapshot(
     fingerprint: fingerprintSnapshot(snapshot),
     observationMode: observedMode,
     paymentFloorRefs,
+    focusPaymentContext,
   };
 }
 
@@ -492,6 +527,8 @@ async function createLegacySnapshot(page: Page, targetId: string): Promise<Brows
     // Legacy (non-AI) snapshot path is not covered by the floor computation;
     // an empty floor is correct (raise-only — never fabricate a floor here).
     paymentFloorRefs: [],
+    // Same rationale: not computed on the legacy fallback path.
+    focusPaymentContext: false,
   };
 }
 

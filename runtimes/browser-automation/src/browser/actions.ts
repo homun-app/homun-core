@@ -39,6 +39,10 @@ export type BrowserActionResult = {
   // Machine-derived payment floor refs from the embedded post-action snapshot
   // (present whenever the action requested a fresh snapshot). Raise-only.
   paymentFloorRefs?: string[];
+  // Machine-only focus-context signal from the embedded post-action snapshot
+  // (present whenever the action requested a fresh snapshot). See
+  // computeFocusPaymentContext in snapshot.ts.
+  focusPaymentContext?: boolean;
   filledRefs?: string[];
   failedRefs?: Array<{ ref: string; error: string }>;
   batchResults?: Array<BrowserActionResult | { ok: false; error: string }>;

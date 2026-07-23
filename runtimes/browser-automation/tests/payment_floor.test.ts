@@ -83,6 +83,26 @@ describe("machine payment floor", () => {
     expect(floorRefs(snapshot)).not.toContain(searchInput!.ref);
   });
 
+  it("focusPaymentContext is true when a cc-form field is focused, false for the search field", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "checkout" });
+
+    let snapshot = await manager.snapshot({ targetId: "checkout", observationMode: "interact" } as never);
+    const ccInput = snapshot.refs.find((ref) => ref.name === "Card number");
+    expect(ccInput?.ref).toBeDefined();
+    await manager.act({ targetId: "checkout", kind: "click", ref: ccInput!.ref } as never);
+
+    snapshot = await manager.snapshot({ targetId: "checkout", observationMode: "interact" } as never);
+    expect((snapshot as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(true);
+
+    const searchInput = snapshot.refs.find((ref) => ref.name === "Termine ricerca");
+    expect(searchInput?.ref).toBeDefined();
+    await manager.act({ targetId: "checkout", kind: "click", ref: searchInput!.ref } as never);
+
+    snapshot = await manager.snapshot({ targetId: "checkout", observationMode: "interact" } as never);
+    expect((snapshot as unknown as { focusPaymentContext: boolean }).focusPaymentContext).toBe(false);
+  });
+
   it("floors nothing on a page with no cc-form and no PSP frame (train fixture)", async () => {
     const trainFixture = path.join(import.meta.dirname, "fixtures", "train.html");
     const trainHtml = await readFile(trainFixture, "utf8");
