@@ -16,6 +16,7 @@ export interface TurnStreamRecoveryOptions {
   onEvent?: (event: SequencedTurnEvent, state: TurnReplayState) => void;
   sleep?: (milliseconds: number) => Promise<void>;
   maxReconnects?: number;
+  maxActiveReconnects?: number;
   reconnectDelays?: number[];
   initialState?: TurnReplayState;
 }

@@ -21,15 +21,18 @@ export async function recoverTurnStream(options) {
     onEvent = () => {},
     sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     maxReconnects = DEFAULT_DELAYS.length,
+    maxActiveReconnects = 900,
     reconnectDelays = DEFAULT_DELAYS,
     initialState,
   } = options;
   let state = initialState ?? createTurnReplayState(turnId);
   let reconnects = 0;
+  let activeReconnects = 0;
   let terminalRecoveryAttempts = 0;
   let lastTransportError;
 
   while (true) {
+    const seqBeforeConnection = state.lastSeq;
     try {
       await connect({
         turnId,
@@ -78,6 +81,17 @@ export async function recoverTurnStream(options) {
       // polling, not terminal-recovery failures, so they must not exhaust the
       // small budget reserved for a genuinely missing terminal event.
       terminalRecoveryAttempts = 0;
+      if (state.lastSeq > seqBeforeConnection) {
+        activeReconnects = 0;
+      } else if (activeReconnects >= maxActiveReconnects) {
+        throw new TurnStreamRecoveryError(
+          `Turn ${turnId} made no stream progress while still ${durableStatus.status} after ${activeReconnects} reconnects.`,
+          "turn_stream_recovery_exhausted",
+          lastTransportError,
+        );
+      } else {
+        activeReconnects += 1;
+      }
     }
 
     const delay = reconnectDelays[Math.min(reconnects, reconnectDelays.length - 1)] ?? 0;

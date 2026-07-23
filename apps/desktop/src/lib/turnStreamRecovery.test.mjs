@@ -106,3 +106,21 @@ test("settles after a durable user-approval handoff with streamed content", asyn
   assert.equal(result.status, "completed");
   assert.equal(result.text, "[PAYMENT_APPROVAL_REQUIRED]");
 });
+
+test("bounds an active turn that makes no durable stream progress", async () => {
+  let statusReads = 0;
+  await assert.rejects(
+    recoverTurnStream({
+      turnId: "turn",
+      connect: async () => {},
+      getStatus: async () => {
+        statusReads += 1;
+        if (statusReads > 4) throw new Error("test guard");
+        return { status: "running" };
+      },
+      sleep: async () => {},
+      maxActiveReconnects: 2,
+    }),
+    (error) => error?.code === "turn_stream_recovery_exhausted",
+  );
+});
