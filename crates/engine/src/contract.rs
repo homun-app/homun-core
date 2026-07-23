@@ -70,6 +70,22 @@ pub enum FinalizationFence {
     PendingInput,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnControlDisposition {
+    ContinueCurrentWork,
+    ReplanCurrentWork,
+    FinalizeWithCurrentEvidence,
+    CancelCurrentWork,
+    NeedsClarification,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnControlDecision {
+    pub steering_id: i64,
+    pub disposition: TurnControlDisposition,
+    pub instruction: String,
+}
+
 /// Typed failure. Preserves parity: only an UPSTREAM status error should surface as the turn's
 /// committed final answer (the gateway's `last_model_error`); a transport/stream failure already
 /// streamed a generic live notice and must NOT overwrite that fallback. A flat `String` would lose
@@ -94,6 +110,20 @@ pub trait ModelClient {
     fn finalization_fence(&self) -> FinalizationFence {
         FinalizationFence::Ready
     }
+
+    fn current_turn_control(&self) -> Option<TurnControlDecision> {
+        None
+    }
+
+    fn wait_for_turn_control(
+        &self,
+    ) -> impl Future<Output = TurnControlDecision> + Send {
+        std::future::pending()
+    }
+
+    fn acknowledge_turn_control_applied(&self, _steering_id: i64) {}
+
+    fn acknowledge_turn_control_completed(&self, _steering_id: i64) {}
 
     /// Run one model round. Stream raw token text through `on_delta` as it arrives, and return the
     /// assembled assistant message (content + `tool_calls`) plus the provider the impl ended on.
@@ -215,6 +245,10 @@ pub trait BrowserExecutor {
     /// indicator. `browser_used` (from `LoopState`) reports whether a session was ever meant to exist,
     /// so a mid-turn session loss still clears the indicator. Idempotent — safe when none was opened.
     fn close_session(&mut self, browser_used: bool) -> impl Future<Output = ()> + Send;
+
+    fn interrupt(&mut self) -> impl Future<Output = ()> + Send {
+        std::future::ready(())
+    }
 }
 
 /// The engine's output seam: every stream event the loop produces (delta, activity, plan, tool

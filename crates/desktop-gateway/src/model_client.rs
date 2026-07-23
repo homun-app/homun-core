@@ -51,21 +51,164 @@ pub(crate) struct GatewaySteeringContext<'a> {
     pub run_id: &'a str,
 }
 
-impl GatewayModelClient<'_> {
-    fn consume_steering_messages(&self, round: u32) -> Vec<serde_json::Value> {
-        let Some(context) = self.steering else {
-            return Vec::new();
-        };
-        steering_messages_for_round_number(context, round)
+pub(crate) fn current_turn_control(
+    context: GatewaySteeringContext<'_>,
+) -> Option<local_first_engine::TurnControlDecision> {
+    let (record, objective) = {
+        let store = context.state.task_store.lock().ok()?;
+        let record = store
+            .list_interpreted_turn_steering(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+                context.turn_id,
+                context.run_id,
+            )
+            .ok()?
+            .into_iter()
+            .next()?;
+        let objective = store
+            .load_objective_contract(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+            )
+            .ok()?;
+        (record, objective)
+    };
+    let decision = serde_json::from_value::<crate::semantic_decision::ValidatedSemanticDecision>(
+        record.semantic_decision_json?,
+    )
+    .ok()?;
+    let requires_confirmation = objective.as_ref().is_none_or(|active| {
+        crate::semantic_decision::steering_requires_confirmation(
+            active,
+            &decision,
+            record.objective_revision == active.revision,
+        )
+    });
+    let semantic_disposition = crate::semantic_decision::actionable_steering_decision(&decision)?;
+    let disposition = if requires_confirmation {
+        local_first_engine::TurnControlDisposition::NeedsClarification
+    } else {
+        match semantic_disposition {
+        crate::semantic_decision::SteeringDisposition::ContinueCurrentWork => {
+            local_first_engine::TurnControlDisposition::ContinueCurrentWork
+        }
+        crate::semantic_decision::SteeringDisposition::ReplanCurrentWork => {
+            local_first_engine::TurnControlDisposition::ReplanCurrentWork
+        }
+        crate::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence => {
+            local_first_engine::TurnControlDisposition::FinalizeWithCurrentEvidence
+        }
+        crate::semantic_decision::SteeringDisposition::CancelCurrentWork => {
+            local_first_engine::TurnControlDisposition::CancelCurrentWork
+        }
+        crate::semantic_decision::SteeringDisposition::NeedsClarification => {
+            local_first_engine::TurnControlDisposition::NeedsClarification
+        }
+        }
+    };
+    Some(local_first_engine::TurnControlDecision {
+        steering_id: record.steering_id,
+        disposition,
+        instruction: record.content,
+    })
+}
+
+pub(crate) fn acknowledge_turn_control_applied(
+    context: GatewaySteeringContext<'_>,
+    steering_id: i64,
+) {
+    let Some((current, objective)) = context.state.task_store.lock().ok().and_then(|store| {
+        let current = store
+            .load_turn_steering(steering_id, context.user_id, context.workspace_id)
+            .ok()
+            .flatten()?;
+        let objective = store
+            .load_objective_contract(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+            )
+            .ok()
+            .flatten();
+        Some((current, objective))
+    }) else {
+        return;
+    };
+    let record = context.state.task_store.lock().ok().and_then(|store| {
+        store
+            .mark_turn_steering_applied(steering_id, current.revision, context.run_id)
+            .ok()
+    });
+    if let Some(record) = record {
+        if let Ok(chat) = crate::lock_store(context.state) {
+            let _ = chat.materialize_steering_message(context.thread_id, &record);
+        }
+        let proposed = record
+            .semantic_decision_json
+            .as_ref()
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
+        if let (Some(active), Some(proposed)) = (objective.as_ref(), proposed.as_ref())
+            && !crate::semantic_decision::steering_requires_confirmation(
+                active,
+                proposed,
+                record.objective_revision == active.revision,
+            )
+        {
+            let projection = crate::semantic_decision::objective_contract_projection(
+                proposed,
+                Some(active),
+                context.thread_id,
+                context.workspace_id,
+                crate::effective_thread_folder(context.thread_id).as_deref(),
+            );
+            if let Ok(store) = context.state.task_store.lock() {
+                let _ = store.upsert_objective_contract(
+                    context.user_id,
+                    context.workspace_id,
+                    context.thread_id,
+                    &record.source_message_id,
+                    &projection.objective,
+                    projection.mode,
+                    &projection.scope_json,
+                    &projection.allowed_actions_json,
+                    &projection.completion_json,
+                    "active",
+                );
+            }
+        }
+        crate::publish_steering_changed(&record);
     }
 }
 
+pub(crate) fn acknowledge_turn_control_completed(
+    context: GatewaySteeringContext<'_>,
+    steering_id: i64,
+) {
+    let record = context.state.task_store.lock().ok().and_then(|store| {
+        let current = store
+            .load_turn_steering(steering_id, context.user_id, context.workspace_id)
+            .ok()
+            .flatten()?;
+        store
+            .mark_turn_steering_completed(steering_id, current.revision, context.run_id)
+            .ok()
+    });
+    if let Some(record) = record {
+        crate::publish_steering_changed(&record);
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn steering_messages_for_round(
     context: GatewaySteeringContext<'_>,
 ) -> Vec<serde_json::Value> {
     steering_messages_for_round_number(context, 0)
 }
 
+#[cfg(test)]
 fn steering_messages_for_round_number(
     context: GatewaySteeringContext<'_>,
     _round: u32,
@@ -73,9 +216,10 @@ fn steering_messages_for_round_number(
     consume_interpreted_steering(context)
 }
 
+#[cfg(test)]
 pub(crate) fn steering_messages_for_round_with(
     context: GatewaySteeringContext<'_>,
-    mut resolve: impl FnMut(
+    resolve: impl FnMut(
         &str,
         Option<&local_first_task_runtime::ObjectiveContractRecord>,
     ) -> crate::semantic_decision::ValidatedSemanticDecision,
@@ -83,6 +227,7 @@ pub(crate) fn steering_messages_for_round_with(
     steering_messages_for_round_number_with(context, 0, resolve)
 }
 
+#[cfg(test)]
 fn steering_messages_for_round_number_with(
     context: GatewaySteeringContext<'_>,
     round: u32,
@@ -126,6 +271,7 @@ fn steering_messages_for_round_number_with(
     consume_interpreted_steering(context)
 }
 
+#[cfg(test)]
 fn consume_interpreted_steering(
     context: GatewaySteeringContext<'_>,
 ) -> Vec<serde_json::Value> {
@@ -519,6 +665,34 @@ impl ModelClient for GatewayModelClient<'_> {
         }
     }
 
+    fn current_turn_control(&self) -> Option<local_first_engine::TurnControlDecision> {
+        current_turn_control(self.steering?)
+    }
+
+    async fn wait_for_turn_control(&self) -> local_first_engine::TurnControlDecision {
+        loop {
+            if let Some(control) = self.current_turn_control()
+                && control.disposition
+                    != local_first_engine::TurnControlDisposition::ContinueCurrentWork
+            {
+                return control;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+        if let Some(context) = self.steering {
+            acknowledge_turn_control_applied(context, steering_id);
+        }
+    }
+
+    fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+        if let Some(context) = self.steering {
+            acknowledge_turn_control_completed(context, steering_id);
+        }
+    }
+
     async fn generate(
         &self,
         call: &ModelCall<'_>,
@@ -536,12 +710,7 @@ impl ModelClient for GatewayModelClient<'_> {
         // provider 400s specifically on the forcing shape. `None` everywhere but the loop's main
         // per-round call (see `ModelCall::forced_tool`), so this is a no-op for every other turn.
         let mut forced_tool_fallback_tried = false;
-        // Consume steering only at a round boundary: `generate` is entered once per
-        // model round, before the request payload is built. The durable queue makes
-        // this exactly-once even across provider retries within this round.
-        let mut messages_owned = call.messages.to_vec();
-        messages_owned.extend(self.consume_steering_messages(call.usage.round.unwrap_or_default()));
-        let messages = messages_owned.as_slice();
+        let messages = call.messages;
         let tool_schemas = call.tools;
         let temperature = call.temperature;
         let is_final_round = call.is_final_round;

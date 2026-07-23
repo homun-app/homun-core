@@ -16,7 +16,8 @@ use crate::browser::{
 };
 use crate::contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal,
-    ModelClient, PlanProgress, TurnCompletionJudge, TurnPolicy,
+    ModelClient, PlanProgress, TurnCompletionJudge, TurnControlDecision, TurnControlDisposition,
+    TurnPolicy,
 };
 use crate::events::{GenerateStreamEvent, TokenMetrics};
 use crate::execution_journal::{
@@ -39,6 +40,38 @@ use std::time::Instant;
 
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
 const MAX_PLAN_NUDGES: u32 = 8;
+
+async fn wait_for_interrupting_control<M: ModelClient>(
+    model_client: &M,
+) -> TurnControlDecision {
+    loop {
+        if let Some(control) = model_client.current_turn_control()
+            && control.disposition != TurnControlDisposition::ContinueCurrentWork
+        {
+            return control;
+        }
+        let control = model_client.wait_for_turn_control().await;
+        if control.disposition != TurnControlDisposition::ContinueCurrentWork {
+            return control;
+        }
+    }
+}
+
+fn apply_turn_control<M: ModelClient>(
+    model_client: &M,
+    messages: &mut Vec<serde_json::Value>,
+    control: &TurnControlDecision,
+) {
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": format!(
+            "[VALIDATED USER STEERING]\n{}\n\nApply the structured runtime disposition {:?} now.",
+            control.instruction,
+            control.disposition,
+        ),
+    }));
+    model_client.acknowledge_turn_control_applied(control.steering_id);
+}
 
 /// Harness-driven plan progress from VERIFIED evidence. Called after each work tool result: if the
 /// plan has a frontier `doing` step and enough new evidence has accrued, ask the F2 judge whether that
@@ -185,7 +218,22 @@ where
 {
     let mut delivery = TurnDelivery::NoVisibleAnswer;
     let turn_started_at = Instant::now();
-    for round in 0..cfg.hard_round_ceiling {
+    let mut steering_to_complete = Vec::new();
+    'rounds: for round in 0..cfg.hard_round_ceiling {
+        if let Some(control) = model_client.current_turn_control() {
+            apply_turn_control(model_client, &mut ls.messages, &control);
+            steering_to_complete.push(control.steering_id);
+            match control.disposition {
+                TurnControlDisposition::FinalizeWithCurrentEvidence
+                | TurnControlDisposition::NeedsClarification => break 'rounds,
+                TurnControlDisposition::CancelCurrentWork => {
+                    final_done = true;
+                    break 'rounds;
+                }
+                TurnControlDisposition::ContinueCurrentWork
+                | TurnControlDisposition::ReplanCurrentWork => {}
+            }
+        }
         if ls.browser_used {
             let elapsed_ms = u64::try_from(turn_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
             if let Some(reason) = cfg.browser_budget.stop_reason(
@@ -329,35 +377,47 @@ missing, give what you have and note the gap in one short line.",
         let mut round_usage = usage_context.clone();
         round_usage.call_id = format!("{}:round:{round}", usage_context.call_id);
         round_usage.round = u32::try_from(round).ok();
-        let out = model_client
-            .generate(
-                &crate::ModelCall {
-                    base_url: &ls.provider.base_url,
-                    model: &ls.provider.model,
-                    api_key: ls.provider.api_key.as_deref(),
-                    messages: &ls.messages,
-                    tools: &ls.tool_schemas,
-                    temperature,
-                    is_final_round,
-                    // S2 T5: the ONLY call site that forces a tool — resolved once, gateway-side,
-                    // into `cfg` (see `TurnConfig::forced_tool` for the intake-turn / binding gate).
-                    // Final-review fix (C1, one-shot forcing): `cfg.forced_tool` is immutable for the
-                    // whole turn, but a forced `tool_choice` contractually MUST return a tool call —
-                    // re-forcing on every round would make round 1 force a SECOND make_document call
-                    // right after a successful delivery (the binding is already cleared by then, so
-                    // the duplicate would render GENERIC instead of from the template). Force only on
-                    // round 0 (the post-intake generation call); every later round falls back to auto
-                    // so the model can emit its text summary and the turn terminates cleanly.
-                    forced_tool: if round == 0 {
-                        cfg.forced_tool.as_deref()
-                    } else {
-                        None
-                    },
-                    usage: &round_usage,
-                },
-                &|_tok| {},
-            )
-            .await;
+        let round_call = crate::ModelCall {
+            base_url: &ls.provider.base_url,
+            model: &ls.provider.model,
+            api_key: ls.provider.api_key.as_deref(),
+            messages: &ls.messages,
+            tools: &ls.tool_schemas,
+            temperature,
+            is_final_round,
+            forced_tool: if round == 0 {
+                cfg.forced_tool.as_deref()
+            } else {
+                None
+            },
+            usage: &round_usage,
+        };
+        let mut control_during_model = None;
+        let out = tokio::select! {
+            out = model_client.generate(&round_call, &|_tok| {}) => Some(out),
+            control = wait_for_interrupting_control(model_client) => {
+                apply_turn_control(model_client, &mut ls.messages, &control);
+                steering_to_complete.push(control.steering_id);
+                execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
+                control_during_model = Some(control);
+                None
+            }
+        };
+        if let Some(control) = control_during_model {
+            match control.disposition {
+                TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
+                TurnControlDisposition::FinalizeWithCurrentEvidence
+                | TurnControlDisposition::NeedsClarification => break 'rounds,
+                TurnControlDisposition::CancelCurrentWork => {
+                    final_done = true;
+                    break 'rounds;
+                }
+                TurnControlDisposition::ContinueCurrentWork => continue 'rounds,
+            }
+        }
+        let Some(out) = out else {
+            continue 'rounds;
+        };
         let (message, round_finish_reason) = match out {
             Ok(o) => {
                 // Adopt any mid-turn fallback swap for the remaining rounds.
@@ -501,6 +561,7 @@ missing, give what you have and note the gap in one short line.",
             let mut pending_confirm = false;
             let mut stop_for_no_progress = false;
             let mut nudge_no_progress = false;
+            let mut control_after_tools = None;
             // Bundle the turn-level state the dispatch loop touches into `ctx` so
             // the loop body addresses it via `ctx.<field>` (the seam a later refactor
             // extracts into a function). Built once per round; its block ends right
@@ -614,27 +675,73 @@ missing, give what you have and note the gap in one short line.",
                         call_id: call_id.clone(),
                         name: name.to_string(),
                     });
-                    let (result, tool_effects) = if is_browser_granular_tool(name) {
+                    let (result, tool_effects, interrupted) = if is_browser_granular_tool(name) {
                         // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
                         // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
                         // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
                         // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
-                        let r = browser_executor
-                            .execute_browser(name, args_raw, &call_id, &mut ls)
-                            .await;
-                        (r, crate::ToolEffects::default())
+                        tokio::select! {
+                            r = browser_executor.execute_browser(name, args_raw, &call_id, &mut ls) => {
+                                (r, crate::ToolEffects::default(), None)
+                            }
+                            control = wait_for_interrupting_control(model_client) => {
+                                (
+                                    "Tool execution interrupted by validated user steering.".to_string(),
+                                    crate::ToolEffects::default(),
+                                    Some(control),
+                                )
+                            }
+                        }
                     } else {
                         // Non-browser: through the CapabilityExecutor seam (ADR 0026). The executor builds
                         // the per-call ChatToolCtx from `&mut ls` + its held read-only context. `args_raw`
                         // (the model's exact JSON string) is passed through unchanged — no round-trip.
-                        match capability_executor
-                            .execute_tool(name, args_raw, &call_id, &mut ls)
-                            .await
-                        {
-                            Ok(o) => (o.result, o.effects),
-                            Err(e) => (e, crate::ToolEffects::default()),
+                        tokio::select! {
+                            outcome = capability_executor.execute_tool(name, args_raw, &call_id, &mut ls) => {
+                                match outcome {
+                                    Ok(o) => (o.result, o.effects, None),
+                                    Err(e) => (e, crate::ToolEffects::default(), None),
+                                }
+                            }
+                            control = wait_for_interrupting_control(model_client) => {
+                                (
+                                    "Tool execution interrupted by validated user steering.".to_string(),
+                                    crate::ToolEffects::default(),
+                                    Some(control),
+                                )
+                            }
                         }
                     };
+                    if let Some(control) = interrupted {
+                        if is_browser_granular_tool(name) {
+                            browser_executor.interrupt().await;
+                        }
+                        execution_journal.record(AgentExecutionEvent::ToolCallCompleted {
+                            round,
+                            call_id: call_id.clone(),
+                            name: name.to_string(),
+                            result_chars: result.chars().count(),
+                            outcome: "steering_interrupted".to_string(),
+                            result_fingerprint: tool_result_fingerprint(&result),
+                        });
+                        ls.messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": result,
+                        }));
+                        for skipped in calls.iter().skip(idx + 1) {
+                            ls.messages.push(serde_json::json!({
+                                "role": "tool",
+                                "tool_call_id": skipped.get("id").and_then(|id| id.as_str()).unwrap_or(""),
+                                "content": "Tool call skipped because validated user steering changed the active run.",
+                            }));
+                        }
+                        apply_turn_control(model_client, &mut ls.messages, &control);
+                        steering_to_complete.push(control.steering_id);
+                        execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
+                        control_after_tools = Some(control);
+                        break;
+                    }
                     let outcome = classify_tool_result(&result);
                     let result_fingerprint = tool_result_fingerprint(&result);
                     execution_journal.record(AgentExecutionEvent::ToolCallCompleted {
@@ -768,6 +875,18 @@ missing, give what you have and note the gap in one short line.",
                     }
                 }
             } // end ctx scope → borrows freed before the post-loop reads below
+            if let Some(control) = control_after_tools {
+                match control.disposition {
+                    TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
+                    TurnControlDisposition::FinalizeWithCurrentEvidence
+                    | TurnControlDisposition::NeedsClarification => break 'rounds,
+                    TurnControlDisposition::CancelCurrentWork => {
+                        final_done = true;
+                        break 'rounds;
+                    }
+                    TurnControlDisposition::ContinueCurrentWork => continue 'rounds,
+                }
+            }
             if nudge_no_progress {
                 ls.messages.push(serde_json::json!({
                     "role": "system",
@@ -1213,6 +1332,13 @@ missing, give what you have and note the gap in one short line.",
             }
         }
     }
+    if final_done || delivery == TurnDelivery::Delivered {
+        steering_to_complete.sort_unstable();
+        steering_to_complete.dedup();
+        for steering_id in steering_to_complete {
+            model_client.acknowledge_turn_control_completed(steering_id);
+        }
+    }
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
     // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
     // engine's turn ends here.
@@ -1239,6 +1365,7 @@ mod tests {
     use crate::events::{LinkedMemoryRead, TurnMemoryReadSet};
     use serde_json::{Value, json};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     // Minimal seam mocks: the model answers immediately (no tool calls); everything else is a no-op.
     struct AnswerModel;
@@ -2239,6 +2366,160 @@ mod tests {
         assert_eq!(
             done_count, 1,
             "expected exactly one Done event (clean termination)"
+        );
+    }
+
+    #[derive(Default)]
+    struct SteeringFinalizeModel {
+        calls: AtomicUsize,
+        control_ready: AtomicBool,
+        applied: AtomicBool,
+        completed: AtomicBool,
+    }
+
+    impl ModelClient for SteeringFinalizeModel {
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            (self.control_ready.load(Ordering::SeqCst)
+                && !self.applied.load(Ordering::SeqCst))
+            .then(|| crate::TurnControlDecision {
+                steering_id: 7,
+                disposition: crate::TurnControlDisposition::FinalizeWithCurrentEvidence,
+                instruction: "Answer now from the evidence already collected".to_string(),
+            })
+        }
+
+        fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+            assert_eq!(steering_id, 7);
+            self.applied.store(true, Ordering::SeqCst);
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            std::future::poll_fn(|context| {
+                if let Some(control) = self.current_turn_control() {
+                    std::task::Poll::Ready(control)
+                } else {
+                    context.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await
+        }
+
+        fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+            assert_eq!(steering_id, 7);
+            self.completed.store(true, Ordering::SeqCst);
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "tool_wait",
+                        "type": "function",
+                        "function": { "name": "wait_forever", "arguments": "{}" }
+                    }]
+                })
+            } else {
+                assert!(call.tools.is_empty());
+                assert!(call.messages.iter().any(|message| {
+                    message["content"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("evidence already collected"))
+                }));
+                json!({"role": "assistant", "content": "Final answer from current evidence."})
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct PendingSteeringTool<'a>(&'a SteeringFinalizeModel);
+
+    impl CapabilityExecutor for PendingSteeringTool<'_> {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            self.0.control_ready.store(true, Ordering::SeqCst);
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn steering_control_interrupts_active_tool_and_forces_one_terminal_synthesis() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "investigate" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = SteeringFinalizeModel::default();
+        let tool = PendingSteeringTool(&model);
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "investigate".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+        assert!(model.applied.load(Ordering::SeqCst));
+        assert!(model.completed.load(Ordering::SeqCst));
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            1
         );
     }
 }

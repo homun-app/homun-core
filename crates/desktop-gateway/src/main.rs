@@ -26308,6 +26308,16 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             end_browser_activity();
         }
     }
+
+    async fn interrupt(&mut self) {
+        if let Some(client) = self.browser_session.take() {
+            end_browser_activity();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+            })
+            .await;
+        }
+    }
 }
 
 // ─── ADR 0025 — browse-as-recursion: the browser as a delegated sub-agent ────────────────────────
@@ -64413,6 +64423,148 @@ prs.save(Path({path:?}))
             .unwrap()
             .contains("APPLY TO THE CURRENT RUN"));
         assert!(second.is_empty());
+    }
+
+    #[test]
+    fn gateway_projects_and_acknowledges_structured_turn_control() {
+        let state = super::AppState::for_tests();
+        let user_id = super::gateway_user_id();
+        let objective = state.task_store.lock().unwrap().upsert_objective_contract(
+            user_id.as_str(),
+            "workspace-a",
+            "thread-1",
+            "message-objective",
+            "Find train results",
+            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+            &serde_json::json!({}),
+            &serde_json::json!(["read"]),
+            &serde_json::json!({"deliverable": "results"}),
+            "active",
+        ).unwrap();
+        let pending = state.task_store.lock().unwrap().append_turn_steering(
+            user_id.as_str(),
+            "workspace-a",
+            "thread-1",
+            "turn-1",
+            &local_first_task_runtime::NewTurnSteering {
+                source_message_id: "message-control".into(),
+                prompt: "answer with current evidence".into(),
+                visible_prompt: "answer with current evidence".into(),
+                images: Vec::new(),
+                attachments: serde_json::json!([]),
+                mode: None,
+                model: None,
+            },
+            objective.revision,
+        ).unwrap();
+        let claimed = state.task_store.lock().unwrap().claim_pending_turn_steering(
+            user_id.as_str(), "workspace-a", "thread-1", "turn-1", "run-1", 1,
+        ).unwrap().remove(0);
+        let mut decision = super::semantic_decision::safe_fallback(None, "fixture");
+        decision.provenance.fallback_reason = None;
+        decision.decision.relationship_to_active_objective =
+            super::semantic_decision::ObjectiveRelationship::CompatibleExtension;
+        decision.decision.steering_disposition =
+            super::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence;
+        let interpreted = state.task_store.lock().unwrap().mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::to_value(decision).unwrap(),
+            "run-1",
+        ).unwrap();
+        let context = crate::model_client::GatewaySteeringContext {
+            state: &state,
+            user_id: user_id.as_str(),
+            workspace_id: "workspace-a",
+            thread_id: "thread-1",
+            turn_id: "turn-1",
+            run_id: "run-1",
+        };
+
+        let control = crate::model_client::current_turn_control(context).unwrap();
+        assert_eq!(control.steering_id, pending.steering_id);
+        assert_eq!(
+            control.disposition,
+            local_first_engine::TurnControlDisposition::FinalizeWithCurrentEvidence
+        );
+        crate::model_client::acknowledge_turn_control_applied(context, control.steering_id);
+        assert_eq!(
+            state.task_store.lock().unwrap().load_turn_steering(
+                control.steering_id, user_id.as_str(), "workspace-a",
+            ).unwrap().unwrap().status,
+            local_first_task_runtime::TurnSteeringStatus::Applied
+        );
+        crate::model_client::acknowledge_turn_control_completed(context, control.steering_id);
+        let completed = state.task_store.lock().unwrap().load_turn_steering(
+            control.steering_id, user_id.as_str(), "workspace-a",
+        ).unwrap().unwrap();
+        assert_eq!(completed.status, local_first_task_runtime::TurnSteeringStatus::Completed);
+        assert!(completed.revision > interpreted.revision);
+    }
+
+    #[test]
+    fn gateway_confirmation_requirement_overrides_the_requested_disposition() {
+        let state = super::AppState::for_tests();
+        let user_id = super::gateway_user_id();
+        let objective = state.task_store.lock().unwrap().upsert_objective_contract(
+            user_id.as_str(),
+            "workspace-a",
+            "thread-1",
+            "message-objective",
+            "Find train results",
+            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+            &serde_json::json!({}),
+            &serde_json::json!(["read"]),
+            &serde_json::json!({"deliverable": "results"}),
+            "active",
+        ).unwrap();
+        state.task_store.lock().unwrap().append_turn_steering(
+            user_id.as_str(),
+            "workspace-a",
+            "thread-1",
+            "turn-1",
+            &local_first_task_runtime::NewTurnSteering {
+                source_message_id: "message-confirm".into(),
+                prompt: "change the active objective".into(),
+                visible_prompt: "change the active objective".into(),
+                images: Vec::new(),
+                attachments: serde_json::json!([]),
+                mode: None,
+                model: None,
+            },
+            objective.revision,
+        ).unwrap();
+        let claimed = state.task_store.lock().unwrap().claim_pending_turn_steering(
+            user_id.as_str(), "workspace-a", "thread-1", "turn-1", "run-1", 1,
+        ).unwrap().remove(0);
+        let mut decision = super::semantic_decision::safe_fallback(None, "fixture");
+        decision.provenance.fallback_reason = None;
+        decision.decision.relationship_to_active_objective =
+            super::semantic_decision::ObjectiveRelationship::CompatibleExtension;
+        decision.decision.steering_disposition =
+            super::semantic_decision::SteeringDisposition::ReplanCurrentWork;
+        decision.decision.requires_user_confirmation = true;
+        state.task_store.lock().unwrap().mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::to_value(decision).unwrap(),
+            "run-1",
+        ).unwrap();
+        let context = crate::model_client::GatewaySteeringContext {
+            state: &state,
+            user_id: user_id.as_str(),
+            workspace_id: "workspace-a",
+            thread_id: "thread-1",
+            turn_id: "turn-1",
+            run_id: "run-1",
+        };
+
+        let control = crate::model_client::current_turn_control(context).unwrap();
+
+        assert_eq!(
+            control.disposition,
+            local_first_engine::TurnControlDisposition::NeedsClarification
+        );
     }
 
     #[test]

@@ -1047,7 +1047,8 @@ impl TaskStore {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         Ok(self.connection.execute(
             "UPDATE turn_steering SET status='held', revision=revision+1, updated_at=?1
-             WHERE user_id=?2 AND workspace_id=?3 AND active_turn_id=?4 AND status='pending'",
+             WHERE user_id=?2 AND workspace_id=?3 AND active_turn_id=?4
+               AND status IN ('pending','claimed','interpreted')",
             params![now, user_id, workspace_id, active_turn_id],
         )?)
     }
@@ -3292,6 +3293,24 @@ mod turn_steering_tests {
         let edited = store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("edited")).unwrap();
         assert!(matches!(store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("stale")), Err(TaskRuntimeError::Conflict(_))));
         assert_eq!(store.cancel_turn_steering(row.steering_id, "u", "w", edited.revision).unwrap().status, TurnSteeringStatus::Cancelled);
+    }
+
+    #[test]
+    fn manual_stop_holds_claimed_or_interpreted_steering_for_recovery() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("recover me"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
+        store.mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
+            "run-1",
+        ).unwrap();
+
+        assert_eq!(store.hold_pending_turn_steering("u", "w", "turn-1").unwrap(), 1);
+        let held = store.list_turn_steering("u", "w", "thread").unwrap().remove(0);
+        assert_eq!(held.status, TurnSteeringStatus::Held);
+        assert!(held.semantic_decision_json.is_some());
     }
 
     #[test]
