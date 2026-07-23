@@ -463,6 +463,18 @@ export interface CorePromptSubmissionResult {
   effective_model?: string | null;
 }
 
+/**
+ * Benign enqueue race: the server observed an already-active turn and routed
+ * this submission into its steering queue. The renderer must reconcile from
+ * durable state instead of presenting the successful routing as an error.
+ */
+export class SteeringQueuedDuringSubmissionError extends Error {
+  constructor() {
+    super("steering_queued");
+    this.name = "SteeringQueuedDuringSubmissionError";
+  }
+}
+
 export interface ChatAttachmentInput {
   localPath: string;
   displayName: string;
@@ -4737,7 +4749,7 @@ async function submitBrokerRuntimeChatPromptStream(
     routingBinding,
   });
   if (enqueued.status === "steering_queued") {
-    throw new Error("Instruction queued on the active task; no second stream was started.");
+    throw new SteeringQueuedDuringSubmissionError();
   }
   const turnId = enqueued.turn_id;
   const promptBuildSeconds = roundedSeconds(

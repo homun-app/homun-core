@@ -7,7 +7,6 @@ export interface ActiveTurnStatusProps {
   elapsedSeconds: number;
   attempt: number;
   activityCount: number;
-  variant: "assistant-footer" | "composer-bar";
   onOpenActivity(): void;
   onStop(): void;
 }
@@ -25,7 +24,6 @@ export function ActiveTurnStatus({
   elapsedSeconds,
   attempt,
   activityCount,
-  variant,
   onOpenActivity,
   onStop,
 }: ActiveTurnStatusProps) {
@@ -33,24 +31,28 @@ export function ActiveTurnStatus({
 
   return (
     <div
-      className={`active-turn-status ${variant}`}
+      className="active-turn-status"
       role="status"
       aria-live="polite"
+      aria-label={t("chat.stillWorking")}
+      title={detail}
     >
       <span className="active-turn-pulse" aria-hidden="true" />
       <span className="active-turn-copy">
-        <strong>{t("chat.stillWorking")}</strong>
-        <span>{phase}</span>
-        {detail && <small>{detail}</small>}
+        <strong>{phase}</strong>
       </span>
       <span className="active-turn-meta">
         <span>{formatElapsed(elapsedSeconds)}</span>
-        <span>{t("chat.attemptN", { count: Math.max(1, attempt) })}</span>
+        {attempt > 1 && <span>{t("chat.attemptN", { count: attempt })}</span>}
       </span>
-      <button type="button" className="active-turn-activity" onClick={onOpenActivity}>
+      <button
+        type="button"
+        className="active-turn-activity"
+        aria-label={t("chat.inspector.views.activity")}
+        onClick={onOpenActivity}
+      >
         <Activity size={14} />
-        {/* UI contract: Attività is rendered through the active locale. */}
-        <span>{t("chat.inspector.activity")}</span>
+        <span>{t("chat.inspector.views.activity")}</span>
         {activityCount > 0 && <small>{activityCount}</small>}
       </button>
       <button

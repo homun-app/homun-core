@@ -79,6 +79,7 @@ import type {
 } from "react";
 import {
   coreBridge,
+  SteeringQueuedDuringSubmissionError,
   subscribeAppEvents,
   type ActiveModelInfo,
   type ChatAttachmentInput,
@@ -1426,6 +1427,17 @@ export function ChatView({
     } catch (error) {
       cancelScheduledStreamingFrame();
       if (cancelledLocally || cancelledStreamIdsRef.current.has(requestId)) {
+        return;
+      }
+      if (error instanceof SteeringQueuedDuringSubmissionError) {
+        setPromptError(null);
+        setOptimisticMessages(null);
+        setProjectedActiveTurn(null);
+        onMessagesChange(conversationBase);
+        await Promise.all([
+          refreshPendingSteering().catch(() => undefined),
+          Promise.resolve().then(() => onThreadChanged()).catch(() => undefined),
+        ]);
         return;
       }
       const message = describeBridgeError(error);
@@ -2856,7 +2868,7 @@ export function ChatView({
               )}
               {isStreamingMessage ? (
                 <>
-                  {!streamHasVisibleText && (
+                  {!streamHasVisibleText && !chatTurnState && (
                     <AssistantThinkingState status={streamStatus} />
                   )}
                   {displayMessage.text && (
@@ -3114,22 +3126,12 @@ export function ChatView({
                 )}
               </footer>
             </article>
-            {displayMessage.id === activeAssistantMessageId && chatTurnState && (
-              <div className="active-turn-tail">
-                <ActiveTurnStatus
-                  {...chatTurnState}
-                  variant="assistant-footer"
-                  onOpenActivity={openActivityIsland}
-                  onStop={() => void stopActiveTurn()}
-                />
-              </div>
-            )}
             </div>
             );
           })}
           </div>
 
-          {promptSubmitting && !streamingAssistantId && (
+          {promptSubmitting && !streamingAssistantId && !chatTurnState && (
             <div className="thread-message-row">
               <article className="message assistant pending" aria-live="polite">
                 <header className="assistant-label">
@@ -3139,16 +3141,6 @@ export function ChatView({
                 </header>
                 <AssistantThinkingState status={streamStatus} />
               </article>
-              {chatTurnState && (
-                <div className="active-turn-tail">
-                  <ActiveTurnStatus
-                    {...chatTurnState}
-                    variant="assistant-footer"
-                    onOpenActivity={openActivityIsland}
-                    onStop={() => void stopActiveTurn()}
-                  />
-                </div>
-              )}
             </div>
           )}
 
@@ -3241,7 +3233,6 @@ export function ChatView({
         {chatTurnState && (
           <ActiveTurnStatus
             {...chatTurnState}
-            variant="composer-bar"
             onOpenActivity={openActivityIsland}
             onStop={() => void stopActiveTurn()}
           />
