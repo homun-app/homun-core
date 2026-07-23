@@ -54,6 +54,7 @@ mod setup_computer;
 // step 3; pure string generation — not wired yet).
 mod seatbelt;
 mod semantic_decision;
+mod steering_control;
 mod task_registry;
 mod temporal;
 mod template_packs;
@@ -1157,6 +1158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             local_first_desktop_gateway::MessageDeliveryState::Retrying,
         );
     }
+    steering_control::start(state.clone());
     // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
     // only after the lease-aware broker recovery above has completed its critical write to
     // the unified database; starting it earlier can race bump_process_generation and make a
@@ -8359,6 +8361,7 @@ pub(crate) fn resolve_semantic_decision(
             "deliverable".to_string(),
             "execution_shape".to_string(),
             "memory_intent".to_string(),
+            "steering_disposition".to_string(),
             "requires_user_confirmation".to_string(),
             "confidence".to_string(),
             "rationale".to_string(),
@@ -8379,7 +8382,7 @@ pub(crate) fn resolve_semantic_decision(
             tracing::warn!(
                 target: "semantic::decision",
                 ?error,
-                "semantic decision model unavailable; using safe fallback"
+                "semantic decision model unavailable; steering will remain pending"
             );
             Err("model_unavailable".to_string())
         }

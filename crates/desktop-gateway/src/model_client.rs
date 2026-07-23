@@ -68,18 +68,9 @@ pub(crate) fn steering_messages_for_round(
 
 fn steering_messages_for_round_number(
     context: GatewaySteeringContext<'_>,
-    round: u32,
+    _round: u32,
 ) -> Vec<serde_json::Value> {
-    let binding = crate::active_routing_binding(context.state, Some(context.thread_id));
-    steering_messages_for_round_number_with(context, round, |content, active| {
-        crate::resolve_semantic_decision(
-            context.state,
-            Some(context.thread_id),
-            content,
-            active,
-            binding.as_ref(),
-        )
-    })
+    consume_interpreted_steering(context)
 }
 
 pub(crate) fn steering_messages_for_round_with(
@@ -100,44 +91,92 @@ fn steering_messages_for_round_number_with(
         Option<&local_first_task_runtime::ObjectiveContractRecord>,
     ) -> crate::semantic_decision::ValidatedSemanticDecision,
 ) -> Vec<serde_json::Value> {
-    let Ok(store) = context.state.task_store.lock() else {
-        return Vec::new();
-    };
-    let mut objective = store
-        .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
-        .ok()
-        .flatten();
-    let messages = store
-        .claim_pending_turn_steering(
-            context.user_id,
-            context.workspace_id,
-            context.thread_id,
-            context.turn_id,
-            context.run_id,
-            round,
-        )
-        .unwrap_or_default();
-    drop(store);
-
-    if !messages.is_empty() {
-        let materialized = crate::lock_store(context.state)
-            .ok()
-            .is_some_and(|chat| messages.iter().all(|message| {
-                chat.materialize_steering_message(context.thread_id, message).is_ok()
-            }));
-        if !materialized {
+    let (objective, claimed) = {
+        let Ok(store) = context.state.task_store.lock() else {
             return Vec::new();
-        }
+        };
+        let objective = store
+            .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
+            .ok()
+            .flatten();
+        let claimed = store
+            .claim_pending_turn_steering(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+                context.turn_id,
+                context.run_id,
+                round,
+            )
+            .unwrap_or_default();
+        (objective, claimed)
+    };
+    for message in claimed {
+        let decision = resolve(&message.content, objective.as_ref());
         if let Ok(store) = context.state.task_store.lock() {
-            let ids = messages.iter().map(|message| message.steering_id).collect::<Vec<_>>();
-            if store.mark_turn_steering_applied(&ids, context.run_id).is_err() {
-                return Vec::new();
-            }
+            let _ = crate::steering_control::persist_interpretation_result(
+                &store,
+                &message,
+                context.run_id,
+                Ok(decision),
+                crate::now_epoch_secs() as i64,
+            );
         }
     }
+    consume_interpreted_steering(context)
+}
 
-    messages.into_iter().map(|message| {
-            let proposed = resolve(&message.content, objective.as_ref());
+fn consume_interpreted_steering(
+    context: GatewaySteeringContext<'_>,
+) -> Vec<serde_json::Value> {
+    let (mut objective, messages) = {
+        let Ok(store) = context.state.task_store.lock() else {
+            return Vec::new();
+        };
+        let objective = store
+            .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
+            .ok()
+            .flatten();
+        let messages = store
+            .list_interpreted_turn_steering(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+                context.turn_id,
+                context.run_id,
+            )
+            .unwrap_or_default();
+        (objective, messages)
+    };
+
+    messages.into_iter().filter_map(|message| {
+            let proposed = message
+                .semantic_decision_json
+                .as_ref()
+                .and_then(|value| serde_json::from_value(value.clone()).ok())?;
+            let materialized = crate::lock_store(context.state)
+                .ok()
+                .is_some_and(|chat| {
+                    chat.materialize_steering_message(context.thread_id, &message).is_ok()
+                });
+            if !materialized {
+                return None;
+            }
+            let applied = context
+                .state
+                .task_store
+                .lock()
+                .ok()
+                .and_then(|store| {
+                    store
+                        .mark_turn_steering_applied(
+                            message.steering_id,
+                            message.revision,
+                            context.run_id,
+                        )
+                        .ok()
+                });
+            applied?;
             let requires_confirmation = objective.as_ref().is_none_or(|active| {
                 crate::semantic_decision::steering_requires_confirmation(
                     active,
@@ -181,7 +220,7 @@ fn steering_messages_for_round_number_with(
                     proposed.decision.relationship_to_active_objective,
                 )
             };
-            serde_json::json!({"role": "user", "content": content})
+            Some(serde_json::json!({"role": "user", "content": content}))
         })
         .collect()
 }

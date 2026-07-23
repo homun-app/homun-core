@@ -824,6 +824,55 @@ impl TaskStore {
             .collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    pub fn list_interpreted_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        active_turn_id: &str,
+        run_id: &str,
+    ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                    source_message_id, content, payload_json, objective_revision, status,
+                    revision, created_at, updated_at, claimed_run_id, claimed_round,
+                    claimed_at, applied_at, cancelled_at, consumed_at,
+                    semantic_decision_json, interpreted_at, completed_at,
+                    last_interpretation_error, next_retry_at, interpretation_attempts
+             FROM turn_steering
+             WHERE user_id=?1 AND workspace_id=?2 AND thread_id=?3 AND active_turn_id=?4
+               AND claimed_run_id=?5 AND status='interpreted'
+             ORDER BY steering_id ASC",
+        )?;
+        Ok(statement
+            .query_map(
+                params![user_id, workspace_id, thread_id, active_turn_id, run_id],
+                map_turn_steering_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_due_pending_turn_steering(
+        &self,
+        now: i64,
+        limit: usize,
+    ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                    source_message_id, content, payload_json, objective_revision, status,
+                    revision, created_at, updated_at, claimed_run_id, claimed_round,
+                    claimed_at, applied_at, cancelled_at, consumed_at,
+                    semantic_decision_json, interpreted_at, completed_at,
+                    last_interpretation_error, next_retry_at, interpretation_attempts
+             FROM turn_steering
+             WHERE status='pending' AND (next_retry_at IS NULL OR next_retry_at <= ?1)
+             ORDER BY steering_id ASC LIMIT ?2",
+        )?;
+        Ok(statement
+            .query_map(params![now, limit as i64], map_turn_steering_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub fn update_turn_steering(
         &self,
         steering_id: i64,
@@ -3296,6 +3345,39 @@ mod turn_steering_tests {
 
         assert!(store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-2", 2).unwrap().is_empty());
         assert_eq!(store.list_turn_steering("u", "w", "thread").unwrap().remove(0).status, TurnSteeringStatus::Pending);
+    }
+
+    #[test]
+    fn interpreted_rows_can_be_loaded_for_the_active_turn_without_pending_text() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("semantic control"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
+        store.mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::json!({"steering_disposition": "replan_current_work"}),
+            "run-1",
+        ).unwrap();
+
+        let rows = store.list_interpreted_turn_steering("u", "w", "thread", "turn-1", "run-1").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, TurnSteeringStatus::Interpreted);
+        assert_eq!(rows[0].content, "semantic control");
+    }
+
+    #[test]
+    fn due_pending_scan_excludes_future_backoff_and_non_pending_rows() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("due"), 1).unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("future"), 1).unwrap();
+        let mut claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap();
+        let future = claimed.pop().unwrap();
+        let due = claimed.pop().unwrap();
+        store.release_turn_steering_for_retry(future.steering_id, future.revision, "model_unavailable", i64::MAX).unwrap();
+        store.release_turn_steering_for_retry(due.steering_id, due.revision, "model_unavailable", 1).unwrap();
+
+        let rows = store.list_due_pending_turn_steering(10, 20).unwrap();
+        assert_eq!(rows.iter().map(|row| row.content.as_str()).collect::<Vec<_>>(), vec!["due"]);
     }
 }
 
