@@ -26918,6 +26918,17 @@ fn delegated_browse_tool_outcome(
     }
 }
 
+/// Round budget scaled from the declared result contract. Progress (the engine's
+/// `max_no_progress`) is the primary limiter; this only sizes the ceiling so a
+/// richer goal gets proportionally more rounds. Deterministic, no model input.
+fn browse_round_budget(contract: &local_first_engine::browse::BrowseResultContract) -> usize {
+    const BASE: usize = 5;
+    const CAP: usize = 10;
+    let required = contract.fields.iter().filter(|f| f.required).count();
+    let items_bonus = if contract.minimum_items.unwrap_or(0) > 3 { 1 } else { 0 };
+    (BASE + required.div_ceil(2) + items_bonus).clamp(BASE, CAP)
+}
+
 /// The recursive `browse(goal)` executor (ADR 0025). Holds the turn-constants the sub-seams need
 /// (`AppState`, HTTP client, thread/prompt/request, perimeter flags); `browse` builds the browser-only
 /// sub-seams + isolated `LoopState` and calls `engine::run_turn`. Constructed by the manager's `browse`
@@ -62464,6 +62475,39 @@ mod tests {
         let contract = parsed.contract.unwrap();
         assert_eq!(contract.minimum_items, Some(3));
         assert_eq!(contract.fields[0].name, "departure");
+    }
+
+    #[test]
+    fn browse_round_budget_scales_with_contract_shape() {
+        use local_first_engine::browse::{BrowseResultContract, BrowseResultField, BrowseResultKind};
+        let simple = BrowseResultContract { kind: BrowseResultKind::Fact, minimum_items: None, fields: vec![], boundary: None };
+        assert_eq!(super::browse_round_budget(&simple), 5);
+
+        let list = BrowseResultContract {
+            kind: BrowseResultKind::List,
+            minimum_items: Some(5),
+            fields: vec![
+                BrowseResultField { name: "departure".into(), required: true },
+                BrowseResultField { name: "arrival".into(), required: true },
+                BrowseResultField { name: "duration".into(), required: true },
+                BrowseResultField { name: "price".into(), required: false },
+            ],
+            boundary: None,
+        };
+        // BASE 5 + ceil(3 required / 2)=2 + (minimum_items>3 ? 1 : 0)=1 = 8
+        assert_eq!(super::browse_round_budget(&list), 8);
+    }
+
+    #[test]
+    fn browse_round_budget_never_exceeds_cap() {
+        use local_first_engine::browse::{BrowseResultContract, BrowseResultField, BrowseResultKind};
+        let huge = BrowseResultContract {
+            kind: BrowseResultKind::List,
+            minimum_items: Some(10),
+            fields: (0..12).map(|i| BrowseResultField { name: format!("f{i}"), required: true }).collect(),
+            boundary: None,
+        };
+        assert_eq!(super::browse_round_budget(&huge), 10);
     }
 
     #[test]
