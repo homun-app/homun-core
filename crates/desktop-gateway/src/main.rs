@@ -22591,6 +22591,18 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                     format!("navigate {url}"),
                                     "done",
                                 );
+                                push_browser_step(
+                                    browser_protocol_event_summary(
+                                        call_id,
+                                        "navigation_observation",
+                                        browser_observation_metrics(
+                                            &value,
+                                            vec!["navigate".to_string()],
+                                            "completed",
+                                        ),
+                                    ),
+                                    "done",
+                                );
                                 let page_url = value
                                     .get("url")
                                     .and_then(|u| u.as_str())
@@ -22641,6 +22653,18 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 *ctx.last_snapshot = snap.clone();
                             }
                             push_browser_step("snapshot".to_string(), "done");
+                            push_browser_step(
+                                browser_protocol_event_summary(
+                                    call_id,
+                                    "observation",
+                                    browser_observation_metrics(
+                                        &value,
+                                        vec!["snapshot".to_string()],
+                                        "completed",
+                                    ),
+                                ),
+                                "done",
+                            );
                             Ok(format!("Page snapshot:\n{snap}"))
                         }
                         Err(error) => {
@@ -22781,6 +22805,7 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                             },
                         )
                         .await;
+                        let action_kinds = browser_action_kinds(&action);
                         let guard = browse_web_lock().lock().await;
                         let (client_back, act_res) =
                             chat_browser_call(client, BrowserMethod::Act, action)
@@ -22800,6 +22825,22 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                     *ctx.last_snapshot = snap.clone();
                                 }
                                 push_browser_step(format!("{kind}"), "done");
+                                push_browser_step(
+                                    browser_protocol_event_summary(
+                                        call_id,
+                                        if action_kinds.len() > 1 {
+                                            "action_bundle"
+                                        } else {
+                                            "browser_act"
+                                        },
+                                        browser_observation_metrics(
+                                            &value,
+                                            action_kinds.clone(),
+                                            "completed",
+                                        ),
+                                    ),
+                                    "done",
+                                );
                                 let mut out = if snap.is_empty() {
                                     "Action performed.".to_string()
                                 } else {
@@ -22896,6 +22937,18 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             ))
                                         } else {
                                             *ctx.last_snapshot = snap.clone();
+                                            push_browser_step(
+                                                browser_protocol_event_summary(
+                                                    call_id,
+                                                    "stale_ref_recovery_observation",
+                                                    browser_observation_metrics(
+                                                        snap_res.as_ref().unwrap(),
+                                                        vec!["snapshot".to_string()],
+                                                        "stale_ref_recovered",
+                                                    ),
+                                                ),
+                                                "done",
+                                            );
                                             Ok(stale_ref_recovery_message(
                                                 args.get("ref")
                                                     .and_then(|v| v.as_str()),
@@ -26449,9 +26502,24 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
                     answer: "Browser stopped with an invalid terminal payload.".to_string(),
                     ..Default::default()
                 });
+            let stop_reason = serde_json::to_string(&payload.status)
+                .unwrap_or_else(|_| "\"partial\"".to_string())
+                .trim_matches('"')
+                .to_string();
             let result = local_first_engine::browse::validate_browser_done_payload(
                 payload,
                 self.result_contract.as_ref(),
+            );
+            push_browser_step(
+                browser_protocol_event_summary(
+                    call_id,
+                    "browser_done",
+                    serde_json::json!({
+                        "stop_reason": stop_reason,
+                        "action_kinds": ["browser_done"],
+                    }),
+                ),
+                "done",
             );
             return local_first_engine::browse::browse_result_for_manager(&result);
         }
@@ -26753,6 +26821,21 @@ impl GatewayBrowseExecutor<'_> {
         );
         usage_context.purpose_detail = Some("browse".to_string());
         usage_context.thread_id = self.thread_id.map(str::to_string);
+        let contract_fp = browser_contract_fingerprint(&request.contract);
+        push_browser_step(
+            browser_protocol_event_summary(
+                usage_context.call_id.as_str(),
+                "manager_browse_start",
+                serde_json::json!({
+                    "stop_reason": "started",
+                    "action_kinds": ["browse"],
+                    "minimum_items": request.contract.as_ref().and_then(|contract| contract.minimum_items).unwrap_or(0),
+                    "contract_fields": request.contract.as_ref().map(|contract| contract.fields.len() as u64).unwrap_or(0),
+                    "contract_fp": contract_fp,
+                }),
+            ),
+            "done",
+        );
         // The tool chokepoint is browser-only: the 6 browser tools route through the fresh browser
         // executor below; any non-browser call is refused (defense — none are offered in tool_schemas).
         let capability_executor = BrowseOnlyCapabilityExecutor;
@@ -26784,6 +26867,17 @@ impl GatewayBrowseExecutor<'_> {
                 &mut ls,
             )
             .await;
+            push_browser_step(
+                browser_protocol_event_summary(
+                    usage_context.call_id.as_str(),
+                    "trusted_pre_navigation",
+                    serde_json::json!({
+                        "stop_reason": "completed",
+                        "action_kinds": ["navigate"],
+                    }),
+                ),
+                "done",
+            );
         }
         // The sub-turn does NO plan tracking / F3 compaction / route-blocking / completion-nudging — that
         // is the manager's job. All four ports are inert no-ops, and the cfg disables the plan machinery.
@@ -26845,6 +26939,21 @@ impl GatewayBrowseExecutor<'_> {
         .await;
 
         if let Some(result) = local_first_engine::browse::browse_result_from_manager_text(&outcome.memory_answer) {
+            let stop_reason = serde_json::to_string(&result.status)
+                .unwrap_or_else(|_| "\"partial\"".to_string())
+                .trim_matches('"')
+                .to_string();
+            push_browser_step(
+                browser_protocol_event_summary(
+                    usage_context.call_id.as_str(),
+                    "terminal_result",
+                    serde_json::json!({
+                        "stop_reason": stop_reason,
+                        "action_kinds": ["browser_done"],
+                    }),
+                ),
+                "done",
+            );
             return result;
         }
         let fallback_payload = local_first_engine::browse::BrowserDonePayload {
@@ -26855,6 +26964,18 @@ impl GatewayBrowseExecutor<'_> {
             sources: outcome.browse_sources.clone(),
             evidence: vec!["Browser sub-turn ended before browser_done.".into()],
         };
+        push_browser_step(
+            browser_protocol_event_summary(
+                usage_context.call_id.as_str(),
+                "timeout_fallback",
+                serde_json::json!({
+                    "observation_chars": browser_executor.last_snapshot.chars().count() as u64,
+                    "stop_reason": "timeout",
+                    "action_kinds": ["browser_done"],
+                }),
+            ),
+            "error",
+        );
         local_first_engine::browse::validate_browser_done_payload(
             fallback_payload,
             request.contract.as_ref(),
@@ -31200,6 +31321,117 @@ fn begin_browser_activity(goal: String, thread_id: Option<String>) {
             steps: Vec::new(),
         });
     }
+}
+
+fn browser_protocol_event_summary(
+    child_run_id: &str,
+    boundary: &str,
+    metrics: serde_json::Value,
+) -> String {
+    let observation_chars = metrics
+        .get("observation_chars")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let refs = metrics
+        .get("refs")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let stop_reason = metrics
+        .get("stop_reason")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let action_kinds = metrics
+        .get("action_kinds")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let mut out = format!(
+        "browser_protocol child_run_id={child_run_id} boundary={boundary} observation_chars={observation_chars} refs={refs} action_kinds={action_kinds} stop_reason={stop_reason}"
+    );
+    for key in [
+        "generation",
+        "completed_actions",
+        "unexecuted_actions",
+        "minimum_items",
+        "contract_fields",
+    ] {
+        if let Some(value) = metrics.get(key).and_then(serde_json::Value::as_u64) {
+            out.push_str(&format!(" {key}={value}"));
+        }
+    }
+    if let Some(value) = metrics.get("contract_fp").and_then(serde_json::Value::as_str) {
+        out.push_str(&format!(" contract_fp={value}"));
+    }
+    out
+}
+
+fn browser_action_kinds(action: &serde_json::Value) -> Vec<String> {
+    if let Some(actions) = action.get("actions").and_then(serde_json::Value::as_array) {
+        return actions
+            .iter()
+            .filter_map(|action| action.get("kind").and_then(serde_json::Value::as_str))
+            .map(str::to_string)
+            .collect();
+    }
+    action
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .map(|kind| vec![kind.to_string()])
+        .unwrap_or_default()
+}
+
+fn browser_observation_metrics(
+    value: &serde_json::Value,
+    action_kinds: Vec<String>,
+    stop_reason: &str,
+) -> serde_json::Value {
+    let observation_chars = value
+        .get("stats")
+        .and_then(|stats| stats.get("chars"))
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            value
+                .get("snapshot")
+                .and_then(serde_json::Value::as_str)
+                .map(|snapshot| snapshot.chars().count() as u64)
+        })
+        .unwrap_or(0);
+    let refs = value
+        .get("stats")
+        .and_then(|stats| stats.get("refs"))
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            value
+                .get("refs")
+                .and_then(serde_json::Value::as_array)
+                .map(|refs| refs.len() as u64)
+        })
+        .unwrap_or(0);
+    serde_json::json!({
+        "observation_chars": observation_chars,
+        "refs": refs,
+        "action_kinds": action_kinds,
+        "stop_reason": stop_reason,
+        "generation": value.get("generation").and_then(serde_json::Value::as_u64).unwrap_or(0),
+        "completed_actions": value.get("completedActions").and_then(serde_json::Value::as_u64).unwrap_or(0),
+        "unexecuted_actions": value.get("unexecutedActions").and_then(serde_json::Value::as_array).map(|actions| actions.len() as u64).unwrap_or(0),
+    })
+}
+
+fn browser_contract_fingerprint(
+    contract: &Option<local_first_engine::browse::BrowseResultContract>,
+) -> Option<String> {
+    let contract = contract.as_ref()?;
+    let encoded = serde_json::to_string(contract).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&encoded, &mut hasher);
+    Some(format!("{:016x}", std::hash::Hasher::finish(&hasher)))
 }
 
 fn push_browser_step(label: String, status: &str) {
@@ -61982,6 +62214,27 @@ mod tests {
         );
         assert!(schema.to_string().contains("completed"));
         assert!(schema.to_string().contains("fields_missing"));
+    }
+
+    #[test]
+    fn browser_event_summary_redacts_page_text_and_keeps_metrics() {
+        let event = super::browser_protocol_event_summary(
+            "child_123",
+            "action_bundle",
+            serde_json::json!({
+                "observation_chars": 6120,
+                "refs": 42,
+                "action_kinds": ["type", "click"],
+                "stop_reason": "completed",
+                "raw_page_text": "Departure 09:05 secret@example.com"
+            }),
+        );
+
+        assert!(event.contains("child_123"));
+        assert!(event.contains("observation_chars=6120"));
+        assert!(event.contains("action_kinds=type,click"));
+        assert!(!event.contains("secret@example.com"));
+        assert!(!event.contains("Departure 09:05"));
     }
 
     #[test]
