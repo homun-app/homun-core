@@ -27065,13 +27065,25 @@ impl GatewayBrowseExecutor<'_> {
         let compactor = NoContextCompactor;
         let turn_policy = OpenTurnPolicy;
         let completion_judge = NeverIncompleteJudge;
+        // `request.contract` is optional; `browse_round_budget` is defined over a declared
+        // contract, so a missing one falls back to BASE (5) — the same default as the prior
+        // hard-coded round count — rather than synthesizing a contract to feed it.
+        let rounds = request
+            .contract
+            .as_ref()
+            .map(browse_round_budget)
+            .unwrap_or(5);
         let cfg = local_first_engine::TurnConfig {
-            hard_round_ceiling: 5,
-            max_rounds: 5,
-            browser_max_rounds: 5,
+            hard_round_ceiling: rounds,
+            max_rounds: rounds,
+            browser_max_rounds: rounds,
             browser_nav_cap: browse_subagent_nav_cap(),
             browser_budget: local_first_engine::config::BrowserBudget {
-                max_elapsed_ms: 55_000,
+                // Wall-clock is a safety ceiling (a wedge backstop), aligned to the
+                // acceptance gate's per-run maximum — NOT the success criterion. Progress
+                // (`max_no_progress`) terminates a stalled run; the round budget sizes
+                // how far a *progressing* run may go.
+                max_elapsed_ms: 90_000,
                 max_failed_navigations: 3,
                 max_no_progress: 2,
             },
