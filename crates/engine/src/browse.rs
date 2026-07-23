@@ -314,6 +314,72 @@ pub fn browse_result_for_manager(result: &BrowseResult) -> String {
     out
 }
 
+pub fn browse_result_from_manager_text(text: &str) -> Option<BrowseResult> {
+    let mut found: Option<bool> = None;
+    let mut confidence = Confidence::Low;
+    let mut status = BrowserDoneStatus::Partial;
+    let mut answer = String::new();
+    let mut note = None;
+    let mut sources = Vec::new();
+    let mut items = Vec::new();
+    let mut fields_missing = Vec::new();
+    let mut evidence = Vec::new();
+    let mut section = "";
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("found: ") {
+            found = Some(value.trim() == "true");
+            section = "";
+        } else if let Some(value) = line.strip_prefix("confidence: ") {
+            confidence = if value.trim() == "high" {
+                Confidence::High
+            } else {
+                Confidence::Low
+            };
+            section = "";
+        } else if let Some(value) = line.strip_prefix("status: ") {
+            status = match value.trim() {
+                "completed" => BrowserDoneStatus::Completed,
+                "blocked" => BrowserDoneStatus::Blocked,
+                "unavailable" => BrowserDoneStatus::Unavailable,
+                "timeout" => BrowserDoneStatus::Timeout,
+                _ => BrowserDoneStatus::Partial,
+            };
+            section = "";
+        } else if let Some(value) = line.strip_prefix("answer: ") {
+            answer = value.trim().to_string();
+            section = "";
+        } else if let Some(value) = line.strip_prefix("note: ") {
+            note = Some(value.trim().to_string());
+            section = "";
+        } else if line == "sources:" || line == "items:" || line == "fields_missing:" || line == "evidence:" {
+            section = line.trim_end_matches(':');
+        } else if let Some(value) = line.strip_prefix("- ") {
+            match section {
+                "sources" => sources.push(value.to_string()),
+                "items" => {
+                    if let Ok(item) = serde_json::from_str::<Value>(value) {
+                        items.push(item);
+                    }
+                }
+                "fields_missing" => fields_missing.push(value.to_string()),
+                "evidence" => evidence.push(value.to_string()),
+                _ => {}
+            }
+        }
+    }
+    Some(BrowseResult {
+        found: found?,
+        answer,
+        sources,
+        confidence,
+        note,
+        status,
+        items,
+        fields_missing,
+        evidence,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

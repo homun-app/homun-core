@@ -112,6 +112,8 @@ pub struct LoopState {
     pub browser_failed_navigations: u32,
     /// Consecutive browser outcomes that made no useful progress.
     pub browser_no_progress: u32,
+    /// Delegated `browse` calls that completed in this manager turn.
+    pub browse_calls_completed: usize,
 }
 
 impl LoopState {

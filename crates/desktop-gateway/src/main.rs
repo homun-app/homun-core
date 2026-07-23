@@ -17989,6 +17989,10 @@ fn browser_done_tool_schema() -> serde_json::Value {
     })
 }
 
+fn initial_manager_tool_schemas_for_test(_read_only: bool, _contact_only: bool) -> Vec<serde_json::Value> {
+    vec![browse_tool_schema()]
+}
+
 fn use_computer_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -26237,14 +26241,23 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         // engine dispatch sees `browse` as a plain non-browser tool → it arrives here; the recursion runs
         // entirely gateway-side and returns a compact BrowseResult the manager reads.
         if name == "browse" {
+            if ls.browse_calls_completed > 0 {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: "found: false\nnote: A browse result was already returned in this turn. Use that evidence; ask the user before retrying.".to_string(),
+                    effects: local_first_engine::ToolEffects {
+                        outcome_hint: Some(local_first_engine::ToolOutcomeHint::NoProgress),
+                        ..Default::default()
+                    },
+                });
+            }
             if earlier_browse_call_in_current_round(&ls.messages, call_id) {
                 let deferred = local_first_engine::BrowseResult::not_found(
                     "browse deferred: another browse call already ran in this model round; inspect its result before deciding whether another source is needed",
                 );
                 return Ok(delegated_browse_tool_outcome(&deferred));
             }
-            let goal = build_browse_goal(args_raw);
-            if goal.is_empty() {
+            let request = parse_browse_request(args_raw);
+            if request.goal.is_empty() {
                 return Ok(local_first_engine::ToolOutcome {
                     result: "browse needs a non-empty `goal`.".to_string(),
                     effects: Default::default(),
@@ -26260,7 +26273,8 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                         == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
                 channel_owner: self.channel_owner,
             };
-            let outcome = browse_executor.browse(&goal).await;
+            let outcome = browse_executor.browse(request).await;
+            ls.browse_calls_completed = ls.browse_calls_completed.saturating_add(1);
             return Ok(delegated_browse_tool_outcome(&outcome));
         }
         // ADR 0023 Step 5: re-hydrate the turn's armed sensitive domains (carried as tokens in the
@@ -26397,6 +26411,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
 struct GatewayBrowserExecutor<'a> {
     browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
     last_snapshot: String,
+    result_contract: Option<local_first_engine::browse::BrowseResultContract>,
     current_target: String,
     opened_targets: Vec<String>,
     nav_failures: std::collections::HashMap<String, u32>,
@@ -26426,7 +26441,20 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         args_raw: &str,
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
-    ) -> String {
+) -> String {
+        if name == "browser_done" {
+            let payload = serde_json::from_str::<local_first_engine::browse::BrowserDonePayload>(args_raw)
+                .unwrap_or_else(|_| local_first_engine::browse::BrowserDonePayload {
+                    status: local_first_engine::browse::BrowserDoneStatus::Partial,
+                    answer: "Browser stopped with an invalid terminal payload.".to_string(),
+                    ..Default::default()
+                });
+            let result = local_first_engine::browse::validate_browser_done_payload(
+                payload,
+                self.result_contract.as_ref(),
+            );
+            return local_first_engine::browse::browse_result_for_manager(&result);
+        }
         // The browser branch mutates its ctx directly (disjoint read-set): browser-private state from
         // `&mut self`, loop-visible browser fields + provider from `&mut ls`. `browser_session` is
         // threaded separately (its Cell/RefCell would make the ctx non-`Sync`). ADR 0025 folds this
@@ -26671,19 +26699,28 @@ impl GatewayBrowseExecutor<'_> {
     /// Run one browser sub-turn for `goal` and return its `BrowseResult`. The recursion (this calls
     /// `run_turn`, which dispatches browser tools back through the sub `GatewayBrowserExecutor`) stays
     /// finite: the sub CapabilityExecutor type has no `browse`, so there is no self-recursive tool.
-    async fn browse(&self, goal: &str) -> local_first_engine::BrowseResult {
+    async fn browse(&self, request: ParsedBrowseRequest) -> local_first_engine::BrowseResult {
         // Browser model (falls back to the chat model when the browser role is auto/unresolved), so the
         // sub-agent runs on the small/cheap browsing model without ever switching the manager's provider.
         let (base_url, model, api_key) = browser_openai_stream_config()
             .or_else(chat_openai_stream_config)
             .unwrap_or_default();
 
+        let user_goal = match &request.contract {
+            Some(contract) => format!(
+                "{}\n\nResult contract:\n{}",
+                request.goal,
+                serde_json::to_string_pretty(contract).unwrap_or_default()
+            ),
+            None => request.goal.clone(),
+        };
+
         // Seed the ISOLATED sub-state: a clean 2-message context (browser prompt + goal) and ONLY the 6
         // granular browser tools. Nothing from the manager's turn crosses in — isolation by construction.
         let mut ls = local_first_engine::LoopState::new();
         ls.messages = local_first_engine::browse::seed_browse_messages(
             &browse_subagent_system_prompt(),
-            goal,
+            &user_goal,
         );
         ls.tool_schemas = vec![
             browser_navigate_tool_schema(),
@@ -26722,6 +26759,7 @@ impl GatewayBrowseExecutor<'_> {
         let mut browser_executor = GatewayBrowserExecutor {
             browser_session: None,
             last_snapshot: String::new(),
+            result_contract: request.contract.clone(),
             current_target: "chat_0".to_string(),
             opened_targets: Vec::new(),
             nav_failures: std::collections::HashMap::new(),
@@ -26732,6 +26770,21 @@ impl GatewayBrowseExecutor<'_> {
             read_only: self.read_only,
             channel_owner: self.channel_owner,
         };
+        if let Some(hint_url) = request.hint_url.as_deref() {
+            let nav_args = serde_json::json!({
+                "url": hint_url,
+                "target": "chat_0"
+            })
+            .to_string();
+            let _ = <GatewayBrowserExecutor as local_first_engine::BrowserExecutor>::execute_browser(
+                &mut browser_executor,
+                "browser_navigate",
+                &nav_args,
+                "pre_nav",
+                &mut ls,
+            )
+            .await;
+        }
         // The sub-turn does NO plan tracking / F3 compaction / route-blocking / completion-nudging — that
         // is the manager's job. All four ports are inert no-ops, and the cfg disables the plan machinery.
         let plan_progress = NoPlanProgress;
@@ -26739,11 +26792,15 @@ impl GatewayBrowseExecutor<'_> {
         let turn_policy = OpenTurnPolicy;
         let completion_judge = NeverIncompleteJudge;
         let cfg = local_first_engine::TurnConfig {
-            hard_round_ceiling: hard_round_ceiling(),
-            max_rounds: chat_browser_max_rounds(),
-            browser_max_rounds: chat_browser_max_rounds(),
+            hard_round_ceiling: 5,
+            max_rounds: 5,
+            browser_max_rounds: 5,
             browser_nav_cap: browse_subagent_nav_cap(),
-            browser_budget: browse_subagent_budget(),
+            browser_budget: local_first_engine::config::BrowserBudget {
+                max_elapsed_ms: 55_000,
+                max_failed_navigations: 3,
+                max_no_progress: 2,
+            },
             // Browse sub-turn does NO token-budget compaction (NoContextCompactor); the browser
             // history hygiene it needs is `prune_browser_history`. Unknown window → fail-open anyway.
             context_window: None,
@@ -26774,7 +26831,7 @@ impl GatewayBrowseExecutor<'_> {
             self.thread_id,
             &std::collections::BTreeSet::new(),
             &[],
-            goal.to_string(),
+            user_goal.clone(),
             String::new(),
             None,
             false,
@@ -26787,9 +26844,20 @@ impl GatewayBrowseExecutor<'_> {
         )
         .await;
 
-        local_first_engine::browse::browse_result_from_outcome_with_snapshot(
-            &outcome,
-            &browser_executor.last_snapshot,
+        if let Some(result) = local_first_engine::browse::browse_result_from_manager_text(&outcome.memory_answer) {
+            return result;
+        }
+        let fallback_payload = local_first_engine::browse::BrowserDonePayload {
+            status: local_first_engine::browse::BrowserDoneStatus::Timeout,
+            answer: browser_executor.last_snapshot.chars().take(2000).collect(),
+            items: vec![],
+            fields_missing: vec!["browser_done".into()],
+            sources: outcome.browse_sources.clone(),
+            evidence: vec!["Browser sub-turn ended before browser_done.".into()],
+        };
+        local_first_engine::browse::validate_browser_done_payload(
+            fallback_payload,
+            request.contract.as_ref(),
         )
     }
 }
@@ -27943,7 +28011,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // browser tools are driven ONLY inside the isolated browse sub-loop (they're seeded there directly),
     // never offered to the manager. The mid-turn model-switch + the granular-tools-on-the-manager path
     // are retired — one canonical browser path.
-    let mut base_tools = vec![browse_tool_schema()];
+    let mut base_tools = initial_manager_tool_schemas_for_test(read_only, contact_only);
     base_tools.extend([
         recall_memory_tool_schema(),
         query_code_graph_tool_schema(),
@@ -28815,6 +28883,7 @@ async fn run_agent_rounds(
     let mut browser_executor = GatewayBrowserExecutor {
         browser_session: None,
         last_snapshot: String::new(),
+        result_contract: None,
         current_target: "chat_0".to_string(), // the first tab the tools operate on
         opened_targets: Vec::new(),
         nav_failures: std::collections::HashMap::new(),
@@ -61913,6 +61982,43 @@ mod tests {
         );
         assert!(schema.to_string().contains("completed"));
         assert!(schema.to_string().contains("fields_missing"));
+    }
+
+    #[test]
+    fn parse_browse_request_keeps_model_contract_without_keyword_inference() {
+        let parsed = super::parse_browse_request(r#"{
+            "goal":"Search the requested journey",
+            "hints":{"url":"https://www.trenitalia.com/it.html"},
+            "result_contract":{
+                "kind":"list",
+                "minimum_items":3,
+                "fields":[
+                    {"name":"departure","required":true},
+                    {"name":"arrival","required":true},
+                    {"name":"duration","required":true},
+                    {"name":"price","required":false}
+                ],
+                "boundary":"Stop before booking or payment"
+            }
+        }"#);
+
+        assert_eq!(parsed.goal, "Search the requested journey");
+        assert_eq!(parsed.hint_url.as_deref(), Some("https://www.trenitalia.com/it.html"));
+        let contract = parsed.contract.unwrap();
+        assert_eq!(contract.minimum_items, Some(3));
+        assert_eq!(contract.fields[0].name, "departure");
+    }
+
+    #[test]
+    fn built_in_browse_is_loaded_without_find_capability() {
+        let base_tools = super::initial_manager_tool_schemas_for_test(false, false);
+        let names = base_tools
+            .iter()
+            .filter_map(|schema| schema.pointer("/function/name").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"browse"));
+        assert!(!names.iter().position(|name| *name == "browse").is_none());
     }
 
     #[test]
