@@ -265,6 +265,14 @@ export class BrowserSessionManager {
   async act(action: BrowserActRequest): Promise<BrowserActionResult> {
     const state = await this.resolvePage(action.targetId);
     await dismissCommonOverlays(state.page);
+    const requestedGeneration = Number((action as Record<string, unknown>).generation);
+    if (Number.isFinite(requestedGeneration) && requestedGeneration > 0 && requestedGeneration !== state.generation) {
+      throw new BrowserAutomationError({
+        code: "BROWSER_STALE_GENERATION",
+        message: `action generation ${requestedGeneration} does not match current page generation ${state.generation}`,
+        retryable: true,
+      });
+    }
     if (action.kind === "click" && action.ref && state.armedFileChooser) {
       const files = state.armedFileChooser;
       state.armedFileChooser = undefined;

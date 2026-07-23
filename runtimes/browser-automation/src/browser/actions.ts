@@ -16,6 +16,7 @@ const MAX_WAIT_TIME_MS = 30_000;
 const MAX_CLICK_DELAY_MS = 5_000;
 const MAX_BATCH_ACTIONS = 100;
 const MAX_BATCH_DEPTH = 3;
+const MAX_CHAT_BUNDLE_ACTIONS = 4;
 const DEFAULT_HOLD_MS = 3_000;
 const MAX_HOLD_MS = 20_000;
 
@@ -38,6 +39,8 @@ export type BrowserActionResult = {
   filledRefs?: string[];
   failedRefs?: Array<{ ref: string; error: string }>;
   batchResults?: Array<BrowserActionResult | { ok: false; error: string }>;
+  completedActions?: number;
+  unexecutedActions?: BrowserActRequest[];
   result?: unknown;
   /** For "type": the autocomplete suggestion that was selected, if any. */
   committedOption?: string;
@@ -225,6 +228,7 @@ async function executeActionUnchecked(
   action: BrowserActRequest,
   depth: number,
 ): Promise<BrowserActionResult> {
+  assertChatBundle(action);
   switch (action.kind) {
     case "click": {
       const locator = requireRefOrSelector(page, refs, action.ref, action.selector, "click");
@@ -482,18 +486,22 @@ async function executeActionUnchecked(
         });
       }
       const batchResults: BrowserActionResult["batchResults"] = [];
-      for (const nested of action.actions) {
+      const unexecutedActions: BrowserActRequest[] = [];
+      let completedActions = 0;
+      for (const [index, nested] of action.actions.entries()) {
         try {
           batchResults.push(await executeActionUnchecked(page, refs, withTarget(action.targetId, nested), depth + 1));
+          completedActions += 1;
         } catch (error) {
           const normalized = normalizeActionError(error, nested.kind);
           batchResults.push({ ok: false, error: `${normalized.code}: ${normalized.message}` });
+          unexecutedActions.push(...action.actions.slice(index + 1));
           if (action.stopOnError !== false) {
-            throw normalized;
+            break;
           }
         }
       }
-      return { ok: true, url: page.url(), batchResults };
+      return { ok: true, url: page.url(), batchResults, completedActions, unexecutedActions };
     }
     default: {
       // An unrecognized action shape (e.g. a planner that emitted
@@ -511,6 +519,31 @@ async function executeActionUnchecked(
 
 function withTarget(targetId: string, action: BrowserActRequest): BrowserActRequest {
   return { ...action, targetId } as BrowserActRequest;
+}
+
+function isChatBundle(action: BrowserActRequest): boolean {
+  const raw = action as Record<string, unknown>;
+  return Boolean(raw.chatBundle ?? raw.chat_bundle);
+}
+
+function assertChatBundle(action: BrowserActRequest): void {
+  if (action.kind !== "batch" || !isChatBundle(action)) {
+    return;
+  }
+  if (action.actions.length > MAX_CHAT_BUNDLE_ACTIONS) {
+    throw new BrowserAutomationError({
+      code: "BROWSER_CHAT_BUNDLE_TOO_LARGE",
+      message: "chat browser bundles may contain at most 4 actions",
+      retryable: false,
+    });
+  }
+  if (action.actions.some((nested) => nested.kind === "batch")) {
+    throw new BrowserAutomationError({
+      code: "BROWSER_NESTED_BATCH_REJECTED",
+      message: "chat browser bundles must be flat",
+      retryable: false,
+    });
+  }
 }
 
 function countBatchActions(actions: BrowserActRequest[]): number {

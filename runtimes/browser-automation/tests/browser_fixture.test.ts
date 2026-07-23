@@ -295,6 +295,89 @@ describe("browser sidecar engine", () => {
     expect(extract.stats.chars).toBeLessThanOrEqual(16_200);
   });
 
+  it("executes a chat bundle of four actions and rejects nested or oversized bundles", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/train`, label: "train" });
+    const snapshot = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const accept = snapshot.refs.find((ref) => ref.name === "Accetta tutto");
+    const from = snapshot.refs.find((ref) => ref.name === "Da");
+
+    const accepted = accept
+      ? await manager.act({
+          targetId: "train",
+          kind: "batch",
+          chatBundle: true,
+          generation: snapshot.generation,
+          actions: [{ targetId: "train", kind: "click", ref: accept.ref }],
+          observationMode: "delta",
+        } as never)
+      : snapshot;
+    if (accept) {
+      expect(accepted).toMatchObject({ ok: true });
+    }
+
+    const afterAccept = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const fromRef = afterAccept.refs.find((ref) => ref.name === "Da") ?? from;
+    const bundle = await manager.act({
+      targetId: "train",
+      kind: "batch",
+      chatBundle: true,
+      generation: afterAccept.generation,
+      actions: [
+        { targetId: "train", kind: "type", ref: fromRef!.ref, text: "Nap" },
+        { targetId: "train", kind: "wait", text: "Napoli Centrale", timeoutMs: 2_000 },
+      ],
+      observationMode: "delta",
+    } as never);
+    expect(bundle.batchResults).toHaveLength(2);
+    expect(bundle.completedActions).toBe(2);
+    expect(JSON.stringify(bundle)).toContain("Napoli Centrale");
+
+    await expect(
+      manager.act({
+        targetId: "train",
+        kind: "batch",
+        chatBundle: true,
+        generation: bundle.generation,
+        actions: [
+          { targetId: "train", kind: "wait", text: "x" },
+          { targetId: "train", kind: "wait", text: "x" },
+          { targetId: "train", kind: "wait", text: "x" },
+          { targetId: "train", kind: "wait", text: "x" },
+          { targetId: "train", kind: "wait", text: "x" },
+        ],
+      } as never),
+    ).rejects.toMatchObject({ code: "BROWSER_CHAT_BUNDLE_TOO_LARGE" });
+
+    await expect(
+      manager.act({
+        targetId: "train",
+        kind: "batch",
+        chatBundle: true,
+        generation: bundle.generation,
+        actions: [{ targetId: "train", kind: "batch", actions: [] }],
+      } as never),
+    ).rejects.toMatchObject({ code: "BROWSER_NESTED_BATCH_REJECTED" });
+  });
+
+  it("rejects a chat bundle from a stale observation generation", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "booking" });
+    const first = await manager.snapshot({ targetId: "booking", observationMode: "interact" } as never);
+    await manager.snapshot({ targetId: "booking", observationMode: "interact" } as never);
+    const name = first.refs.find((ref) => ref.name === "Name");
+
+    await expect(
+      manager.act({
+        targetId: "booking",
+        kind: "batch",
+        chatBundle: true,
+        generation: first.generation,
+        actions: [{ targetId: "booking", kind: "type", ref: name!.ref, text: "Ada" }],
+      } as never),
+    ).rejects.toMatchObject({ code: "BROWSER_STALE_GENERATION" });
+  });
+
   it("selects options and can snapshot after an explicit fill_form request", async () => {
     await manager.start();
     await manager.open({ url: baseUrl, label: "booking" });
