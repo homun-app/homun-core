@@ -4,6 +4,8 @@
 
 **Status:** Approved in conversation (design deferred to technical verification, verified against code); awaiting written-spec review
 
+> **Post-implementation status (2026-07-23, final whole-slice review):** implemented and green, but the adversarial whole-slice review found the ref-less leg is **NOT fully closed** — a must-fix cluster of schema-legal bypasses (Enter spellings, `scroll`+ref click, `selector`/`commit` fields) and a likely OOPIF fail-open for real cross-origin PSP iframes. See `docs/superpowers/2026-07-23-overnight-weakness-triage.md` (TOP PRIORITY section). The slice defends a cooperative model, not an adversarial one, until that cluster is fixed holistically.
+
 **Scope:** Close the ref-less leg of the machine payment floor on the browse sub-turn (branch `fabio/browser-stream-recovery`). Follow-up item 1 of the final whole-branch review of the *Browser Semantic Effect Gate* slice. Item 2 (binding the approval grant to merchant/amount) is a **separate spec**, deliberately out of scope here.
 
 ## Gap being closed
