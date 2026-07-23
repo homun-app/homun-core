@@ -1,47 +1,12 @@
 //! Shared browser safety gate. Decides whether a single browser action is
-//! high-risk (a purchase/login/booking commit, or arbitrary page script) and
-//! must be refused without explicit user approval.
+//! high-risk (a final payment commit or arbitrary page script) and must be
+//! refused without explicit user approval.
 //!
 //! Used by the main-agent-driven `browser_act` tool to enforce the guard. Takes
 //! the snapshot as `&str` (not a `BrowserObservation`) so it has no dependency on
 //! the browser-automation crate types.
 
 use serde_json::Value;
-
-/// Substring patterns (EN + IT) that mark a control as high-risk. Matching is
-/// conservative substring on the element label. Search/`cerca` is deliberately
-/// NOT here — running a search is allowed; buying/booking/logging in is not.
-const HIGH_RISK_LABEL_PATTERNS: &[&str] = &[
-    // purchase / payment
-    "buy",
-    "pay",
-    "payment",
-    "checkout",
-    "purchase",
-    "place order",
-    "order now",
-    "add to cart",
-    "acquista",
-    "paga",
-    "pagamento",
-    "compra",
-    "acquisto",
-    "ordina",
-    "carrello",
-    "procedi all'acquisto",
-    // booking / reservation
-    "book now",
-    "reserve",
-    "prenota",
-    "prenotazione",
-    // authentication
-    "log in",
-    "login",
-    "sign in",
-    "signin",
-    "accedi",
-    "entra con",
-];
 
 const FINAL_PAYMENT_LABEL_PATTERNS: &[&str] = &[
     "buy",
@@ -62,7 +27,7 @@ const FINAL_PAYMENT_LABEL_PATTERNS: &[&str] = &[
 
 /// True if the action commits something potentially irreversible: a click, a
 /// `type` with `submit`, or an Enter/Return key press. Used both by the
-/// high-risk check and (in read-only/channel turns) to block ALL commits.
+/// final-payment check.
 pub fn is_committing_action(action: &Value) -> bool {
     let kind = action.get("kind").and_then(Value::as_str).unwrap_or("");
     matches!(kind, "click" | "clickCoords")
@@ -80,16 +45,16 @@ pub fn is_committing_action(action: &Value) -> bool {
 }
 
 /// Returns a blocker reason if the action is high-risk: arbitrary JS, or a
-/// committing action on a control whose label matches a purchase/login/booking
-/// pattern. `None` means the action is safe to run. `snapshot` is the latest
+/// committing action on a control whose label matches a final-payment pattern.
+/// `None` means the action is safe to run. `snapshot` is the latest
 /// page snapshot text, used to resolve the control label from `ref`.
 pub fn high_risk_reason(action: &Value, snapshot: &str) -> Option<String> {
     high_risk_reason_with_payment_approval(action, snapshot, None)
 }
 
 /// Approval-aware variant for the future payment flow. A matching
-/// `payment_approval_id` can unlock final purchase/payment controls only; login,
-/// arbitrary script, booking, and unrelated high-risk labels remain blocked.
+/// `payment_approval_id` can unlock final payment controls only. Login and
+/// booking are user-directed browser actions and do not use this payment gate.
 pub fn high_risk_reason_with_payment_approval(
     action: &Value,
     snapshot: &str,
@@ -134,15 +99,7 @@ pub fn high_risk_reason_with_payment_approval(
              and requires a matching Payment Approval Card"
         ));
     }
-    HIGH_RISK_LABEL_PATTERNS
-        .iter()
-        .find(|pattern| label.contains(*pattern))
-        .map(|pattern| {
-            format!(
-                "blocked before high-risk action: control \"{label}\" matches \"{pattern}\" \
-                 (purchase/login/booking require explicit user approval)"
-            )
-        })
+    None
 }
 
 /// Extracts the accessible name of a ref from an AI snapshot line such as
@@ -161,7 +118,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const SNAP: &str = "- textbox \"Da\" [ref=e1]\n- button \"Acquista ora\" [ref=e9]\n- button \"Cerca\" [ref=e7]\n- button \"Tieni premuto per confermare di essere umano\" [ref=e3]";
+    const SNAP: &str = "- textbox \"Da\" [ref=e1]\n- button \"Acquista ora\" [ref=e9]\n- button \"Cerca\" [ref=e7]\n- button \"Accedi\" [ref=e8]\n- button \"Prenota\" [ref=e11]\n- button \"Tieni premuto per confermare di essere umano\" [ref=e3]";
 
     #[test]
     fn blocks_evaluate() {
@@ -176,6 +133,17 @@ mod tests {
     #[test]
     fn allows_click_on_search() {
         assert!(high_risk_reason(&json!({"kind":"click","ref":"e7"}), SNAP).is_none());
+    }
+
+    #[test]
+    fn allows_login_and_booking_but_blocks_payment() {
+        for reference in ["e7", "e8", "e11"] {
+            assert!(
+                high_risk_reason(&json!({"kind":"click","ref":reference}), SNAP).is_none(),
+                "{reference} should be allowed"
+            );
+        }
+        assert!(high_risk_reason(&json!({"kind":"click","ref":"e9"}), SNAP).is_some());
     }
 
     #[test]

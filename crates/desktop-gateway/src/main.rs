@@ -17965,7 +17965,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button (it keeps the pointer pressed for a few seconds). Do not use for purchases, logins or payments unless the user approved a Payment Approval Card and you have its exact payment_approval_id.",
+            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type', then inspect the updated snapshot and select the intended suggestion when needed. Login and booking actions are allowed when they are part of the user's request. The final action that transfers money requires an approved Payment Approval Card and its exact payment_approval_id. For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -22533,33 +22533,18 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 false
                             }
                         };
-                    // SAFETY GATE: high-risk (buy/login/booking, or
-                    // evaluate) is refused for EVERYONE. In read-only
-                    // (channel) turns any committing action is also
-                    // refused — EXCEPT when the sender is the OWNER
-                    // (is_self card): that block protects the user from
-                    // other people, not from their own requests (e.g.
-                    // clicking "Cerca" on a train search they asked for).
+                    // SAFETY GATE: arbitrary page script remains forbidden and
+                    // the final action that transfers money requires a matching
+                    // Payment Approval Card. Search, login and booking actions
+                    // are ordinary user-directed browser interactions; objective
+                    // read-only mode must not be reused as an origin-trust gate.
                     let approved_payment_id =
                         approved_payment_id_for_action(ctx.state, &action);
                     let blocked = browser_safety::high_risk_reason_with_payment_approval(
                         &action,
                         ctx.last_snapshot,
                         approved_payment_id.as_deref(),
-                    )
-                    .or_else(|| {
-                        if ctx.read_only
-                            && !ctx.channel_owner
-                            && browser_safety::is_committing_action(&action)
-                        {
-                            Some(
-                                "action that confirms/submits is not allowed from the channel"
-                                    .to_string(),
-                            )
-                        } else {
-                            None
-                        }
-                    });
+                    );
                     if let Some(error) = preflight_error {
                         *browser_session = Some(client);
                         Err(error)
