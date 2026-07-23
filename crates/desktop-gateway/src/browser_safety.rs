@@ -44,6 +44,21 @@ pub fn is_committing_action(action: &Value) -> bool {
                 .is_some_and(|key| matches!(key.to_ascii_lowercase().as_str(), "enter" | "return")))
 }
 
+pub fn is_final_payment_action(action: &Value, snapshot: &str) -> bool {
+    if !is_committing_action(action) && action.get("kind").and_then(Value::as_str) != Some("hold") {
+        return false;
+    }
+    let label = action
+        .get("ref")
+        .and_then(Value::as_str)
+        .and_then(|ref_id| snapshot_label_for_ref(snapshot, ref_id))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    FINAL_PAYMENT_LABEL_PATTERNS
+        .iter()
+        .any(|pattern| label.contains(*pattern))
+}
+
 /// Returns a blocker reason if the action is high-risk: arbitrary JS, or a
 /// committing action on a control whose label matches a final-payment pattern.
 /// `None` means the action is safe to run. `snapshot` is the latest

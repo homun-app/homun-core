@@ -525,6 +525,8 @@ impl AppState {
 struct PaymentApprovalGrant {
     snapshot: PaymentApprovalSnapshot,
     cvv_one_shot: Option<String>,
+    thread_id: String,
+    consumed: bool,
     expires_at: std::time::Instant,
 }
 
@@ -22538,8 +22540,26 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     // Payment Approval Card. Search, login and booking actions
                     // are ordinary user-directed browser interactions; objective
                     // read-only mode must not be reused as an origin-trust gate.
-                    let approved_payment_id =
-                        approved_payment_id_for_action(ctx.state, &action);
+                    let approved_payment_id = if browser_safety::is_final_payment_action(
+                        &action,
+                        ctx.last_snapshot,
+                    ) {
+                        match claim_payment_approval_for_action(
+                            ctx.state,
+                            &action,
+                            ctx.last_snapshot,
+                            ctx.thread_id,
+                        ) {
+                            Ok(id) => Some(id),
+                            Err(error) if action.get("payment_approval_id").is_some() => {
+                                preflight_error = Some(error);
+                                None
+                            }
+                            Err(_) => None,
+                        }
+                    } else {
+                        None
+                    };
                     let blocked = browser_safety::high_risk_reason_with_payment_approval(
                         &action,
                         ctx.last_snapshot,
@@ -43754,6 +43774,8 @@ fn payment_approval_grant_from_request(
     Ok(PaymentApprovalGrant {
         snapshot: request.snapshot.clone(),
         cvv_one_shot: Some(request.cvv.trim().to_string()),
+        thread_id: request.thread_id.clone().unwrap_or_default(),
+        consumed: false,
         expires_at: std::time::Instant::now()
             + std::time::Duration::from_secs(PAYMENT_APPROVAL_TTL_SECONDS),
     })
@@ -43892,13 +43914,44 @@ fn rewrite_payment_approval_to_done(
     out
 }
 
-fn approved_payment_id_for_action(state: &AppState, action: &serde_json::Value) -> Option<String> {
-    let approval_id = action.get("payment_approval_id")?.as_str()?.to_string();
-    let mut approvals = lock_payment_approvals(state).ok()?;
-    prune_expired_payment_approvals(&mut approvals);
-    approvals
-        .get(&approval_id)
-        .map(|grant| grant.snapshot.approval_id.clone())
+fn claim_payment_approval_for_action(
+    state: &AppState,
+    action: &serde_json::Value,
+    snapshot: &str,
+    thread_id: Option<&str>,
+) -> Result<String, String> {
+    let mut approvals = lock_payment_approvals(state).map_err(|error| error.message)?;
+    claim_payment_approval_from_map(&mut approvals, action, snapshot, thread_id)
+}
+
+fn claim_payment_approval_from_map(
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+    action: &serde_json::Value,
+    snapshot: &str,
+    thread_id: Option<&str>,
+) -> Result<String, String> {
+    if !browser_safety::is_final_payment_action(action, snapshot) {
+        return Err("payment approval can only be used on the final payment control".to_string());
+    }
+    let approval_id = action
+        .get("payment_approval_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "final payment requires a Payment Approval Card".to_string())?
+        .to_string();
+    prune_expired_payment_approvals(approvals);
+    let grant = approvals
+        .get_mut(&approval_id)
+        .ok_or_else(|| "payment approval is missing or expired".to_string())?;
+    if grant.thread_id != thread_id.unwrap_or_default() {
+        return Err("payment approval belongs to a different conversation".to_string());
+    }
+    if grant.consumed {
+        return Err("payment approval was already used".to_string());
+    }
+    grant.consumed = true;
+    Ok(grant.snapshot.approval_id.clone())
 }
 
 fn prune_expired_payment_approvals(
@@ -63922,6 +63975,8 @@ prs.save(Path({path:?}))
             super::PaymentApprovalGrant {
                 snapshot: payment_snapshot(),
                 cvv_one_shot: Some("123".to_string()),
+                thread_id: String::new(),
+                consumed: false,
                 expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
             },
         )]);
@@ -64039,6 +64094,51 @@ prs.save(Path({path:?}))
             super::apply_payment_approval_secret_from_map(&mut approvals, &mut second_fill)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn payment_grant_is_thread_scoped_and_final_click_is_one_shot() {
+        let mut approvals = std::collections::HashMap::from([(
+            "pay_test".to_string(),
+            super::PaymentApprovalGrant {
+                snapshot: payment_snapshot(),
+                cvv_one_shot: Some("123".to_string()),
+                thread_id: "thread_1".to_string(),
+                consumed: false,
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+            },
+        )]);
+        let action = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "payment_approval_id": "pay_test"
+        });
+        let snapshot = "- button \"Paga ora\" [ref=e20]";
+
+        assert!(super::claim_payment_approval_from_map(
+            &mut approvals,
+            &action,
+            snapshot,
+            Some("thread_2")
+        )
+        .is_err());
+        assert_eq!(
+            super::claim_payment_approval_from_map(
+                &mut approvals,
+                &action,
+                snapshot,
+                Some("thread_1")
+            )
+            .unwrap(),
+            "pay_test"
+        );
+        assert!(super::claim_payment_approval_from_map(
+            &mut approvals,
+            &action,
+            snapshot,
+            Some("thread_1")
+        )
+        .is_err());
     }
 
     #[test]
