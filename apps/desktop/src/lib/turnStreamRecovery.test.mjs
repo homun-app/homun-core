@@ -59,10 +59,50 @@ test("fails with a typed error after the reconnect budget", async () => {
     recoverTurnStream({
       turnId: "turn",
       connect: async () => {},
-      getStatus: async () => ({ status: "running" }),
+      getStatus: async () => ({ status: "completed" }),
       sleep: async () => {},
       maxReconnects: 2,
     }),
     (error) => error?.code === "turn_stream_recovery_exhausted",
   );
+});
+
+test("does not exhaust reconnects while the durable turn is still running", async () => {
+  let connections = 0;
+  const result = await recoverTurnStream({
+    turnId: "turn",
+    connect: async ({ onEvent }) => {
+      connections += 1;
+      if (connections === 7) {
+        onEvent({ turn_id: "turn", seq: 1, kind: "delta", payload: { text: "OK" } });
+        onEvent({ turn_id: "turn", seq: 2, kind: "done", payload: {} });
+      }
+    },
+    getStatus: async () => ({ status: "running" }),
+    sleep: async () => {},
+    maxReconnects: 2,
+  });
+
+  assert.equal(connections, 7);
+  assert.equal(result.status, "completed");
+  assert.equal(result.text, "OK");
+});
+
+test("settles after a durable user-approval handoff with streamed content", async () => {
+  const result = await recoverTurnStream({
+    turnId: "turn",
+    connect: async ({ onEvent }) => {
+      onEvent({
+        turn_id: "turn",
+        seq: 1,
+        kind: "delta",
+        payload: { text: "[PAYMENT_APPROVAL_REQUIRED]" },
+      });
+    },
+    getStatus: async () => ({ status: "waiting_user_approval" }),
+    sleep: async () => {},
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.text, "[PAYMENT_APPROVAL_REQUIRED]");
 });

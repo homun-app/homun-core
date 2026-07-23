@@ -1,6 +1,8 @@
 import { applyTurnEvent, createTurnReplayState } from "./turnReplayState.mjs";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled"]);
+const DURABLE_TERMINAL = new Set(["completed", "failed", "cancelled", "expired"]);
+const DURABLE_HANDOFF = new Set(["waiting_user_approval"]);
 const DEFAULT_DELAYS = [100, 250, 500, 1000, 2000];
 
 export class TurnStreamRecoveryError extends Error {
@@ -24,6 +26,7 @@ export async function recoverTurnStream(options) {
   } = options;
   let state = initialState ?? createTurnReplayState(turnId);
   let reconnects = 0;
+  let terminalRecoveryAttempts = 0;
   let lastTransportError;
 
   while (true) {
@@ -45,8 +48,9 @@ export async function recoverTurnStream(options) {
 
     if (TERMINAL.has(state.status)) return state;
 
+    let durableStatus;
     try {
-      await getStatus(turnId);
+      durableStatus = await getStatus(turnId);
     } catch (error) {
       throw new TurnStreamRecoveryError(
         `Turn ${turnId} cannot be recovered because its durable state is unavailable.`,
@@ -55,12 +59,25 @@ export async function recoverTurnStream(options) {
       );
     }
 
-    if (reconnects >= maxReconnects) {
-      throw new TurnStreamRecoveryError(
-        `Turn ${turnId} stream ended without a durable terminal after ${reconnects} reconnects.`,
-        "turn_stream_recovery_exhausted",
-        lastTransportError,
-      );
+    if (DURABLE_HANDOFF.has(durableStatus.status) && state.lastSeq > 0) {
+      return { ...state, status: "completed" };
+    }
+
+    if (DURABLE_TERMINAL.has(durableStatus.status)) {
+      if (terminalRecoveryAttempts >= maxReconnects) {
+        throw new TurnStreamRecoveryError(
+          `Turn ${turnId} reached ${durableStatus.status} without a matching terminal stream event after ${terminalRecoveryAttempts} reconnects.`,
+          "turn_stream_recovery_exhausted",
+          lastTransportError,
+        );
+      }
+      terminalRecoveryAttempts += 1;
+    } else {
+      // A queued/running turn can legitimately have no broadcaster yet (or can
+      // be waiting behind another browser task). Empty EOFs in that state are
+      // polling, not terminal-recovery failures, so they must not exhaust the
+      // small budget reserved for a genuinely missing terminal event.
+      terminalRecoveryAttempts = 0;
     }
 
     const delay = reconnectDelays[Math.min(reconnects, reconnectDelays.length - 1)] ?? 0;
