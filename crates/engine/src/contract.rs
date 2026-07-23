@@ -144,6 +144,26 @@ pub struct LoadedTool {
     pub schema: Option<Value>,
 }
 
+/// Optional structured classification supplied by a tool adapter when the
+/// human/model-facing result text is intentionally not JSON. This is control
+/// metadata, not intent interpretation: it lets the guarded loop distinguish a
+/// completed call that made progress from one that exhausted its capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolOutcomeHint {
+    Success,
+    NoProgress,
+}
+
+impl ToolOutcomeHint {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::NoProgress => "no_progress",
+        }
+    }
+}
+
 /// The loop-state changes a tool execution requests. Returned (not applied by the executor) so the
 /// executor stays decoupled from the loop's `&mut` state — the ENGINE applies these to its own loop
 /// state after the call. This is the ctx→effects redesign (ADR 0024 inc 5d): today `execute_chat_tool`
@@ -189,6 +209,13 @@ pub struct ToolEffects {
     /// as `request_confirm`/`reset_stall_guards` signaling an action the loop-state alone
     /// can't perform.
     pub clear_routing_binding: bool,
+    /// A delegated capability used the real browser even though it travelled
+    /// through the generic `CapabilityExecutor` seam. The loop uses this to
+    /// apply the browser wall-clock/stagnation budget to the whole manager turn.
+    pub browser_activity_observed: bool,
+    /// Structured progress signal for adapters whose model-facing result is
+    /// prose rather than machine-parsed JSON.
+    pub outcome_hint: Option<ToolOutcomeHint>,
 }
 
 /// One tool execution's output: the result text (pushed into the conversation as the tool message)

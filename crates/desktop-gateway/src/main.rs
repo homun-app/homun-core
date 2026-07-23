@@ -17864,6 +17864,27 @@ fn chat_browser_budget() -> local_first_engine::BrowserBudget {
     }
 }
 
+const BROWSE_SUBAGENT_MAX_ELAPSED_MS: u64 = 180_000;
+const BROWSE_SUBAGENT_MAX_NAVS: usize = 8;
+
+fn browse_subagent_budget() -> local_first_engine::BrowserBudget {
+    let mut budget = chat_browser_budget();
+    budget.max_elapsed_ms = env::var("HOMUN_CHAT_BROWSER_SUBAGENT_MAX_ELAPSED_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .map(|value| value.clamp(1_000, 600_000))
+        .unwrap_or(BROWSE_SUBAGENT_MAX_ELAPSED_MS);
+    budget
+}
+
+fn bounded_browse_subagent_nav_cap(configured_cap: usize) -> usize {
+    configured_cap.min(BROWSE_SUBAGENT_MAX_NAVS)
+}
+
+fn browse_subagent_nav_cap() -> usize {
+    bounded_browse_subagent_nav_cap(chat_browser_nav_cap())
+}
+
 /// How many connected-service tools to pull into the searchable catalog (NOT
 /// sent to the model — only searched by `find_connected_tools`).
 const COMPOSIO_CATALOG_CAP: usize = 200;
@@ -26114,10 +26135,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 let deferred = local_first_engine::BrowseResult::not_found(
                     "browse deferred: another browse call already ran in this model round; inspect its result before deciding whether another source is needed",
                 );
-                return Ok(local_first_engine::ToolOutcome {
-                    result: local_first_engine::browse::browse_result_for_manager(&deferred),
-                    effects: Default::default(),
-                });
+                return Ok(delegated_browse_tool_outcome(&deferred));
             }
             let goal = build_browse_goal(args_raw);
             if goal.is_empty() {
@@ -26137,10 +26155,7 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                 channel_owner: self.channel_owner,
             };
             let outcome = browse_executor.browse(&goal).await;
-            return Ok(local_first_engine::ToolOutcome {
-                result: local_first_engine::browse::browse_result_for_manager(&outcome),
-                effects: Default::default(),
-            });
+            return Ok(delegated_browse_tool_outcome(&outcome));
         }
         // ADR 0023 Step 5: re-hydrate the turn's armed sensitive domains (carried as tokens in the
         // engine-safe LoopState) into the gateway enum for the approval gates. Read before the `&mut`
@@ -26487,6 +26502,26 @@ fn earlier_browse_call_in_current_round(
     false
 }
 
+/// Preserve the readable `BrowseResult` contract for the manager while passing
+/// progress and browser-usage facts to the guarded loop as typed metadata.
+/// Nothing here interprets user prose or keywords.
+fn delegated_browse_tool_outcome(
+    result: &local_first_engine::BrowseResult,
+) -> local_first_engine::ToolOutcome {
+    local_first_engine::ToolOutcome {
+        result: local_first_engine::browse::browse_result_for_manager(result),
+        effects: local_first_engine::ToolEffects {
+            browser_activity_observed: true,
+            outcome_hint: Some(if result.found {
+                local_first_engine::ToolOutcomeHint::Success
+            } else {
+                local_first_engine::ToolOutcomeHint::NoProgress
+            }),
+            ..Default::default()
+        },
+    }
+}
+
 /// The recursive `browse(goal)` executor (ADR 0025). Holds the turn-constants the sub-seams need
 /// (`AppState`, HTTP client, thread/prompt/request, perimeter flags); `browse` builds the browser-only
 /// sub-seams + isolated `LoopState` and calls `engine::run_turn`. Constructed by the manager's `browse`
@@ -26574,8 +26609,8 @@ impl GatewayBrowseExecutor<'_> {
             hard_round_ceiling: hard_round_ceiling(),
             max_rounds: chat_browser_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
-            browser_nav_cap: chat_browser_nav_cap(),
-            browser_budget: chat_browser_budget(),
+            browser_nav_cap: browse_subagent_nav_cap(),
+            browser_budget: browse_subagent_budget(),
             // Browse sub-turn does NO token-budget compaction (NoContextCompactor); the browser
             // history hygiene it needs is `prune_browser_history`. Unknown window → fail-open anyway.
             context_window: None,
@@ -26619,7 +26654,10 @@ impl GatewayBrowseExecutor<'_> {
         )
         .await;
 
-        local_first_engine::browse::browse_result_from_outcome(&outcome)
+        local_first_engine::browse::browse_result_from_outcome_with_snapshot(
+            &outcome,
+            &browser_executor.last_snapshot,
+        )
     }
 }
 
@@ -58734,7 +58772,7 @@ mod tests {
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
         browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
-        earlier_browse_call_in_current_round,
+        delegated_browse_tool_outcome, earlier_browse_call_in_current_round,
         build_memory_source_grant, build_plan_markdown, clawhub_origin,
         capability_call_completed_outcome, classify_connector_error,
         collect_member_counts, composio_tool_is_read, connector_error_hint,
@@ -61728,6 +61766,37 @@ mod tests {
 
         assert!(!earlier_browse_call_in_current_round(&messages, "browse_1"));
         assert!(earlier_browse_call_in_current_round(&messages, "browse_2"));
+    }
+
+    #[test]
+    fn delegated_browse_outcome_marks_browser_activity_and_structured_progress() {
+        let found = local_first_engine::BrowseResult {
+            found: true,
+            answer: "dato verificato".to_string(),
+            sources: vec!["https://example.test/source".to_string()],
+            confidence: local_first_engine::browse::Confidence::High,
+            note: None,
+        };
+        let found_outcome = delegated_browse_tool_outcome(&found);
+        assert!(found_outcome.effects.browser_activity_observed);
+        assert_eq!(
+            found_outcome.effects.outcome_hint,
+            Some(local_first_engine::ToolOutcomeHint::Success)
+        );
+
+        let missing = local_first_engine::BrowseResult::not_found("source unavailable");
+        let missing_outcome = delegated_browse_tool_outcome(&missing);
+        assert!(missing_outcome.effects.browser_activity_observed);
+        assert_eq!(
+            missing_outcome.effects.outcome_hint,
+            Some(local_first_engine::ToolOutcomeHint::NoProgress)
+        );
+    }
+
+    #[test]
+    fn browse_subagent_uses_a_tighter_navigation_cap_per_single_goal() {
+        assert_eq!(super::bounded_browse_subagent_nav_cap(20), 8);
+        assert_eq!(super::bounded_browse_subagent_nav_cap(5), 5);
     }
 
     #[test]

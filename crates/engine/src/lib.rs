@@ -75,7 +75,7 @@ pub mod browse;
 pub use contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal, LoadedTool,
     FinalizationFence, ModelCall, ModelCallError, ModelClient, ModelRoundOutput, PlanProgress, ProviderBinding,
-    ToolEffects, ToolOutcome, TurnCompletionJudge, TurnControlDecision, TurnControlDisposition,
+    ToolEffects, ToolOutcome, ToolOutcomeHint, TurnCompletionJudge, TurnControlDecision, TurnControlDisposition,
     TurnPolicy,
 };
 pub use execution_journal::{

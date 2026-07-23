@@ -112,6 +112,35 @@ pub fn browse_result_from_outcome(outcome: &TurnOutcome) -> BrowseResult {
     }
 }
 
+/// Preserve grounded page evidence when the browser sub-agent navigated and
+/// captured a substantive accessibility snapshot but its final no-tools model
+/// call failed to produce visible prose. The manager still performs the
+/// semantic verification against the user's goal; this fallback only prevents
+/// already-observed page text from being discarded as `found: false`.
+pub fn browse_result_from_outcome_with_snapshot(
+    outcome: &TurnOutcome,
+    last_snapshot: &str,
+) -> BrowseResult {
+    let result = browse_result_from_outcome(outcome);
+    if result.found {
+        return result;
+    }
+    let snapshot = last_snapshot.trim();
+    if outcome.browse_sources.is_empty() || snapshot.chars().count() < 200 {
+        return result;
+    }
+    let snapshot = snapshot.chars().take(8_000).collect::<String>();
+    BrowseResult {
+        found: true,
+        answer: format!(
+            "The browser reached a grounded page but the browsing sub-agent did not finish its summary. Verify and extract the requested facts from this last page snapshot:\n{snapshot}"
+        ),
+        sources: outcome.browse_sources.clone(),
+        confidence: Confidence::Low,
+        note: None,
+    }
+}
+
 /// Render a [`BrowseResult`] as the tool-result text the MANAGER reads (ADR 0025 slice 2). A compact
 /// LABELED block (not raw JSON) so the strong manager model can verify the answer against the step
 /// criterion and route deterministically — `found: false` → mark blocked / answer "unavailable" without
@@ -226,6 +255,33 @@ Tell me if you want me to retry or rephrase."
     fn empty_answer_maps_to_not_found_with_no_note() {
         let r = browse_result_from_outcome(&TurnOutcome::default());
         assert!(!r.found && r.answer.is_empty() && r.note.is_none());
+    }
+
+    #[test]
+    fn grounded_snapshot_survives_when_subagent_synthesis_has_no_answer() {
+        let outcome = TurnOutcome {
+            delivery: TurnDelivery::NoVisibleAnswer,
+            browse_sources: vec!["https://official.example/report".to_string()],
+            ..Default::default()
+        };
+        let snapshot = format!(
+            "Official report\nURL: https://official.example/report\n{}",
+            "Measured punctuality was 91.4 percent. ".repeat(8)
+        );
+
+        let result = browse_result_from_outcome_with_snapshot(&outcome, &snapshot);
+
+        assert!(result.found);
+        assert_eq!(result.confidence, Confidence::Low);
+        assert_eq!(result.sources, outcome.browse_sources);
+        assert!(result.answer.contains("91.4 percent"));
+    }
+
+    #[test]
+    fn ungrounded_snapshot_does_not_become_a_browse_result() {
+        let snapshot = "Navigation text ".repeat(30);
+        let result = browse_result_from_outcome_with_snapshot(&TurnOutcome::default(), &snapshot);
+        assert!(!result.found);
     }
 
     #[test]

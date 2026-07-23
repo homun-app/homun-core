@@ -1065,7 +1065,8 @@ impl TaskStore {
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
         let pending: i64 = tx.query_row(
             "SELECT COUNT(*) FROM turn_steering
-             WHERE user_id=?1 AND workspace_id=?2 AND active_turn_id=?3 AND status='pending'",
+             WHERE user_id=?1 AND workspace_id=?2 AND active_turn_id=?3
+               AND status IN ('pending','claimed','interpreted')",
             params![user_id, workspace_id, active_turn_id],
             |row| row.get(0),
         )?;
@@ -3336,6 +3337,48 @@ mod turn_steering_tests {
             store.mark_turn_steering_completed(applied.steering_id, applied.revision, "run-1"),
             Err(TaskRuntimeError::Conflict(_))
         ));
+    }
+
+    #[test]
+    fn finalization_fence_blocks_every_unapplied_steering_state() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let pending = store
+            .append_turn_steering(
+                "u",
+                "w",
+                "thread",
+                "turn-1",
+                &new_steering("finish from current evidence"),
+                1,
+            )
+            .unwrap();
+        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .remove(0);
+        assert_eq!(claimed.steering_id, pending.steering_id);
+        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+
+        let interpreted = store
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
+                "run-1",
+            )
+            .unwrap();
+        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+
+        store
+            .mark_turn_steering_applied(
+                interpreted.steering_id,
+                interpreted.revision,
+                "run-1",
+            )
+            .unwrap();
+        assert!(store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
     }
 
     #[test]

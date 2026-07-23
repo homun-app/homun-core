@@ -189,6 +189,9 @@ impl LoopState {
         if effects.request_compaction {
             self.pending_compaction = true;
         }
+        if effects.browser_activity_observed {
+            self.browser_used = true;
+        }
         if effects.reset_stall_guards {
             // F1: real progress → anchor this round, zero the repeat counter, clear the last-round sig.
             self.progress_anchor_round = round;
@@ -250,6 +253,23 @@ mod tests {
         assert_eq!(ls.observe_tool_outcome("shell", "error"), 1);
         assert_eq!(ls.observe_tool_outcome("shell", "success"), 0);
         assert!(ls.last_no_progress_family.is_empty());
+    }
+
+    #[test]
+    fn delegated_browser_effect_marks_the_turn_as_browser_work() {
+        let mut ls = LoopState::new();
+        let mut pending_confirm = false;
+
+        ls.apply_effects(
+            &mut pending_confirm,
+            0,
+            ToolEffects {
+                browser_activity_observed: true,
+                ..ToolEffects::default()
+            },
+        );
+
+        assert!(ls.browser_used);
     }
 
     #[test]

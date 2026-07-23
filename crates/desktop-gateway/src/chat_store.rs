@@ -3544,14 +3544,84 @@ impl ChatStore {
                 "preview_url": image,
             })
         }));
-        Self::insert_linked_user_message(
-            &self.conn,
-            thread_id,
-            &steering.source_message_id,
-            &steering.visible_prompt,
-            &steering.claimed_at.unwrap_or(steering.created_at).to_string(),
-            &attachments,
-        )
+        let message = ChatMessage {
+            id: steering.source_message_id.clone(),
+            role: "user".to_string(),
+            text: steering.visible_prompt.clone(),
+            timestamp: steering.claimed_at.unwrap_or(steering.created_at).to_string(),
+            metadata: None,
+            metrics: None,
+            feedback: None,
+            saved_memory_ref: None,
+            linked_task_id: None,
+            linked_automation_ref: None,
+            attachments,
+            event_parts: Vec::new(),
+            memory_reuse: None,
+            delivery_state: MessageDeliveryState::Delivered,
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        let existing: Option<(String, String)> = tx
+            .query_row(
+                "select thread_id, role from chat_messages where id = ?1",
+                params![message.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((existing_thread, role)) = existing {
+            if existing_thread == thread_id && role == "user" {
+                tx.commit()?;
+                return Ok(());
+            }
+            return Err(rusqlite::Error::InvalidParameterName(
+                "incompatible steering message id".to_string(),
+            ));
+        }
+
+        let running_assistant: Option<(String, Option<String>)> = tx
+            .query_row(
+                "select id, parent_id from chat_messages
+                  where thread_id = ?1 and role = 'assistant' and linked_task_id = ?2
+                  order by rowid desc limit 1",
+                params![thread_id, steering.active_turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let active_leaf = Self::active_leaf_on(&tx, thread_id)?;
+        if let Some((assistant_id, assistant_parent)) = running_assistant
+            .filter(|(assistant_id, _)| active_leaf.as_deref() == Some(assistant_id.as_str()))
+        {
+            if !Self::insert_message_on(
+                &tx,
+                thread_id,
+                &message,
+                assistant_parent.as_deref(),
+            )? {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "steering message id collision".to_string(),
+                ));
+            }
+            tx.execute(
+                "update chat_messages set parent_id = ?1
+                  where thread_id = ?2 and id = ?3 and role = 'assistant'",
+                params![message.id, thread_id, assistant_id],
+            )?;
+            tx.execute(
+                "update chat_threads set active_leaf_id = ?1 where thread_id = ?2",
+                params![assistant_id, thread_id],
+            )?;
+        } else {
+            Self::insert_linked_user_message(
+                &tx,
+                thread_id,
+                &message.id,
+                &message.text,
+                &message.timestamp,
+                &message.attachments,
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Insert the broker's visible user prompt and assistant placeholder as one
@@ -3577,10 +3647,16 @@ impl ChatStore {
                 let user_matches = user_row.thread_id == thread_id
                     && user_row.role == user.role
                     && user_row.linked_task_id == user.linked_task_id;
+                let assistant_descends_from_user = Self::message_descends_from_on(
+                    conn,
+                    thread_id,
+                    &assistant.id,
+                    &user.id,
+                )?;
                 let assistant_matches = assistant_row.thread_id == thread_id
                     && assistant_row.role == assistant.role
                     && assistant_row.linked_task_id == assistant.linked_task_id
-                    && assistant_row.parent_id.as_deref() == Some(user.id.as_str());
+                    && assistant_descends_from_user;
                 if user_matches && assistant_matches {
                     // The complete pair is already persisted for this exact
                     // logical turn. Do not calculate a new parent from the
@@ -3615,6 +3691,33 @@ impl ChatStore {
             params![assistant.id, thread_id],
         )?;
         Ok(())
+    }
+
+    fn message_descends_from_on(
+        conn: &Connection,
+        thread_id: &str,
+        descendant_id: &str,
+        ancestor_id: &str,
+    ) -> rusqlite::Result<bool> {
+        let mut current = Some(descendant_id.to_string());
+        let mut seen = HashSet::new();
+        while let Some(message_id) = current {
+            if message_id == ancestor_id {
+                return Ok(true);
+            }
+            if !seen.insert(message_id.clone()) {
+                return Ok(false);
+            }
+            current = conn
+                .query_row(
+                    "select parent_id from chat_messages where thread_id = ?1 and id = ?2",
+                    params![thread_id, message_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten();
+        }
+        Ok(false)
     }
 
     fn linked_turn_message_on(
@@ -5767,6 +5870,74 @@ mod tests {
             )
             .unwrap();
         assert_eq!(leaf.as_deref(), Some(assistant.id.as_str()));
+    }
+
+    #[test]
+    fn steering_message_is_displayed_before_the_running_turns_final_answer() {
+        let store = ChatStore::in_memory().unwrap();
+        let thread = store.create_thread("default").unwrap();
+        let tid = thread.thread_id;
+        let seed_id = store.messages(&tid).unwrap().messages[0].id.clone();
+        let user = mk_message("local_user_request", "user");
+        let mut assistant = mk_message("local_assistant_request", "assistant");
+        assistant.text.clear();
+        assistant.linked_task_id = Some("turn-1".to_string());
+        assistant.delivery_state = MessageDeliveryState::Streaming;
+        ChatStore::insert_linked_turn_messages(&store.conn, &tid, &user, &assistant).unwrap();
+
+        let task_store = local_first_task_runtime::TaskStore::open_in_memory().unwrap();
+        task_store
+            .append_turn_steering(
+                "u",
+                "w",
+                &tid,
+                "turn-1",
+                &local_first_task_runtime::NewTurnSteering {
+                    source_message_id: "local_user_steering".to_string(),
+                    prompt: "Concludi con le evidenze disponibili".to_string(),
+                    visible_prompt: "Concludi con le evidenze disponibili".to_string(),
+                    images: Vec::new(),
+                    attachments: serde_json::json!([]),
+                    mode: None,
+                    model: None,
+                },
+                1,
+            )
+            .unwrap();
+        let steering = task_store
+            .claim_pending_turn_steering("u", "w", &tid, "turn-1", "run-1", 1)
+            .unwrap()
+            .remove(0);
+
+        store.materialize_steering_message(&tid, &steering).unwrap();
+        ChatStore::insert_linked_turn_messages(&store.conn, &tid, &user, &assistant)
+            .expect("the original turn pair remains idempotent after steering is spliced in");
+        store
+            .finalize_assistant_message(
+                &tid,
+                &assistant.id,
+                "Risposta conclusiva.",
+                &[],
+                &MemoryReuseEnvelope::normal(),
+            )
+            .unwrap();
+
+        let ids = store
+            .messages(&tid)
+            .unwrap()
+            .messages
+            .into_iter()
+            .map(|message| message.id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                seed_id,
+                user.id,
+                steering.source_message_id,
+                assistant.id,
+            ]
+        );
     }
 
     #[test]
