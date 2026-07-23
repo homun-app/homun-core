@@ -75,7 +75,25 @@ fn is_gated_action(action: &Value) -> bool {
     is_committing_action(action) || action.get("kind").and_then(Value::as_str) == Some("hold")
 }
 
-/// Effective class for a committing action: `max(declared, machine_floor)`.
+/// A committing action whose payment class cannot come from a ref: an
+/// Enter/Return key press submits the form that holds the *focus*, not a ref.
+/// (A `type submit=true` carries the field ref and is handled by the ref floor;
+/// `clickCoords` is rejected upstream.)
+pub fn is_refless_committing(action: &Value) -> bool {
+    let kind = action.get("kind").and_then(Value::as_str).unwrap_or("");
+    matches!(kind, "press" | "press_key")
+        && action
+            .get("key")
+            .or_else(|| action.get("text"))
+            .and_then(Value::as_str)
+            .is_some_and(|k| matches!(k.to_ascii_lowercase().as_str(), "enter" | "return"))
+}
+
+/// Effective class for a committing action: `max(declared, machine_floor)`, where
+/// `machine_floor = max(ref_floor, page_floor)`. `page_floor` covers what the ref
+/// floor structurally cannot: a ref-less Enter/Return submits whatever form holds
+/// the page's *focus*, so a machine-detected payment focus context also raises
+/// the floor (never lowers it) even with no `ref` on the action itself.
 /// `Err` is a typed, fail-closed rejection the model must act on:
 /// - `BROWSER_ACTION_CLASS_MISSING`: committing action declared no class;
 /// - `BROWSER_ACTION_CLASS_CONFLICT`: a machine floor exceeds the declared class,
@@ -84,6 +102,7 @@ fn is_gated_action(action: &Value) -> bool {
 pub fn effective_action_class(
     action: &Value,
     payment_floor_refs: &HashSet<String>,
+    focus_payment_context: bool,
 ) -> Result<ActionClass, String> {
     if !is_gated_action(action) {
         return Ok(ActionClass::Ordinary);
@@ -93,7 +112,13 @@ pub fn effective_action_class(
          (ordinary|account|booking|payment_commit)"
             .to_string()
     })?;
-    let floor = payment_floor_for(action, payment_floor_refs);
+    let ref_floor = payment_floor_for(action, payment_floor_refs);
+    let page_floor = if is_refless_committing(action) && focus_payment_context {
+        ActionClass::PaymentCommit
+    } else {
+        ActionClass::Ordinary
+    };
+    let floor = ref_floor.max(page_floor);
     if floor > declared {
         return Err(format!(
             "BROWSER_ACTION_CLASS_CONFLICT: this control is a payment control; \
@@ -106,9 +131,15 @@ pub fn effective_action_class(
 /// True when the action's effective class is `PaymentCommit` (declared or floored).
 /// Used to decide whether to claim a Payment Approval Card. A class error counts
 /// as "treat as payment" so the gate below re-rejects it fail-closed.
-pub fn action_is_payment_commit(action: &Value, payment_floor_refs: &HashSet<String>) -> bool {
-    matches!(effective_action_class(action, payment_floor_refs), Ok(ActionClass::PaymentCommit) | Err(_))
-        && is_gated_action(action)
+pub fn action_is_payment_commit(
+    action: &Value,
+    payment_floor_refs: &HashSet<String>,
+    focus_payment_context: bool,
+) -> bool {
+    matches!(
+        effective_action_class(action, payment_floor_refs, focus_payment_context),
+        Ok(ActionClass::PaymentCommit) | Err(_)
+    ) && is_gated_action(action)
 }
 
 /// The single browser action gate. `None` = allow. `Some(reason)` = typed
@@ -116,6 +147,7 @@ pub fn action_is_payment_commit(action: &Value, payment_floor_refs: &HashSet<Str
 pub fn evaluate_browser_action(
     action: &Value,
     payment_floor_refs: &HashSet<String>,
+    focus_payment_context: bool,
     approved_payment_id: Option<&str>,
 ) -> Option<String> {
     if action.get("kind").and_then(Value::as_str) == Some("evaluate") {
@@ -123,7 +155,7 @@ pub fn evaluate_browser_action(
             "BROWSER_HAZARDOUS_ACTION: arbitrary page script (evaluate) is not allowed".to_string(),
         );
     }
-    let effective = match effective_action_class(action, payment_floor_refs) {
+    let effective = match effective_action_class(action, payment_floor_refs, focus_payment_context) {
         Ok(class) => class,
         Err(reason) => return Some(reason),
     };
@@ -197,7 +229,7 @@ mod tests {
     #[test]
     fn committing_action_without_class_is_rejected_fail_closed() {
         use serde_json::json;
-        let reason = evaluate_browser_action(&json!({"kind":"click","ref":"e5"}), &floor(&[]), None).unwrap();
+        let reason = evaluate_browser_action(&json!({"kind":"click","ref":"e5"}), &floor(&[]), false, None).unwrap();
         assert!(reason.contains("BROWSER_ACTION_CLASS_MISSING"));
     }
 
@@ -205,14 +237,14 @@ mod tests {
     fn ordinary_declared_committing_action_is_allowed_without_a_floor() {
         use serde_json::json;
         let action = json!({"kind":"click","ref":"e7","action_class":"ordinary"});
-        assert!(evaluate_browser_action(&action, &floor(&[]), None).is_none());
+        assert!(evaluate_browser_action(&action, &floor(&[]), false, None).is_none());
     }
 
     #[test]
     fn declared_below_payment_floor_is_a_conflict() {
         use serde_json::json;
         let action = json!({"kind":"click","ref":"e9","action_class":"booking"});
-        let reason = evaluate_browser_action(&action, &floor(&["e9"]), None).unwrap();
+        let reason = evaluate_browser_action(&action, &floor(&["e9"]), false, None).unwrap();
         assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
     }
 
@@ -220,30 +252,65 @@ mod tests {
     fn payment_commit_requires_matching_approval() {
         use serde_json::json;
         let action = json!({"kind":"click","ref":"e9","action_class":"payment_commit"});
-        let blocked = evaluate_browser_action(&action, &floor(&[]), None).unwrap();
+        let blocked = evaluate_browser_action(&action, &floor(&[]), false, None).unwrap();
         assert!(blocked.contains("BROWSER_PAYMENT_APPROVAL_REQUIRED"));
         let approved = json!({"kind":"click","ref":"e9","action_class":"payment_commit","payment_approval_id":"pay_1"});
-        assert!(evaluate_browser_action(&approved, &floor(&[]), Some("pay_1")).is_none());
+        assert!(evaluate_browser_action(&approved, &floor(&[]), false, Some("pay_1")).is_none());
     }
 
     #[test]
     fn non_committing_action_needs_no_class() {
         use serde_json::json;
-        assert!(evaluate_browser_action(&json!({"kind":"type","ref":"e1","text":"Napoli"}), &floor(&[]), None).is_none());
-        assert!(evaluate_browser_action(&json!({"kind":"scroll"}), &floor(&[]), None).is_none());
+        assert!(evaluate_browser_action(&json!({"kind":"type","ref":"e1","text":"Napoli"}), &floor(&[]), false, None).is_none());
+        assert!(evaluate_browser_action(&json!({"kind":"scroll"}), &floor(&[]), false, None).is_none());
+    }
+
+    #[test]
+    fn refless_enter_in_focus_payment_context_conflicts_when_underdeclared() {
+        use serde_json::json;
+        let enter = json!({"kind":"press","key":"Enter","action_class":"ordinary"});
+        // focus in a cc-form → page floor raises to payment_commit → conflict with ordinary
+        let reason = evaluate_browser_action(&enter, &floor(&[]), true, None).unwrap();
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+    }
+
+    #[test]
+    fn refless_enter_declared_payment_needs_approval_then_allowed() {
+        use serde_json::json;
+        let enter = json!({"kind":"press","key":"Enter","action_class":"payment_commit"});
+        assert!(evaluate_browser_action(&enter, &floor(&[]), true, None).unwrap().contains("BROWSER_PAYMENT_APPROVAL_REQUIRED"));
+        let approved = json!({"kind":"press","key":"Enter","action_class":"payment_commit","payment_approval_id":"p1"});
+        assert!(evaluate_browser_action(&approved, &floor(&[]), true, Some("p1")).is_none());
+    }
+
+    #[test]
+    fn refless_enter_outside_payment_context_is_ordinary() {
+        use serde_json::json;
+        let enter = json!({"kind":"press","key":"Enter","action_class":"ordinary"});
+        assert!(evaluate_browser_action(&enter, &floor(&[]), false, None).is_none());
+    }
+
+    #[test]
+    fn is_refless_committing_only_matches_enter_press() {
+        use serde_json::json;
+        assert!(is_refless_committing(&json!({"kind":"press","key":"Enter"})));
+        assert!(is_refless_committing(&json!({"kind":"press_key","text":"Return"})));
+        assert!(!is_refless_committing(&json!({"kind":"click","ref":"e5"})));       // has a ref
+        assert!(!is_refless_committing(&json!({"kind":"type","ref":"e1","submit":true}))); // ref-bearing
+        assert!(!is_refless_committing(&json!({"kind":"scroll"})));
     }
 
     #[test]
     fn evaluate_kind_is_always_hazardous() {
         use serde_json::json;
-        assert!(evaluate_browser_action(&json!({"kind":"evaluate"}), &floor(&[]), None).is_some());
+        assert!(evaluate_browser_action(&json!({"kind":"evaluate"}), &floor(&[]), false, None).is_some());
     }
 
     #[test]
     fn payment_floor_marks_effective_payment() {
         use serde_json::json;
-        assert!(action_is_payment_commit(&json!({"kind":"click","ref":"e9","action_class":"payment_commit"}), &floor(&[])));
-        assert!(action_is_payment_commit(&json!({"kind":"click","ref":"e9","action_class":"ordinary"}), &floor(&["e9"])));
-        assert!(!action_is_payment_commit(&json!({"kind":"click","ref":"e7","action_class":"ordinary"}), &floor(&[])));
+        assert!(action_is_payment_commit(&json!({"kind":"click","ref":"e9","action_class":"payment_commit"}), &floor(&[]), false));
+        assert!(action_is_payment_commit(&json!({"kind":"click","ref":"e9","action_class":"ordinary"}), &floor(&["e9"]), false));
+        assert!(!action_is_payment_commit(&json!({"kind":"click","ref":"e7","action_class":"ordinary"}), &floor(&[]), false));
     }
 }

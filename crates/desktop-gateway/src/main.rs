@@ -18225,7 +18225,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform one action or a flat bundle of at most four safe actions selected from the current observation generation, then return the updated observation. For fields with autocomplete use kind='type', then inspect the updated snapshot and select the intended suggestion when needed. Login and booking actions are allowed when they are part of the user's request. The final action that transfers money requires an approved Payment Approval Card and its exact payment_approval_id and cannot run inside a bundle. For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button. Every committing action — a click, a submit (kind='type' with submit=true), pressing Enter/Return, or a 'hold' — must declare action_class, judged by what the action actually does on the page, not by button wording: 'ordinary' for everyday navigation/interaction with no lasting effect (following a link, opening a menu, dismissing a dialog); 'account' for anything that changes signed-in identity or account state (logging in/out, registering, changing account settings); 'booking' for reserving/scheduling/ordering something that is not yet a completed purchase (adding to cart, selecting a flight/room/slot, confirming a reservation); 'payment_commit' for the action that actually commits money (placing an order, confirming checkout, submitting a payment form) — this class additionally requires a matching, unapproved-otherwise payment_approval_id and can never run inside a bundle.",
+            "description": "Perform one action or a flat bundle of at most four safe actions selected from the current observation generation, then return the updated observation. For fields with autocomplete use kind='type', then inspect the updated snapshot and select the intended suggestion when needed. Login and booking actions are allowed when they are part of the user's request. The final action that transfers money requires an approved Payment Approval Card and its exact payment_approval_id and cannot run inside a bundle. For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button. Every committing action — a click, a submit (kind='type' with submit=true), pressing Enter/Return, or a 'hold' — must declare action_class, judged by what the action actually does on the page, not by button wording: 'ordinary' for everyday navigation/interaction with no lasting effect (following a link, opening a menu, dismissing a dialog); 'account' for anything that changes signed-in identity or account state (logging in/out, registering, changing account settings); 'booking' for reserving/scheduling/ordering something that is not yet a completed purchase (adding to cart, selecting a flight/room/slot, confirming a reservation); 'payment_commit' for the action that actually commits money (placing an order, confirming checkout, submitting a payment form) — this class additionally requires a matching, unapproved-otherwise payment_approval_id and can never run inside a bundle. On a page that is itself a payment form, prefer clicking the specific confirm control over pressing Enter to submit it, so approval is requested exactly when a payment is actually being committed — judge this by what the page and control actually are, never by button wording.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -18333,6 +18333,7 @@ fn normalize_browser_action_bundle(
     action: &mut serde_json::Value,
     current_target: &str,
     payment_floor_refs: &std::collections::HashSet<String>,
+    page_focus_payment_context: bool,
 ) -> Option<String> {
     let actions = action.get("actions").and_then(serde_json::Value::as_array)?;
     if actions.len() > 4 {
@@ -18341,20 +18342,40 @@ fn normalize_browser_action_bundle(
                 .to_string(),
         );
     }
+    // Per-item focus context: the page's own focus, OR'd with any EARLIER item in this
+    // same bundle that targeted a floored ref (a bundle that types into a cc field then
+    // presses Enter → focus is now on that field, even though the page started elsewhere).
+    // Only grows across the loop — never reset — matching the floor's raise-only rule.
+    let mut focus_context = page_focus_payment_context;
     for nested in actions {
+        if nested.get("kind").and_then(serde_json::Value::as_str) == Some("clickCoords") {
+            return Some(
+                "BROWSER_UNSUPPORTED_COMMITTING_ACTION: coordinate clicks are not available; click a specific [ref=…] control instead"
+                    .to_string(),
+            );
+        }
         if nested.get("kind").and_then(serde_json::Value::as_str) == Some("batch")
             || nested.get("actions").is_some()
         {
             return Some("Browser action bundle rejected: nested bundles are not allowed.".to_string());
         }
-        if browser_safety::action_is_payment_commit(nested, payment_floor_refs) {
+        if browser_safety::action_is_payment_commit(nested, payment_floor_refs, focus_context) {
             return Some(
                 "Payment actions cannot run inside a browser action bundle. Ask for the Payment Approval Card and execute the final payment as a standalone approved action."
                     .to_string(),
             );
         }
-        if let Some(reason) = browser_safety::evaluate_browser_action(nested, payment_floor_refs, None) {
+        if let Some(reason) =
+            browser_safety::evaluate_browser_action(nested, payment_floor_refs, focus_context, None)
+        {
             return Some(format!("Browser action bundle rejected: {reason}"));
+        }
+        let targets_floored_ref = nested
+            .get("ref")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|r| payment_floor_refs.contains(r));
+        if targets_floored_ref {
+            focus_context = true;
         }
     }
     if let Some(obj) = action.as_object_mut() {
@@ -22045,6 +22066,11 @@ struct BrowserToolCtx<'a> {
     // observation. Raises (never lowers) the effective action class; see
     // `browser_safety::effective_action_class`.
     payment_floor_refs: &'a mut std::collections::HashSet<String>,
+    // Machine-derived "focus is in a payment context" flag for the current
+    // observation (sidecar Task 2; defaults to false while absent). Floors a
+    // ref-less committing action (Enter/Return) the same way `payment_floor_refs`
+    // floors a ref-bearing one — see `browser_safety::is_refless_committing`.
+    focus_payment_context: &'a mut bool,
     pending_browser_image: &'a mut Option<String>,
     browser_tool_call_ids: &'a mut std::collections::BTreeSet<String>,
     current_target: &'a mut String,
@@ -22763,6 +22789,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
                                     *ctx.payment_floor_refs = browser_floor_refs(&value);
+                                    *ctx.focus_payment_context = browser_focus_payment_context(&value);
                                 }
                                 push_browser_step(
                                     format!("navigate {url}"),
@@ -22835,6 +22862,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             if !snap.is_empty() {
                                 *ctx.last_snapshot = snap.clone();
                                 *ctx.payment_floor_refs = browser_floor_refs(&value);
+                                *ctx.focus_payment_context = browser_focus_payment_context(&value);
                             }
                             push_browser_step("snapshot".to_string(), "done");
                             let metrics = browser_observation_metrics(
@@ -22899,10 +22927,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             serde_json::Value::String(ctx.current_target.clone()),
                         );
                     }
+                    // Single-action focus context is just the page's own last-observed
+                    // focus (no "prior nested item" concept outside a bundle).
+                    let focus_ctx = *ctx.focus_payment_context;
                     if let Some(error) = normalize_browser_action_bundle(
                         &mut action,
                         ctx.current_target.as_str(),
                         ctx.payment_floor_refs,
+                        focus_ctx,
                     ) {
                         *browser_session = Some(client);
                         push_browser_step("browser action bundle blocked".to_string(), "error");
@@ -22949,11 +22981,13 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     let approved_payment_id = if should_claim_payment_approval(
                         &action,
                         ctx.payment_floor_refs,
+                        focus_ctx,
                     ) {
                         match claim_payment_approval_for_action(
                             ctx.state,
                             &action,
                             ctx.payment_floor_refs,
+                            focus_ctx,
                             ctx.thread_id,
                         ) {
                             Ok(id) => Some(id),
@@ -22966,11 +23000,27 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     } else {
                         None
                     };
-                    let blocked = browser_safety::evaluate_browser_action(
-                        &action,
-                        ctx.payment_floor_refs,
-                        approved_payment_id.as_deref(),
-                    );
+                    // clickCoords is rejected outright, BEFORE the class gate: it is not
+                    // ref-based (the ref floor can't cover it) and not Enter/Return (the
+                    // page floor above doesn't apply either), so no machine signal can
+                    // ever classify it — fail closed regardless of declared action_class.
+                    // Defense-in-depth: verified no production path emits it and the
+                    // schema doesn't expose it, but a model could still hallucinate it.
+                    let blocked = if action.get("kind").and_then(serde_json::Value::as_str)
+                        == Some("clickCoords")
+                    {
+                        Some(
+                            "BROWSER_UNSUPPORTED_COMMITTING_ACTION: coordinate clicks are not available; click a specific [ref=…] control instead"
+                                .to_string(),
+                        )
+                    } else {
+                        browser_safety::evaluate_browser_action(
+                            &action,
+                            ctx.payment_floor_refs,
+                            focus_ctx,
+                            approved_payment_id.as_deref(),
+                        )
+                    };
                     if let Some(error) = preflight_error {
                         *browser_session = Some(client);
                         Err(error)
@@ -23025,6 +23075,7 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
                                     *ctx.payment_floor_refs = browser_floor_refs(&value);
+                                    *ctx.focus_payment_context = browser_focus_payment_context(&value);
                                 }
                                 push_browser_step(format!("{kind}"), "done");
                                 let boundary = if action_kinds.len() > 1 {
@@ -23142,6 +23193,8 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             *ctx.last_snapshot = snap.clone();
                                             *ctx.payment_floor_refs =
                                                 browser_floor_refs(snap_res.as_ref().unwrap());
+                                            *ctx.focus_payment_context =
+                                                browser_focus_payment_context(snap_res.as_ref().unwrap());
                                             let metrics = browser_observation_metrics(
                                                 snap_res.as_ref().unwrap(),
                                                 vec!["snapshot".to_string()],
@@ -26680,6 +26733,11 @@ struct GatewayBrowserExecutor<'a> {
     // snapshot). Mirrors `last_snapshot`'s update sites; never derived from label
     // text. See `browser_safety::effective_action_class`.
     last_payment_floor_refs: std::collections::HashSet<String>,
+    // Machine-derived "focus is in a payment context" flag for the last observation.
+    // Updated at the SAME 4 sites as `last_payment_floor_refs`; defaults to false
+    // until the sidecar starts sending it (Task 2). Floors a ref-less committing
+    // action (Enter/Return) the same way the ref floor floors a ref-bearing one.
+    last_focus_payment_context: bool,
     result_contract: Option<local_first_engine::browse::BrowseResultContract>,
     current_target: String,
     opened_targets: Vec<String>,
@@ -26753,6 +26811,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             browser_used: &mut ls.browser_used,
             last_snapshot: &mut self.last_snapshot,
             payment_floor_refs: &mut self.last_payment_floor_refs,
+            focus_payment_context: &mut self.last_focus_payment_context,
             pending_browser_image: &mut ls.pending_browser_image,
             browser_tool_call_ids: &mut ls.browser_tool_call_ids,
             current_target: &mut self.current_target,
@@ -27093,6 +27152,7 @@ impl GatewayBrowseExecutor<'_> {
             browser_session: None,
             last_snapshot: String::new(),
             last_payment_floor_refs: std::collections::HashSet::new(),
+            last_focus_payment_context: false,
             result_contract: request.contract.clone(),
             current_target: "chat_0".to_string(),
             opened_targets: Vec::new(),
@@ -29300,6 +29360,7 @@ async fn run_agent_rounds(
         browser_session: None,
         last_snapshot: String::new(),
         last_payment_floor_refs: std::collections::HashSet::new(),
+        last_focus_payment_context: false,
         result_contract: None,
         current_target: "chat_0".to_string(), // the first tab the tools operate on
         opened_targets: Vec::new(),
@@ -31386,6 +31447,16 @@ fn browser_floor_refs(value: &serde_json::Value) -> std::collections::HashSet<St
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Machine focus-in-payment-context flag the sidecar attached to an observation
+/// (Task 2). Absent → false. Raises (never lowers) a ref-less committing action's
+/// class — see `browser_safety::is_refless_committing`.
+fn browser_focus_payment_context(value: &serde_json::Value) -> bool {
+    value
+        .get("focusPaymentContext")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// How long a per-thread browser session may sit idle before it is reaped.
@@ -44912,9 +44983,10 @@ fn rewrite_payment_approval_to_done(
 fn should_claim_payment_approval(
     action: &serde_json::Value,
     payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
 ) -> bool {
     matches!(
-        browser_safety::effective_action_class(action, payment_floor_refs),
+        browser_safety::effective_action_class(action, payment_floor_refs, focus_payment_context),
         Ok(browser_safety::ActionClass::PaymentCommit)
     )
 }
@@ -44923,19 +44995,21 @@ fn claim_payment_approval_for_action(
     state: &AppState,
     action: &serde_json::Value,
     payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
     thread_id: Option<&str>,
 ) -> Result<String, String> {
     let mut approvals = lock_payment_approvals(state).map_err(|error| error.message)?;
-    claim_payment_approval_from_map(&mut approvals, action, payment_floor_refs, thread_id)
+    claim_payment_approval_from_map(&mut approvals, action, payment_floor_refs, focus_payment_context, thread_id)
 }
 
 fn claim_payment_approval_from_map(
     approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
     action: &serde_json::Value,
     payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
     thread_id: Option<&str>,
 ) -> Result<String, String> {
-    if !browser_safety::action_is_payment_commit(action, payment_floor_refs) {
+    if !browser_safety::action_is_payment_commit(action, payment_floor_refs, focus_payment_context) {
         return Err("payment approval can only be used on the final payment control".to_string());
     }
     let approval_id = action
@@ -65258,12 +65332,12 @@ prs.save(Path({path:?}))
         let payment_floor: std::collections::HashSet<String> =
             std::collections::HashSet::from(["e20".to_string()]);
         let blocked_click = serde_json::json!({"kind":"click","ref":"e20","action_class":"payment_commit"});
-        assert!(browser_safety::evaluate_browser_action(&blocked_click, &payment_floor, None).is_some());
+        assert!(browser_safety::evaluate_browser_action(&blocked_click, &payment_floor, false, None).is_some());
         let approved_click = serde_json::json!({
             "kind":"click","ref":"e20","action_class":"payment_commit","payment_approval_id":"pay_test"
         });
         assert!(
-            browser_safety::evaluate_browser_action(&approved_click, &payment_floor, Some("pay_test"))
+            browser_safety::evaluate_browser_action(&approved_click, &payment_floor, false, Some("pay_test"))
                 .is_none()
         );
 
@@ -65315,6 +65389,7 @@ prs.save(Path({path:?}))
             &mut approvals,
             &action,
             &payment_floor,
+            false,
             Some("thread_2")
         )
         .is_err());
@@ -65323,6 +65398,7 @@ prs.save(Path({path:?}))
                 &mut approvals,
                 &action,
                 &payment_floor,
+                false,
                 Some("thread_1")
             )
             .unwrap(),
@@ -65332,6 +65408,7 @@ prs.save(Path({path:?}))
             &mut approvals,
             &action,
             &payment_floor,
+            false,
             Some("thread_1")
         )
         .is_err());
@@ -65365,13 +65442,14 @@ prs.save(Path({path:?}))
             "payment_approval_id": "pay_test"
         });
         assert!(
-            browser_safety::effective_action_class(&missing_class_action, &payment_floor).is_err(),
+            browser_safety::effective_action_class(&missing_class_action, &payment_floor, false)
+                .is_err(),
             "discriminator the fix relies on: an under-declared committing action is a class error"
         );
 
         // Enforcement-site decision: must NOT claim on a class error.
         let should_claim =
-            super::should_claim_payment_approval(&missing_class_action, &payment_floor);
+            super::should_claim_payment_approval(&missing_class_action, &payment_floor, false);
         assert!(
             !should_claim,
             "a class error must never trigger consuming the one-shot grant"
@@ -65385,6 +65463,7 @@ prs.save(Path({path:?}))
                 &mut approvals,
                 &missing_class_action,
                 &payment_floor,
+                false,
                 Some("thread_1"),
             );
         }
@@ -65392,7 +65471,7 @@ prs.save(Path({path:?}))
         // The gate still fail-closed rejects the action on the class error —
         // no approved id was ever produced, so nothing unauthorized executes.
         let blocked =
-            browser_safety::evaluate_browser_action(&missing_class_action, &payment_floor, None);
+            browser_safety::evaluate_browser_action(&missing_class_action, &payment_floor, false, None);
         assert!(
             blocked
                 .as_deref()
@@ -65415,17 +65494,19 @@ prs.save(Path({path:?}))
             "payment_approval_id": "pay_test"
         });
         assert_eq!(
-            browser_safety::effective_action_class(&declared_payment_action, &payment_floor),
+            browser_safety::effective_action_class(&declared_payment_action, &payment_floor, false),
             Ok(browser_safety::ActionClass::PaymentCommit)
         );
         assert!(super::should_claim_payment_approval(
             &declared_payment_action,
-            &payment_floor
+            &payment_floor,
+            false
         ));
         let claimed = super::claim_payment_approval_from_map(
             &mut approvals,
             &declared_payment_action,
             &payment_floor,
+            false,
             Some("thread_1"),
         )
         .expect("retry should successfully claim the still-unconsumed grant");
@@ -65434,6 +65515,7 @@ prs.save(Path({path:?}))
             browser_safety::evaluate_browser_action(
                 &declared_payment_action,
                 &payment_floor,
+                false,
                 Some(&claimed)
             )
             .is_none(),
@@ -65445,6 +65527,7 @@ prs.save(Path({path:?}))
             &mut approvals,
             &declared_payment_action,
             &payment_floor,
+            false,
             Some("thread_1")
         )
         .is_err());
@@ -76869,7 +76952,7 @@ data: [DONE]\n";
         let action = serde_json::json!({
             "kind": "click", "ref": "e9", "target_id": "chat_0", "action_class": "payment_commit"
         });
-        assert!(browser_safety::evaluate_browser_action(&action, &floor, None).is_some());
+        assert!(browser_safety::evaluate_browser_action(&action, &floor, false, None).is_some());
     }
 
     #[test]
@@ -76878,7 +76961,7 @@ data: [DONE]\n";
             "kind": "click", "ref": "e9", "target_id": "chat_0", "action_class": "ordinary"
         });
         assert!(
-            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), None)
+            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), false, None)
                 .is_none()
         );
     }
@@ -76887,7 +76970,7 @@ data: [DONE]\n";
     fn act_gate_allows_typing_into_field() {
         let action = serde_json::json!({ "kind": "type", "ref": "e1", "text": "Napoli", "target_id": "chat_0" });
         assert!(
-            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), None)
+            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), false, None)
                 .is_none()
         );
     }
