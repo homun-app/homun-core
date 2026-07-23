@@ -85,6 +85,14 @@ pub enum AgentExecutionEvent {
         failed_navigations: u32,
         no_progress: u32,
     },
+    /// A redacted browser-protocol boundary summary (observation/action_bundle/
+    /// browser_done/terminal_result/etc). Callers must pre-redact `payload` —
+    /// this variant does not filter its contents, it only tags the boundary.
+    BrowserProtocol {
+        round: usize,
+        boundary: String,
+        payload: Value,
+    },
     RunCompleted {
         reason: String,
     },
@@ -171,6 +179,19 @@ impl AgentExecutionEvent {
                     "failed_navigations": failed_navigations,
                     "no_progress": no_progress,
                 }),
+            ),
+            Self::BrowserProtocol {
+                round,
+                boundary,
+                payload,
+            } => (
+                "browser_protocol",
+                Some(round),
+                {
+                    let mut obj = payload.as_object().cloned().unwrap_or_default();
+                    obj.insert("boundary".to_string(), Value::String(boundary));
+                    Value::Object(obj)
+                },
             ),
             Self::RunCompleted { reason } => ("run_completed", None, json!({"reason": reason})),
             Self::RunFailed { reason } => ("run_failed", None, json!({"reason": reason})),
@@ -461,6 +482,19 @@ mod tests {
         assert_eq!(kind, "prompt_snapshot");
         assert_eq!(round, Some(7));
         assert_eq!(payload["fingerprint"], expected);
+    }
+
+    #[test]
+    fn browser_protocol_event_maps_to_parts() {
+        let event = AgentExecutionEvent::BrowserProtocol {
+            round: 2,
+            boundary: "action_bundle".to_string(),
+            payload: serde_json::json!({ "action_kinds": ["click"], "stop_reason": "completed" }),
+        };
+        let (kind, round, value) = event.into_parts();
+        assert_eq!(kind, "browser_protocol");
+        assert_eq!(round, Some(2));
+        assert_eq!(value["boundary"], "action_bundle");
     }
 
     #[test]
