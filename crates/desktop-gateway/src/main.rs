@@ -18329,6 +18329,13 @@ fn browser_act_error_hint(error: &str) -> &'static str {
     }
 }
 
+// Shared with the single-action `browser_act` enforcement site in
+// `execute_browser_tool` (see `single_action_rejects_clickcoords_before_payment_claim`)
+// so both reject-clickCoords sites emit byte-identical text — one message to
+// keep in sync, not two literals that can silently drift apart.
+const BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR: &str =
+    "BROWSER_UNSUPPORTED_COMMITTING_ACTION: coordinate clicks are not available; click a specific [ref=…] control instead";
+
 fn normalize_browser_action_bundle(
     action: &mut serde_json::Value,
     current_target: &str,
@@ -18349,10 +18356,7 @@ fn normalize_browser_action_bundle(
     let mut focus_context = page_focus_payment_context;
     for nested in actions {
         if nested.get("kind").and_then(serde_json::Value::as_str) == Some("clickCoords") {
-            return Some(
-                "BROWSER_UNSUPPORTED_COMMITTING_ACTION: coordinate clicks are not available; click a specific [ref=…] control instead"
-                    .to_string(),
-            );
+            return Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR.to_string());
         }
         if nested.get("kind").and_then(serde_json::Value::as_str) == Some("batch")
             || nested.get("actions").is_some()
@@ -22940,8 +22944,28 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         push_browser_step("browser action bundle blocked".to_string(), "error");
                         Err(error)
                     } else {
+                    // clickCoords must be rejected before ANY payment-approval side
+                    // effect: it is not ref-based (the ref floor can't cover it) and
+                    // not Enter/Return (the page floor above doesn't apply either),
+                    // so no machine signal can ever classify it — fail closed
+                    // regardless of declared action_class. Checked here, FIRST,
+                    // before `apply_payment_approval_secret_for_action` and before
+                    // `should_claim_payment_approval`/`claim_payment_approval_for_action`
+                    // below, because a hallucinated clickCoords can still carry a
+                    // declared action_class:"payment_commit" plus a valid
+                    // payment_approval_id — which resolves to a genuine PaymentCommit
+                    // on the declared class alone — so checking this only as part of
+                    // the gate (after claiming) let clickCoords burn a one-shot
+                    // Payment Approval Card grant for an action that gets rejected
+                    // anyway. Defense-in-depth: verified no production path emits it
+                    // and the schema doesn't expose it, but a model could still
+                    // hallucinate it.
+                    let blocked_before_claim =
+                        single_action_rejects_clickcoords_before_payment_claim(&action);
                     let mut preflight_error = None;
-                    let vault_secret_used =
+                    let vault_secret_used = if blocked_before_claim.is_some() {
+                        false
+                    } else {
                         match apply_payment_approval_secret_for_action(
                             ctx.state,
                             &mut action,
@@ -22957,7 +22981,8 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 ));
                                 false
                             }
-                        };
+                        }
+                    };
                     // SAFETY GATE: arbitrary page script remains forbidden and
                     // the final action that transfers money requires a matching
                     // Payment Approval Card. Search, login and booking actions
@@ -22978,7 +23003,9 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     // unauthorized executed. Claim only when the effective class
                     // GENUINELY resolves to payment; on a class error, leave the
                     // grant unconsumed so the re-declared retry can use it.
-                    let approved_payment_id = if should_claim_payment_approval(
+                    let approved_payment_id = if blocked_before_claim.is_some() {
+                        None
+                    } else if should_claim_payment_approval(
                         &action,
                         ctx.payment_floor_refs,
                         focus_ctx,
@@ -23000,27 +23027,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     } else {
                         None
                     };
-                    // clickCoords is rejected outright, BEFORE the class gate: it is not
-                    // ref-based (the ref floor can't cover it) and not Enter/Return (the
-                    // page floor above doesn't apply either), so no machine signal can
-                    // ever classify it — fail closed regardless of declared action_class.
-                    // Defense-in-depth: verified no production path emits it and the
-                    // schema doesn't expose it, but a model could still hallucinate it.
-                    let blocked = if action.get("kind").and_then(serde_json::Value::as_str)
-                        == Some("clickCoords")
-                    {
-                        Some(
-                            "BROWSER_UNSUPPORTED_COMMITTING_ACTION: coordinate clicks are not available; click a specific [ref=…] control instead"
-                                .to_string(),
-                        )
-                    } else {
+                    let blocked = blocked_before_claim.map(str::to_string).or_else(|| {
                         browser_safety::evaluate_browser_action(
                             &action,
                             ctx.payment_floor_refs,
                             focus_ctx,
                             approved_payment_id.as_deref(),
                         )
-                    };
+                    });
                     if let Some(error) = preflight_error {
                         *browser_session = Some(client);
                         Err(error)
@@ -44971,6 +44985,31 @@ fn rewrite_payment_approval_to_done(
     out
 }
 
+/// Whether a single (non-bundled) `browser_act` request must be rejected as
+/// `BROWSER_UNSUPPORTED_COMMITTING_ACTION` BEFORE any payment-approval side
+/// effect runs (vault-secret substitution, one-shot grant claim). The
+/// `execute_browser_tool` single-action branch checks this FIRST — ahead of
+/// `apply_payment_approval_secret_for_action` and `should_claim_payment_approval`
+/// / `claim_payment_approval_for_action` below — because a hallucinated
+/// `clickCoords` action can still carry a declared `action_class:"payment_commit"`
+/// plus a valid, unconsumed `payment_approval_id`: `effective_action_class`
+/// resolves purely from the DECLARED class (`kind` never enters that
+/// decision), so it resolves to a genuine `Ok(PaymentCommit)` and, left
+/// unchecked until after claiming, would burn the one-shot Payment Approval
+/// Card for an action that gets rejected anyway (Task 1 review finding,
+/// commit eb9d877d). Mirrors the bundle path's reject-first check in
+/// `normalize_browser_action_bundle`, which rejects `clickCoords` as the very
+/// first thing in its loop, before any claim.
+fn single_action_rejects_clickcoords_before_payment_claim(
+    action: &serde_json::Value,
+) -> Option<&'static str> {
+    if action.get("kind").and_then(serde_json::Value::as_str) == Some("clickCoords") {
+        Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
+    } else {
+        None
+    }
+}
+
 /// Whether the `browser_act` enforcement site should CLAIM (consume) a
 /// Payment Approval Card grant for this action. Deliberately narrower than
 /// `browser_safety::action_is_payment_commit`: that helper also treats a
@@ -65531,6 +65570,127 @@ prs.save(Path({path:?}))
             Some("thread_1")
         )
         .is_err());
+    }
+
+    #[test]
+    fn clickcoords_with_payment_class_is_rejected_before_the_claim_and_leaves_the_grant_unconsumed(
+    ) {
+        // Regression for the Important review finding on Task 1 (commit
+        // eb9d877d): the single-action `browser_act` enforcement branch in
+        // `execute_browser_tool` used to compute `approved_payment_id` — via
+        // `should_claim_payment_approval` → `claim_payment_approval_for_action`
+        // → `claim_payment_approval_from_map`, which sets `grant.consumed =
+        // true` — BEFORE checking whether the action is `clickCoords`.
+        // Because `effective_action_class` resolves purely from the
+        // model-DECLARED `action_class` field (`kind` never enters that
+        // decision), a clickCoords action carrying `action_class:
+        // "payment_commit"` and a valid, unconsumed `payment_approval_id`
+        // resolves to a genuine `Ok(PaymentCommit)`, so
+        // `should_claim_payment_approval` said "claim it" and the grant was
+        // burned — even though the action is then unconditionally rejected
+        // as BROWSER_UNSUPPORTED_COMMITTING_ACTION. The coordinate click
+        // never executed (good), but the Payment Approval Card was burned
+        // for nothing, forcing an unnecessary re-approval.
+        //
+        // LIMITATION: `execute_browser_tool` is a private `async fn` that
+        // needs a live `AppState`, a tokio runtime and a real/mock browser
+        // session, so it cannot be driven directly by a plain `#[test]`.
+        // This test instead exercises
+        // `single_action_rejects_clickcoords_before_payment_claim` — the
+        // exact function the fixed single-action branch now calls FIRST,
+        // gating both `apply_payment_approval_secret_for_action` and
+        // `should_claim_payment_approval`/`claim_payment_approval_for_action`
+        // behind it — together with the same map-based claim helper
+        // (`claim_payment_approval_from_map`) the sibling tests above use,
+        // to pin the ordering invariant the fix establishes: reject BEFORE
+        // claim, so the grant survives for a legitimate follow-up action.
+        let mut approvals = std::collections::HashMap::from([(
+            "pay_test".to_string(),
+            super::PaymentApprovalGrant {
+                snapshot: payment_snapshot(),
+                cvv_one_shot: Some("123".to_string()),
+                thread_id: "thread_1".to_string(),
+                consumed: false,
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+            },
+        )]);
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // The trap: a hallucinated clickCoords action declaring
+        // action_class:"payment_commit" plus a valid payment_approval_id.
+        let click_coords_action = serde_json::json!({
+            "kind": "clickCoords",
+            "x": 120,
+            "y": 240,
+            "action_class": "payment_commit",
+            "payment_approval_id": "pay_test"
+        });
+
+        // Discriminator the bug relied on: `kind` is irrelevant to
+        // `effective_action_class`, so this payload resolves as a
+        // GENUINELY claimable PaymentCommit — proving the claim call, if it
+        // ran first, would succeed and burn the grant.
+        assert!(
+            super::should_claim_payment_approval(&click_coords_action, &payment_floor, false),
+            "a clickCoords action declaring action_class:payment_commit must resolve as a \
+             genuine PaymentCommit — this is exactly why the clickCoords reject must run \
+             BEFORE should_claim_payment_approval/claim_payment_approval_for_action, never after"
+        );
+        // Confirms the claim really would burn it, on a disposable clone —
+        // isolated so it never touches the `approvals` map the assertions
+        // below check.
+        let mut would_be_burned = approvals.clone();
+        assert!(
+            super::claim_payment_approval_from_map(
+                &mut would_be_burned,
+                &click_coords_action,
+                &payment_floor,
+                false,
+                Some("thread_1"),
+            )
+            .is_ok(),
+            "sanity: the trap payload is a well-formed, claimable grant"
+        );
+        assert!(
+            would_be_burned.get("pay_test").unwrap().consumed,
+            "sanity: claiming this exact payload does consume the grant when reached"
+        );
+
+        // (a) The fix: the single-action branch now checks this FIRST and
+        // rejects with the typed BROWSER_UNSUPPORTED_COMMITTING_ACTION error.
+        let blocked_before_claim =
+            super::single_action_rejects_clickcoords_before_payment_claim(&click_coords_action);
+        assert_eq!(
+            blocked_before_claim,
+            Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR),
+            "expected the typed BROWSER_UNSUPPORTED_COMMITTING_ACTION rejection"
+        );
+
+        // (b) Mirror the real call site's actual gate on the ORIGINAL
+        // `approvals` map: `execute_browser_tool`'s single-action branch
+        // only reaches should_claim_payment_approval/claim_payment_approval_for_action
+        // when `blocked_before_claim.is_none()`. Threading that exact
+        // condition here (rather than asserting on an untouched map) means
+        // this test genuinely fails if the reorder ever regresses: dropping
+        // the `blocked_before_claim.is_none()` guard — i.e. reverting to the
+        // pre-fix ordering — would make this branch run the claim and burn
+        // the grant, flipping the assertion below to RED.
+        if blocked_before_claim.is_none() {
+            if super::should_claim_payment_approval(&click_coords_action, &payment_floor, false) {
+                let _ = super::claim_payment_approval_from_map(
+                    &mut approvals,
+                    &click_coords_action,
+                    &payment_floor,
+                    false,
+                    Some("thread_1"),
+                );
+            }
+        }
+        assert!(
+            !approvals.get("pay_test").unwrap().consumed,
+            "clickCoords must be rejected before any payment-approval claim runs; the grant \
+             must survive UNCONSUMED for a subsequent legitimate action to use"
+        );
     }
 
     #[test]
