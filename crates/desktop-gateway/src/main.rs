@@ -18303,7 +18303,7 @@ fn browser_act_error_hint(error: &str) -> &'static str {
 fn normalize_browser_action_bundle(
     action: &mut serde_json::Value,
     current_target: &str,
-    snapshot: &str,
+    payment_floor_refs: &std::collections::HashSet<String>,
 ) -> Option<String> {
     let actions = action.get("actions").and_then(serde_json::Value::as_array)?;
     if actions.len() > 4 {
@@ -18318,13 +18318,13 @@ fn normalize_browser_action_bundle(
         {
             return Some("Browser action bundle rejected: nested bundles are not allowed.".to_string());
         }
-        if browser_safety::is_final_payment_action(nested, snapshot) {
+        if browser_safety::action_is_payment_commit(nested, payment_floor_refs) {
             return Some(
                 "Payment actions cannot run inside a browser action bundle. Ask for the Payment Approval Card and execute the final payment as a standalone approved action."
                     .to_string(),
             );
         }
-        if let Some(reason) = browser_safety::high_risk_reason(nested, snapshot) {
+        if let Some(reason) = browser_safety::evaluate_browser_action(nested, payment_floor_refs, None) {
             return Some(format!("Browser action bundle rejected: {reason}"));
         }
     }
@@ -22012,6 +22012,10 @@ fn attachment_text_is_ready(text: &str) -> bool {
 struct BrowserToolCtx<'a> {
     browser_used: &'a mut bool,
     last_snapshot: &'a mut String,
+    // Machine-derived payment floor refs (never label text) for the current
+    // observation. Raises (never lowers) the effective action class; see
+    // `browser_safety::effective_action_class`.
+    payment_floor_refs: &'a mut std::collections::HashSet<String>,
     pending_browser_image: &'a mut Option<String>,
     browser_tool_call_ids: &'a mut std::collections::BTreeSet<String>,
     current_target: &'a mut String,
@@ -22725,6 +22729,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 let snap = browser_snapshot_text(&value);
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
+                                    *ctx.payment_floor_refs = browser_floor_refs(&value);
                                 }
                                 push_browser_step(
                                     format!("navigate {url}"),
@@ -22790,6 +22795,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             let snap = browser_snapshot_text(&value);
                             if !snap.is_empty() {
                                 *ctx.last_snapshot = snap.clone();
+                                *ctx.payment_floor_refs = browser_floor_refs(&value);
                             }
                             push_browser_step("snapshot".to_string(), "done");
                             push_browser_step(
@@ -22855,7 +22861,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     if let Some(error) = normalize_browser_action_bundle(
                         &mut action,
                         ctx.current_target.as_str(),
-                        ctx.last_snapshot,
+                        ctx.payment_floor_refs,
                     ) {
                         *browser_session = Some(client);
                         push_browser_step("browser action bundle blocked".to_string(), "error");
@@ -22884,14 +22890,16 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     // Payment Approval Card. Search, login and booking actions
                     // are ordinary user-directed browser interactions; objective
                     // read-only mode must not be reused as an origin-trust gate.
-                    let approved_payment_id = if browser_safety::is_final_payment_action(
+                    // The decision is on the EFFECTIVE action class (declared ⊔
+                    // machine floor), never on control label text.
+                    let approved_payment_id = if browser_safety::action_is_payment_commit(
                         &action,
-                        ctx.last_snapshot,
+                        ctx.payment_floor_refs,
                     ) {
                         match claim_payment_approval_for_action(
                             ctx.state,
                             &action,
-                            ctx.last_snapshot,
+                            ctx.payment_floor_refs,
                             ctx.thread_id,
                         ) {
                             Ok(id) => Some(id),
@@ -22904,9 +22912,9 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     } else {
                         None
                     };
-                    let blocked = browser_safety::high_risk_reason_with_payment_approval(
+                    let blocked = browser_safety::evaluate_browser_action(
                         &action,
-                        ctx.last_snapshot,
+                        ctx.payment_floor_refs,
                         approved_payment_id.as_deref(),
                     );
                     if let Some(error) = preflight_error {
@@ -22962,6 +22970,7 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                     !snap.is_empty() && snap == *ctx.last_snapshot;
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
+                                    *ctx.payment_floor_refs = browser_floor_refs(&value);
                                 }
                                 push_browser_step(format!("{kind}"), "done");
                                 push_browser_step(
@@ -23076,6 +23085,8 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             ))
                                         } else {
                                             *ctx.last_snapshot = snap.clone();
+                                            *ctx.payment_floor_refs =
+                                                browser_floor_refs(snap_res.as_ref().unwrap());
                                             push_browser_step(
                                                 browser_protocol_event_summary(
                                                     call_id,
@@ -26603,6 +26614,10 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
 struct GatewayBrowserExecutor<'a> {
     browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
     last_snapshot: String,
+    // Machine-derived payment floor refs for the last observation (act/navigate/
+    // snapshot). Mirrors `last_snapshot`'s update sites; never derived from label
+    // text. See `browser_safety::effective_action_class`.
+    last_payment_floor_refs: std::collections::HashSet<String>,
     result_contract: Option<local_first_engine::browse::BrowseResultContract>,
     current_target: String,
     opened_targets: Vec<String>,
@@ -26669,6 +26684,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         let mut bctx = BrowserToolCtx {
             browser_used: &mut ls.browser_used,
             last_snapshot: &mut self.last_snapshot,
+            payment_floor_refs: &mut self.last_payment_floor_refs,
             pending_browser_image: &mut ls.pending_browser_image,
             browser_tool_call_ids: &mut ls.browser_tool_call_ids,
             current_target: &mut self.current_target,
@@ -26981,6 +26997,7 @@ impl GatewayBrowseExecutor<'_> {
         let mut browser_executor = GatewayBrowserExecutor {
             browser_session: None,
             last_snapshot: String::new(),
+            last_payment_floor_refs: std::collections::HashSet::new(),
             result_contract: request.contract.clone(),
             current_target: "chat_0".to_string(),
             opened_targets: Vec::new(),
@@ -29143,6 +29160,7 @@ async fn run_agent_rounds(
     let mut browser_executor = GatewayBrowserExecutor {
         browser_session: None,
         last_snapshot: String::new(),
+        last_payment_floor_refs: std::collections::HashSet::new(),
         result_contract: None,
         current_target: "chat_0".to_string(), // the first tab the tools operate on
         opened_targets: Vec::new(),
@@ -31159,6 +31177,21 @@ fn browser_snapshot_text(value: &serde_json::Value) -> String {
         .and_then(|s| s.as_str())
         .unwrap_or("")
         .to_string()
+}
+
+/// Machine-derived payment floor refs the sidecar attached to an observation.
+/// Absent field → empty set. These raise (never lower) the effective action class.
+fn browser_floor_refs(value: &serde_json::Value) -> std::collections::HashSet<String> {
+    value
+        .get("paymentFloorRefs")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// How long a per-thread browser session may sit idle before it is reaped.
@@ -44633,20 +44666,20 @@ fn rewrite_payment_approval_to_done(
 fn claim_payment_approval_for_action(
     state: &AppState,
     action: &serde_json::Value,
-    snapshot: &str,
+    payment_floor_refs: &std::collections::HashSet<String>,
     thread_id: Option<&str>,
 ) -> Result<String, String> {
     let mut approvals = lock_payment_approvals(state).map_err(|error| error.message)?;
-    claim_payment_approval_from_map(&mut approvals, action, snapshot, thread_id)
+    claim_payment_approval_from_map(&mut approvals, action, payment_floor_refs, thread_id)
 }
 
 fn claim_payment_approval_from_map(
     approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
     action: &serde_json::Value,
-    snapshot: &str,
+    payment_floor_refs: &std::collections::HashSet<String>,
     thread_id: Option<&str>,
 ) -> Result<String, String> {
-    if !browser_safety::is_final_payment_action(action, snapshot) {
+    if !browser_safety::action_is_payment_commit(action, payment_floor_refs) {
         return Err("payment approval can only be used on the final payment control".to_string());
     }
     let approval_id = action
@@ -64910,18 +64943,17 @@ prs.save(Path({path:?}))
         assert!(!rewritten.contains("123456"));
         assert!(!rewritten.contains("CVV: 123"));
 
-        let page_snapshot = "- textbox \"CVV\" [ref=e12]\n- button \"Paga ora\" [ref=e20]";
-        let blocked_click = serde_json::json!({"kind":"click","ref":"e20"});
-        assert!(browser_safety::high_risk_reason(&blocked_click, page_snapshot).is_some());
-        let approved_click =
-            serde_json::json!({"kind":"click","ref":"e20","payment_approval_id":"pay_test"});
+        // Machine floor marks e20 as the payment control — never a label match.
+        let payment_floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e20".to_string()]);
+        let blocked_click = serde_json::json!({"kind":"click","ref":"e20","action_class":"payment_commit"});
+        assert!(browser_safety::evaluate_browser_action(&blocked_click, &payment_floor, None).is_some());
+        let approved_click = serde_json::json!({
+            "kind":"click","ref":"e20","action_class":"payment_commit","payment_approval_id":"pay_test"
+        });
         assert!(
-            browser_safety::high_risk_reason_with_payment_approval(
-                &approved_click,
-                page_snapshot,
-                Some("pay_test")
-            )
-            .is_none()
+            browser_safety::evaluate_browser_action(&approved_click, &payment_floor, Some("pay_test"))
+                .is_none()
         );
 
         let mut fill_cvv = serde_json::json!({
@@ -64963,14 +64995,15 @@ prs.save(Path({path:?}))
         let action = serde_json::json!({
             "kind": "click",
             "ref": "e20",
+            "action_class": "payment_commit",
             "payment_approval_id": "pay_test"
         });
-        let snapshot = "- button \"Paga ora\" [ref=e20]";
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         assert!(super::claim_payment_approval_from_map(
             &mut approvals,
             &action,
-            snapshot,
+            &payment_floor,
             Some("thread_2")
         )
         .is_err());
@@ -64978,7 +65011,7 @@ prs.save(Path({path:?}))
             super::claim_payment_approval_from_map(
                 &mut approvals,
                 &action,
-                snapshot,
+                &payment_floor,
                 Some("thread_1")
             )
             .unwrap(),
@@ -64987,7 +65020,7 @@ prs.save(Path({path:?}))
         assert!(super::claim_payment_approval_from_map(
             &mut approvals,
             &action,
-            snapshot,
+            &payment_floor,
             Some("thread_1")
         )
         .is_err());
@@ -76405,24 +76438,34 @@ data: [DONE]\n";
     }
 
     #[test]
-    fn act_gate_blocks_final_payment_click() {
-        let snapshot = "- button \"Paga ora\" [ref=e9]\n- textbox \"Da\" [ref=e1]";
-        let action = serde_json::json!({ "kind": "click", "ref": "e9", "target_id": "chat_0" });
-        assert!(browser_safety::high_risk_reason(&action, snapshot).is_some());
+    fn act_gate_blocks_final_payment_click_without_approval() {
+        // Machine floor marks e9 as the payment control — never label text.
+        let floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e9".to_string()]);
+        let action = serde_json::json!({
+            "kind": "click", "ref": "e9", "target_id": "chat_0", "action_class": "payment_commit"
+        });
+        assert!(browser_safety::evaluate_browser_action(&action, &floor, None).is_some());
     }
 
     #[test]
-    fn act_gate_allows_purchase_click_before_payment() {
-        let snapshot = "- button \"Acquista\" [ref=e9]\n- textbox \"Da\" [ref=e1]";
-        let action = serde_json::json!({ "kind": "click", "ref": "e9", "target_id": "chat_0" });
-        assert!(browser_safety::high_risk_reason(&action, snapshot).is_none());
+    fn act_gate_allows_ordinary_click_before_payment() {
+        let action = serde_json::json!({
+            "kind": "click", "ref": "e9", "target_id": "chat_0", "action_class": "ordinary"
+        });
+        assert!(
+            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), None)
+                .is_none()
+        );
     }
 
     #[test]
     fn act_gate_allows_typing_into_field() {
-        let snapshot = "- textbox \"Da\" [ref=e1]";
         let action = serde_json::json!({ "kind": "type", "ref": "e1", "text": "Napoli", "target_id": "chat_0" });
-        assert!(browser_safety::high_risk_reason(&action, snapshot).is_none());
+        assert!(
+            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), None)
+                .is_none()
+        );
     }
 
     #[test]
@@ -76438,6 +76481,20 @@ data: [DONE]\n";
         let value = serde_json::json!({ "snapshot": "- page", "url": "https://x" });
         assert_eq!(browser_snapshot_text(&value), "- page");
         assert_eq!(browser_snapshot_text(&serde_json::json!({})), "");
+    }
+
+    #[test]
+    fn browser_floor_refs_reads_sidecar_payment_floor() {
+        let value = serde_json::json!({
+            "snapshot": "- button \"Conferma\" [ref=e9]",
+            "paymentFloorRefs": ["e9"]
+        });
+        let refs = super::browser_floor_refs(&value);
+        assert!(refs.contains("e9"));
+        assert_eq!(refs.len(), 1);
+
+        let empty = serde_json::json!({ "snapshot": "- button \"Cerca\" [ref=e7]" });
+        assert!(super::browser_floor_refs(&empty).is_empty());
     }
 
     #[test]

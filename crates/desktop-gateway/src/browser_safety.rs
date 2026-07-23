@@ -2,11 +2,18 @@
 //! high-risk (a final payment commit or arbitrary page script) and must be
 //! refused without explicit user approval.
 //!
-//! Used by the main-agent-driven `browser_act` tool to enforce the guard. Takes
-//! the snapshot as `&str` (not a `BrowserObservation`) so it has no dependency on
-//! the browser-automation crate types.
+//! The payment decision is made on the *effective action class*
+//! (`max(model-declared class, machine-derived payment floor)`), never on
+//! control label text: label keywords fail open on unlabeled controls and on
+//! languages outside the hardcoded list, which is exactly wrong for a payment
+//! gate. `snapshot_label_for_ref` survives only for approval-card binding and
+//! display, never for this decision.
+//!
+//! Used by the main-agent-driven `browser_act` tool to enforce the guard. Has
+//! no dependency on the browser-automation crate types.
 
 use serde_json::Value;
+use std::collections::HashSet;
 
 /// The effect class of a committing browser action. Ordering is the safety
 /// lattice: a machine floor may only raise the class, never lower it, so
@@ -32,26 +39,9 @@ pub fn declared_action_class(action: &Value) -> Option<ActionClass> {
     }
 }
 
-const FINAL_PAYMENT_LABEL_PATTERNS: &[&str] = &[
-    "pay now",
-    "confirm payment",
-    "submit payment",
-    "authorize payment",
-    "complete purchase",
-    "place order",
-    "order now",
-    "paga ora",
-    "conferma pagamento",
-    "invia pagamento",
-    "autorizza pagamento",
-    "conferma e paga",
-    "completa acquisto",
-    "ordina e paga",
-];
-
 /// True if the action commits something potentially irreversible: a click, a
 /// `type` with `submit`, or an Enter/Return key press. Used both by the
-/// final-payment check.
+/// gate below and by the "is this action gated at all" check.
 pub fn is_committing_action(action: &Value) -> bool {
     let kind = action.get("kind").and_then(Value::as_str).unwrap_or("");
     matches!(kind, "click" | "clickCoords")
@@ -68,75 +58,85 @@ pub fn is_committing_action(action: &Value) -> bool {
                 .is_some_and(|key| matches!(key.to_ascii_lowercase().as_str(), "enter" | "return")))
 }
 
-pub fn is_final_payment_action(action: &Value, snapshot: &str) -> bool {
-    if !is_committing_action(action) && action.get("kind").and_then(Value::as_str) != Some("hold") {
-        return false;
-    }
-    let label = action
+/// The floor for a ref is `PaymentCommit` when the sidecar's machine analysis
+/// (cc-autocomplete fields, PSP-origin frame) marked it; otherwise `Ordinary`.
+/// Floors are machine-derived and never read label text.
+fn payment_floor_for(action: &Value, payment_floor_refs: &HashSet<String>) -> ActionClass {
+    let is_floored = action
         .get("ref")
         .and_then(Value::as_str)
-        .and_then(|ref_id| snapshot_label_for_ref(snapshot, ref_id))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    FINAL_PAYMENT_LABEL_PATTERNS
-        .iter()
-        .any(|pattern| label.contains(*pattern))
+        .is_some_and(|r| payment_floor_refs.contains(r));
+    if is_floored { ActionClass::PaymentCommit } else { ActionClass::Ordinary }
 }
 
-/// Returns a blocker reason if the action is high-risk: arbitrary JS, or a
-/// committing action on a control whose label matches a final-payment pattern.
-/// `None` means the action is safe to run. `snapshot` is the latest
-/// page snapshot text, used to resolve the control label from `ref`.
-pub fn high_risk_reason(action: &Value, snapshot: &str) -> Option<String> {
-    high_risk_reason_with_payment_approval(action, snapshot, None)
+/// True when the action is committing (or `hold`). Payment gating only applies
+/// to these; typing/scrolling/hovering are never gated.
+fn is_gated_action(action: &Value) -> bool {
+    is_committing_action(action) || action.get("kind").and_then(Value::as_str) == Some("hold")
 }
 
-/// Approval-aware variant for the future payment flow. A matching
-/// `payment_approval_id` can unlock final payment controls only. Login and
-/// booking are user-directed browser actions and do not use this payment gate.
-pub fn high_risk_reason_with_payment_approval(
+/// Effective class for a committing action: `max(declared, machine_floor)`.
+/// `Err` is a typed, fail-closed rejection the model must act on:
+/// - `BROWSER_ACTION_CLASS_MISSING`: committing action declared no class;
+/// - `BROWSER_ACTION_CLASS_CONFLICT`: a machine floor exceeds the declared class,
+///   so the model must re-declare (as payment) rather than have the code silently
+///   upgrade and proceed.
+pub fn effective_action_class(
     action: &Value,
-    snapshot: &str,
+    payment_floor_refs: &HashSet<String>,
+) -> Result<ActionClass, String> {
+    if !is_gated_action(action) {
+        return Ok(ActionClass::Ordinary);
+    }
+    let declared = declared_action_class(action).ok_or_else(|| {
+        "BROWSER_ACTION_CLASS_MISSING: a committing action must declare action_class \
+         (ordinary|account|booking|payment_commit)"
+            .to_string()
+    })?;
+    let floor = payment_floor_for(action, payment_floor_refs);
+    if floor > declared {
+        return Err(format!(
+            "BROWSER_ACTION_CLASS_CONFLICT: this control is a payment control; \
+             re-declare action_class=payment_commit (was {declared:?})"
+        ));
+    }
+    Ok(declared.max(floor))
+}
+
+/// True when the action's effective class is `PaymentCommit` (declared or floored).
+/// Used to decide whether to claim a Payment Approval Card. A class error counts
+/// as "treat as payment" so the gate below re-rejects it fail-closed.
+pub fn action_is_payment_commit(action: &Value, payment_floor_refs: &HashSet<String>) -> bool {
+    matches!(effective_action_class(action, payment_floor_refs), Ok(ActionClass::PaymentCommit) | Err(_))
+        && is_gated_action(action)
+}
+
+/// The single browser action gate. `None` = allow. `Some(reason)` = typed
+/// rejection. Never reads label text for the payment decision.
+pub fn evaluate_browser_action(
+    action: &Value,
+    payment_floor_refs: &HashSet<String>,
     approved_payment_id: Option<&str>,
 ) -> Option<String> {
-    let kind = action.get("kind").and_then(Value::as_str).unwrap_or("");
-    if kind == "evaluate" {
+    if action.get("kind").and_then(Value::as_str) == Some("evaluate") {
         return Some(
-            "blocked: arbitrary page script (evaluate) is not allowed without explicit approval"
-                .to_string(),
+            "BROWSER_HAZARDOUS_ACTION: arbitrary page script (evaluate) is not allowed".to_string(),
         );
     }
-    // `hold` is not a blanket commit (so a press-and-hold human-verification
-    // challenge runs unattended, incl. from a channel), but it must still face the
-    // purchase/login label check below — a "hold to pay/confirm order" control is
-    // as committing as a click on it.
-    if !is_committing_action(action) && kind != "hold" {
-        return None;
-    }
-    let label = action
-        .get("ref")
-        .and_then(Value::as_str)
-        .and_then(|ref_id| snapshot_label_for_ref(snapshot, ref_id))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    if label.is_empty() {
-        return None;
-    }
-    let payment_match = FINAL_PAYMENT_LABEL_PATTERNS
-        .iter()
-        .find(|pattern| label.contains(*pattern));
-    if let Some(pattern) = payment_match {
-        let action_approval_id = action
-            .get("payment_approval_id")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if approved_payment_id.is_some_and(|approved| approved == action_approval_id) {
+    let effective = match effective_action_class(action, payment_floor_refs) {
+        Ok(class) => class,
+        Err(reason) => return Some(reason),
+    };
+    if effective == ActionClass::PaymentCommit {
+        let action_id = action.get("payment_approval_id").and_then(Value::as_str).unwrap_or("");
+        if approved_payment_id.is_some_and(|approved| approved == action_id) {
             return None;
         }
-        return Some(format!(
-            "blocked before final payment action: control \"{label}\" matches \"{pattern}\" \
-             and requires a matching Payment Approval Card"
-        ));
+        return Some(
+            "BROWSER_PAYMENT_APPROVAL_REQUIRED: the final payment action needs a matching, \
+             unconsumed Payment Approval Card"
+                .to_string(),
+        );
     }
     None
 }
@@ -157,7 +157,9 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const SNAP: &str = "- textbox \"Da\" [ref=e1]\n- button \"Paga ora\" [ref=e9]\n- button \"Cerca\" [ref=e7]\n- button \"Accedi\" [ref=e8]\n- button \"Prenota\" [ref=e11]\n- button \"Vai al checkout\" [ref=e12]\n- button \"Acquista\" [ref=e13]\n- button \"Tieni premuto per confermare di essere umano\" [ref=e3]";
+    fn floor(refs: &[&str]) -> std::collections::HashSet<String> {
+        refs.iter().map(|r| r.to_string()).collect()
+    }
 
     #[test]
     fn declared_class_parses_the_four_names_and_rejects_unknown() {
@@ -178,39 +180,6 @@ mod tests {
     }
 
     #[test]
-    fn blocks_evaluate() {
-        assert!(high_risk_reason(&json!({"kind":"evaluate"}), SNAP).is_some());
-    }
-
-    #[test]
-    fn blocks_click_on_purchase_label() {
-        assert!(high_risk_reason(&json!({"kind":"click","ref":"e9"}), SNAP).is_some());
-    }
-
-    #[test]
-    fn allows_click_on_search() {
-        assert!(high_risk_reason(&json!({"kind":"click","ref":"e7"}), SNAP).is_none());
-    }
-
-    #[test]
-    fn allows_login_and_booking_but_blocks_payment() {
-        for reference in ["e7", "e8", "e11", "e12", "e13"] {
-            assert!(
-                high_risk_reason(&json!({"kind":"click","ref":reference}), SNAP).is_none(),
-                "{reference} should be allowed"
-            );
-        }
-        assert!(high_risk_reason(&json!({"kind":"click","ref":"e9"}), SNAP).is_some());
-    }
-
-    #[test]
-    fn allows_type_into_field() {
-        assert!(
-            high_risk_reason(&json!({"kind":"type","ref":"e1","text":"Napoli"}), SNAP).is_none()
-        );
-    }
-
-    #[test]
     fn committing_detects_enter_press() {
         assert!(is_committing_action(&json!({"kind":"press","key":"Enter"})));
         assert!(!is_committing_action(
@@ -226,27 +195,55 @@ mod tests {
     }
 
     #[test]
-    fn allows_hold_on_human_challenge() {
-        assert!(high_risk_reason(&json!({"kind":"hold","ref":"e3"}), SNAP).is_none());
+    fn committing_action_without_class_is_rejected_fail_closed() {
+        use serde_json::json;
+        let reason = evaluate_browser_action(&json!({"kind":"click","ref":"e5"}), &floor(&[]), None).unwrap();
+        assert!(reason.contains("BROWSER_ACTION_CLASS_MISSING"));
     }
 
     #[test]
-    fn blocks_hold_on_purchase_label() {
-        assert!(high_risk_reason(&json!({"kind":"hold","ref":"e9"}), SNAP).is_some());
+    fn ordinary_declared_committing_action_is_allowed_without_a_floor() {
+        use serde_json::json;
+        let action = json!({"kind":"click","ref":"e7","action_class":"ordinary"});
+        assert!(evaluate_browser_action(&action, &floor(&[]), None).is_none());
     }
 
     #[test]
-    fn final_payment_click_requires_matching_payment_approval() {
-        let snapshot = "- button \"Paga ora\" [ref=e10]";
-        let action = json!({"kind":"click","ref":"e10"});
+    fn declared_below_payment_floor_is_a_conflict() {
+        use serde_json::json;
+        let action = json!({"kind":"click","ref":"e9","action_class":"booking"});
+        let reason = evaluate_browser_action(&action, &floor(&["e9"]), None).unwrap();
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+    }
 
-        let blocked = high_risk_reason_with_payment_approval(&action, snapshot, Some("pay_123"));
-        assert!(blocked.is_some());
-        assert!(blocked.unwrap().contains("Payment Approval Card"));
+    #[test]
+    fn payment_commit_requires_matching_approval() {
+        use serde_json::json;
+        let action = json!({"kind":"click","ref":"e9","action_class":"payment_commit"});
+        let blocked = evaluate_browser_action(&action, &floor(&[]), None).unwrap();
+        assert!(blocked.contains("BROWSER_PAYMENT_APPROVAL_REQUIRED"));
+        let approved = json!({"kind":"click","ref":"e9","action_class":"payment_commit","payment_approval_id":"pay_1"});
+        assert!(evaluate_browser_action(&approved, &floor(&[]), Some("pay_1")).is_none());
+    }
 
-        let approved = json!({"kind":"click","ref":"e10","payment_approval_id":"pay_123"});
-        assert!(
-            high_risk_reason_with_payment_approval(&approved, snapshot, Some("pay_123")).is_none()
-        );
+    #[test]
+    fn non_committing_action_needs_no_class() {
+        use serde_json::json;
+        assert!(evaluate_browser_action(&json!({"kind":"type","ref":"e1","text":"Napoli"}), &floor(&[]), None).is_none());
+        assert!(evaluate_browser_action(&json!({"kind":"scroll"}), &floor(&[]), None).is_none());
+    }
+
+    #[test]
+    fn evaluate_kind_is_always_hazardous() {
+        use serde_json::json;
+        assert!(evaluate_browser_action(&json!({"kind":"evaluate"}), &floor(&[]), None).is_some());
+    }
+
+    #[test]
+    fn payment_floor_marks_effective_payment() {
+        use serde_json::json;
+        assert!(action_is_payment_commit(&json!({"kind":"click","ref":"e9","action_class":"payment_commit"}), &floor(&[])));
+        assert!(action_is_payment_commit(&json!({"kind":"click","ref":"e9","action_class":"ordinary"}), &floor(&["e9"])));
+        assert!(!action_is_payment_commit(&json!({"kind":"click","ref":"e7","action_class":"ordinary"}), &floor(&[])));
     }
 }
