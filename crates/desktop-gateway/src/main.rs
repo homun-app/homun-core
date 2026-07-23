@@ -75319,10 +75319,17 @@ data: [DONE]\n";
     }
 
     #[test]
-    fn act_gate_blocks_purchase_click() {
-        let snapshot = "- button \"Acquista ora\" [ref=e9]\n- textbox \"Da\" [ref=e1]";
+    fn act_gate_blocks_final_payment_click() {
+        let snapshot = "- button \"Paga ora\" [ref=e9]\n- textbox \"Da\" [ref=e1]";
         let action = serde_json::json!({ "kind": "click", "ref": "e9", "target_id": "chat_0" });
         assert!(browser_safety::high_risk_reason(&action, snapshot).is_some());
+    }
+
+    #[test]
+    fn act_gate_allows_purchase_click_before_payment() {
+        let snapshot = "- button \"Acquista\" [ref=e9]\n- textbox \"Da\" [ref=e1]";
+        let action = serde_json::json!({ "kind": "click", "ref": "e9", "target_id": "chat_0" });
+        assert!(browser_safety::high_risk_reason(&action, snapshot).is_none());
     }
 
     #[test]
