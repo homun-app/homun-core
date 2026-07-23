@@ -36,6 +36,9 @@ export type BrowserActionResult = {
   generation?: number;
   fingerprint?: string;
   observationMode?: BrowserObservationMode;
+  // Machine-derived payment floor refs from the embedded post-action snapshot
+  // (present whenever the action requested a fresh snapshot). Raise-only.
+  paymentFloorRefs?: string[];
   filledRefs?: string[];
   failedRefs?: Array<{ ref: string; error: string }>;
   batchResults?: Array<BrowserActionResult | { ok: false; error: string }>;

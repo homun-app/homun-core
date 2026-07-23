@@ -231,6 +231,7 @@ export class BrowserSessionManager {
     generation: number;
     fingerprint: string;
     observationMode: "interact" | "delta" | "extract";
+    paymentFloorRefs: string[];
   }> {
     const state = await this.resolvePage(params.targetId);
     // Let late content settle before snapshotting: a static page (Wikipedia) is already
@@ -259,6 +260,7 @@ export class BrowserSessionManager {
       generation: snapshot.generation,
       fingerprint: snapshot.fingerprint,
       observationMode: snapshot.observationMode,
+      paymentFloorRefs: snapshot.paymentFloorRefs,
     };
   }
 
@@ -308,6 +310,7 @@ export class BrowserSessionManager {
       generation: snapshot.generation,
       fingerprint: snapshot.fingerprint,
       observationMode: snapshot.observationMode,
+      paymentFloorRefs: snapshot.paymentFloorRefs,
     };
   }
 

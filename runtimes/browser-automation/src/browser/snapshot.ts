@@ -23,6 +23,10 @@ export type BrowserSnapshot = {
   generation: number;
   fingerprint: string;
   observationMode: BrowserObservationMode;
+  // Machine-derived floor refs (ADR: browser payment floors). A ref present here
+  // can only RAISE the gateway's effective action_class for that action, never
+  // lower it. Populated by computePaymentFloorRefs from DOM/frame contracts only.
+  paymentFloorRefs: string[];
 };
 
 export type BrowserObservationMode = "interact" | "delta" | "extract";
@@ -101,6 +105,71 @@ const INTERACTIVE_SELECTOR = [
   "[role='button']",
   "[contenteditable='true']",
 ].join(", ");
+
+// Exact PSP host-suffix list (global constraint) — no substring/fuzzy matching,
+// only exact host or "*.<suffix>" match against the element's own document origin.
+const PSP_HOST_SUFFIXES = [
+  "stripe.com",
+  "js.stripe.com",
+  "checkout.stripe.com",
+  "adyen.com",
+  "paypal.com",
+  "braintreegateway.com",
+  "checkout.com",
+  "klarna.com",
+  "nexi.it",
+  "worldline.com",
+  "satispay.com",
+];
+
+// Machine-only floor: a committing-capable ref (button/link) is a payment
+// control when its element sits in a <form> containing a cc-autocomplete
+// input, OR inside a frame/document whose origin is a known PSP host. This
+// NEVER reads visible label/text content — only DOM structure, the
+// `autocomplete` attribute contract, and frame/document origin. Raise-only:
+// callers use this set to raise an action's effective payment class, never
+// to lower it.
+export async function computePaymentFloorRefs(
+  refs: BrowserRef[],
+  refLocators: Map<string, Locator>,
+): Promise<string[]> {
+  const floored: string[] = [];
+  for (const ref of refs) {
+    if (ref.role !== "button" && ref.role !== "link") {
+      continue;
+    }
+    const locator = refLocators.get(ref.ref);
+    if (!locator) {
+      continue;
+    }
+    const isPaymentControl = await locator
+      .evaluate((el, pspSuffixes) => {
+        const form = el.closest("form");
+        const inCcForm = !!form && !!form.querySelector('input[autocomplete^="cc-"]');
+        let origin = "";
+        try {
+          origin = el.ownerDocument.defaultView?.location.origin ?? "";
+        } catch {
+          origin = "";
+        }
+        let host = "";
+        try {
+          host = new URL(origin).hostname;
+        } catch {
+          host = "";
+        }
+        const inPspFrame = (pspSuffixes as string[]).some(
+          (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+        );
+        return inCcForm || inPspFrame;
+      }, PSP_HOST_SUFFIXES)
+      .catch(() => false);
+    if (isPaymentControl) {
+      floored.push(ref.ref);
+    }
+  }
+  return floored;
+}
 
 export async function createSnapshot(
   page: Page,
@@ -182,6 +251,7 @@ async function createAiSnapshot(
   for (const ref of refs) {
     refLocators.set(ref.ref, page.locator(`aria-ref=${ref.ref}`));
   }
+  const paymentFloorRefs = await computePaymentFloorRefs(refs, refLocators);
   return {
     targetId,
     url: page.url(),
@@ -194,6 +264,7 @@ async function createAiSnapshot(
     generation: normalizedGeneration(options?.generation),
     fingerprint: fingerprintSnapshot(snapshot),
     observationMode: observedMode,
+    paymentFloorRefs,
   };
 }
 
@@ -385,6 +456,9 @@ async function createLegacySnapshot(page: Page, targetId: string): Promise<Brows
     generation: 0,
     fingerprint: fingerprintSnapshot(snapshot),
     observationMode: "extract",
+    // Legacy (non-AI) snapshot path is not covered by the floor computation;
+    // an empty floor is correct (raise-only — never fabricate a floor here).
+    paymentFloorRefs: [],
   };
 }
 
