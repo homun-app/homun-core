@@ -26059,6 +26059,15 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         // engine dispatch sees `browse` as a plain non-browser tool → it arrives here; the recursion runs
         // entirely gateway-side and returns a compact BrowseResult the manager reads.
         if name == "browse" {
+            if earlier_browse_call_in_current_round(&ls.messages, call_id) {
+                let deferred = local_first_engine::BrowseResult::not_found(
+                    "browse deferred: another browse call already ran in this model round; inspect its result before deciding whether another source is needed",
+                );
+                return Ok(local_first_engine::ToolOutcome {
+                    result: local_first_engine::browse::browse_result_for_manager(&deferred),
+                    effects: Default::default(),
+                });
+            }
             let goal = build_browse_goal(args_raw);
             if goal.is_empty() {
                 return Ok(local_first_engine::ToolOutcome {
@@ -26380,6 +26389,41 @@ fn build_browse_goal(args_raw: &str) -> String {
         }
     }
     out
+}
+
+/// The manager can emit several `browse` calls in one response, but it cannot
+/// have observed the first result while deciding the later calls. Execute only
+/// the first browse in that model round; later calls are reconsidered after the
+/// result is in context. This prevents blind multi-site wandering and keeps one
+/// browser sub-agent in control of the shared contained browser at a time.
+fn earlier_browse_call_in_current_round(
+    messages: &[serde_json::Value],
+    current_call_id: &str,
+) -> bool {
+    for message in messages.iter().rev() {
+        let Some(calls) = message.get("tool_calls").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        if !calls.iter().any(|call| {
+            call.get("id").and_then(serde_json::Value::as_str) == Some(current_call_id)
+        }) {
+            continue;
+        }
+        for call in calls {
+            if call.get("id").and_then(serde_json::Value::as_str) == Some(current_call_id) {
+                return false;
+            }
+            if call
+                .pointer("/function/name")
+                .and_then(serde_json::Value::as_str)
+                == Some("browse")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    false
 }
 
 /// The recursive `browse(goal)` executor (ADR 0025). Holds the turn-constants the sub-seams need
@@ -58629,6 +58673,7 @@ mod tests {
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
         browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
         browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
+        earlier_browse_call_in_current_round,
         build_memory_source_grant, build_plan_markdown, clawhub_origin,
         capability_call_completed_outcome, classify_connector_error,
         collect_member_counts, composio_tool_is_read, connector_error_hint,
@@ -61608,6 +61653,20 @@ mod tests {
         assert_eq!(build_browse_goal(r#"{"hints":{"url":"https://x"}}"#), "");
         assert_eq!(build_browse_goal(r#"{"goal":"   "}"#), "");
         assert_eq!(build_browse_goal("not json"), "");
+    }
+
+    #[test]
+    fn defers_a_second_browse_call_until_the_manager_sees_the_first_result() {
+        let messages = vec![serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [
+                {"id":"browse_1","function":{"name":"browse","arguments":"{\\\"goal\\\":\\\"Trenitalia\\\"}"}},
+                {"id":"browse_2","function":{"name":"browse","arguments":"{\\\"goal\\\":\\\"Italo\\\"}"}}
+            ]
+        })];
+
+        assert!(!earlier_browse_call_in_current_round(&messages, "browse_1"));
+        assert!(earlier_browse_call_in_current_round(&messages, "browse_2"));
     }
 
     #[test]
