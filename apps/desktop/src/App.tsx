@@ -51,7 +51,7 @@ import {
 import { wsSubscription } from "./lib/wsSubscription";
 import { useSetting } from "./lib/settingsStore";
 import { showSystemNotification, notificationPermission } from "./lib/systemNotifications";
-import { reconcileChatMessages } from "./lib/uiSnapshot";
+import { reconcileChatMessages, reconcileChatThreads } from "./lib/uiSnapshot";
 import {
   createThreadAttentionState,
   hydrateThreadAttentionState,
@@ -804,7 +804,12 @@ export default function App() {
       const snapshot = await coreBridge.selectChatThread(threadId);
       const mappedThreads = snapshot.threads.map(mapCoreChatThread);
       const selectedThread = mappedThreads.find((item) => item.threadId === threadId) ?? fallback;
-      setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
+      // Functional form: the snapshot lands after an await, so `chatThreads` from
+      // the render closure is already stale — and reconciling keeps the array
+      // identity when the selection changed nothing in the list itself.
+      setChatThreads((current) =>
+        mappedThreads.length ? reconcileChatThreads(current, mappedThreads) : current,
+      );
       if (selectedThread) setSelectedTaskId(selectedThread.taskId);
       const attention = await coreBridge.threadAttentions(selectedThread?.workspaceId ?? undefined);
       applyThreadAttentionRows(attention);
@@ -838,7 +843,11 @@ export default function App() {
         mappedThreads.some((thread) => thread.threadId === activeThreadId) ||
         workspaceId === activeThread.workspaceId
       ) {
-        setChatThreads(mappedThreads.length ? mappedThreads : chatThreads);
+        // Fires on every turn/thread.updated stream event, so it is even hotter
+        // than the 2.5s poll: reconcile instead of re-creating the whole list.
+        setChatThreads((current) =>
+          mappedThreads.length ? reconcileChatThreads(current, mappedThreads) : current,
+        );
       }
       setThreadMessagesFromBackend(
         threadId,
@@ -1171,7 +1180,8 @@ export default function App() {
         && thread.status === "active") ??
       mappedThreads.find((thread) => thread.status === "active") ??
       defaultChatThread;
-    setChatThreads(mappedThreads.length ? mappedThreads : [defaultChatThread]);
+    const desired = mappedThreads.length ? mappedThreads : [defaultChatThread];
+    setChatThreads((current) => reconcileChatThreads(current, desired));
     if (!preservedThread) {
       setActiveThreadId(selectedThread.threadId);
       setSelectedTaskId(selectedThread.taskId);
@@ -1414,7 +1424,10 @@ export default function App() {
   async function refreshChatReadModels(preferredThreadId = activeThreadId) {
     const snapshot = await coreBridge.chatThreads();
     const mappedThreads = snapshot.threads.map(mapCoreChatThread);
-    setChatThreads(mappedThreads.length ? mappedThreads : [defaultChatThread]);
+    // This runs on the 2.5s operational poll: hand React the previous array back
+    // when nothing changed, or App/Sidebar/Shell/ChatView re-render every tick.
+    const desired = mappedThreads.length ? mappedThreads : [defaultChatThread];
+    setChatThreads((current) => reconcileChatThreads(current, desired));
     const preferred = mappedThreads.find((thread) => thread.threadId === preferredThreadId);
     if (!preferred) return;
     const messages = await coreBridge.chatMessages(preferred.threadId);

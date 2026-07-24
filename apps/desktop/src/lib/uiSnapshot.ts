@@ -1,5 +1,8 @@
 import type { MemoryArtifactView } from "./coreBridge";
 import type { ChatMessage } from "../types";
+// Re-export the single pure source so TS and node:test share one implementation.
+// @ts-expect-error — .mjs sibling, resolved at build by Vite.
+import { reconcileChatThreads as reconcileChatThreadsImpl } from "./uiSnapshot.mjs";
 
 function sameJson(left: unknown, right: unknown) {
   if (left === right) return true;
@@ -45,6 +48,18 @@ export function reconcileChatMessages(
     ? current
     : incoming;
 }
+
+/**
+ * Identity-preserving reconciliation for the thread list, the sibling of
+ * `reconcileChatMessages`. Returns `current` **by identity** when every thread is
+ * unchanged, so the 2.5s operational poll stops re-rendering App/Sidebar/Shell/
+ * ChatView on every tick; otherwise a new array that reuses the untouched thread
+ * objects. Implementation in `uiSnapshot.mjs` (shared with `node --test`).
+ */
+export const reconcileChatThreads: <T extends { threadId: string }>(
+  current: T[] | undefined,
+  incoming: T[],
+) => T[] = reconcileChatThreadsImpl;
 
 export function reconcileMemoryArtifacts(
   current: MemoryArtifactView[],
