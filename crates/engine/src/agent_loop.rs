@@ -241,6 +241,10 @@ where
     E: EventSink,
 {
     let mut delivery = TurnDelivery::NoVisibleAnswer;
+    // Set when a steering control asked to CLARIFY. It does NOT change the loop's control flow (the
+    // turn still leaves the rounds and synthesizes), it only survives to the outcome: without it the
+    // caller cannot distinguish "here is your answer" from "the turn stopped to ask you something".
+    let mut needs_clarification = false;
     let turn_started_at = Instant::now();
     // The per-progress stall clock: reset to `now` on every real browser progress (see the
     // `browser_no_progress = 0` point below). The browser wall-clock budget is measured from THIS,
@@ -261,8 +265,11 @@ where
             apply_turn_control(model_client, &mut ls.messages, &control);
             steering_to_complete.push(control.steering_id);
             match control.disposition {
-                TurnControlDisposition::FinalizeWithCurrentEvidence
-                | TurnControlDisposition::NeedsClarification => break 'rounds,
+                TurnControlDisposition::FinalizeWithCurrentEvidence => break 'rounds,
+                TurnControlDisposition::NeedsClarification => {
+                    needs_clarification = true;
+                    break 'rounds;
+                }
                 TurnControlDisposition::CancelCurrentWork => {
                     final_done = true;
                     break 'rounds;
@@ -446,8 +453,11 @@ missing, give what you have and note the gap in one short line.",
         if let Some(control) = control_during_model {
             match control.disposition {
                 TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
-                TurnControlDisposition::FinalizeWithCurrentEvidence
-                | TurnControlDisposition::NeedsClarification => break 'rounds,
+                TurnControlDisposition::FinalizeWithCurrentEvidence => break 'rounds,
+                TurnControlDisposition::NeedsClarification => {
+                    needs_clarification = true;
+                    break 'rounds;
+                }
                 TurnControlDisposition::CancelCurrentWork => {
                     final_done = true;
                     break 'rounds;
@@ -995,8 +1005,11 @@ missing, give what you have and note the gap in one short line.",
             if let Some(control) = control_after_tools {
                 match control.disposition {
                     TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
-                    TurnControlDisposition::FinalizeWithCurrentEvidence
-                    | TurnControlDisposition::NeedsClarification => break 'rounds,
+                    TurnControlDisposition::FinalizeWithCurrentEvidence => break 'rounds,
+                    TurnControlDisposition::NeedsClarification => {
+                        needs_clarification = true;
+                        break 'rounds;
+                    }
                     TurnControlDisposition::CancelCurrentWork => {
                         final_done = true;
                         break 'rounds;
@@ -1516,6 +1529,8 @@ missing, give what you have and note the gap in one short line.",
         // Reaching here means the turn ran to completion: any image rejection was either recovered by
         // the caller before this attempt, or downgraded to a fatal error above.
         image_rejection: None,
+        // Carried out so the caller can tell a real answer from a turn that stopped to ask the user.
+        needs_clarification,
     }
 }
 
@@ -4227,6 +4242,155 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             model.early_completed.load(Ordering::SeqCst),
             "a steering control drained/applied earlier in the turn must still be acknowledged \
              completed when the turn parks on a later, different, uninterpreted row"
+        );
+    }
+
+    #[test]
+    fn needs_clarification_disposition_is_visible_on_the_outcome() {
+        // The loop must not flatten "ask the user" into "finalize with what you
+        // have": the caller cannot tell a real answer from a swallowed question.
+        let outcome = crate::TurnOutcome {
+            needs_clarification: true,
+            ..crate::TurnOutcome::default()
+        };
+        assert!(outcome.needs_clarification);
+    }
+
+    /// A steering control interpreted as CLARIFY, surfacing while a tool is in flight — the same
+    /// shape as `SteeringFinalizeModel`, but with the disposition that asks the USER a question.
+    #[derive(Default)]
+    struct SteeringClarifyModel {
+        calls: AtomicUsize,
+        control_ready: AtomicBool,
+        applied: AtomicBool,
+    }
+
+    impl ModelClient for SteeringClarifyModel {
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            (self.control_ready.load(Ordering::SeqCst)
+                && !self.applied.load(Ordering::SeqCst))
+            .then(|| crate::TurnControlDecision {
+                steering_id: 11,
+                disposition: crate::TurnControlDisposition::NeedsClarification,
+                instruction: "Which of the two accounts did you mean?".to_string(),
+            })
+        }
+
+        fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+            assert_eq!(steering_id, 11);
+            self.applied.store(true, Ordering::SeqCst);
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            std::future::poll_fn(|context| {
+                if let Some(control) = self.current_turn_control() {
+                    std::task::Poll::Ready(control)
+                } else {
+                    context.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "tool_wait",
+                        "type": "function",
+                        "function": { "name": "wait_forever", "arguments": "{}" }
+                    }]
+                })
+            } else {
+                json!({"role": "assistant", "content": "Which account did you mean?"})
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct PendingClarifyTool<'a>(&'a SteeringClarifyModel);
+
+    impl CapabilityExecutor for PendingClarifyTool<'_> {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            self.0.control_ready.store(true, Ordering::SeqCst);
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clarify_steering_marks_the_outcome_instead_of_looking_like_a_plain_finalize() {
+        // Regression (triage MINOR 9): CLARIFY used to share the `break 'rounds` arm with
+        // FINALIZE, so the caller saw an ordinary answer and could not tell that the turn
+        // actually stopped to ask the user something.
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "move the money" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = SteeringClarifyModel::default();
+        let tool = PendingClarifyTool(&model);
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "move the money".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert!(
+            outcome.needs_clarification,
+            "a CLARIFY steering must reach the caller as such, not as a plain finalize"
         );
     }
 }
