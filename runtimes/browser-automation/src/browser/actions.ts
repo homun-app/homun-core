@@ -827,15 +827,34 @@ function autocompletePrefix(value: string): string | null {
 /// `target` (the FULL intended value — even when we only typed a prefix to open
 /// the list). `appeared` distinguishes "no dropdown at all" from "dropdown shown
 /// but nothing matched", which the caller uses to decide whether to retry.
+///
+/// `minScore` gates how confident the best match must be before we commit it.
+/// Default 1 keeps the ARIA combobox path's original behavior (any relation at
+/// all, or a single visible option regardless of relation — a real ARIA
+/// combobox is itself a strong enough signal). The non-ARIA fallback passes 3
+/// (exact or option-startsWith-target) because there is no such reliable
+/// signal there — we must not guess on unrelated page chrome. In both cases a
+/// single visible option only auto-commits if it actually relates to the
+/// target (score >= 1); at minScore<=1 that's implied unconditionally (any
+/// single option, matching the old behavior byte-for-byte), otherwise it's an
+/// explicit floor so the single-option shortcut can't bypass the confidence bar.
+///
+/// `waitMs` caps how long we wait for a suggestion row to render before giving
+/// up. Default = `min(timeout, 1800)` (the ARIA path, where a combobox has
+/// promised a list). The non-ARIA fallback passes a SHORT wait (~500ms): it
+/// runs on EVERY `type` into a plain field, most of which have no typeahead at
+/// all, so it must not add a ~1.8s stall to ordinary form typing.
 async function trySelectFromOpenList(
   page: Page,
   input: Locator,
   optionLocator: Locator,
   target: string,
   timeout: number,
+  minScore = 1,
+  waitMs?: number,
 ): Promise<{ committed?: string; options: string[]; appeared: boolean }> {
   try {
-    await optionLocator.first().waitFor({ state: "visible", timeout: Math.min(timeout, 1800) });
+    await optionLocator.first().waitFor({ state: "visible", timeout: waitMs ?? Math.min(timeout, 1800) });
   } catch {
     return { options: [], appeared: false };
   }
@@ -870,13 +889,22 @@ async function trySelectFromOpenList(
 
   const optionTexts = options.map((option) => option.text);
   const best = scored[0];
-  if (best.score >= 1 || options.length === 1) {
+  const singleOptionOk = options.length === 1 && (minScore <= 1 || best.score >= 1);
+  if (best.score >= minScore || singleOptionOk) {
     const confirmed = await selectSuggestion(page, input, optionLocator, best, options.length, timeout);
     return { committed: confirmed ? best.text : undefined, options: optionTexts, appeared: true };
   }
   // Dropdown shown, but nothing relates to the target → ambiguous, don't guess.
   return { options: optionTexts, appeared: true };
 }
+
+// Bounded, visible-only set of plausible suggestion rows for the non-ARIA
+// fallback below. Deliberately narrow (role=option/listbox descendants, or a
+// handful of common suggestion/autocomplete/typeahead/dropdown class-name
+// conventions) so it never matches arbitrary page chrome — a real page's
+// unrelated buttons/links don't carry these roles or class-name conventions.
+const NON_ARIA_OPTION_SELECTOR =
+  '[role="option"], [role="listbox"] *:not([role="listbox"]), ul[class*="suggest" i] li, ul[class*="auto" i] li, [class*="suggestion" i]:not(:has(*)), [class*="typeahead" i] li, [class*="dropdown" i] li';
 
 /// Owns the autocomplete protocol so the MODEL doesn't have to: the caller types
 /// the full value once; here we (1) try to select a matching suggestion; (2) if
@@ -891,7 +919,21 @@ async function confirmAutocomplete(
 ): Promise<{ committed?: string; options: string[] }> {
   const { isCombobox, listboxId } = await inputComboboxInfo(input);
   if (!isCombobox) {
-    return { options: [] }; // plain field — leave the text as-is, no wait
+    // Non-ARIA fallback: real-world typeaheads (e.g. Trenitalia's station
+    // picker) often render a suggestion list with zero ARIA wiring at all, so
+    // inputComboboxInfo's signals never fire. We still must not GUESS — reuse
+    // the same open-list scanning machinery as the ARIA path, but gated by a
+    // much stricter match (minScore=3) so we only ever click a visible row
+    // that plainly relates to what was just typed, never unrelated page
+    // chrome. No prefix-retry here (unlike the ARIA path below): if nothing
+    // strong enough shows up in response to the full typed value, we simply
+    // leave the field holding the full text — current, safe behavior.
+    const nonAriaOptionLocator = page.locator(NON_ARIA_OPTION_SELECTOR).locator("visible=true");
+    // Short wait (500ms): this probe runs on every non-ARIA `type`, so it must
+    // not stall ordinary form typing waiting for a list that will never appear.
+    const fallback = await trySelectFromOpenList(page, input, nonAriaOptionLocator, typed, timeout, 3, 500);
+    if (fallback.committed) return { committed: fallback.committed, options: fallback.options };
+    return { options: fallback.options };
   }
 
   const optionLocator = listboxId
