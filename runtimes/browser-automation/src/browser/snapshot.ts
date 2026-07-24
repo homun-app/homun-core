@@ -421,7 +421,17 @@ async function createAiSnapshot(
     observedSnapshot.length > limit
       ? `${observedSnapshot.slice(0, limit)}\n\n[...TRUNCATED - page too large]`
       : observedSnapshot;
-  const refs = roleOptions ? refsFromAiSnapshot(snapshot) : builtSnapshot.refs;
+  // A delta is `+`/`-`-prefixed diff text, not a snapshot: re-parsing refs out
+  // of it yields ZERO refs, because `refsFromAiSnapshot` anchors on `^\s*-`
+  // followed by a role token and every delta line carries a diff marker ahead
+  // of the original `- ` (an added line reads `+ - button …`, a removed one
+  // `- - button …`). Only that doubled marker keeps a REMOVED line's dead ref
+  // from being re-advertised as live — too thin a coincidence to rely on. So
+  // refs always come from the full built snapshot in delta mode. Unreachable
+  // via today's schema (delta and role-filter are never combined) — this is
+  // the guard that keeps it unreachable. See tests/snapshot_delta_refs.test.ts.
+  const refs =
+    roleOptions && observedMode !== "delta" ? refsFromAiSnapshot(snapshot) : builtSnapshot.refs;
   const refLocators = new Map<string, Locator>();
   for (const ref of refs) {
     refLocators.set(ref.ref, page.locator(`aria-ref=${ref.ref}`));
