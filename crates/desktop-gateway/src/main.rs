@@ -18435,15 +18435,30 @@ fn normalize_browser_action_bundle(
     None
 }
 
+/// True when a `browser_act` error means the targeted `[ref=eN]` no longer resolves because the
+/// page changed under us (MINOR 8), so the caller should auto-recover with a fresh snapshot instead
+/// of just erroring. Broadened beyond `stale`/`detached` to the common Playwright phrasings the
+/// underlying CDP/Playwright driver actually throws (`"element is not attached to the DOM"`, `"no
+/// node found for selector"`) — case-insensitive, since the wording/casing varies across Playwright
+/// versions.
+fn is_stale_ref_error(error: &str) -> bool {
+    let e = error.to_lowercase();
+    e.contains("stale") || e.contains("detached") || e.contains("not attached") || e.contains("no node found")
+}
+
 fn stale_ref_recovery_message(old_ref: Option<&str>, snapshot: &str) -> String {
     let old = old_ref
         .map(str::trim)
         .filter(|r| !r.is_empty())
         .unwrap_or("the old ref");
+    // Built off the shared `STALE_REF_RECOVERY_MARKER` constant (not a second copy of the same
+    // literal) so the engine's `is_stale_ref_recovery_result` — which counts this recovery toward
+    // `browser_no_progress` instead of resetting it (MINOR 8) — recognizes it by construction.
     format!(
-        "⚠ The reference had expired (the page changed). I took a fresh snapshot. \
+        "{} I took a fresh snapshot. \
 Do NOT retry {old}; choose a NEW [ref=...] from this snapshot, or use browser_snapshot if the \
-data is already visible:\n{snapshot}"
+data is already visible:\n{snapshot}",
+        local_first_engine::browser::STALE_REF_RECOVERY_MARKER
     )
 }
 
@@ -23285,10 +23300,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 // (forcing the model to spend a round re-snapshotting),
                                 // take a fresh snapshot NOW and hand it back so it
                                 // retries with new refs in the same round.
-                                let stale = {
-                                    let e = error.to_lowercase();
-                                    e.contains("stale") || e.contains("detached")
-                                };
+                                let stale = is_stale_ref_error(&error);
                                 match (stale, browser_session.take()) {
                                     (true, Some(c)) => {
                                         let guard = browse_web_lock().lock().await;
@@ -66256,6 +66268,21 @@ prs.save(Path({path:?}))
         assert!(msg.contains("Do NOT retry e145"));
         assert!(msg.contains("NEW [ref=...]"));
         assert!(msg.contains("[ref=e200] Article"));
+        // The message is built off the shared engine marker so
+        // `local_first_engine::browser::is_stale_ref_recovery_result` recognizes it (MINOR 8).
+        assert!(local_first_engine::browser::is_stale_ref_recovery_result(&msg));
+    }
+
+    #[test]
+    fn stale_ref_error_detection_covers_common_playwright_phrasings() {
+        // MINOR 8: broadened beyond the original stale/detached pair to the phrasings Playwright
+        // actually throws, case-insensitively.
+        assert!(super::is_stale_ref_error("Error: stale element reference"));
+        assert!(super::is_stale_ref_error("element is DETACHED from document"));
+        assert!(super::is_stale_ref_error("Error: element is not attached to the DOM"));
+        assert!(super::is_stale_ref_error("Error: no node found for selector [ref=e12]"));
+        assert!(super::is_stale_ref_error("NO NODE FOUND for selector"));
+        assert!(!super::is_stale_ref_error("Error: timeout waiting for selector"));
     }
 
     #[test]

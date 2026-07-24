@@ -13,8 +13,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// A legacy no-answer phrase is still mapped to NOT-FOUND if it reaches a browse result. New engine
-/// turns use `TurnDelivery::NoVisibleAnswer` instead of manufacturing this prose.
-const NO_ANSWER_MARKER: &str = "couldn't produce a final answer";
+/// turns use `TurnDelivery::NoVisibleAnswer` instead of manufacturing this prose. This is the sub-agent's
+/// ENTIRE canned answer when it fires (never a fragment of a longer one), so recognizing it must be
+/// ANCHORED to the start of the (trimmed, lowercased) answer — not `contains` — or a legitimate answer
+/// that merely quotes/discusses this phrase mid-text (e.g. summarizing what an error page said) would be
+/// wrongly discarded as no-answer (MINOR 10). See [`is_canonical_no_answer`].
+const NO_ANSWER_MARKER: &str = "i completed the steps but couldn't produce a final answer";
+
+/// True when `answer` (trimmed, case-insensitive) IS the canonical no-answer sentinel — matched from
+/// the start of the string, not anywhere inside it. See [`NO_ANSWER_MARKER`].
+fn is_canonical_no_answer(answer: &str) -> bool {
+    answer.trim().to_lowercase().starts_with(NO_ANSWER_MARKER)
+}
 
 /// The delimiter the loop prepends to the auto-generated "Fonti"/Sources block (`text::fonti_section`).
 /// `browse` strips that block from `answer` because sources travel STRUCTURED in `BrowseResult.sources`
@@ -206,7 +216,7 @@ pub fn browse_result_from_outcome(outcome: &TurnOutcome) -> BrowseResult {
         .unwrap_or(raw)
         .trim()
         .to_string();
-    let is_no_answer = answer.to_lowercase().contains(NO_ANSWER_MARKER);
+    let is_no_answer = is_canonical_no_answer(&answer);
     let found = !answer.is_empty() && !is_no_answer;
     if !found {
         // Impossible/exhausted goal: carry the sub-agent's own words as the note (helps the manager
@@ -266,117 +276,50 @@ pub fn browse_result_from_outcome_with_snapshot(
     }
 }
 
-/// Render a [`BrowseResult`] as the tool-result text the MANAGER reads (ADR 0025 slice 2). A compact
-/// LABELED block (not raw JSON) so the strong manager model can verify the answer against the step
-/// criterion and route deterministically — `found: false` → mark blocked / answer "unavailable" without
-/// thrashing; `found: true` → verify `answer`, cite `sources`, advance. Readable beats JSON here: the
-/// manager reasons over it, it never gets machine-parsed.
+/// Render a [`BrowseResult`] as the tool-result text the MANAGER reads (ADR 0025 slice 2; JSON
+/// switch, IMPORTANT 3). A single compact JSON object — NOT the older line-prefixed text — because
+/// a free-form multi-line `answer` (e.g. a multi-option itinerary) silently lost every line after
+/// the first under that format, and any line inside `answer` that happened to equal
+/// `sources:`/`items:`/`fields_missing:`/`evidence:` flipped the line-parser's section state and
+/// fabricated structured fields out of prose. JSON round-trips a multi-line string (and one that
+/// merely CONTAINS those section keywords) byte-for-byte, because it is a real string value, never
+/// re-interpreted as syntax. The manager model still just reads text — a compact JSON object is as
+/// legible to it as the old labeled block — but the gateway's own round trip
+/// (`browse_result_for_manager` → the sub-turn's `memory_answer` → [`browse_result_from_manager_text`])
+/// is now a real parse instead of a line-oracle. See [`browse_result_from_manager_text`] for the
+/// paired back-compat fallback.
 pub fn browse_result_for_manager(result: &BrowseResult) -> String {
-    if !result.found {
-        return match &result.note {
-            Some(note) => format!("found: false\nnote: {note}"),
-            None => "found: false".to_string(),
-        };
-    }
-    let confidence = match result.confidence {
-        Confidence::High => "high",
-        Confidence::Low => "low",
-    };
-    let status = format!("{:?}", result.status).to_lowercase();
-    let mut out = format!(
-        "found: true\nconfidence: {confidence}\nstatus: {status}\nanswer: {}",
-        result.answer
-    );
-    if !result.items.is_empty() {
-        out.push_str("\nitems:");
-        for item in &result.items {
-            out.push_str(&format!("\n- {}", serde_json::to_string(item).unwrap_or_default()));
-        }
-    }
-    if !result.fields_missing.is_empty() {
-        out.push_str("\nfields_missing:");
-        for field in &result.fields_missing {
-            out.push_str(&format!("\n- {field}"));
-        }
-    }
-    if !result.evidence.is_empty() {
-        out.push_str("\nevidence:");
-        for evidence in &result.evidence {
-            out.push_str(&format!("\n- {evidence}"));
-        }
-    }
-    if !result.sources.is_empty() {
-        out.push_str("\nsources:");
-        for url in &result.sources {
-            out.push_str(&format!("\n- {url}"));
-        }
-    }
-    out
+    serde_json::to_string(result).unwrap_or_else(|_| {
+        // `BrowseResult` has no non-serializable fields (String/Vec/enum/Option only), so this is
+        // unreachable in practice — but never let a serialization hiccup crash the turn: degrade to
+        // the minimal JSON shape the parser below still understands.
+        json!({ "found": result.found, "answer": result.answer }).to_string()
+    })
 }
 
+/// Parse the manager-facing text back into a [`BrowseResult`] (paired with
+/// [`browse_result_for_manager`], IMPORTANT 3). Primary path: JSON — the exact inverse of the
+/// serializer above, so a multi-line answer or one containing `sources:`/`items:` text survives
+/// intact instead of being truncated or mis-parsed into fabricated structured fields.
+///
+/// Back-compat fallback: any string that is NOT valid JSON (the older line-prefixed format still
+/// in flight during a rollout, or unexpected raw prose) degrades gracefully by becoming the WHOLE
+/// `answer` — it is never re-parsed line-by-line into structured fields, which is the very bug this
+/// JSON switch fixes.
 pub fn browse_result_from_manager_text(text: &str) -> Option<BrowseResult> {
-    let mut found: Option<bool> = None;
-    let mut confidence = Confidence::Low;
-    let mut status = BrowserDoneStatus::Partial;
-    let mut answer = String::new();
-    let mut note = None;
-    let mut sources = Vec::new();
-    let mut items = Vec::new();
-    let mut fields_missing = Vec::new();
-    let mut evidence = Vec::new();
-    let mut section = "";
-    for line in text.lines() {
-        if let Some(value) = line.strip_prefix("found: ") {
-            found = Some(value.trim() == "true");
-            section = "";
-        } else if let Some(value) = line.strip_prefix("confidence: ") {
-            confidence = if value.trim() == "high" {
-                Confidence::High
-            } else {
-                Confidence::Low
-            };
-            section = "";
-        } else if let Some(value) = line.strip_prefix("status: ") {
-            status = match value.trim() {
-                "completed" => BrowserDoneStatus::Completed,
-                "blocked" => BrowserDoneStatus::Blocked,
-                "unavailable" => BrowserDoneStatus::Unavailable,
-                "timeout" => BrowserDoneStatus::Timeout,
-                _ => BrowserDoneStatus::Partial,
-            };
-            section = "";
-        } else if let Some(value) = line.strip_prefix("answer: ") {
-            answer = value.trim().to_string();
-            section = "";
-        } else if let Some(value) = line.strip_prefix("note: ") {
-            note = Some(value.trim().to_string());
-            section = "";
-        } else if line == "sources:" || line == "items:" || line == "fields_missing:" || line == "evidence:" {
-            section = line.trim_end_matches(':');
-        } else if let Some(value) = line.strip_prefix("- ") {
-            match section {
-                "sources" => sources.push(value.to_string()),
-                "items" => {
-                    if let Ok(item) = serde_json::from_str::<Value>(value) {
-                        items.push(item);
-                    }
-                }
-                "fields_missing" => fields_missing.push(value.to_string()),
-                "evidence" => evidence.push(value.to_string()),
-                _ => {}
-            }
-        }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(result) = serde_json::from_str::<BrowseResult>(trimmed) {
+        return Some(result);
     }
     Some(BrowseResult {
-        found: found?,
-        answer,
-        sources,
-        confidence,
-        note,
-        status,
-        items,
-        fields_missing,
-        evidence,
+        found: true,
+        answer: trimmed.to_string(),
+        confidence: Confidence::Low,
+        status: BrowserDoneStatus::Partial,
+        ..Default::default()
     })
 }
 
@@ -533,6 +476,36 @@ Tell me if you want me to retry or rephrase."
     }
 
     #[test]
+    fn answer_merely_quoting_the_no_answer_phrase_mid_text_is_not_discarded() {
+        // MINOR 10 regression: the phrase must be ANCHORED (matched from the start of the answer),
+        // not a `contains` substring check — a legitimate answer that quotes/discusses the canned
+        // sentinel mid-text (e.g. summarizing what an error banner said) is real evidence and must
+        // survive as `found: true`.
+        let outcome = TurnOutcome {
+            delivery: TurnDelivery::Delivered,
+            memory_answer: "The support page says: \"if the bot couldn't produce a final answer, \
+contact support\" — but I did find the answer: the fare is EUR 39."
+                .to_string(),
+            browse_sources: vec!["https://example.test/support".to_string()],
+            ..Default::default()
+        };
+        let r = browse_result_from_outcome(&outcome);
+        assert!(r.found, "quoting the phrase mid-text is not the canned no-answer fallback");
+        assert!(r.answer.contains("EUR 39"));
+    }
+
+    #[test]
+    fn the_exact_sentinel_is_still_classified_no_answer() {
+        let outcome = TurnOutcome {
+            delivery: TurnDelivery::Delivered,
+            memory_answer: "I completed the steps but couldn't produce a final answer.".to_string(),
+            ..Default::default()
+        };
+        let r = browse_result_from_outcome(&outcome);
+        assert!(!r.found, "the exact canonical sentinel is still a no-answer");
+    }
+
+    #[test]
     fn empty_answer_maps_to_not_found_with_no_note() {
         let r = browse_result_from_outcome(&TurnOutcome::default());
         assert!(!r.found && r.answer.is_empty() && r.note.is_none());
@@ -566,7 +539,7 @@ Tell me if you want me to retry or rephrase."
     }
 
     #[test]
-    fn manager_view_labels_a_found_result_with_sources() {
+    fn manager_view_is_a_compact_json_object_with_sources() {
         let r = BrowseResult {
             found: true,
             answer: "$63,120".to_string(),
@@ -577,16 +550,86 @@ Tell me if you want me to retry or rephrase."
             ..Default::default()
         };
         let text = browse_result_for_manager(&r);
-        assert_eq!(
-            text,
-            "found: true\nconfidence: high\nstatus: completed\nanswer: $63,120\nsources:\n- https://kraken.com/btc"
-        );
+        let value: Value = serde_json::from_str(&text)
+            .expect("the manager view is valid JSON, not the old labeled-text format");
+        assert_eq!(value["found"], json!(true));
+        assert_eq!(value["answer"], json!("$63,120"));
+        assert_eq!(value["confidence"], json!("high"));
+        assert_eq!(value["status"], json!("completed"));
+        assert_eq!(value["sources"], json!(["https://kraken.com/btc"]));
     }
 
     #[test]
-    fn manager_view_of_not_found_carries_note_and_no_answer() {
+    fn manager_view_round_trip_preserves_a_multiline_answer() {
+        // IMPORTANT 3: the old line-prefixed format silently dropped every line after the first.
+        let answer = "Option 1: 09:05 → 13:40, 4h35m, EUR 39\n\
+Option 2: 11:10 → 15:52, 4h42m, EUR 45\n\
+Option 3: 14:20 → 18:59, 4h39m, EUR 52"
+            .to_string();
+        let r = BrowseResult {
+            found: true,
+            answer: answer.clone(),
+            sources: vec!["https://www.trenitalia.com/".to_string()],
+            confidence: Confidence::High,
+            status: BrowserDoneStatus::Completed,
+            ..Default::default()
+        };
+        let text = browse_result_for_manager(&r);
+        let back = browse_result_from_manager_text(&text).expect("valid JSON parses back");
+        assert_eq!(back.answer, answer, "every line of the multi-line answer survives the round trip");
+        assert_eq!(back.answer.lines().count(), 3);
+        assert!(back.found);
+        assert_eq!(back.sources, r.sources);
+        assert_eq!(back.status, BrowserDoneStatus::Completed);
+    }
+
+    #[test]
+    fn manager_view_round_trip_does_not_fabricate_structured_fields_from_answer_text() {
+        // IMPORTANT 3: an answer whose OWN text contains lines equal to the old section headers
+        // (`sources:`, `items:`, ...) used to flip the line-parser's section state and manufacture
+        // fake structured fields out of prose. JSON never re-interprets a string value as syntax.
+        let tricky_answer = "Here is what the board shows:\nsources:\nitems:\n- this is prose, not a real list"
+            .to_string();
+        let r = BrowseResult {
+            found: true,
+            answer: tricky_answer.clone(),
+            confidence: Confidence::Low,
+            status: BrowserDoneStatus::Partial,
+            ..Default::default()
+        };
+        let text = browse_result_for_manager(&r);
+        let back = browse_result_from_manager_text(&text).expect("valid JSON parses back");
+        assert_eq!(
+            back.answer, tricky_answer,
+            "the literal 'sources:'/'items:' lines inside the answer are not section headers"
+        );
+        assert!(back.sources.is_empty(), "no sources were fabricated from the answer text");
+        assert!(back.items.is_empty(), "no items were fabricated from the answer text");
+        assert!(back.fields_missing.is_empty());
+        assert!(back.evidence.is_empty());
+    }
+
+    #[test]
+    fn non_json_legacy_string_becomes_the_whole_answer() {
+        // Back-compat fallback: a string that predates the JSON switch (or unexpected raw prose)
+        // degrades gracefully — it is never re-parsed into structured fields, just carried whole.
+        let legacy = "The train departs at 09:05 and arrives at 13:40.";
+        let back = browse_result_from_manager_text(legacy).expect("legacy text still parses");
+        assert_eq!(back.answer, legacy);
+        assert!(back.found, "a non-empty legacy string degrades to a found answer");
+        assert!(back.sources.is_empty());
+    }
+
+    #[test]
+    fn manager_view_of_not_found_carries_note_as_json_with_empty_answer() {
         let text = browse_result_for_manager(&BrowseResult::not_found("not available on Polymarket"));
-        assert_eq!(text, "found: false\nnote: not available on Polymarket");
-        assert!(!text.contains("answer:"), "a not-found result exposes no answer to the manager");
+        let value: Value = serde_json::from_str(&text)
+            .expect("the manager view is valid JSON, not the old labeled-text format");
+        assert_eq!(value["found"], json!(false));
+        assert_eq!(value["note"], json!("not available on Polymarket"));
+        assert_eq!(value["answer"], json!(""), "a not-found result carries no real answer");
+        let back = browse_result_from_manager_text(&text).expect("valid JSON parses back");
+        assert!(!back.found);
+        assert_eq!(back.note.as_deref(), Some("not available on Polymarket"));
     }
 }

@@ -26,6 +26,28 @@ const NATIVE_BROWSER_TOOLS: [&str; 7] = [
 pub const PRUNED_SNAPSHOT_STUB: &str =
     "[previous snapshot removed — call browser_snapshot again if needed]";
 
+/// Fixed prefix of the gateway's stale-ref auto-recovery message (`main.rs`'s
+/// `stale_ref_recovery_message`): a `[ref=eN]` the model targeted no longer exists because the page
+/// changed, so the gateway takes a fresh snapshot and hands it back inside the SAME `Ok(...)` tool
+/// result instead of erroring. That `Ok` looks like an ordinary successful `browser_act` to
+/// `classify_tool_result` (it's plain text, not the `{"status":"blocked"}` shape), so left alone it
+/// resets `browser_no_progress` to 0 (MINOR 8) — a ref-churning SPA can then loop
+/// act→stale→snapshot→act forever, since fresh refs keep going stale before the model can use them.
+/// A stale-ref recovery is a real observation but NOT progress toward the goal, so the loop must
+/// count it like any other stall. `pub` (not private to the gateway) so BOTH sides share one
+/// literal: the gateway builds its message off this constant and the loop recognizes it via
+/// [`is_stale_ref_recovery_result`] — a single source of truth instead of two crates independently
+/// guessing at the same string.
+pub const STALE_REF_RECOVERY_MARKER: &str = "⚠ The reference had expired (the page changed).";
+
+/// True when a browser tool result is the gateway's stale-ref auto-recovery message (see
+/// [`STALE_REF_RECOVERY_MARKER`]) rather than an ordinary tool result. The loop uses this to keep
+/// `browser_no_progress` advancing on repeated stale-ref churn instead of resetting on every
+/// recovery.
+pub fn is_stale_ref_recovery_result(result: &str) -> bool {
+    result.starts_with(STALE_REF_RECOVERY_MARKER)
+}
+
 /// True for the granular browser tools that must route through the browser seam (the mid-turn
 /// `&mut` browser branch), NOT the pure capability chokepoint. ADR 0025 folds this into `browse`.
 pub fn is_browser_granular_tool(name: &str) -> bool {
@@ -207,6 +229,19 @@ mod tests {
         assert_eq!(resolve_browser_chat_tool_name("write_file"), None);
         assert!(is_browser_granular_tool("browser_act") && !is_browser_granular_tool("write_file"));
         assert!(is_browser_granular_tool("browser_done"));
+    }
+
+    #[test]
+    fn recognizes_stale_ref_recovery_messages_by_fixed_prefix() {
+        let recovered = format!(
+            "{STALE_REF_RECOVERY_MARKER} I took a fresh snapshot. Do NOT retry e12; \
+choose a NEW [ref=...] from this snapshot:\n[ref=e40] Button"
+        );
+        assert!(is_stale_ref_recovery_result(&recovered));
+        assert!(!is_stale_ref_recovery_result("Page opened (https://example.com). Snapshot: ..."));
+        assert!(!is_stale_ref_recovery_result(
+            "A page that merely quotes: ⚠ The reference had expired (the page changed) mid-sentence"
+        ));
     }
 
     #[test]

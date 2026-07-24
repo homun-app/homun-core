@@ -12,7 +12,8 @@
 //! loop recursively for the browser sub-agent.
 
 use crate::browser::{
-    is_browser_granular_tool, prune_browser_history, resolve_browser_chat_tool_name,
+    is_browser_granular_tool, is_stale_ref_recovery_result, prune_browser_history,
+    resolve_browser_chat_tool_name,
 };
 use crate::contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal,
@@ -802,7 +803,15 @@ missing, give what you have and note the gap in one short line.",
                         break 'rounds;
                     }
                     if is_browser_granular_tool(name) {
-                        let stalled = matches!(outcome, "empty" | "error" | "blocked" | "no_progress");
+                        // MINOR 8: a stale-ref auto-recovery (main.rs) is a real page observation but
+                        // NOT progress toward the goal — it comes back as an ordinary `Ok(...)` plain-text
+                        // result, which `classify_tool_result` reads as "success" (it isn't the
+                        // `{"status":...}` shape), so left unchecked it would reset the counter below and
+                        // let a ref-churning SPA loop act→stale→snapshot→act forever. Fold it into the
+                        // same stalled bucket as empty/error/blocked so repeated churn still trips
+                        // `max_no_progress`.
+                        let stalled = is_stale_ref_recovery_result(&result)
+                            || matches!(outcome, "empty" | "error" | "blocked" | "no_progress");
                         if stalled {
                             ls.browser_no_progress = ls.browser_no_progress.saturating_add(1);
                             if name == "browser_navigate" {
@@ -1884,6 +1893,150 @@ mod tests {
 
         async fn close_session(&mut self, _browser_used: bool) {}
     }
+    #[derive(Default)]
+    struct StaleRefChurnModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for StaleRefChurnModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call.is_final_round {
+                let content = "Non sono riuscito ad accedere alla pagina richiesta. Puoi riprovare.";
+                on_delta(content);
+                return Ok(ModelRoundOutput {
+                    message: json!({ "role": "assistant", "content": content }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            // The model keeps targeting a ref that just went stale — exactly the SPA churn MINOR 8
+            // guards against: the page keeps re-rendering the same control under a NEW [ref=eN].
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": format!("act_{call_index}"),
+                        "type": "function",
+                        "function": {
+                            "name": "browser_act",
+                            "arguments": "{\"kind\":\"click\",\"ref\":\"e1\"}"
+                        },
+                    }],
+                }),
+                provider,
+                finish_reason: Some("tool_calls".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    /// Every `browser_act` comes back as the gateway's stale-ref auto-recovery text (MINOR 8): a
+    /// real `Ok(...)` result (plain prose, not `{"status":...}`) that pre-fix would have looked
+    /// like ordinary success to `classify_tool_result` and reset `browser_no_progress` on every
+    /// call — letting the churn above loop forever instead of tripping the budget.
+    struct StaleRefRecoveryBrowser;
+
+    impl BrowserExecutor for StaleRefRecoveryBrowser {
+        async fn execute_browser(
+            &mut self,
+            name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> String {
+            assert_eq!(name, "browser_act");
+            state.browser_used = true;
+            format!(
+                "{} I took a fresh snapshot. Do NOT retry e1; choose a NEW [ref=...] \
+from this snapshot:\n[ref=e2] Same control, re-rendered",
+                crate::browser::STALE_REF_RECOVERY_MARKER
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stale_ref_recovery_churn_still_trips_the_no_progress_budget() {
+        // MINOR 8 regression: N consecutive stale-ref recoveries must NOT reset
+        // `browser_no_progress` to 0 on every round (that would let a ref-churning SPA loop
+        // act→stale→snapshot→act forever) — they must count as stalls like empty/error/blocked.
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = StaleRefRecoveryBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 12;
+        turn_cfg.browser_nav_cap = 12;
+        turn_cfg.browser_budget.max_no_progress = 2;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &StaleRefChurnModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            1,
+            "the budget must trip after max_no_progress consecutive stale-ref recoveries, not loop \
+             until hard_round_ceiling"
+        );
+        drop(journal_events);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
     struct NoPlan;
     impl PlanProgress for NoPlan {
         async fn persist_plan(&self, _t: Option<&str>, _s: &[Value]) {}
