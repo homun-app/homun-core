@@ -37789,6 +37789,52 @@ async fn get_turn(
     })))
 }
 
+/// Cancels a chat_turn task via the broker AND finalizes its assistant bubble
+/// (`MessageDeliveryState::Cancelled`) in the SAME call — every cancel entry point
+/// (`cancel_turn`, `cancel_task`) routes through this now (converge, don't
+/// duplicate) so bubble treatment cannot silently diverge between them again.
+///
+/// For a `Running` turn the live executor's own cancel-detection
+/// (`ChatTurnRunBranch::Cancelled` in turn_executor.rs, or the runner loop's
+/// `externally_cancelled` guard) ALSO finalizes the bubble once its drain
+/// unwinds — this call's write is redundant-but-harmless there (idempotent).
+///
+/// For a `Parked` turn (steering park+resume, Build 2) there is NO live executor —
+/// it was unregistered and its agent_run aborted at park time — so nothing else
+/// will EVER flip that bubble out of its open "waiting for the model" state. Before
+/// this helper existed, `cancel_task` (the Workbench "Attività" tab's cancel,
+/// unlike `cancel_turn`) skipped this step entirely, leaving a permanent ghost
+/// bubble on cancel-of-parked. `task_before_cancel` is the task snapshot fetched
+/// BEFORE calling this (its `thread_id`/`assistant_message_id` don't change on
+/// cancel, so re-fetching after would be redundant). Returns whatever
+/// `cancel_chat_turn` returned (`false` = already terminal or missing).
+fn cancel_chat_turn_and_finalize_bubble(
+    state: &AppState,
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    task_id: &TaskId,
+    task_before_cancel: Option<&TaskRecord>,
+) -> local_first_task_runtime::TaskRuntimeResult<bool> {
+    let ok = local_first_task_runtime::broker::cancel_chat_turn(
+        store,
+        user_id,
+        workspace_id,
+        task_id,
+        &crate::turn_executor::GatewayCancelNotify,
+    )?;
+    if ok {
+        if let Some(task) = task_before_cancel {
+            set_chat_turn_message_delivery_state(
+                state,
+                task,
+                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            );
+        }
+    }
+    Ok(ok)
+}
+
 /// DELETE /api/chat/turns/{turn_id} — cancel a turn (idempotent). 202 if cancelled,
 /// 404 if the turn does not exist or is already terminal.
 async fn cancel_turn(
@@ -37807,12 +37853,13 @@ async fn cancel_turn(
         .get_task(&task_id, &user_id, &workspace_id)
         .ok()
         .flatten();
-    let ok = local_first_task_runtime::broker::cancel_chat_turn(
+    let ok = cancel_chat_turn_and_finalize_bubble(
+        &state,
         &store,
         &user_id,
         &workspace_id,
         &task_id,
-        &crate::turn_executor::GatewayCancelNotify,
+        delivery_task.as_ref(),
     )
     .map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -37827,15 +37874,6 @@ async fn cancel_turn(
         .filter(|row| row.active_turn_id == turn_id && row.status == local_first_task_runtime::TurnSteeringStatus::Held)
         .collect::<Vec<_>>();
     drop(store);
-    if ok {
-        if let Some(task) = delivery_task.as_ref() {
-            set_chat_turn_message_delivery_state(
-                &state,
-                task,
-                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
-            );
-        }
-    }
     for steering in &held_steering {
         publish_steering_changed(steering);
     }
@@ -38623,12 +38661,17 @@ async fn cancel_task(
             );
             if !terminal {
                 if task.kind == "chat_turn" {
-                    local_first_task_runtime::broker::cancel_chat_turn(
+                    // Route through the shared helper (also used by `cancel_turn`) so this
+                    // endpoint gets the SAME bubble finalization — without it, cancelling an
+                    // already-Parked turn here left its assistant bubble a permanent ghost
+                    // (no live executor left to ever flip it out of "waiting for the model").
+                    cancel_chat_turn_and_finalize_bubble(
+                        &state,
                         &store,
                         &user,
                         &workspace,
                         &tid,
-                        &crate::turn_executor::GatewayCancelNotify,
+                        Some(&task),
                     )
                     .map_err(GatewayError::task)?;
                 } else {
@@ -38649,6 +38692,155 @@ async fn cancel_task(
         }
     }
     Ok(Json(task_queue_response_for_state(&state)?))
+}
+
+#[cfg(test)]
+mod cancel_of_parked_turn_tests {
+    use super::*;
+    use local_first_task_runtime::{ResourceClass, ResourceRequirement};
+
+    /// Seeds a chat thread with one assistant bubble, then a chat_turn task Running
+    /// under that same thread/message id, then parks it via `park_chat_turn` —
+    /// mirrors the engine's finalization-boundary park (Build 2). Returns the
+    /// generated thread_id (ChatStore mints its own).
+    fn seed_parked_chat_turn_with_bubble(
+        state: &AppState,
+        turn_id: &str,
+        assistant_message_id: &str,
+    ) -> String {
+        let thread_id = {
+            let chat_store = state.chat_store.lock().unwrap();
+            let thread = chat_store.create_thread("workspace-a").unwrap();
+            let message = channel_chat_message_with_id("assistant", "", assistant_message_id);
+            chat_store
+                .append_assistant_message(&thread.thread_id, &message)
+                .unwrap();
+            thread.thread_id
+        };
+
+        let task_store = state.task_store.lock().unwrap();
+        let mut task = TaskRecord::new(
+            turn_id,
+            gateway_user_id(),
+            gateway_workspace_id(),
+            "chat_turn",
+            "seed goal",
+            serde_json::json!({
+                "thread_id": thread_id,
+                "assistant_message_id": assistant_message_id,
+            }),
+        );
+        task.status = TaskStatus::Running;
+        task.resource_requirements = vec![ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
+        task_store
+            .insert_chat_turn(&task, &thread_id, "req-1", "interactive", "full")
+            .unwrap();
+        task_store
+            .park_chat_turn(turn_id, gateway_user_id().as_str(), gateway_workspace_id().as_str())
+            .unwrap();
+        thread_id
+    }
+
+    /// Regression test for the T3-review "ghost bubble" finding: cancelling an
+    /// already-Parked turn has no live executor to finalize its bubble on its own
+    /// (unlike a Running turn, whose own drain loop / `externally_cancelled` guard
+    /// does it independently) — `cancel_chat_turn_and_finalize_bubble` must be the
+    /// one place that does it, for BOTH `cancel_turn` and `cancel_task`.
+    #[test]
+    fn cancel_of_a_parked_turn_finalizes_the_bubble_with_exactly_one_terminal_event() {
+        let state = AppState::for_tests();
+        let turn_id = "turn-cancel-parked";
+        let assistant_message_id = "asst-parked-1";
+        let thread_id = seed_parked_chat_turn_with_bubble(&state, turn_id, assistant_message_id);
+
+        let user_id = gateway_user_id();
+        let workspace_id = gateway_workspace_id();
+        let task_id = TaskId::new(turn_id);
+
+        let store = state.task_store.lock().unwrap();
+        let task_before_cancel = store
+            .get_task(&task_id, &user_id, &workspace_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(task_before_cancel.status, TaskStatus::Parked, "precondition: turn is parked");
+
+        let ok = cancel_chat_turn_and_finalize_bubble(
+            &state,
+            &store,
+            &user_id,
+            &workspace_id,
+            &task_id,
+            Some(&task_before_cancel),
+        )
+        .unwrap();
+        assert!(ok, "a parked turn is still cancellable");
+
+        let cancelled = store.get_task(&task_id, &user_id, &workspace_id).unwrap().unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+
+        let events = store.read_turn_events(turn_id, 0).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == local_first_task_runtime::TurnEventKind::Cancelled)
+                .count(),
+            1,
+            "exactly one Cancelled terminal event"
+        );
+        drop(store);
+
+        let message = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .message(&thread_id, assistant_message_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            message.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            "the bubble is no longer a ghost — cancel-of-parked finalizes it too"
+        );
+    }
+
+    /// End-to-end regression guard on the actual endpoint (not just the shared
+    /// helper): before this fix, `cancel_task` called `broker::cancel_chat_turn`
+    /// directly and skipped bubble finalization entirely, so a parked turn
+    /// cancelled from the Workbench "Attività" tab left a ghost bubble even though
+    /// `cancel_turn` (the chat-panel Stop button) already handled it correctly.
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancel_task_endpoint_finalizes_bubble_for_a_parked_turn() {
+        let state = AppState::for_tests();
+        let turn_id = "turn-cancel-parked-endpoint";
+        let assistant_message_id = "asst-parked-2";
+        let thread_id = seed_parked_chat_turn_with_bubble(&state, turn_id, assistant_message_id);
+
+        let _ = cancel_task(State(state.clone()), Path(turn_id.to_string()))
+            .await
+            .unwrap();
+
+        let cancelled = state
+            .task_store
+            .lock()
+            .unwrap()
+            .get_task(&TaskId::new(turn_id), &gateway_user_id(), &gateway_workspace_id())
+            .unwrap()
+            .unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+
+        let message = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .message(&thread_id, assistant_message_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            message.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            "cancel_task must finalize the bubble for a parked turn, same as cancel_turn"
+        );
+    }
 }
 
 async fn run_next_task(
