@@ -178,3 +178,30 @@ test("throws the typed terminal error exactly once after the status-probe retry 
   // terminal on the 3rd, never on the 1st.
   assert.equal(statusCalls, 3);
 });
+
+test("a long park never exhausts the progress budget", async () => {
+  let statusCalls = 0;
+  const slept = [];
+  const result = await recoverTurnStream({
+    turnId: "turn-parked",
+    maxActiveReconnects: 3,
+    sleep: async (ms) => {
+      slept.push(ms);
+    },
+    connect: async ({ onEvent }) => {
+      // Empty EOFs for the whole park; once the durable turn is done the very
+      // next reconnect replays the terminal event, as the real stream does.
+      if (statusCalls > 10) onEvent({ turn_id: "turn-parked", seq: 1, kind: "done", payload: {} });
+    },
+    getStatus: async () => {
+      statusCalls += 1;
+      // Stay parked well past maxActiveReconnects, then deliver.
+      return statusCalls > 10 ? { status: "completed" } : { status: "parked" };
+    },
+  });
+  assert.equal(result.status, "completed");
+  assert.ok(
+    slept.some((ms) => ms >= 5000),
+    `a parked turn must wait on the long delay, got ${JSON.stringify(slept)}`,
+  );
+});
