@@ -2333,6 +2333,18 @@ impl TaskStore {
     /// resume trigger (`unpark_chat_turn_to_queued`) moves it forward. Steering rows
     /// are untouched here (left `pending` for the resumed run to interpret). Idempotent:
     /// a no-op if the task is not currently `running` (already parked/terminal/gone).
+    ///
+    /// Releases the task's resource reservation (e.g. the single shared `BrowserSession`
+    /// slot, `broker::chat_turn_resource_requirements`) and clears its lease, mirroring
+    /// EVERY other "leave Running" transition in this codebase
+    /// (`mark_task_waiting_external`/`mark_task_completed` in the gateway,
+    /// `recover_chat_turns_at_boot` here) — a parked turn can wait for the model
+    /// indefinitely, so without this it would hold the slot for the whole park, blocking
+    /// every OTHER chat's browser use (the "stuck turn holds browser_session" class this
+    /// project already fixed elsewhere). Resume (`unpark_chat_turn_to_queued` ->
+    /// `Queued`) re-reserves through the normal dispatch path
+    /// (`acquire_task_for_execution` -> `ResourceGovernor::reserve`), same as any other
+    /// queued task.
     pub fn park_chat_turn(
         &self,
         turn_id: &str,
@@ -2364,7 +2376,17 @@ impl TaskStore {
         // unlike the SQL-only `finalizing` sentinel, `Parked` is a real TaskStatus
         // variant that `get_task`/`list_tasks` readers (dispatch, projections) rely on.
         let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+        // Same connection, still inside `tx`'s open transaction (rusqlite statements are
+        // connection-scoped, not handle-scoped) — this DELETE commits/rolls back atomically
+        // with the status flip below. `lease_owner`/`lease_expires_at`/`last_heartbeat_at`
+        // have no dedicated SQL columns (they only live inside `task_json`, same as every
+        // other TaskRecord field besides status/priority/kind/etc.), so clearing them on
+        // the struct before re-serializing is sufficient — there is nothing else to null out.
+        self.release_resources(&task)?;
         task.status = TaskStatus::Parked;
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
         task.updated_at = OffsetDateTime::now_utc();
         tx.execute(
             "UPDATE tasks SET status = ?1, updated_at = ?2, task_json = ?3
@@ -3599,8 +3621,12 @@ mod agent_control_state_tests {
         assert_eq!(checkpoint.round, 2);
     }
 
-    /// Seeds a `chat_turn` task (Running) mirroring `chat_turn_query_tests::make_chat_turn`.
-    fn seed_chat_turn(store: &TaskStore, task_id: &str) {
+    /// Seeds a `chat_turn` task (Running) mirroring `chat_turn_query_tests::make_chat_turn`,
+    /// with the same `BrowserSession` resource requirement real chat turns carry
+    /// (`broker::chat_turn_resource_requirements`) so park/unpark resource release can be
+    /// exercised. Returns the record so the caller can reserve it the same way the real
+    /// dispatcher (`acquire_task_for_execution` -> `ResourceGovernor::reserve`) would.
+    fn seed_chat_turn(store: &TaskStore, task_id: &str) -> TaskRecord {
         let mut task = TaskRecord::new(
             task_id,
             UserId::new("user"),
@@ -3610,15 +3636,27 @@ mod agent_control_state_tests {
             json!({}),
         );
         task.status = TaskStatus::Running;
+        task.resource_requirements =
+            vec![crate::ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
         store
             .insert_chat_turn(&task, "thread", "req-1", "interactive", "full")
             .unwrap();
+        task
     }
 
     #[test]
     fn park_then_resumable_checkpoint_is_readable_and_unpark_queues() {
         let store = TaskStore::open_in_memory().unwrap();
-        seed_chat_turn(&store, "turn");
+        let user = UserId::new("user");
+        let workspace = WorkspaceId::new("workspace");
+        let task = seed_chat_turn(&store, "turn");
+        // Reserve the BrowserSession slot the way the real dispatcher does on acquire.
+        store.reserve_resources(&task, "worker_a").unwrap();
+        assert_eq!(
+            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            1,
+            "the running turn holds the shared browser_session slot"
+        );
         store.create_agent_run(&run("run")).unwrap();
         store
             .append_agent_checkpoint("run", 3, &json!({"round": 3}), "fp", true)
@@ -3637,6 +3675,18 @@ mod agent_control_state_tests {
             .unwrap()
             .unwrap();
         assert_eq!(parked_task.status, TaskStatus::Parked, "task is parked");
+        assert!(parked_task.lease_owner.is_none(), "park clears the lease owner");
+        assert!(parked_task.lease_expires_at.is_none(), "park clears the lease expiry");
+        assert!(parked_task.last_heartbeat_at.is_none(), "park clears the heartbeat");
+
+        // The critical fix under test: parking releases the shared resource reservation.
+        // Without it, a turn parked indefinitely (model down) would hold the single
+        // BrowserSession slot forever and block every other chat's browser use.
+        assert_eq!(
+            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0,
+            "park releases the browser_session reservation, not just the agent run"
+        );
 
         let runs = store.list_agent_runs_for_turn("turn", "user", "workspace").unwrap();
         assert_eq!(runs.len(), 1);
@@ -3659,6 +3709,16 @@ mod agent_control_state_tests {
         assert_eq!(queued_task.status, TaskStatus::Queued, "unpark queues the task");
         assert!(!store.unpark_chat_turn_to_queued("turn", "user", "workspace").unwrap(),
             "second unpark call is a no-op (already queued, not parked)");
+
+        // Resume re-reserves through the normal dispatch path (out of this crate's scope to
+        // simulate the gateway's acquire loop, but the store-level primitive works the same
+        // way it did the first time the turn was dispatched):
+        store.reserve_resources(&queued_task, "worker_b").unwrap();
+        assert_eq!(
+            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            1,
+            "re-dispatch re-reserves the slot exactly like the first acquire"
+        );
     }
 
     #[test]
