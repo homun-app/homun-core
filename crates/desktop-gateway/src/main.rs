@@ -18409,6 +18409,117 @@ fn browser_action_execution_fields_are_schema_legal(action: &serde_json::Value) 
     kind_ok && action.get("selector").is_none()
 }
 
+/// D2 machine classification of a browser action's progress — control metadata, NEVER prose or
+/// button-label text. The guarded loop's stall/no-progress budget depends on this distinguishing a
+/// goal-advancing action from a no-op re-type or a failure: a `type`/`fill` that selected no
+/// autocomplete suggestion (`committed_option == false`), or any action that errored or left the
+/// page unchanged, is NOT progress — even though a `type`'s own text edit always changes the
+/// snapshot, which is exactly why `no_change` alone cannot classify a typeahead.
+fn browser_action_outcome_hint(
+    kind: &str,
+    ok: bool,
+    no_change: bool,
+    committed_option: bool,
+    navigated_ok: bool,
+    errored: bool,
+) -> local_first_engine::contract::ToolOutcomeHint {
+    use local_first_engine::contract::ToolOutcomeHint::{NoProgress, Success};
+    if errored || !ok {
+        return NoProgress;
+    }
+    match kind {
+        "navigate" => {
+            if navigated_ok {
+                Success
+            } else {
+                NoProgress
+            }
+        }
+        "type" | "fill" => {
+            if committed_option {
+                Success
+            } else {
+                NoProgress
+            }
+        }
+        // Any other action (click, press, select, a bundle, …): progress iff it changed the page.
+        _ => {
+            if no_change {
+                NoProgress
+            } else {
+                Success
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod browser_outcome_hint_tests {
+    use super::browser_action_outcome_hint;
+    use local_first_engine::contract::ToolOutcomeHint::{NoProgress, Success};
+
+    #[test]
+    fn type_without_committed_suggestion_is_no_progress() {
+        // The "Napoli ×3" case: the type executed fine but selected no station suggestion.
+        assert_eq!(
+            browser_action_outcome_hint("type", true, false, false, false, false),
+            NoProgress
+        );
+    }
+
+    #[test]
+    fn type_with_committed_suggestion_is_progress() {
+        assert_eq!(
+            browser_action_outcome_hint("type", true, false, true, false, false),
+            Success
+        );
+    }
+
+    #[test]
+    fn fill_without_committed_suggestion_is_no_progress() {
+        assert_eq!(
+            browser_action_outcome_hint("fill", true, false, false, false, false),
+            NoProgress
+        );
+    }
+
+    #[test]
+    fn any_error_or_not_ok_is_no_progress() {
+        assert_eq!(
+            browser_action_outcome_hint("click", true, false, false, false, true),
+            NoProgress
+        );
+        assert_eq!(
+            browser_action_outcome_hint("navigate", false, false, false, false, false),
+            NoProgress
+        );
+    }
+
+    #[test]
+    fn other_action_is_progress_only_when_the_page_changed() {
+        assert_eq!(
+            browser_action_outcome_hint("click", true, false, false, false, false),
+            Success
+        );
+        assert_eq!(
+            browser_action_outcome_hint("click", true, true, false, false, false),
+            NoProgress
+        );
+    }
+
+    #[test]
+    fn navigate_ok_is_progress_failed_is_not() {
+        assert_eq!(
+            browser_action_outcome_hint("navigate", true, false, false, true, false),
+            Success
+        );
+        assert_eq!(
+            browser_action_outcome_hint("navigate", true, false, false, false, false),
+            NoProgress
+        );
+    }
+}
+
 fn normalize_browser_action_bundle(
     action: &mut serde_json::Value,
     current_target: &str,
@@ -22191,6 +22302,12 @@ struct BrowserToolCtx<'a> {
     // `GatewayBrowserExecutor` so every boundary this ctx crosses persists the same handle — a real
     // `GatewayJournal::Durable` when the enclosing run is registered, else the silent `Disabled` arm.
     journal: &'a agent_journal::GatewayJournal,
+    // Out-parameter (D1/D2): the machine progress classification of the action just executed,
+    // written where the sidecar's signals live (committed suggestion, page change, error) and
+    // read back by `GatewayBrowserExecutor::execute_browser`. `None` on the neutral read-only
+    // tools (snapshot/tabs/dialog/screenshot) → the caller defaults them to `Success`. Never
+    // derived from the result prose — that is exactly the misclassification this replaces.
+    outcome_hint: &'a mut Option<local_first_engine::contract::ToolOutcomeHint>,
 }
 
 /// The NON-browser tool context (ADR 0026 / inc 5): the read-set of `execute_chat_tool` only —
@@ -23083,6 +23200,8 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     ) {
                         *browser_session = Some(client);
                         push_browser_step("browser action bundle blocked".to_string(), "error");
+                        *ctx.outcome_hint =
+                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                         Err(error)
                     } else {
                     // A non-schema action (clickCoords, any other unrecognized kind, or a
@@ -23179,10 +23298,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     });
                     if let Some(error) = preflight_error {
                         *browser_session = Some(client);
+                        *ctx.outcome_hint =
+                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                         Err(error)
                     } else if let Some(reason) = blocked {
                         eprintln!("browser-gate: BLOCKED ({reason})");
                         *browser_session = Some(client);
+                        *ctx.outcome_hint =
+                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                         push_browser_step(
                             format!(
                                 "action blocked: {}",
@@ -23319,10 +23442,26 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                         }
                                     }
                                 }
+                                // D2: machine progress classification for the guarded loop's
+                                // stall budget — from the sidecar's signals (committed suggestion,
+                                // page change), never re-derived from the prose in `out` above.
+                                *ctx.outcome_hint = Some(browser_action_outcome_hint(
+                                    args.get("kind").and_then(|k| k.as_str()).unwrap_or(""),
+                                    true,
+                                    no_change,
+                                    value
+                                        .get("committedOption")
+                                        .and_then(|v| v.as_str())
+                                        .is_some_and(|s| !s.trim().is_empty()),
+                                    false,
+                                    false,
+                                ));
                                 Ok(out)
                             }
                             Err(error) => {
                                 push_browser_step(format!("{kind}"), "error");
+                                *ctx.outcome_hint =
+                                    Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                                 // DIAG (HOMUN_DEBUG): what the model tried + why it
                                 // failed, to root-cause the repeated browser_act loop.
                                 if verbose_debug() {
@@ -23682,6 +23821,17 @@ Use the text snapshot."
                 _ => Err(format!("Unknown browser tool: {name}")),
             },
         };
+        // D2 fallback for arms that set no explicit hint (navigate / snapshot / tabs / dialog /
+        // screenshot): the `Result` VARIANT is itself a machine signal — an errored action is no
+        // progress, an ok one is. The `browser_act` arm sets a nuanced hint above (a successful
+        // `type` that selected no suggestion is `Ok` yet NoProgress), which takes precedence here.
+        if ctx.outcome_hint.is_none() {
+            *ctx.outcome_hint = Some(if outcome.is_err() {
+                local_first_engine::contract::ToolOutcomeHint::NoProgress
+            } else {
+                local_first_engine::contract::ToolOutcomeHint::Success
+            });
+        }
         match outcome {
             Ok(text) => text,
             Err(text) => text,
@@ -26972,7 +27122,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         args_raw: &str,
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
-) -> String {
+) -> (String, local_first_engine::contract::ToolOutcomeHint) {
         if name == "browser_done" {
             let payload = serde_json::from_str::<local_first_engine::browse::BrowserDonePayload>(args_raw)
                 .unwrap_or_else(|_| local_first_engine::browse::BrowserDonePayload {
@@ -27001,12 +27151,16 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
                 browser_protocol_event_summary(call_id, "browser_done", metrics),
                 "done",
             );
-            return local_first_engine::browse::browse_result_for_manager(&result);
+            return (
+                local_first_engine::browse::browse_result_for_manager(&result),
+                local_first_engine::contract::ToolOutcomeHint::Success,
+            );
         }
         // The browser branch mutates its ctx directly (disjoint read-set): browser-private state from
         // `&mut self`, loop-visible browser fields + provider from `&mut ls`. `browser_session` is
         // threaded separately (its Cell/RefCell would make the ctx non-`Sync`). ADR 0025 folds this
         // whole ctx into a recursive `browse(goal)` and the seam goes away.
+        let mut outcome_hint: Option<local_first_engine::contract::ToolOutcomeHint> = None;
         let mut bctx = BrowserToolCtx {
             browser_used: &mut ls.browser_used,
             last_snapshot: &mut self.last_snapshot,
@@ -27024,8 +27178,18 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             read_only: self.read_only,
             channel_owner: self.channel_owner,
             journal: &self.journal,
+            outcome_hint: &mut outcome_hint,
         };
-        execute_browser_tool(&mut bctx, &mut self.browser_session, name, args_raw, call_id).await
+        // D1/D2: the act/navigate arms write the machine progress hint into `outcome_hint` (via
+        // ctx), computed from the sidecar's signals — never re-derived from the result prose. The
+        // neutral read-only tools leave it None → Success (they don't stall a browse).
+        let text =
+            execute_browser_tool(&mut bctx, &mut self.browser_session, name, args_raw, call_id).await;
+        drop(bctx);
+        (
+            text,
+            outcome_hint.unwrap_or(local_first_engine::contract::ToolOutcomeHint::Success),
+        )
     }
 
     async fn close_session(&mut self, browser_used: bool) {
@@ -27092,7 +27256,10 @@ browse and answer.\n\
 METHOD:\n\
 1. Open a source with browser_navigate, then read the snapshot.\n\
 2. Proceed ONE micro-action at a time (browser_act with a kind + a [ref=...] from the snapshot); \
-re-read the snapshot after each action (browser_act returns the updated one).\n\
+re-read the snapshot after each action (browser_act returns the updated one). When a field shows \
+suggestions as you type (a station, city, or airport picker), type the name and then pick the \
+matching suggestion before moving on — a typed value with no suggestion selected is usually not \
+accepted.\n\
 3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
 JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
 do not repeat the same failing search.\n\
@@ -27622,7 +27789,9 @@ impl local_first_engine::CapabilityExecutor for ComputerOnlyCapabilityExecutor {
 struct ComputerNoBrowserExecutor;
 impl local_first_engine::BrowserExecutor for ComputerNoBrowserExecutor {
     async fn execute_browser(&mut self, name: &str, _args_raw: &str, _call_id: &str,
-        _state: &mut local_first_engine::LoopState) -> String { format!("browser tool unavailable: {name}") }
+        _state: &mut local_first_engine::LoopState) -> (String, local_first_engine::contract::ToolOutcomeHint) {
+        (format!("browser tool unavailable: {name}"), local_first_engine::contract::ToolOutcomeHint::Success)
+    }
     async fn close_session(&mut self, _browser_used: bool) {}
 }
 

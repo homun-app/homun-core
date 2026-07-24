@@ -713,8 +713,12 @@ missing, give what you have and note the gap in one short line.",
                         // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
                         // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
                         tokio::select! {
-                            r = browser_executor.execute_browser(name, args_raw, &call_id, &mut ls) => {
-                                (r, crate::ToolEffects::default(), None)
+                            (r, hint) = browser_executor.execute_browser(name, args_raw, &call_id, &mut ls) => {
+                                // The browser branch produces no other ToolEffects (it mutates its own
+                                // state directly), but it DOES carry a machine outcome hint so the loop's
+                                // stall/no-progress accounting isn't fooled by prose that always reads
+                                // "success" (a timed-out or no-op action, or a type that selected nothing).
+                                (r, crate::ToolEffects { outcome_hint: Some(hint), ..crate::ToolEffects::default() }, None)
                             }
                             control = wait_for_interrupting_control(model_client) => {
                                 (
@@ -1677,8 +1681,8 @@ mod tests {
             _a: &str,
             _c: &str,
             _s: &mut LoopState,
-        ) -> String {
-            String::new()
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            (String::new(), crate::contract::ToolOutcomeHint::Success)
         }
         async fn close_session(&mut self, _b: bool) {}
     }
@@ -1742,10 +1746,10 @@ mod tests {
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> String {
+        ) -> (String, crate::contract::ToolOutcomeHint) {
             assert_eq!(name, "browser_done");
             state.browser_used = true;
-            "done".to_string()
+            ("done".to_string(), crate::contract::ToolOutcomeHint::Success)
         }
 
         async fn close_session(&mut self, _browser_used: bool) {}
@@ -1948,9 +1952,12 @@ mod tests {
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> String {
+        ) -> (String, crate::contract::ToolOutcomeHint) {
             state.browser_used = true;
-            json!({ "status": "blocked" }).to_string()
+            (
+                json!({ "status": "blocked" }).to_string(),
+                crate::contract::ToolOutcomeHint::NoProgress,
+            )
         }
 
         async fn close_session(&mut self, _browser_used: bool) {}
@@ -2021,13 +2028,18 @@ mod tests {
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> String {
+        ) -> (String, crate::contract::ToolOutcomeHint) {
             assert_eq!(name, "browser_act");
             state.browser_used = true;
-            format!(
-                "{} I took a fresh snapshot. Do NOT retry e1; choose a NEW [ref=...] \
+            // Hint = Success on purpose: this fixture proves the stale-ref MARKER trips
+            // no-progress independently (the `||` in the branch), not the hint.
+            (
+                format!(
+                    "{} I took a fresh snapshot. Do NOT retry e1; choose a NEW [ref=...] \
 from this snapshot:\n[ref=e2] Same control, re-rendered",
-                crate::browser::STALE_REF_RECOVERY_MARKER
+                    crate::browser::STALE_REF_RECOVERY_MARKER
+                ),
+                crate::contract::ToolOutcomeHint::Success,
             )
         }
 
@@ -2094,6 +2106,94 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             1,
             "the budget must trip after max_no_progress consecutive stale-ref recoveries, not loop \
              until hard_round_ceiling"
+        );
+        drop(journal_events);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
+    /// Every `browser_act` comes back with PROSE that reads like success ("Action performed.
+    /// Updated snapshot…") but a NoProgress HINT — the exact shape of a type that selected no
+    /// autocomplete suggestion, or a timed-out action the sidecar reports as failed. The hint,
+    /// not `classify_tool_result` on the prose, must drive the stall budget. Pre-fix (the browser
+    /// branch discarded the hint and used `ToolEffects::default()`) this looped to the round
+    /// ceiling; now `max_no_progress` trips.
+    struct SuccessProseNoProgressBrowser;
+
+    impl BrowserExecutor for SuccessProseNoProgressBrowser {
+        async fn execute_browser(
+            &mut self,
+            name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            assert_eq!(name, "browser_act");
+            state.browser_used = true;
+            (
+                "Action performed. Updated snapshot:\n[ref=e1] Station field".to_string(),
+                crate::contract::ToolOutcomeHint::NoProgress,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_progress_hint_trips_budget_even_when_prose_looks_like_success() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = SuccessProseNoProgressBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 12;
+        turn_cfg.browser_nav_cap = 12;
+        turn_cfg.browser_budget.max_no_progress = 2;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &StaleRefChurnModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            1,
+            "a NoProgress hint must trip max_no_progress even though the result prose reads as success"
         );
         drop(journal_events);
         assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
