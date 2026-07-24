@@ -11,11 +11,31 @@ import type { Components } from "react-markdown";
 import type { Mermaid } from "mermaid";
 
 import { copyText } from "../lib/clipboard";
+// The splitter is a plain .mjs sibling so `node --test` can exercise it without
+// a build step, which is why it carries no type declaration.
+// @ts-expect-error JavaScript sibling intentionally has no declaration file.
+import * as markdownBlocks from "../lib/markdownBlocks.mjs";
 import "highlight.js/styles/github.css";
 
 // highlight.js (via lowlight) → hAST → real React elements (no innerHTML).
 // `common` covers ~37 mainstream languages, enough for chat code blocks.
 const lowlight = createLowlight(common);
+
+interface MarkdownBlockSlice {
+  key: string;
+  text: string;
+  closed: boolean;
+}
+
+const splitMarkdownBlocks = markdownBlocks.splitMarkdownBlocks as (
+  text: string,
+) => MarkdownBlockSlice[];
+
+// Module-level, NOT inline literals: a fresh array on every render is a new prop
+// identity, which defeats the unified processor's own caching and forces a full
+// re-parse each frame.
+const REHYPE_PLUGINS = [rehypeSanitize];
+const REMARK_PLUGINS = [remarkGfm];
 
 interface RichMessageRendererProps {
   text: string;
@@ -83,20 +103,48 @@ function RichMessageRenderer({
     [text],
   );
 
+  // Per-block rendering: the whole unified pipeline used to run over the entire
+  // accumulated text on every rAF flush — O(len) per frame, O(len²) per message.
+  // Only the growing tail block re-parses now; the closed ones are memoized.
+  const blocks = useMemo(() => splitMarkdownBlocks(normalizedText), [normalizedText]);
+
   return (
     <div className="rich-message">
-      <ReactMarkdown
-        components={markdownComponents}
-        rehypePlugins={[rehypeSanitize]}
-        remarkPlugins={[remarkGfm]}
-      >
-        {normalizedText}
-      </ReactMarkdown>
+      {blocks.map((block) => (
+        <MarkdownBlock
+          key={block.key}
+          components={markdownComponents}
+          text={block.text}
+        />
+      ))}
     </div>
   );
 }
 
 export default memo(RichMessageRenderer);
+
+/**
+ * One top-level markdown block. Memoized on its text (and the stable components
+ * map), so every block that has stopped growing is skipped entirely while the
+ * tail streams in.
+ */
+const MarkdownBlock = memo(function MarkdownBlock({
+  components,
+  text,
+}: {
+  components: Components;
+  text: string;
+}) {
+  return (
+    <ReactMarkdown
+      components={components}
+      rehypePlugins={REHYPE_PLUGINS}
+      remarkPlugins={REMARK_PLUGINS}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+});
 
 function normalizeMarkdownForRichRendering(text: string) {
   const lines = repairNestedMarkdownFences(text).split("\n");
