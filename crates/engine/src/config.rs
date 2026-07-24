@@ -13,6 +13,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserStopReason {
     WallClock,
+    Stall,
     FailedNavigations,
     NoProgress,
 }
@@ -21,6 +22,7 @@ impl BrowserStopReason {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::WallClock => "wall_clock",
+            Self::Stall => "stall",
             Self::FailedNavigations => "failed_navigations",
             Self::NoProgress => "no_progress",
         }
@@ -29,20 +31,33 @@ impl BrowserStopReason {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrowserBudget {
+    /// Absolute hard cap on total browse wall-clock — never resets. A final backstop so a
+    /// pathological loop cannot run forever; set well above any legitimate multi-step task.
     pub max_elapsed_ms: u64,
+    /// The PRIMARY control: max wall-clock since the LAST real-progress action. Resets on every
+    /// success (a selected suggestion, a page change, a successful navigation), so a browse that
+    /// keeps advancing is never choked by it — only a genuinely stuck one is. This is what lets a
+    /// slow model finish a multi-field form the old absolute-from-start ceiling killed at ~2 rounds.
+    pub max_stall_ms: u64,
     pub max_failed_navigations: u32,
     pub max_no_progress: u32,
 }
 
 impl BrowserBudget {
+    /// `stall_ms` is the time since the last real-progress action (reset on success); `elapsed_ms`
+    /// is total browse wall-clock (never reset). The absolute cap is checked first as a final
+    /// backstop, then the per-progress stall window, then the stagnation counters.
     pub fn stop_reason(
         self,
         elapsed_ms: u64,
+        stall_ms: u64,
         failed_navigations: u32,
         no_progress: u32,
     ) -> Option<BrowserStopReason> {
         if elapsed_ms >= self.max_elapsed_ms {
             Some(BrowserStopReason::WallClock)
+        } else if stall_ms >= self.max_stall_ms {
+            Some(BrowserStopReason::Stall)
         } else if failed_navigations >= self.max_failed_navigations {
             Some(BrowserStopReason::FailedNavigations)
         } else if no_progress >= self.max_no_progress {
@@ -110,22 +125,34 @@ mod tests {
     fn browser_budget_stops_on_time_or_stagnation() {
         let budget = BrowserBudget {
             max_elapsed_ms: 300_000,
+            max_stall_ms: 90_000,
             max_failed_navigations: 8,
             max_no_progress: 5,
         };
 
+        // A browse that keeps PROGRESSING survives past the old absolute 90s ceiling: 100s total
+        // elapsed but only 10s since the last success → keep going. This is the regression the
+        // whole change targets (the old code stopped a progressing browse at ~2 rounds).
+        assert_eq!(budget.stop_reason(100_000, 10_000, 0, 0), None);
+        // A STALLED browse (no progress for the stall window) stops, even though the absolute cap
+        // is nowhere near.
         assert_eq!(
-            budget.stop_reason(300_001, 0, 0),
+            budget.stop_reason(100_000, 90_001, 0, 0),
+            Some(BrowserStopReason::Stall)
+        );
+        // The absolute cap is the final backstop, checked before the stall window.
+        assert_eq!(
+            budget.stop_reason(300_001, 0, 0, 0),
             Some(BrowserStopReason::WallClock)
         );
         assert_eq!(
-            budget.stop_reason(1_000, 8, 0),
+            budget.stop_reason(1_000, 1_000, 8, 0),
             Some(BrowserStopReason::FailedNavigations)
         );
         assert_eq!(
-            budget.stop_reason(1_000, 0, 5),
+            budget.stop_reason(1_000, 1_000, 0, 5),
             Some(BrowserStopReason::NoProgress)
         );
-        assert_eq!(budget.stop_reason(1_000, 7, 4), None);
+        assert_eq!(budget.stop_reason(1_000, 1_000, 7, 4), None);
     }
 }

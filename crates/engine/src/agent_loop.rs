@@ -242,6 +242,11 @@ where
 {
     let mut delivery = TurnDelivery::NoVisibleAnswer;
     let turn_started_at = Instant::now();
+    // The per-progress stall clock: reset to `now` on every real browser progress (see the
+    // `browser_no_progress = 0` point below). The browser wall-clock budget is measured from THIS,
+    // not from `turn_started_at`, so a browse that keeps advancing is never choked by a cumulative
+    // timer — only the absolute cap (from `turn_started_at`) and a genuine stall stop it.
+    let mut last_browser_progress_at = Instant::now();
     let mut steering_to_complete = Vec::new();
     // Tracks the last round the loop actually ran, captured in outer scope because the `for`
     // loop's `round` binding does not survive past the loop (exhaustion or `break`) — the
@@ -268,8 +273,11 @@ where
         }
         if ls.browser_used {
             let elapsed_ms = u64::try_from(turn_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let stall_ms =
+                u64::try_from(last_browser_progress_at.elapsed().as_millis()).unwrap_or(u64::MAX);
             if let Some(reason) = cfg.browser_budget.stop_reason(
                 elapsed_ms,
+                stall_ms,
                 ls.browser_failed_navigations,
                 ls.browser_no_progress,
             ) {
@@ -733,14 +741,14 @@ missing, give what you have and note the gap in one short line.",
                         // the per-call ChatToolCtx from `&mut ls` + its held read-only context. `args_raw`
                         // (the model's exact JSON string) is passed through unchanged — no round-trip.
                         let delegated_browse = name == "browse";
-                        let elapsed_ms = u64::try_from(turn_started_at.elapsed().as_millis())
-                            .unwrap_or(u64::MAX);
-                        let remaining_browser_ms = cfg
-                            .browser_budget
-                            .max_elapsed_ms
-                            .saturating_sub(elapsed_ms);
+                        // The `browse` sub-agent call gets the ABSOLUTE cap as a fresh hard deadline
+                        // from NOW (this call) — not a cumulative `cap - elapsed` that shrinks as the
+                        // turn runs and folds in pre-browse (e.g. curl) time, which starved the browse
+                        // on a slow model. The sub-turn's own per-progress stall window
+                        // (`config.rs` `max_stall_ms`, reset on success) is the real control; this is a
+                        // final backstop on a single browse call.
                         let browser_deadline = tokio::time::sleep(std::time::Duration::from_millis(
-                            remaining_browser_ms,
+                            cfg.browser_budget.max_elapsed_ms,
                         ));
                         tokio::pin!(browser_deadline);
                         tokio::select! {
@@ -855,6 +863,11 @@ missing, give what you have and note the gap in one short line.",
                             }
                         } else {
                             ls.browser_no_progress = 0;
+                            // Real browser progress → reset the per-progress stall clock, so the
+                            // wall-clock stall window (checked at the top of the loop) measures time
+                            // SINCE this success, not since the turn began. Same signal that resets
+                            // `browser_no_progress`; keeps the two budgets consistent.
+                            last_browser_progress_at = Instant::now();
                         }
                     } else {
                         let no_progress_count =
@@ -2111,6 +2124,235 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
     }
 
+    /// Like `StaleRefChurnModel` but each round targets a DIFFERENT ref — a model legitimately
+    /// advancing through a form, one field per round. Needed by the stall-window reset test:
+    /// byte-identical rounds would trip the repeat-guard before the timing is provable.
+    #[derive(Default)]
+    struct VariedActModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for VariedActModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call.is_final_round {
+                let content = "Modulo completato.";
+                on_delta(content);
+                return Ok(ModelRoundOutput {
+                    message: json!({ "role": "assistant", "content": content }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": format!("act_{call_index}"),
+                        "type": "function",
+                        "function": {
+                            "name": "browser_act",
+                            "arguments": format!("{{\"kind\":\"click\",\"ref\":\"e{call_index}\"}}")
+                        },
+                    }],
+                }),
+                provider,
+                finish_reason: Some("tool_calls".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    /// Progressing browser: every action takes real time (~20ms) and reports Success — the shape
+    /// of a slow model legitimately advancing through a multi-field form. Used to prove the stall
+    /// window RESETS on progress (the run outlives `max_stall_ms` cumulatively).
+    struct SlowProgressBrowser;
+
+    impl BrowserExecutor for SlowProgressBrowser {
+        async fn execute_browser(
+            &mut self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            state.browser_used = true;
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            (
+                "Action performed. Updated snapshot:\n[ref=e2] Next field".to_string(),
+                crate::contract::ToolOutcomeHint::Success,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    /// Stalled browser: every action takes longer than the stall window and reports NoProgress —
+    /// the wall-clock stall window must stop the run even when the stagnation counters are far
+    /// from tripping.
+    struct SlowStallBrowser;
+
+    impl BrowserExecutor for SlowStallBrowser {
+        async fn execute_browser(
+            &mut self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            state.browser_used = true;
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            (
+                "Action performed. Updated snapshot:\n[ref=e1] Same field".to_string(),
+                crate::contract::ToolOutcomeHint::NoProgress,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stall_window_resets_on_progress_so_a_progressing_browse_outlives_it() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = SlowProgressBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 6;
+        turn_cfg.browser_max_rounds = 6;
+        turn_cfg.browser_nav_cap = 12;
+        // Stall window (100ms) far below the run's TOTAL browse time (6 × 20ms + overhead): only
+        // the per-progress reset lets this run finish without a budget stop.
+        turn_cfg.browser_budget.max_stall_ms = 100;
+        let started = Instant::now();
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &VariedActModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(100),
+            "the run must have cumulatively outlived the stall window for the reset to be proven"
+        );
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            0,
+            "a browse that makes progress every round must never be stopped by the stall window"
+        );
+        drop(journal_events);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stalled_browse_stops_within_the_stall_window() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = SlowStallBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 12;
+        turn_cfg.browser_nav_cap = 12;
+        turn_cfg.browser_budget.max_stall_ms = 100;
+        // Stagnation counters far from tripping: ONLY the stall window can stop this run.
+        turn_cfg.browser_budget.max_no_progress = 50;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &StaleRefChurnModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            1,
+            "a browse with no progress for longer than the stall window must stop (reason: stall)"
+        );
+        drop(journal_events);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
     /// Every `browser_act` comes back with PROSE that reads like success ("Action performed.
     /// Updated snapshot…") but a NoProgress HINT — the exact shape of a type that selected no
     /// autocomplete suggestion, or a timed-out action the sidecar reports as failed. The hint,
@@ -2276,6 +2518,7 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
             browser_nav_cap: 6,
             browser_budget: crate::BrowserBudget {
                 max_elapsed_ms: 300_000,
+                max_stall_ms: 300_000,
                 max_failed_navigations: 8,
                 max_no_progress: 5,
             },

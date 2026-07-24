@@ -18031,6 +18031,13 @@ fn chat_browser_budget() -> local_first_engine::BrowserBudget {
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .map(|value| value.clamp(1_000, 600_000))
         .unwrap_or(300_000);
+    // Stall window: max wall-clock since the last real progress (resets on success). This is the
+    // primary control; `max_elapsed_ms` above is only the absolute backstop.
+    let max_stall_ms = env::var("HOMUN_CHAT_BROWSER_MAX_STALL_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .map(|value| value.clamp(1_000, 600_000))
+        .unwrap_or(120_000);
     let max_failed_navigations = env::var("HOMUN_CHAT_BROWSER_MAX_FAILED_NAVIGATIONS")
         .ok()
         .and_then(|raw| raw.trim().parse::<u32>().ok())
@@ -18043,6 +18050,7 @@ fn chat_browser_budget() -> local_first_engine::BrowserBudget {
         .unwrap_or(5);
     local_first_engine::BrowserBudget {
         max_elapsed_ms,
+        max_stall_ms,
         max_failed_navigations,
         max_no_progress,
     }
@@ -27584,13 +27592,16 @@ impl GatewayBrowseExecutor<'_> {
             browser_max_rounds: rounds,
             browser_nav_cap: browse_subagent_nav_cap(),
             browser_budget: local_first_engine::config::BrowserBudget {
-                // Wall-clock is a safety ceiling (a wedge backstop), aligned to the
-                // acceptance gate's per-run maximum — NOT the success criterion. Progress
-                // (`max_no_progress`) terminates a stalled run; the round budget sizes
-                // how far a *progressing* run may go.
-                max_elapsed_ms: 90_000,
-                max_failed_navigations: 3,
-                max_no_progress: 2,
+                // `max_elapsed_ms` is now the ABSOLUTE backstop (never resets) — generous, so a
+                // progressing browse is never choked by it. The PRIMARY control is `max_stall_ms`:
+                // max wall-clock WITHOUT a success, reset on every real progress (a selected
+                // suggestion, a page change, a navigation). This is what lets a slow model finish a
+                // multi-field form the old 90s-from-start ceiling killed at ~2 rounds. The round
+                // budget still sizes how far a progressing run may go.
+                max_elapsed_ms: 300_000,
+                max_stall_ms: 90_000,
+                max_failed_navigations: 4,
+                max_no_progress: 3,
             },
             // Browse sub-turn does NO token-budget compaction (NoContextCompactor); the browser
             // history hygiene it needs is `prune_browser_history`. Unknown window → fail-open anyway.
