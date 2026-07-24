@@ -7,9 +7,9 @@ il "cosa c'è di nuovo" nell'aggiornamento) e nella pagina changelog del sito.
 
 ## [Non rilasciato]
 
-## [0.1.2] — 2026-07-24
+## [0.1.1079] — 2026-07-24
 
-Prima release con il nuovo motore del browser e il controllo a metà attività ("steering").
+Nuovo motore del browser e controllo a metà attività ("steering").
 
 ### Novità
 - **Controllo a metà attività (steering).** Puoi correggere o reindirizzare Homun mentre sta
@@ -35,4 +35,4 @@ Prima release con il nuovo motore del browser e il controllo a metà attività (
   parole del pulsante).
 
 [Non rilasciato]: https://github.com/homun-app/homun-releases/releases
-[0.1.2]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.2
+[0.1.1079]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1079

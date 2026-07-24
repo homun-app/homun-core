@@ -43,8 +43,9 @@ test("returns null for a version with no section (caller must error, never ship 
   assert.equal(extractReleaseNotes(FIXTURE, "9.9.9"), null);
 });
 
-test("the real CHANGELOG.md has a non-empty section for the shipping version 0.1.2", () => {
-  const notes = extractReleaseNotes(readFileSync(CHANGELOG_PATH, "utf8"), "0.1.2");
-  assert.ok(notes && notes.length > 40, "0.1.2 section should exist and be substantial");
+test("the real CHANGELOG.md has a non-empty section for the shipping version", () => {
+  const version = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  const notes = extractReleaseNotes(readFileSync(CHANGELOG_PATH, "utf8"), version);
+  assert.ok(notes && notes.length > 40, `${version} section should exist and be substantial`);
   assert.doesNotMatch(notes, /## \[/, "must not include another version heading");
 });
