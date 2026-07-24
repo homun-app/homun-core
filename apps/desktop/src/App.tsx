@@ -22,7 +22,6 @@ import {
 import { pluginRegistry, type PluginHost } from "./plugins/registry";
 import {
   coreBridge,
-  subscribeAppEvents,
   type AppEvent,
   type AutomationCreateteInput,
   type ChatAttachmentInput,

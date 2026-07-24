@@ -80,8 +80,8 @@ import type {
 import {
   coreBridge,
   SteeringQueuedDuringSubmissionError,
-  subscribeAppEvents,
   type ActiveModelInfo,
+  type AppEvent,
   type ChatAttachmentInput,
   type CoreBranchPoint,
   type CoreChatStreamEvent,
@@ -5146,7 +5146,14 @@ export function MemoryGraphPanel({
         if (active) setBuildingGraph(building);
       })
       .catch(() => {});
-    const unsubscribe = subscribeAppEvents((event) => {
+    // One event transport: project_graph.* rides the unified WS, wrapped by the gateway
+    // in an `app.event` envelope (publish_app_event is the single producer — it fans the
+    // very same event to the WS registry and to the legacy NDJSON channel, so nothing is
+    // lost by dropping the latter). The socket is a process-lifetime singleton connected
+    // by App at boot; here we only add and drop a handler, never touch the connection.
+    const unsubscribe = wsSubscription.subscribe((msg) => {
+      if (msg.type !== "app.event") return;
+      const event = msg.event as AppEvent;
       if (event.workspace !== workspace) return;
       if (event.type === "project_graph.ready") {
         setBuildingGraph(false);
