@@ -12,6 +12,11 @@ pub enum TurnDelivery {
     Delivered,
     #[default]
     NoVisibleAnswer,
+    /// The turn hit its finalization boundary with steering still pending that
+    /// the coordinator could not interpret (model unavailable). It checkpointed
+    /// and parked; the caller keeps the bubble open and finishes the run with
+    /// `parked_waiting_for_model` for coordinator-driven resume. No terminal event.
+    Parked,
 }
 
 /// The turn's result the gateway tail consumes. Kept minimal — only what the tail can't already see

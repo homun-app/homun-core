@@ -42,6 +42,12 @@ use std::time::Instant;
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
 const MAX_PLAN_NUDGES: u32 = 8;
 
+/// Bounded wait, in `wait_for_turn_control` cycles, for an uninterpreted steering row at the
+/// finalization fence before parking (≈ 40 × the 50ms coordinator poll ≈ 2s). Replaces the old
+/// infinite spin: if nothing becomes interpretable within this budget (the coordinator is still
+/// working or the semantic model is unavailable), the turn parks instead of hanging.
+const PARK_WAIT_CYCLES: u32 = 40;
+
 async fn wait_for_interrupting_control<M: ModelClient>(
     model_client: &M,
 ) -> TurnControlDecision {
@@ -220,7 +226,12 @@ where
     let mut delivery = TurnDelivery::NoVisibleAnswer;
     let turn_started_at = Instant::now();
     let mut steering_to_complete = Vec::new();
+    // Tracks the last round the loop actually ran, captured in outer scope because the `for`
+    // loop's `round` binding does not survive past the loop (exhaustion or `break`) — the
+    // post-loop finalization fence below needs it to checkpoint at the right round on park.
+    let mut last_round: usize = 0;
     'rounds: for round in 0..cfg.hard_round_ceiling {
+        last_round = round;
         if let Some(control) = model_client.current_turn_control() {
             apply_turn_control(model_client, &mut ls.messages, &control);
             steering_to_complete.push(control.steering_id);
@@ -1261,15 +1272,38 @@ missing, give what you have and note the gap in one short line.",
     // in-loop delivery path so a steering instruction that was queued,
     // claimed, or interpreted while the last tool was running cannot be
     // overtaken by the forced no-tools synthesis.
+    //
+    // Drain interpreted controls (including `continue`) so a steering queued/claimed
+    // while the last tool ran is honored before finalization. If the fence stays
+    // PendingInput with nothing interpreted (rows pending/claimed the coordinator
+    // cannot resolve — e.g. the semantic model is unavailable), park instead of
+    // spinning: exit with a non-delivering Parked outcome for coordinator resume.
+    let mut park_wait: u32 = 0;
     while !final_done
         && model_client.finalization_fence() == crate::FinalizationFence::PendingInput
     {
-        let control = wait_for_interrupting_control(model_client).await;
-        apply_turn_control(model_client, &mut ls.messages, &control);
-        steering_to_complete.push(control.steering_id);
-        if control.disposition == TurnControlDisposition::CancelCurrentWork {
-            final_done = true;
+        if let Some(control) = model_client.current_turn_control() {
+            apply_turn_control(model_client, &mut ls.messages, &control);
+            steering_to_complete.push(control.steering_id);
+            if control.disposition == TurnControlDisposition::CancelCurrentWork {
+                final_done = true;
+            }
+            park_wait = 0;
+            continue;
         }
+        if park_wait >= PARK_WAIT_CYCLES {
+            // Park: capture a resumable checkpoint at the boundary and return without
+            // delivering. Do NOT force synthesis, do NOT emit Done.
+            execution_journal.checkpoint(crate::LoopCheckpoint::from_state(last_round, &ls));
+            return crate::TurnOutcome {
+                delivery: TurnDelivery::Parked,
+                memory_answer: String::new(),
+                image_rejection: None,
+                ..Default::default()
+            };
+        }
+        park_wait += 1;
+        let _ = model_client.wait_for_turn_control().await;
     }
 
     if !final_done {
@@ -3227,5 +3261,303 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert!(started.elapsed() < std::time::Duration::from_millis(100));
         assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
         assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+    }
+
+    // --- Finalization fence rework: drain / bounded-wait / park (steering-park-resume, Task 1) ---
+
+    /// A tool ran while a steering row became interpreted as a plain `continue` — the disposition
+    /// `wait_for_interrupting_control` (used mid-round/mid-tool) deliberately ignores, so it never
+    /// surfaces there. The fence's drain step must pick it up via `current_turn_control()` directly
+    /// (which returns ANY interpreted row, continue included) instead of spinning on it forever.
+    #[derive(Default)]
+    struct TrailingContinueAtFenceModel {
+        calls: AtomicUsize,
+        control_ready: AtomicBool,
+        applied: AtomicBool,
+        completed: AtomicBool,
+    }
+
+    impl ModelClient for TrailingContinueAtFenceModel {
+        fn finalization_fence(&self) -> crate::FinalizationFence {
+            if self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst) {
+                crate::FinalizationFence::PendingInput
+            } else {
+                crate::FinalizationFence::Ready
+            }
+        }
+
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            (self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst)).then(
+                || crate::TurnControlDecision {
+                    steering_id: 11,
+                    disposition: crate::TurnControlDisposition::ContinueCurrentWork,
+                    instruction: "Keep going with the current step".to_string(),
+                },
+            )
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            loop {
+                if let Some(control) = self.current_turn_control() {
+                    return control;
+                }
+                tokio::task::yield_now().await;
+            }
+        }
+
+        fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+            assert_eq!(steering_id, 11);
+            self.applied.store(true, Ordering::SeqCst);
+        }
+
+        fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+            assert_eq!(steering_id, 11);
+            self.completed.store(true, Ordering::SeqCst);
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "browse_once",
+                        "type": "function",
+                        "function": { "name": "browse", "arguments": "{}" }
+                    }]
+                })
+            } else {
+                assert!(call.is_final_round);
+                assert!(self.applied.load(Ordering::SeqCst));
+                assert!(call.messages.iter().any(|message| {
+                    message["content"].as_str().is_some_and(|content| {
+                        content.contains("Keep going with the current step")
+                    })
+                }));
+                json!({"role": "assistant", "content": "Answer after the drained continue."})
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct ContinueSettingBrowseTool<'a>(&'a TrailingContinueAtFenceModel);
+
+    impl CapabilityExecutor for ContinueSettingBrowseTool<'_> {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            self.0.control_ready.store(true, Ordering::SeqCst);
+            Ok(ToolOutcome {
+                result: "found: false".to_string(),
+                effects: ToolEffects::default(),
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn trailing_continue_at_the_fence_is_drained_and_finalizes() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "research" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = TrailingContinueAtFenceModel::default();
+        let tool = ContinueSettingBrowseTool(&model);
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 1;
+        turn_cfg.max_rounds = 1;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "research".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // The trailing `continue` sitting at the fence is drained (applied) rather than parked —
+        // the turn finalizes via forced synthesis instead of hanging on the old spin.
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert!(model.applied.load(Ordering::SeqCst));
+        assert!(model.completed.load(Ordering::SeqCst));
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            1
+        );
+    }
+
+    /// The fence stays `PendingInput` forever and `current_turn_control()` never returns an
+    /// interpreted row (the steering stays `pending`/`claimed` — e.g. the semantic model is
+    /// unavailable to interpret it). Against the OLD spin this hangs forever; the reworked fence
+    /// must park within its bounded wait budget instead.
+    #[derive(Default)]
+    struct NeverInterpretedSteeringModel {
+        calls: AtomicUsize,
+        wait_calls: AtomicUsize,
+    }
+
+    impl ModelClient for NeverInterpretedSteeringModel {
+        fn finalization_fence(&self) -> crate::FinalizationFence {
+            crate::FinalizationFence::PendingInput
+        }
+
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            None
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            self.wait_calls.fetch_add(1, Ordering::SeqCst);
+            // One cooperative yield per cycle (not a real sleep) so 40 bounded-wait cycles run
+            // near-instantly here, while still giving `tokio::time::timeout` a scheduling point
+            // to preempt a regression to the old non-yielding spin.
+            tokio::task::yield_now().await;
+            crate::TurnControlDecision {
+                steering_id: 42,
+                disposition: crate::TurnControlDisposition::ContinueCurrentWork,
+                instruction: "row still pending; not yet interpreted".to_string(),
+            }
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "Draft answer while steering is still pending.",
+                }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn uninterpreted_pending_steering_at_the_fence_parks_within_budget() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "investigate" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = NeverInterpretedSteeringModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 1;
+        turn_cfg.max_rounds = 1;
+
+        // Guard against a regression to the old infinite spin: fail fast with a clear panic
+        // instead of hanging the whole test binary.
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_turn(
+                ls,
+                turn_cfg,
+                &usage_context(),
+                &model,
+                &NoTools,
+                &mut browser,
+                &NoPlan,
+                &DoneJudge,
+                &NoCompact,
+                &OpenPolicy,
+                &journal,
+                &sink,
+                0.0,
+                None,
+                &std::collections::BTreeSet::new(),
+                &[],
+                "investigate".to_string(),
+                String::new(),
+                None,
+                false,
+                0,
+                false,
+                Vec::new(),
+                None,
+                &crate::turn_trace::TurnTrace::disabled(),
+            ),
+        )
+        .await
+        .expect("run_turn must park within its bounded wait budget, not hang");
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Parked);
+        assert!(outcome.memory_answer.is_empty());
+        assert!(
+            model.wait_calls.load(Ordering::SeqCst) > 0,
+            "expected the bounded wait to poll wait_for_turn_control at least once"
+        );
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            0,
+            "a parked turn must never emit a terminal Done"
+        );
     }
 }
