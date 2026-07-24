@@ -18419,16 +18419,23 @@ fn browser_action_execution_fields_are_schema_legal(action: &serde_json::Value) 
 
 /// D2 machine classification of a browser action's progress — control metadata, NEVER prose or
 /// button-label text. The guarded loop's stall/no-progress budget depends on this distinguishing a
-/// goal-advancing action from a no-op re-type or a failure: a `type`/`fill` that selected no
-/// autocomplete suggestion (`committed_option == false`), or any action that errored or left the
-/// page unchanged, is NOT progress — even though a `type`'s own text edit always changes the
-/// snapshot, which is exactly why `no_change` alone cannot classify a typeahead.
+/// goal-advancing action from a no-op re-type or a failure.
+///
+/// The ONLY `type`/`fill` shape that is no-progress is the "Napoli ×3" churn: a typeahead where a
+/// suggestion LIST appeared (`suggestions_present`) but nothing was selected (`!committed_option`).
+/// A plain field with no list, a committed suggestion, or an explicit submit (Enter/`submit:true`,
+/// which skips autocomplete and thus never sets `committed_option`) all filled/advanced the field
+/// → progress. Classifying every uncommitted `type`/`fill` as no-progress would stall an ordinary
+/// multi-field form mid-way, which is the opposite of this build's goal.
+///
+/// `navigate` is NOT handled here — the caller only invokes this for `browser_act` kinds; a
+/// `browser_navigate` is classified by the `Result` variant in `execute_browser_tool`'s fallback.
 fn browser_action_outcome_hint(
     kind: &str,
     ok: bool,
     no_change: bool,
     committed_option: bool,
-    navigated_ok: bool,
+    suggestions_present: bool,
     errored: bool,
 ) -> local_first_engine::contract::ToolOutcomeHint {
     use local_first_engine::contract::ToolOutcomeHint::{NoProgress, Success};
@@ -18436,18 +18443,14 @@ fn browser_action_outcome_hint(
         return NoProgress;
     }
     match kind {
-        "navigate" => {
-            if navigated_ok {
-                Success
-            } else {
-                NoProgress
-            }
-        }
+        // A typeahead list appeared but no suggestion was committed → churn. Everything else a
+        // successful type/fill can be (plain field filled, suggestion committed, explicit submit)
+        // is progress.
         "type" | "fill" => {
-            if committed_option {
-                Success
-            } else {
+            if suggestions_present && !committed_option {
                 NoProgress
+            } else {
+                Success
             }
         }
         // Any other action (click, press, select, a bundle, …): progress iff it changed the page.
@@ -18466,11 +18469,17 @@ mod browser_outcome_hint_tests {
     use super::browser_action_outcome_hint;
     use local_first_engine::contract::ToolOutcomeHint::{NoProgress, Success};
 
+    // Signature: browser_action_outcome_hint(kind, ok, no_change, committed_option, suggestions_present, errored)
+
     #[test]
-    fn type_without_committed_suggestion_is_no_progress() {
-        // The "Napoli ×3" case: the type executed fine but selected no station suggestion.
+    fn typeahead_list_appeared_but_nothing_selected_is_no_progress() {
+        // The "Napoli ×3" case: a suggestion list rendered but no station was committed.
         assert_eq!(
-            browser_action_outcome_hint("type", true, false, false, false, false),
+            browser_action_outcome_hint("type", true, false, false, true, false),
+            NoProgress
+        );
+        assert_eq!(
+            browser_action_outcome_hint("fill", true, false, false, true, false),
             NoProgress
         );
     }
@@ -18478,16 +18487,32 @@ mod browser_outcome_hint_tests {
     #[test]
     fn type_with_committed_suggestion_is_progress() {
         assert_eq!(
-            browser_action_outcome_hint("type", true, false, true, false, false),
+            browser_action_outcome_hint("type", true, false, true, true, false),
             Success
         );
     }
 
     #[test]
-    fn fill_without_committed_suggestion_is_no_progress() {
+    fn plain_field_type_or_fill_with_no_list_is_progress() {
+        // C1 regression: an ordinary form field (no typeahead) fills successfully — progress, so a
+        // multi-field form is not stalled mid-way.
+        assert_eq!(
+            browser_action_outcome_hint("type", true, false, false, false, false),
+            Success
+        );
         assert_eq!(
             browser_action_outcome_hint("fill", true, false, false, false, false),
-            NoProgress
+            Success
+        );
+    }
+
+    #[test]
+    fn explicit_submit_type_is_progress() {
+        // `submit:true` / Enter skips autocomplete → no committed_option and no suggestions list,
+        // but it advanced the page. Must be progress, not a stall.
+        assert_eq!(
+            browser_action_outcome_hint("type", true, false, false, false, false),
+            Success
         );
     }
 
@@ -18498,7 +18523,7 @@ mod browser_outcome_hint_tests {
             NoProgress
         );
         assert_eq!(
-            browser_action_outcome_hint("navigate", false, false, false, false, false),
+            browser_action_outcome_hint("type", false, false, false, false, false),
             NoProgress
         );
     }
@@ -18511,18 +18536,6 @@ mod browser_outcome_hint_tests {
         );
         assert_eq!(
             browser_action_outcome_hint("click", true, true, false, false, false),
-            NoProgress
-        );
-    }
-
-    #[test]
-    fn navigate_ok_is_progress_failed_is_not() {
-        assert_eq!(
-            browser_action_outcome_hint("navigate", true, false, false, true, false),
-            Success
-        );
-        assert_eq!(
-            browser_action_outcome_hint("navigate", true, false, false, false, false),
             NoProgress
         );
     }
@@ -23450,18 +23463,24 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                         }
                                     }
                                 }
-                                // D2: machine progress classification for the guarded loop's
-                                // stall budget — from the sidecar's signals (committed suggestion,
-                                // page change), never re-derived from the prose in `out` above.
+                                // D2: machine progress classification for the guarded loop's stall
+                                // budget — from the sidecar's signals (committed suggestion, whether
+                                // a suggestion list appeared, page change), never re-derived from the
+                                // prose in `out` above.
+                                let committed_option = value
+                                    .get("committedOption")
+                                    .and_then(|v| v.as_str())
+                                    .is_some_and(|s| !s.trim().is_empty());
+                                let suggestions_present = value
+                                    .get("suggestions")
+                                    .and_then(|v| v.as_array())
+                                    .is_some_and(|a| !a.is_empty());
                                 *ctx.outcome_hint = Some(browser_action_outcome_hint(
                                     args.get("kind").and_then(|k| k.as_str()).unwrap_or(""),
                                     true,
                                     no_change,
-                                    value
-                                        .get("committedOption")
-                                        .and_then(|v| v.as_str())
-                                        .is_some_and(|s| !s.trim().is_empty()),
-                                    false,
+                                    committed_option,
+                                    suggestions_present,
                                     false,
                                 ));
                                 Ok(out)

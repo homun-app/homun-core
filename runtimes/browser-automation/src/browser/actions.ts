@@ -761,14 +761,21 @@ async function selectSuggestion(
   best: { text: string; index: number; locator: Locator },
   optionCount: number,
   timeout: number,
+  // ARIA comboboxes swallow Enter (they select the highlighted option, no form submit), so the
+  // keyboard fallback is safe there. On a NON-ARIA input Enter submits the enclosing form — a
+  // committing action the model never requested and the payment gate never judged — so the
+  // non-ARIA fallback passes `false` and we click-only: a mis-scored row is left unselected rather
+  // than risking a submit.
+  allowKeyboardCommit = true,
 ): Promise<boolean> {
   try {
     await best.locator.click({ timeout });
     await page.waitForTimeout(120);
     if (await selectionConfirmed(input, optionLocator, best.text)) return true;
   } catch {
-    /* keyboard-only widget or stale — try the keyboard */
+    /* keyboard-only widget or stale — try the keyboard (only when Enter can't submit a form) */
   }
+  if (!allowKeyboardCommit) return false;
   try {
     await input.click({ timeout }).catch(() => undefined);
     const steps = Math.min(best.index + 1, optionCount);
@@ -852,6 +859,7 @@ async function trySelectFromOpenList(
   timeout: number,
   minScore = 1,
   waitMs?: number,
+  allowKeyboardCommit = true,
 ): Promise<{ committed?: string; options: string[]; appeared: boolean }> {
   try {
     await optionLocator.first().waitFor({ state: "visible", timeout: waitMs ?? Math.min(timeout, 1800) });
@@ -891,20 +899,21 @@ async function trySelectFromOpenList(
   const best = scored[0];
   const singleOptionOk = options.length === 1 && (minScore <= 1 || best.score >= 1);
   if (best.score >= minScore || singleOptionOk) {
-    const confirmed = await selectSuggestion(page, input, optionLocator, best, options.length, timeout);
+    const confirmed = await selectSuggestion(page, input, optionLocator, best, options.length, timeout, allowKeyboardCommit);
     return { committed: confirmed ? best.text : undefined, options: optionTexts, appeared: true };
   }
   // Dropdown shown, but nothing relates to the target → ambiguous, don't guess.
   return { options: optionTexts, appeared: true };
 }
 
-// Bounded, visible-only set of plausible suggestion rows for the non-ARIA
-// fallback below. Deliberately narrow (role=option/listbox descendants, or a
-// handful of common suggestion/autocomplete/typeahead/dropdown class-name
-// conventions) so it never matches arbitrary page chrome — a real page's
-// unrelated buttons/links don't carry these roles or class-name conventions.
+// Bounded, visible-only set of plausible suggestion rows for the non-ARIA fallback below.
+// Deliberately narrow — explicit option roles, or the FULL-word class-name conventions real
+// typeahead widgets use (`suggestion`/`autocomplete`/`typeahead`) as `li` children. Notably it
+// does NOT use `[class*="auto"]` (which matches Tailwind utility classes like `mx-auto`,
+// `overflow-auto` on any `ul`) nor a bare `[role="listbox"] *` (which would match any descendant of
+// any listbox on the page) — both would let it click unrelated page chrome.
 const NON_ARIA_OPTION_SELECTOR =
-  '[role="option"], [role="listbox"] *:not([role="listbox"]), ul[class*="suggest" i] li, ul[class*="auto" i] li, [class*="suggestion" i]:not(:has(*)), [class*="typeahead" i] li, [class*="dropdown" i] li';
+  '[role="option"], [role="listbox"] li, ul[class*="suggestion" i] li, ul[class*="autocomplete" i] li, ul[class*="typeahead" i] li, [class*="suggestion" i] li, [class*="typeahead" i] li';
 
 /// Owns the autocomplete protocol so the MODEL doesn't have to: the caller types
 /// the full value once; here we (1) try to select a matching suggestion; (2) if
@@ -929,9 +938,11 @@ async function confirmAutocomplete(
     // strong enough shows up in response to the full typed value, we simply
     // leave the field holding the full text — current, safe behavior.
     const nonAriaOptionLocator = page.locator(NON_ARIA_OPTION_SELECTOR).locator("visible=true");
-    // Short wait (500ms): this probe runs on every non-ARIA `type`, so it must
-    // not stall ordinary form typing waiting for a list that will never appear.
-    const fallback = await trySelectFromOpenList(page, input, nonAriaOptionLocator, typed, timeout, 3, 500);
+    // Short wait (500ms): this probe runs on every non-ARIA `type`, so it must not stall ordinary
+    // form typing waiting for a list that will never appear. `allowKeyboardCommit=false`: a
+    // non-ARIA input's Enter submits the enclosing form, so we click-only — never risk a submit the
+    // model didn't ask for (and the payment gate never judged) on a mis-scored row.
+    const fallback = await trySelectFromOpenList(page, input, nonAriaOptionLocator, typed, timeout, 3, 500, false);
     if (fallback.committed) return { committed: fallback.committed, options: fallback.options };
     return { options: fallback.options };
   }

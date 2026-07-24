@@ -886,9 +886,20 @@ missing, give what you have and note the gap in one short line.",
                             source: name.to_string(),
                         });
                     }
+                    // A delegated `browse` call reports `browser_activity_observed` (it did real
+                    // browser work in its sub-turn). In the MANAGER turn no granular browser tool ever
+                    // runs, so the granular-branch progress reset below never fires here — without this,
+                    // the manager's stall clock would stay pinned at turn start and a healthy long
+                    // browse (up to its own 300s deadline) would trip the manager's stall window the
+                    // moment it returns, ending the turn before the model can use the result (C2). A
+                    // browse call IS progress at the manager level → reset the stall clock.
+                    let browser_activity_observed = tool_effects.browser_activity_observed;
                     // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                     // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
                     ls.apply_effects(&mut pending_confirm, round, tool_effects);
+                    if browser_activity_observed {
+                        last_browser_progress_at = Instant::now();
+                    }
 
                     // Collect source URLs from browser results so the final
                     // answer can carry a deterministic "Fonti" section. The
@@ -3636,6 +3647,118 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert!(started.elapsed() < std::time::Duration::from_millis(100));
         assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
         assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// Round 0 delegates to `browse`; the next round answers from the result — no `is_final_round`
+    /// expectation (the browse COMPLETES normally here, so round 1 is an ordinary round, unlike the
+    /// budget-exhausted deadline test where the second call is a forced synthesis).
+    #[derive(Default)]
+    struct BrowseThenAnswerModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for BrowseThenAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let (message, finish) = if index == 0 {
+                (
+                    json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "browse_0",
+                            "type": "function",
+                            "function": { "name": "browse", "arguments": "{\"goal\":\"test\"}" }
+                        }]
+                    }),
+                    "tool_calls",
+                )
+            } else {
+                (json!({"role": "assistant", "content": "Answer using the browse result."}), "stop")
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(finish.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_completed_delegated_browse_does_not_trip_the_manager_stall_window_on_return() {
+        // C2 regression: a healthy `browse` that legitimately runs longer than the MANAGER turn's
+        // stall window must NOT stall the manager the moment it returns — the model has to get its
+        // next round to use the browse result. `browser_activity_observed` resets the manager stall
+        // clock (the granular-branch reset never fires in the manager turn). Without the fix the
+        // model would be cut off after the browse (1 call, budget_exceeded).
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = BrowseThenAnswerModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_budget.max_elapsed_ms = 300_000; // browse completes (its 120ms << cap)
+        turn_cfg.browser_budget.max_stall_ms = 80; // < the browse's 120ms → would stall on return
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &SlowDelegatedBrowse,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let stalls = journal
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+            .count();
+        assert_eq!(stalls, 0, "a completed browse must not trip the manager stall window on return");
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            2,
+            "the model must get its post-browse round to use the result"
+        );
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
     }
 
     // --- Finalization fence rework: drain / bounded-wait / park (steering-park-resume, Task 1) ---
