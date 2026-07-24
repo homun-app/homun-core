@@ -29,6 +29,7 @@ export async function recoverTurnStream(options) {
   let reconnects = 0;
   let activeReconnects = 0;
   let terminalRecoveryAttempts = 0;
+  let statusProbeFailures = 0;
   let lastTransportError;
 
   while (true) {
@@ -54,12 +55,27 @@ export async function recoverTurnStream(options) {
     let durableStatus;
     try {
       durableStatus = await getStatus(turnId);
+      // A successful probe clears the failure streak: only *consecutive*
+      // status failures should ever burn the recovery budget below.
+      statusProbeFailures = 0;
     } catch (error) {
-      throw new TurnStreamRecoveryError(
-        `Turn ${turnId} cannot be recovered because its durable state is unavailable.`,
-        "turn_stream_state_unavailable",
-        error,
-      );
+      // A gateway restart/blip is exactly the moment this probe is most
+      // likely to fail, and exactly the moment recovery matters most. Treat
+      // it like the stream `connect` failures above: absorb it and retry
+      // with the same bounded backoff/budget, instead of throwing a false
+      // terminal error on the first hiccup.
+      if (statusProbeFailures >= maxReconnects) {
+        throw new TurnStreamRecoveryError(
+          `Turn ${turnId} cannot be recovered because its durable state has been unavailable for ${statusProbeFailures + 1} consecutive attempts.`,
+          "turn_stream_state_unavailable",
+          error,
+        );
+      }
+      statusProbeFailures += 1;
+      const delay = reconnectDelays[Math.min(reconnects, reconnectDelays.length - 1)] ?? 0;
+      reconnects += 1;
+      await sleep(delay);
+      continue;
     }
 
     if (DURABLE_HANDOFF.has(durableStatus.status) && state.lastSeq > 0) {
