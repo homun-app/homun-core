@@ -631,6 +631,26 @@ impl TaskStore {
         Ok(record)
     }
 
+    /// Upserts the thread's single objective contract. Idempotent on the objective's
+    /// SUBSTANTIVE identity (review I1, steering park+resume Build 2): `revision`
+    /// only bumps when `objective` (text) or `mode` actually differ from the stored
+    /// row; every other field (scope/allowed_actions/completion/status) still always
+    /// updates to the latest projection, just without forcing a new revision.
+    ///
+    /// This matters because `execute_chat_turn_task` calls this on EVERY dispatch of
+    /// a chat_turn, including a coordinator-driven RESUME of a parked turn — which
+    /// re-derives the objective from a fresh model call. A fresh call's raw semantic
+    /// decision (confidence/rationale, embedded in `scope_json`) is essentially never
+    /// byte-identical even when the underlying objective is unchanged, so gating the
+    /// bump on the full row (as an unconditional `revision + 1` effectively did) bumps
+    /// on every resume — desyncing the resumed run's objective revision from the
+    /// `objective_revision` a pending steering row was queued against. That mismatch
+    /// makes `steering_requires_confirmation`'s `!revision_matches` unconditionally
+    /// true, silently downgrading an otherwise-actionable steering decision to
+    /// `NeedsClarification` right when resume is supposed to apply it. Comparing only
+    /// `objective` + `mode` (the contract's actual identity) keeps "a genuinely
+    /// different objective forces reinterpretation" intact while making "the exact
+    /// same ask, re-derived" a no-op on the revision counter.
     #[allow(clippy::too_many_arguments)]
     pub fn upsert_objective_contract(
         &self,
@@ -666,7 +686,12 @@ impl TaskStore {
                 allowed_actions_json = excluded.allowed_actions_json,
                 completion_json = excluded.completion_json,
                 status = excluded.status,
-                revision = objective_contracts.revision + 1,
+                revision = CASE
+                    WHEN objective_contracts.objective = excluded.objective
+                     AND objective_contracts.mode = excluded.mode
+                    THEN objective_contracts.revision
+                    ELSE objective_contracts.revision + 1
+                END,
                 updated_at = excluded.updated_at",
             params![
                 user_id,
@@ -2362,9 +2387,26 @@ impl TaskStore {
     /// gateway-restart abort, just with a different reason string) and flips the
     /// chat_turn task `running -> parked`. `Parked` is an active, non-terminal status
     /// the scheduler's `Queued|Pending` dispatch never picks up; only the coordinator's
-    /// resume trigger (`unpark_chat_turn_to_queued`) moves it forward. Steering rows
-    /// are untouched here (left `pending` for the resumed run to interpret). Idempotent:
-    /// a no-op if the task is not currently `running` (already parked/terminal/gone).
+    /// resume trigger (`unpark_chat_turn_to_queued`) moves it forward. Still-`pending`
+    /// steering rows are untouched (left `pending` for the resumed run to interpret);
+    /// any `claimed`-but-not-yet-`interpreted` row is released back to `pending` (see
+    /// below — review I2). Idempotent: a no-op if the task is not currently `running`
+    /// (already parked/terminal/gone).
+    ///
+    /// Releasing `claimed` rows (review I2, steering park+resume Build 2): the
+    /// finalization fence only parks once its bounded wait finds nothing newly
+    /// INTERPRETED (an interpreted row is drained/applied before park — see
+    /// `agent_loop`'s fence), so the only steering states that can still be present
+    /// at park time are `pending` (never claimed) or `claimed` (the coordinator
+    /// claimed it under the run that's being aborted right now, but interpretation
+    /// hadn't finished within the park budget). A `claimed` row left bound to the
+    /// now-aborted run would (a) never appear in `list_due_pending_turn_steering`
+    /// (pending-only — the coordinator would never re-probe it) and (b) permanently
+    /// block `fence_chat_turn_finalization` (which counts `pending|claimed|interpreted`)
+    /// on the RESUMED run too, since nothing can ever finish interpreting a claim bound
+    /// to a dead run — re-parking at every fence forever. Releasing it back to
+    /// `pending` here lets the resumed run's coordinator poll re-claim and interpret it
+    /// normally, same as any other pending row.
     ///
     /// Releases the task's resource reservation (e.g. the single shared `BrowserSession`
     /// slot, `broker::chat_turn_resource_requirements`) and clears its lease, mirroring
@@ -2432,6 +2474,24 @@ impl TaskStore {
                 workspace_id,
             ],
         )?;
+        // Release any `claimed`-but-not-`interpreted` steering row back to `pending`
+        // (review I2 — see the doc comment above): unbinds it from the run just
+        // aborted so the due-scan (pending-only) and a resumed run's fresh claim can
+        // both see it again, instead of parking forever on a claim nothing can ever
+        // finish.
+        tx.execute(
+            "UPDATE turn_steering
+             SET status = 'pending', claimed_run_id = NULL, claimed_round = NULL,
+                 claimed_at = NULL, revision = revision + 1, updated_at = ?1
+             WHERE user_id = ?2 AND workspace_id = ?3 AND active_turn_id = ?4
+               AND status = 'claimed'",
+            params![
+                OffsetDateTime::now_utc().unix_timestamp(),
+                user_id,
+                workspace_id,
+                turn_id,
+            ],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -2441,6 +2501,16 @@ impl TaskStore {
     /// checkpoint via the now-widened `latest_resumable_checkpoint_for_turn`.
     /// Returns whether a parked row was actually flipped (`false` if the task
     /// wasn't `parked` — e.g. already resumed by a concurrent call, or cancelled).
+    ///
+    /// Also resets `interpretation_attempts`/backoff on the turn's still-`pending`
+    /// steering (review C1 hardening, steering park+resume Build 2): that counter is
+    /// SHARED by the parked-model-down probe's backoff and the coordinator's orphan
+    /// budget (`MAX_ORPHAN_INTERPRETATION_ATTEMPTS` in `steering_control.rs`).
+    /// Without this reset, attempts built up purely from waiting out a model outage
+    /// would carry forward into the resumed turn — letting ordinary probe backoffs
+    /// alone tip a resumed (and about-to-be-applied) steering into `held` the moment
+    /// any later poll is misread as orphaned. A successful resume is a natural,
+    /// deliberate point to zero the slate.
     pub fn unpark_chat_turn_to_queued(
         &self,
         turn_id: &str,
@@ -2476,6 +2546,21 @@ impl TaskStore {
                 workspace_id,
             ],
         )?;
+        if changed == 1 {
+            tx.execute(
+                "UPDATE turn_steering
+                 SET interpretation_attempts = 0, next_retry_at = NULL,
+                     last_interpretation_error = NULL, revision = revision + 1, updated_at = ?1
+                 WHERE user_id = ?2 AND workspace_id = ?3 AND active_turn_id = ?4
+                   AND status = 'pending'",
+                params![
+                    OffsetDateTime::now_utc().unix_timestamp(),
+                    user_id,
+                    workspace_id,
+                    turn_id,
+                ],
+            )?;
+        }
         tx.commit()?;
         Ok(changed == 1)
     }
@@ -3275,6 +3360,73 @@ mod runtime_plan_tests {
             .is_none());
     }
 
+    /// Review I1 regression: a resumed chat_turn re-derives its objective from a
+    /// fresh model call (`execute_chat_turn_task` calls `upsert_objective_contract`
+    /// on every dispatch, resume included). An unconditional `revision + 1` on that
+    /// re-derivation desyncs the resumed run's revision from whatever a pending
+    /// steering row was stamped with, forcing it into `NeedsClarification`. Same
+    /// `objective` + `mode` must be a no-op on the revision counter even when the
+    /// surrounding scope/allowed_actions/completion differ (as they realistically do —
+    /// scope_json embeds the raw semantic decision, including volatile
+    /// confidence/rationale text that is never byte-identical across two model calls).
+    #[test]
+    fn upsert_objective_contract_is_idempotent_on_unchanged_objective_and_mode() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-1",
+                "Investigate the failing test and report findings",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({"resources": ["project"], "semantic_decision": {"confidence": 0.91, "rationale": "first pass"}}),
+                &json!(["read"]),
+                &json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+
+        // Re-derived (e.g. a resume's fresh model call): SAME objective + mode, but a
+        // DIFFERENT scope_json (different confidence/rationale) and source_message_id.
+        let second = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-2",
+                "Investigate the failing test and report findings",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({"resources": ["project"], "semantic_decision": {"confidence": 0.87, "rationale": "second pass, slightly different wording"}}),
+                &json!(["read"]),
+                &json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+
+        assert_eq!(first.revision, second.revision, "unchanged objective/mode must not bump revision");
+        assert_eq!(second.source_message_id, "message-2", "provenance still updates");
+        assert_eq!(second.scope_json["semantic_decision"]["confidence"], 0.87, "other fields still update");
+
+        // A genuinely different objective still bumps (existing behavior preserved —
+        // matches `objective_contract_is_created_and_replaced_in_place` above).
+        let third = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-3",
+                "Investigate the failing test AND fix the underlying bug",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({"resources": ["project"]}),
+                &json!(["read"]),
+                &json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+        assert_eq!(third.revision, second.revision + 1, "a changed objective still bumps");
+    }
+
     #[test]
     fn runtime_plan_is_bound_to_an_objective_revision() {
         let store = TaskStore::open_in_memory().unwrap();
@@ -3773,6 +3925,74 @@ mod agent_control_state_tests {
             1,
             "re-dispatch re-reserves the slot exactly like the first acquire"
         );
+    }
+
+    /// Review I2 regression: a steering row still `claimed` under the run being
+    /// aborted must NOT stay `claimed` across park — it must be released back to
+    /// `pending` so (a) the due-scan (pending-only) can see it again and (b) a later
+    /// fence check doesn't count it as blocking forever against a run that will never
+    /// finish interpreting it.
+    #[test]
+    fn park_releases_a_claimed_but_uninterpreted_steering_row_back_to_pending() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let task = seed_chat_turn(&store, "turn");
+        store.reserve_resources(&task, "worker_a").unwrap();
+        store.create_agent_run(&run("run")).unwrap();
+
+        store
+            .append_turn_steering(
+                "user",
+                "workspace",
+                "thread",
+                "turn",
+                &NewTurnSteering {
+                    source_message_id: "message-1".to_string(),
+                    prompt: "finish now".to_string(),
+                    visible_prompt: "finish now".to_string(),
+                    images: Vec::new(),
+                    attachments: json!([]),
+                    mode: None,
+                    model: None,
+                },
+                1,
+            )
+            .unwrap();
+        // The coordinator claimed it under "run" but interpretation didn't finish
+        // before the fence's park budget expired.
+        let claimed = store
+            .claim_pending_turn_steering("user", "workspace", "thread", "turn", "run", 0)
+            .unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].status, TurnSteeringStatus::Claimed, "precondition");
+
+        // Before park: a claimed row is invisible to the due-scan and blocks the fence.
+        assert!(store.list_due_pending_turn_steering(i64::MAX, 10).unwrap().is_empty());
+        assert!(!store.fence_chat_turn_finalization("user", "workspace", "turn").unwrap());
+
+        store.park_chat_turn("turn", "user", "workspace").unwrap();
+
+        let released = store
+            .list_turn_steering("user", "workspace", "thread")
+            .unwrap()
+            .into_iter()
+            .find(|row| row.steering_id == claimed[0].steering_id)
+            .unwrap();
+        assert_eq!(released.status, TurnSteeringStatus::Pending, "released back to pending");
+        assert!(released.claimed_run_id.is_none());
+        assert!(released.claimed_round.is_none());
+        assert!(released.claimed_at.is_none());
+
+        // After park: it reappears in the due-scan, ready for the resumed run to claim.
+        let due = store.list_due_pending_turn_steering(i64::MAX, 10).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].steering_id, claimed[0].steering_id);
+
+        // A resumed run re-claims and interprets it normally.
+        let reclaimed = store
+            .claim_pending_turn_steering("user", "workspace", "thread", "turn", "run-2", 0)
+            .unwrap();
+        assert_eq!(reclaimed.len(), 1);
+        assert_eq!(reclaimed[0].claimed_run_id.as_deref(), Some("run-2"));
     }
 
     #[test]

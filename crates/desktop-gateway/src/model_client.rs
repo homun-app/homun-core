@@ -1365,4 +1365,132 @@ mod tests {
             started.elapsed()
         );
     }
+
+    /// Review I1 regression: a resumed chat_turn re-derives its objective from a
+    /// fresh model call (`execute_chat_turn_task` calls `upsert_objective_contract`
+    /// on EVERY dispatch, resume included). Before the store-level fix, an
+    /// unconditional `revision + 1` on that re-derivation desynced the resumed run's
+    /// objective revision from whatever a pending steering row was stamped with at
+    /// append time, forcing `steering_requires_confirmation`'s `!revision_matches`
+    /// unconditionally true — silently downgrading an otherwise-actionable steering
+    /// decision to `NeedsClarification` right when resume is supposed to apply it.
+    #[test]
+    fn resumed_steering_with_unchanged_objective_is_applied_not_demoted() {
+        let state = crate::AppState::for_tests();
+        let (user, workspace, thread, turn_id) = ("u", "w", "t", "turn-1");
+
+        // Original dispatch: objective at revision 1.
+        let original = state
+            .task_store
+            .lock()
+            .unwrap()
+            .upsert_objective_contract(
+                user,
+                workspace,
+                thread,
+                "message-1",
+                "Investigate the failing test and report findings",
+                local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                &serde_json::json!({"resources": ["project"], "semantic_decision": {"confidence": 0.91}}),
+                &serde_json::json!(["read"]),
+                &serde_json::json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+
+        // A steering message queued against that revision — mirrors the real
+        // `append_turn_steering` call site, which stamps `objective_revision` with
+        // whatever the CURRENT contract revision is at append time.
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .append_turn_steering(
+                user,
+                workspace,
+                thread,
+                turn_id,
+                &local_first_task_runtime::NewTurnSteering {
+                    source_message_id: "steer-1".to_string(),
+                    prompt: "finish with what you have".to_string(),
+                    visible_prompt: "finish with what you have".to_string(),
+                    images: Vec::new(),
+                    attachments: serde_json::json!([]),
+                    mode: None,
+                    model: None,
+                },
+                original.revision,
+            )
+            .unwrap();
+
+        // Resume re-derives the SAME objective/mode from a fresh model call — a
+        // DIFFERENT scope_json (different confidence, as two real model calls
+        // realistically produce) but the same substantive objective. Must NOT bump.
+        let resumed = state
+            .task_store
+            .lock()
+            .unwrap()
+            .upsert_objective_contract(
+                user,
+                workspace,
+                thread,
+                "message-1",
+                "Investigate the failing test and report findings",
+                local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                &serde_json::json!({"resources": ["project"], "semantic_decision": {"confidence": 0.87}}),
+                &serde_json::json!(["read"]),
+                &serde_json::json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+        assert_eq!(resumed.revision, original.revision, "unchanged objective/mode must not bump across resume");
+
+        // Claim + interpret the steering under the resumed run, with a decision that
+        // is only actionable if the revision genuinely matches.
+        let run_id = "resumed-run-1";
+        let claimed = state
+            .task_store
+            .lock()
+            .unwrap()
+            .claim_pending_turn_steering(user, workspace, thread, turn_id, run_id, 0)
+            .unwrap();
+        assert_eq!(claimed.len(), 1);
+        let claimed = claimed.into_iter().next().unwrap();
+
+        let mut decision = crate::semantic_decision::safe_fallback(None, "unused");
+        decision.provenance.fallback_reason = None;
+        decision.decision.steering_disposition =
+            crate::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence;
+        decision.decision.requires_user_confirmation = false;
+        decision.decision.relationship_to_active_objective =
+            crate::semantic_decision::ObjectiveRelationship::SameObjective;
+        decision.decision.mode = local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis;
+
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::to_value(&decision).unwrap(),
+                run_id,
+            )
+            .unwrap();
+
+        let context = GatewaySteeringContext {
+            state: &state,
+            user_id: user,
+            workspace_id: workspace,
+            thread_id: thread,
+            turn_id,
+            run_id,
+        };
+        let control = current_turn_control(context).expect("interpreted control must be available");
+        assert_eq!(
+            control.disposition,
+            local_first_engine::TurnControlDisposition::FinalizeWithCurrentEvidence,
+            "must be applied under the resumed run, not demoted to NeedsClarification"
+        );
+    }
 }

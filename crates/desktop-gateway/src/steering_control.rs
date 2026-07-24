@@ -189,6 +189,53 @@ fn interpret_pending_turn(state: &crate::AppState, pending: &TurnSteeringRecord)
     }
 }
 
+/// Pure routing decision for a due `pending` steering whose turn has no `Running`
+/// agent run (review C1 fix, steering park+resume Build 2). A missing `Running` run
+/// row does NOT by itself mean the turn is gone — it is also routinely true, for
+/// EVERY turn, during two IN-TRANSIT windows: right after enqueue (before the runner
+/// picks the task up) and right after `unpark_chat_turn_to_queued` (before the
+/// resumed dispatch's own pre-run work — `execute_chat_turn_task`'s
+/// `resolve_semantic_decision`, which can take tens of seconds — finishes and
+/// `create_agent_run` finally inserts the NEW run row). Both windows must just wait
+/// for a later poll to find the run; treating "no Running run" as orphaned by itself
+/// was the actual bug — it regressed instant steering on every turn's first seconds
+/// AND, combined with the shared attempts counter, could push a steering that was
+/// seconds from being applied by the resumed run straight to `held` instead. The
+/// ORPHAN budget is reserved for the two cases nothing will EVER resolve: the task
+/// is missing entirely, or it reached a genuinely TERMINAL status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingWithoutRunRoute {
+    /// Parked with a resumable checkpoint: probe model availability, maybe unpark.
+    ProbeAndMaybeResume,
+    /// The task exists and is in any other non-terminal status — Queued, Pending,
+    /// Running (pre-run-row), WaitingXxx, Paused, or Parked without a checkpoint yet
+    /// (should not normally happen, but "alive" either way). A turn is in flight; do
+    /// nothing and let a later poll find its Running run (or its park).
+    WaitInTransit,
+    /// The task is missing entirely, or reached a terminal status: nothing will ever
+    /// interpret this row again.
+    Orphaned,
+}
+
+fn route_pending_without_running_run(
+    task_status: Option<TaskStatus>,
+    has_resumable_checkpoint: bool,
+) -> PendingWithoutRunRoute {
+    match task_status {
+        Some(TaskStatus::Parked) if has_resumable_checkpoint => {
+            PendingWithoutRunRoute::ProbeAndMaybeResume
+        }
+        Some(
+            TaskStatus::Completed
+            | TaskStatus::Failed
+            | TaskStatus::Cancelled
+            | TaskStatus::Expired,
+        )
+        | None => PendingWithoutRunRoute::Orphaned,
+        Some(_) => PendingWithoutRunRoute::WaitInTransit,
+    }
+}
+
 /// Coordinator resume trigger + orphan-row handling (design Part 3 + Part 5,
 /// steering park+resume Build 2). Called for a due `pending` steering whose turn
 /// has NO `Running` agent run. Splits the model probe out as an injected `probe`
@@ -234,88 +281,103 @@ fn resolve_pending_without_running_run<F>(
         (task_status, has_resumable_checkpoint)
     };
 
-    if task_status == Some(TaskStatus::Parked) && has_resumable_checkpoint {
-        // Otherwise the parked turn is a silent stall from the UI's point of view —
-        // no Running run to show activity for. Idempotent: only the first cycle
-        // that observes the park actually inserts the event.
-        emit_waiting_for_model_activity_once(state, &pending.active_turn_id);
+    match route_pending_without_running_run(task_status, has_resumable_checkpoint) {
+        PendingWithoutRunRoute::WaitInTransit => {
+            // In flight (just enqueued, or just unparked and awaiting its resumed
+            // dispatch's pre-run work + new agent_run row): do NOTHING. No counter
+            // increment, no defer, no probe — a later poll finds the Running run (or,
+            // if it parks again, the Parked branch) and interprets normally.
+        }
+        PendingWithoutRunRoute::ProbeAndMaybeResume => {
+            // Otherwise the parked turn is a silent stall from the UI's point of view —
+            // no Running run to show activity for. Idempotent: only the first cycle
+            // that observes the park actually inserts the event.
+            emit_waiting_for_model_activity_once(state, &pending.active_turn_id);
 
-        let objective = state.task_store.lock().ok().and_then(|store| {
-            store
-                .load_objective_contract(&pending.user_id, &pending.workspace_id, &pending.thread_id)
-                .ok()
-                .flatten()
-        });
-        let binding = crate::active_routing_binding(state, Some(&pending.thread_id));
-        // THROWAWAY probe: no claim_pending_turn_steering, no persisted result — the
-        // only thing that matters is actionable-vs-fallback (design Part 3: the real
-        // claim/interpret/apply must happen under the RESUMED run, never bound to
-        // this dead parked run_id).
-        let decision = probe(
-            Some(&pending.thread_id),
-            &pending.content,
-            objective.as_ref(),
-            binding.as_ref(),
-        );
+            let objective = state.task_store.lock().ok().and_then(|store| {
+                store
+                    .load_objective_contract(&pending.user_id, &pending.workspace_id, &pending.thread_id)
+                    .ok()
+                    .flatten()
+            });
+            let binding = crate::active_routing_binding(state, Some(&pending.thread_id));
+            // THROWAWAY probe: no claim_pending_turn_steering, no persisted result — the
+            // only thing that matters is actionable-vs-fallback (design Part 3: the real
+            // claim/interpret/apply must happen under the RESUMED run, never bound to
+            // this dead parked run_id).
+            let decision = probe(
+                Some(&pending.thread_id),
+                &pending.content,
+                objective.as_ref(),
+                binding.as_ref(),
+            );
 
-        if crate::semantic_decision::actionable_steering_decision(&decision).is_some() {
-            // Model is back: unpark so the normal runner re-dispatches and reseeds
-            // from the park checkpoint. Steering itself is untouched — it stays
-            // `pending` and gets claimed/interpreted under the NEW run on a later poll.
-            if let Ok(store) = state.task_store.lock() {
-                let _ = store.unpark_chat_turn_to_queued(
-                    &pending.active_turn_id,
-                    &pending.user_id,
-                    &pending.workspace_id,
+            if crate::semantic_decision::actionable_steering_decision(&decision).is_some() {
+                // Model is back: unpark so the normal runner re-dispatches and reseeds
+                // from the park checkpoint. Steering itself is untouched — it stays
+                // `pending` and gets claimed/interpreted under the NEW run on a later
+                // poll. `unpark_chat_turn_to_queued` also resets this row's
+                // `interpretation_attempts`/backoff (review C1 hardening) so probe
+                // backoffs accumulated while parked cannot carry into whatever the
+                // resumed turn's coordinator activity does next.
+                if let Ok(store) = state.task_store.lock() {
+                    let _ = store.unpark_chat_turn_to_queued(
+                        &pending.active_turn_id,
+                        &pending.user_id,
+                        &pending.workspace_id,
+                    );
+                }
+            } else if let Ok(store) = state.task_store.lock() {
+                // Model still down: bounded backoff on the row, no restart-thrash. The
+                // turn stays Parked until a later probe confirms the model is back.
+                let reason = decision
+                    .provenance
+                    .fallback_reason
+                    .as_deref()
+                    .unwrap_or("model_unavailable");
+                let _ = store.defer_pending_turn_steering(
+                    pending.steering_id,
+                    pending.revision,
+                    reason,
+                    now.saturating_add(retry_delay_seconds(pending.interpretation_attempts)),
                 );
             }
-        } else if let Ok(store) = state.task_store.lock() {
-            // Model still down: bounded backoff on the row, no restart-thrash. The
-            // turn stays Parked until a later probe confirms the model is back.
-            let reason = decision
-                .provenance
-                .fallback_reason
-                .as_deref()
-                .unwrap_or("model_unavailable");
-            let _ = store.defer_pending_turn_steering(
-                pending.steering_id,
-                pending.revision,
-                reason,
-                now.saturating_add(retry_delay_seconds(pending.interpretation_attempts)),
-            );
         }
-        return;
-    }
-
-    // Orphaned: no Running run AND no resumable Parked checkpoint — the turn
-    // genuinely completed/cancelled/failed and nothing will ever interpret this
-    // row. Bounded backoff first (covers benign races, e.g. the checkpoint/park
-    // flip landing a beat after this poll's snapshot); once the attempt budget is
-    // exhausted, surface it instead of polling forever.
-    let Ok(store) = state.task_store.lock() else {
-        return;
-    };
-    if pending.interpretation_attempts.saturating_add(1) >= MAX_ORPHAN_INTERPRETATION_ATTEMPTS {
-        if let Ok(held) = store.hold_pending_turn_steering(
-            &pending.user_id,
-            &pending.workspace_id,
-            &pending.active_turn_id,
-        ) {
-            if held > 0 {
-                if let Ok(Some(record)) =
-                    store.load_turn_steering(pending.steering_id, &pending.user_id, &pending.workspace_id)
-                {
-                    crate::publish_steering_changed(&record);
+        PendingWithoutRunRoute::Orphaned => {
+            // No Running run AND no resumable Parked checkpoint AND (task missing or
+            // terminal) — the turn genuinely completed/cancelled/failed and nothing
+            // will ever interpret this row. Bounded backoff first (covers benign
+            // races, e.g. the checkpoint/park flip landing a beat after this poll's
+            // snapshot); once the attempt budget is exhausted, surface it instead of
+            // polling forever.
+            let Ok(store) = state.task_store.lock() else {
+                return;
+            };
+            if pending.interpretation_attempts.saturating_add(1) >= MAX_ORPHAN_INTERPRETATION_ATTEMPTS {
+                if let Ok(held) = store.hold_pending_turn_steering(
+                    &pending.user_id,
+                    &pending.workspace_id,
+                    &pending.active_turn_id,
+                ) {
+                    if held > 0 {
+                        if let Ok(Some(record)) = store.load_turn_steering(
+                            pending.steering_id,
+                            &pending.user_id,
+                            &pending.workspace_id,
+                        ) {
+                            crate::publish_steering_changed(&record);
+                        }
+                    }
                 }
+            } else {
+                let _ = store.defer_pending_turn_steering(
+                    pending.steering_id,
+                    pending.revision,
+                    "turn_orphaned",
+                    now.saturating_add(retry_delay_seconds(pending.interpretation_attempts)),
+                );
             }
         }
-    } else {
-        let _ = store.defer_pending_turn_steering(
-            pending.steering_id,
-            pending.revision,
-            "turn_orphaned",
-            now.saturating_add(retry_delay_seconds(pending.interpretation_attempts)),
-        );
     }
 }
 
@@ -651,5 +713,87 @@ mod tests {
             })
             .count();
         assert_eq!(waiting_activity_count, 1, "idempotent — emitted exactly once despite two calls");
+    }
+
+    /// Review C1 regression: the window between `unpark_chat_turn_to_queued` (task ->
+    /// Queued, then the scheduler flips it Running) and the resumed dispatch's OWN
+    /// new `create_agent_run` row (which lands only after `execute_chat_turn_task`'s
+    /// pre-run semantic call, potentially tens of seconds later) must NOT be treated
+    /// as orphaned. Before the fix, "no Running run" alone routed here to the orphan
+    /// arm, consuming the orphan-attempt budget with a counter ALSO fed by ordinary
+    /// probe backoffs — a model outage long enough to accumulate a few backoffs,
+    /// followed by recovery + unpark, could land the very next poll (in-transit) on
+    /// `held` instead of leaving the steering to be applied by the resumed run.
+    #[test]
+    fn resume_in_transit_window_is_not_misclassified_as_orphan() {
+        let state = crate::AppState::for_tests();
+        let turn_id = "turn-c1";
+        let mut pending = seed_parked_turn_with_pending_steering(&state, turn_id, "finish now");
+
+        // A model outage: several probe cycles defer while parked, accumulating
+        // attempts on the SAME counter the orphan budget also reads.
+        for _ in 0..3 {
+            resolve_pending_without_running_run(&state, &pending, |_, _, _, _| {
+                fallback_decision("model_unavailable")
+            });
+            let store = state.task_store.lock().unwrap();
+            pending = store.load_turn_steering(pending.steering_id, "u", "w").unwrap().unwrap();
+            drop(store);
+        }
+        assert!(pending.interpretation_attempts >= 3, "attempts accumulated from the outage");
+
+        // The model recovers: the probe is actionable -> unpark.
+        resolve_pending_without_running_run(&state, &pending, |_, _, _, _| actionable_decision());
+        {
+            let store = state.task_store.lock().unwrap();
+            let task = store
+                .get_task(
+                    &local_first_task_runtime::TaskId::new(turn_id),
+                    &local_first_task_runtime::UserId::new("u"),
+                    &local_first_task_runtime::WorkspaceId::new("w"),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(task.status, TaskStatus::Queued, "unparked");
+        }
+        let after_unpark = {
+            let store = state.task_store.lock().unwrap();
+            store.load_turn_steering(pending.steering_id, "u", "w").unwrap().unwrap()
+        };
+        assert_eq!(after_unpark.interpretation_attempts, 0, "unpark resets the shared attempts counter");
+        assert_eq!(after_unpark.status, TurnSteeringStatus::Pending);
+
+        // In-transit window: the scheduler flips the task Running (mirrors the real
+        // acquire step), but the resumed dispatch has not yet created its NEW
+        // agent_run row — no Running run exists for this turn yet. This is exactly
+        // the window the coordinator's "no Running run" path sees on its very next
+        // 500ms poll.
+        {
+            let store = state.task_store.lock().unwrap();
+            let task_id = local_first_task_runtime::TaskId::new(turn_id);
+            let mut task = store
+                .get_task(
+                    &task_id,
+                    &local_first_task_runtime::UserId::new("u"),
+                    &local_first_task_runtime::WorkspaceId::new("w"),
+                )
+                .unwrap()
+                .unwrap();
+            task.status = TaskStatus::Running;
+            store.insert_chat_turn(&task, "thread", "req-1", "interactive", "full").unwrap();
+        }
+
+        let unreachable_probe = |_: Option<&str>,
+                                 _: &str,
+                                 _: Option<&local_first_task_runtime::ObjectiveContractRecord>,
+                                 _: Option<&crate::RoutingBinding>|
+         -> ValidatedSemanticDecision { panic!("in-transit must not probe the model") };
+        resolve_pending_without_running_run(&state, &after_unpark, unreachable_probe);
+
+        let store = state.task_store.lock().unwrap();
+        let row = store.load_turn_steering(after_unpark.steering_id, "u", "w").unwrap().unwrap();
+        assert_eq!(row.status, TurnSteeringStatus::Pending, "still pending — not held");
+        assert_eq!(row.interpretation_attempts, 0, "in-transit does not consume the orphan budget");
+        assert!(row.next_retry_at.is_none(), "a plain wait, not a deferred retry");
     }
 }
