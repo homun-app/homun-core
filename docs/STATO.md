@@ -3,7 +3,82 @@
 > Aggiornato a OGNI sessione (vedi [METHODOLOGY.md](METHODOLOGY.md) §6). Resta **conciso**: è
 > uno *stato*, non un changelog (lo storico va in `archive/`). Da qui si riparte dopo una
 > compattazione o a inizio sessione.
-> **Ultimo aggiornamento: 2026-07-22.**
+> **Ultimo aggiornamento: 2026-07-24.**
+
+## ⭐ CHECKPOINT 2026-07-24 (bis) — Fluidità UI desktop + residui triage chiusi
+
+Punto di partenza: l'app era percepita "poco fluida" rispetto ai competitor. L'audit ha misurato
+cause precise, non un problema architetturale — le fondamenta (coalescing rAF dei delta, memo delle
+bolle concluse, preload interamente async) erano già corrette.
+
+**Causa n°1, una riga.** `.thread-scroll` dichiarava `scroll-behavior: smooth` e l'auto-scroll dello
+streaming chiamava `scrollTo` con `behavior: "auto"` — che per spec CSSOM **eredita `smooth`**. Ogni
+flush rAF avviava un'animazione che il frame successivo annullava: la viewport inseguiva il testo con
+effetto elastico. Ora lo streaming scorre `instant`; il salto col bottone resta animato.
+
+**Costo per-frame dello streaming.** Il markdown si rende **per blocco**: solo la coda in crescita
+viene ri-parsata, i blocchi chiusi sono memoizzati (misurato 228 ms → 19 ms su 120 frame di un
+messaggio da 4,2 KB, 11,8×). Gli array dei plugin sono a livello di modulo — come letterali freschi
+annullavano il caching del processore. Un fence di codice viene evidenziato solo quando smette di
+crescere. Il transcript si indicizza una volta per render: `findPreviousUserMessage` (scansione per
+riga, O(N²) a frame) è stato **eliminato**, non affiancato.
+
+**Renderer e finestra.** Le righe fuori vista sono saltate da `content-visibility` (con esenzione
+`:has()` per la riga che ha un menu aperto — la contenzione di paint l'avrebbe tagliato); il renderer
+non è più soggetto a `backgroundThrottling` (rAF a ~1 Hz congelava lo streaming a finestra occlusa);
+la finestra si rivela su `ready-to-show` con sfondo a tema, niente flash bianco.
+
+**Stato e bundle.** Il poll operativo non ricrea più l'elenco chat a ogni tick (riconciliazione per
+identità, con confronto posizionale: la versione ingenua per-id avrebbe inghiottito i riordini).
+Chunk d'ingresso **3.571.856 → 1.144.511 byte** (−68%) con viste secondarie lazy e vendor separati.
+Un solo trasporto eventi: il canale NDJSON legacy è ritirato, resta il WebSocket unificato
+(verificato lato gateway che porti gli stessi eventi).
+
+**Residui triage chiusi:** `parked` è uno stato d'attesa nella recovery desktop (un park lungo non
+esaurisce più il budget e non produce un errore spurio); il timeout del chiamante è applicato sul
+provider locale mistral.rs (prima ignorato: una generazione bloccata teneva il worker per sempre);
+guardia sui ref in modalità delta; `needs_clarification` visibile sul `TurnOutcome` invece di essere
+appiattito su "finalizza". Il resto del cluster must-fix risultava **già chiuso** dai commit del
+24/07 (verificato nel codice, non nei doc): grafie di Enter, `scroll` che non clicca, focus
+per-target, test OOPIF cross-origin, JSON per browse, delta LCS, retry della status-probe.
+
+**Residuo cosciente (non un difetto):** `press`/`press_key` con `Space` su un controllo di submit già
+focalizzato non è classificato committing — gatare tutti gli `Space` sovra-gaterebbe la digitazione.
+
+**Aperto, spawnato come task separati:** `fontsManifest` (1,84 MB di woff2 base64) è ancora una
+dipendenza statica dal percorso chat, quindi il suo chunk è separato ma non differito;
+`project_graph.too_large` non ha alcun produttore lato gateway (il flusso "repo troppo grande" è
+morto) e `project_graph.failed` non è gestito dalla UI.
+
+**Gate finali (tutti verdi, sessione 2026-07-24):**
+| Gate | Esito |
+| --- | --- |
+| `cargo test -p local-first-engine` | 135 passed, 0 failed |
+| `cargo test -p local-first-inference --features local-mistralrs` | 31 passed, 0 failed |
+| `cargo test -p local-first-desktop-gateway` | lib 55 + main 934 + integrazioni, 0 failed; 6 ignored |
+| `npm test` (browser-automation) | 13 file, 71 passed |
+| `npm run build` (desktop) | OK |
+| `npm run test:ui-contract` | OK |
+| `npm run test:electron` | 61/61 |
+| `python3 scripts/pre_release_gate.py` | ALL GREEN |
+
+**Validazione umana ancora da fare (non computer-verificabile):** la fluidità percepita durante una
+risposta lunga in streaming, e la resa del markdown per-blocco su liste "loose", tabelle e blocchi di
+codice — i test coprono la funzione di split (32 documenti avversariali, 649 prefissi di streaming,
+7.906 prefissi fuzzati, 0 divergenze contro la pipeline reale), non l'estetica del risultato.
+
+## ⭐ CHECKPOINT 2026-07-24 — Browser Build 1/2/3, steering park+resume, changelog
+
+Tre archi mergiati in `main` (`af76ce01`). **Steering park+resume:** un turno che perde il modello
+viene parcheggiato (stato `Parked`, bolla assistant aperta, risorse e lease rilasciati) e ripreso dal
+coordinator alla ripresa del modello; la cancellazione di un turno parcheggiato finalizza la bolla.
+Chiusi i due CRITICAL steering del triage: soglia di confidence rimossa dal percorso steering,
+fallback di autenticazione esteso oltre il solo 401. **Browser Build 3:** il progresso si classifica
+da segnali macchina, non dalla prosa del risultato; il wall-clock è una finestra di stallo che si
+resetta sul progresso più un cap assoluto; selezione dagli autocomplete non-ARIA. **Release:**
+`CHANGELOG.md` è la sorgente unica delle release notes, versione `0.1.1079`. **Gate pagamenti:**
+l'executor browser durevole (`capability.browser.*`) è fail-closed, chiudendo il buco per cui le
+automazioni bypassavano l'intero gate.
 
 ## ⭐ CHECKPOINT 2026-07-22 — Interfaccia task stabile, gate app installata
 
