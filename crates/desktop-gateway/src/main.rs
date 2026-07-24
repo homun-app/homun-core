@@ -18238,11 +18238,11 @@ fn browser_act_tool_schema() -> serde_json::Value {
                         "type": "string",
                         "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])."
                     },
-                    "text": { "type": "string", "description": "Text to type (kind='type') or value (kind='fill')." },
+                    "text": { "type": "string", "description": "Text to type (kind='type'), value (kind='fill'), or the key name to press (kind='press_key'), e.g. 'Enter', 'ArrowDown'." },
                     "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
                     "values": { "type": "array", "items": { "type": "string" }, "description": "Multiple values for a multi-select." },
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
-                    "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
+                    "key": { "type": "string", "description": "Key to press for kind='press', e.g. 'Enter', 'ArrowDown'. For kind='press_key' put the key name in 'text' instead — press_key reads 'text', not 'key'." },
                     "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
                     "generation": { "type": "integer", "description": "Observation generation used to choose refs." },
                     "observationMode": { "type": "string", "enum": ["interact","delta","extract"], "description": "Observation mode to return after the action. Use delta after action bundles and extract when collecting final results." },
@@ -18264,9 +18264,9 @@ fn browser_act_tool_schema() -> serde_json::Value {
                                     "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
                                 },
                                 "ref": { "type": "string", "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])." },
-                                "text": { "type": "string", "description": "Text to type (kind='type') or value (kind='fill')." },
+                                "text": { "type": "string", "description": "Text to type (kind='type'), value (kind='fill'), or the key name to press (kind='press_key'), e.g. 'Enter', 'ArrowDown'." },
                                 "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
-                                "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
+                                "key": { "type": "string", "description": "Key to press for kind='press', e.g. 'Enter', 'ArrowDown'. For kind='press_key' put the key name in 'text' instead — press_key reads 'text', not 'key'." },
                                 "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
                                 "action_class": {
                                     "type": "string",
@@ -22102,10 +22102,11 @@ fn attachment_text_is_ready(text: &str) -> bool {
 struct BrowserToolCtx<'a> {
     browser_used: &'a mut bool,
     last_snapshot: &'a mut String,
-    // Machine-derived payment floor refs (never label text) for the current
-    // observation. Raises (never lowers) the effective action class; see
-    // `browser_safety::effective_action_class`.
-    payment_floor_refs: &'a mut std::collections::HashSet<String>,
+    // Machine-derived payment floor refs (never label text), keyed by `target_id`
+    // (Build1 Fix 3 — mirrors `payment_context_by_target` below; a single global
+    // set let observing tab A clobber tab B's floor). Raises (never lowers) the
+    // effective action class; see `browser_safety::effective_action_class`.
+    payment_floor_refs: &'a mut std::collections::HashMap<String, std::collections::HashSet<String>>,
     // Per-target_id payment context (focus flag + robust last-acted-floored flag;
     // fixes IMPORTANT D — a single global flag let a snapshot of tab A clear tab B's
     // payment context). Floors a ref-less committing action (Enter/Return) the same
@@ -22829,7 +22830,11 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 let snap = browser_snapshot_text(&value);
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
-                                    *ctx.payment_floor_refs = browser_floor_refs(&value);
+                                    browser_set_target_floor(
+                                        ctx.payment_floor_refs,
+                                        ctx.current_target.as_str(),
+                                        browser_floor_refs(&value),
+                                    );
                                     // A navigate is an explicit fresh observation of THIS target's
                                     // page: update the best-effort focus flag AND clear the robust
                                     // last-acted-floored flag (the page just changed under us).
@@ -22913,7 +22918,11 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             let snap = browser_snapshot_text(&value);
                             if !snap.is_empty() {
                                 *ctx.last_snapshot = snap.clone();
-                                *ctx.payment_floor_refs = browser_floor_refs(&value);
+                                browser_set_target_floor(
+                                    ctx.payment_floor_refs,
+                                    ctx.current_target.as_str(),
+                                    browser_floor_refs(&value),
+                                );
                                 // Explicit re-observation of THIS target: refresh the focus flag
                                 // and clear the robust flag (a model-requested snapshot is the
                                 // canonical "re-orient on this page" moment).
@@ -22999,10 +23008,17 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         ctx.payment_context_by_target,
                         ctx.current_target.as_str(),
                     );
+                    // Build1 Fix 3: resolve THIS target's floor set once, up front — every
+                    // read below in this arm is against the PRE-act observation of the SAME
+                    // target the action is about to run on, so a single owned snapshot is
+                    // correct (and sidesteps holding an immutable borrow of the map across
+                    // the later mutable `browser_set_target_floor` post-act refresh).
+                    let current_floor_refs =
+                        browser_floor_refs_for_target(ctx.payment_floor_refs, ctx.current_target.as_str());
                     if let Some(error) = normalize_browser_action_bundle(
                         &mut action,
                         ctx.current_target.as_str(),
-                        ctx.payment_floor_refs,
+                        &current_floor_refs,
                         focus_ctx,
                     ) {
                         *browser_session = Some(client);
@@ -23073,13 +23089,13 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         None
                     } else if should_claim_payment_approval(
                         &action,
-                        ctx.payment_floor_refs,
+                        &current_floor_refs,
                         focus_ctx,
                     ) {
                         match claim_payment_approval_for_action(
                             ctx.state,
                             &action,
-                            ctx.payment_floor_refs,
+                            &current_floor_refs,
                             focus_ctx,
                             ctx.thread_id,
                         ) {
@@ -23096,7 +23112,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     let blocked = blocked_before_claim.map(str::to_string).or_else(|| {
                         browser_safety::evaluate_browser_action(
                             &action,
-                            ctx.payment_floor_refs,
+                            &current_floor_refs,
                             focus_ctx,
                             approved_payment_id.as_deref(),
                         )
@@ -23142,7 +23158,7 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                         // 1.2): acting on a ref the floor already marked is proof positive of a
                         // payment interaction regardless of OS window focus.
                         let targeted_floored_ref =
-                            browser_action_targeted_a_floored_ref(&action, ctx.payment_floor_refs);
+                            browser_action_targeted_a_floored_ref(&action, &current_floor_refs);
                         let guard = browse_web_lock().lock().await;
                         let (client_back, act_res) =
                             chat_browser_call_bounded(client, BrowserMethod::Act, action)
@@ -23166,7 +23182,11 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                 }
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
-                                    *ctx.payment_floor_refs = browser_floor_refs(&value);
+                                    browser_set_target_floor(
+                                        ctx.payment_floor_refs,
+                                        ctx.current_target.as_str(),
+                                        browser_floor_refs(&value),
+                                    );
                                     browser_set_target_focus(
                                         ctx.payment_context_by_target,
                                         ctx.current_target.as_str(),
@@ -23293,8 +23313,11 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             ))
                                         } else {
                                             *ctx.last_snapshot = snap.clone();
-                                            *ctx.payment_floor_refs =
-                                                browser_floor_refs(snap_res.as_ref().unwrap());
+                                            browser_set_target_floor(
+                                                ctx.payment_floor_refs,
+                                                ctx.current_target.as_str(),
+                                                browser_floor_refs(snap_res.as_ref().unwrap()),
+                                            );
                                             // A stale ref means the page genuinely changed under us —
                                             // this recovery snapshot is a real fresh observation of
                                             // THIS target, so treat it like an explicit
@@ -26843,17 +26866,20 @@ struct GatewayBrowserExecutor<'a> {
     browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
     last_snapshot: String,
     // Machine-derived payment floor refs for the last observation (act/navigate/
-    // snapshot). Mirrors `last_snapshot`'s update sites; never derived from label
-    // text. See `browser_safety::effective_action_class`.
-    last_payment_floor_refs: std::collections::HashSet<String>,
+    // snapshot), keyed by `target_id` (Build1 Fix 3). Was a single global
+    // `HashSet` — but interleaving two tabs without re-observing the acted-on one
+    // (observe tab B, observe tab A, act on tab B's already-floored ref) let tab
+    // A's observation silently overwrite tab B's floor, failing the ref/page floor
+    // open on the next action. Per-target closes that; each entry is refreshed
+    // ONLY by an observation on that same target — never derived from label text.
+    // See `browser_safety::effective_action_class`, `browser_floor_refs_for_target`,
+    // `browser_set_target_floor`.
+    last_payment_floor_refs: std::collections::HashMap<String, std::collections::HashSet<String>>,
     // Per-`target_id` payment context (focus flag + robust last-acted-floored
     // flag). Replaces the single global `last_focus_payment_context: bool` (fixes
     // IMPORTANT D — a snapshot of tab A must not clear tab B's payment context).
-    // `last_payment_floor_refs` above stays a SINGLE field, deliberately not
-    // per-target: every navigate/snapshot/act response refreshes it for whichever
-    // target the call just touched, immediately before it gates that SAME call's
-    // action, so per-call freshness holds without a map there. See
-    // `BrowserPaymentContext`.
+    // Mirrors `last_payment_floor_refs` above, which is now ALSO per-target for
+    // the same reason (Build1 Fix 3). See `BrowserPaymentContext`.
     payment_context_by_target: std::collections::HashMap<String, BrowserPaymentContext>,
     result_contract: Option<local_first_engine::browse::BrowseResultContract>,
     current_target: String,
@@ -27268,7 +27294,7 @@ impl GatewayBrowseExecutor<'_> {
         let mut browser_executor = GatewayBrowserExecutor {
             browser_session: None,
             last_snapshot: String::new(),
-            last_payment_floor_refs: std::collections::HashSet::new(),
+            last_payment_floor_refs: std::collections::HashMap::new(),
             payment_context_by_target: std::collections::HashMap::new(),
             result_contract: request.contract.clone(),
             current_target: "chat_0".to_string(),
@@ -29476,7 +29502,7 @@ async fn run_agent_rounds(
     let mut browser_executor = GatewayBrowserExecutor {
         browser_session: None,
         last_snapshot: String::new(),
-        last_payment_floor_refs: std::collections::HashSet::new(),
+        last_payment_floor_refs: std::collections::HashMap::new(),
         payment_context_by_target: std::collections::HashMap::new(),
         result_contract: None,
         current_target: "chat_0".to_string(), // the first tab the tools operate on
@@ -31564,6 +31590,32 @@ fn browser_floor_refs(value: &serde_json::Value) -> std::collections::HashSet<St
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// This target's machine-derived payment floor refs (Build1 Fix 3, per-`target_id`
+/// floor set, mirroring `payment_context_by_target`). Absent target (never
+/// observed yet) → empty set, matching the old single-set default. Returns an
+/// owned clone (the sets are small — a handful of ref ids per observation) so
+/// callers can hold it across the mutable borrow the post-act refresh needs.
+fn browser_floor_refs_for_target(
+    floor_by_target: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+    target: &str,
+) -> std::collections::HashSet<String> {
+    floor_by_target.get(target).cloned().unwrap_or_default()
+}
+
+/// Replaces ONLY `target`'s floor-ref entry with a fresh observation's refs — the
+/// fix for the cross-tab fail-open: a single global `HashSet` let observing tab A
+/// overwrite tab B's floor out from under it (interleaving two tabs without
+/// re-observing the acted-on one would silently clear its floor). Every call site
+/// that used to do `*payment_floor_refs = browser_floor_refs(&value)` now goes
+/// through here, keyed by the target the observation actually came from.
+fn browser_set_target_floor(
+    floor_by_target: &mut std::collections::HashMap<String, std::collections::HashSet<String>>,
+    target: &str,
+    floor: std::collections::HashSet<String>,
+) {
+    floor_by_target.insert(target.to_string(), floor);
 }
 
 /// Machine focus-in-payment-context flag the sidecar attached to an observation
@@ -66127,6 +66179,75 @@ prs.save(Path({path:?}))
             "actions": [{"kind": "click", "ref": "e1"}]
         });
         assert!(!super::browser_action_targeted_a_floored_ref(&bundle_no_hit, &payment_floor));
+    }
+
+    // --- Build1 Fix 3: per-target floor set (cross-tab fail-open) ---
+
+    #[test]
+    fn browser_floor_for_target_defaults_to_empty_for_an_unobserved_target() {
+        let map: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        assert!(super::browser_floor_refs_for_target(&map, "chat_0").is_empty());
+    }
+
+    #[test]
+    fn browser_set_target_floor_only_touches_its_own_target() {
+        let mut map: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        super::browser_set_target_floor(
+            &mut map,
+            "chat_1",
+            std::collections::HashSet::from(["e5".to_string()]),
+        );
+        super::browser_set_target_floor(&mut map, "chat_0", std::collections::HashSet::new());
+        assert!(super::browser_floor_refs_for_target(&map, "chat_1").contains("e5"));
+        assert!(super::browser_floor_refs_for_target(&map, "chat_0").is_empty());
+    }
+
+    #[test]
+    fn browser_per_target_floor_set_survives_a_different_targets_observation_cross_tab_regression() {
+        // Build1 Fix 3 regression: a single global floor set let observing tab A
+        // clobber tab B's floor out from under it. Scenario from the review:
+        // observe tab B (floors e5), observe tab A (empties A only), act on tab
+        // B's e5 → last_acted_floored[B] set → a ref-less Enter on tab B floors.
+        let mut floor_by_target: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        super::browser_set_target_floor(
+            &mut floor_by_target,
+            "chat_1", // tab B
+            std::collections::HashSet::from(["e5".to_string()]),
+        );
+        super::browser_set_target_floor(
+            &mut floor_by_target,
+            "chat_0", // tab A — its own (empty) floor must not bleed into chat_1
+            std::collections::HashSet::new(),
+        );
+        let b_floor = super::browser_floor_refs_for_target(&floor_by_target, "chat_1");
+        assert!(
+            b_floor.contains("e5"),
+            "tab B's floor must survive tab A's unrelated observation"
+        );
+
+        // Act: type into tab B's e5 (a floored ref) — mirrors the enforcement
+        // site's PRE-act `browser_action_targeted_a_floored_ref` check, now read
+        // from chat_1's OWN entry rather than a single shared set.
+        let cvv_fill =
+            serde_json::json!({"kind": "type", "ref": "e5", "text": "123", "target_id": "chat_1"});
+        assert!(super::browser_action_targeted_a_floored_ref(&cvv_fill, &b_floor));
+
+        let mut ctx_by_target: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        super::browser_mark_target_acted_floored(&mut ctx_by_target, "chat_1");
+        assert!(super::browser_payment_context_for(&ctx_by_target, "chat_1"));
+        assert!(!super::browser_payment_context_for(&ctx_by_target, "chat_0"));
+
+        // A ref-less Enter on tab B must floor via last_acted_floored, using
+        // chat_1's own (still-intact) floor set.
+        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let combined = super::browser_payment_context_for(&ctx_by_target, "chat_1");
+        let reason = browser_safety::evaluate_browser_action(&enter, &b_floor, combined, None)
+            .expect("ref-less Enter on tab B must be rejected as under-declared payment_commit");
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
     }
 
     #[test]

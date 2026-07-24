@@ -48,22 +48,61 @@ pub fn declared_action_class(action: &Value) -> Option<ActionClass> {
 /// itself matches on — never page label text, so this stays machine-only.
 const ENTER_KEY_SPELLINGS: &[&str] = &["enter", "return", "numpadenter", "\n", "\r"];
 
-/// Case-insensitive membership in `ENTER_KEY_SPELLINGS`.
+/// True if `value` IS an Enter spelling, or is a `+`-joined modifier chord whose
+/// key token is one. Playwright's `keyboard.press` takes a chord like
+/// `"Control+Enter"` / `"Meta+Enter"` (the idiomatic Cmd/Ctrl+Enter submit) as a
+/// single literal string dispatched verbatim by the sidecar's `press`/`press_key`
+/// — a whole-string membership check against `ENTER_KEY_SPELLINGS` never matches
+/// it, so that schema-legal submit spelling slipped through ungated. Splitting on
+/// `+` and checking whether ANY lowercased token is an Enter spelling catches
+/// every modifier combination without having to enumerate them. Deliberately NO
+/// `.trim()` on the token: the bare spellings `"\n"`/`"\r"` are themselves
+/// whitespace, and `str::trim` would strip them down to an empty string that
+/// never matches — the chord protocol never emits spaces around `+` anyway, so
+/// there is nothing legitimate for a trim to remove.
 fn is_enter_spelling(value: &str) -> bool {
-    ENTER_KEY_SPELLINGS.contains(&value.to_ascii_lowercase().as_str())
+    value
+        .split('+')
+        .any(|token| ENTER_KEY_SPELLINGS.contains(&token.to_ascii_lowercase().as_str()))
+}
+
+/// True when a `type`/`fill` action submits the form it targets: `submit==true`,
+/// OR the typed text ends in `\n`/`\r` (Playwright presses Enter for a trailing
+/// newline — trailing only, so an internal line break does not over-gate), OR ANY
+/// non-empty `commit` field. The schema's `commit` values (`"enter"`,
+/// `"arrow_enter"`, and any future value) all drive a post-type keypress in the
+/// sidecar EXCEPT the explicit `"none"` opt-out — but treating `"none"` as
+/// submitting too is deliberate: it costs one extra declared `action_class` on a
+/// field that opts out of confirmation, never a missed gate on one that doesn't,
+/// which is the fail-closed side to err on for a payment-safety predicate.
+fn type_or_fill_submits(action: &Value) -> bool {
+    let submit = action
+        .get("submit")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let text_ends_in_enter = action
+        .get("text")
+        .and_then(Value::as_str)
+        .is_some_and(|text| text.ends_with('\n') || text.ends_with('\r'));
+    let has_commit = action
+        .get("commit")
+        .and_then(Value::as_str)
+        .is_some_and(|c| !c.trim().is_empty());
+    submit || text_ends_in_enter || has_commit
 }
 
 /// True if the action commits/submits something potentially irreversible, matched
 /// against what the sidecar actually executes rather than an ad-hoc guess:
 /// - `click` / `clickCoords` (the latter is additionally rejected upstream, see
 ///   `BROWSER_UNSUPPORTED_COMMITTING_ACTION` in `main.rs`);
-/// - `press` whose `key` field is an Enter spelling; `press_key` whose `text` field
-///   is (the sidecar reads a DIFFERENT field per kind — see `ENTER_KEY_SPELLINGS`);
-/// - `type` / `fill` with `submit == true`, OR whose `text` ends in `\n`/`\r`
-///   (Playwright presses Enter for a trailing newline — trailing only, so a
-///   multi-line textarea whose text does NOT end in a newline is not over-gated),
-///   OR whose `commit` field is an Enter spelling (`commit:"arrow_enter"` is not:
-///   it confirms an autocomplete, it is not itself an Enter keypress).
+/// - `press` whose `key` field is an Enter spelling (bare OR a `+`-joined modifier
+///   chord, e.g. `"Control+Enter"`/`"Meta+Enter"` — see `is_enter_spelling`);
+///   `press_key` whose `text` field is (the sidecar reads a DIFFERENT field per
+///   kind — see `ENTER_KEY_SPELLINGS`);
+/// - `type` / `fill` that submits per `type_or_fill_submits`: `submit == true`, a
+///   trailing `\n`/`\r`, or ANY non-empty `commit` field (not just an Enter
+///   spelling — `commit:"arrow_enter"` presses ArrowDown then Enter, so it DOES
+///   commit, even though it is not itself an Enter keypress).
 ///
 /// `hold` is NOT included here (see `is_gated_action`, which ORs it in separately):
 /// a press-and-hold human-verification challenge must run unattended, so it is
@@ -81,21 +120,7 @@ pub fn is_committing_action(action: &Value) -> bool {
             .get("text")
             .and_then(Value::as_str)
             .is_some_and(is_enter_spelling),
-        "type" | "fill" => {
-            let submit = action
-                .get("submit")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            let text_ends_in_enter = action
-                .get("text")
-                .and_then(Value::as_str)
-                .is_some_and(|text| text.ends_with('\n') || text.ends_with('\r'));
-            let commit_is_enter = action
-                .get("commit")
-                .and_then(Value::as_str)
-                .is_some_and(is_enter_spelling);
-            submit || text_ends_in_enter || commit_is_enter
-        }
+        "type" | "fill" => type_or_fill_submits(action),
         _ => false,
     }
 }
@@ -120,6 +145,9 @@ fn payment_floor_for(action: &Value, payment_floor_refs: &HashSet<String>) -> Ac
 /// means a floored ref is ALWAYS gated, regardless of what kind of action touches
 /// it. Payment gating applies only when one of these three holds; plain
 /// typing/scrolling/hovering on an unfloored ref is never gated.
+/// Accepted friction: this also gates a benign `hover`/`scrollIntoView` that
+/// merely targets a floored control — over-gating a read-only touch is the
+/// fail-closed side of the same tradeoff, not a bug.
 fn is_gated_action(action: &Value, payment_floor_refs: &HashSet<String>) -> bool {
     is_committing_action(action)
         || action.get("kind").and_then(Value::as_str) == Some("hold")
@@ -150,11 +178,34 @@ pub fn is_refless_committing(action: &Value) -> bool {
     }
 }
 
+/// True when the action SUBMITS a form and therefore needs the PAGE floor
+/// (focus / last-acted-floored / bundle-predecessor payment context), broader
+/// than `is_refless_committing`: a ref-less Enter/Return `press`/`press_key`
+/// ALWAYS qualifies (the ref floor structurally cannot cover it), and so does a
+/// `type`/`fill` that submits (`type_or_fill_submits`) — even though that one DOES
+/// carry a `ref`. The ref it carries may not be the one the machine floor marked
+/// (autofocus, a dynamically-inserted field, a same-form sibling input), so a
+/// submitting `type` into a non-floored ref would otherwise escape BOTH the ref
+/// floor (its own ref is clean) and the old ref-less-only page floor — committing
+/// the surrounding payment form while resolving as a plain keystroke. Gating a
+/// non-submitting `type`/`fill` here would over-gate ordinary form filling, so
+/// this predicate — unlike `is_gated_action`'s ref-membership arm — deliberately
+/// stays limited to actions that actually submit.
+pub fn is_submitting_action(action: &Value) -> bool {
+    if is_refless_committing(action) {
+        return true;
+    }
+    matches!(action.get("kind").and_then(Value::as_str), Some("type") | Some("fill"))
+        && type_or_fill_submits(action)
+}
+
 /// Effective class for a committing action: `max(declared, machine_floor)`, where
 /// `machine_floor = max(ref_floor, page_floor)`. `page_floor` covers what the ref
-/// floor structurally cannot: a ref-less Enter/Return submits whatever form holds
-/// the page's *focus*, so a machine-detected payment focus context also raises
-/// the floor (never lowers it) even with no `ref` on the action itself.
+/// floor structurally cannot: a submitting action (`is_submitting_action`) commits
+/// whatever form holds the page's *focus* — not necessarily the ref it carries, if
+/// any — so a machine-detected payment focus context also raises the floor (never
+/// lowers it) regardless of whether the action's own `ref` (if it has one) was
+/// individually marked.
 /// `Err` is a typed, fail-closed rejection the model must act on:
 /// - `BROWSER_ACTION_CLASS_MISSING`: committing action declared no class;
 /// - `BROWSER_ACTION_CLASS_CONFLICT`: a machine floor exceeds the declared class,
@@ -174,7 +225,7 @@ pub fn effective_action_class(
             .to_string()
     })?;
     let ref_floor = payment_floor_for(action, payment_floor_refs);
-    let page_floor = if is_refless_committing(action) && focus_payment_context {
+    let page_floor = if is_submitting_action(action) && focus_payment_context {
         ActionClass::PaymentCommit
     } else {
         ActionClass::Ordinary
@@ -411,9 +462,11 @@ mod tests {
         assert!(is_committing_action(&json!({"kind":"fill","ref":"e1","text":"Napoli\r"})));
         assert!(is_committing_action(&json!({"kind":"type","ref":"e1","commit":"enter"})));
         assert!(is_committing_action(&json!({"kind":"type","ref":"e1","commit":"Return"})));
-        // "arrow_enter" confirms an autocomplete keyboard-navigation pattern; it is not
-        // itself an Enter keypress, so it must NOT be treated as committing.
-        assert!(!is_committing_action(&json!({"kind":"type","ref":"e1","commit":"arrow_enter"})));
+        // Build1 Fix 2(b): "arrow_enter" is NOT itself an Enter keypress, but it DOES
+        // press ArrowDown then UNCONDITIONALLY Enter in the sidecar — it commits, so
+        // it must be treated as committing too (previously only an Enter-spelling
+        // `commit` qualified, missing this schema-legal submit path).
+        assert!(is_committing_action(&json!({"kind":"type","ref":"e1","commit":"arrow_enter"})));
     }
 
     #[test]
@@ -473,6 +526,91 @@ mod tests {
         });
         let reason = evaluate_browser_action(&typed, &floor(&["e12"]), false, None).unwrap();
         assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+    }
+
+    // --- Build1 Fix 1: modifier+Enter chords are Enter spellings too ---
+
+    #[test]
+    fn modifier_enter_chord_is_committing_on_press_and_press_key() {
+        // Playwright dispatches Cmd/Ctrl+Enter as a single literal "Control+Enter" /
+        // "Meta+Enter" string — the idiomatic modifier-Enter submit spelling. A
+        // whole-string membership check misses it entirely; `is_enter_spelling`
+        // must split on '+' and match any token.
+        assert!(is_committing_action(&json!({"kind":"press","key":"Control+Enter"})));
+        assert!(is_committing_action(&json!({"kind":"press_key","text":"Meta+Enter"})));
+        // Case-insensitive and order-agnostic on the modifier token.
+        assert!(is_committing_action(&json!({"kind":"press","key":"meta+enter"})));
+        assert!(is_committing_action(&json!({"kind":"press","key":"Shift+Control+Enter"})));
+        // A chord whose key token is NOT an Enter spelling stays non-committing.
+        assert!(!is_committing_action(&json!({"kind":"press","key":"Control+ArrowDown"})));
+    }
+
+    #[test]
+    fn modifier_enter_chord_is_refless_committing_and_floors_in_payment_context() {
+        assert!(is_refless_committing(&json!({"kind":"press","key":"Control+Enter"})));
+        assert!(is_refless_committing(&json!({"kind":"press_key","text":"Meta+Enter"})));
+
+        let ctrl_enter = json!({"kind":"press","key":"Control+Enter","action_class":"ordinary"});
+        let reason = evaluate_browser_action(&ctrl_enter, &floor(&[]), true, None)
+            .expect("Control+Enter in payment context must be rejected when under-declared");
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+
+        let meta_enter =
+            json!({"kind":"press_key","text":"Meta+Enter","action_class":"ordinary"});
+        let reason = evaluate_browser_action(&meta_enter, &floor(&[]), true, None)
+            .expect("Meta+Enter in payment context must be rejected when under-declared");
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+    }
+
+    // --- Build1 Fix 2: commit-based and typed submits, incl. into a non-floored ref ---
+
+    #[test]
+    fn any_non_empty_commit_field_is_committing_not_just_enter_spellings() {
+        // `commit:"arrow_enter"` presses ArrowDown then UNCONDITIONALLY Enter in the
+        // sidecar — it commits even though it is not itself an Enter keypress, so it
+        // must be treated as committing (previously only an Enter-spelling `commit`
+        // qualified).
+        assert!(is_committing_action(&json!({"kind":"type","ref":"e1","commit":"arrow_enter"})));
+        assert!(is_committing_action(&json!({"kind":"fill","ref":"e1","commit":"arrow_enter"})));
+        // An empty commit string is not a real commit directive.
+        assert!(!is_committing_action(&json!({"kind":"type","ref":"e1","commit":""})));
+    }
+
+    #[test]
+    fn is_submitting_action_covers_refless_enter_and_submitting_type_or_fill() {
+        assert!(is_submitting_action(&json!({"kind":"press","key":"Enter"})));
+        assert!(is_submitting_action(&json!({"kind":"press_key","text":"Control+Enter"})));
+        assert!(is_submitting_action(&json!({"kind":"type","ref":"e1","submit":true})));
+        assert!(is_submitting_action(&json!({"kind":"type","ref":"e1","text":"x\n"})));
+        assert!(is_submitting_action(&json!({"kind":"type","ref":"e1","commit":"arrow_enter"})));
+        // A plain, non-submitting type/fill must NOT count — only a genuine submit.
+        assert!(!is_submitting_action(&json!({"kind":"type","ref":"e1","text":"Napoli"})));
+        assert!(!is_submitting_action(&json!({"kind":"click","ref":"e5"})));
+    }
+
+    #[test]
+    fn submitting_type_into_a_non_floored_ref_in_payment_context_conflicts_when_ordinary() {
+        // Build1 Fix 2(a): a `type` that SUBMITS (trailing newline) targets its own
+        // ref (e1), which the machine floor never marked — only the PAGE (focus)
+        // context says we're in a payment form. Before the fix, the page floor only
+        // covered ref-less Enter, so this submit escaped both floors and resolved as
+        // ordinary. It must now conflict when under-declared.
+        let typed = json!({
+            "kind": "type", "ref": "e1", "text": "4242 4242 4242 4242\n", "action_class": "ordinary"
+        });
+        let reason = evaluate_browser_action(&typed, &floor(&[]), true, None)
+            .expect("a submitting type into a non-floored ref, in payment context, must conflict");
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+    }
+
+    #[test]
+    fn plain_non_submitting_type_outside_payment_context_stays_ordinary() {
+        // No over-gating: a benign `type` with submit:false, no trailing newline, no
+        // commit, no payment context, must remain a plain allowed ordinary action.
+        let typed = json!({
+            "kind": "type", "ref": "e1", "text": "Napoli", "submit": false, "action_class": "ordinary"
+        });
+        assert!(evaluate_browser_action(&typed, &floor(&[]), false, None).is_none());
     }
 
     // --- 1.4 gateway defense-in-depth: ref ∈ floor ⇒ gated regardless of kind ---
