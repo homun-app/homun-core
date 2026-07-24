@@ -534,7 +534,12 @@ fn resolve_model_value_for_context(
             return fallback;
         }
     };
-    if decision.confidence < 0.45 {
+    // No numeric confidence threshold on the steering path: an uncertain model must
+    // return `needs_clarification` instead, not be silently downgraded to a fallback
+    // that can never be actionable — that would strand a pending steering row forever
+    // (see docs/superpowers/specs/2026-07-24-steering-park-resume-design.md Part 4).
+    // New-turn routing keeps the threshold unchanged.
+    if !steering_control && decision.confidence < 0.45 {
         let mut fallback = safe_fallback(active, "low_confidence");
         fallback.provenance.validator_rejection_code = Some("low_confidence".to_string());
         return fallback;
@@ -918,5 +923,55 @@ mod tests {
         let fallback = safe_fallback(None, "model_unavailable");
 
         assert_eq!(actionable_steering_decision(&fallback), None);
+    }
+
+    #[test]
+    fn steering_path_ignores_confidence_threshold() {
+        let mut decision = read_only_decision();
+        decision.relationship_to_active_objective = ObjectiveRelationship::SameObjective;
+        decision.steering_disposition = SteeringDisposition::FinalizeWithCurrentEvidence;
+        decision.confidence = 0.44;
+
+        let validated = resolve_steering_model_value(
+            Ok(serde_json::to_value(decision).unwrap()),
+            &registry(),
+            None,
+            Some("provider"),
+            Some("model"),
+        );
+
+        // A clear steering decision below the 0.45 numeric threshold must still be
+        // actionable: the steering path has no confidence gate (an uncertain model
+        // is expected to return `needs_clarification` instead).
+        assert_eq!(validated.provenance.fallback_reason, None);
+        assert_eq!(
+            actionable_steering_decision(&validated),
+            Some(SteeringDisposition::FinalizeWithCurrentEvidence)
+        );
+    }
+
+    #[test]
+    fn new_turn_path_still_gates_low_confidence() {
+        let mut decision = read_only_decision();
+        decision.confidence = 0.44;
+
+        let validated = resolve_model_value(
+            Ok(serde_json::to_value(decision).unwrap()),
+            &registry(),
+            None,
+            Some("provider"),
+            Some("model"),
+        );
+
+        // New-turn routing keeps the threshold: an unrelated low-confidence decision
+        // still falls back rather than being trusted as a fresh objective.
+        assert_eq!(
+            validated.provenance.fallback_reason.as_deref(),
+            Some("low_confidence")
+        );
+        assert_eq!(
+            validated.provenance.validator_rejection_code.as_deref(),
+            Some("low_confidence")
+        );
     }
 }

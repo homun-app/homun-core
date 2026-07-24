@@ -8459,14 +8459,59 @@ fn resolve_semantic_decision_for_context(
     }
 }
 
+/// Error classes eligible for the semantic-decision auth/availability fallback:
+/// explicit auth/quota/server rejections (401/403/429/5xx) and transport-level
+/// failures (connection refused, timeout, an `Io` error reading the stream, or a
+/// stream that ended without a terminal `done`). A malformed response body
+/// (`Json`) or an explicit runtime-reported error code (`Runtime`) is deliberately
+/// excluded — those reflect a provider-specific bug rather than an availability
+/// signal, and retrying on a different model would mask it instead of surfacing it.
+fn semantic_decision_auth_fallback_applies(
+    error: &local_first_subagents::RuntimeClientError,
+) -> bool {
+    use local_first_subagents::RuntimeClientError;
+    match error {
+        RuntimeClientError::Status(401 | 403 | 429) => true,
+        RuntimeClientError::Status(status) => (500..=599).contains(status),
+        RuntimeClientError::Request(_)
+        | RuntimeClientError::Io(_)
+        | RuntimeClientError::StreamEndedWithoutDone => true,
+        RuntimeClientError::Json(_) | RuntimeClientError::Runtime { .. } => false,
+    }
+}
+
+// Injectable core (mirrors `auth_fallback_resolved_role_from_registry` /
+// `semantic_decision_auth_fallback_resolved_role_from_registry`): lets tests supply
+// a deterministic registry + key predicate instead of depending on
+// `load_provider_registry()` / `provider_api_key()` global state.
+fn semantic_decision_auth_fallback_from_registry(
+    error: &local_first_subagents::RuntimeClientError,
+    resolved: Option<&ResolvedRole>,
+    registry: &ProviderRegistry,
+    provider_has_key: impl FnMut(&str) -> bool,
+) -> Option<ResolvedRole> {
+    if !semantic_decision_auth_fallback_applies(error) {
+        return None;
+    }
+    // No distinct fallback model configured: stay pending on genuine unavailability
+    // rather than fabricate one (per spec).
+    semantic_decision_auth_fallback_resolved_role_from_registry(
+        registry,
+        resolved?.model.as_str(),
+        provider_has_key,
+    )
+}
+
 fn semantic_decision_auth_fallback(
     error: &local_first_subagents::RuntimeClientError,
     resolved: Option<&ResolvedRole>,
 ) -> Option<ResolvedRole> {
-    if !matches!(error, local_first_subagents::RuntimeClientError::Status(401)) {
-        return None;
-    }
-    semantic_decision_auth_fallback_resolved_role(resolved?.model.as_str())
+    semantic_decision_auth_fallback_from_registry(
+        error,
+        resolved,
+        &load_provider_registry(),
+        |provider_id| provider_api_key(provider_id).is_some(),
+    )
 }
 
 // Test-only fixture builder: its last production caller was the hardcoded
@@ -72288,6 +72333,157 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
         assert_eq!(fallback.provider_id, "ollama");
         assert_eq!(fallback.model, "qwen3.5:4b");
         assert_eq!(fallback.kind, super::model_registry::ProviderKind::Ollama);
+    }
+
+    // Malformed URL: RequestBuilder::build() surfaces the stored parse error
+    // synchronously without performing any network I/O or needing an async runtime.
+    fn sample_reqwest_request_error() -> reqwest::Error {
+        reqwest::blocking::Client::new()
+            .get("not a valid url")
+            .build()
+            .expect_err("malformed URL should fail to build a request")
+    }
+
+    fn semantic_decision_auth_fallback_test_resolved(model: &str) -> super::model_registry::ResolvedRole {
+        super::model_registry::ResolvedRole {
+            role: "orchestrator".to_string(),
+            provider_id: "cloud".to_string(),
+            model: model.to_string(),
+            kind: super::model_registry::ProviderKind::OpenaiCompat,
+            base_url: "https://api.example.test/v1".to_string(),
+            auto: false,
+            tier: super::model_registry::ModelTier::Balanced,
+        }
+    }
+
+    // Registry with a distinct, usable local fallback model (mirrors the fixture in
+    // `semantic_decision_auth_fallback_prefers_qualified_local_json_model`).
+    fn semantic_decision_auth_fallback_registry_with_fallback() -> super::model_registry::ProviderRegistry
+    {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut cloud = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        cloud.active_model = Some("deepseek-v4-pro".into());
+        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        registry.upsert(cloud);
+
+        let mut local = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        local.models = vec![super::model_registry::ModelEntry::inferred("qwen3.5:4b")];
+        registry.upsert(local);
+        registry
+    }
+
+    // Registry with no other provider and no local model at all: there is nothing
+    // distinct to fall back to.
+    fn semantic_decision_auth_fallback_registry_without_fallback(
+    ) -> super::model_registry::ProviderRegistry {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut cloud = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        cloud.active_model = Some("deepseek-v4-pro".into());
+        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        registry.upsert(cloud);
+        registry
+    }
+
+    #[test]
+    fn semantic_decision_auth_fallback_applies_beyond_401() {
+        use local_first_subagents::RuntimeClientError;
+
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(401)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(403)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(429)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(500)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(599)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::StreamEndedWithoutDone
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"))
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Request(sample_reqwest_request_error())
+        ));
+
+        // Not a genuine availability signal: leave these ungated (unchanged behavior).
+        assert!(!super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(400)
+        ));
+        assert!(!super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(404)
+        ));
+        assert!(!super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Runtime {
+                code: "context_length_exceeded".to_string(),
+                message: "too long".to_string(),
+            }
+        ));
+    }
+
+    #[test]
+    fn semantic_decision_auth_fallback_attempts_configured_fallback_beyond_401() {
+        use local_first_subagents::RuntimeClientError;
+
+        let registry = semantic_decision_auth_fallback_registry_with_fallback();
+        let resolved = semantic_decision_auth_fallback_test_resolved("deepseek-v4-pro");
+
+        for error in [
+            RuntimeClientError::Status(403),
+            RuntimeClientError::Status(429),
+            RuntimeClientError::Status(500),
+            RuntimeClientError::StreamEndedWithoutDone,
+        ] {
+            let fallback = super::semantic_decision_auth_fallback_from_registry(
+                &error,
+                Some(&resolved),
+                &registry,
+                |_| false,
+            );
+            assert_eq!(
+                fallback.map(|role| role.model),
+                Some("qwen3.5:4b".to_string()),
+                "expected a fallback for {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_decision_auth_fallback_stays_pending_without_configured_fallback() {
+        use local_first_subagents::RuntimeClientError;
+
+        let registry = semantic_decision_auth_fallback_registry_without_fallback();
+        let resolved = semantic_decision_auth_fallback_test_resolved("deepseek-v4-pro");
+
+        let fallback = super::semantic_decision_auth_fallback_from_registry(
+            &RuntimeClientError::Status(500),
+            Some(&resolved),
+            &registry,
+            |_| false,
+        );
+        assert!(fallback.is_none());
     }
 
     #[test]
