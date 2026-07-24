@@ -39316,12 +39316,65 @@ fn call_shared_browser_sidecar(
     }
 }
 
+/// Fail-closed safety gate for the durable, NON-INTERACTIVE browser capability
+/// executor. Returns the refusal reason, or `None` when the call is safe to run.
+///
+/// The interactive guarded loop (`execute_browser_tool` + `browser_safety`) is the
+/// ONLY place a browser *action* can be gated safely: it owns the live page snapshot
+/// (needed to resolve the target control's label) and the per-turn Payment Approval
+/// Card (the `payment_approval_id` a final purchase requires). A durable capability
+/// task — materialized by the OrchestratorBrain and run by the background worker —
+/// has NEITHER: there is no chat turn to carry an approval, and no snapshot to
+/// evaluate against, so `browser_safety::high_risk_reason` would itself fail OPEN
+/// here on an unresolved `ref`. Reusing that gate would therefore be a fail-open, not
+/// a fix. So this executor must never perform a committing browser action: `Act`
+/// (the sidecar's single committing/interactive surface) is refused outright, as is
+/// any method carrying payment-commit intent. Page reads (snapshot/tabs/screenshot)
+/// and navigation stay allowed. This is deliberately scoped to THIS pipeline and does
+/// not touch the interactive `browser_safety` gate (converge, don't duplicate).
+fn browser_capability_action_refusal(method: BrowserMethod, params: &Value) -> Option<String> {
+    if method == BrowserMethod::Act {
+        return Some(
+            "refused: browser_act cannot run in a non-interactive durable task — a \
+             click/type/payment can only be gated by the interactive guarded loop (live \
+             snapshot + Payment Approval Card). Drive the browser inline in chat instead."
+                .to_string(),
+        );
+    }
+    // Defense in depth: refuse payment-commit intent declared or carried on ANY method.
+    // A `payment_approval_id`/`vault_secret` cannot be validated without the interactive
+    // approval flow, so its presence here is a rejection, never an implicit unlock.
+    let declares_payment_commit = browser_safety::declared_action_class(params)
+        == Some(browser_safety::ActionClass::PaymentCommit);
+    let carries_payment_field = ["payment_approval_id", "vault_secret"].iter().any(|field| {
+        params
+            .get(*field)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    });
+    if declares_payment_commit || carries_payment_field {
+        return Some(
+            "refused: a payment-commit browser action cannot run in a non-interactive durable \
+             task — it requires a Payment Approval Card that only the interactive guarded loop \
+             can issue and validate."
+                .to_string(),
+        );
+    }
+    None
+}
+
 fn execute_persistent_browser_capability(
     state: &AppState,
     task: &TaskRecord,
     method: BrowserMethod,
     params: Value,
 ) -> Result<ExecutorResult, LocalTaskExecutionError> {
+    // Fail-closed gate BEFORE the shared sidecar's `Act` call: this durable, headless
+    // context can never present a Payment Approval Card nor a live snapshot, so a
+    // committing/payment browser action is refused here rather than forwarded ungated.
+    if let Some(reason) = browser_capability_action_refusal(method, &params) {
+        return Err(LocalTaskExecutionError { message: reason });
+    }
     let response = match call_shared_browser_sidecar(state, task, method, params.clone())? {
         SharedSidecarCall::SidecarLost(reason) => {
             return Ok(ExecutorResult::RetryableFailure { reason });
@@ -58589,8 +58642,9 @@ mod tests {
         ValidatedMemorySourceInput, WorkspaceRecord, WorkspacesFile, active_llm_concurrency,
         adapt_skill_body, aggregate_session_state_from_counts,
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
-        browser_error_indicates_dead_sidecar, browser_method_for_capability_tool,
-        browser_snapshot_text, browser_targets_for_goal, browser_url_for_goal, build_browse_goal,
+        browser_capability_action_refusal, browser_error_indicates_dead_sidecar,
+        browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
+        browser_url_for_goal, build_browse_goal,
         build_memory_source_grant, build_plan_markdown, clawhub_origin,
         capability_call_completed_outcome, classify_connector_error,
         collect_member_counts, composio_tool_is_read, connector_error_hint,
@@ -74351,6 +74405,72 @@ data: [DONE]\n";
             Some(BrowserMethod::Act)
         );
         assert_eq!(browser_method_for_capability_tool("github.search"), None);
+    }
+
+    // The durable capability-browser executor runs OUTSIDE any chat turn: it has no
+    // live page snapshot and can never hold a Payment Approval Card, so the
+    // interactive `browser_safety` gate (which needs both) cannot protect it. These
+    // tests pin the executor's own fail-closed refusal: a committing/payment
+    // `browser_act` must be refused before it can reach the sidecar `Act` call,
+    // while page reads and navigation stay allowed.
+    #[test]
+    fn capability_browser_executor_refuses_committing_act() {
+        // A plain click is a committing action — refused in a non-interactive task.
+        assert!(browser_capability_action_refusal(
+            BrowserMethod::Act,
+            &serde_json::json!({ "kind": "click", "ref": "e9" }),
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn capability_browser_executor_refuses_payment_bearing_act() {
+        // A payment click carrying an approval id / vault secret that this context
+        // could never legitimately have issued must still be refused (fail-closed:
+        // presence of a payment field is a rejection, never an implicit unlock).
+        assert!(browser_capability_action_refusal(
+            BrowserMethod::Act,
+            &serde_json::json!({
+                "kind": "click",
+                "ref": "e10",
+                "payment_approval_id": "pay_123",
+            }),
+        )
+        .is_some());
+        assert!(browser_capability_action_refusal(
+            BrowserMethod::Act,
+            &serde_json::json!({ "kind": "fill", "ref": "e2", "vault_secret": "cvv_one_shot" }),
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn capability_browser_executor_refuses_declared_payment_commit_on_any_method() {
+        // A payment_commit-class action declared on ANY method is refused, even one
+        // that is normally a read/navigation — the class, not the method, decides.
+        assert!(browser_capability_action_refusal(
+            BrowserMethod::Navigate,
+            &serde_json::json!({ "url": "https://shop.example/pay", "action_class": "payment_commit" }),
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn capability_browser_executor_allows_reads_and_navigation() {
+        // Page reads and ordinary navigation carry no commit risk and stay allowed,
+        // so read-oriented capability tasks are not collateral damage of the gate.
+        assert!(
+            browser_capability_action_refusal(BrowserMethod::Snapshot, &serde_json::json!({}))
+                .is_none()
+        );
+        assert!(
+            browser_capability_action_refusal(BrowserMethod::Tabs, &serde_json::json!({})).is_none()
+        );
+        assert!(browser_capability_action_refusal(
+            BrowserMethod::Navigate,
+            &serde_json::json!({ "url": "https://example.com" }),
+        )
+        .is_none());
     }
 
     #[test]
