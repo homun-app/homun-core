@@ -1,8 +1,11 @@
 import { createServer, Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { chromium } from "playwright-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BrowserSessionManager } from "../src/browser/session_manager.js";
+import { createSnapshot } from "../src/browser/snapshot.js";
+import { discoverChromiumExecutable } from "../src/browser/profiles.js";
 
 // Real node:http server + real headless BrowserSessionManager, following the
 // pattern in browser_fixture.test.ts — no mocking of Playwright internals.
@@ -187,6 +190,103 @@ describe("machine payment floor", () => {
     } finally {
       trainServer.closeAllConnections();
       await new Promise<void>((resolve) => trainServer.close(() => resolve()));
+    }
+  });
+});
+
+describe("machine payment floor — genuine cross-origin OOPIF", () => {
+  // The iframe test above (checkout-iframe.html + psp-frame.html) proves the
+  // frame-aware code path works, but both documents are served from the SAME
+  // 127.0.0.1:<port> origin — same-process nesting, not a real out-of-process
+  // iframe. The gateway's `last_acted_floored` now relies on the floor holding
+  // for an ACTUAL cross-origin PSP integration (Stripe Elements, Adyen
+  // Drop-in, ...), where the iframe is a separate origin and Chromium's
+  // default site-per-process isolation puts it in its own renderer process.
+  // This test forces that: the outer document is served from "127.0.0.1",
+  // the inner (PSP) document from "localhost" — different hostnames are
+  // different origins to the browser even though both resolve to loopback,
+  // so no /etc/hosts or DNS change is needed to get a genuine cross-site,
+  // out-of-process iframe locally.
+  //
+  // It drives Playwright directly (chromium.launch + a raw CDPSession)
+  // instead of going through BrowserSessionManager, for two reasons: (1)
+  // proving the iframe is genuinely OUT-OF-PROCESS needs Target.setAutoAttach
+  // — Chromium's DevTools protocol only auto-attaches a SEPARATE Target
+  // (type "iframe") for a frame it actually put in its own renderer process;
+  // a same-origin/same-process nested iframe produces no such target, which
+  // was verified locally against this same harness (attachedTargets stayed
+  // empty for a same-origin nest, and gained one "iframe" target the moment
+  // the nested document moved to a different hostname) — and the manager
+  // does not expose a raw CDPSession. (2) computePaymentFloorRefs (via
+  // createSnapshot) is itself a plain function of a Playwright `Page`, so
+  // exercising it directly on a hand-built page is a valid, more direct unit
+  // test of the exact claim this test makes.
+  it("floors a cc-autocomplete input that lives inside a genuinely cross-origin (out-of-process) iframe", async () => {
+    const innerFixture = path.join(import.meta.dirname, "fixtures", "psp-frame.html");
+    const outerTemplateFixture = path.join(import.meta.dirname, "fixtures", "checkout-iframe-cross-origin.html");
+    const innerHtml = await readFile(innerFixture, "utf8");
+    const outerTemplate = await readFile(outerTemplateFixture, "utf8");
+
+    const innerServer = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(innerHtml);
+    });
+    // Inner (PSP) document on "localhost" — see the origin-forcing comment above.
+    await new Promise<void>((resolve) => innerServer.listen(0, "localhost", resolve));
+    const innerAddress = innerServer.address();
+    if (!innerAddress || typeof innerAddress === "string") {
+      throw new Error("inner (PSP) fixture server did not start");
+    }
+    const innerBaseUrl = `http://localhost:${innerAddress.port}`;
+
+    const outerHtml = outerTemplate.replace("__INNER_ORIGIN__", innerBaseUrl);
+    const outerServer = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(outerHtml);
+    });
+    // Outer document on "127.0.0.1" — a different hostname from "localhost" above.
+    await new Promise<void>((resolve) => outerServer.listen(0, "127.0.0.1", resolve));
+    const outerAddress = outerServer.address();
+    if (!outerAddress || typeof outerAddress === "string") {
+      throw new Error("outer fixture server did not start");
+    }
+    const outerBaseUrl = `http://127.0.0.1:${outerAddress.port}`;
+
+    const executablePath = await discoverChromiumExecutable();
+    const browser = await chromium.launch({ headless: true, executablePath });
+    try {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+
+      const attachedFrameTargetTypes: string[] = [];
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Target.setAutoAttach", {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true,
+      });
+      cdp.on("Target.attachedToTarget", (event) => {
+        attachedFrameTargetTypes.push(event.targetInfo.type);
+      });
+
+      await page.goto(outerBaseUrl, { waitUntil: "load" });
+
+      // Genuine-OOPIF proof: a real out-of-process child target auto-attached.
+      // If this is empty, the iframe below is NOT actually out-of-process and
+      // the floor assertion after it would not be testing the OOPIF claim.
+      expect(attachedFrameTargetTypes).toContain("iframe");
+
+      const snapshot = await createSnapshot(page, "oopif-checkout", { observationMode: "interact" });
+      const ccInput = snapshot.refs.find((ref) => ref.name === "Card number");
+      expect(ccInput?.ref).toBeDefined();
+      expect(ccInput?.role).toBe("textbox");
+      expect(snapshot.paymentFloorRefs).toContain(ccInput!.ref);
+    } finally {
+      await browser.close();
+      innerServer.closeAllConnections();
+      await new Promise<void>((resolve) => innerServer.close(() => resolve()));
+      outerServer.closeAllConnections();
+      await new Promise<void>((resolve) => outerServer.close(() => resolve()));
     }
   });
 });

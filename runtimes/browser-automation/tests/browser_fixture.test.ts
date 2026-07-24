@@ -540,6 +540,59 @@ describe("browser sidecar engine", () => {
     expect(waited).toMatchObject({ ok: true, targetId: "booking" });
   }, 15_000);
 
+  // Critical B: `kind: "scroll"` with a `ref` used to `.click()` that ref before
+  // scrolling — a scroll on a floored Pay button could submit it ungated. It must
+  // now only bring the element into view, like scrollIntoView/scroll_into_view.
+  it("does not click a ref when scrolling — only scrolls it into view", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "booking" });
+    const snapshot = await manager.snapshot({ targetId: "booking" });
+    const submit = snapshot.refs.find((ref) => ref.name === "Submit");
+    expect(submit?.ref).toBeDefined();
+
+    // The fixture's #submit button sits below a 110vh spacer (`<div
+    // style="height: 110vh">`), so it starts out of view — confirm that, so
+    // the "now in view" assertion below is actually exercising the scroll.
+    const before = await manager.act({
+      targetId: "booking",
+      kind: "evaluate",
+      ref: submit!.ref,
+      fn: "(el) => el.getBoundingClientRect().top",
+    });
+    expect(before.result as number).toBeGreaterThan(600);
+
+    const scrolled = await manager.act({
+      targetId: "booking",
+      kind: "scroll",
+      ref: submit!.ref,
+    });
+    expect(scrolled).toMatchObject({ ok: true, targetId: "booking" });
+
+    // Not clicked: the fixture's #submit click handler is the ONLY thing that
+    // ever writes to #result, so an empty #result proves no click fired.
+    const resultText = await manager.act({
+      targetId: "booking",
+      kind: "evaluate",
+      fn: "() => document.querySelector('#result').textContent",
+    });
+    expect(resultText.result).toBe("");
+
+    // Scrolled into view: the element is now within the viewport's vertical bounds.
+    const after = await manager.act({
+      targetId: "booking",
+      kind: "evaluate",
+      ref: submit!.ref,
+      fn: "(el) => el.getBoundingClientRect().top",
+    });
+    const viewportHeight = await manager.act({
+      targetId: "booking",
+      kind: "evaluate",
+      fn: "() => window.innerHeight",
+    });
+    expect(after.result as number).toBeGreaterThanOrEqual(0);
+    expect(after.result as number).toBeLessThanOrEqual(viewportHeight.result as number);
+  });
+
   it("returns a classified timeout error for impossible waits", async () => {
     await manager.start();
     await manager.open({ url: baseUrl, label: "booking" });

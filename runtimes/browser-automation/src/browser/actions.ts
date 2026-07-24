@@ -174,6 +174,7 @@ type BrowserActRequestInner =
       direction?: "up" | "down" | "left" | "right";
       amount?: number;
       ref?: string;
+      timeoutMs?: number;
     }
   | {
       kind: "wait";
@@ -395,7 +396,12 @@ async function executeActionUnchecked(
     }
     case "scroll": {
       if (action.ref) {
-        await requireRef(refs, action.ref).click().catch(() => undefined);
+        // A scroll must NEVER click a control — this used to `.click()` the ref,
+        // which let a "scroll" on a floored Pay button submit ungated (Critical B).
+        // Bring the element into view only, exactly like scrollIntoView/scroll_into_view.
+        await requireRef(refs, action.ref)
+          .scrollIntoViewIfNeeded({ timeout: actionTimeout(action.timeoutMs) })
+          .catch(() => undefined);
       }
       const direction = action.direction ?? "down";
       const amount = Math.max(1, Math.min(Math.abs(action.amount ?? 3), 10));
