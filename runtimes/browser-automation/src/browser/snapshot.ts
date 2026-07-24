@@ -654,16 +654,148 @@ function fingerprintSnapshot(snapshot: string): string {
   return `snap_${(hash >>> 0).toString(16)}`;
 }
 
-function structuralDelta(previous: string | undefined, current: string): string {
+// Guards the O(oldLen*newLen) LCS table below. This diff runs inline in the
+// sidecar's per-call deadline (interact 10s / act 15s in main.rs), so a
+// pathological previous+current pair (e.g. spanning a full-page navigation)
+// must not spend unbounded time/memory on the table; an oversized pair is
+// itself evidence the delta would be ~the whole page anyway, so it goes
+// straight to the same full-snapshot fallback as ref churn.
+const MAX_DIFF_CELLS = 4_000_000;
+
+// Ratio of added lines over total current lines above which Playwright ref
+// reassignment (aria-ref renumbering on re-render/navigation) has defeated
+// line-identity diffing: because every line embeds `[ref=eN]`, a bare
+// renumbering makes nearly every line read as "added" even though nothing
+// structurally changed. Falling back to the full snapshot is both more
+// honest and no larger than a "delta" that is already ~the whole page.
+const REF_CHURN_FALLBACK_RATIO = 0.6;
+
+function nonBlankLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+// Backward LCS-length table: lengths[i * (newLen+1) + j] = length of the
+// longest common subsequence of oldLines[i:] and newLines[j:]. Flattened
+// into a single Int32Array (row-major) rather than nested arrays — cheap
+// enough for the few-hundred-line snapshots this runs on, and avoids the
+// per-row allocation overhead of an array-of-arrays.
+function lcsLengths(oldLines: string[], newLines: string[]): Int32Array {
+  const oldLen = oldLines.length;
+  const newLen = newLines.length;
+  const width = newLen + 1;
+  const table = new Int32Array((oldLen + 1) * width);
+  for (let i = oldLen - 1; i >= 0; i--) {
+    for (let j = newLen - 1; j >= 0; j--) {
+      const idx = i * width + j;
+      if (oldLines[i] === newLines[j]) {
+        table[idx] = table[(i + 1) * width + (j + 1)] + 1;
+      } else {
+        const down = table[(i + 1) * width + j];
+        const right = table[i * width + (j + 1)];
+        table[idx] = down >= right ? down : right;
+      }
+    }
+  }
+  return table;
+}
+
+type DiffOp = { type: "add" | "remove"; line: string };
+
+// Walks the LCS table front-to-back to emit a positional sequence diff:
+// equal lines are consumed silently, add/remove ops are emitted in the
+// order they occur. This is what makes a genuinely-new duplicate line
+// (same trimmed text as an existing line, different position) show up as
+// an addition instead of being dropped by set-membership, and what lets a
+// removal be reported instead of being invisible.
+function walkDiff(oldLines: string[], newLines: string[], table: Int32Array): DiffOp[] {
+  const oldLen = oldLines.length;
+  const newLen = newLines.length;
+  const width = newLen + 1;
+  const ops: DiffOp[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < oldLen && j < newLen) {
+    if (oldLines[i] === newLines[j]) {
+      i += 1;
+      j += 1;
+      continue;
+    }
+    const down = table[(i + 1) * width + j];
+    const right = table[i * width + (j + 1)];
+    if (down >= right) {
+      ops.push({ type: "remove", line: oldLines[i] });
+      i += 1;
+    } else {
+      ops.push({ type: "add", line: newLines[j] });
+      j += 1;
+    }
+  }
+  while (i < oldLen) {
+    ops.push({ type: "remove", line: oldLines[i] });
+    i += 1;
+  }
+  while (j < newLen) {
+    ops.push({ type: "add", line: newLines[j] });
+    j += 1;
+  }
+  return ops;
+}
+
+// Sequence-aware structural delta between two AI snapshots (IMPORTANT 4).
+//
+// The naive predecessor did set-membership on trimmed lines: it only ever
+// reported ADDED lines, so a removal (an error banner clearing, a
+// "sold out" row disappearing, a spinner resolving) was invisible — the
+// model was told "[no structural changes]" and acted on stale assumptions.
+// A genuinely-new line whose trimmed text happened to equal an existing
+// line (repeated "In stock", identical labels) was silently dropped as if
+// unchanged. And because every line embeds `[ref=eN]`, a Playwright ref
+// reassignment made every line differ from the previous snapshot, so the
+// "delta" became the whole page and blew the delta observation char cap
+// under silent truncation — the opposite of the intended savings.
+//
+// This does a real line-SEQUENCE diff (an LCS/Myers-equivalent longest
+// common subsequence over non-blank trimmed lines): duplicates are
+// preserved by position rather than deduplicated by a Set, and both
+// additions (`+ `) and removals (`- `) are reported so the model sees when
+// content disappeared, not just what appeared. When ref churn defeats
+// line-identity (added lines make up most of the current page), this
+// falls back to the full current snapshot instead of a misleadingly
+// bloated or empty delta — the caller's existing char-cap truncation still
+// applies to that fallback exactly as it would to a non-delta observation.
+// Machine-only: a pure text-sequence diff, no label/text semantics.
+export function structuralDelta(previous: string | undefined, current: string): string {
   if (!previous) {
     return current;
   }
-  const oldLines = new Set(previous.split("\n").map((line) => line.trim()).filter(Boolean));
-  const added = current
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !oldLines.has(line));
-  return added.length ? added.join("\n") : "[no structural changes detected]";
+  const oldLines = nonBlankLines(previous);
+  const newLines = nonBlankLines(current);
+
+  if (oldLines.length === 0 && newLines.length === 0) {
+    return "[no structural changes detected]";
+  }
+
+  if ((oldLines.length + 1) * (newLines.length + 1) > MAX_DIFF_CELLS) {
+    return current;
+  }
+
+  const table = lcsLengths(oldLines, newLines);
+  const ops = walkDiff(oldLines, newLines, table);
+
+  if (ops.length === 0) {
+    return "[no structural changes detected]";
+  }
+
+  const addedCount = ops.reduce((count, op) => count + (op.type === "add" ? 1 : 0), 0);
+  const addedRatio = newLines.length > 0 ? addedCount / newLines.length : 0;
+  if (addedRatio > REF_CHURN_FALLBACK_RATIO) {
+    return current;
+  }
+
+  return ops.map((op) => (op.type === "add" ? `+ ${op.line}` : `- ${op.line}`)).join("\n");
 }
 
 async function resolveRole(locator: Locator): Promise<string> {
