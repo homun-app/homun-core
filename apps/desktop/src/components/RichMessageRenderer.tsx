@@ -11,11 +11,40 @@ import type { Components } from "react-markdown";
 import type { Mermaid } from "mermaid";
 
 import { copyText } from "../lib/clipboard";
+// The splitter is a plain .mjs sibling so `node --test` can exercise it without
+// a build step, which is why it carries no type declaration.
+// @ts-expect-error JavaScript sibling intentionally has no declaration file.
+import * as markdownBlocks from "../lib/markdownBlocks.mjs";
+// @ts-expect-error JavaScript sibling intentionally has no declaration file.
+import * as settledText from "../lib/settledText.mjs";
 import "highlight.js/styles/github.css";
 
 // highlight.js (via lowlight) → hAST → real React elements (no innerHTML).
 // `common` covers ~37 mainstream languages, enough for chat code blocks.
 const lowlight = createLowlight(common);
+
+interface MarkdownBlockSlice {
+  key: string;
+  text: string;
+  closed: boolean;
+}
+
+const splitMarkdownBlocks = markdownBlocks.splitMarkdownBlocks as (
+  text: string,
+) => MarkdownBlockSlice[];
+
+const nextSettledValue = settledText.nextSettledValue as (input: {
+  current: string;
+  settled: string | undefined;
+  elapsedMs: number;
+  quietMs: number;
+}) => string;
+
+// Module-level, NOT inline literals: a fresh array on every render is a new prop
+// identity, which defeats the unified processor's own caching and forces a full
+// re-parse each frame.
+const REHYPE_PLUGINS = [rehypeSanitize];
+const REMARK_PLUGINS = [remarkGfm];
 
 interface RichMessageRendererProps {
   text: string;
@@ -83,20 +112,48 @@ function RichMessageRenderer({
     [text],
   );
 
+  // Per-block rendering: the whole unified pipeline used to run over the entire
+  // accumulated text on every rAF flush — O(len) per frame, O(len²) per message.
+  // Only the growing tail block re-parses now; the closed ones are memoized.
+  const blocks = useMemo(() => splitMarkdownBlocks(normalizedText), [normalizedText]);
+
   return (
     <div className="rich-message">
-      <ReactMarkdown
-        components={markdownComponents}
-        rehypePlugins={[rehypeSanitize]}
-        remarkPlugins={[remarkGfm]}
-      >
-        {normalizedText}
-      </ReactMarkdown>
+      {blocks.map((block) => (
+        <MarkdownBlock
+          key={block.key}
+          components={markdownComponents}
+          text={block.text}
+        />
+      ))}
     </div>
   );
 }
 
 export default memo(RichMessageRenderer);
+
+/**
+ * One top-level markdown block. Memoized on its text (and the stable components
+ * map), so every block that has stopped growing is skipped entirely while the
+ * tail streams in.
+ */
+const MarkdownBlock = memo(function MarkdownBlock({
+  components,
+  text,
+}: {
+  components: Components;
+  text: string;
+}) {
+  return (
+    <ReactMarkdown
+      components={components}
+      rehypePlugins={REHYPE_PLUGINS}
+      remarkPlugins={REMARK_PLUGINS}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+});
 
 function normalizeMarkdownForRichRendering(text: string) {
   const lines = repairNestedMarkdownFences(text).split("\n");
@@ -207,6 +264,11 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
     window.setTimeout(() => setCopied(false), 1_400);
   }
 
+  // A fence that is still streaming grows every frame; highlighting it each time
+  // re-tokenizes the whole block ~60×/s (O(len) per frame, O(len²) per fence).
+  // Highlight only once the code goes quiet.
+  const settledCode = useSettledCode(code);
+
   // Highlight to React elements (no innerHTML). Plain blocks ("text"/log/etc. —
   // e.g. command output) are rendered RAW: running `highlightAuto` on non-code
   // prose can yield an empty/near-empty tree (the "missing output" bug). Only
@@ -220,13 +282,19 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
     }
     try {
       const tree = lowlight.registered(language)
-        ? lowlight.highlight(language, code)
-        : lowlight.highlightAuto(code);
+        ? lowlight.highlight(language, settledCode)
+        : lowlight.highlightAuto(settledCode);
       return toJsxRuntime(tree, { Fragment, jsx, jsxs });
     } catch {
       return null;
     }
-  }, [code, language]);
+  }, [settledCode, language]);
+
+  // The highlight describes `settledCode`, which lags the stream while the fence
+  // is still growing. Showing it then would freeze the block on an older, shorter
+  // text — so the raw `code` renders until the two agree. Between the two branches
+  // the full text is ALWAYS on screen: never blank, never trailing the stream.
+  const body = highlighted !== null && settledCode === code ? highlighted : code;
 
   return (
     <figure className="rich-code-block">
@@ -238,10 +306,43 @@ function CodeBlock({ code, language }: { code: string; language: string }) {
         </button>
       </figcaption>
       <pre>
-        <code className="hljs">{highlighted ?? code}</code>
+        <code className="hljs">{body}</code>
       </pre>
     </figure>
   );
+}
+
+// How long a fence must stop growing before it is worth highlighting: short
+// enough that the highlight looks instantaneous once the stream pauses, long
+// enough to skip the ~60 full re-tokenizations per second a growing block costs.
+const CODE_SETTLE_QUIET_MS = 120;
+
+/**
+ * `code` debounced to its quiet value (the policy lives in `nextSettledValue`, so
+ * the hook and its test can never drift apart). The very first value is returned
+ * immediately, so an already-complete message never waits a frame to paint.
+ */
+function useSettledCode(code: string) {
+  const [settled, setSettled] = useState(code);
+
+  useEffect(() => {
+    if (code === settled) return;
+    // The effect re-runs on every change, so this timer restarts with it and only
+    // ever fires after `code` has been quiet for the whole window.
+    const timer = window.setTimeout(() => {
+      setSettled((previous) =>
+        nextSettledValue({
+          current: code,
+          settled: previous,
+          elapsedMs: CODE_SETTLE_QUIET_MS,
+          quietMs: CODE_SETTLE_QUIET_MS,
+        }),
+      );
+    }, CODE_SETTLE_QUIET_MS);
+    return () => window.clearTimeout(timer);
+  }, [code, settled]);
+
+  return settled;
 }
 
 function MermaidBlock({

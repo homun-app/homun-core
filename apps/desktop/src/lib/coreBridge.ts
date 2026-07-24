@@ -889,7 +889,12 @@ export interface ComposioConnection {
   status: string;
 }
 
-/** A real-time UI event pushed by the gateway over /api/events. */
+/**
+ * A real-time UI event pushed by the gateway. It travels inside the `app.event`
+ * envelope of the unified WebSocket (`wsSubscription`) — the legacy NDJSON
+ * `/api/events` client was retired, as a second live transport meant a second
+ * connection, a second reconnect loop and a double dispatch of every handler.
+ */
 export interface AppEvent {
   type: string;
   thread_id?: string;
@@ -900,61 +905,6 @@ export interface AppEvent {
   turn_id?: string;
   user_message_id?: string;
   assistant_message_id?: string;
-}
-
-/**
- * Subscribes to the gateway's real-time event stream (NDJSON over HTTP, the same
- * push idiom the chat stream uses). Invokes `onEvent` for each event — e.g.
- * `thread.turn_started` when an inbound Telegram/WhatsApp/scheduled turn has
- * already persisted its visible user bubble and assistant placeholder.
- * Auto-reconnects on drop. Returns an unsubscribe function.
- */
-export function subscribeAppEvents(onEvent: (event: AppEvent) => void): () => void {
-  let stopped = false;
-  let controller: AbortController | null = null;
-
-  async function connect() {
-    while (!stopped) {
-      controller = new AbortController();
-      try {
-        const response = await fetch(`${DESKTOP_GATEWAY_URL}/api/events`, {
-          headers: gatewayHeaders(),
-          signal: controller.signal,
-        });
-        if (!response.ok || !response.body) throw new Error(`events HTTP ${response.status}`);
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let nl: number;
-          while ((nl = buffer.indexOf("\n")) >= 0) {
-            const line = buffer.slice(0, nl).trim();
-            buffer = buffer.slice(nl + 1);
-            if (!line) continue;
-            try {
-              onEvent(JSON.parse(line) as AppEvent);
-            } catch {
-              // ignore a malformed line
-            }
-          }
-        }
-      } catch {
-        if (stopped) return;
-      }
-      if (stopped) return;
-      // Reconnect after a short backoff (gateway restart, transient drop, …).
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-  }
-
-  void connect();
-  return () => {
-    stopped = true;
-    controller?.abort();
-  };
 }
 
 async function electronRuntimeModel(): Promise<ActiveModelInfo> {

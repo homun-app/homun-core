@@ -80,8 +80,8 @@ import type {
 import {
   coreBridge,
   SteeringQueuedDuringSubmissionError,
-  subscribeAppEvents,
   type ActiveModelInfo,
+  type AppEvent,
   type ChatAttachmentInput,
   type CoreBranchPoint,
   type CoreChatStreamEvent,
@@ -155,6 +155,10 @@ import {
   type InspectorTabKind,
 } from "../lib/inspectorWorkspace";
 import { reconcileMemoryArtifacts } from "../lib/uiSnapshot";
+// Transcript indexes live in a plain .mjs sibling so `node --test` can exercise
+// them without a build step, which is why they carry no type declaration.
+// @ts-expect-error JavaScript sibling intentionally has no declaration file.
+import * as messageIndex from "../lib/messageIndex.mjs";
 import {
   STRUCTURED_MARKER_DELTA_RE,
   COMPOSIO_CONFIRM_RE,
@@ -201,6 +205,14 @@ import type {
   TaskItem,
   DiffEventPayload,
 } from "../types";
+
+const buildPreviousUserMessageIndex = messageIndex.buildPreviousUserMessageIndex as (
+  messages: ChatMessage[],
+) => Map<string, ChatMessage | null>;
+
+const buildBranchIndex = messageIndex.buildBranchIndex as (
+  branches: CoreBranchPoint[],
+) => Map<string, CoreBranchPoint>;
 
 const CHAT_VIEW_SESSION_ID =
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -611,6 +623,16 @@ export function ChatView({
     const base = optimisticMessages ?? messages;
     return base.filter((m) => !(m.role === "assistant" && m.id.endsWith("_ready")));
   }, [optimisticMessages, messages]);
+  // Transcript lookups, resolved ONCE per render instead of once per row. The
+  // action bar asks "does this message have a user message before it?" and the
+  // branch picker asks "is there a branch point on this node?" for every row of
+  // the transcript, on every streaming frame: as linear scans that was O(N²) and
+  // O(N·B) per frame. As indexes it is one pass plus O(1) lookups.
+  const previousUserMessageIndex = useMemo(
+    () => buildPreviousUserMessageIndex(threadMessages),
+    [threadMessages],
+  );
+  const branchIndex = useMemo(() => buildBranchIndex(branches), [branches]);
   // All artifacts generated in this conversation (from persisted ‹‹ARTIFACT››
   // markers) — drives the Artifacts workspace panel.
   // ADR 0022 (Piano UI C2): dipende dai messaggi PERSISTED (`messages`), NON da
@@ -1071,8 +1093,12 @@ export function ChatView({
     }
   }
 
+  // "instant", never "auto": per CSSOM-View, "auto" resolves to the element's computed
+  // scroll-behavior, so with a smooth scroller every rAF flush started an animation the
+  // next frame cancelled — the viewport trailed the text and rubber-banded for the whole
+  // answer. Same reasoning for every other non-user-initiated jump below.
   function afterStreamingFramePaint() {
-    scrollConversationToBottomIfPinned("auto");
+    scrollConversationToBottomIfPinned("instant");
   }
 
   async function runLocalSmokeTest() {
@@ -1261,7 +1287,7 @@ export function ChatView({
       setStreamingAssistantId(streamingMessage.id);
       notifyStreaming(true);
       streamingUserPinnedRef.current = conversationBottomDistance() < 220;
-      window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
+      window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
       cancelStreamingRequestRef.current = cancelStreamingRequest;
       // Record an active stream so a reload mid-answer can reattach (resume).
       writeResumeMarker(thread.threadId, {
@@ -2032,7 +2058,7 @@ export function ChatView({
   function regenerateAnswer(messageId: string) {
     if (promptSubmitting || streamingAssistantId) return;
     const assistant = threadMessages.find((message) => message.id === messageId);
-    const previousUser = findPreviousUserMessage(threadMessages, messageId);
+    const previousUser = previousUserMessageIndex.get(messageId);
     if (!assistant || !previousUser) {
       setPromptError(t("chat.noPreviousPromptToRegenerate"));
       return;
@@ -2089,7 +2115,7 @@ export function ChatView({
     notifyStreaming(true);
     resetStreamingState("");
     streamingUserPinnedRef.current = conversationBottomDistance() < 220;
-    window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
+    window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
     setStreamStatus({
       requestId,
       phase: "thinking",
@@ -2410,7 +2436,7 @@ export function ChatView({
     notifyStreaming(true);
     resetStreamingState(message.text);
     streamingUserPinnedRef.current = conversationBottomDistance() < 220;
-    window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
+    window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
     setStreamStatus({
       requestId,
       phase: "thinking",
@@ -2550,10 +2576,12 @@ export function ChatView({
     };
   }, [computerSessionId]);
 
+  // Opening a thread lands at the bottom, it does not animate its way down: an animated
+  // first-paint scroll across a long transcript is exactly the sluggishness we're removing.
   useEffect(() => {
     shouldStickToBottomRef.current = true;
     streamingUserPinnedRef.current = false;
-    window.setTimeout(() => scrollConversationToBottom("auto"), 0);
+    window.setTimeout(() => scrollConversationToBottom("instant"), 0);
   }, [thread.threadId]);
 
   useEffect(() => {
@@ -2625,7 +2653,7 @@ export function ChatView({
       .reverse()
       .find((message) => message.role === "assistant" && Boolean(message.text?.trim()));
     if (!latest || latest.id === followUpsFor) return undefined;
-    const previousUser = findPreviousUserMessage(threadMessages, latest.id);
+    const previousUser = previousUserMessageIndex.get(latest.id);
     let cancelled = false;
     setFollowUps([]);
     setFollowUpsFor(latest.id);
@@ -2640,7 +2668,7 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [threadMessages, streamingAssistantId, followUpsFor]);
+  }, [threadMessages, previousUserMessageIndex, streamingAssistantId, followUpsFor]);
 
   // After a reload, reattach to an answer that was still streaming (resume).
   useEffect(() => {
@@ -2682,8 +2710,11 @@ export function ChatView({
   }, [incomingBackgroundTurn, messages, promptSubmitting, streamingAssistantId, thread.threadId]);
 
   useEffect(() => {
-    const handleResize = () => scrollConversationToBottomIfPinned("auto");
-    const behavior: ScrollBehavior = streamingAssistantId ? "auto" : "smooth";
+    // A resize is a continuous gesture: re-pinning must track the drag frame by frame, so it
+    // is instant. While streaming the transcript grows every frame → instant for the same
+    // reason. Only the settled, non-streaming case (a committed message landing) glides.
+    const handleResize = () => scrollConversationToBottomIfPinned("instant");
+    const behavior: ScrollBehavior = streamingAssistantId ? "instant" : "smooth";
 
     const frame = window.requestAnimationFrame(() =>
       scrollConversationToBottomIfPinned(behavior),
@@ -2980,7 +3011,7 @@ export function ChatView({
                   }
                   canRegenerate={
                     displayMessage.role === "assistant" &&
-                    Boolean(findPreviousUserMessage(threadMessages, displayMessage.id))
+                    Boolean(previousUserMessageIndex.get(displayMessage.id))
                   }
                   canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
                   canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
@@ -3032,7 +3063,7 @@ export function ChatView({
               )}
               {!isStreamingMessage &&
                 (() => {
-                  const point = branches.find((b) => b.node_id === displayMessage.id);
+                  const point = branchIndex.get(displayMessage.id);
                   if (!point || point.options.length < 2) return null;
                   const active = point.options[point.active_index];
                   const label = active?.label ?? null;
@@ -3780,22 +3811,6 @@ function resolveMessageActionMenuPlacement(
   }
 
   return "below";
-}
-
-function findPreviousUserMessage(
-  messages: ChatMessage[],
-  messageId: string,
-): ChatMessage | undefined {
-  const messageIndex = messages.findIndex((message) => message.id === messageId);
-  if (messageIndex <= 0) return undefined;
-
-  for (let index = messageIndex - 1; index >= 0; index -= 1) {
-    if (messages[index].role === "user") {
-      return messages[index];
-    }
-  }
-
-  return undefined;
 }
 
 function isLatestAssistantMessage(messages: ChatMessage[], messageId: string) {
@@ -5131,7 +5146,14 @@ export function MemoryGraphPanel({
         if (active) setBuildingGraph(building);
       })
       .catch(() => {});
-    const unsubscribe = subscribeAppEvents((event) => {
+    // One event transport: project_graph.* rides the unified WS, wrapped by the gateway
+    // in an `app.event` envelope (publish_app_event is the single producer — it fans the
+    // very same event to the WS registry and to the legacy NDJSON channel, so nothing is
+    // lost by dropping the latter). The socket is a process-lifetime singleton connected
+    // by App at boot; here we only add and drop a handler, never touch the connection.
+    const unsubscribe = wsSubscription.subscribe((msg) => {
+      if (msg.type !== "app.event") return;
+      const event = msg.event as AppEvent;
       if (event.workspace !== workspace) return;
       if (event.type === "project_graph.ready") {
         setBuildingGraph(false);

@@ -3894,7 +3894,11 @@ body.resizing-drawer {
      thread (code blocks scroll inside themselves). */
   overflow-y: auto;
   overflow-x: hidden;
-  scroll-behavior: smooth;
+  /* No smooth scrolling declared here, deliberately: it would animate every programmatic
+     scrollTo made with `behavior: "auto"` (CSSOM-View resolves "auto" to the scroller's
+     computed value), so the per-frame streaming auto-scroll kept restarting an animation
+     the next frame cancelled. The one animated jump we want — the jump-to-bottom button —
+     asks for it explicitly at the call site. */
   scrollbar-gutter: stable;
 }
 /* Thin, discreet scrollbar pinned to the far right of the scroll area. */
@@ -3934,6 +3938,40 @@ body.resizing-drawer {
 
 .thread-message-row {
   width: 100%;
+}
+
+/* Skip layout/paint/style entirely for rows outside the viewport. The whole
+   transcript lives in the DOM (it is NOT virtualized: .thread-message-list is a
+   plain flex column), so on a long thread every streaming frame re-laid-out
+   thousands of nodes nobody was looking at. The selector is the row wrapper, not
+   `.message`: the <article class="message"> is a child of .thread-message-row,
+   so a `> .message` selector would match nothing.
+   `contain-intrinsic-size: auto 280px` gives a never-yet-rendered row a
+   placeholder height; the `auto` keyword then makes the browser remember each
+   row's real height once measured, so the scrollbar and the scroll position stay
+   honest instead of jumping as rows come into view. */
+.thread-message-list > .thread-message-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 280px;
+}
+/* The last row is the streaming one: never let the renderer skip it, and never
+   let a placeholder height fight its real, growing one. */
+.thread-message-list > .thread-message-row:last-child {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+/* `content-visibility: auto` applies paint containment AT ALL TIMES, not only
+   while the row is skipped, and paint containment clips to the row's own box.
+   Two descendants deliberately overflow it: `.message-action-menu` (drops up to
+   360px below the hover action bar, and flips `.above` when there is no room)
+   and `.memory-usage-popover` (opens 320px above the footer badge). Both are
+   mounted only while open, so keying the exemption on `:has()` drops the
+   containment for exactly one row, only while an overlay is actually up —
+   instead of on every hover. */
+.thread-message-list > .thread-message-row:has(.message-action-menu),
+.thread-message-list > .thread-message-row:has(.memory-usage-popover) {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
 }
 
 .message {

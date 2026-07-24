@@ -7,6 +7,21 @@ il "cosa c'è di nuovo" nell'aggiornamento) e nella pagina changelog del sito.
 
 ## [Non rilasciato]
 
+### Migliorato
+- **L'app è molto più fluida.** La risposta ora scorre senza rimbalzi mentre viene scritta, il testo
+  si aggiorna senza scatti anche nelle risposte lunghe, e i blocchi di codice non "sfarfallano" più
+  mentre arrivano.
+- **Avvio più pulito e veloce.** La finestra appare già col tema giusto, senza lampo bianco, e l'app
+  si carica più in fretta perché le schermate secondarie vengono caricate solo quando servono.
+- **Homun continua a scrivere anche quando la finestra è coperta.** Prima, con l'app in secondo
+  piano, la risposta si congelava e ripartiva di colpo tornando sopra.
+
+### Correzioni
+- **Attese lunghe non vengono più scambiate per errori.** Se il modello resta non disponibile a
+  lungo, l'attesa resta un'attesa: niente messaggio d'errore mentre Homun sta ancora riprendendo.
+- **Il modello locale rispetta il tempo massimo.** Una generazione bloccata non tiene più occupato
+  Homun a tempo indefinito.
+
 ## [0.1.1079] — 2026-07-24
 
 Nuovo motore del browser e controllo a metà attività ("steering").

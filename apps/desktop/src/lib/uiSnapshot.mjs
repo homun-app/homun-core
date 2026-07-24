@@ -33,6 +33,43 @@ function sameMemoryArtifact(left, right) {
     left.thread === right.thread;
 }
 
+function sameChatThread(left, right) {
+  return left.threadId === right.threadId &&
+    left.workspaceId === right.workspaceId &&
+    left.title === right.title &&
+    left.subtitle === right.subtitle &&
+    left.status === right.status &&
+    left.pinned === right.pinned &&
+    left.computerSessionId === right.computerSessionId &&
+    left.taskId === right.taskId &&
+    left.updatedAt === right.updatedAt &&
+    left.messageCount === right.messageCount &&
+    left.source === right.source &&
+    left.channelRecipient === right.channelRecipient;
+}
+
+/// Identity-preserving reconciliation for the thread list, mirroring what
+/// `reconcileChatMessages` already does for messages. The operational poll runs
+/// every 2.5s: without this, each tick handed React a brand-new array of
+/// brand-new objects, so the `activeThread` memo changed and App/Sidebar/Shell/
+/// ChatView re-rendered even mid-stream — a periodic hitch on top of the rAF loop.
+/// Order is compared positionally (the sidebar is most-recent-first, so a
+/// reorder with no field change is a real change and must reach the UI), while
+/// the by-id fallback still lets a moved row keep its object identity.
+export function reconcileChatThreads(current, incoming) {
+  if (!current || current.length !== incoming.length) return incoming;
+  let changed = false;
+  let byId = null;
+  const merged = incoming.map((thread, index) => {
+    if (sameChatThread(current[index], thread)) return current[index];
+    changed = true;
+    if (!byId) byId = new Map(current.map((item) => [item.threadId, item]));
+    const moved = byId.get(thread.threadId);
+    return moved && sameChatThread(moved, thread) ? moved : thread;
+  });
+  return changed ? merged : current;
+}
+
 export function reconcileChatMessages(current, incoming) {
   if (!current || current.length !== incoming.length) return incoming;
   return current.every((item, index) => sameChatMessage(item, incoming[index]))

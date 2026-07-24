@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, shell, ipcMain, dialog, nativeImage, powerSaveBlocker, session } = require("electron");
+const { app, BrowserWindow, Menu, Notification, shell, ipcMain, dialog, nativeImage, nativeTheme, powerSaveBlocker, session } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
@@ -480,6 +480,16 @@ function rendererEntry() {
   return { kind: "url", value: pathToFileURL(indexPath).toString() };
 }
 
+/// The window's pre-paint fill. Matching the persisted theme keeps the reveal
+/// from flashing white for dark-theme users; light is the app default.
+function startupBackgroundColor() {
+  try {
+    return nativeTheme.shouldUseDarkColors ? "#101114" : "#fcfcfd";
+  } catch {
+    return "#fcfcfd";
+  }
+}
+
 function createWindow() {
   const iconPath = brandIconPath();
   const window = new BrowserWindow({
@@ -489,12 +499,17 @@ function createWindow() {
     minHeight: 680,
     ...(iconPath ? { icon: iconPath } : {}),
     title: "Homun",
-    backgroundColor: "#ffffff",
+    show: false,
+    backgroundColor: startupBackgroundColor(),
     titleBarStyle: "hidden",
     ...(process.platform === "darwin"
       ? { trafficLightPosition: { x: 16, y: 15 } }
       : { titleBarOverlay: { height: 44, color: "#ffffff", symbolColor: "#5f6368" } }),
     webPreferences: {
+      // The renderer paints streamed tokens from a requestAnimationFrame loop.
+      // Electron's default throttling drops rAF to ~1Hz for an occluded window,
+      // which freezes the answer mid-stream and bursts it on refocus.
+      backgroundThrottling: false,
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
@@ -511,6 +526,11 @@ function createWindow() {
     },
   });
   mainWindows.add(window);
+  // Reveal only once the renderer can actually paint: showing an empty window
+  // first produced a white flash before the themed UI arrived.
+  window.once("ready-to-show", () => {
+    window.show();
+  });
   window.on("closed", () => {
     mainWindows.delete(window);
   });

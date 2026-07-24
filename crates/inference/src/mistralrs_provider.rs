@@ -82,6 +82,15 @@ impl MistralRsProvider {
     }
 }
 
+/// The caller's timeout bound (e.g. the steering decision's 45s) as a `Duration`.
+/// A missing, non-finite or non-positive value means "no bound" — never a zero
+/// timeout, which would fail every request instantly.
+fn timeout_duration(seconds: Option<f64>) -> Option<std::time::Duration> {
+    seconds
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .map(std::time::Duration::from_secs_f64)
+}
+
 impl InferenceProvider for MistralRsProvider {
     fn descriptor(&self) -> &CapabilityDescriptor {
         &self.descriptor
@@ -98,14 +107,34 @@ impl InferenceProvider for MistralRsProvider {
             &self.descriptor.id,
         );
         let messages = TextMessages::new().add_message(TextMessageRole::User, &request.prompt);
-        let response = match self.runtime.block_on(self.model.send_chat_request(messages)) {
-            Ok(response) => response,
-            Err(error) => {
+        let request_future = self.model.send_chat_request(messages);
+        // Without this the caller's bound was advisory only: a hung local
+        // generation held the interpreter worker forever (triage MINOR 7).
+        // The elapsed case is mapped straight onto this crate's error type —
+        // mistral.rs reports its own failures through `anyhow`, which is not a
+        // dependency here, so there is no shared error type to funnel into.
+        let outcome = match timeout_duration(request.request_timeout_seconds) {
+            Some(bound) => self
+                .runtime
+                .block_on(async move { tokio::time::timeout(bound, request_future).await })
+                .map_err(|_elapsed| RuntimeClientError::Runtime {
+                    code: "mistralrs_timeout".to_string(),
+                    message: format!("local generation exceeded {bound:?}"),
+                }),
+            None => Ok(self.runtime.block_on(request_future)),
+        };
+        let response = match outcome {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => {
                 attempt.failed("runtime", None);
                 return Err(RuntimeClientError::Runtime {
                     code: "mistralrs_error".to_string(),
                     message: error.to_string(),
                 });
+            }
+            Err(timeout_error) => {
+                attempt.failed("timeout", None);
+                return Err(timeout_error);
             }
         };
 
@@ -131,5 +160,24 @@ impl InferenceProvider for MistralRsProvider {
             local_first_inference_usage::UsageProvenance::HomunEstimated,
         );
         Ok(parsed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::timeout_duration;
+    use std::time::Duration;
+
+    #[test]
+    fn timeout_duration_maps_only_positive_finite_seconds() {
+        assert_eq!(timeout_duration(Some(45.0)), Some(Duration::from_secs(45)));
+        assert_eq!(timeout_duration(Some(0.5)), Some(Duration::from_millis(500)));
+        // No bound configured, or a nonsense bound, must never become a 0s timeout
+        // that fails every request instantly — it means "no timeout".
+        assert_eq!(timeout_duration(None), None);
+        assert_eq!(timeout_duration(Some(0.0)), None);
+        assert_eq!(timeout_duration(Some(-1.0)), None);
+        assert_eq!(timeout_duration(Some(f64::NAN)), None);
+        assert_eq!(timeout_duration(Some(f64::INFINITY)), None);
     }
 }

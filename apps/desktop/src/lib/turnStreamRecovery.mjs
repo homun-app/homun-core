@@ -4,6 +4,12 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 const DURABLE_TERMINAL = new Set(["completed", "failed", "cancelled", "expired"]);
 const DURABLE_HANDOFF = new Set(["waiting_user_approval"]);
 const DEFAULT_DELAYS = [100, 250, 500, 1000, 2000];
+// A turn parked by the steering coordinator waits for the model to come back —
+// minutes, sometimes longer. It is a low-frequency WAIT state, not a stalled
+// stream: counting its empty reconnects against the progress budget surfaced a
+// spurious recovery error while the gateway was still resuming correctly.
+const DURABLE_WAITING = new Set(["parked"]);
+const PARKED_DELAY_MS = 5_000;
 
 export class TurnStreamRecoveryError extends Error {
   constructor(message, code = "turn_stream_recovery_exhausted", cause) {
@@ -91,6 +97,12 @@ export async function recoverTurnStream(options) {
         );
       }
       terminalRecoveryAttempts += 1;
+    } else if (DURABLE_WAITING.has(durableStatus.status)) {
+      // Neither terminal nor stalled: poll slowly and leave both budgets alone.
+      terminalRecoveryAttempts = 0;
+      activeReconnects = 0;
+      await sleep(PARKED_DELAY_MS);
+      continue;
     } else {
       // A queued/running turn can legitimately have no broadcaster yet (or can
       // be waiting behind another browser task). Empty EOFs in that state are
