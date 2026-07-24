@@ -18330,11 +18330,39 @@ fn browser_act_error_hint(error: &str) -> &'static str {
 }
 
 // Shared with the single-action `browser_act` enforcement site in
-// `execute_browser_tool` (see `single_action_rejects_clickcoords_before_payment_claim`)
-// so both reject-clickCoords sites emit byte-identical text — one message to
-// keep in sync, not two literals that can silently drift apart.
+// `execute_browser_tool` (see
+// `single_action_rejects_unsupported_execution_before_payment_claim`) so both
+// reject sites emit byte-identical text — one message to keep in sync, not two
+// literals that can silently drift apart.
 const BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR: &str =
-    "BROWSER_UNSUPPORTED_COMMITTING_ACTION: coordinate clicks are not available; click a specific [ref=…] control instead";
+    "BROWSER_UNSUPPORTED_COMMITTING_ACTION: this action is not executable (an unrecognized kind, coordinate clicks, or a selector field bypassing the ref) — use a schema kind with a specific [ref=…] control instead";
+
+/// The `kind` values the `browser_act` schema exposes (mirrors `browser_act_tool_schema`'s
+/// two `"enum"` literals — kept in sync by hand, same convention as the shared error
+/// text above, since the schema itself must stay a plain JSON literal for the model).
+const BROWSER_ACT_SCHEMA_KINDS: &[&str] = &[
+    "click", "type", "fill", "select", "select_option", "press", "press_key", "hover", "hold",
+    "scroll", "scrollIntoView", "wait",
+];
+
+/// True when `action` carries only fields the `browser_act` schema exposes for
+/// execution: a `kind` in `BROWSER_ACT_SCHEMA_KINDS`, and no `selector` field. A
+/// `kind` outside that set cannot have been legitimately produced from the schema —
+/// it is either a stale/hallucinated call (`clickCoords`, `batch`) or a sidecar-only
+/// kind the schema deliberately never exposes (`evaluate`). `selector` is honored by
+/// the sidecar as an alternative to `ref` (`requireRefOrSelector` in
+/// `runtimes/browser-automation/src/browser/actions.ts`) but the schema never exposes
+/// it — letting it through would let a call target an element by raw CSS selector,
+/// bypassing the ref-based payment floor entirely (a floored ref never has to appear
+/// in the request at all). Shared by the single-action path and each bundle item in
+/// `normalize_browser_action_bundle` (design 1.3).
+fn browser_action_execution_fields_are_schema_legal(action: &serde_json::Value) -> bool {
+    let kind_ok = action
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|kind| BROWSER_ACT_SCHEMA_KINDS.contains(&kind));
+    kind_ok && action.get("selector").is_none()
+}
 
 fn normalize_browser_action_bundle(
     action: &mut serde_json::Value,
@@ -18355,13 +18383,21 @@ fn normalize_browser_action_bundle(
     // Only grows across the loop — never reset — matching the floor's raise-only rule.
     let mut focus_context = page_focus_payment_context;
     for nested in actions {
-        if nested.get("kind").and_then(serde_json::Value::as_str) == Some("clickCoords") {
-            return Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR.to_string());
-        }
+        // Nested-bundle check FIRST, with its own specific message: a nested
+        // "batch"/"actions" item would ALSO fail the general schema-kind check below
+        // (a hallucinated "batch" isn't in `BROWSER_ACT_SCHEMA_KINDS` either), but the
+        // more specific rejection is clearer for the model to act on.
         if nested.get("kind").and_then(serde_json::Value::as_str) == Some("batch")
             || nested.get("actions").is_some()
         {
             return Some("Browser action bundle rejected: nested bundles are not allowed.".to_string());
+        }
+        // Generalizes the former clickCoords-only reject (design 1.3): any kind
+        // outside the schema enum, or any item carrying a non-schema `selector`
+        // field that would bypass the ref-based floor, is rejected here — BEFORE the
+        // payment-commit/gate checks below ever run on this item.
+        if !browser_action_execution_fields_are_schema_legal(nested) {
+            return Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR.to_string());
         }
         if browser_safety::action_is_payment_commit(nested, payment_floor_refs, focus_context) {
             return Some(
@@ -22070,11 +22106,12 @@ struct BrowserToolCtx<'a> {
     // observation. Raises (never lowers) the effective action class; see
     // `browser_safety::effective_action_class`.
     payment_floor_refs: &'a mut std::collections::HashSet<String>,
-    // Machine-derived "focus is in a payment context" flag for the current
-    // observation (sidecar Task 2; defaults to false while absent). Floors a
-    // ref-less committing action (Enter/Return) the same way `payment_floor_refs`
-    // floors a ref-bearing one — see `browser_safety::is_refless_committing`.
-    focus_payment_context: &'a mut bool,
+    // Per-target_id payment context (focus flag + robust last-acted-floored flag;
+    // fixes IMPORTANT D — a single global flag let a snapshot of tab A clear tab B's
+    // payment context). Floors a ref-less committing action (Enter/Return) the same
+    // way `payment_floor_refs` floors a ref-bearing one — see
+    // `browser_safety::is_refless_committing` and `BrowserPaymentContext`.
+    payment_context_by_target: &'a mut std::collections::HashMap<String, BrowserPaymentContext>,
     pending_browser_image: &'a mut Option<String>,
     browser_tool_call_ids: &'a mut std::collections::BTreeSet<String>,
     current_target: &'a mut String,
@@ -22793,7 +22830,18 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
                                     *ctx.payment_floor_refs = browser_floor_refs(&value);
-                                    *ctx.focus_payment_context = browser_focus_payment_context(&value);
+                                    // A navigate is an explicit fresh observation of THIS target's
+                                    // page: update the best-effort focus flag AND clear the robust
+                                    // last-acted-floored flag (the page just changed under us).
+                                    browser_set_target_focus(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                        browser_focus_payment_context(&value),
+                                    );
+                                    browser_clear_target_acted_floored(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                    );
                                 }
                                 push_browser_step(
                                     format!("navigate {url}"),
@@ -22866,7 +22914,18 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             if !snap.is_empty() {
                                 *ctx.last_snapshot = snap.clone();
                                 *ctx.payment_floor_refs = browser_floor_refs(&value);
-                                *ctx.focus_payment_context = browser_focus_payment_context(&value);
+                                // Explicit re-observation of THIS target: refresh the focus flag
+                                // and clear the robust flag (a model-requested snapshot is the
+                                // canonical "re-orient on this page" moment).
+                                browser_set_target_focus(
+                                    ctx.payment_context_by_target,
+                                    ctx.current_target.as_str(),
+                                    browser_focus_payment_context(&value),
+                                );
+                                browser_clear_target_acted_floored(
+                                    ctx.payment_context_by_target,
+                                    ctx.current_target.as_str(),
+                                );
                             }
                             push_browser_step("snapshot".to_string(), "done");
                             let metrics = browser_observation_metrics(
@@ -22931,9 +22990,15 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             serde_json::Value::String(ctx.current_target.clone()),
                         );
                     }
-                    // Single-action focus context is just the page's own last-observed
-                    // focus (no "prior nested item" concept outside a bundle).
-                    let focus_ctx = *ctx.focus_payment_context;
+                    // Single-action payment context for the CURRENT target: the best-effort
+                    // focus flag OR'd with the robust last-acted-floored flag (IMPORTANT C —
+                    // a cross-origin PSP OOPIF fails the focus check whenever the app isn't
+                    // OS-frontmost, but `last_acted_floored` is frame-aware for free via the
+                    // per-ref floor). No "prior nested item" concept outside a bundle.
+                    let focus_ctx = browser_payment_context_for(
+                        ctx.payment_context_by_target,
+                        ctx.current_target.as_str(),
+                    );
                     if let Some(error) = normalize_browser_action_bundle(
                         &mut action,
                         ctx.current_target.as_str(),
@@ -22944,24 +23009,25 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         push_browser_step("browser action bundle blocked".to_string(), "error");
                         Err(error)
                     } else {
-                    // clickCoords must be rejected before ANY payment-approval side
-                    // effect: it is not ref-based (the ref floor can't cover it) and
-                    // not Enter/Return (the page floor above doesn't apply either),
-                    // so no machine signal can ever classify it — fail closed
-                    // regardless of declared action_class. Checked here, FIRST,
-                    // before `apply_payment_approval_secret_for_action` and before
-                    // `should_claim_payment_approval`/`claim_payment_approval_for_action`
-                    // below, because a hallucinated clickCoords can still carry a
+                    // A non-schema action (clickCoords, any other unrecognized kind, or a
+                    // selector-bearing action) must be rejected before ANY payment-approval
+                    // side effect: none of it is ref-based (the ref floor can't cover a
+                    // selector or an unrecognized kind) and none of it is Enter/Return (the
+                    // page floor above doesn't apply either), so no machine signal can ever
+                    // classify it — fail closed regardless of declared action_class. Checked
+                    // here, FIRST, before `apply_payment_approval_secret_for_action` and
+                    // before `should_claim_payment_approval`/`claim_payment_approval_for_action`
+                    // below, because a hallucinated non-schema action can still carry a
                     // declared action_class:"payment_commit" plus a valid
                     // payment_approval_id — which resolves to a genuine PaymentCommit
                     // on the declared class alone — so checking this only as part of
-                    // the gate (after claiming) let clickCoords burn a one-shot
+                    // the gate (after claiming) would let it burn a one-shot
                     // Payment Approval Card grant for an action that gets rejected
-                    // anyway. Defense-in-depth: verified no production path emits it
-                    // and the schema doesn't expose it, but a model could still
-                    // hallucinate it.
+                    // anyway. Defense-in-depth: verified no production path emits these
+                    // and the schema doesn't expose them, but a model could still
+                    // hallucinate one.
                     let blocked_before_claim =
-                        single_action_rejects_clickcoords_before_payment_claim(&action);
+                        single_action_rejects_unsupported_execution_before_payment_claim(&action);
                     let mut preflight_error = None;
                     let vault_secret_used = if blocked_before_claim.is_some() {
                         false
@@ -23071,6 +23137,12 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                         )
                         .await;
                         let action_kinds = browser_action_kinds(&action);
+                        // Captured BEFORE `action` is moved into the sidecar call below, against
+                        // the PRE-act `payment_floor_refs` — the robust IMPORTANT-C signal (design
+                        // 1.2): acting on a ref the floor already marked is proof positive of a
+                        // payment interaction regardless of OS window focus.
+                        let targeted_floored_ref =
+                            browser_action_targeted_a_floored_ref(&action, ctx.payment_floor_refs);
                         let guard = browse_web_lock().lock().await;
                         let (client_back, act_res) =
                             chat_browser_call_bounded(client, BrowserMethod::Act, action)
@@ -23086,10 +23158,26 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                 // repeating the same move.
                                 let no_change =
                                     !snap.is_empty() && snap == *ctx.last_snapshot;
+                                if targeted_floored_ref {
+                                    browser_mark_target_acted_floored(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                    );
+                                }
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
                                     *ctx.payment_floor_refs = browser_floor_refs(&value);
-                                    *ctx.focus_payment_context = browser_focus_payment_context(&value);
+                                    browser_set_target_focus(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                        browser_focus_payment_context(&value),
+                                    );
+                                    // Deliberately NOT clearing last_acted_floored here: this is the
+                                    // act's OWN post-action refresh, not an independent
+                                    // re-observation. Clearing here would erase the flag just set
+                                    // above for THIS SAME action, breaking "type CVV into a floored
+                                    // ref, then press Enter" across the next call. See
+                                    // `browser_clear_target_acted_floored`'s doc comment.
                                 }
                                 push_browser_step(format!("{kind}"), "done");
                                 let boundary = if action_kinds.len() > 1 {
@@ -23207,8 +23295,19 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             *ctx.last_snapshot = snap.clone();
                                             *ctx.payment_floor_refs =
                                                 browser_floor_refs(snap_res.as_ref().unwrap());
-                                            *ctx.focus_payment_context =
-                                                browser_focus_payment_context(snap_res.as_ref().unwrap());
+                                            // A stale ref means the page genuinely changed under us —
+                                            // this recovery snapshot is a real fresh observation of
+                                            // THIS target, so treat it like an explicit
+                                            // browser_snapshot: refresh focus AND clear the robust flag.
+                                            browser_set_target_focus(
+                                                ctx.payment_context_by_target,
+                                                ctx.current_target.as_str(),
+                                                browser_focus_payment_context(snap_res.as_ref().unwrap()),
+                                            );
+                                            browser_clear_target_acted_floored(
+                                                ctx.payment_context_by_target,
+                                                ctx.current_target.as_str(),
+                                            );
                                             let metrics = browser_observation_metrics(
                                                 snap_res.as_ref().unwrap(),
                                                 vec!["snapshot".to_string()],
@@ -26747,11 +26846,15 @@ struct GatewayBrowserExecutor<'a> {
     // snapshot). Mirrors `last_snapshot`'s update sites; never derived from label
     // text. See `browser_safety::effective_action_class`.
     last_payment_floor_refs: std::collections::HashSet<String>,
-    // Machine-derived "focus is in a payment context" flag for the last observation.
-    // Updated at the SAME 4 sites as `last_payment_floor_refs`; defaults to false
-    // until the sidecar starts sending it (Task 2). Floors a ref-less committing
-    // action (Enter/Return) the same way the ref floor floors a ref-bearing one.
-    last_focus_payment_context: bool,
+    // Per-`target_id` payment context (focus flag + robust last-acted-floored
+    // flag). Replaces the single global `last_focus_payment_context: bool` (fixes
+    // IMPORTANT D — a snapshot of tab A must not clear tab B's payment context).
+    // `last_payment_floor_refs` above stays a SINGLE field, deliberately not
+    // per-target: every navigate/snapshot/act response refreshes it for whichever
+    // target the call just touched, immediately before it gates that SAME call's
+    // action, so per-call freshness holds without a map there. See
+    // `BrowserPaymentContext`.
+    payment_context_by_target: std::collections::HashMap<String, BrowserPaymentContext>,
     result_contract: Option<local_first_engine::browse::BrowseResultContract>,
     current_target: String,
     opened_targets: Vec<String>,
@@ -26825,7 +26928,7 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             browser_used: &mut ls.browser_used,
             last_snapshot: &mut self.last_snapshot,
             payment_floor_refs: &mut self.last_payment_floor_refs,
-            focus_payment_context: &mut self.last_focus_payment_context,
+            payment_context_by_target: &mut self.payment_context_by_target,
             pending_browser_image: &mut ls.pending_browser_image,
             browser_tool_call_ids: &mut ls.browser_tool_call_ids,
             current_target: &mut self.current_target,
@@ -27166,7 +27269,7 @@ impl GatewayBrowseExecutor<'_> {
             browser_session: None,
             last_snapshot: String::new(),
             last_payment_floor_refs: std::collections::HashSet::new(),
-            last_focus_payment_context: false,
+            payment_context_by_target: std::collections::HashMap::new(),
             result_contract: request.contract.clone(),
             current_target: "chat_0".to_string(),
             opened_targets: Vec::new(),
@@ -29374,7 +29477,7 @@ async fn run_agent_rounds(
         browser_session: None,
         last_snapshot: String::new(),
         last_payment_floor_refs: std::collections::HashSet::new(),
-        last_focus_payment_context: false,
+        payment_context_by_target: std::collections::HashMap::new(),
         result_contract: None,
         current_target: "chat_0".to_string(), // the first tab the tools operate on
         opened_targets: Vec::new(),
@@ -31471,6 +31574,115 @@ fn browser_focus_payment_context(value: &serde_json::Value) -> bool {
         .get("focusPaymentContext")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
+}
+
+/// Per-`target_id` payment-context signal (design 1.2, fixes IMPORTANT D/C). A
+/// single global flag let a snapshot of tab A clear tab B's payment context out
+/// from under it — every tab now gets its own entry, keyed by `target_id`.
+///
+/// - `focus` mirrors the sidecar's best-effort `focusPaymentContext`
+///   (`document.hasFocus()`-based): correct for a same-process/main-frame cc-form,
+///   but it fails OPEN for a real cross-origin PSP OOPIF whenever the app is not
+///   OS-frontmost (IMPORTANT C) — so it is kept only as a SECONDARY signal now.
+/// - `last_acted_floored` is the robust, OS-focus-independent signal: it is
+///   frame-aware "for free" because the per-ref floor
+///   (`computePaymentFloorRefs`/`locator.evaluate` in the sidecar) already floors a
+///   card input inside a cross-origin OOPIF correctly — so acting on that ref sets
+///   this flag regardless of window focus.
+///
+/// The gate ORs both (see `browser_payment_context_for`); it only ever raises
+/// (never lowers) the ref-less committing floor, matching the payment-floor's own
+/// raise-only discipline.
+#[derive(Debug, Default, Clone, Copy)]
+struct BrowserPaymentContext {
+    focus: bool,
+    last_acted_floored: bool,
+}
+
+impl BrowserPaymentContext {
+    /// The single bool the gate consumes: either signal is enough to floor.
+    fn combined(self) -> bool {
+        self.focus || self.last_acted_floored
+    }
+}
+
+/// Combined per-target payment-context signal fed to
+/// `browser_safety::effective_action_class`'s `focus_payment_context` parameter.
+/// Absent entry (target never observed yet) → false, matching the old default.
+fn browser_payment_context_for(
+    payment_context_by_target: &std::collections::HashMap<String, BrowserPaymentContext>,
+    target: &str,
+) -> bool {
+    payment_context_by_target
+        .get(target)
+        .is_some_and(|context| context.combined())
+}
+
+/// Updates a target's best-effort focus flag from a fresh observation. Called at
+/// every site that refreshes `payment_floor_refs` for a target (navigate, snapshot,
+/// act success, stale-ref recovery) — mirrors that field's own update discipline.
+fn browser_set_target_focus(
+    payment_context_by_target: &mut std::collections::HashMap<String, BrowserPaymentContext>,
+    target: &str,
+    focus: bool,
+) {
+    payment_context_by_target
+        .entry(target.to_string())
+        .or_default()
+        .focus = focus;
+}
+
+/// Marks a target's robust payment signal after an `act` that targeted a ref the
+/// PRE-act observation had already floored (IMPORTANT C). Only ever raises the
+/// flag; cleared exclusively by `browser_clear_target_acted_floored`, never here.
+fn browser_mark_target_acted_floored(
+    payment_context_by_target: &mut std::collections::HashMap<String, BrowserPaymentContext>,
+    target: &str,
+) {
+    payment_context_by_target
+        .entry(target.to_string())
+        .or_default()
+        .last_acted_floored = true;
+}
+
+/// Clears a target's last-acted-floored flag on an explicit `browser_navigate` /
+/// `browser_snapshot` (or stale-ref-recovery) re-observation of that SAME target.
+/// Deliberately NEVER called from `browser_act`'s own post-action success refresh:
+/// that refresh is the direct continuation of the very action that may have just
+/// SET this flag (e.g. typing a CVV into a floored ref), so clearing it there would
+/// erase the signal the very next ref-less Enter needs to see. Per-target, so
+/// re-observing a DIFFERENT tab never touches this target's flag (fixes
+/// IMPORTANT D).
+fn browser_clear_target_acted_floored(
+    payment_context_by_target: &mut std::collections::HashMap<String, BrowserPaymentContext>,
+    target: &str,
+) {
+    if let Some(context) = payment_context_by_target.get_mut(target) {
+        context.last_acted_floored = false;
+    }
+}
+
+/// True when `action` (a single action, or any item of its flat bundle) targets a
+/// ref that was in the PRE-act `payment_floor_refs` — the trigger for
+/// `browser_mark_target_acted_floored`. Bundle items already carry `target_id`
+/// equal to the bundle's `current_target` (see `normalize_browser_action_bundle`),
+/// so checking every item's `ref` against the SAME floor set is correct for a
+/// single-target bundle.
+fn browser_action_targeted_a_floored_ref(
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+) -> bool {
+    let ref_is_floored = |value: &serde_json::Value| {
+        value
+            .get("ref")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|r| payment_floor_refs.contains(r))
+    };
+    ref_is_floored(action)
+        || action
+            .get("actions")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|items| items.iter().any(ref_is_floored))
 }
 
 /// How long a per-thread browser session may sit idle before it is reaped.
@@ -44991,22 +45203,33 @@ fn rewrite_payment_approval_to_done(
 /// `execute_browser_tool` single-action branch checks this FIRST — ahead of
 /// `apply_payment_approval_secret_for_action` and `should_claim_payment_approval`
 /// / `claim_payment_approval_for_action` below — because a hallucinated
-/// `clickCoords` action can still carry a declared `action_class:"payment_commit"`
-/// plus a valid, unconsumed `payment_approval_id`: `effective_action_class`
-/// resolves purely from the DECLARED class (`kind` never enters that
-/// decision), so it resolves to a genuine `Ok(PaymentCommit)` and, left
-/// unchecked until after claiming, would burn the one-shot Payment Approval
-/// Card for an action that gets rejected anyway (Task 1 review finding,
-/// commit eb9d877d). Mirrors the bundle path's reject-first check in
-/// `normalize_browser_action_bundle`, which rejects `clickCoords` as the very
-/// first thing in its loop, before any claim.
-fn single_action_rejects_clickcoords_before_payment_claim(
+/// `clickCoords` action (or any other non-schema kind, or a `selector`-bearing
+/// action) can still carry a declared `action_class:"payment_commit"` plus a
+/// valid, unconsumed `payment_approval_id`: `effective_action_class` resolves
+/// purely from the DECLARED class (`kind` never enters that decision), so it
+/// resolves to a genuine `Ok(PaymentCommit)` and, left unchecked until after
+/// claiming, would burn the one-shot Payment Approval Card for an action that
+/// gets rejected anyway (Task 1 review finding, commit eb9d877d; generalized
+/// from clickCoords-only to the full schema-legality check in design 1.3).
+/// Mirrors the bundle path's reject-first check in
+/// `normalize_browser_action_bundle`, which runs the identical
+/// `browser_action_execution_fields_are_schema_legal` check as the very first
+/// thing in its loop, before any claim.
+fn single_action_rejects_unsupported_execution_before_payment_claim(
     action: &serde_json::Value,
 ) -> Option<&'static str> {
-    if action.get("kind").and_then(serde_json::Value::as_str) == Some("clickCoords") {
-        Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
-    } else {
+    // A bundle ("actions" present) was already validated per-item inside
+    // `normalize_browser_action_bundle`, which runs BEFORE this check (see the call
+    // site) and, once every item passes, rewrites the top-level `kind` to the
+    // gateway's own "batch" marker. That marker is legitimate here — it is not a
+    // schema kind and must not be re-rejected as unsupported.
+    if action.get("actions").is_some() {
+        return None;
+    }
+    if browser_action_execution_fields_are_schema_legal(action) {
         None
+    } else {
+        Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
     }
 }
 
@@ -65596,7 +65819,7 @@ prs.save(Path({path:?}))
         // needs a live `AppState`, a tokio runtime and a real/mock browser
         // session, so it cannot be driven directly by a plain `#[test]`.
         // This test instead exercises
-        // `single_action_rejects_clickcoords_before_payment_claim` — the
+        // `single_action_rejects_unsupported_execution_before_payment_claim` — the
         // exact function the fixed single-action branch now calls FIRST,
         // gating both `apply_payment_approval_secret_for_action` and
         // `should_claim_payment_approval`/`claim_payment_approval_for_action`
@@ -65659,7 +65882,7 @@ prs.save(Path({path:?}))
         // (a) The fix: the single-action branch now checks this FIRST and
         // rejects with the typed BROWSER_UNSUPPORTED_COMMITTING_ACTION error.
         let blocked_before_claim =
-            super::single_action_rejects_clickcoords_before_payment_claim(&click_coords_action);
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&click_coords_action);
         assert_eq!(
             blocked_before_claim,
             Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR),
@@ -65691,6 +65914,219 @@ prs.save(Path({path:?}))
             "clickCoords must be rejected before any payment-approval claim runs; the grant \
              must survive UNCONSUMED for a subsequent legitimate action to use"
         );
+    }
+
+    // --- 1.3: generalized reject (non-schema kind / selector field) ---
+
+    #[test]
+    fn schema_legal_kinds_are_all_accepted_and_a_hallucinated_kind_is_not() {
+        for kind in super::BROWSER_ACT_SCHEMA_KINDS {
+            let action = serde_json::json!({"kind": kind, "ref": "e1"});
+            assert!(
+                super::browser_action_execution_fields_are_schema_legal(&action),
+                "schema kind {kind:?} must be accepted"
+            );
+        }
+        for bad_kind in ["clickCoords", "batch", "evaluate", "wat"] {
+            let action = serde_json::json!({"kind": bad_kind, "ref": "e1"});
+            assert!(
+                !super::browser_action_execution_fields_are_schema_legal(&action),
+                "non-schema kind {bad_kind:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn selector_field_is_rejected_even_on_an_otherwise_legal_kind() {
+        // `selector` bypasses the ref-based floor entirely (a floored ref never has
+        // to appear in the request at all), so it must be rejected regardless of an
+        // otherwise-legal `kind`.
+        let action = serde_json::json!({"kind": "click", "selector": "#pay-now"});
+        assert!(!super::browser_action_execution_fields_are_schema_legal(&action));
+    }
+
+    #[test]
+    fn single_action_reject_catches_non_schema_kind_and_selector_before_any_claim() {
+        let hallucinated_kind =
+            serde_json::json!({"kind": "wat", "ref": "e1", "action_class": "payment_commit"});
+        assert_eq!(
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&hallucinated_kind),
+            Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
+        );
+
+        let selector_action = serde_json::json!({
+            "kind": "click", "selector": "#pay-now", "action_class": "payment_commit"
+        });
+        assert_eq!(
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&selector_action),
+            Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
+        );
+
+        // A legitimate schema-legal single action is never rejected here.
+        let legal = serde_json::json!({"kind": "click", "ref": "e1", "action_class": "ordinary"});
+        assert_eq!(
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&legal),
+            None
+        );
+    }
+
+    #[test]
+    fn single_action_reject_does_not_re_reject_a_normalized_bundle() {
+        // Once `normalize_browser_action_bundle` validates every item and rewrites
+        // the wrapper's `kind` to its own internal "batch" marker, the single-action
+        // reject-check must treat that wrapper as legitimate (it is not itself a
+        // schema kind, but it is not a hallucinated one either) — distinguished by
+        // the presence of the `actions` array, not by `kind`.
+        let normalized_bundle = serde_json::json!({
+            "kind": "batch",
+            "chatBundle": true,
+            "actions": [{"kind": "click", "ref": "e1", "action_class": "ordinary"}]
+        });
+        assert_eq!(
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&normalized_bundle),
+            None
+        );
+    }
+
+    #[test]
+    fn bundle_item_with_selector_or_non_schema_kind_is_rejected_before_the_gate() {
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        let mut selector_bundle = serde_json::json!({
+            "actions": [{"kind": "click", "selector": "#pay-now", "action_class": "ordinary"}]
+        });
+        let rejected = super::normalize_browser_action_bundle(
+            &mut selector_bundle,
+            "chat_0",
+            &payment_floor,
+            false,
+        );
+        assert!(rejected.is_some_and(|reason| reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION")));
+
+        let mut bad_kind_bundle = serde_json::json!({
+            "actions": [{"kind": "clickCoords", "x": 1, "y": 2, "action_class": "ordinary"}]
+        });
+        let rejected = super::normalize_browser_action_bundle(
+            &mut bad_kind_bundle,
+            "chat_0",
+            &payment_floor,
+            false,
+        );
+        assert!(rejected.is_some_and(|reason| reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION")));
+
+        // A schema-legal bundle is normalized (not rejected) and gets tagged "batch".
+        let mut legal_bundle = serde_json::json!({
+            "actions": [{"kind": "click", "ref": "e1", "action_class": "ordinary"}]
+        });
+        assert!(super::normalize_browser_action_bundle(
+            &mut legal_bundle,
+            "chat_0",
+            &payment_floor,
+            false,
+        )
+        .is_none());
+        assert_eq!(legal_bundle["kind"], "batch");
+    }
+
+    // --- 1.4: ref ∈ payment floor gates ANY kind (defense-in-depth) ---
+
+    #[test]
+    fn act_gate_blocks_scroll_on_a_floored_ref_regardless_of_kind() {
+        // `scroll` is not in the committing set at all, but a ref the machine
+        // analysis already floored must still force a declared class — defense
+        // against a FUTURE (or hallucinated) kind acting on a floored control.
+        let floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e9".to_string()]);
+        let action =
+            serde_json::json!({ "kind": "scroll", "ref": "e9", "target_id": "chat_0" });
+        assert!(browser_safety::evaluate_browser_action(&action, &floor, false, None).is_some());
+    }
+
+    // --- 1.2: per-target payment context (focus flag + robust last-acted-floored) ---
+
+    #[test]
+    fn per_target_context_defaults_to_false_for_an_unobserved_target() {
+        let map: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        assert!(!super::browser_payment_context_for(&map, "chat_0"));
+    }
+
+    #[test]
+    fn last_acted_floored_raises_the_combined_context_for_its_target_only() {
+        let mut map: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        // Acting on a floored ref on chat_0 sets ITS flag...
+        super::browser_mark_target_acted_floored(&mut map, "chat_0");
+        assert!(super::browser_payment_context_for(&map, "chat_0"));
+        // ...and must NOT bleed into a different tab (fixes IMPORTANT D).
+        assert!(!super::browser_payment_context_for(&map, "chat_1"));
+    }
+
+    #[test]
+    fn explicit_snapshot_on_one_target_does_not_clear_a_different_targets_floor() {
+        // Regression for IMPORTANT D: acting on tab B's floored ref, then an
+        // explicit re-observation (snapshot/navigate) of tab A, then a ref-less
+        // Enter on tab B must still be floored — tab A's clear must not bleed into
+        // tab B's entry.
+        let mut map: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        super::browser_mark_target_acted_floored(&mut map, "chat_1"); // tab B acted on a floored ref
+        super::browser_clear_target_acted_floored(&mut map, "chat_0"); // tab A re-observed
+        assert!(
+            super::browser_payment_context_for(&map, "chat_1"),
+            "tab B's last-acted-floored flag must survive a DIFFERENT tab's re-observation"
+        );
+        // Clearing the SAME target does take effect.
+        super::browser_clear_target_acted_floored(&mut map, "chat_1");
+        assert!(!super::browser_payment_context_for(&map, "chat_1"));
+    }
+
+    #[test]
+    fn refless_enter_is_floored_by_last_acted_floored_with_no_focus_signal() {
+        // "act on a floored ref, then a ref-less Enter (no focus context) → floored."
+        let mut map: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        let payment_floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e12".to_string()]);
+        // The prior act targeted e12 (a floored ref) — mirrors what the enforcement
+        // site does via `browser_action_targeted_a_floored_ref`.
+        let cvv_fill = serde_json::json!({"kind": "fill", "ref": "e12", "text": "123"});
+        assert!(super::browser_action_targeted_a_floored_ref(&cvv_fill, &payment_floor));
+        super::browser_mark_target_acted_floored(&mut map, "chat_0");
+
+        let combined = super::browser_payment_context_for(&map, "chat_0");
+        assert!(combined, "last_acted_floored alone must floor, with NO focus signal");
+
+        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let reason = browser_safety::evaluate_browser_action(&enter, &payment_floor, combined, None)
+            .unwrap();
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+    }
+
+    #[test]
+    fn action_targeted_a_floored_ref_covers_single_and_bundle_actions() {
+        let payment_floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e12".to_string()]);
+        assert!(super::browser_action_targeted_a_floored_ref(
+            &serde_json::json!({"kind": "fill", "ref": "e12"}),
+            &payment_floor
+        ));
+        assert!(!super::browser_action_targeted_a_floored_ref(
+            &serde_json::json!({"kind": "fill", "ref": "e1"}),
+            &payment_floor
+        ));
+        // A bundle: any item's ref matching the floor set counts.
+        let bundle = serde_json::json!({
+            "actions": [
+                {"kind": "click", "ref": "e1"},
+                {"kind": "fill", "ref": "e12"}
+            ]
+        });
+        assert!(super::browser_action_targeted_a_floored_ref(&bundle, &payment_floor));
+        let bundle_no_hit = serde_json::json!({
+            "actions": [{"kind": "click", "ref": "e1"}]
+        });
+        assert!(!super::browser_action_targeted_a_floored_ref(&bundle_no_hit, &payment_floor));
     }
 
     #[test]
