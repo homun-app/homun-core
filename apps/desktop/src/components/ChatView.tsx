@@ -1071,8 +1071,12 @@ export function ChatView({
     }
   }
 
+  // "instant", never "auto": per CSSOM-View, "auto" resolves to the element's computed
+  // scroll-behavior, so with a smooth scroller every rAF flush started an animation the
+  // next frame cancelled — the viewport trailed the text and rubber-banded for the whole
+  // answer. Same reasoning for every other non-user-initiated jump below.
   function afterStreamingFramePaint() {
-    scrollConversationToBottomIfPinned("auto");
+    scrollConversationToBottomIfPinned("instant");
   }
 
   async function runLocalSmokeTest() {
@@ -1261,7 +1265,7 @@ export function ChatView({
       setStreamingAssistantId(streamingMessage.id);
       notifyStreaming(true);
       streamingUserPinnedRef.current = conversationBottomDistance() < 220;
-      window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
+      window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
       cancelStreamingRequestRef.current = cancelStreamingRequest;
       // Record an active stream so a reload mid-answer can reattach (resume).
       writeResumeMarker(thread.threadId, {
@@ -2089,7 +2093,7 @@ export function ChatView({
     notifyStreaming(true);
     resetStreamingState("");
     streamingUserPinnedRef.current = conversationBottomDistance() < 220;
-    window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
+    window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
     setStreamStatus({
       requestId,
       phase: "thinking",
@@ -2410,7 +2414,7 @@ export function ChatView({
     notifyStreaming(true);
     resetStreamingState(message.text);
     streamingUserPinnedRef.current = conversationBottomDistance() < 220;
-    window.setTimeout(() => scrollConversationToBottomIfPinned("auto"), 0);
+    window.setTimeout(() => scrollConversationToBottomIfPinned("instant"), 0);
     setStreamStatus({
       requestId,
       phase: "thinking",
@@ -2550,10 +2554,12 @@ export function ChatView({
     };
   }, [computerSessionId]);
 
+  // Opening a thread lands at the bottom, it does not animate its way down: an animated
+  // first-paint scroll across a long transcript is exactly the sluggishness we're removing.
   useEffect(() => {
     shouldStickToBottomRef.current = true;
     streamingUserPinnedRef.current = false;
-    window.setTimeout(() => scrollConversationToBottom("auto"), 0);
+    window.setTimeout(() => scrollConversationToBottom("instant"), 0);
   }, [thread.threadId]);
 
   useEffect(() => {
@@ -2682,8 +2688,11 @@ export function ChatView({
   }, [incomingBackgroundTurn, messages, promptSubmitting, streamingAssistantId, thread.threadId]);
 
   useEffect(() => {
-    const handleResize = () => scrollConversationToBottomIfPinned("auto");
-    const behavior: ScrollBehavior = streamingAssistantId ? "auto" : "smooth";
+    // A resize is a continuous gesture: re-pinning must track the drag frame by frame, so it
+    // is instant. While streaming the transcript grows every frame → instant for the same
+    // reason. Only the settled, non-streaming case (a committed message landing) glides.
+    const handleResize = () => scrollConversationToBottomIfPinned("instant");
+    const behavior: ScrollBehavior = streamingAssistantId ? "instant" : "smooth";
 
     const frame = window.requestAnimationFrame(() =>
       scrollConversationToBottomIfPinned(behavior),
