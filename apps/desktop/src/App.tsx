@@ -1,17 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import i18n from "./i18n";
 import { useTranslation } from "react-i18next";
-import { AutomationsView } from "./components/AutomationsView";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ChatView } from "./components/ChatView";
-import { ContainedComputerView } from "./components/ContainedComputerView";
-import { LearningView } from "./components/LearningView";
 import { Shell } from "./components/Shell";
 import { ChatSearchModal } from "./components/Sidebar";
 import { LoginGate } from "./components/LoginGate";
 import { ShallowView } from "./components/ShallowView";
-import { SettingsView } from "./components/SettingsView";
-import { TasksView } from "./components/TasksView";
 import {
   approvals,
   brainRun,
@@ -78,6 +73,28 @@ import type {
   TaskStatus,
   ViewId,
 } from "./types";
+
+// Secondary views are not on the path to the first chat paint; keeping them in
+// the eager chunk cost ~1MB of parse before anything was interactive. ChatView
+// and Shell stay static imports on purpose — they *are* the first paint, and
+// deferring them would only move the wait, not remove it.
+const AutomationsView = lazy(() =>
+  import("./components/AutomationsView").then((m) => ({ default: m.AutomationsView })),
+);
+const ContainedComputerView = lazy(() =>
+  import("./components/ContainedComputerView").then((m) => ({
+    default: m.ContainedComputerView,
+  })),
+);
+const SettingsView = lazy(() =>
+  import("./components/SettingsView").then((m) => ({ default: m.SettingsView })),
+);
+const TasksView = lazy(() =>
+  import("./components/TasksView").then((m) => ({ default: m.TasksView })),
+);
+const LearningView = lazy(() =>
+  import("./components/LearningView").then((m) => ({ default: m.LearningView })),
+);
 
 const defaultChatThread: ChatThread = {
   threadId: "thread_active_prompt",
@@ -1646,110 +1663,115 @@ export default function App() {
         className={`workspace ${isSettings ? "settings-workspace" : ""}`}
         aria-label={t("app.mainWorkspace")}
       >
-        {activeView === "chat" && (
-          <ChatView
-            key={activeThread.threadId}
-            sidebarCollapsed={!drawerOpen}
-            onExpandSidebar={() => setDrawerOpen(true)}
-            onOpenSearch={() => setSearchOpen(true)}
-            onOpenUsageSettings={() => {
-              setPreviousView("chat");
-              setSettingsSection("usage");
-              setSettingsSub("");
-              setActiveView("settings");
-            }}
-            approvals={approvalItems}
-            approvalBusyId={approvalBusyId}
-            computerSessionId={activeThread.computerSessionId}
-            messages={activeMessages}
-            health={runtimeItems}
-            task={selectedTask}
-            thread={activeThread}
-            onMessagesChange={(messages) =>
-              handleMessagesChange(activeThread.threadId, messages)
-            }
-            islandRefreshNonce={islandRefreshNonce}
-            incomingBackgroundTurn={incomingBackgroundTurn}
-            autoSubmit={
-              pendingTemplateAutoSubmit?.threadId === activeThread.threadId
-                ? pendingTemplateAutoSubmit
-                : null
-            }
-            onAutoSubmitConsumed={(id) =>
-              setPendingTemplateAutoSubmit((current) =>
-                current?.id === id ? null : current,
-              )
-            }
-            onOpenTasks={() => setActiveView("tasks")}
-            onApproveApprovel={handleApproveApprovel}
-            onRejectApprovel={handleRejectApprovel}
-            onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
-            onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
-            onStreamingChange={(busy) =>
-              setStreamingThreadId(busy ? activeThread.threadId : null)
-            }
-          />
-        )}
-        {activeView === "tasks" && (
-          <TasksView
-            tasks={taskItems}
-            approvals={approvalItems}
-            resourceUsage={resourceUsage}
-            selectedTaskDetail={selectedTaskDetail}
-            taskDetailLoading={taskDetailLoading}
-            approvalBusyId={approvalBusyId}
-            selectedTaskId={selectedTask.id}
-            onApproveApprovel={handleApproveApprovel}
-            onRejectApprovel={handleRejectApprovel}
-            onSelectTask={setSelectedTaskId}
-          />
-        )}
-        {activeView === "learning" && (
-          <LearningView
-            insights={learningInsights}
-            proposals={automationProposals}
-          />
-        )}
-        {/* Memory has no top-level view: it lives in Settings → Memory only
-            (SettingsView renders <MemoryView embedded />). */}
-        {activeView === "settings" && (
-          <SettingsView
-            connections={connectionItems}
-            section={settingsSection}
-            sub={settingsSub}
-            onPluginsChanged={reloadPlugins}
-          />
-        )}
-        {activeView === "automations" && (
-          <AutomationsView
-            automations={automationItems}
-            onCreatete={handleCreateteAutomation}
-            onUpdate={handleUpdateAutomation}
-            onToggle={handleToggleAutomation}
-            onDelete={handleDeleteAutomation}
-          />
-        )}
-        {enabledPlugins.map(
-          (plugin) =>
-            activeView === plugin.id && <plugin.Panel key={plugin.id} host={pluginHost} />,
-        )}
-        {activeView === "browser" && <ContainedComputerView />}
-        {activeView === "brain" && (
-          <ShallowView
-            title="Brain Audit"
-            eyebrow={t("app.explainablePlans")}
-            description={`Route, loaded tools, memory refs and subagent steps are persisted without raw payload. ${contextBudgetSummary(brainRun.contextBudget)}`}
-            stats={[
-              { label: "Route", value: brainRun.route },
-              { label: "Rounds", value: String(brainRun.plannerRounds) },
-              { label: "Tools", value: String(brainRun.loadedTools) },
-              {
-                label: "Context",
-                value: `${Math.round(contextBudgetCompressionRatio(brainRun.contextBudget) * 100)}%`,
-              },
-            ]}
-          />
-        )}
+        {/* The boundary sits INSIDE <main> so a lazy chunk fetch blanks only
+            the workspace pane: Shell (sidebar, nav, topbar) and the overlays
+            rendered as its siblings stay mounted instead of flashing away. */}
+        <Suspense fallback={null}>
+          {activeView === "chat" && (
+            <ChatView
+              key={activeThread.threadId}
+              sidebarCollapsed={!drawerOpen}
+              onExpandSidebar={() => setDrawerOpen(true)}
+              onOpenSearch={() => setSearchOpen(true)}
+              onOpenUsageSettings={() => {
+                setPreviousView("chat");
+                setSettingsSection("usage");
+                setSettingsSub("");
+                setActiveView("settings");
+              }}
+              approvals={approvalItems}
+              approvalBusyId={approvalBusyId}
+              computerSessionId={activeThread.computerSessionId}
+              messages={activeMessages}
+              health={runtimeItems}
+              task={selectedTask}
+              thread={activeThread}
+              onMessagesChange={(messages) =>
+                handleMessagesChange(activeThread.threadId, messages)
+              }
+              islandRefreshNonce={islandRefreshNonce}
+              incomingBackgroundTurn={incomingBackgroundTurn}
+              autoSubmit={
+                pendingTemplateAutoSubmit?.threadId === activeThread.threadId
+                  ? pendingTemplateAutoSubmit
+                  : null
+              }
+              onAutoSubmitConsumed={(id) =>
+                setPendingTemplateAutoSubmit((current) =>
+                  current?.id === id ? null : current,
+                )
+              }
+              onOpenTasks={() => setActiveView("tasks")}
+              onApproveApprovel={handleApproveApprovel}
+              onRejectApprovel={handleRejectApprovel}
+              onRuntimeChanged={() => refreshRuntimeReadModels(activeThread.taskId)}
+              onThreadChanged={() => refreshChatReadModels(activeThread.threadId)}
+              onStreamingChange={(busy) =>
+                setStreamingThreadId(busy ? activeThread.threadId : null)
+              }
+            />
+          )}
+          {activeView === "tasks" && (
+            <TasksView
+              tasks={taskItems}
+              approvals={approvalItems}
+              resourceUsage={resourceUsage}
+              selectedTaskDetail={selectedTaskDetail}
+              taskDetailLoading={taskDetailLoading}
+              approvalBusyId={approvalBusyId}
+              selectedTaskId={selectedTask.id}
+              onApproveApprovel={handleApproveApprovel}
+              onRejectApprovel={handleRejectApprovel}
+              onSelectTask={setSelectedTaskId}
+            />
+          )}
+          {activeView === "learning" && (
+            <LearningView
+              insights={learningInsights}
+              proposals={automationProposals}
+            />
+          )}
+          {/* Memory has no top-level view: it lives in Settings → Memory only
+              (SettingsView renders <MemoryView embedded />). */}
+          {activeView === "settings" && (
+            <SettingsView
+              connections={connectionItems}
+              section={settingsSection}
+              sub={settingsSub}
+              onPluginsChanged={reloadPlugins}
+            />
+          )}
+          {activeView === "automations" && (
+            <AutomationsView
+              automations={automationItems}
+              onCreatete={handleCreateteAutomation}
+              onUpdate={handleUpdateAutomation}
+              onToggle={handleToggleAutomation}
+              onDelete={handleDeleteAutomation}
+            />
+          )}
+          {enabledPlugins.map(
+            (plugin) =>
+              activeView === plugin.id && <plugin.Panel key={plugin.id} host={pluginHost} />,
+          )}
+          {activeView === "browser" && <ContainedComputerView />}
+          {activeView === "brain" && (
+            <ShallowView
+              title="Brain Audit"
+              eyebrow={t("app.explainablePlans")}
+              description={`Route, loaded tools, memory refs and subagent steps are persisted without raw payload. ${contextBudgetSummary(brainRun.contextBudget)}`}
+              stats={[
+                { label: "Route", value: brainRun.route },
+                { label: "Rounds", value: String(brainRun.plannerRounds) },
+                { label: "Tools", value: String(brainRun.loadedTools) },
+                {
+                  label: "Context",
+                  value: `${Math.round(contextBudgetCompressionRatio(brainRun.contextBudget) * 100)}%`,
+                },
+              ]}
+            />
+          )}
+        </Suspense>
       </main>
     </Shell>
       {searchOpen && (
