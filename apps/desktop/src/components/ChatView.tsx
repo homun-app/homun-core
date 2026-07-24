@@ -155,6 +155,10 @@ import {
   type InspectorTabKind,
 } from "../lib/inspectorWorkspace";
 import { reconcileMemoryArtifacts } from "../lib/uiSnapshot";
+// Transcript indexes live in a plain .mjs sibling so `node --test` can exercise
+// them without a build step, which is why they carry no type declaration.
+// @ts-expect-error JavaScript sibling intentionally has no declaration file.
+import * as messageIndex from "../lib/messageIndex.mjs";
 import {
   STRUCTURED_MARKER_DELTA_RE,
   COMPOSIO_CONFIRM_RE,
@@ -201,6 +205,14 @@ import type {
   TaskItem,
   DiffEventPayload,
 } from "../types";
+
+const buildPreviousUserMessageIndex = messageIndex.buildPreviousUserMessageIndex as (
+  messages: ChatMessage[],
+) => Map<string, ChatMessage | null>;
+
+const buildBranchIndex = messageIndex.buildBranchIndex as (
+  branches: CoreBranchPoint[],
+) => Map<string, CoreBranchPoint>;
 
 const CHAT_VIEW_SESSION_ID =
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -611,6 +623,16 @@ export function ChatView({
     const base = optimisticMessages ?? messages;
     return base.filter((m) => !(m.role === "assistant" && m.id.endsWith("_ready")));
   }, [optimisticMessages, messages]);
+  // Transcript lookups, resolved ONCE per render instead of once per row. The
+  // action bar asks "does this message have a user message before it?" and the
+  // branch picker asks "is there a branch point on this node?" for every row of
+  // the transcript, on every streaming frame: as linear scans that was O(N²) and
+  // O(N·B) per frame. As indexes it is one pass plus O(1) lookups.
+  const previousUserMessageIndex = useMemo(
+    () => buildPreviousUserMessageIndex(threadMessages),
+    [threadMessages],
+  );
+  const branchIndex = useMemo(() => buildBranchIndex(branches), [branches]);
   // All artifacts generated in this conversation (from persisted ‹‹ARTIFACT››
   // markers) — drives the Artifacts workspace panel.
   // ADR 0022 (Piano UI C2): dipende dai messaggi PERSISTED (`messages`), NON da
@@ -2036,7 +2058,7 @@ export function ChatView({
   function regenerateAnswer(messageId: string) {
     if (promptSubmitting || streamingAssistantId) return;
     const assistant = threadMessages.find((message) => message.id === messageId);
-    const previousUser = findPreviousUserMessage(threadMessages, messageId);
+    const previousUser = previousUserMessageIndex.get(messageId);
     if (!assistant || !previousUser) {
       setPromptError(t("chat.noPreviousPromptToRegenerate"));
       return;
@@ -2631,7 +2653,7 @@ export function ChatView({
       .reverse()
       .find((message) => message.role === "assistant" && Boolean(message.text?.trim()));
     if (!latest || latest.id === followUpsFor) return undefined;
-    const previousUser = findPreviousUserMessage(threadMessages, latest.id);
+    const previousUser = previousUserMessageIndex.get(latest.id);
     let cancelled = false;
     setFollowUps([]);
     setFollowUpsFor(latest.id);
@@ -2646,7 +2668,7 @@ export function ChatView({
     return () => {
       cancelled = true;
     };
-  }, [threadMessages, streamingAssistantId, followUpsFor]);
+  }, [threadMessages, previousUserMessageIndex, streamingAssistantId, followUpsFor]);
 
   // After a reload, reattach to an answer that was still streaming (resume).
   useEffect(() => {
@@ -2989,7 +3011,7 @@ export function ChatView({
                   }
                   canRegenerate={
                     displayMessage.role === "assistant" &&
-                    Boolean(findPreviousUserMessage(threadMessages, displayMessage.id))
+                    Boolean(previousUserMessageIndex.get(displayMessage.id))
                   }
                   canReply={displayMessage.role !== "system" && Boolean(displayMessage.text)}
                   canEdit={displayMessage.role === "user" && Boolean(displayMessage.text)}
@@ -3041,7 +3063,7 @@ export function ChatView({
               )}
               {!isStreamingMessage &&
                 (() => {
-                  const point = branches.find((b) => b.node_id === displayMessage.id);
+                  const point = branchIndex.get(displayMessage.id);
                   if (!point || point.options.length < 2) return null;
                   const active = point.options[point.active_index];
                   const label = active?.label ?? null;
@@ -3789,22 +3811,6 @@ function resolveMessageActionMenuPlacement(
   }
 
   return "below";
-}
-
-function findPreviousUserMessage(
-  messages: ChatMessage[],
-  messageId: string,
-): ChatMessage | undefined {
-  const messageIndex = messages.findIndex((message) => message.id === messageId);
-  if (messageIndex <= 0) return undefined;
-
-  for (let index = messageIndex - 1; index >= 0; index -= 1) {
-    if (messages[index].role === "user") {
-      return messages[index];
-    }
-  }
-
-  return undefined;
 }
 
 function isLatestAssistantMessage(messages: ChatMessage[], messageId: string) {
