@@ -135,6 +135,24 @@ jobs:
           test -n "$APP_PATH"
           npm run verify:host-computer-package -- --app "$APP_PATH" --expected-arch arm64
 
+      # Set the GitHub Release body from CHANGELOG.md (the single source of truth). The signed macOS
+      # publish above created the draft release for this tag; electron-updater's github provider
+      # serves this body as the in-app "what's new", and the website /changelog renders it from the
+      # Releases API — one source, two consumers. Done once (mac job). `extract-release-notes.mjs`
+      # exits non-zero if the tag has no CHANGELOG section, which FAILS the job on purpose: a release
+      # must never ship with empty notes ("we published a version but don't know what changed").
+      - name: Set release notes from CHANGELOG.md
+        if: matrix.platform == 'mac' && steps.signing.outputs.has_cert == 'true' && startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          node scripts/extract-release-notes.mjs "${GITHUB_REF_NAME#v}" > "$RUNNER_TEMP/release-notes.md"
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo homun-app/homun-releases \
+            --notes-file "$RUNNER_TEMP/release-notes.md"
+
       # macOS unsigned: build as artifact only, never publish — an unsigned mac
       # build must not reach the signed auto-update channel. Runs when no Apple cert
       # is configured, OR on any non-tag build (PR/dispatch) where the fast unsigned
