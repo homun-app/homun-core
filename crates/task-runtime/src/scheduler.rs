@@ -199,19 +199,8 @@ fn overdue_reason(task: &TaskRecord, now: OffsetDateTime) -> Option<String> {
     None
 }
 
+// `TaskStatus::as_str` is now the canonical string mapping (added alongside
+// `TaskStatus::Parked`); this local helper would otherwise duplicate it.
 fn status_label(status: TaskStatus) -> &'static str {
-    match status {
-        TaskStatus::Queued => "queued",
-        TaskStatus::Pending => "pending",
-        TaskStatus::Running => "running",
-        TaskStatus::WaitingTime => "waiting_time",
-        TaskStatus::WaitingExternalEvent => "waiting_external_event",
-        TaskStatus::WaitingUserApproval => "waiting_user_approval",
-        TaskStatus::WaitingResource => "waiting_resource",
-        TaskStatus::Paused => "paused",
-        TaskStatus::Completed => "completed",
-        TaskStatus::Failed => "failed",
-        TaskStatus::Cancelled => "cancelled",
-        TaskStatus::Expired => "expired",
-    }
+    status.as_str()
 }

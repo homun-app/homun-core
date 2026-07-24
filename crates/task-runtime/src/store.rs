@@ -1192,7 +1192,7 @@ impl TaskStore {
                  JOIN agent_runs r ON r.run_id = c.run_id
                  WHERE c.turn_id = ?1 AND c.user_id = ?2 AND c.workspace_id = ?3
                    AND c.resumable = 1 AND r.status = 'aborted'
-                   AND r.terminal_reason = 'gateway_restart'
+                   AND r.terminal_reason IN ('gateway_restart', 'parked_waiting_for_model')
                  ORDER BY c.created_at DESC, c.round DESC
                  LIMIT 1",
                 params![turn_id, user_id, workspace_id],
@@ -2322,6 +2322,108 @@ impl TaskStore {
                 workspace_id,
             ],
         )?)
+    }
+
+    /// Parks a running chat turn at its finalization boundary: aborts the running
+    /// agent run with `terminal_reason = "parked_waiting_for_model"` (preserving its
+    /// resumable checkpoint intact — mirrors `abort_running_agent_runs_for_turn`'s
+    /// gateway-restart abort, just with a different reason string) and flips the
+    /// chat_turn task `running -> parked`. `Parked` is an active, non-terminal status
+    /// the scheduler's `Queued|Pending` dispatch never picks up; only the coordinator's
+    /// resume trigger (`unpark_chat_turn_to_queued`) moves it forward. Steering rows
+    /// are untouched here (left `pending` for the resumed run to interpret). Idempotent:
+    /// a no-op if the task is not currently `running` (already parked/terminal/gone).
+    pub fn park_chat_turn(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<()> {
+        self.abort_running_agent_runs_for_turn(
+            turn_id,
+            user_id,
+            workspace_id,
+            "parked_waiting_for_model",
+        )?;
+
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let task_json: Option<String> = tx
+            .query_row(
+                "SELECT task_json FROM tasks
+                 WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+                   AND kind = 'chat_turn' AND status = 'running'",
+                params![turn_id, user_id, workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(task_json) = task_json else {
+            tx.commit()?;
+            return Ok(());
+        };
+        // Keep the task_json blob's embedded status in sync with the status column —
+        // unlike the SQL-only `finalizing` sentinel, `Parked` is a real TaskStatus
+        // variant that `get_task`/`list_tasks` readers (dispatch, projections) rely on.
+        let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+        task.status = TaskStatus::Parked;
+        task.updated_at = OffsetDateTime::now_utc();
+        tx.execute(
+            "UPDATE tasks SET status = ?1, updated_at = ?2, task_json = ?3
+             WHERE task_id = ?4 AND user_id = ?5 AND workspace_id = ?6 AND status = 'running'",
+            params![
+                TaskStatus::Parked.as_str(),
+                task.updated_at.unix_timestamp(),
+                serde_json::to_string(&task)?,
+                turn_id,
+                user_id,
+                workspace_id,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Flips a parked chat turn back to `queued` (the resume trigger): the normal
+    /// scheduler re-dispatches it, and the resumed run reseeds from the park
+    /// checkpoint via the now-widened `latest_resumable_checkpoint_for_turn`.
+    /// Returns whether a parked row was actually flipped (`false` if the task
+    /// wasn't `parked` — e.g. already resumed by a concurrent call, or cancelled).
+    pub fn unpark_chat_turn_to_queued(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<bool> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let task_json: Option<String> = tx
+            .query_row(
+                "SELECT task_json FROM tasks
+                 WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+                   AND kind = 'chat_turn' AND status = 'parked'",
+                params![turn_id, user_id, workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(task_json) = task_json else {
+            tx.commit()?;
+            return Ok(false);
+        };
+        let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+        task.status = TaskStatus::Queued;
+        task.updated_at = OffsetDateTime::now_utc();
+        let changed = tx.execute(
+            "UPDATE tasks SET status = ?1, updated_at = ?2, task_json = ?3
+             WHERE task_id = ?4 AND user_id = ?5 AND workspace_id = ?6 AND status = 'parked'",
+            params![
+                TaskStatus::Queued.as_str(),
+                task.updated_at.unix_timestamp(),
+                serde_json::to_string(&task)?,
+                turn_id,
+                user_id,
+                workspace_id,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(changed == 1)
     }
 
     /// Deletes every journal owned by one chat thread; event rows cascade with each run.
@@ -3495,6 +3597,68 @@ mod agent_control_state_tests {
             .unwrap()
             .unwrap();
         assert_eq!(checkpoint.round, 2);
+    }
+
+    /// Seeds a `chat_turn` task (Running) mirroring `chat_turn_query_tests::make_chat_turn`.
+    fn seed_chat_turn(store: &TaskStore, task_id: &str) {
+        let mut task = TaskRecord::new(
+            task_id,
+            UserId::new("user"),
+            WorkspaceId::new("workspace"),
+            "chat_turn",
+            "seed goal",
+            json!({}),
+        );
+        task.status = TaskStatus::Running;
+        store
+            .insert_chat_turn(&task, "thread", "req-1", "interactive", "full")
+            .unwrap();
+    }
+
+    #[test]
+    fn park_then_resumable_checkpoint_is_readable_and_unpark_queues() {
+        let store = TaskStore::open_in_memory().unwrap();
+        seed_chat_turn(&store, "turn");
+        store.create_agent_run(&run("run")).unwrap();
+        store
+            .append_agent_checkpoint("run", 3, &json!({"round": 3}), "fp", true)
+            .unwrap();
+
+        // Before park: nothing resumable (mirrors the gateway-restart case).
+        assert!(store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .is_none());
+
+        store.park_chat_turn("turn", "user", "workspace").unwrap();
+
+        let parked_task = store
+            .get_task(&TaskId::new("turn"), &UserId::new("user"), &WorkspaceId::new("workspace"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(parked_task.status, TaskStatus::Parked, "task is parked");
+
+        let runs = store.list_agent_runs_for_turn("turn", "user", "workspace").unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, AgentRunStatus::Aborted);
+        assert_eq!(runs[0].terminal_reason.as_deref(), Some("parked_waiting_for_model"));
+
+        // The park checkpoint is now resumable (filter widened beyond gateway_restart).
+        let checkpoint = store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .unwrap();
+        assert_eq!(checkpoint.round, 3);
+
+        // Unpark: task flips back to queued, and returns true exactly once.
+        assert!(store.unpark_chat_turn_to_queued("turn", "user", "workspace").unwrap());
+        let queued_task = store
+            .get_task(&TaskId::new("turn"), &UserId::new("user"), &WorkspaceId::new("workspace"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(queued_task.status, TaskStatus::Queued, "unpark queues the task");
+        assert!(!store.unpark_chat_turn_to_queued("turn", "user", "workspace").unwrap(),
+            "second unpark call is a no-op (already queued, not parked)");
     }
 
     #[test]
