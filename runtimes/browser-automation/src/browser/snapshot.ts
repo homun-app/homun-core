@@ -11,6 +11,16 @@ export type BrowserSnapshot = {
   targetId: string;
   url: string;
   snapshot: string;
+  // The full, unfiltered accessibility text for THIS observation — before any
+  // role filtering (e.g. "interact" mode's interactive-only view) and before
+  // structuralDelta marks it up. `snapshot` above is what the model actually
+  // sees (role-filtered and/or diff-marked); this is the ONLY stable basis a
+  // caller should retain across observation modes to feed the *next* delta
+  // call's `previousSnapshot` — diffing full-raw against a previously
+  // displayed (filtered/marked) snapshot is what caused nearly every line to
+  // read as "added" on ordinary interact->delta / delta->delta sequences.
+  // Equal to `snapshot` on the legacy (non-AI) path, which has no filtering.
+  rawSnapshot: string;
   refs: BrowserRef[];
   refLocators: Map<string, Locator>;
   refsMode: "aria" | "locator";
@@ -387,15 +397,25 @@ async function createAiSnapshot(
   await enrichPageAccessibility(page);
   const timeout = Math.max(500, Math.min(60_000, Math.floor(options?.timeoutMs ?? 5_000)));
   const ariaSnapshot = await page.ariaSnapshot({ mode: "ai", timeout });
+  // Computed once, before role filtering: the URL list is appended identically
+  // to both the full-raw text (exposed as `rawSnapshot`, the delta basis) and
+  // the display text below, so the two never diverge over whether links were
+  // requested.
+  const snapshotUrls = options?.urls ? await collectSnapshotUrls(page) : [];
+  const rawSnapshot = snapshotUrls.length ? appendSnapshotUrls(ariaSnapshot, snapshotUrls) : ariaSnapshot;
   const roleOptions = roleSnapshotOptions(options);
   const builtSnapshot = roleOptions
     ? buildRoleSnapshotFromAiSnapshot(ariaSnapshot, roleOptions)
     : { snapshot: ariaSnapshot, refs: refsFromAiSnapshot(ariaSnapshot) };
-  const rawSnapshot = options?.urls
-    ? appendSnapshotUrls(builtSnapshot.snapshot, await collectSnapshotUrls(page))
+  const displaySnapshot = snapshotUrls.length
+    ? appendSnapshotUrls(builtSnapshot.snapshot, snapshotUrls)
     : builtSnapshot.snapshot;
+  // Delta diffs full-raw against full-raw (options.previousSnapshot must be the
+  // caller's retained `rawSnapshot` from the prior call, never a displayed
+  // snapshot) so ordinary interact->delta / delta->delta sequences produce a
+  // small bounded delta instead of spuriously tripping the ref-churn fallback.
   const observedSnapshot =
-    observedMode === "delta" ? structuralDelta(options?.previousSnapshot, rawSnapshot) : rawSnapshot;
+    observedMode === "delta" ? structuralDelta(options?.previousSnapshot, rawSnapshot) : displaySnapshot;
   const limit = limitForObservation(observedMode, options?.maxChars);
   const snapshot =
     observedSnapshot.length > limit
@@ -412,6 +432,7 @@ async function createAiSnapshot(
     targetId,
     url: page.url(),
     snapshot,
+    rawSnapshot,
     refs,
     refLocators,
     refsMode: "aria",
@@ -605,6 +626,8 @@ async function createLegacySnapshot(page: Page, targetId: string): Promise<Brows
     targetId,
     url: page.url(),
     snapshot,
+    // Legacy path has no role filtering and no delta mode: raw == displayed.
+    rawSnapshot: snapshot,
     refs,
     refLocators,
     refsMode: "locator",

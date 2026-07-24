@@ -31,19 +31,24 @@ describe("structuralDelta", () => {
   });
 
   it("keeps a genuinely-new duplicate line instead of dropping it as already-seen", () => {
-    const previous = ['- text "In stock" [ref=e1]', '- heading "Item A" [ref=e2]'].join("\n");
+    // Both "In stock" lines are BYTE-IDENTICAL (same text, no differentiating
+    // ref) — this is what actually exercises the old set-collapse bug. A
+    // variant with different ref suffixes per copy is textually distinct and
+    // would trivially show up as an addition regardless of set-vs-sequence
+    // logic, so it doesn't pin the behavior this test is meant to guard.
+    const previous = ['- text "In stock"', '- heading "Item A" [ref=e2]'].join("\n");
     const current = [
-      '- text "In stock" [ref=e1]',
+      '- text "In stock"',
       '- heading "Item A" [ref=e2]',
-      '- text "In stock" [ref=e3]',
+      '- text "In stock"',
     ].join("\n");
 
     const delta = structuralDelta(previous, current);
 
-    // The new, third "In stock" line (a real duplicate by text) must be
-    // reported as an addition, not filtered out via set membership.
+    // The new, third "In stock" line (a genuine duplicate, identical text)
+    // must be reported as an addition, not filtered out via set membership.
     const addedLines = delta.split("\n").filter((line) => line.startsWith("+ "));
-    expect(addedLines).toContainEqual('+ - text "In stock" [ref=e3]');
+    expect(addedLines).toEqual(['+ - text "In stock"']);
   });
 
   it("falls back to the full snapshot when ref churn defeats line-identity", () => {

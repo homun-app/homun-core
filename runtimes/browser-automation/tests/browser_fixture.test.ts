@@ -295,6 +295,66 @@ describe("browser sidecar engine", () => {
     expect(extract.stats.chars).toBeLessThanOrEqual(16_200);
   });
 
+  // Pins the real-world regression: structuralDelta's basis must be the last
+  // FULL raw accessibility snapshot, not whatever text was actually displayed
+  // (an interact-role-filtered view, or a previous marked delta). Diffing the
+  // next full raw snapshot against a filtered/marked previous makes nearly
+  // every line look "added", spuriously tripping the ref-churn fallback and
+  // collapsing delta mode into a full-page dump on the two common sequences
+  // (interact->delta, delta->delta). Against the buggy displayed-text basis
+  // this test fails (the fallback fires and the unrelated heading leaks into
+  // the "delta"); against the full-raw-snapshot basis it passes.
+  it("yields a small marked delta (not a full-page fallback) across an interact-then-delta sequence with one genuine change", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/train`, label: "train" });
+
+    const interact = await manager.snapshot({
+      targetId: "train",
+      observationMode: "interact",
+    } as never);
+    const from = interact.refs.find((ref) => ref.name === "Da");
+
+    const typed = await manager.act({
+      targetId: "train",
+      kind: "type",
+      ref: from!.ref,
+      text: "Nap",
+      observationMode: "delta",
+      generation: interact.generation,
+    } as never);
+    expect(typed.observationMode).toBe("delta");
+
+    const delta = typed.snapshot!;
+    // A genuine delta only ever contains marked add/remove lines for what
+    // changed; it must never echo unrelated, unchanged static content (the
+    // page's <h1>) the way the full-page fallback would.
+    expect(delta).not.toContain("Cerca treni");
+    // The two new autocomplete suggestions must show up as marked additions.
+    const addedLines = delta.split("\n").filter((line) => line.startsWith("+ "));
+    expect(addedLines.some((line) => line.includes("Napoli Centrale"))).toBe(true);
+    // Bounded well below the delta char cap (8_000) — proof this is a small
+    // incremental diff, not a truncated full-page dump that happens to fit.
+    expect(delta.length).toBeLessThan(600);
+
+    // A second, delta-then-delta step over another genuine change must stay
+    // small too — the basis fix must hold across repeated delta calls, not
+    // just the first one after an interact call.
+    const to = interact.refs.find((ref) => ref.name === "A");
+    const typedAgain = await manager.act({
+      targetId: "train",
+      kind: "type",
+      ref: to!.ref,
+      text: "Mil",
+      observationMode: "delta",
+      generation: typed.generation,
+    } as never);
+    const secondDelta = typedAgain.snapshot!;
+    expect(secondDelta).not.toContain("Cerca treni");
+    const secondAddedLines = secondDelta.split("\n").filter((line) => line.startsWith("+ "));
+    expect(secondAddedLines.some((line) => line.includes("Milano Centrale"))).toBe(true);
+    expect(secondDelta.length).toBeLessThan(600);
+  });
+
   it("executes a chat bundle of four actions and rejects nested or oversized bundles", async () => {
     await manager.start();
     await manager.open({ url: `${baseUrl}/train`, label: "train" });

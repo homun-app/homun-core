@@ -43,7 +43,15 @@ type PageState = {
   label?: string;
   refs: Map<string, Locator>;
   generation: number;
-  lastSnapshot?: string;
+  // The last FULL raw accessibility snapshot (pre-role-filter, pre-delta —
+  // see BrowserSnapshot.rawSnapshot), independent of whatever was actually
+  // displayed to the model. This, not the displayed snapshot, is the basis
+  // fed to the NEXT delta call: diffing full-raw against a previously
+  // *displayed* (role-filtered "interact" view, or already diff-marked)
+  // snapshot made nearly every line read as "added" and spuriously tripped
+  // structuralDelta's ref-churn fallback on ordinary interact->delta and
+  // delta->delta sequences, collapsing delta mode into a full-page dump.
+  lastFullSnapshot?: string;
   lastSnapshotFingerprint?: string;
   consoleMessages: ConsoleEntry[];
   pendingDialog?: Dialog;
@@ -244,11 +252,11 @@ export class BrowserSessionManager {
     state.generation += 1;
     const snapshot = await createSnapshot(state.page, params.targetId, {
       ...params,
-      previousSnapshot: state.lastSnapshot,
+      previousSnapshot: state.lastFullSnapshot,
       generation: state.generation,
     });
     state.refs = snapshot.refLocators;
-    state.lastSnapshot = snapshot.snapshot;
+    state.lastFullSnapshot = snapshot.rawSnapshot;
     state.lastSnapshotFingerprint = snapshot.fingerprint;
     return {
       targetId: snapshot.targetId,
@@ -295,11 +303,11 @@ export class BrowserSessionManager {
     state.generation += 1;
     const snapshot = await createSnapshot(state.page, action.targetId, {
       ...(action as Record<string, unknown>),
-      previousSnapshot: state.lastSnapshot,
+      previousSnapshot: state.lastFullSnapshot,
       generation: state.generation,
     } as BrowserSnapshotOptions);
     state.refs = snapshot.refLocators;
-    state.lastSnapshot = snapshot.snapshot;
+    state.lastFullSnapshot = snapshot.rawSnapshot;
     state.lastSnapshotFingerprint = snapshot.fingerprint;
     return {
       ...result,
