@@ -86,3 +86,13 @@ The whole-slice adversarial review of the ref-less payment-context slice (`6dee0
 **MINOR** — bundle rejection message not spec-precise (`main.rs:18367`); spec §3's "any committing kind outside the schema enum" typed-reject only covers `clickCoords` (unknown kinds fall through to the sidecar's fail-closed throw); armed-file-chooser click returns no snapshot (stale-not-reset, safe).
 
 **Recommended holistic fix (one coordinated follow-up, TDD+review):** (1) canonicalize the committing/Enter predicate at the gateway chokepoint over ALL kinds+fields the sidecar can act on (press/press_key/type-newline/scroll-ref/selector/commit) — a single "does this action commit/submit?" function that matches the sidecar's real execution, raise-only; (2) verify OOPIF focus with a two-origin e2e test and, if it fails open, redesign the PSP-frame signal; (3) scope `last_focus_payment_context` per target_id. Until (1)+(2) land, treat the ref-less leg as "defends a cooperative model, not an adversarial one."
+
+---
+
+## ⚠️ NEW (2026-07-24, Build 1 whole-diff review) — the payment gate covers only the INTERACTIVE browse leg
+
+The whole-build adversarial review + the fill-fields fix surfaced a significant pre-existing architectural gap:
+
+- **`execute_persistent_browser_capability` (the scheduled/automation `browser.act` capability path) has NO payment gate at all.** All of the effect-gate + ref-less work lives in the interactive `execute_browser_tool` / browse sub-turn path. A scheduled task or automation that drives the browser via the `browser.act` capability bypasses the entire committing/floor/approval machinery. This is worse than the design's stated "automations cannot approve their own payment" — an automation `browser.act` isn't even checked. It is out of scope for Build 1 (interactive leg) but must be closed before automations are trusted to touch payment pages. (A background task chip was spawned for it.)
+- **Conscious residual (not fixed, documented):** `press`/`press_key` with `Space`/`" "` on a submit control that already holds keyboard focus (reachable via Tab) activates it — a ref-less submit that neither the committing predicate nor the page floor classifies, because gating all Space would over-gate ordinary typing. Same family as the document-level-Enter residual.
+- **Latent (not reachable today):** if a `delta` observation is ever combined with a role-filter option, `refsFromAiSnapshot` would parse zero refs from the `+`/`- `-prefixed delta text (snapshot.ts ref regex anchors on `^\s*-`). Not reachable via today's schema; add a guard if delta+role-filter is ever combined.
