@@ -42,10 +42,10 @@ use std::time::Instant;
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
 const MAX_PLAN_NUDGES: u32 = 8;
 
-/// Bounded wait, in `wait_for_turn_control` cycles, for an uninterpreted steering row at the
-/// finalization fence before parking (≈ 40 × the 50ms coordinator poll ≈ 2s). Replaces the old
-/// infinite spin: if nothing becomes interpretable within this budget (the coordinator is still
-/// working or the semantic model is unavailable), the turn parks instead of hanging.
+/// Bounded wait, in 50ms wall-clock ticks, for an uninterpreted steering row at the finalization
+/// fence before parking (≈ 40 × 50ms ≈ 2s). Deliberately wall-clock, not event-driven: the row may
+/// never become interpretable (the semantic model can be down indefinitely), so the budget must
+/// elapse on its own — replaces the old infinite spin, which parks instead of hanging.
 const PARK_WAIT_CYCLES: u32 = 40;
 
 async fn wait_for_interrupting_control<M: ModelClient>(
@@ -1303,7 +1303,14 @@ missing, give what you have and note the gap in one short line.",
             };
         }
         park_wait += 1;
-        let _ = model_client.wait_for_turn_control().await;
+        // A plain wall-clock tick, deliberately NOT `wait_for_turn_control()`: that seam is
+        // specified to return only once a non-`continue` interpreted control appears (the real
+        // gateway impl loops internally, sleeping, and never returns on its own otherwise) — if
+        // the semantic model is down and the row never gets interpreted, awaiting it here would
+        // block this tick forever and `park_wait` would never reach the budget, defeating the
+        // park. Ticking on a bounded sleep instead means the budget elapses on wall-clock time
+        // regardless of whether interpretation ever happens.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
     if !final_done {
@@ -3438,8 +3445,13 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
 
     /// The fence stays `PendingInput` forever and `current_turn_control()` never returns an
     /// interpreted row (the steering stays `pending`/`claimed` — e.g. the semantic model is
-    /// unavailable to interpret it). Against the OLD spin this hangs forever; the reworked fence
-    /// must park within its bounded wait budget instead.
+    /// unavailable to interpret it). `wait_for_turn_control()` models the REAL production
+    /// behavior (`GatewayModelClient::wait_for_turn_control`): it returns ONLY once a non-
+    /// `continue` interpreted control appears, else it never resolves on its own — so with
+    /// `current_turn_control()` permanently `None`, awaiting it directly would block forever.
+    /// The reworked park loop must tick on a plain wall-clock sleep instead of this seam, so it
+    /// parks within its bounded budget regardless. If a regression makes the loop await this
+    /// future directly, the test hangs and the `tokio::time::timeout` guard below catches it.
     #[derive(Default)]
     struct NeverInterpretedSteeringModel {
         calls: AtomicUsize,
@@ -3457,15 +3469,9 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
 
         async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
             self.wait_calls.fetch_add(1, Ordering::SeqCst);
-            // One cooperative yield per cycle (not a real sleep) so 40 bounded-wait cycles run
-            // near-instantly here, while still giving `tokio::time::timeout` a scheduling point
-            // to preempt a regression to the old non-yielding spin.
-            tokio::task::yield_now().await;
-            crate::TurnControlDecision {
-                steering_id: 42,
-                disposition: crate::TurnControlDisposition::ContinueCurrentWork,
-                instruction: "row still pending; not yet interpreted".to_string(),
-            }
+            // Never resolves — mirrors production when the row never gets interpreted. The
+            // fixed park loop must not depend on this future completing.
+            std::future::pending().await
         }
 
         async fn generate(
@@ -3508,8 +3514,10 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         turn_cfg.hard_round_ceiling = 1;
         turn_cfg.max_rounds = 1;
 
-        // Guard against a regression to the old infinite spin: fail fast with a clear panic
-        // instead of hanging the whole test binary.
+        // Guard against a regression to the old infinite spin (or to a park loop that awaits
+        // the blocking `wait_for_turn_control()` seam): fail fast with a clear panic instead of
+        // hanging the whole test binary.
+        let started = std::time::Instant::now();
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             run_turn(
@@ -3542,12 +3550,31 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         )
         .await
         .expect("run_turn must park within its bounded wait budget, not hang");
+        let elapsed = started.elapsed();
 
         assert_eq!(outcome.delivery, crate::TurnDelivery::Parked);
         assert!(outcome.memory_answer.is_empty());
+        // Proves the budget is wall-clock-ticked (PARK_WAIT_CYCLES=40 * 50ms ~= 2s), not an
+        // instant return and not a hang: real time actually elapsed, comfortably under the
+        // 5s timeout above.
         assert!(
-            model.wait_calls.load(Ordering::SeqCst) > 0,
-            "expected the bounded wait to poll wait_for_turn_control at least once"
+            elapsed >= std::time::Duration::from_millis(1_500),
+            "expected the bounded wait to actually tick ~2s of wall-clock time, elapsed={elapsed:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "park must complete within its own budget, well before the outer timeout, elapsed={elapsed:?}"
+        );
+        // `wait_for_turn_control()` never resolves in this double (`std::future::pending()`), so
+        // the ONLY way this line is reached at all is if the park loop's tick never awaited it
+        // to completion — a direct await here would have hung and been caught by the timeout
+        // above instead. The lone round-0 model call races the loop's OTHER (unrelated)
+        // `wait_for_interrupting_control` select arm against `generate()`, which may poll (but
+        // never complete) this same seam once — hence `<= 1`, not a strict `== 0`.
+        assert!(
+            model.wait_calls.load(Ordering::SeqCst) <= 1,
+            "wait_for_turn_control should be polled at most once (the unrelated round-call race), \
+             never awaited to completion by the park loop's tick"
         );
         assert_eq!(
             sink.0
