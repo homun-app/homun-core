@@ -1043,6 +1043,38 @@ impl TaskStore {
             .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
     }
 
+    /// Records a coordinator interpretation attempt against a row that is STILL
+    /// `pending` (never claimed) — the `status='pending'` counterpart of
+    /// `release_turn_steering_for_retry` (which requires `status='claimed'`).
+    /// Needed because the coordinator's park-resume probe and its orphan-row
+    /// detection (steering park+resume, Build 2) both deliberately do NOT claim
+    /// before they touch the model/diagnose the turn (design: no `claimed_run_id`
+    /// binding to a dead parked/orphaned run) — bounded backoff on those rows has
+    /// nowhere else to live. The row stays `pending`; only the bookkeeping columns
+    /// change, so a later poll cycle can still pick it up once `next_retry_at` passes.
+    pub fn defer_pending_turn_steering(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        error: &str,
+        next_retry_at: i64,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE turn_steering
+             SET last_interpretation_error=?1, next_retry_at=?2,
+                 interpretation_attempts=interpretation_attempts+1,
+                 revision=revision+1, updated_at=?3
+             WHERE steering_id=?4 AND revision=?5 AND status='pending'",
+            params![error, next_retry_at, now, steering_id, expected_revision as i64],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict("steering changed before retry defer".into()));
+        }
+        load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
     pub fn hold_pending_turn_steering(&self, user_id: &str, workspace_id: &str, active_turn_id: &str) -> TaskRuntimeResult<usize> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         Ok(self.connection.execute(
@@ -3518,6 +3550,28 @@ mod turn_steering_tests {
         assert_eq!(pending.last_interpretation_error.as_deref(), Some("model_unavailable"));
         assert_eq!(pending.interpretation_attempts, 1);
         assert!(pending.applied_at.is_none());
+    }
+
+    #[test]
+    fn defer_pending_turn_steering_backs_off_a_never_claimed_row() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let row = store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("still waiting"), 1).unwrap();
+        assert_eq!(row.status, TurnSteeringStatus::Pending);
+
+        let deferred = store.defer_pending_turn_steering(
+            row.steering_id, row.revision, "model_unavailable", 999,
+        ).unwrap();
+        assert_eq!(deferred.status, TurnSteeringStatus::Pending, "stays pending — never claimed");
+        assert_eq!(deferred.next_retry_at, Some(999));
+        assert_eq!(deferred.last_interpretation_error.as_deref(), Some("model_unavailable"));
+        assert_eq!(deferred.interpretation_attempts, 1);
+        assert!(deferred.claimed_run_id.is_none());
+
+        // Revision-guarded like every other steering transition.
+        assert!(matches!(
+            store.defer_pending_turn_steering(row.steering_id, row.revision, "stale", 1000),
+            Err(TaskRuntimeError::Conflict(_))
+        ));
     }
 
     #[test]
