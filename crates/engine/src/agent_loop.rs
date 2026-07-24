@@ -80,6 +80,23 @@ fn apply_turn_control<M: ModelClient>(
     model_client.acknowledge_turn_control_applied(control.steering_id);
 }
 
+/// Acknowledge every drained (applied) steering id back to the coordinator, deduped. Shared
+/// between the normal turn-end completion and the park early-return: a control applied EARLIER
+/// in the turn (round loop, model-call race, or an earlier fence-drain iteration) must still be
+/// completed even when the turn parks on a DIFFERENT, later, uninterpreted row — otherwise that
+/// earlier id's store row is stuck at `applied` forever (a permanent "Applying…" spinner in the
+/// UI). Drains the vec so callers can't double-flush the same ids.
+fn complete_drained_steering<M: ModelClient>(
+    model_client: &M,
+    steering_to_complete: &mut Vec<i64>,
+) {
+    steering_to_complete.sort_unstable();
+    steering_to_complete.dedup();
+    for steering_id in steering_to_complete.drain(..) {
+        model_client.acknowledge_turn_control_completed(steering_id);
+    }
+}
+
 /// Harness-driven plan progress from VERIFIED evidence. Called after each work tool result: if the
 /// plan has a frontier `doing` step and enough new evidence has accrued, ask the F2 judge whether that
 /// step is genuinely complete; if so, mark it done, advance the frontier, and emit the ‹‹PLAN›› card +
@@ -229,6 +246,9 @@ where
     // Tracks the last round the loop actually ran, captured in outer scope because the `for`
     // loop's `round` binding does not survive past the loop (exhaustion or `break`) — the
     // post-loop finalization fence below needs it to checkpoint at the right round on park.
+    // The `0` default is never observed as a stale/wrong round in practice: `cfg.hard_round_ceiling`
+    // is always configured >= 1, so the loop runs at least round 0 (setting this) before the
+    // fence can ever be reached.
     let mut last_round: usize = 0;
     'rounds: for round in 0..cfg.hard_round_ceiling {
         last_round = round;
@@ -1293,7 +1313,12 @@ missing, give what you have and note the gap in one short line.",
         }
         if park_wait >= PARK_WAIT_CYCLES {
             // Park: capture a resumable checkpoint at the boundary and return without
-            // delivering. Do NOT force synthesis, do NOT emit Done.
+            // delivering. Do NOT force synthesis, do NOT emit Done. Flush completions for
+            // anything already drained/applied earlier in this same turn FIRST — this is the
+            // only place those ids would otherwise get acknowledged (the normal completion
+            // block below is never reached on this early-return path), and their instructions
+            // are already folded into `ls.messages`, which the park checkpoint preserves.
+            complete_drained_steering(model_client, &mut steering_to_complete);
             execution_journal.checkpoint(crate::LoopCheckpoint::from_state(last_round, &ls));
             return crate::TurnOutcome {
                 delivery: TurnDelivery::Parked,
@@ -1447,11 +1472,7 @@ missing, give what you have and note the gap in one short line.",
         }
     }
     if final_done || delivery == TurnDelivery::Delivered {
-        steering_to_complete.sort_unstable();
-        steering_to_complete.dedup();
-        for steering_id in steering_to_complete {
-            model_client.acknowledge_turn_control_completed(steering_id);
-        }
+        complete_drained_steering(model_client, &mut steering_to_complete);
     }
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
     // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
@@ -2133,13 +2154,17 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
     }
     #[derive(Default)]
-    struct CollectJournal(Mutex<Vec<String>>);
+    struct CollectJournal(Mutex<Vec<String>>, Mutex<Vec<crate::LoopCheckpoint>>);
     impl crate::ExecutionJournal for CollectJournal {
         fn record(&self, event: crate::AgentExecutionEvent) {
             self.0
                 .lock()
                 .unwrap()
                 .push(event.into_parts().0.to_string());
+        }
+
+        fn checkpoint(&self, checkpoint: crate::LoopCheckpoint) {
+            self.1.lock().unwrap().push(checkpoint);
         }
     }
 
@@ -3585,6 +3610,157 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
                 .count(),
             0,
             "a parked turn must never emit a terminal Done"
+        );
+        // The park path must emit a resumable checkpoint at the boundary (the coordinator-resume
+        // pipeline reseeds from it). At least the normal per-round checkpoint fires (round 0, the
+        // only round `hard_round_ceiling = 1` allows) PLUS the park-point checkpoint itself — both
+        // at round 0 here; assert on the LAST one (the park checkpoint) rather than an exact count,
+        // since that's not this test's concern.
+        let checkpoints = journal.1.lock().unwrap();
+        assert!(
+            !checkpoints.is_empty(),
+            "expected at least one checkpoint emitted by the time the turn parks"
+        );
+        assert_eq!(
+            checkpoints.last().unwrap().round,
+            0,
+            "the park checkpoint must capture the last round the loop actually ran"
+        );
+    }
+
+    /// A steering control drained/applied EARLIER in the turn (round 0, via `current_turn_control`
+    /// at the top of the round loop) must still be acknowledged completed even though the turn
+    /// later parks on a DIFFERENT row that never becomes interpretable. Before the flush fix, the
+    /// park early-return skipped the normal turn-end completion block entirely, silently dropping
+    /// this id — its store row would be stuck at `applied` forever (a permanent "Applying…"
+    /// spinner in the UI).
+    #[derive(Default)]
+    struct EarlierAppliedThenStuckSteeringModel {
+        calls: AtomicUsize,
+        early_control_taken: AtomicBool,
+        early_applied: AtomicBool,
+        early_completed: AtomicBool,
+    }
+
+    impl ModelClient for EarlierAppliedThenStuckSteeringModel {
+        fn finalization_fence(&self) -> crate::FinalizationFence {
+            // Always pending: a SECOND, different row is stuck uninterpreted at the fence
+            // regardless of what happened earlier in the turn with the first row.
+            crate::FinalizationFence::PendingInput
+        }
+
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            // Offered exactly once, at the very top of round 0 (before `early_control_taken`
+            // flips) — a control drained by the ROUND LOOP itself, not the fence. Never
+            // interpreted again afterward (the stuck row at the fence is a DIFFERENT id that
+            // this double never surfaces through `current_turn_control`).
+            (!self.early_control_taken.load(Ordering::SeqCst)).then(|| {
+                self.early_control_taken.store(true, Ordering::SeqCst);
+                crate::TurnControlDecision {
+                    steering_id: 5,
+                    disposition: crate::TurnControlDisposition::ContinueCurrentWork,
+                    instruction: "Keep going — applied early in the turn".to_string(),
+                }
+            })
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            // Models production: never resolves once nothing is left to interpret.
+            std::future::pending().await
+        }
+
+        fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+            assert_eq!(steering_id, 5);
+            self.early_applied.store(true, Ordering::SeqCst);
+        }
+
+        fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+            assert_eq!(steering_id, 5);
+            self.early_completed.store(true, Ordering::SeqCst);
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "Draft answer while a different row is still stuck pending.",
+                }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn park_flushes_completion_for_steering_drained_earlier_in_the_turn() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "investigate" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = EarlierAppliedThenStuckSteeringModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 1;
+        turn_cfg.max_rounds = 1;
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_turn(
+                ls,
+                turn_cfg,
+                &usage_context(),
+                &model,
+                &NoTools,
+                &mut browser,
+                &NoPlan,
+                &DoneJudge,
+                &NoCompact,
+                &OpenPolicy,
+                &journal,
+                &sink,
+                0.0,
+                None,
+                &std::collections::BTreeSet::new(),
+                &[],
+                "investigate".to_string(),
+                String::new(),
+                None,
+                false,
+                0,
+                false,
+                Vec::new(),
+                None,
+                &crate::turn_trace::TurnTrace::disabled(),
+            ),
+        )
+        .await
+        .expect("run_turn must park within its bounded wait budget, not hang");
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Parked);
+        assert!(model.early_applied.load(Ordering::SeqCst));
+        // The regression: without the flush-before-park fix, this stays false — the id applied
+        // earlier in the turn is silently dropped when the turn parks on the later, different,
+        // uninterpreted row.
+        assert!(
+            model.early_completed.load(Ordering::SeqCst),
+            "a steering control drained/applied earlier in the turn must still be acknowledged \
+             completed when the turn parks on a later, different, uninterpreted row"
         );
     }
 }
