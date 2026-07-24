@@ -31732,6 +31732,15 @@ fn browser_clear_target_acted_floored(
 /// equal to the bundle's `current_target` (see `normalize_browser_action_bundle`),
 /// so checking every item's `ref` against the SAME floor set is correct for a
 /// single-target bundle.
+///
+/// Checks BOTH the top-level `ref` AND any `fields[].ref` (mirrors
+/// `browser_safety::any_ref_in_floor`): a `kind:"fill"` action using the
+/// sidecar's canonical multi-field contract (`fields:[{ref,value}]` — see
+/// `resolveFillFields` in `runtimes/browser-automation/src/browser/actions.ts`)
+/// carries no top-level `ref` at all, so a ref-only check never set
+/// `last_acted_floored` for it — leaving a following ref-less Enter/Return
+/// ungated even though the fill just targeted a floored card field (Build1
+/// fill-fields fail-open).
 fn browser_action_targeted_a_floored_ref(
     action: &serde_json::Value,
     payment_floor_refs: &std::collections::HashSet<String>,
@@ -31741,6 +31750,17 @@ fn browser_action_targeted_a_floored_ref(
             .get("ref")
             .and_then(serde_json::Value::as_str)
             .is_some_and(|r| payment_floor_refs.contains(r))
+            || value
+                .get("fields")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|fields| {
+                    fields.iter().any(|field| {
+                        field
+                            .get("ref")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|r| payment_floor_refs.contains(r))
+                    })
+                })
     };
     ref_is_floored(action)
         || action
@@ -66191,6 +66211,54 @@ prs.save(Path({path:?}))
             "actions": [{"kind": "click", "ref": "e1"}]
         });
         assert!(!super::browser_action_targeted_a_floored_ref(&bundle_no_hit, &payment_floor));
+    }
+
+    // --- Build1 fill-fields fail-open: `fields[].ref` must floor too ---
+
+    #[test]
+    fn fill_fields_array_targeting_floored_ref_sets_last_acted_floored_for_a_following_refless_enter() {
+        // {kind:"fill", fields:[{ref:<floored>, value:"x"}]} carries no top-level
+        // `ref` — the sidecar's canonical multi-field contract puts the ref inside
+        // `fields[]` (see `resolveFillFields` in
+        // `runtimes/browser-automation/src/browser/actions.ts`). Before the fix,
+        // `browser_action_targeted_a_floored_ref` only read `action.get("ref")` and
+        // missed it entirely, so `last_acted_floored` never got set — leaving a
+        // FOLLOWING ref-less Enter (no focus signal, e.g. a cross-origin PSP OOPIF
+        // that fails `focusPaymentContext` open) completely ungated.
+        let payment_floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e12".to_string()]);
+        let cc_fields_fill = serde_json::json!({
+            "kind": "fill",
+            "fields": [{"ref": "e12", "type": "text", "value": "4242 4242 4242 4242"}]
+        });
+        assert!(super::browser_action_targeted_a_floored_ref(&cc_fields_fill, &payment_floor));
+
+        let mut ctx_by_target: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        super::browser_mark_target_acted_floored(&mut ctx_by_target, "chat_0");
+        let combined = super::browser_payment_context_for(&ctx_by_target, "chat_0");
+        assert!(combined, "last_acted_floored alone must floor, with NO focus signal");
+
+        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let reason = browser_safety::evaluate_browser_action(&enter, &payment_floor, combined, None)
+            .expect("a ref-less Enter following a floored fields[] fill must be rejected as under-declared payment_commit");
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+
+        // A fields[] fill hitting ONLY a non-floored ref must NOT set the flag.
+        let ordinary_fields_fill = serde_json::json!({
+            "kind": "fill",
+            "fields": [{"ref": "e1", "value": "Napoli"}, {"ref": "e2", "value": "Milano"}]
+        });
+        assert!(!super::browser_action_targeted_a_floored_ref(&ordinary_fields_fill, &payment_floor));
+
+        // A bundle whose item uses fields[] to hit a floored ref counts too.
+        let bundle = serde_json::json!({
+            "actions": [
+                {"kind": "click", "ref": "e1"},
+                {"kind": "fill", "fields": [{"ref": "e12", "value": "4242"}]}
+            ]
+        });
+        assert!(super::browser_action_targeted_a_floored_ref(&bundle, &payment_floor));
     }
 
     // --- Build1 Fix 3: per-target floor set (cross-tab fail-open) ---

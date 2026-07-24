@@ -125,36 +125,66 @@ pub fn is_committing_action(action: &Value) -> bool {
     }
 }
 
-/// The floor for a ref is `PaymentCommit` when the sidecar's machine analysis
-/// (cc-autocomplete fields, PSP-origin frame) marked it; otherwise `Ordinary`.
-/// Floors are machine-derived and never read label text.
-fn payment_floor_for(action: &Value, payment_floor_refs: &HashSet<String>) -> ActionClass {
-    let is_floored = action
+/// True when `action`'s top-level `ref`, OR any `fields[].ref`, is in
+/// `payment_floor_refs`. `kind:"fill"` is a schema-legal kind that carries NO
+/// top-level `ref` when it uses the sidecar's canonical multi-field contract
+/// (`fields:[{ref,value}]` — see `resolveFillFields` in
+/// `runtimes/browser-automation/src/browser/actions.ts`, which the sidecar
+/// actually iterates and fills). A check that only reads `action.get("ref")`
+/// never sees a floored card ref hidden inside that array, so `{kind:"fill",
+/// fields:[{ref:<floored cc ref>,value:"4242…"}]}` used to fill the card field
+/// completely ungated (Build1 fill-fields fail-open). Descending into
+/// `fields[]` here — rather than rejecting the shape outright — keeps a
+/// legitimate multi-field fill working while closing the hole: whichever ref
+/// the sidecar will actually act on, that ref's floor is what decides the
+/// class.
+fn any_ref_in_floor(action: &Value, payment_floor_refs: &HashSet<String>) -> bool {
+    let top_level_floored = action
         .get("ref")
         .and_then(Value::as_str)
         .is_some_and(|r| payment_floor_refs.contains(r));
-    if is_floored { ActionClass::PaymentCommit } else { ActionClass::Ordinary }
+    let fields_floored = action
+        .get("fields")
+        .and_then(Value::as_array)
+        .is_some_and(|fields| {
+            fields.iter().any(|field| {
+                field
+                    .get("ref")
+                    .and_then(Value::as_str)
+                    .is_some_and(|r| payment_floor_refs.contains(r))
+            })
+        });
+    top_level_floored || fields_floored
 }
 
-/// True when the action is committing, `hold`, OR targets a ref already in
-/// `payment_floor_refs`. That last arm is defense-in-depth (design 1.4): the ref
-/// floor is computed independently of `kind`, so without it a FUTURE (or
-/// hallucinated) kind that acts on a floored control — one `is_committing_action`
-/// does not yet recognize — would fall through ungated purely because its `kind`
-/// isn't in today's committing set. Folding the ref check into the gate itself
-/// means a floored ref is ALWAYS gated, regardless of what kind of action touches
-/// it. Payment gating applies only when one of these three holds; plain
-/// typing/scrolling/hovering on an unfloored ref is never gated.
+/// The floor for a ref is `PaymentCommit` when the sidecar's machine analysis
+/// (cc-autocomplete fields, PSP-origin frame) marked it; otherwise `Ordinary`.
+/// Floors are machine-derived and never read label text. Checks the top-level
+/// `ref` AND any `fields[].ref` (see `any_ref_in_floor`) so a `fill` action
+/// hiding its floored ref inside `fields[]` still floors correctly.
+fn payment_floor_for(action: &Value, payment_floor_refs: &HashSet<String>) -> ActionClass {
+    if any_ref_in_floor(action, payment_floor_refs) { ActionClass::PaymentCommit } else { ActionClass::Ordinary }
+}
+
+/// True when the action is committing, `hold`, OR targets a ref (top-level, OR
+/// any `fields[].ref` — see `any_ref_in_floor`) already in `payment_floor_refs`.
+/// That last arm is defense-in-depth (design 1.4): the ref floor is computed
+/// independently of `kind`, so without it a FUTURE (or hallucinated) kind that
+/// acts on a floored control — one `is_committing_action` does not yet
+/// recognize — would fall through ungated purely because its `kind` isn't in
+/// today's committing set. Folding the ref check into the gate itself means a
+/// floored ref is ALWAYS gated, regardless of what kind of action touches it,
+/// AND regardless of whether that ref sits at the top level or inside a `fill`
+/// action's `fields[]` array. Payment gating applies only when one of these
+/// three holds; plain typing/scrolling/hovering on an unfloored ref is never
+/// gated.
 /// Accepted friction: this also gates a benign `hover`/`scrollIntoView` that
 /// merely targets a floored control — over-gating a read-only touch is the
 /// fail-closed side of the same tradeoff, not a bug.
 fn is_gated_action(action: &Value, payment_floor_refs: &HashSet<String>) -> bool {
     is_committing_action(action)
         || action.get("kind").and_then(Value::as_str) == Some("hold")
-        || action
-            .get("ref")
-            .and_then(Value::as_str)
-            .is_some_and(|r| payment_floor_refs.contains(r))
+        || any_ref_in_floor(action, payment_floor_refs)
 }
 
 /// A committing action whose payment class cannot come from a ref: an Enter/Return
@@ -649,5 +679,70 @@ mod tests {
             &floor(&["e9"]),
             false
         ));
+    }
+
+    // --- Build1 fill-fields fail-open: `fill` with a `fields[]` array hides a
+    // floored ref from top-level-`ref`-only checks (§1.4 and last-acted-floored) ---
+
+    #[test]
+    fn fill_with_fields_array_targeting_floored_ref_is_gated_as_payment() {
+        // {kind:"fill", fields:[{ref:<floored cc ref>, value:"4242…"}]} carries NO
+        // top-level `ref` at all — the sidecar's canonical multi-field contract puts
+        // the ref inside `fields[]` (see `resolveFillFields` in
+        // `runtimes/browser-automation/src/browser/actions.ts`). A check that only
+        // reads `action.get("ref")` never sees it, so this used to sail through as
+        // Ordinary with no declared class required at all.
+        let fill = json!({
+            "kind": "fill",
+            "fields": [{"ref": "e9", "type": "text", "value": "4242 4242 4242 4242"}],
+            "action_class": "ordinary"
+        });
+        let reason = evaluate_browser_action(&fill, &floor(&["e9"]), false, None)
+            .expect("a fill whose fields[] targets a floored ref must be gated as payment");
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"), "got: {reason}");
+
+        // Declaring payment_commit correctly requires (and is unblocked by) an
+        // approval, exactly like a top-level-ref fill would be.
+        let declared_payment = json!({
+            "kind": "fill",
+            "fields": [{"ref": "e9", "value": "4242 4242 4242 4242"}],
+            "action_class": "payment_commit"
+        });
+        assert!(
+            evaluate_browser_action(&declared_payment, &floor(&["e9"]), false, None)
+                .unwrap()
+                .contains("BROWSER_PAYMENT_APPROVAL_REQUIRED")
+        );
+        let approved = json!({
+            "kind": "fill",
+            "fields": [{"ref": "e9", "value": "4242 4242 4242 4242"}],
+            "action_class": "payment_commit",
+            "payment_approval_id": "pay_1"
+        });
+        assert!(evaluate_browser_action(&approved, &floor(&["e9"]), false, Some("pay_1")).is_none());
+
+        // action_is_payment_commit must also see it, for the claim-gating call site.
+        assert!(action_is_payment_commit(
+            &json!({"kind":"fill","fields":[{"ref":"e9","value":"x"}],"action_class":"payment_commit","payment_approval_id":"pay_1"}),
+            &floor(&["e9"]),
+            false
+        ));
+    }
+
+    #[test]
+    fn fill_with_fields_array_targeting_only_non_floored_refs_stays_ordinary() {
+        // No over-gating: a genuine multi-field fill whose refs are NOT in the
+        // payment floor, outside any payment context, must remain a plain allowed
+        // ordinary action — descending into `fields[]` must not turn every
+        // multi-field fill into a payment action.
+        let fill = json!({
+            "kind": "fill",
+            "fields": [
+                {"ref": "e1", "value": "Napoli"},
+                {"ref": "e2", "value": "Milano"}
+            ]
+        });
+        assert!(evaluate_browser_action(&fill, &floor(&["e9"]), false, None).is_none());
+        assert!(!action_is_payment_commit(&fill, &floor(&["e9"]), false));
     }
 }
