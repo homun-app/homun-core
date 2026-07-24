@@ -17,6 +17,35 @@ use serde_json::Value;
 use serde_json::json;
 use tokio::sync::{Notify, broadcast};
 
+/// Which post-run branch `execute_chat_turn_task` takes once the drained turn resolves.
+/// `Parked` (steering park+resume, Build 2) only applies once `Cancelled` is ruled out: a
+/// manual Stop that raced the park always wins — the user's own terminal request predates
+/// whatever the engine decided at its finalization fence — so the two paths can never both
+/// try to produce a terminal outcome for the same turn (see `classify_chat_turn_run`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatTurnRunBranch {
+    Cancelled,
+    Parked,
+    Generated,
+    NoAnswer,
+}
+
+/// Pure decision: given the three independently-observed signals, which branch applies.
+/// Kept as a free function (not inlined into the executor's if/else chain) so the
+/// precedence — cancel beats park beats a real answer beats nothing — is a single,
+/// directly testable statement instead of buried in a page of I/O.
+fn classify_chat_turn_run(cancelled: bool, generated: bool, parked: bool) -> ChatTurnRunBranch {
+    if cancelled {
+        ChatTurnRunBranch::Cancelled
+    } else if parked {
+        ChatTurnRunBranch::Parked
+    } else if generated {
+        ChatTurnRunBranch::Generated
+    } else {
+        ChatTurnRunBranch::NoAnswer
+    }
+}
+
 fn finalize_agent_run(
     state: &crate::AppState,
     thread_id: &str,
@@ -560,64 +589,102 @@ pub fn execute_chat_turn_task(
         .map(|result| result.text)
         .unwrap_or_default();
     let generated = !cancelled && !answer.trim().is_empty();
-    if cancelled {
-        if let Ok(store) = state.chat_store.lock() {
-            let partial = store
-                .message(thread_id, &visible_turn.assistant_message_id)
-                .ok()
-                .flatten()
-                .map(|message| crate::strip_chat_markers(&message.text))
-                .filter(|text| !text.trim().is_empty())
-                .unwrap_or_else(|| "Operazione interrotta.".to_string());
-            let _ = store.set_message_text(
+    // Parked at the finalization boundary (Build 2, park+resume): `run_agent_rounds`'s outcome
+    // consumer already called `park_chat_turn` synchronously — this agent_run aborted with
+    // `parked_waiting_for_model`, the task flipped to `Parked`, steering left `pending` — before
+    // unblocking this drain with an empty `done` line (the ONLY way it and `answer` end up empty
+    // without a genuine failure). Re-reading the task's own authoritative status, rather than
+    // threading a new signal through the SSE/`AgentTurnResult` plumbing, mirrors how a manual Stop
+    // is detected elsewhere in this same pipeline (the runner's `externally_cancelled` reload).
+    let parked = !cancelled
+        && !generated
+        && state
+            .task_store
+            .lock()
+            .ok()
+            .and_then(|store| {
+                store
+                    .get_task(&task.task_id, &task.user_id, &task.workspace_id)
+                    .ok()
+                    .flatten()
+            })
+            .is_some_and(|persisted| persisted.status == TaskStatus::Parked);
+    match classify_chat_turn_run(cancelled, generated, parked) {
+        ChatTurnRunBranch::Cancelled => {
+            if let Ok(store) = state.chat_store.lock() {
+                let partial = store
+                    .message(thread_id, &visible_turn.assistant_message_id)
+                    .ok()
+                    .flatten()
+                    .map(|message| crate::strip_chat_markers(&message.text))
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or_else(|| "Operazione interrotta.".to_string());
+                let _ = store.set_message_text(
+                    thread_id,
+                    &visible_turn.assistant_message_id,
+                    partial.trim(),
+                );
+                let _ = store.set_message_delivery_state(
+                    thread_id,
+                    &visible_turn.assistant_message_id,
+                    local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+                );
+            }
+            finalize_agent_run(
+                state,
                 thread_id,
-                &visible_turn.assistant_message_id,
-                partial.trim(),
-            );
-            let _ = store.set_message_delivery_state(
-                thread_id,
-                &visible_turn.assistant_message_id,
-                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+                task.user_id.as_str(),
+                &workspace_id,
+                &agent_run,
+                AgentRunStatus::Aborted,
+                "cancelled",
+                Some(local_first_engine::AgentExecutionEvent::RunAborted {
+                    reason: "cancelled".to_string(),
+                }),
             );
         }
-        finalize_agent_run(
-            state,
-            thread_id,
-            task.user_id.as_str(),
-            &workspace_id,
-            &agent_run,
-            AgentRunStatus::Aborted,
-            "cancelled",
-            Some(local_first_engine::AgentExecutionEvent::RunAborted {
-                reason: "cancelled".to_string(),
-            }),
-        );
-    } else if generated {
-        finalize_agent_run(
-            state,
-            thread_id,
-            task.user_id.as_str(),
-            &workspace_id,
-            &agent_run,
-            AgentRunStatus::Completed,
-            "delivered",
-            Some(local_first_engine::AgentExecutionEvent::RunCompleted {
-                reason: "delivered".to_string(),
-            }),
-        );
-    } else {
-        finalize_agent_run(
-            state,
-            thread_id,
-            task.user_id.as_str(),
-            &workspace_id,
-            &agent_run,
-            AgentRunStatus::Failed,
-            "no_reply_generated",
-            Some(local_first_engine::AgentExecutionEvent::RunFailed {
-                reason: "no_reply_generated".to_string(),
-            }),
-        );
+        ChatTurnRunBranch::Parked => {
+            // The task-runtime row is already terminal-for-this-attempt (aborted with
+            // `parked_waiting_for_model`) via `park_chat_turn`; calling `finalize_agent_run`
+            // again would try to `finish_agent_run` a row no longer `running` (a harmless
+            // no-op guarded by its own WHERE clause) and record a misleading `RunFailed`
+            // journal event. Only close out THIS run's in-process observability journal so
+            // the writer thread + registry entry don't leak — the DB row and task status are
+            // already correct, and NO terminal turn event / assistant-message finalize happens
+            // here (the bubble stays open; see the "6+7" step below).
+            if let Some((run_id, journal)) = &agent_run {
+                journal.close_and_flush();
+                crate::agent_journal::unregister(run_id);
+            }
+        }
+        ChatTurnRunBranch::Generated => {
+            finalize_agent_run(
+                state,
+                thread_id,
+                task.user_id.as_str(),
+                &workspace_id,
+                &agent_run,
+                AgentRunStatus::Completed,
+                "delivered",
+                Some(local_first_engine::AgentExecutionEvent::RunCompleted {
+                    reason: "delivered".to_string(),
+                }),
+            );
+        }
+        ChatTurnRunBranch::NoAnswer => {
+            finalize_agent_run(
+                state,
+                thread_id,
+                task.user_id.as_str(),
+                &workspace_id,
+                &agent_run,
+                AgentRunStatus::Failed,
+                "no_reply_generated",
+                Some(local_first_engine::AgentExecutionEvent::RunFailed {
+                    reason: "no_reply_generated".to_string(),
+                }),
+            );
+        }
     }
     tracing::info!(
         target: "broker::executor",
@@ -706,6 +773,8 @@ pub fn execute_chat_turn_task(
             }
         }
         tracing::info!(target: "broker::executor", turn_id = %turn_id, "approval card persisted; skipping channel mirror and terminal done event");
+    } else if parked {
+        tracing::info!(target: "broker::executor", turn_id = %turn_id, "turn parked at the finalization boundary — bubble left open, steering pending for coordinator-driven resume");
     } else {
         tracing::info!(target: "broker::executor", turn_id = %turn_id, cancelled, "turn did not produce a final reply — skipping finalization + done event");
     }
@@ -729,6 +798,8 @@ pub fn execute_chat_turn_task(
             None
         } else if waiting_for_user {
             Some("chat turn is waiting for a user action".to_string())
+        } else if parked {
+            Some("chat turn parked at its finalization boundary; waiting for the model".to_string())
         } else {
             Some("chat turn produced no final reply".to_string())
         },
@@ -743,6 +814,8 @@ pub fn execute_chat_turn_task(
             "Chat turn executed.".to_string()
         } else if waiting_for_user {
             "Chat turn is waiting for approval.".to_string()
+        } else if parked {
+            "Chat turn parked; waiting for the model.".to_string()
         } else {
             "Chat turn produced no reply.".to_string()
         },
@@ -765,6 +838,8 @@ pub fn execute_chat_turn_task(
             "chat_turn_completed".to_string()
         } else if waiting_for_user {
             "chat_turn_waiting_approval".to_string()
+        } else if parked {
+            "chat_turn_parked".to_string()
         } else {
             "chat_turn_incomplete".to_string()
         },
@@ -772,6 +847,8 @@ pub fn execute_chat_turn_task(
             "Chat turn completed".to_string()
         } else if waiting_for_user {
             "Chat turn waiting approval".to_string()
+        } else if parked {
+            "Chat turn parked".to_string()
         } else {
             "Chat turn incomplete".to_string()
         },
@@ -779,6 +856,8 @@ pub fn execute_chat_turn_task(
             "Interactive chat turn.".to_string()
         } else if waiting_for_user {
             "Remote approval required before the turn can continue.".to_string()
+        } else if parked {
+            "Waiting for the model; steering stays queued for the resumed turn.".to_string()
         } else {
             "Chat turn stopped before producing a reply.".to_string()
         },
@@ -821,6 +900,40 @@ mod tests {
     use super::*;
     use crate::AppState;
     use local_first_task_runtime::TaskStore;
+
+    #[test]
+    fn classify_chat_turn_run_cancel_wins_over_park() {
+        // A manual Stop that raced the park must still win: exactly one terminal path, never
+        // both a cancel finalize AND a park.
+        assert_eq!(
+            classify_chat_turn_run(true, false, true),
+            ChatTurnRunBranch::Cancelled
+        );
+        assert_eq!(
+            classify_chat_turn_run(true, true, true),
+            ChatTurnRunBranch::Cancelled
+        );
+    }
+
+    #[test]
+    fn classify_chat_turn_run_park_is_distinct_from_genuine_no_answer() {
+        assert_eq!(
+            classify_chat_turn_run(false, false, true),
+            ChatTurnRunBranch::Parked
+        );
+        assert_eq!(
+            classify_chat_turn_run(false, false, false),
+            ChatTurnRunBranch::NoAnswer
+        );
+    }
+
+    #[test]
+    fn classify_chat_turn_run_generated_takes_the_normal_path() {
+        assert_eq!(
+            classify_chat_turn_run(false, true, false),
+            ChatTurnRunBranch::Generated
+        );
+    }
 
     #[test]
     fn register_and_unregister_turn() {

@@ -29405,6 +29405,35 @@ fn delivered_image_rejection_outcome(
     outcome
 }
 
+/// Called from `run_agent_rounds`'s outcome consumer when `run_turn` returns
+/// `TurnDelivery::Parked` (steering park+resume, Build 2): parks the chat_turn task —
+/// aborts the running agent_run with `parked_waiting_for_model` (keeping its resumable
+/// checkpoint), releases the browser-session resource, flips the task to `Parked` — so the
+/// SAME turn_id/assistant bubble resumes later once the coordinator's probe finds the
+/// semantic model back. `turn_id` is `None` for a non-broker call (no steering context, so
+/// the engine never parks in practice) — a defensive no-op, not a panic. Best-effort: a
+/// store failure is logged, not fatal; a stuck `running` row still recovers via the existing
+/// stale-lease path instead of hanging this stream.
+fn park_chat_turn_task(
+    state: &AppState,
+    turn_id: Option<&str>,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) {
+    let Some(turn_id) = turn_id else {
+        tracing::warn!(
+            target: "agent::park",
+            "engine parked a turn with no broker turn_id — nothing to park"
+        );
+        return;
+    };
+    if let Ok(store) = state.task_store.lock() {
+        if let Err(error) = store.park_chat_turn(turn_id, user_id.as_str(), workspace_id.as_str()) {
+            tracing::warn!(target: "agent::park", %turn_id, %error, "could not park chat turn");
+        }
+    }
+}
+
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn
 // learn, extracted VERBATIM from the tokio::spawn body of stream_chat_via_openai. The
 // signature (the captured turn state) is what becomes engine::run_turn's interface at 5.D1c.
@@ -29590,6 +29619,38 @@ async fn run_agent_rounds(
         turn_trace,
     )
     .await;
+
+    // Park at the finalization boundary (Build 2, park+resume): the engine hit its fence with
+    // steering still pending that the coordinator could not interpret (semantic model
+    // unavailable) and checkpointed instead of spinning (T1) — `memory_answer` is empty and NO
+    // terminal event was emitted by the engine. Park the chat_turn task here (T2's
+    // `park_chat_turn`: aborts the running agent_run with `parked_waiting_for_model`, releases
+    // the browser-session resource, keeps steering `pending` for the resumed run) and unblock
+    // the gateway's OWN SSE drain (`turn_executor::drain_agent_stream_into_message_with_fanout`,
+    // which otherwise waits forever on a terminal line the engine deliberately never sends) with
+    // a plain empty `done` — NOT an `error` (which `fanout_turn_event` would turn into a durable
+    // terminal event) and NOT a real answer. The empty text keeps `generated` false downstream,
+    // so the executor's own no-answer branch runs; ITS re-read of this task's now-`Parked`
+    // status (not this outcome) is what tells it — and the runner — not to treat this as a
+    // failure. No terminal turn event is emitted here or anywhere else on this path.
+    if outcome.delivery == local_first_engine::TurnDelivery::Parked {
+        park_chat_turn_task(
+            &state_owned,
+            effect_turn_id.as_deref(),
+            &automation_user_id,
+            &automation_workspace_id,
+        );
+        let _ = emit_stream_event(
+            tx,
+            GenerateStreamEvent::Done {
+                text: String::new(),
+                metrics: TokenMetrics::zero(),
+                redacted_user_text: None,
+            },
+        )
+        .await;
+        return outcome;
+    }
 
     // The common case: the turn ran (whatever it concluded).
     let Some(rejection) = outcome.image_rejection.clone() else {
@@ -38815,6 +38876,24 @@ fn approval_allows_browser_policy(approval: &ApprovalRequest) -> bool {
         || approval.explanation.to_lowercase().contains("browser")
 }
 
+/// True once `run_agent_rounds`'s outcome consumer has parked this turn's task (steering
+/// pending, model unavailable — see `park_chat_turn_task`/`TaskStore::park_chat_turn`).
+/// Checked AFTER `execute_read_only_task` returns, mirroring the `externally_cancelled`
+/// reload right above its call site in `run_next_task_once`: the executor's own
+/// `TaskExecutionOutcome` has no way to say "parked" (it's a generic shape shared by every
+/// task kind), so the authoritative signal is the task's OWN status, re-read fresh.
+fn chat_turn_task_is_parked(
+    state: &AppState,
+    task: &TaskRecord,
+    user: &UserId,
+    workspace: &WorkspaceId,
+) -> bool {
+    lock_task_store(state)
+        .ok()
+        .and_then(|store| store.get_task(&task.task_id, user, workspace).ok().flatten())
+        .is_some_and(|persisted| persisted.status == TaskStatus::Parked)
+}
+
 fn run_next_task_once(
     state: &AppState,
     worker_id: &str,
@@ -39079,6 +39158,30 @@ fn run_next_task_once(
             stopped_reason: Some("cancelled by user".to_string()),
             results: vec![TaskRunStepResponse {
                 status: "cancelled".to_string(),
+                task_id: Some(task_id),
+                message: outcome.summary,
+            }],
+        });
+    }
+    // Guard: the executor itself may have PARKED this chat turn at its finalization boundary
+    // (steering pending, model unavailable — `run_agent_rounds`'s outcome consumer already
+    // called `park_chat_turn`, which aborted the running agent_run with
+    // `parked_waiting_for_model`, released the browser-session resource, flipped the task to
+    // `Parked`, and left steering rows `pending`). `outcome.completed` is false here with no
+    // `pending_approval` — exactly the shape a genuine "no reply" also has — so without this
+    // guard the `else` branch below would run `handle_failed_task_run` with `hard_error = true`
+    // for a chat_turn, clobbering `Parked` back to `Failed` AND marking the assistant bubble
+    // `Failed` (`set_chat_turn_message_delivery_state(..., Failed)`), regressing both "the bubble
+    // stays open" and "the SAME turn resumes" invariants. Mirrors the `externally_cancelled`
+    // guard above: reload the authoritative status rather than trust the stale local `task`.
+    if chat_turn_task_is_parked(state, &task, &user, &workspace) {
+        surface_task_execution_outcome(state, &task_id, &outcome)?;
+        return Ok(TaskRunBatchResponse {
+            status: "parked".to_string(),
+            completed: 0,
+            stopped_reason: Some("parked_waiting_for_model".to_string()),
+            results: vec![TaskRunStepResponse {
+                status: "parked".to_string(),
                 task_id: Some(task_id),
                 message: outcome.summary,
             }],
@@ -79656,6 +79759,164 @@ data: [DONE]\n";
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Retrying
         );
+    }
+
+    #[test]
+    fn park_chat_turn_task_parks_the_running_task_and_aborts_its_run() {
+        let state = AppState::for_tests();
+        let user = super::gateway_user_id();
+        let workspace = WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            "turn_park_wrapper",
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "prompt",
+            serde_json::json!({}),
+        );
+        task.status = TaskStatus::Running;
+        {
+            let store = super::lock_task_store(&state).unwrap();
+            store.insert_task(&task).unwrap();
+            store
+                .create_agent_run(&local_first_task_runtime::NewAgentRun {
+                    run_id: "agent_run_park_wrapper".to_string(),
+                    turn_id: task.task_id.as_str().to_string(),
+                    thread_id: "thread_park_wrapper".to_string(),
+                    user_id: user.as_str().to_string(),
+                    workspace_id: workspace.as_str().to_string(),
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+        }
+
+        super::park_chat_turn_task(&state, Some(task.task_id.as_str()), &user, &workspace);
+
+        let persisted = super::lock_task_store(&state)
+            .unwrap()
+            .get_task(&task.task_id, &user, &workspace)
+            .unwrap()
+            .expect("task still present");
+        assert_eq!(persisted.status, TaskStatus::Parked);
+        let runs = super::lock_task_store(&state)
+            .unwrap()
+            .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
+            .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            runs[0].terminal_reason.as_deref(),
+            Some("parked_waiting_for_model")
+        );
+    }
+
+    #[test]
+    fn park_chat_turn_task_is_a_noop_without_a_broker_turn_id() {
+        let state = AppState::for_tests();
+        // The engine can only reach `TurnDelivery::Parked` with a live steering context, which
+        // requires a broker turn_id — but the wrapper must not panic if that invariant is ever
+        // violated (e.g. a non-broker call somehow parks). Nothing to park, nothing crashes.
+        super::park_chat_turn_task(
+            &state,
+            None,
+            &super::gateway_user_id(),
+            &WorkspaceId::new("workspace_test"),
+        );
+    }
+
+    #[test]
+    fn parked_chat_turn_short_circuits_the_runner_without_a_terminal_event_or_failed_bubble() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let mut assistant = super::channel_chat_message_with_id(
+            "assistant",
+            "",
+            "local_assistant_park_guard",
+        );
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let user = super::gateway_user_id();
+        let workspace = WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            "turn_park_guard",
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "prompt",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": assistant.id,
+            }),
+        );
+        task.status = TaskStatus::Running;
+        {
+            let store = super::lock_task_store(&state).unwrap();
+            store.insert_task(&task).unwrap();
+            store
+                .create_agent_run(&local_first_task_runtime::NewAgentRun {
+                    run_id: "agent_run_park_guard".to_string(),
+                    turn_id: task.task_id.as_str().to_string(),
+                    thread_id: thread.thread_id.clone(),
+                    user_id: user.as_str().to_string(),
+                    workspace_id: workspace.as_str().to_string(),
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+            // Simulate `run_agent_rounds`'s outcome consumer having already parked the turn
+            // (T2's `park_chat_turn`, wired to this exact call in `park_chat_turn_task`).
+            store
+                .park_chat_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
+                .unwrap();
+        }
+        task.status = TaskStatus::Parked;
+
+        // (b) the runner's guard sees the task as parked — this is what makes it skip
+        // `handle_failed_task_run` in `run_next_task_once` instead of clobbering the status.
+        assert!(super::chat_turn_task_is_parked(
+            &state, &task, &user, &workspace
+        ));
+        let runs = super::lock_task_store(&state)
+            .unwrap()
+            .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
+            .unwrap();
+        assert_eq!(
+            runs[0].terminal_reason.as_deref(),
+            Some("parked_waiting_for_model")
+        );
+
+        // (c) the assistant bubble was NEVER touched by the park path — still `Streaming`,
+        // not `Failed`/`Completed`/`Cancelled` (no half-finalized bubble).
+        let stored = super::lock_store(&state)
+            .unwrap()
+            .message(&thread.thread_id, &assistant.id)
+            .unwrap()
+            .expect("assistant message still present");
+        assert_eq!(
+            stored.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Streaming
+        );
+
+        // (a) no terminal turn event exists for this turn — park emits none.
+        let events = super::lock_task_store(&state)
+            .unwrap()
+            .read_turn_events(task.task_id.as_str(), 0)
+            .unwrap();
+        assert!(!events.iter().any(|event| matches!(
+            event.kind,
+            local_first_task_runtime::TurnEventKind::Done
+                | local_first_task_runtime::TurnEventKind::Error
+                | local_first_task_runtime::TurnEventKind::Cancelled
+        )));
     }
 
     #[test]
