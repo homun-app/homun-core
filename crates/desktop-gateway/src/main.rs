@@ -23,6 +23,10 @@ mod provider_usage;
 // Model-output normalization moved WHOLE into the engine crate (ADR 0024 inc 5e.3, pure serde
 // module); re-exported so `model_normalize::…` call sites are unchanged.
 use local_first_engine::model_normalize;
+// Brings `.record(...)` into scope for direct calls on a `GatewayJournal` (C2, browser-protocol
+// metrics); `run_turn`'s own generic `J: ExecutionJournal` parameter doesn't need this import, but
+// calling the method directly outside that generic context does.
+use local_first_engine::ExecutionJournal;
 mod model_registry;
 // Local scanner for Anthropic "Agent Skills" (SKILL.md folders).
 mod skills;
@@ -54,6 +58,7 @@ mod setup_computer;
 // step 3; pure string generation — not wired yet).
 mod seatbelt;
 mod semantic_decision;
+mod steering_control;
 mod task_registry;
 mod temporal;
 mod template_packs;
@@ -525,6 +530,8 @@ impl AppState {
 struct PaymentApprovalGrant {
     snapshot: PaymentApprovalSnapshot,
     cvv_one_shot: Option<String>,
+    thread_id: String,
+    consumed: bool,
     expires_at: std::time::Instant,
 }
 
@@ -1155,6 +1162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             local_first_desktop_gateway::MessageDeliveryState::Retrying,
         );
     }
+    steering_control::start(state.clone());
     // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
     // only after the lease-aware broker recovery above has completed its critical write to
     // the unified database; starting it earlier can race bump_process_generation and make a
@@ -8311,6 +8319,27 @@ pub(crate) fn resolve_semantic_decision(
     active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
     binding: Option<&RoutingBinding>,
 ) -> semantic_decision::ValidatedSemanticDecision {
+    resolve_semantic_decision_for_context(state, thread_id, prompt, active, binding, false)
+}
+
+pub(crate) fn resolve_steering_semantic_decision(
+    state: &AppState,
+    thread_id: Option<&str>,
+    prompt: &str,
+    active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
+    binding: Option<&RoutingBinding>,
+) -> semantic_decision::ValidatedSemanticDecision {
+    resolve_semantic_decision_for_context(state, thread_id, prompt, active, binding, true)
+}
+
+fn resolve_semantic_decision_for_context(
+    state: &AppState,
+    thread_id: Option<&str>,
+    prompt: &str,
+    active: Option<&local_first_task_runtime::ObjectiveContractRecord>,
+    binding: Option<&RoutingBinding>,
+    steering_control: bool,
+) -> semantic_decision::ValidatedSemanticDecision {
     let capabilities = semantic_capability_registry();
     let recent_thread_context = bounded_thread_context(state, thread_id);
     let input = semantic_decision::SemanticDecisionInput {
@@ -8357,12 +8386,14 @@ pub(crate) fn resolve_semantic_decision(
             "deliverable".to_string(),
             "execution_shape".to_string(),
             "memory_intent".to_string(),
+            "steering_disposition".to_string(),
             "requires_user_confirmation".to_string(),
             "confidence".to_string(),
             "rationale".to_string(),
         ],
         repair: true,
     };
+    let mut effective_resolved = resolved.clone();
     let model_value = match router.generate_json_with(&Requirements::default(), &request) {
         Ok(response) if response.valid => Ok(response.json),
         Ok(response) => {
@@ -8374,20 +8405,112 @@ pub(crate) fn resolve_semantic_decision(
             Err("invalid_model_output".to_string())
         }
         Err(error) => {
-            tracing::warn!(
-                target: "semantic::decision",
-                ?error,
-                "semantic decision model unavailable; using safe fallback"
-            );
-            Err("model_unavailable".to_string())
+            if let Some(fallback) = semantic_decision_auth_fallback(&error, resolved.as_ref()) {
+                tracing::warn!(
+                    target: "semantic::decision",
+                    ?error,
+                    from_model = resolved.as_ref().map(|value| value.model.as_str()),
+                    to_model = %fallback.model,
+                    "semantic decision model auth failed; retrying with auth fallback"
+                );
+                let fallback_router = build_router_for_resolved(&fallback);
+                effective_resolved = Some(fallback);
+                match fallback_router.generate_json_with(&Requirements::default(), &request) {
+                    Ok(response) if response.valid => Ok(response.json),
+                    Ok(response) => {
+                        tracing::warn!(
+                            target: "semantic::decision",
+                            errors = ?response.errors,
+                            "semantic fallback decision did not satisfy the structured contract"
+                        );
+                        Err("invalid_model_output".to_string())
+                    }
+                    Err(fallback_error) => {
+                        tracing::warn!(
+                            target: "semantic::decision",
+                            ?fallback_error,
+                            "semantic fallback decision model unavailable; steering will remain pending"
+                        );
+                        Err("model_unavailable".to_string())
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    target: "semantic::decision",
+                    ?error,
+                    "semantic decision model unavailable; steering will remain pending"
+                );
+                Err("model_unavailable".to_string())
+            }
         }
     };
-    semantic_decision::resolve_model_value(
-        model_value,
-        &capabilities,
-        active,
-        resolved.as_ref().map(|value| value.provider_id.as_str()),
-        resolved.as_ref().map(|value| value.model.as_str()),
+    let provider = effective_resolved.as_ref().map(|value| value.provider_id.as_str());
+    let model = effective_resolved.as_ref().map(|value| value.model.as_str());
+    if steering_control {
+        semantic_decision::resolve_steering_model_value(
+            model_value,
+            &capabilities,
+            active,
+            provider,
+            model,
+        )
+    } else {
+        semantic_decision::resolve_model_value(model_value, &capabilities, active, provider, model)
+    }
+}
+
+/// Error classes eligible for the semantic-decision auth/availability fallback:
+/// explicit auth/quota/server rejections (401/403/429/5xx) and transport-level
+/// failures (connection refused, timeout, an `Io` error reading the stream, or a
+/// stream that ended without a terminal `done`). A malformed response body
+/// (`Json`) or an explicit runtime-reported error code (`Runtime`) is deliberately
+/// excluded — those reflect a provider-specific bug rather than an availability
+/// signal, and retrying on a different model would mask it instead of surfacing it.
+fn semantic_decision_auth_fallback_applies(
+    error: &local_first_subagents::RuntimeClientError,
+) -> bool {
+    use local_first_subagents::RuntimeClientError;
+    match error {
+        RuntimeClientError::Status(401 | 403 | 429) => true,
+        RuntimeClientError::Status(status) => (500..=599).contains(status),
+        RuntimeClientError::Request(_)
+        | RuntimeClientError::Io(_)
+        | RuntimeClientError::StreamEndedWithoutDone => true,
+        RuntimeClientError::Json(_) | RuntimeClientError::Runtime { .. } => false,
+    }
+}
+
+// Injectable core (mirrors `auth_fallback_resolved_role_from_registry` /
+// `semantic_decision_auth_fallback_resolved_role_from_registry`): lets tests supply
+// a deterministic registry + key predicate instead of depending on
+// `load_provider_registry()` / `provider_api_key()` global state.
+fn semantic_decision_auth_fallback_from_registry(
+    error: &local_first_subagents::RuntimeClientError,
+    resolved: Option<&ResolvedRole>,
+    registry: &ProviderRegistry,
+    provider_has_key: impl FnMut(&str) -> bool,
+) -> Option<ResolvedRole> {
+    if !semantic_decision_auth_fallback_applies(error) {
+        return None;
+    }
+    // No distinct fallback model configured: stay pending on genuine unavailability
+    // rather than fabricate one (per spec).
+    semantic_decision_auth_fallback_resolved_role_from_registry(
+        registry,
+        resolved?.model.as_str(),
+        provider_has_key,
+    )
+}
+
+fn semantic_decision_auth_fallback(
+    error: &local_first_subagents::RuntimeClientError,
+    resolved: Option<&ResolvedRole>,
+) -> Option<ResolvedRole> {
+    semantic_decision_auth_fallback_from_registry(
+        error,
+        resolved,
+        &load_provider_registry(),
+        |provider_id| provider_api_key(provider_id).is_some(),
     )
 }
 
@@ -16772,10 +16895,22 @@ pub(crate) async fn collect_openai_stream(
     let mut markers = local_first_desktop_gateway::markers::StreamMarkerFilter::default();
     let mut done = false;
     let mut got_any = false;
+    let mut saw_finish_reason = false;
     while !done {
         // First chunk gets a generous budget (cold model load / connect latency);
         // subsequent chunks use the tighter inter-token idle.
-        let wait = if got_any { idle } else { first_token };
+        // Some OpenAI-compatible providers emit a non-null `finish_reason` but
+        // omit `[DONE]` and keep the HTTP connection alive. Once the semantic
+        // terminal signal arrives, allow only a short grace window for a
+        // trailing usage event instead of holding the whole turn until the
+        // multi-minute idle timeout.
+        let wait = if saw_finish_reason {
+            std::time::Duration::from_millis(750)
+        } else if got_any {
+            idle
+        } else {
+            first_token
+        };
         match tokio::time::timeout(wait, stream.next()).await {
             Err(_) => {
                 // Idle stall: if tokens already arrived, SALVAGE the partial response
@@ -16808,6 +16943,15 @@ pub(crate) async fn collect_openai_stream(
                         continue;
                     }
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        if json
+                            .get("choices")
+                            .and_then(|choices| choices.get(0))
+                            .and_then(|choice| choice.get("finish_reason"))
+                            .and_then(|reason| reason.as_str())
+                            .is_some_and(|reason| !reason.is_empty())
+                        {
+                            saw_finish_reason = true;
+                        }
                         if let Some(fragment) = json
                             .get("choices")
                             .and_then(|c| c.get(0))
@@ -17514,14 +17658,25 @@ fn chat_payload_max_tokens(is_final_round: bool, debug_override: Option<&str>) -
         .unwrap_or(DEFAULT_CHAT_MAX_TOKENS)
 }
 
-pub(crate) fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
-    let registry = load_provider_registry();
+fn auth_fallback_resolved_role_from_registry(
+    registry: &ProviderRegistry,
+    failing_model: &str,
+    mut provider_has_key: impl FnMut(&str) -> bool,
+) -> Option<ResolvedRole> {
     // 1) Any provider with a key + a usable model different from the failing one.
     for provider in &registry.providers {
-        if let Some(key) = provider_api_key(&provider.id) {
+        if provider_has_key(&provider.id) {
             if let Some(model) = provider.effective_model() {
                 if model != failing_model {
-                    return Some((provider.base_url.clone(), model, Some(key)));
+                    return Some(ResolvedRole {
+                        role: "auth_fallback".to_string(),
+                        provider_id: provider.id.clone(),
+                        model: model.clone(),
+                        kind: provider.kind,
+                        base_url: provider.base_url.clone(),
+                        auto: true,
+                        tier: registry.tier_for(&provider.id, &model),
+                    });
                 }
             }
         }
@@ -17539,10 +17694,92 @@ pub(crate) fn auth_fallback_config(failing_model: &str) -> Option<(String, Strin
             .map(|m| m.id.clone())
             .find(|id| !id.contains(":cloud") && id != failing_model)
         {
-            return Some((provider.base_url.clone(), model, None));
+            return Some(ResolvedRole {
+                role: "auth_fallback".to_string(),
+                provider_id: provider.id.clone(),
+                model: model.clone(),
+                kind: provider.kind,
+                base_url: provider.base_url.clone(),
+                auto: true,
+                tier: registry.tier_for(&provider.id, &model),
+            });
         }
     }
     None
+}
+
+fn auth_fallback_resolved_role(failing_model: &str) -> Option<ResolvedRole> {
+    let registry = load_provider_registry();
+    auth_fallback_resolved_role_from_registry(&registry, failing_model, |provider_id| {
+        provider_api_key(provider_id).is_some()
+    })
+}
+
+pub(crate) fn auth_fallback_config(failing_model: &str) -> Option<(String, String, Option<String>)> {
+    let fallback = auth_fallback_resolved_role(failing_model)?;
+    let api_key = provider_api_key(&fallback.provider_id).or_else(env_inference_api_key);
+    Some((fallback.base_url, fallback.model, api_key))
+}
+
+const QUALIFIED_SEMANTIC_DECISION_FALLBACK_MODELS: &[&str] = &["qwen3.5:4b", "qwen3.5:2b"];
+
+fn semantic_decision_auth_fallback_resolved_role_from_registry(
+    registry: &ProviderRegistry,
+    failing_model: &str,
+    provider_has_key: impl FnMut(&str) -> bool,
+) -> Option<ResolvedRole> {
+    auth_fallback_resolved_role_from_registry(registry, failing_model, provider_has_key).and_then(
+        |fallback| {
+            if fallback.base_url.contains("127.0.0.1")
+                || fallback.base_url.contains("localhost")
+            {
+                local_semantic_decision_fallback(registry, failing_model).or(Some(fallback))
+            } else {
+                Some(fallback)
+            }
+        },
+    )
+}
+
+fn local_semantic_decision_fallback(
+    registry: &ProviderRegistry,
+    failing_model: &str,
+) -> Option<ResolvedRole> {
+    for qualified in QUALIFIED_SEMANTIC_DECISION_FALLBACK_MODELS {
+        for provider in &registry.providers {
+            let local =
+                provider.base_url.contains("127.0.0.1") || provider.base_url.contains("localhost");
+            if !local {
+                continue;
+            }
+            if provider
+                .models
+                .iter()
+                .any(|model| model.id == *qualified && model.id != failing_model)
+            {
+                let model = (*qualified).to_string();
+                return Some(ResolvedRole {
+                    role: "semantic_auth_fallback".to_string(),
+                    provider_id: provider.id.clone(),
+                    model: model.clone(),
+                    kind: provider.kind,
+                    base_url: provider.base_url.clone(),
+                    auto: true,
+                    tier: registry.tier_for(&provider.id, &model),
+                });
+            }
+        }
+    }
+    None
+}
+
+fn semantic_decision_auth_fallback_resolved_role(failing_model: &str) -> Option<ResolvedRole> {
+    let registry = load_provider_registry();
+    semantic_decision_auth_fallback_resolved_role_from_registry(
+        &registry,
+        failing_model,
+        |provider_id| provider_api_key(provider_id).is_some(),
+    )
 }
 
 /// A provider can serve normal chat yet reject a tool-bearing request. Recover with
@@ -17794,6 +18031,13 @@ fn chat_browser_budget() -> local_first_engine::BrowserBudget {
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .map(|value| value.clamp(1_000, 600_000))
         .unwrap_or(300_000);
+    // Stall window: max wall-clock since the last real progress (resets on success). This is the
+    // primary control; `max_elapsed_ms` above is only the absolute backstop.
+    let max_stall_ms = env::var("HOMUN_CHAT_BROWSER_MAX_STALL_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .map(|value| value.clamp(1_000, 600_000))
+        .unwrap_or(120_000);
     let max_failed_navigations = env::var("HOMUN_CHAT_BROWSER_MAX_FAILED_NAVIGATIONS")
         .ok()
         .and_then(|raw| raw.trim().parse::<u32>().ok())
@@ -17806,9 +18050,31 @@ fn chat_browser_budget() -> local_first_engine::BrowserBudget {
         .unwrap_or(5);
     local_first_engine::BrowserBudget {
         max_elapsed_ms,
+        max_stall_ms,
         max_failed_navigations,
         max_no_progress,
     }
+}
+
+const BROWSE_SUBAGENT_MAX_ELAPSED_MS: u64 = 180_000;
+const BROWSE_SUBAGENT_MAX_NAVS: usize = 8;
+
+fn browse_subagent_budget() -> local_first_engine::BrowserBudget {
+    let mut budget = chat_browser_budget();
+    budget.max_elapsed_ms = env::var("HOMUN_CHAT_BROWSER_SUBAGENT_MAX_ELAPSED_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .map(|value| value.clamp(1_000, 600_000))
+        .unwrap_or(BROWSE_SUBAGENT_MAX_ELAPSED_MS);
+    budget
+}
+
+fn bounded_browse_subagent_nav_cap(configured_cap: usize) -> usize {
+    configured_cap.min(BROWSE_SUBAGENT_MAX_NAVS)
+}
+
+fn browse_subagent_nav_cap() -> usize {
+    bounded_browse_subagent_nav_cap(chat_browser_nav_cap())
 }
 
 /// How many connected-service tools to pull into the searchable catalog (NOT
@@ -17843,7 +18109,7 @@ fn browse_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browse",
-            "description": "Delegate a web-browsing GOAL to an isolated browser sub-agent and get back the result. Use it whenever you need real-time or web data (prices, standings, schedules, facts, availability): state ONE concrete information goal in `goal` (e.g. 'current BTC price on Kraken', 'Serie A standings after matchday 30'). The sub-agent navigates the real browser for you and returns `found` (was the info obtained?), `answer` (the concrete value), `sources` (URLs visited) and `confidence`. You do NOT drive the browser yourself and never see individual pages — issue ONE browse per need, then verify the answer and continue. If `found: false`, the info was unavailable: refine the goal and browse again (at most twice), else tell the user it's unavailable — do not invent it.",
+            "description": "Delegate a web-browsing GOAL to an isolated browser sub-agent and get back the result. Use it whenever you need real-time or web data (prices, standings, schedules, facts, availability): state ONE concrete information goal in `goal` (e.g. 'current BTC price on Kraken', 'Serie A standings after matchday 30'). One delegated browse call should be enough for a concrete goal: include semantic hints/result requirements when useful, then inspect the returned structured result. If the result is partial, blocked, unavailable, or failed, report that grounded state instead of blindly retrying the same browse.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -17864,12 +18130,59 @@ fn browse_tool_schema() -> serde_json::Value {
                                 "description": "A site/section to prefer (e.g. 'wikipedia', 'official schedule')."
                             }
                         }
+                    },
+                    "result_contract": {
+                        "type": "object",
+                        "description": "Structured result requirements derived semantically from the user's request. The model chooses these fields; the gateway validates shape and bounds only.",
+                        "properties": {
+                            "kind": { "type": "string", "enum": ["list", "fact"] },
+                            "minimum_items": { "type": "integer", "minimum": 1, "maximum": 10 },
+                            "fields": {
+                                "type": "array",
+                                "maxItems": 12,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": { "type": "string", "maxLength": 80 },
+                                        "required": { "type": "boolean" }
+                                    },
+                                    "required": ["name", "required"]
+                                }
+                            },
+                            "boundary": { "type": "string", "maxLength": 400 }
+                        }
                     }
                 },
                 "required": ["goal"]
             }
         }
     })
+}
+
+fn browser_done_tool_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "browser_done",
+            "description": "Terminate the browser sub-turn with grounded structured evidence. Use this as soon as the result contract is satisfied, partial, blocked, unavailable, or timed out. Do not write a normal prose answer instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": { "type": "string", "enum": ["completed","partial","blocked","unavailable","timeout"] },
+                    "answer": { "type": "string" },
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "fields_missing": { "type": "array", "items": { "type": "string" } },
+                    "sources": { "type": "array", "items": { "type": "string" } },
+                    "evidence": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["status", "answer"]
+            }
+        }
+    })
+}
+
+fn initial_manager_tool_schemas_for_test(_read_only: bool, _contact_only: bool) -> Vec<serde_json::Value> {
+    vec![browse_tool_schema()]
 }
 
 fn use_computer_tool_schema() -> serde_json::Value {
@@ -17965,7 +18278,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browser_act",
-            "description": "Perform ONE single micro-action on the current page (a click, writing in a field, selecting, pressing a key, etc.) and return the UPDATED snapshot. One action at a time: after each action re-read the snapshot before the next. For fields with autocomplete use kind='type' (the suggestion selection is automatic). For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button (it keeps the pointer pressed for a few seconds). Do not use for purchases, logins or payments unless the user approved a Payment Approval Card and you have its exact payment_approval_id.",
+            "description": "Perform one action or a flat bundle of at most four safe actions selected from the current observation generation, then return the updated observation. For fields with autocomplete use kind='type', then inspect the updated snapshot and select the intended suggestion when needed. Login and booking actions are allowed when they are part of the user's request. The final action that transfers money requires an approved Payment Approval Card and its exact payment_approval_id and cannot run inside a bundle. For a 'press and hold' / 'tieni premuto' human-verification challenge use kind='hold' on the button. Every committing action — a click, a submit (kind='type' with submit=true), pressing Enter/Return, or a 'hold' — must declare action_class, judged by what the action actually does on the page, not by button wording: 'ordinary' for everyday navigation/interaction with no lasting effect (following a link, opening a menu, dismissing a dialog); 'account' for anything that changes signed-in identity or account state (logging in/out, registering, changing account settings); 'booking' for reserving/scheduling/ordering something that is not yet a completed purchase (adding to cart, selecting a flight/room/slot, confirming a reservation); 'payment_commit' for the action that actually commits money (placing an order, confirming checkout, submitting a payment form) — this class additionally requires a matching, unapproved-otherwise payment_approval_id and can never run inside a bundle. On a page that is itself a payment form, prefer clicking the specific confirm control over pressing Enter to submit it, so approval is requested exactly when a payment is actually being committed — judge this by what the page and control actually are, never by button wording.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -17978,17 +18291,54 @@ fn browser_act_tool_schema() -> serde_json::Value {
                         "type": "string",
                         "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])."
                     },
-                    "text": { "type": "string", "description": "Text to type (kind='type') or value (kind='fill')." },
+                    "text": { "type": "string", "description": "Text to type (kind='type'), value (kind='fill'), or the key name to press (kind='press_key'), e.g. 'Enter', 'ArrowDown'." },
                     "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
                     "values": { "type": "array", "items": { "type": "string" }, "description": "Multiple values for a multi-select." },
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
-                    "key": { "type": "string", "description": "Key to press (kind='press'/'press_key'), e.g. 'Enter', 'ArrowDown'." },
+                    "key": { "type": "string", "description": "Key to press for kind='press', e.g. 'Enter', 'ArrowDown'. For kind='press_key' put the key name in 'text' instead — press_key reads 'text', not 'key'." },
                     "durationMs": { "type": "number", "description": "How long to keep the pointer pressed for kind='hold' (ms). Default ~3000; raise if the challenge needs a longer hold." },
+                    "generation": { "type": "integer", "description": "Observation generation used to choose refs." },
+                    "observationMode": { "type": "string", "enum": ["interact","delta","extract"], "description": "Observation mode to return after the action. Use delta after action bundles and extract when collecting final results." },
+                    "action_class": {
+                        "type": "string",
+                        "enum": ["ordinary","account","booking","payment_commit"],
+                        "description": "Required on every committing action (click, submit, Enter, hold). Judge by real-world effect: 'ordinary' = everyday navigation with no lasting effect; 'account' = changes signed-in identity or account state; 'booking' = reserves/selects/orders something not yet a completed purchase; 'payment_commit' = actually commits money and requires an approved payment_approval_id."
+                    },
+                    "actions": {
+                        "type": "array",
+                        "maxItems": 4,
+                        "description": "Flat bundle of at most four safe actions selected from the current observation. No nested batch. Payment actions are not allowed here.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["click","type","fill","select","select_option","press","press_key","hover","hold","scroll","scrollIntoView","wait"],
+                                    "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
+                                },
+                                "ref": { "type": "string", "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])." },
+                                "text": { "type": "string", "description": "Text to type (kind='type'), value (kind='fill'), or the key name to press (kind='press_key'), e.g. 'Enter', 'ArrowDown'." },
+                                "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
+                                "key": { "type": "string", "description": "Key to press for kind='press', e.g. 'Enter', 'ArrowDown'. For kind='press_key' put the key name in 'text' instead — press_key reads 'text', not 'key'." },
+                                "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
+                                "action_class": {
+                                    "type": "string",
+                                    "enum": ["ordinary","account","booking","payment_commit"],
+                                    "description": "Required on this item when it is a committing action (click, submit, Enter, hold). Same meaning as the top-level action_class."
+                                }
+                            },
+                            "required": ["kind"]
+                        }
+                    },
                     "payment_approval_id": { "type": "string", "description": "Exact id returned by an approved Payment Approval Card. Use only for approved checkout actions and the final payment click; never invent it." },
                     "vault_secret": { "type": "string", "enum": ["cvv_one_shot"], "description": "Use with payment_approval_id to fill the CVV/CV2 field without exposing the CVV to the model. Do not include a text value when using this." },
                     "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
-                "required": ["kind"]
+                "anyOf": [
+                    { "required": ["kind"] },
+                    { "required": ["actions"] }
+                ],
+                "required": []
             }
         }
     })
@@ -18032,15 +18382,260 @@ fn browser_act_error_hint(error: &str) -> &'static str {
     }
 }
 
+// Shared with the single-action `browser_act` enforcement site in
+// `execute_browser_tool` (see
+// `single_action_rejects_unsupported_execution_before_payment_claim`) so both
+// reject sites emit byte-identical text — one message to keep in sync, not two
+// literals that can silently drift apart.
+const BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR: &str =
+    "BROWSER_UNSUPPORTED_COMMITTING_ACTION: this action is not executable (an unrecognized kind, coordinate clicks, or a selector field bypassing the ref) — use a schema kind with a specific [ref=…] control instead";
+
+/// The `kind` values the `browser_act` schema exposes (mirrors `browser_act_tool_schema`'s
+/// two `"enum"` literals — kept in sync by hand, same convention as the shared error
+/// text above, since the schema itself must stay a plain JSON literal for the model).
+const BROWSER_ACT_SCHEMA_KINDS: &[&str] = &[
+    "click", "type", "fill", "select", "select_option", "press", "press_key", "hover", "hold",
+    "scroll", "scrollIntoView", "wait",
+];
+
+/// True when `action` carries only fields the `browser_act` schema exposes for
+/// execution: a `kind` in `BROWSER_ACT_SCHEMA_KINDS`, and no `selector` field. A
+/// `kind` outside that set cannot have been legitimately produced from the schema —
+/// it is either a stale/hallucinated call (`clickCoords`, `batch`) or a sidecar-only
+/// kind the schema deliberately never exposes (`evaluate`). `selector` is honored by
+/// the sidecar as an alternative to `ref` (`requireRefOrSelector` in
+/// `runtimes/browser-automation/src/browser/actions.ts`) but the schema never exposes
+/// it — letting it through would let a call target an element by raw CSS selector,
+/// bypassing the ref-based payment floor entirely (a floored ref never has to appear
+/// in the request at all). Shared by the single-action path and each bundle item in
+/// `normalize_browser_action_bundle` (design 1.3).
+fn browser_action_execution_fields_are_schema_legal(action: &serde_json::Value) -> bool {
+    let kind_ok = action
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|kind| BROWSER_ACT_SCHEMA_KINDS.contains(&kind));
+    kind_ok && action.get("selector").is_none()
+}
+
+/// D2 machine classification of a browser action's progress — control metadata, NEVER prose or
+/// button-label text. The guarded loop's stall/no-progress budget depends on this distinguishing a
+/// goal-advancing action from a no-op re-type or a failure.
+///
+/// The ONLY `type`/`fill` shape that is no-progress is the "Napoli ×3" churn: a typeahead where a
+/// suggestion LIST appeared (`suggestions_present`) but nothing was selected (`!committed_option`).
+/// A plain field with no list, a committed suggestion, or an explicit submit (Enter/`submit:true`,
+/// which skips autocomplete and thus never sets `committed_option`) all filled/advanced the field
+/// → progress. Classifying every uncommitted `type`/`fill` as no-progress would stall an ordinary
+/// multi-field form mid-way, which is the opposite of this build's goal.
+///
+/// `navigate` is NOT handled here — the caller only invokes this for `browser_act` kinds; a
+/// `browser_navigate` is classified by the `Result` variant in `execute_browser_tool`'s fallback.
+fn browser_action_outcome_hint(
+    kind: &str,
+    ok: bool,
+    no_change: bool,
+    committed_option: bool,
+    suggestions_present: bool,
+    errored: bool,
+) -> local_first_engine::contract::ToolOutcomeHint {
+    use local_first_engine::contract::ToolOutcomeHint::{NoProgress, Success};
+    if errored || !ok {
+        return NoProgress;
+    }
+    match kind {
+        // A typeahead list appeared but no suggestion was committed → churn. Everything else a
+        // successful type/fill can be (plain field filled, suggestion committed, explicit submit)
+        // is progress.
+        "type" | "fill" => {
+            if suggestions_present && !committed_option {
+                NoProgress
+            } else {
+                Success
+            }
+        }
+        // Any other action (click, press, select, a bundle, …): progress iff it changed the page.
+        _ => {
+            if no_change {
+                NoProgress
+            } else {
+                Success
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod browser_outcome_hint_tests {
+    use super::browser_action_outcome_hint;
+    use local_first_engine::contract::ToolOutcomeHint::{NoProgress, Success};
+
+    // Signature: browser_action_outcome_hint(kind, ok, no_change, committed_option, suggestions_present, errored)
+
+    #[test]
+    fn typeahead_list_appeared_but_nothing_selected_is_no_progress() {
+        // The "Napoli ×3" case: a suggestion list rendered but no station was committed.
+        assert_eq!(
+            browser_action_outcome_hint("type", true, false, false, true, false),
+            NoProgress
+        );
+        assert_eq!(
+            browser_action_outcome_hint("fill", true, false, false, true, false),
+            NoProgress
+        );
+    }
+
+    #[test]
+    fn type_with_committed_suggestion_is_progress() {
+        assert_eq!(
+            browser_action_outcome_hint("type", true, false, true, true, false),
+            Success
+        );
+    }
+
+    #[test]
+    fn plain_field_type_or_fill_with_no_list_is_progress() {
+        // C1 regression: an ordinary form field (no typeahead) fills successfully — progress, so a
+        // multi-field form is not stalled mid-way.
+        assert_eq!(
+            browser_action_outcome_hint("type", true, false, false, false, false),
+            Success
+        );
+        assert_eq!(
+            browser_action_outcome_hint("fill", true, false, false, false, false),
+            Success
+        );
+    }
+
+    #[test]
+    fn explicit_submit_type_is_progress() {
+        // `submit:true` / Enter skips autocomplete → no committed_option and no suggestions list,
+        // but it advanced the page. Must be progress, not a stall.
+        assert_eq!(
+            browser_action_outcome_hint("type", true, false, false, false, false),
+            Success
+        );
+    }
+
+    #[test]
+    fn any_error_or_not_ok_is_no_progress() {
+        assert_eq!(
+            browser_action_outcome_hint("click", true, false, false, false, true),
+            NoProgress
+        );
+        assert_eq!(
+            browser_action_outcome_hint("type", false, false, false, false, false),
+            NoProgress
+        );
+    }
+
+    #[test]
+    fn other_action_is_progress_only_when_the_page_changed() {
+        assert_eq!(
+            browser_action_outcome_hint("click", true, false, false, false, false),
+            Success
+        );
+        assert_eq!(
+            browser_action_outcome_hint("click", true, true, false, false, false),
+            NoProgress
+        );
+    }
+}
+
+fn normalize_browser_action_bundle(
+    action: &mut serde_json::Value,
+    current_target: &str,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    page_focus_payment_context: bool,
+) -> Option<String> {
+    let actions = action.get("actions").and_then(serde_json::Value::as_array)?;
+    if actions.len() > 4 {
+        return Some(
+            "Browser action bundle rejected: use at most four actions from the current observation."
+                .to_string(),
+        );
+    }
+    // Per-item focus context: the page's own focus, OR'd with any EARLIER item in this
+    // same bundle that targeted a floored ref (a bundle that types into a cc field then
+    // presses Enter → focus is now on that field, even though the page started elsewhere).
+    // Only grows across the loop — never reset — matching the floor's raise-only rule.
+    let mut focus_context = page_focus_payment_context;
+    for nested in actions {
+        // Nested-bundle check FIRST, with its own specific message: a nested
+        // "batch"/"actions" item would ALSO fail the general schema-kind check below
+        // (a hallucinated "batch" isn't in `BROWSER_ACT_SCHEMA_KINDS` either), but the
+        // more specific rejection is clearer for the model to act on.
+        if nested.get("kind").and_then(serde_json::Value::as_str) == Some("batch")
+            || nested.get("actions").is_some()
+        {
+            return Some("Browser action bundle rejected: nested bundles are not allowed.".to_string());
+        }
+        // Generalizes the former clickCoords-only reject (design 1.3): any kind
+        // outside the schema enum, or any item carrying a non-schema `selector`
+        // field that would bypass the ref-based floor, is rejected here — BEFORE the
+        // payment-commit/gate checks below ever run on this item.
+        if !browser_action_execution_fields_are_schema_legal(nested) {
+            return Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR.to_string());
+        }
+        if browser_safety::action_is_payment_commit(nested, payment_floor_refs, focus_context) {
+            return Some(
+                "Payment actions cannot run inside a browser action bundle. Ask for the Payment Approval Card and execute the final payment as a standalone approved action."
+                    .to_string(),
+            );
+        }
+        if let Some(reason) =
+            browser_safety::evaluate_browser_action(nested, payment_floor_refs, focus_context, None)
+        {
+            return Some(format!("Browser action bundle rejected: {reason}"));
+        }
+        let targets_floored_ref = nested
+            .get("ref")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|r| payment_floor_refs.contains(r));
+        if targets_floored_ref {
+            focus_context = true;
+        }
+    }
+    if let Some(obj) = action.as_object_mut() {
+        obj.insert("kind".to_string(), serde_json::Value::String("batch".to_string()));
+        obj.insert("chatBundle".to_string(), serde_json::Value::Bool(true));
+    }
+    if let Some(actions) = action.get_mut("actions").and_then(serde_json::Value::as_array_mut) {
+        for nested in actions {
+            if let Some(obj) = nested.as_object_mut() {
+                obj.entry("target_id".to_string())
+                    .or_insert_with(|| serde_json::Value::String(current_target.to_string()));
+                obj.entry("targetId".to_string())
+                    .or_insert_with(|| serde_json::Value::String(current_target.to_string()));
+            }
+        }
+    }
+    None
+}
+
+/// True when a `browser_act` error means the targeted `[ref=eN]` no longer resolves because the
+/// page changed under us (MINOR 8), so the caller should auto-recover with a fresh snapshot instead
+/// of just erroring. Broadened beyond `stale`/`detached` to the common Playwright phrasings the
+/// underlying CDP/Playwright driver actually throws (`"element is not attached to the DOM"`, `"no
+/// node found for selector"`) — case-insensitive, since the wording/casing varies across Playwright
+/// versions.
+fn is_stale_ref_error(error: &str) -> bool {
+    let e = error.to_lowercase();
+    e.contains("stale") || e.contains("detached") || e.contains("not attached") || e.contains("no node found")
+}
+
 fn stale_ref_recovery_message(old_ref: Option<&str>, snapshot: &str) -> String {
     let old = old_ref
         .map(str::trim)
         .filter(|r| !r.is_empty())
         .unwrap_or("the old ref");
+    // Built off the shared `STALE_REF_RECOVERY_MARKER` constant (not a second copy of the same
+    // literal) so the engine's `is_stale_ref_recovery_result` — which counts this recovery toward
+    // `browser_no_progress` instead of resetting it (MINOR 8) — recognizes it by construction.
     format!(
-        "⚠ The reference had expired (the page changed). I took a fresh snapshot. \
+        "{} I took a fresh snapshot. \
 Do NOT retry {old}; choose a NEW [ref=...] from this snapshot, or use browser_snapshot if the \
-data is already visible:\n{snapshot}"
+data is already visible:\n{snapshot}",
+        local_first_engine::browser::STALE_REF_RECOVERY_MARKER
     )
 }
 
@@ -21699,6 +22294,17 @@ fn attachment_text_is_ready(text: &str) -> bool {
 struct BrowserToolCtx<'a> {
     browser_used: &'a mut bool,
     last_snapshot: &'a mut String,
+    // Machine-derived payment floor refs (never label text), keyed by `target_id`
+    // (Build1 Fix 3 — mirrors `payment_context_by_target` below; a single global
+    // set let observing tab A clobber tab B's floor). Raises (never lowers) the
+    // effective action class; see `browser_safety::effective_action_class`.
+    payment_floor_refs: &'a mut std::collections::HashMap<String, std::collections::HashSet<String>>,
+    // Per-target_id payment context (focus flag + robust last-acted-floored flag;
+    // fixes IMPORTANT D — a single global flag let a snapshot of tab A clear tab B's
+    // payment context). Floors a ref-less committing action (Enter/Return) the same
+    // way `payment_floor_refs` floors a ref-bearing one — see
+    // `browser_safety::is_refless_committing` and `BrowserPaymentContext`.
+    payment_context_by_target: &'a mut std::collections::HashMap<String, BrowserPaymentContext>,
     pending_browser_image: &'a mut Option<String>,
     browser_tool_call_ids: &'a mut std::collections::BTreeSet<String>,
     current_target: &'a mut String,
@@ -21713,6 +22319,16 @@ struct BrowserToolCtx<'a> {
     prompt: &'a str,
     read_only: bool,
     channel_owner: bool,
+    // Durable sink for redacted browser-protocol boundary metrics (C2). Borrowed from the owning
+    // `GatewayBrowserExecutor` so every boundary this ctx crosses persists the same handle — a real
+    // `GatewayJournal::Durable` when the enclosing run is registered, else the silent `Disabled` arm.
+    journal: &'a agent_journal::GatewayJournal,
+    // Out-parameter (D1/D2): the machine progress classification of the action just executed,
+    // written where the sidecar's signals live (committed suggestion, page change, error) and
+    // read back by `GatewayBrowserExecutor::execute_browser`. `None` on the neutral read-only
+    // tools (snapshot/tabs/dialog/screenshot) → the caller defaults them to `Success`. Never
+    // derived from the result prose — that is exactly the misclassification this replaces.
+    outcome_hint: &'a mut Option<local_first_engine::contract::ToolOutcomeHint>,
 }
 
 /// The NON-browser tool context (ADR 0026 / inc 5): the read-set of `execute_chat_tool` only —
@@ -22326,14 +22942,14 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             )
                         };
                         let (client_back, nav_res) =
-                            chat_browser_call(client, open_method, open_params)
+                            chat_browser_call_bounded(client, open_method, open_params)
                                 .await;
                         let nav_err = nav_res.err();
                         // Navigate/Open return no snapshot → snapshot now.
                         let mut client_now = client_back;
                         let snap_result = if nav_err.is_none() {
                             if let Some(c) = client_now.take() {
-                                let (c2, snap) = chat_browser_call(
+                                let (c2, snap) = chat_browser_call_bounded(
                                     c,
                                     BrowserMethod::Snapshot,
                                     browser_chat_snapshot_params(
@@ -22412,9 +23028,44 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 let snap = browser_snapshot_text(&value);
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
+                                    browser_set_target_floor(
+                                        ctx.payment_floor_refs,
+                                        ctx.current_target.as_str(),
+                                        browser_floor_refs(&value),
+                                    );
+                                    // A navigate is an explicit fresh observation of THIS target's
+                                    // page: update the best-effort focus flag AND clear the robust
+                                    // last-acted-floored flag (the page just changed under us).
+                                    browser_set_target_focus(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                        browser_focus_payment_context(&value),
+                                    );
+                                    browser_clear_target_acted_floored(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                    );
                                 }
                                 push_browser_step(
                                     format!("navigate {url}"),
+                                    "done",
+                                );
+                                let metrics = browser_observation_metrics(
+                                    &value,
+                                    vec!["navigate".to_string()],
+                                    "completed",
+                                );
+                                ctx.journal.record(browser_protocol_journal_event(
+                                    call_id,
+                                    "navigation_observation",
+                                    &metrics,
+                                ));
+                                push_browser_step(
+                                    browser_protocol_event_summary(
+                                        call_id,
+                                        "navigation_observation",
+                                        metrics,
+                                    ),
                                     "done",
                                 );
                                 let page_url = value
@@ -22452,7 +23103,7 @@ or tell the user to start the contained computer (Settings → Local computer)."
                     )
                     .await;
                     let guard = browse_web_lock().lock().await;
-                    let (client_back, snap) = chat_browser_call(
+                    let (client_back, snap) = chat_browser_call_bounded(
                         client,
                         BrowserMethod::Snapshot,
                         browser_chat_snapshot_params(ctx.current_target.as_str()),
@@ -22465,8 +23116,39 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             let snap = browser_snapshot_text(&value);
                             if !snap.is_empty() {
                                 *ctx.last_snapshot = snap.clone();
+                                browser_set_target_floor(
+                                    ctx.payment_floor_refs,
+                                    ctx.current_target.as_str(),
+                                    browser_floor_refs(&value),
+                                );
+                                // Explicit re-observation of THIS target: refresh the focus flag
+                                // and clear the robust flag (a model-requested snapshot is the
+                                // canonical "re-orient on this page" moment).
+                                browser_set_target_focus(
+                                    ctx.payment_context_by_target,
+                                    ctx.current_target.as_str(),
+                                    browser_focus_payment_context(&value),
+                                );
+                                browser_clear_target_acted_floored(
+                                    ctx.payment_context_by_target,
+                                    ctx.current_target.as_str(),
+                                );
                             }
                             push_browser_step("snapshot".to_string(), "done");
+                            let metrics = browser_observation_metrics(
+                                &value,
+                                vec!["snapshot".to_string()],
+                                "completed",
+                            );
+                            ctx.journal.record(browser_protocol_journal_event(
+                                call_id,
+                                "observation",
+                                &metrics,
+                            ));
+                            push_browser_step(
+                                browser_protocol_event_summary(call_id, "observation", metrics),
+                                "done",
+                            );
                             Ok(format!("Page snapshot:\n{snap}"))
                         }
                         Err(error) => {
@@ -22515,8 +23197,57 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             serde_json::Value::String(ctx.current_target.clone()),
                         );
                     }
+                    // Single-action payment context for the CURRENT target: the best-effort
+                    // focus flag OR'd with the robust last-acted-floored flag (IMPORTANT C —
+                    // a cross-origin PSP OOPIF fails the focus check whenever the app isn't
+                    // OS-frontmost, but `last_acted_floored` is frame-aware for free via the
+                    // per-ref floor). No "prior nested item" concept outside a bundle.
+                    let focus_ctx = browser_payment_context_for(
+                        ctx.payment_context_by_target,
+                        ctx.current_target.as_str(),
+                    );
+                    // Build1 Fix 3: resolve THIS target's floor set once, up front — every
+                    // read below in this arm is against the PRE-act observation of the SAME
+                    // target the action is about to run on, so a single owned snapshot is
+                    // correct (and sidesteps holding an immutable borrow of the map across
+                    // the later mutable `browser_set_target_floor` post-act refresh).
+                    let current_floor_refs =
+                        browser_floor_refs_for_target(ctx.payment_floor_refs, ctx.current_target.as_str());
+                    if let Some(error) = normalize_browser_action_bundle(
+                        &mut action,
+                        ctx.current_target.as_str(),
+                        &current_floor_refs,
+                        focus_ctx,
+                    ) {
+                        *browser_session = Some(client);
+                        push_browser_step("browser action bundle blocked".to_string(), "error");
+                        *ctx.outcome_hint =
+                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                        Err(error)
+                    } else {
+                    // A non-schema action (clickCoords, any other unrecognized kind, or a
+                    // selector-bearing action) must be rejected before ANY payment-approval
+                    // side effect: none of it is ref-based (the ref floor can't cover a
+                    // selector or an unrecognized kind) and none of it is Enter/Return (the
+                    // page floor above doesn't apply either), so no machine signal can ever
+                    // classify it — fail closed regardless of declared action_class. Checked
+                    // here, FIRST, before `apply_payment_approval_secret_for_action` and
+                    // before `should_claim_payment_approval`/`claim_payment_approval_for_action`
+                    // below, because a hallucinated non-schema action can still carry a
+                    // declared action_class:"payment_commit" plus a valid
+                    // payment_approval_id — which resolves to a genuine PaymentCommit
+                    // on the declared class alone — so checking this only as part of
+                    // the gate (after claiming) would let it burn a one-shot
+                    // Payment Approval Card grant for an action that gets rejected
+                    // anyway. Defense-in-depth: verified no production path emits these
+                    // and the schema doesn't expose them, but a model could still
+                    // hallucinate one.
+                    let blocked_before_claim =
+                        single_action_rejects_unsupported_execution_before_payment_claim(&action);
                     let mut preflight_error = None;
-                    let vault_secret_used =
+                    let vault_secret_used = if blocked_before_claim.is_some() {
+                        false
+                    } else {
                         match apply_payment_approval_secret_for_action(
                             ctx.state,
                             &mut action,
@@ -22532,40 +23263,70 @@ or tell the user to start the contained computer (Settings → Local computer)."
                                 ));
                                 false
                             }
-                        };
-                    // SAFETY GATE: high-risk (buy/login/booking, or
-                    // evaluate) is refused for EVERYONE. In read-only
-                    // (channel) turns any committing action is also
-                    // refused — EXCEPT when the sender is the OWNER
-                    // (is_self card): that block protects the user from
-                    // other people, not from their own requests (e.g.
-                    // clicking "Cerca" on a train search they asked for).
-                    let approved_payment_id =
-                        approved_payment_id_for_action(ctx.state, &action);
-                    let blocked = browser_safety::high_risk_reason_with_payment_approval(
-                        &action,
-                        ctx.last_snapshot,
-                        approved_payment_id.as_deref(),
-                    )
-                    .or_else(|| {
-                        if ctx.read_only
-                            && !ctx.channel_owner
-                            && browser_safety::is_committing_action(&action)
-                        {
-                            Some(
-                                "action that confirms/submits is not allowed from the channel"
-                                    .to_string(),
-                            )
-                        } else {
-                            None
                         }
+                    };
+                    // SAFETY GATE: arbitrary page script remains forbidden and
+                    // the final action that transfers money requires a matching
+                    // Payment Approval Card. Search, login and booking actions
+                    // are ordinary user-directed browser interactions; objective
+                    // read-only mode must not be reused as an origin-trust gate.
+                    // The decision is on the EFFECTIVE action class (declared ⊔
+                    // machine floor), never on control label text.
+                    //
+                    // Claiming (consuming) the one-shot grant is gated on
+                    // `should_claim_payment_approval`, which is intentionally
+                    // NARROWER than `action_is_payment_commit`: the latter also
+                    // treats a class error (missing/conflicting action_class) as
+                    // "payment" so the gate below re-rejects it fail-closed —
+                    // right for the gate, wrong for claiming. Claiming on a class
+                    // error would burn the grant on an under-declared action and
+                    // then still reject it for the class error, forcing full
+                    // re-approval on the corrected retry even though nothing
+                    // unauthorized executed. Claim only when the effective class
+                    // GENUINELY resolves to payment; on a class error, leave the
+                    // grant unconsumed so the re-declared retry can use it.
+                    let approved_payment_id = if blocked_before_claim.is_some() {
+                        None
+                    } else if should_claim_payment_approval(
+                        &action,
+                        &current_floor_refs,
+                        focus_ctx,
+                    ) {
+                        match claim_payment_approval_for_action(
+                            ctx.state,
+                            &action,
+                            &current_floor_refs,
+                            focus_ctx,
+                            ctx.thread_id,
+                        ) {
+                            Ok(id) => Some(id),
+                            Err(error) if action.get("payment_approval_id").is_some() => {
+                                preflight_error = Some(error);
+                                None
+                            }
+                            Err(_) => None,
+                        }
+                    } else {
+                        None
+                    };
+                    let blocked = blocked_before_claim.map(str::to_string).or_else(|| {
+                        browser_safety::evaluate_browser_action(
+                            &action,
+                            &current_floor_refs,
+                            focus_ctx,
+                            approved_payment_id.as_deref(),
+                        )
                     });
                     if let Some(error) = preflight_error {
                         *browser_session = Some(client);
+                        *ctx.outcome_hint =
+                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                         Err(error)
                     } else if let Some(reason) = blocked {
                         eprintln!("browser-gate: BLOCKED ({reason})");
                         *browser_session = Some(client);
+                        *ctx.outcome_hint =
+                            Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                         push_browser_step(
                             format!(
                                 "action blocked: {}",
@@ -22595,9 +23356,16 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                             },
                         )
                         .await;
+                        let action_kinds = browser_action_kinds(&action);
+                        // Captured BEFORE `action` is moved into the sidecar call below, against
+                        // the PRE-act `payment_floor_refs` — the robust IMPORTANT-C signal (design
+                        // 1.2): acting on a ref the floor already marked is proof positive of a
+                        // payment interaction regardless of OS window focus.
+                        let targeted_floored_ref =
+                            browser_action_targeted_a_floored_ref(&action, &current_floor_refs);
                         let guard = browse_web_lock().lock().await;
                         let (client_back, act_res) =
-                            chat_browser_call(client, BrowserMethod::Act, action)
+                            chat_browser_call_bounded(client, BrowserMethod::Act, action)
                                 .await;
                         drop(guard);
                         *browser_session = client_back;
@@ -22610,10 +23378,49 @@ I did nothing: propose to the user what to do and wait — do NOT retry the same
                                 // repeating the same move.
                                 let no_change =
                                     !snap.is_empty() && snap == *ctx.last_snapshot;
+                                if targeted_floored_ref {
+                                    browser_mark_target_acted_floored(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                    );
+                                }
                                 if !snap.is_empty() {
                                     *ctx.last_snapshot = snap.clone();
+                                    browser_set_target_floor(
+                                        ctx.payment_floor_refs,
+                                        ctx.current_target.as_str(),
+                                        browser_floor_refs(&value),
+                                    );
+                                    browser_set_target_focus(
+                                        ctx.payment_context_by_target,
+                                        ctx.current_target.as_str(),
+                                        browser_focus_payment_context(&value),
+                                    );
+                                    // Deliberately NOT clearing last_acted_floored here: this is the
+                                    // act's OWN post-action refresh, not an independent
+                                    // re-observation. Clearing here would erase the flag just set
+                                    // above for THIS SAME action, breaking "type CVV into a floored
+                                    // ref, then press Enter" across the next call. See
+                                    // `browser_clear_target_acted_floored`'s doc comment.
                                 }
                                 push_browser_step(format!("{kind}"), "done");
+                                let boundary = if action_kinds.len() > 1 {
+                                    "action_bundle"
+                                } else {
+                                    "browser_act"
+                                };
+                                let metrics = browser_observation_metrics(
+                                    &value,
+                                    action_kinds.clone(),
+                                    "completed",
+                                );
+                                ctx.journal.record(browser_protocol_journal_event(
+                                    call_id, boundary, &metrics,
+                                ));
+                                push_browser_step(
+                                    browser_protocol_event_summary(call_id, boundary, metrics),
+                                    "done",
+                                );
                                 let mut out = if snap.is_empty() {
                                     "Action performed.".to_string()
                                 } else {
@@ -22656,10 +23463,32 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                         }
                                     }
                                 }
+                                // D2: machine progress classification for the guarded loop's stall
+                                // budget — from the sidecar's signals (committed suggestion, whether
+                                // a suggestion list appeared, page change), never re-derived from the
+                                // prose in `out` above.
+                                let committed_option = value
+                                    .get("committedOption")
+                                    .and_then(|v| v.as_str())
+                                    .is_some_and(|s| !s.trim().is_empty());
+                                let suggestions_present = value
+                                    .get("suggestions")
+                                    .and_then(|v| v.as_array())
+                                    .is_some_and(|a| !a.is_empty());
+                                *ctx.outcome_hint = Some(browser_action_outcome_hint(
+                                    args.get("kind").and_then(|k| k.as_str()).unwrap_or(""),
+                                    true,
+                                    no_change,
+                                    committed_option,
+                                    suggestions_present,
+                                    false,
+                                ));
                                 Ok(out)
                             }
                             Err(error) => {
                                 push_browser_step(format!("{kind}"), "error");
+                                *ctx.outcome_hint =
+                                    Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                                 // DIAG (HOMUN_DEBUG): what the model tried + why it
                                 // failed, to root-cause the repeated browser_act loop.
                                 if verbose_debug() {
@@ -22682,14 +23511,11 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 // (forcing the model to spend a round re-snapshotting),
                                 // take a fresh snapshot NOW and hand it back so it
                                 // retries with new refs in the same round.
-                                let stale = {
-                                    let e = error.to_lowercase();
-                                    e.contains("stale") || e.contains("detached")
-                                };
+                                let stale = is_stale_ref_error(&error);
                                 match (stale, browser_session.take()) {
                                     (true, Some(c)) => {
                                         let guard = browse_web_lock().lock().await;
-                                        let (c_back, snap_res) = chat_browser_call(
+                                        let (c_back, snap_res) = chat_browser_call_bounded(
                                             c,
                                             BrowserMethod::Snapshot,
                                             browser_chat_snapshot_params(
@@ -22710,6 +23536,42 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                             ))
                                         } else {
                                             *ctx.last_snapshot = snap.clone();
+                                            browser_set_target_floor(
+                                                ctx.payment_floor_refs,
+                                                ctx.current_target.as_str(),
+                                                browser_floor_refs(snap_res.as_ref().unwrap()),
+                                            );
+                                            // A stale ref means the page genuinely changed under us —
+                                            // this recovery snapshot is a real fresh observation of
+                                            // THIS target, so treat it like an explicit
+                                            // browser_snapshot: refresh focus AND clear the robust flag.
+                                            browser_set_target_focus(
+                                                ctx.payment_context_by_target,
+                                                ctx.current_target.as_str(),
+                                                browser_focus_payment_context(snap_res.as_ref().unwrap()),
+                                            );
+                                            browser_clear_target_acted_floored(
+                                                ctx.payment_context_by_target,
+                                                ctx.current_target.as_str(),
+                                            );
+                                            let metrics = browser_observation_metrics(
+                                                snap_res.as_ref().unwrap(),
+                                                vec!["snapshot".to_string()],
+                                                "stale_ref_recovered",
+                                            );
+                                            ctx.journal.record(browser_protocol_journal_event(
+                                                call_id,
+                                                "stale_ref_recovery_observation",
+                                                &metrics,
+                                            ));
+                                            push_browser_step(
+                                                browser_protocol_event_summary(
+                                                    call_id,
+                                                    "stale_ref_recovery_observation",
+                                                    metrics,
+                                                ),
+                                                "done",
+                                            );
                                             Ok(stale_ref_recovery_message(
                                                 args.get("ref")
                                                     .and_then(|v| v.as_str()),
@@ -22727,6 +23589,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 }
                             }
                         }
+                    }
                     }
                 }
                 "browser_screenshot" => {
@@ -22754,7 +23617,7 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                     let file_name =
                         format!("chat_shot_{}.png", uuid::Uuid::new_v4().simple());
                     let guard = browse_web_lock().lock().await;
-                    let (client_back, shot_res) = chat_browser_call(
+                    let (client_back, shot_res) = chat_browser_call_bounded(
                         client,
                         BrowserMethod::Screenshot,
                         serde_json::json!({
@@ -22867,7 +23730,7 @@ Use the text snapshot."
                     )
                     .await;
                     let guard = browse_web_lock().lock().await;
-                    let (client_back, tabs_res) = chat_browser_call(
+                    let (client_back, tabs_res) = chat_browser_call_bounded(
                         client,
                         BrowserMethod::Tabs,
                         serde_json::json!({}),
@@ -22951,7 +23814,7 @@ Use the text snapshot."
                     )
                     .await;
                     let guard = browse_web_lock().lock().await;
-                    let (client_back, dialog_res) = chat_browser_call(
+                    let (client_back, dialog_res) = chat_browser_call_bounded(
                         client,
                         BrowserMethod::RespondDialog,
                         serde_json::json!({
@@ -22985,6 +23848,17 @@ Use the text snapshot."
                 _ => Err(format!("Unknown browser tool: {name}")),
             },
         };
+        // D2 fallback for arms that set no explicit hint (navigate / snapshot / tabs / dialog /
+        // screenshot): the `Result` VARIANT is itself a machine signal — an errored action is no
+        // progress, an ok one is. The `browser_act` arm sets a nuanced hint above (a successful
+        // `type` that selected no suggestion is `Ok` yet NoProgress), which takes precedence here.
+        if ctx.outcome_hint.is_none() {
+            *ctx.outcome_hint = Some(if outcome.is_err() {
+                local_first_engine::contract::ToolOutcomeHint::NoProgress
+            } else {
+                local_first_engine::contract::ToolOutcomeHint::Success
+            });
+        }
         match outcome {
             Ok(text) => text,
             Err(text) => text,
@@ -26054,8 +26928,23 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         // engine dispatch sees `browse` as a plain non-browser tool → it arrives here; the recursion runs
         // entirely gateway-side and returns a compact BrowseResult the manager reads.
         if name == "browse" {
-            let goal = build_browse_goal(args_raw);
-            if goal.is_empty() {
+            if ls.browse_calls_completed > 0 {
+                return Ok(local_first_engine::ToolOutcome {
+                    result: "found: false\nnote: A browse result was already returned in this turn. Use that evidence; ask the user before retrying.".to_string(),
+                    effects: local_first_engine::ToolEffects {
+                        outcome_hint: Some(local_first_engine::ToolOutcomeHint::NoProgress),
+                        ..Default::default()
+                    },
+                });
+            }
+            if earlier_browse_call_in_current_round(&ls.messages, call_id) {
+                let deferred = local_first_engine::BrowseResult::not_found(
+                    "browse deferred: another browse call already ran in this model round; inspect its result before deciding whether another source is needed",
+                );
+                return Ok(delegated_browse_tool_outcome(&deferred));
+            }
+            let request = parse_browse_request(args_raw);
+            if request.goal.is_empty() {
                 return Ok(local_first_engine::ToolOutcome {
                     result: "browse needs a non-empty `goal`.".to_string(),
                     effects: Default::default(),
@@ -26070,12 +26959,11 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
                     || objective_mode
                         == local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
                 channel_owner: self.channel_owner,
+                agent_run_id: self.run_id.map(str::to_string),
             };
-            let outcome = browse_executor.browse(&goal).await;
-            return Ok(local_first_engine::ToolOutcome {
-                result: local_first_engine::browse::browse_result_for_manager(&outcome),
-                effects: Default::default(),
-            });
+            let outcome = browse_executor.browse(request).await;
+            ls.browse_calls_completed = ls.browse_calls_completed.saturating_add(1);
+            return Ok(delegated_browse_tool_outcome(&outcome));
         }
         // ADR 0023 Step 5: re-hydrate the turn's armed sensitive domains (carried as tokens in the
         // engine-safe LoopState) into the gateway enum for the approval gates. Read before the `&mut`
@@ -26211,6 +27099,23 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
 struct GatewayBrowserExecutor<'a> {
     browser_session: Option<BrowserAutomationClient<BrowserSidecarSession>>,
     last_snapshot: String,
+    // Machine-derived payment floor refs for the last observation (act/navigate/
+    // snapshot), keyed by `target_id` (Build1 Fix 3). Was a single global
+    // `HashSet` — but interleaving two tabs without re-observing the acted-on one
+    // (observe tab B, observe tab A, act on tab B's already-floored ref) let tab
+    // A's observation silently overwrite tab B's floor, failing the ref/page floor
+    // open on the next action. Per-target closes that; each entry is refreshed
+    // ONLY by an observation on that same target — never derived from label text.
+    // See `browser_safety::effective_action_class`, `browser_floor_refs_for_target`,
+    // `browser_set_target_floor`.
+    last_payment_floor_refs: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    // Per-`target_id` payment context (focus flag + robust last-acted-floored
+    // flag). Replaces the single global `last_focus_payment_context: bool` (fixes
+    // IMPORTANT D — a snapshot of tab A must not clear tab B's payment context).
+    // Mirrors `last_payment_floor_refs` above, which is now ALSO per-target for
+    // the same reason (Build1 Fix 3). See `BrowserPaymentContext`.
+    payment_context_by_target: std::collections::HashMap<String, BrowserPaymentContext>,
+    result_contract: Option<local_first_engine::browse::BrowseResultContract>,
     current_target: String,
     opened_targets: Vec<String>,
     nav_failures: std::collections::HashMap<String, u32>,
@@ -26220,6 +27125,10 @@ struct GatewayBrowserExecutor<'a> {
     prompt: &'a str,
     read_only: bool,
     channel_owner: bool,
+    // C2: durable sink for redacted browser-protocol metrics (never raw page text/snapshots — see
+    // `browser_protocol_journal_event`). `Disabled` when the caller has no registered agent_run_id
+    // (e.g. no journal for this run) — recording is then a silent no-op, never a fabricated id.
+    journal: agent_journal::GatewayJournal,
 }
 
 impl Drop for GatewayBrowserExecutor<'_> {
@@ -26240,14 +27149,50 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
         args_raw: &str,
         call_id: &str,
         ls: &mut local_first_engine::LoopState,
-    ) -> String {
+) -> (String, local_first_engine::contract::ToolOutcomeHint) {
+        if name == "browser_done" {
+            let payload = serde_json::from_str::<local_first_engine::browse::BrowserDonePayload>(args_raw)
+                .unwrap_or_else(|_| local_first_engine::browse::BrowserDonePayload {
+                    status: local_first_engine::browse::BrowserDoneStatus::Partial,
+                    answer: "Browser stopped with an invalid terminal payload.".to_string(),
+                    ..Default::default()
+                });
+            let stop_reason = serde_json::to_string(&payload.status)
+                .unwrap_or_else(|_| "\"partial\"".to_string())
+                .trim_matches('"')
+                .to_string();
+            let result = local_first_engine::browse::validate_browser_done_payload(
+                payload,
+                self.result_contract.as_ref(),
+            );
+            let metrics = serde_json::json!({
+                "stop_reason": stop_reason,
+                "action_kinds": ["browser_done"],
+            });
+            self.journal.record(browser_protocol_journal_event(
+                call_id,
+                "browser_done",
+                &metrics,
+            ));
+            push_browser_step(
+                browser_protocol_event_summary(call_id, "browser_done", metrics),
+                "done",
+            );
+            return (
+                local_first_engine::browse::browse_result_for_manager(&result),
+                local_first_engine::contract::ToolOutcomeHint::Success,
+            );
+        }
         // The browser branch mutates its ctx directly (disjoint read-set): browser-private state from
         // `&mut self`, loop-visible browser fields + provider from `&mut ls`. `browser_session` is
         // threaded separately (its Cell/RefCell would make the ctx non-`Sync`). ADR 0025 folds this
         // whole ctx into a recursive `browse(goal)` and the seam goes away.
+        let mut outcome_hint: Option<local_first_engine::contract::ToolOutcomeHint> = None;
         let mut bctx = BrowserToolCtx {
             browser_used: &mut ls.browser_used,
             last_snapshot: &mut self.last_snapshot,
+            payment_floor_refs: &mut self.last_payment_floor_refs,
+            payment_context_by_target: &mut self.payment_context_by_target,
             pending_browser_image: &mut ls.pending_browser_image,
             browser_tool_call_ids: &mut ls.browser_tool_call_ids,
             current_target: &mut self.current_target,
@@ -26259,8 +27204,19 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             prompt: self.prompt,
             read_only: self.read_only,
             channel_owner: self.channel_owner,
+            journal: &self.journal,
+            outcome_hint: &mut outcome_hint,
         };
-        execute_browser_tool(&mut bctx, &mut self.browser_session, name, args_raw, call_id).await
+        // D1/D2: the act/navigate arms write the machine progress hint into `outcome_hint` (via
+        // ctx), computed from the sidecar's signals — never re-derived from the result prose. The
+        // neutral read-only tools leave it None → Success (they don't stall a browse).
+        let text =
+            execute_browser_tool(&mut bctx, &mut self.browser_session, name, args_raw, call_id).await;
+        drop(bctx);
+        (
+            text,
+            outcome_hint.unwrap_or(local_first_engine::contract::ToolOutcomeHint::Success),
+        )
     }
 
     async fn close_session(&mut self, browser_used: bool) {
@@ -26291,6 +27247,16 @@ impl local_first_engine::BrowserExecutor for GatewayBrowserExecutor<'_> {
             end_browser_activity();
         }
     }
+
+    async fn interrupt(&mut self) {
+        if let Some(client) = self.browser_session.take() {
+            end_browser_activity();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = client.call(BrowserMethod::Stop, serde_json::json!({}));
+            })
+            .await;
+        }
+    }
 }
 
 // ─── ADR 0025 — browse-as-recursion: the browser as a delegated sub-agent ────────────────────────
@@ -26317,7 +27283,10 @@ browse and answer.\n\
 METHOD:\n\
 1. Open a source with browser_navigate, then read the snapshot.\n\
 2. Proceed ONE micro-action at a time (browser_act with a kind + a [ref=...] from the snapshot); \
-re-read the snapshot after each action (browser_act returns the updated one).\n\
+re-read the snapshot after each action (browser_act returns the updated one). When a field shows \
+suggestions as you type (a station, city, or airport picker), type the name and then pick the \
+matching suggestion before moving on — a typed value with no suggestion selected is usually not \
+accepted.\n\
 3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
 JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
 do not repeat the same failing search.\n\
@@ -26354,19 +27323,45 @@ fn drain_stream_sink() -> StreamSink {
 /// `{ goal, hints?: { url?, container? } }` and folds any hints INTO the goal text (the sub-agent's prompt
 /// is browser-only and has no separate hint slot), so a preferred start URL / source steers it. Returns
 /// "" when `goal` is missing/blank (the caller then refuses the call). Pure — unit-tested below.
+#[derive(Debug, Clone)]
+struct ParsedBrowseRequest {
+    goal: String,
+    hint_url: Option<String>,
+    contract: Option<local_first_engine::browse::BrowseResultContract>,
+}
+
+fn parse_browse_request(args_raw: &str) -> ParsedBrowseRequest {
+    let value: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
+    let goal = value
+        .get("goal")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let hint_url = value
+        .pointer("/hints/url")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| v.starts_with("https://") || v.starts_with("http://"))
+        .map(str::to_string);
+    let contract = value
+        .get("result_contract")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<local_first_engine::browse::BrowseResultContract>(v).ok());
+    ParsedBrowseRequest { goal, hint_url, contract }
+}
+
 fn build_browse_goal(args_raw: &str) -> String {
-    let v: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
-    let goal = v.get("goal").and_then(|g| g.as_str()).unwrap_or("").trim();
+    let parsed = parse_browse_request(args_raw);
+    let goal = parsed.goal.trim();
     if goal.is_empty() {
         return String::new();
     }
     let mut out = goal.to_string();
+    let v: serde_json::Value = serde_json::from_str(args_raw).unwrap_or(serde_json::Value::Null);
     let hints = v.get("hints");
-    if let Some(url) = hints.and_then(|h| h.get("url")).and_then(|u| u.as_str()) {
-        let url = url.trim();
-        if !url.is_empty() {
-            out.push_str(&format!(" (start at {url})"));
-        }
+    if let Some(url) = parsed.hint_url.as_deref() {
+        out.push_str(&format!(" (start at {url})"));
     }
     if let Some(container) = hints.and_then(|h| h.get("container")).and_then(|c| c.as_str()) {
         let container = container.trim();
@@ -26375,6 +27370,72 @@ fn build_browse_goal(args_raw: &str) -> String {
         }
     }
     out
+}
+
+/// The manager can emit several `browse` calls in one response, but it cannot
+/// have observed the first result while deciding the later calls. Execute only
+/// the first browse in that model round; later calls are reconsidered after the
+/// result is in context. This prevents blind multi-site wandering and keeps one
+/// browser sub-agent in control of the shared contained browser at a time.
+fn earlier_browse_call_in_current_round(
+    messages: &[serde_json::Value],
+    current_call_id: &str,
+) -> bool {
+    for message in messages.iter().rev() {
+        let Some(calls) = message.get("tool_calls").and_then(serde_json::Value::as_array) else {
+            continue;
+        };
+        if !calls.iter().any(|call| {
+            call.get("id").and_then(serde_json::Value::as_str) == Some(current_call_id)
+        }) {
+            continue;
+        }
+        for call in calls {
+            if call.get("id").and_then(serde_json::Value::as_str) == Some(current_call_id) {
+                return false;
+            }
+            if call
+                .pointer("/function/name")
+                .and_then(serde_json::Value::as_str)
+                == Some("browse")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    false
+}
+
+/// Preserve the readable `BrowseResult` contract for the manager while passing
+/// progress and browser-usage facts to the guarded loop as typed metadata.
+/// Nothing here interprets user prose or keywords.
+fn delegated_browse_tool_outcome(
+    result: &local_first_engine::BrowseResult,
+) -> local_first_engine::ToolOutcome {
+    local_first_engine::ToolOutcome {
+        result: local_first_engine::browse::browse_result_for_manager(result),
+        effects: local_first_engine::ToolEffects {
+            browser_activity_observed: true,
+            outcome_hint: Some(if result.found {
+                local_first_engine::ToolOutcomeHint::Success
+            } else {
+                local_first_engine::ToolOutcomeHint::NoProgress
+            }),
+            ..Default::default()
+        },
+    }
+}
+
+/// Round budget scaled from the declared result contract. Progress (the engine's
+/// `max_no_progress`) is the primary limiter; this only sizes the ceiling so a
+/// richer goal gets proportionally more rounds. Deterministic, no model input.
+fn browse_round_budget(contract: &local_first_engine::browse::BrowseResultContract) -> usize {
+    const BASE: usize = 5;
+    const CAP: usize = 10;
+    let required = contract.fields.iter().filter(|f| f.required).count();
+    let items_bonus = if contract.minimum_items.unwrap_or(0) > 3 { 1 } else { 0 };
+    (BASE + required.div_ceil(2) + items_bonus).clamp(BASE, CAP)
 }
 
 /// The recursive `browse(goal)` executor (ADR 0025). Holds the turn-constants the sub-seams need
@@ -26388,30 +27449,45 @@ struct GatewayBrowseExecutor<'a> {
     prompt: &'a str,
     read_only: bool,
     channel_owner: bool,
+    // C2: the enclosing manager turn's agent_run_id (owned — the executor outlives the borrow that
+    // produced it), used to look up the SAME registered journal the manager's own turn writes to via
+    // `agent_journal::for_run`. `None`/unregistered both resolve to `GatewayJournal::Disabled` (a
+    // silent no-op), never a fabricated id.
+    agent_run_id: Option<String>,
 }
 
 impl GatewayBrowseExecutor<'_> {
     /// Run one browser sub-turn for `goal` and return its `BrowseResult`. The recursion (this calls
     /// `run_turn`, which dispatches browser tools back through the sub `GatewayBrowserExecutor`) stays
     /// finite: the sub CapabilityExecutor type has no `browse`, so there is no self-recursive tool.
-    async fn browse(&self, goal: &str) -> local_first_engine::BrowseResult {
+    async fn browse(&self, request: ParsedBrowseRequest) -> local_first_engine::BrowseResult {
         // Browser model (falls back to the chat model when the browser role is auto/unresolved), so the
         // sub-agent runs on the small/cheap browsing model without ever switching the manager's provider.
         let (base_url, model, api_key) = browser_openai_stream_config()
             .or_else(chat_openai_stream_config)
             .unwrap_or_default();
 
+        let user_goal = match &request.contract {
+            Some(contract) => format!(
+                "{}\n\nResult contract:\n{}",
+                request.goal,
+                serde_json::to_string_pretty(contract).unwrap_or_default()
+            ),
+            None => request.goal.clone(),
+        };
+
         // Seed the ISOLATED sub-state: a clean 2-message context (browser prompt + goal) and ONLY the 6
         // granular browser tools. Nothing from the manager's turn crosses in — isolation by construction.
         let mut ls = local_first_engine::LoopState::new();
         ls.messages = local_first_engine::browse::seed_browse_messages(
             &browse_subagent_system_prompt(),
-            goal,
+            &user_goal,
         );
         ls.tool_schemas = vec![
             browser_navigate_tool_schema(),
             browser_snapshot_tool_schema(),
             browser_act_tool_schema(),
+            browser_done_tool_schema(),
             browser_screenshot_tool_schema(),
             browser_tabs_tool_schema(),
             browser_dialog_tool_schema(),
@@ -26438,12 +27514,40 @@ impl GatewayBrowseExecutor<'_> {
         );
         usage_context.purpose_detail = Some("browse".to_string());
         usage_context.thread_id = self.thread_id.map(str::to_string);
+        let contract_fp = browser_contract_fingerprint(&request.contract);
+        // C2: one durable journal handle for the whole sub-turn — resolves to the SAME registered
+        // journal the enclosing manager turn writes to (`agent_journal::for_run` is a registry lookup
+        // by run_id), or the silent `Disabled` no-op when this run has none registered.
+        let journal = agent_journal::for_run(self.agent_run_id.as_deref());
+        let start_metrics = serde_json::json!({
+            "stop_reason": "started",
+            "action_kinds": ["browse"],
+            "minimum_items": request.contract.as_ref().and_then(|contract| contract.minimum_items).unwrap_or(0),
+            "contract_fields": request.contract.as_ref().map(|contract| contract.fields.len() as u64).unwrap_or(0),
+            "contract_fp": contract_fp,
+        });
+        journal.record(browser_protocol_journal_event(
+            usage_context.call_id.as_str(),
+            "manager_browse_start",
+            &start_metrics,
+        ));
+        push_browser_step(
+            browser_protocol_event_summary(
+                usage_context.call_id.as_str(),
+                "manager_browse_start",
+                start_metrics,
+            ),
+            "done",
+        );
         // The tool chokepoint is browser-only: the 6 browser tools route through the fresh browser
         // executor below; any non-browser call is refused (defense — none are offered in tool_schemas).
         let capability_executor = BrowseOnlyCapabilityExecutor;
         let mut browser_executor = GatewayBrowserExecutor {
             browser_session: None,
             last_snapshot: String::new(),
+            last_payment_floor_refs: std::collections::HashMap::new(),
+            payment_context_by_target: std::collections::HashMap::new(),
+            result_contract: request.contract.clone(),
             current_target: "chat_0".to_string(),
             opened_targets: Vec::new(),
             nav_failures: std::collections::HashMap::new(),
@@ -26453,19 +27557,71 @@ impl GatewayBrowseExecutor<'_> {
             prompt: self.prompt,
             read_only: self.read_only,
             channel_owner: self.channel_owner,
+            journal: journal.clone(),
         };
+        if let Some(hint_url) = request.hint_url.as_deref() {
+            let nav_args = serde_json::json!({
+                "url": hint_url,
+                "target": "chat_0"
+            })
+            .to_string();
+            let _ = <GatewayBrowserExecutor as local_first_engine::BrowserExecutor>::execute_browser(
+                &mut browser_executor,
+                "browser_navigate",
+                &nav_args,
+                "pre_nav",
+                &mut ls,
+            )
+            .await;
+            let pre_nav_metrics = serde_json::json!({
+                "stop_reason": "completed",
+                "action_kinds": ["navigate"],
+            });
+            journal.record(browser_protocol_journal_event(
+                usage_context.call_id.as_str(),
+                "trusted_pre_navigation",
+                &pre_nav_metrics,
+            ));
+            push_browser_step(
+                browser_protocol_event_summary(
+                    usage_context.call_id.as_str(),
+                    "trusted_pre_navigation",
+                    pre_nav_metrics,
+                ),
+                "done",
+            );
+        }
         // The sub-turn does NO plan tracking / F3 compaction / route-blocking / completion-nudging — that
         // is the manager's job. All four ports are inert no-ops, and the cfg disables the plan machinery.
         let plan_progress = NoPlanProgress;
         let compactor = NoContextCompactor;
         let turn_policy = OpenTurnPolicy;
         let completion_judge = NeverIncompleteJudge;
+        // `request.contract` is optional; `browse_round_budget` is defined over a declared
+        // contract, so a missing one falls back to BASE (5) — the same default as the prior
+        // hard-coded round count — rather than synthesizing a contract to feed it.
+        let rounds = request
+            .contract
+            .as_ref()
+            .map(browse_round_budget)
+            .unwrap_or(5);
         let cfg = local_first_engine::TurnConfig {
-            hard_round_ceiling: hard_round_ceiling(),
-            max_rounds: chat_browser_max_rounds(),
-            browser_max_rounds: chat_browser_max_rounds(),
-            browser_nav_cap: chat_browser_nav_cap(),
-            browser_budget: chat_browser_budget(),
+            hard_round_ceiling: rounds,
+            max_rounds: rounds,
+            browser_max_rounds: rounds,
+            browser_nav_cap: browse_subagent_nav_cap(),
+            browser_budget: local_first_engine::config::BrowserBudget {
+                // `max_elapsed_ms` is now the ABSOLUTE backstop (never resets) — generous, so a
+                // progressing browse is never choked by it. The PRIMARY control is `max_stall_ms`:
+                // max wall-clock WITHOUT a success, reset on every real progress (a selected
+                // suggestion, a page change, a navigation). This is what lets a slow model finish a
+                // multi-field form the old 90s-from-start ceiling killed at ~2 rounds. The round
+                // budget still sizes how far a progressing run may go.
+                max_elapsed_ms: 300_000,
+                max_stall_ms: 90_000,
+                max_failed_navigations: 4,
+                max_no_progress: 3,
+            },
             // Browse sub-turn does NO token-budget compaction (NoContextCompactor); the browser
             // history hygiene it needs is `prune_browser_history`. Unknown window → fail-open anyway.
             context_window: None,
@@ -26477,6 +27633,9 @@ impl GatewayBrowseExecutor<'_> {
             // above) — a deterministic plugin routing (S2) never targets one of those, so forcing is
             // never applicable here.
             forced_tool: None,
+            // E2: THIS is the browse sub-turn — `browser_done` is its own completion signal, so the
+            // engine's terminal must be armed here.
+            browser_subturn: true,
         };
 
         let outcome = local_first_engine::agent_loop::run_turn(
@@ -26490,13 +27649,16 @@ impl GatewayBrowseExecutor<'_> {
             &completion_judge,
             &compactor,
             &turn_policy,
-            &local_first_engine::NoopExecutionJournal,
+            // C2: a real journal handle (not a fabricated id) so engine-emitted events for this
+            // sub-turn — including `BrowserBudgetExceeded` — persist alongside the protocol metrics
+            // recorded above/below, when the enclosing run has one registered.
+            &journal,
             &drain,
             0.2, // low temperature: deterministic extraction, not creative writing
             self.thread_id,
             &std::collections::BTreeSet::new(),
             &[],
-            goal.to_string(),
+            user_goal.clone(),
             String::new(),
             None,
             false,
@@ -26509,7 +27671,60 @@ impl GatewayBrowseExecutor<'_> {
         )
         .await;
 
-        local_first_engine::browse::browse_result_from_outcome(&outcome)
+        if let Some(result) = local_first_engine::browse::browse_result_from_manager_text(&outcome.memory_answer) {
+            let stop_reason = serde_json::to_string(&result.status)
+                .unwrap_or_else(|_| "\"partial\"".to_string())
+                .trim_matches('"')
+                .to_string();
+            let terminal_metrics = serde_json::json!({
+                "stop_reason": stop_reason,
+                "action_kinds": ["browser_done"],
+            });
+            journal.record(browser_protocol_journal_event(
+                usage_context.call_id.as_str(),
+                "terminal_result",
+                &terminal_metrics,
+            ));
+            push_browser_step(
+                browser_protocol_event_summary(
+                    usage_context.call_id.as_str(),
+                    "terminal_result",
+                    terminal_metrics,
+                ),
+                "done",
+            );
+            return result;
+        }
+        let fallback_payload = local_first_engine::browse::BrowserDonePayload {
+            status: local_first_engine::browse::BrowserDoneStatus::Timeout,
+            answer: browser_executor.last_snapshot.chars().take(2000).collect(),
+            items: vec![],
+            fields_missing: vec!["browser_done".into()],
+            sources: outcome.browse_sources.clone(),
+            evidence: vec!["Browser sub-turn ended before browser_done.".into()],
+        };
+        let timeout_metrics = serde_json::json!({
+            "observation_chars": browser_executor.last_snapshot.chars().count() as u64,
+            "stop_reason": "timeout",
+            "action_kinds": ["browser_done"],
+        });
+        journal.record(browser_protocol_journal_event(
+            usage_context.call_id.as_str(),
+            "timeout_fallback",
+            &timeout_metrics,
+        ));
+        push_browser_step(
+            browser_protocol_event_summary(
+                usage_context.call_id.as_str(),
+                "timeout_fallback",
+                timeout_metrics,
+            ),
+            "error",
+        );
+        local_first_engine::browse::validate_browser_done_payload(
+            fallback_payload,
+            request.contract.as_ref(),
+        )
     }
 }
 
@@ -26557,6 +27772,9 @@ impl GatewayComputerExecutor<'_> {
                 browser_budget: chat_browser_budget(),
                 context_window: None, reconcile_on_delivery: false, autoadvance_from_evidence: false,
                 step_verification: false, verbose: verbose_debug(), forced_tool: None,
+                // E2: this is the host-computer sub-turn, NOT the browse sub-turn — it never offers
+                // `browser_done` as a real tool, so the terminal must stay disarmed here.
+                browser_subturn: false,
             },
             &usage_context, &model_client, &capability_executor, &mut browser_executor,
             &NoPlanProgress, &NeverIncompleteJudge, &NoContextCompactor, &OpenTurnPolicy,
@@ -26601,7 +27819,9 @@ impl local_first_engine::CapabilityExecutor for ComputerOnlyCapabilityExecutor {
 struct ComputerNoBrowserExecutor;
 impl local_first_engine::BrowserExecutor for ComputerNoBrowserExecutor {
     async fn execute_browser(&mut self, name: &str, _args_raw: &str, _call_id: &str,
-        _state: &mut local_first_engine::LoopState) -> String { format!("browser tool unavailable: {name}") }
+        _state: &mut local_first_engine::LoopState) -> (String, local_first_engine::contract::ToolOutcomeHint) {
+        (format!("browser tool unavailable: {name}"), local_first_engine::contract::ToolOutcomeHint::Success)
+    }
     async fn close_session(&mut self, _browser_used: bool) {}
 }
 
@@ -27662,7 +28882,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // browser tools are driven ONLY inside the isolated browse sub-loop (they're seeded there directly),
     // never offered to the manager. The mid-turn model-switch + the granular-tools-on-the-manager path
     // are retired — one canonical browser path.
-    let mut base_tools = vec![browse_tool_schema()];
+    let mut base_tools = initial_manager_tool_schemas_for_test(read_only, contact_only);
     base_tools.extend([
         recall_memory_tool_schema(),
         query_code_graph_tool_schema(),
@@ -28312,6 +29532,10 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             verbose: verbose_debug(),
             // S2 T5: resolved above from (routing_binding, Forcing::Specific, turn-index).
             forced_tool: forced_tool.clone(),
+            // E2: this is the manager (chat) turn, NOT the browse sub-turn. Its browser tool set
+            // (`browser_registry_cached_tools`) deliberately excludes `browser_done` — reaching this
+            // turn's dispatcher is a hallucination — so the terminal must stay disarmed here.
+            browser_subturn: false,
         };
         // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern, so it
         // runs HERE after the engine turn returns. Snapshot what it needs before the turn consumes the
@@ -28425,6 +29649,35 @@ fn delivered_image_rejection_outcome(
     outcome
 }
 
+/// Called from `run_agent_rounds`'s outcome consumer when `run_turn` returns
+/// `TurnDelivery::Parked` (steering park+resume, Build 2): parks the chat_turn task —
+/// aborts the running agent_run with `parked_waiting_for_model` (keeping its resumable
+/// checkpoint), releases the browser-session resource, flips the task to `Parked` — so the
+/// SAME turn_id/assistant bubble resumes later once the coordinator's probe finds the
+/// semantic model back. `turn_id` is `None` for a non-broker call (no steering context, so
+/// the engine never parks in practice) — a defensive no-op, not a panic. Best-effort: a
+/// store failure is logged, not fatal; a stuck `running` row still recovers via the existing
+/// stale-lease path instead of hanging this stream.
+fn park_chat_turn_task(
+    state: &AppState,
+    turn_id: Option<&str>,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) {
+    let Some(turn_id) = turn_id else {
+        tracing::warn!(
+            target: "agent::park",
+            "engine parked a turn with no broker turn_id — nothing to park"
+        );
+        return;
+    };
+    if let Ok(store) = state.task_store.lock() {
+        if let Err(error) = store.park_chat_turn(turn_id, user_id.as_str(), workspace_id.as_str()) {
+            tracing::warn!(target: "agent::park", %turn_id, %error, "could not park chat turn");
+        }
+    }
+}
+
 // ADR 0024 inc 5 (5.D1a): the agent turn's round loop + forced synthesis + post-turn
 // learn, extracted VERBATIM from the tokio::spawn body of stream_chat_via_openai. The
 // signature (the captured turn state) is what becomes engine::run_turn's interface at 5.D1c.
@@ -28534,6 +29787,9 @@ async fn run_agent_rounds(
     let mut browser_executor = GatewayBrowserExecutor {
         browser_session: None,
         last_snapshot: String::new(),
+        last_payment_floor_refs: std::collections::HashMap::new(),
+        payment_context_by_target: std::collections::HashMap::new(),
+        result_contract: None,
         current_target: "chat_0".to_string(), // the first tab the tools operate on
         opened_targets: Vec::new(),
         nav_failures: std::collections::HashMap::new(),
@@ -28543,6 +29799,10 @@ async fn run_agent_rounds(
         prompt: &prompt,
         read_only,
         channel_owner,
+        // C2: the manager turn's own registered journal — same handle `run_turn` below receives via
+        // `&execution_journal`, so protocol metrics from a manager-level browser call land in the same
+        // run as everything else this turn records.
+        journal: execution_journal.clone(),
     };
     let plan_progress = GatewayPlanProgress { state: state_owned.clone() };
     let compactor = GatewayContextCompactor {
@@ -28603,6 +29863,38 @@ async fn run_agent_rounds(
         turn_trace,
     )
     .await;
+
+    // Park at the finalization boundary (Build 2, park+resume): the engine hit its fence with
+    // steering still pending that the coordinator could not interpret (semantic model
+    // unavailable) and checkpointed instead of spinning (T1) — `memory_answer` is empty and NO
+    // terminal event was emitted by the engine. Park the chat_turn task here (T2's
+    // `park_chat_turn`: aborts the running agent_run with `parked_waiting_for_model`, releases
+    // the browser-session resource, keeps steering `pending` for the resumed run) and unblock
+    // the gateway's OWN SSE drain (`turn_executor::drain_agent_stream_into_message_with_fanout`,
+    // which otherwise waits forever on a terminal line the engine deliberately never sends) with
+    // a plain empty `done` — NOT an `error` (which `fanout_turn_event` would turn into a durable
+    // terminal event) and NOT a real answer. The empty text keeps `generated` false downstream,
+    // so the executor's own no-answer branch runs; ITS re-read of this task's now-`Parked`
+    // status (not this outcome) is what tells it — and the runner — not to treat this as a
+    // failure. No terminal turn event is emitted here or anywhere else on this path.
+    if outcome.delivery == local_first_engine::TurnDelivery::Parked {
+        park_chat_turn_task(
+            &state_owned,
+            effect_turn_id.as_deref(),
+            &automation_user_id,
+            &automation_workspace_id,
+        );
+        let _ = emit_stream_event(
+            tx,
+            GenerateStreamEvent::Done {
+                text: String::new(),
+                metrics: TokenMetrics::zero(),
+                redacted_user_text: None,
+            },
+        )
+        .await;
+        return outcome;
+    }
 
     // The common case: the turn ran (whatever it concluded).
     let Some(rejection) = outcome.image_rejection.clone() else {
@@ -30486,6 +31778,21 @@ fn browse_web_lock() -> &'static tokio::sync::Mutex<()> {
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
+/// Per-call gateway deadline for a sidecar RPC. Bounds a wedged CDP call that
+/// the sub-turn's between-rounds budget would otherwise miss until the 300s
+/// manager deadline. All within the 90s sub-turn ceiling.
+fn browser_call_deadline(method: local_first_browser_automation::BrowserMethod) -> std::time::Duration {
+    use local_first_browser_automation::BrowserMethod::*;
+    match method {
+        // `Open` creates the managed tab AND does the first navigation (a superset
+        // of `Navigate`'s work, typically the slowest step of a session on a cold
+        // tab), so it gets at least `Navigate`'s budget — never the 10s catch-all.
+        Navigate | Open => std::time::Duration::from_secs(25),
+        Act => std::time::Duration::from_secs(15),
+        _ => std::time::Duration::from_secs(10),
+    }
+}
+
 /// Runs ONE blocking `client.call` off the async runtime, moving the client in
 /// and handing it back out (so the turn keeps ownership of the warm session —
 /// mirrors `BrowserLoopRunner::into_client`). The global `browse_web_lock` MUST be
@@ -30512,6 +31819,42 @@ async fn chat_browser_call(
         // if it ever fires, the client is gone (we cannot recover a moved value
         // after a panic), so report None and let the next call spawn a fresh one.
         Err(error) => (None, Err(format!("browser call task failed: {error}"))),
+    }
+}
+
+/// Typed error surfaced when a sidecar RPC blows its per-call deadline
+/// (`browser_call_deadline`). The `BROWSER_SIDECAR_TIMEOUT` prefix is the
+/// contract the browse sub-loop keys on to map this into a bundle stop
+/// reason / error observation the same way it handles any other browser
+/// failure string.
+const BROWSER_SIDECAR_TIMEOUT_ERROR: &str =
+    "BROWSER_SIDECAR_TIMEOUT: the browser call exceeded its deadline";
+
+/// Every `chat_browser_call` site in `execute_browser_tool` goes through this
+/// wrapper instead, so each sidecar RPC is bounded by `browser_call_deadline`.
+/// A wedged CDP call would otherwise stall the browse sub-turn until the far
+/// outer 300s manager deadline, since the sub-turn budget is only checked
+/// BETWEEN rounds. On timeout the `spawn_blocking` inside `chat_browser_call`
+/// keeps running in the background (there is no way to cancel a blocking CDP
+/// call) — the moved client is unrecoverable — so this returns `None` (the
+/// next call spawns a fresh client/session) and the typed timeout error, with
+/// NO automatic retry: the calling loop decides against its own budget.
+async fn chat_browser_call_bounded(
+    client: BrowserAutomationClient<BrowserSidecarSession>,
+    method: BrowserMethod,
+    params: serde_json::Value,
+) -> (
+    Option<BrowserAutomationClient<BrowserSidecarSession>>,
+    Result<serde_json::Value, String>,
+) {
+    match tokio::time::timeout(
+        browser_call_deadline(method),
+        chat_browser_call(client, method, params),
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(_elapsed) => (None, Err(BROWSER_SIDECAR_TIMEOUT_ERROR.to_string())),
     }
 }
 
@@ -30549,6 +31892,186 @@ fn browser_snapshot_text(value: &serde_json::Value) -> String {
         .and_then(|s| s.as_str())
         .unwrap_or("")
         .to_string()
+}
+
+/// Machine-derived payment floor refs the sidecar attached to an observation.
+/// Absent field → empty set. These raise (never lower) the effective action class.
+fn browser_floor_refs(value: &serde_json::Value) -> std::collections::HashSet<String> {
+    value
+        .get("paymentFloorRefs")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// This target's machine-derived payment floor refs (Build1 Fix 3, per-`target_id`
+/// floor set, mirroring `payment_context_by_target`). Absent target (never
+/// observed yet) → empty set, matching the old single-set default. Returns an
+/// owned clone (the sets are small — a handful of ref ids per observation) so
+/// callers can hold it across the mutable borrow the post-act refresh needs.
+fn browser_floor_refs_for_target(
+    floor_by_target: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+    target: &str,
+) -> std::collections::HashSet<String> {
+    floor_by_target.get(target).cloned().unwrap_or_default()
+}
+
+/// Replaces ONLY `target`'s floor-ref entry with a fresh observation's refs — the
+/// fix for the cross-tab fail-open: a single global `HashSet` let observing tab A
+/// overwrite tab B's floor out from under it (interleaving two tabs without
+/// re-observing the acted-on one would silently clear its floor). Every call site
+/// that used to do `*payment_floor_refs = browser_floor_refs(&value)` now goes
+/// through here, keyed by the target the observation actually came from.
+fn browser_set_target_floor(
+    floor_by_target: &mut std::collections::HashMap<String, std::collections::HashSet<String>>,
+    target: &str,
+    floor: std::collections::HashSet<String>,
+) {
+    floor_by_target.insert(target.to_string(), floor);
+}
+
+/// Machine focus-in-payment-context flag the sidecar attached to an observation
+/// (Task 2). Absent → false. Raises (never lowers) a ref-less committing action's
+/// class — see `browser_safety::is_refless_committing`.
+fn browser_focus_payment_context(value: &serde_json::Value) -> bool {
+    value
+        .get("focusPaymentContext")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Per-`target_id` payment-context signal (design 1.2, fixes IMPORTANT D/C). A
+/// single global flag let a snapshot of tab A clear tab B's payment context out
+/// from under it — every tab now gets its own entry, keyed by `target_id`.
+///
+/// - `focus` mirrors the sidecar's best-effort `focusPaymentContext`
+///   (`document.hasFocus()`-based): correct for a same-process/main-frame cc-form,
+///   but it fails OPEN for a real cross-origin PSP OOPIF whenever the app is not
+///   OS-frontmost (IMPORTANT C) — so it is kept only as a SECONDARY signal now.
+/// - `last_acted_floored` is the robust, OS-focus-independent signal: it is
+///   frame-aware "for free" because the per-ref floor
+///   (`computePaymentFloorRefs`/`locator.evaluate` in the sidecar) already floors a
+///   card input inside a cross-origin OOPIF correctly — so acting on that ref sets
+///   this flag regardless of window focus.
+///
+/// The gate ORs both (see `browser_payment_context_for`); it only ever raises
+/// (never lowers) the ref-less committing floor, matching the payment-floor's own
+/// raise-only discipline.
+#[derive(Debug, Default, Clone, Copy)]
+struct BrowserPaymentContext {
+    focus: bool,
+    last_acted_floored: bool,
+}
+
+impl BrowserPaymentContext {
+    /// The single bool the gate consumes: either signal is enough to floor.
+    fn combined(self) -> bool {
+        self.focus || self.last_acted_floored
+    }
+}
+
+/// Combined per-target payment-context signal fed to
+/// `browser_safety::effective_action_class`'s `focus_payment_context` parameter.
+/// Absent entry (target never observed yet) → false, matching the old default.
+fn browser_payment_context_for(
+    payment_context_by_target: &std::collections::HashMap<String, BrowserPaymentContext>,
+    target: &str,
+) -> bool {
+    payment_context_by_target
+        .get(target)
+        .is_some_and(|context| context.combined())
+}
+
+/// Updates a target's best-effort focus flag from a fresh observation. Called at
+/// every site that refreshes `payment_floor_refs` for a target (navigate, snapshot,
+/// act success, stale-ref recovery) — mirrors that field's own update discipline.
+fn browser_set_target_focus(
+    payment_context_by_target: &mut std::collections::HashMap<String, BrowserPaymentContext>,
+    target: &str,
+    focus: bool,
+) {
+    payment_context_by_target
+        .entry(target.to_string())
+        .or_default()
+        .focus = focus;
+}
+
+/// Marks a target's robust payment signal after an `act` that targeted a ref the
+/// PRE-act observation had already floored (IMPORTANT C). Only ever raises the
+/// flag; cleared exclusively by `browser_clear_target_acted_floored`, never here.
+fn browser_mark_target_acted_floored(
+    payment_context_by_target: &mut std::collections::HashMap<String, BrowserPaymentContext>,
+    target: &str,
+) {
+    payment_context_by_target
+        .entry(target.to_string())
+        .or_default()
+        .last_acted_floored = true;
+}
+
+/// Clears a target's last-acted-floored flag on an explicit `browser_navigate` /
+/// `browser_snapshot` (or stale-ref-recovery) re-observation of that SAME target.
+/// Deliberately NEVER called from `browser_act`'s own post-action success refresh:
+/// that refresh is the direct continuation of the very action that may have just
+/// SET this flag (e.g. typing a CVV into a floored ref), so clearing it there would
+/// erase the signal the very next ref-less Enter needs to see. Per-target, so
+/// re-observing a DIFFERENT tab never touches this target's flag (fixes
+/// IMPORTANT D).
+fn browser_clear_target_acted_floored(
+    payment_context_by_target: &mut std::collections::HashMap<String, BrowserPaymentContext>,
+    target: &str,
+) {
+    if let Some(context) = payment_context_by_target.get_mut(target) {
+        context.last_acted_floored = false;
+    }
+}
+
+/// True when `action` (a single action, or any item of its flat bundle) targets a
+/// ref that was in the PRE-act `payment_floor_refs` — the trigger for
+/// `browser_mark_target_acted_floored`. Bundle items already carry `target_id`
+/// equal to the bundle's `current_target` (see `normalize_browser_action_bundle`),
+/// so checking every item's `ref` against the SAME floor set is correct for a
+/// single-target bundle.
+///
+/// Checks BOTH the top-level `ref` AND any `fields[].ref` (mirrors
+/// `browser_safety::any_ref_in_floor`): a `kind:"fill"` action using the
+/// sidecar's canonical multi-field contract (`fields:[{ref,value}]` — see
+/// `resolveFillFields` in `runtimes/browser-automation/src/browser/actions.ts`)
+/// carries no top-level `ref` at all, so a ref-only check never set
+/// `last_acted_floored` for it — leaving a following ref-less Enter/Return
+/// ungated even though the fill just targeted a floored card field (Build1
+/// fill-fields fail-open).
+fn browser_action_targeted_a_floored_ref(
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+) -> bool {
+    let ref_is_floored = |value: &serde_json::Value| {
+        value
+            .get("ref")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|r| payment_floor_refs.contains(r))
+            || value
+                .get("fields")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|fields| {
+                    fields.iter().any(|field| {
+                        field
+                            .get("ref")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|r| payment_floor_refs.contains(r))
+                    })
+                })
+    };
+    ref_is_floored(action)
+        || action
+            .get("actions")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|items| items.iter().any(ref_is_floored))
 }
 
 /// How long a per-thread browser session may sit idle before it is reaped.
@@ -30850,6 +32373,160 @@ fn begin_browser_activity(goal: String, thread_id: Option<String>) {
             steps: Vec::new(),
         });
     }
+}
+
+fn browser_protocol_event_summary(
+    child_run_id: &str,
+    boundary: &str,
+    metrics: serde_json::Value,
+) -> String {
+    let observation_chars = metrics
+        .get("observation_chars")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let refs = metrics
+        .get("refs")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let stop_reason = metrics
+        .get("stop_reason")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown");
+    let action_kinds = metrics
+        .get("action_kinds")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let mut out = format!(
+        "browser_protocol child_run_id={child_run_id} boundary={boundary} observation_chars={observation_chars} refs={refs} action_kinds={action_kinds} stop_reason={stop_reason}"
+    );
+    for key in [
+        "generation",
+        "completed_actions",
+        "unexecuted_actions",
+        "minimum_items",
+        "contract_fields",
+    ] {
+        if let Some(value) = metrics.get(key).and_then(serde_json::Value::as_u64) {
+            out.push_str(&format!(" {key}={value}"));
+        }
+    }
+    if let Some(value) = metrics.get("contract_fp").and_then(serde_json::Value::as_str) {
+        out.push_str(&format!(" contract_fp={value}"));
+    }
+    out
+}
+
+/// Build a durable journal event from the same redacted metrics used for the
+/// stderr/activity summary. Only the metric keys are carried — never raw page
+/// text, secrets, or snapshots.
+fn browser_protocol_journal_event(
+    call_id: &str,
+    boundary: &str,
+    metrics: &serde_json::Value,
+) -> local_first_engine::execution_journal::AgentExecutionEvent {
+    const ALLOWED: &[&str] = &[
+        "observation_chars",
+        "refs",
+        "action_kinds",
+        "stop_reason",
+        "generation",
+        "completed_actions",
+        "unexecuted_actions",
+        "minimum_items",
+        "contract_fields",
+        "contract_fp",
+        "item_count",
+        "fields_missing",
+        "status",
+        "elapsed_ms",
+    ];
+    let mut redacted = serde_json::Map::new();
+    redacted.insert(
+        "child_run_id".to_string(),
+        serde_json::Value::String(call_id.to_string()),
+    );
+    if let Some(obj) = metrics.as_object() {
+        for key in ALLOWED {
+            if let Some(v) = obj.get(*key) {
+                redacted.insert((*key).to_string(), v.clone());
+            }
+        }
+    }
+    local_first_engine::execution_journal::AgentExecutionEvent::BrowserProtocol {
+        round: 0,
+        boundary: boundary.to_string(),
+        payload: serde_json::Value::Object(redacted),
+    }
+}
+
+fn browser_action_kinds(action: &serde_json::Value) -> Vec<String> {
+    if let Some(actions) = action.get("actions").and_then(serde_json::Value::as_array) {
+        return actions
+            .iter()
+            .filter_map(|action| action.get("kind").and_then(serde_json::Value::as_str))
+            .map(str::to_string)
+            .collect();
+    }
+    action
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .map(|kind| vec![kind.to_string()])
+        .unwrap_or_default()
+}
+
+fn browser_observation_metrics(
+    value: &serde_json::Value,
+    action_kinds: Vec<String>,
+    stop_reason: &str,
+) -> serde_json::Value {
+    let observation_chars = value
+        .get("stats")
+        .and_then(|stats| stats.get("chars"))
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            value
+                .get("snapshot")
+                .and_then(serde_json::Value::as_str)
+                .map(|snapshot| snapshot.chars().count() as u64)
+        })
+        .unwrap_or(0);
+    let refs = value
+        .get("stats")
+        .and_then(|stats| stats.get("refs"))
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| {
+            value
+                .get("refs")
+                .and_then(serde_json::Value::as_array)
+                .map(|refs| refs.len() as u64)
+        })
+        .unwrap_or(0);
+    serde_json::json!({
+        "observation_chars": observation_chars,
+        "refs": refs,
+        "action_kinds": action_kinds,
+        "stop_reason": stop_reason,
+        "generation": value.get("generation").and_then(serde_json::Value::as_u64).unwrap_or(0),
+        "completed_actions": value.get("completedActions").and_then(serde_json::Value::as_u64).unwrap_or(0),
+        "unexecuted_actions": value.get("unexecutedActions").and_then(serde_json::Value::as_array).map(|actions| actions.len() as u64).unwrap_or(0),
+    })
+}
+
+fn browser_contract_fingerprint(
+    contract: &Option<local_first_engine::browse::BrowseResultContract>,
+) -> Option<String> {
+    let contract = contract.as_ref()?;
+    let encoded = serde_json::to_string(contract).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&encoded, &mut hasher);
+    Some(format!("{:016x}", std::hash::Hasher::finish(&hasher)))
 }
 
 fn push_browser_step(label: String, status: &str) {
@@ -36356,6 +38033,52 @@ async fn get_turn(
     })))
 }
 
+/// Cancels a chat_turn task via the broker AND finalizes its assistant bubble
+/// (`MessageDeliveryState::Cancelled`) in the SAME call — every cancel entry point
+/// (`cancel_turn`, `cancel_task`) routes through this now (converge, don't
+/// duplicate) so bubble treatment cannot silently diverge between them again.
+///
+/// For a `Running` turn the live executor's own cancel-detection
+/// (`ChatTurnRunBranch::Cancelled` in turn_executor.rs, or the runner loop's
+/// `externally_cancelled` guard) ALSO finalizes the bubble once its drain
+/// unwinds — this call's write is redundant-but-harmless there (idempotent).
+///
+/// For a `Parked` turn (steering park+resume, Build 2) there is NO live executor —
+/// it was unregistered and its agent_run aborted at park time — so nothing else
+/// will EVER flip that bubble out of its open "waiting for the model" state. Before
+/// this helper existed, `cancel_task` (the Workbench "Attività" tab's cancel,
+/// unlike `cancel_turn`) skipped this step entirely, leaving a permanent ghost
+/// bubble on cancel-of-parked. `task_before_cancel` is the task snapshot fetched
+/// BEFORE calling this (its `thread_id`/`assistant_message_id` don't change on
+/// cancel, so re-fetching after would be redundant). Returns whatever
+/// `cancel_chat_turn` returned (`false` = already terminal or missing).
+fn cancel_chat_turn_and_finalize_bubble(
+    state: &AppState,
+    store: &TaskStore,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+    task_id: &TaskId,
+    task_before_cancel: Option<&TaskRecord>,
+) -> local_first_task_runtime::TaskRuntimeResult<bool> {
+    let ok = local_first_task_runtime::broker::cancel_chat_turn(
+        store,
+        user_id,
+        workspace_id,
+        task_id,
+        &crate::turn_executor::GatewayCancelNotify,
+    )?;
+    if ok {
+        if let Some(task) = task_before_cancel {
+            set_chat_turn_message_delivery_state(
+                state,
+                task,
+                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            );
+        }
+    }
+    Ok(ok)
+}
+
 /// DELETE /api/chat/turns/{turn_id} — cancel a turn (idempotent). 202 if cancelled,
 /// 404 if the turn does not exist or is already terminal.
 async fn cancel_turn(
@@ -36374,12 +38097,13 @@ async fn cancel_turn(
         .get_task(&task_id, &user_id, &workspace_id)
         .ok()
         .flatten();
-    let ok = local_first_task_runtime::broker::cancel_chat_turn(
+    let ok = cancel_chat_turn_and_finalize_bubble(
+        &state,
         &store,
         &user_id,
         &workspace_id,
         &task_id,
-        &crate::turn_executor::GatewayCancelNotify,
+        delivery_task.as_ref(),
     )
     .map_err(|e| GatewayError {
         status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -36394,15 +38118,6 @@ async fn cancel_turn(
         .filter(|row| row.active_turn_id == turn_id && row.status == local_first_task_runtime::TurnSteeringStatus::Held)
         .collect::<Vec<_>>();
     drop(store);
-    if ok {
-        if let Some(task) = delivery_task.as_ref() {
-            set_chat_turn_message_delivery_state(
-                &state,
-                task,
-                local_first_desktop_gateway::MessageDeliveryState::Cancelled,
-            );
-        }
-    }
     for steering in &held_steering {
         publish_steering_changed(steering);
     }
@@ -37190,12 +38905,17 @@ async fn cancel_task(
             );
             if !terminal {
                 if task.kind == "chat_turn" {
-                    local_first_task_runtime::broker::cancel_chat_turn(
+                    // Route through the shared helper (also used by `cancel_turn`) so this
+                    // endpoint gets the SAME bubble finalization — without it, cancelling an
+                    // already-Parked turn here left its assistant bubble a permanent ghost
+                    // (no live executor left to ever flip it out of "waiting for the model").
+                    cancel_chat_turn_and_finalize_bubble(
+                        &state,
                         &store,
                         &user,
                         &workspace,
                         &tid,
-                        &crate::turn_executor::GatewayCancelNotify,
+                        Some(&task),
                     )
                     .map_err(GatewayError::task)?;
                 } else {
@@ -37216,6 +38936,155 @@ async fn cancel_task(
         }
     }
     Ok(Json(task_queue_response_for_state(&state)?))
+}
+
+#[cfg(test)]
+mod cancel_of_parked_turn_tests {
+    use super::*;
+    use local_first_task_runtime::{ResourceClass, ResourceRequirement};
+
+    /// Seeds a chat thread with one assistant bubble, then a chat_turn task Running
+    /// under that same thread/message id, then parks it via `park_chat_turn` —
+    /// mirrors the engine's finalization-boundary park (Build 2). Returns the
+    /// generated thread_id (ChatStore mints its own).
+    fn seed_parked_chat_turn_with_bubble(
+        state: &AppState,
+        turn_id: &str,
+        assistant_message_id: &str,
+    ) -> String {
+        let thread_id = {
+            let chat_store = state.chat_store.lock().unwrap();
+            let thread = chat_store.create_thread("workspace-a").unwrap();
+            let message = channel_chat_message_with_id("assistant", "", assistant_message_id);
+            chat_store
+                .append_assistant_message(&thread.thread_id, &message)
+                .unwrap();
+            thread.thread_id
+        };
+
+        let task_store = state.task_store.lock().unwrap();
+        let mut task = TaskRecord::new(
+            turn_id,
+            gateway_user_id(),
+            gateway_workspace_id(),
+            "chat_turn",
+            "seed goal",
+            serde_json::json!({
+                "thread_id": thread_id,
+                "assistant_message_id": assistant_message_id,
+            }),
+        );
+        task.status = TaskStatus::Running;
+        task.resource_requirements = vec![ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
+        task_store
+            .insert_chat_turn(&task, &thread_id, "req-1", "interactive", "full")
+            .unwrap();
+        task_store
+            .park_chat_turn(turn_id, gateway_user_id().as_str(), gateway_workspace_id().as_str())
+            .unwrap();
+        thread_id
+    }
+
+    /// Regression test for the T3-review "ghost bubble" finding: cancelling an
+    /// already-Parked turn has no live executor to finalize its bubble on its own
+    /// (unlike a Running turn, whose own drain loop / `externally_cancelled` guard
+    /// does it independently) — `cancel_chat_turn_and_finalize_bubble` must be the
+    /// one place that does it, for BOTH `cancel_turn` and `cancel_task`.
+    #[test]
+    fn cancel_of_a_parked_turn_finalizes_the_bubble_with_exactly_one_terminal_event() {
+        let state = AppState::for_tests();
+        let turn_id = "turn-cancel-parked";
+        let assistant_message_id = "asst-parked-1";
+        let thread_id = seed_parked_chat_turn_with_bubble(&state, turn_id, assistant_message_id);
+
+        let user_id = gateway_user_id();
+        let workspace_id = gateway_workspace_id();
+        let task_id = TaskId::new(turn_id);
+
+        let store = state.task_store.lock().unwrap();
+        let task_before_cancel = store
+            .get_task(&task_id, &user_id, &workspace_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(task_before_cancel.status, TaskStatus::Parked, "precondition: turn is parked");
+
+        let ok = cancel_chat_turn_and_finalize_bubble(
+            &state,
+            &store,
+            &user_id,
+            &workspace_id,
+            &task_id,
+            Some(&task_before_cancel),
+        )
+        .unwrap();
+        assert!(ok, "a parked turn is still cancellable");
+
+        let cancelled = store.get_task(&task_id, &user_id, &workspace_id).unwrap().unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+
+        let events = store.read_turn_events(turn_id, 0).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.kind == local_first_task_runtime::TurnEventKind::Cancelled)
+                .count(),
+            1,
+            "exactly one Cancelled terminal event"
+        );
+        drop(store);
+
+        let message = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .message(&thread_id, assistant_message_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            message.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            "the bubble is no longer a ghost — cancel-of-parked finalizes it too"
+        );
+    }
+
+    /// End-to-end regression guard on the actual endpoint (not just the shared
+    /// helper): before this fix, `cancel_task` called `broker::cancel_chat_turn`
+    /// directly and skipped bubble finalization entirely, so a parked turn
+    /// cancelled from the Workbench "Attività" tab left a ghost bubble even though
+    /// `cancel_turn` (the chat-panel Stop button) already handled it correctly.
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancel_task_endpoint_finalizes_bubble_for_a_parked_turn() {
+        let state = AppState::for_tests();
+        let turn_id = "turn-cancel-parked-endpoint";
+        let assistant_message_id = "asst-parked-2";
+        let thread_id = seed_parked_chat_turn_with_bubble(&state, turn_id, assistant_message_id);
+
+        let _ = cancel_task(State(state.clone()), Path(turn_id.to_string()))
+            .await
+            .unwrap();
+
+        let cancelled = state
+            .task_store
+            .lock()
+            .unwrap()
+            .get_task(&TaskId::new(turn_id), &gateway_user_id(), &gateway_workspace_id())
+            .unwrap()
+            .unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+
+        let message = state
+            .chat_store
+            .lock()
+            .unwrap()
+            .message(&thread_id, assistant_message_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            message.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Cancelled,
+            "cancel_task must finalize the bubble for a parked turn, same as cancel_turn"
+        );
+    }
 }
 
 async fn run_next_task(
@@ -37441,6 +39310,24 @@ fn approval_allows_browser_policy(approval: &ApprovalRequest) -> bool {
         || approval.action == "prompt_plan.approve_step"
         || approval.data_boundary.contains("browser")
         || approval.explanation.to_lowercase().contains("browser")
+}
+
+/// True once `run_agent_rounds`'s outcome consumer has parked this turn's task (steering
+/// pending, model unavailable — see `park_chat_turn_task`/`TaskStore::park_chat_turn`).
+/// Checked AFTER `execute_read_only_task` returns, mirroring the `externally_cancelled`
+/// reload right above its call site in `run_next_task_once`: the executor's own
+/// `TaskExecutionOutcome` has no way to say "parked" (it's a generic shape shared by every
+/// task kind), so the authoritative signal is the task's OWN status, re-read fresh.
+fn chat_turn_task_is_parked(
+    state: &AppState,
+    task: &TaskRecord,
+    user: &UserId,
+    workspace: &WorkspaceId,
+) -> bool {
+    lock_task_store(state)
+        .ok()
+        .and_then(|store| store.get_task(&task.task_id, user, workspace).ok().flatten())
+        .is_some_and(|persisted| persisted.status == TaskStatus::Parked)
 }
 
 fn run_next_task_once(
@@ -37707,6 +39594,30 @@ fn run_next_task_once(
             stopped_reason: Some("cancelled by user".to_string()),
             results: vec![TaskRunStepResponse {
                 status: "cancelled".to_string(),
+                task_id: Some(task_id),
+                message: outcome.summary,
+            }],
+        });
+    }
+    // Guard: the executor itself may have PARKED this chat turn at its finalization boundary
+    // (steering pending, model unavailable — `run_agent_rounds`'s outcome consumer already
+    // called `park_chat_turn`, which aborted the running agent_run with
+    // `parked_waiting_for_model`, released the browser-session resource, flipped the task to
+    // `Parked`, and left steering rows `pending`). `outcome.completed` is false here with no
+    // `pending_approval` — exactly the shape a genuine "no reply" also has — so without this
+    // guard the `else` branch below would run `handle_failed_task_run` with `hard_error = true`
+    // for a chat_turn, clobbering `Parked` back to `Failed` AND marking the assistant bubble
+    // `Failed` (`set_chat_turn_message_delivery_state(..., Failed)`), regressing both "the bubble
+    // stays open" and "the SAME turn resumes" invariants. Mirrors the `externally_cancelled`
+    // guard above: reload the authoritative status rather than trust the stale local `task`.
+    if chat_turn_task_is_parked(state, &task, &user, &workspace) {
+        surface_task_execution_outcome(state, &task_id, &outcome)?;
+        return Ok(TaskRunBatchResponse {
+            status: "parked".to_string(),
+            completed: 0,
+            stopped_reason: Some("parked_waiting_for_model".to_string()),
+            results: vec![TaskRunStepResponse {
+                status: "parked".to_string(),
                 task_id: Some(task_id),
                 message: outcome.summary,
             }],
@@ -43822,6 +45733,8 @@ fn payment_approval_grant_from_request(
     Ok(PaymentApprovalGrant {
         snapshot: request.snapshot.clone(),
         cvv_one_shot: Some(request.cvv.trim().to_string()),
+        thread_id: request.thread_id.clone().unwrap_or_default(),
+        consumed: false,
         expires_at: std::time::Instant::now()
             + std::time::Duration::from_secs(PAYMENT_APPROVAL_TTL_SECONDS),
     })
@@ -43960,13 +45873,102 @@ fn rewrite_payment_approval_to_done(
     out
 }
 
-fn approved_payment_id_for_action(state: &AppState, action: &serde_json::Value) -> Option<String> {
-    let approval_id = action.get("payment_approval_id")?.as_str()?.to_string();
-    let mut approvals = lock_payment_approvals(state).ok()?;
-    prune_expired_payment_approvals(&mut approvals);
-    approvals
-        .get(&approval_id)
-        .map(|grant| grant.snapshot.approval_id.clone())
+/// Whether a single (non-bundled) `browser_act` request must be rejected as
+/// `BROWSER_UNSUPPORTED_COMMITTING_ACTION` BEFORE any payment-approval side
+/// effect runs (vault-secret substitution, one-shot grant claim). The
+/// `execute_browser_tool` single-action branch checks this FIRST — ahead of
+/// `apply_payment_approval_secret_for_action` and `should_claim_payment_approval`
+/// / `claim_payment_approval_for_action` below — because a hallucinated
+/// `clickCoords` action (or any other non-schema kind, or a `selector`-bearing
+/// action) can still carry a declared `action_class:"payment_commit"` plus a
+/// valid, unconsumed `payment_approval_id`: `effective_action_class` resolves
+/// purely from the DECLARED class (`kind` never enters that decision), so it
+/// resolves to a genuine `Ok(PaymentCommit)` and, left unchecked until after
+/// claiming, would burn the one-shot Payment Approval Card for an action that
+/// gets rejected anyway (Task 1 review finding, commit eb9d877d; generalized
+/// from clickCoords-only to the full schema-legality check in design 1.3).
+/// Mirrors the bundle path's reject-first check in
+/// `normalize_browser_action_bundle`, which runs the identical
+/// `browser_action_execution_fields_are_schema_legal` check as the very first
+/// thing in its loop, before any claim.
+fn single_action_rejects_unsupported_execution_before_payment_claim(
+    action: &serde_json::Value,
+) -> Option<&'static str> {
+    // A bundle ("actions" present) was already validated per-item inside
+    // `normalize_browser_action_bundle`, which runs BEFORE this check (see the call
+    // site) and, once every item passes, rewrites the top-level `kind` to the
+    // gateway's own "batch" marker. That marker is legitimate here — it is not a
+    // schema kind and must not be re-rejected as unsupported.
+    if action.get("actions").is_some() {
+        return None;
+    }
+    if browser_action_execution_fields_are_schema_legal(action) {
+        None
+    } else {
+        Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
+    }
+}
+
+/// Whether the `browser_act` enforcement site should CLAIM (consume) a
+/// Payment Approval Card grant for this action. Deliberately narrower than
+/// `browser_safety::action_is_payment_commit`: that helper also treats a
+/// class error (`BROWSER_ACTION_CLASS_MISSING`/`_CONFLICT`) as "payment" so
+/// `evaluate_browser_action` re-rejects it fail-closed — correct for the
+/// gate, wrong for claiming. Claim only on a genuinely resolved
+/// `PaymentCommit`; on a class error, do not claim, so the grant survives
+/// for a correctly re-declared retry (see the call site comment in
+/// `execute_browser_tool`).
+fn should_claim_payment_approval(
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+) -> bool {
+    matches!(
+        browser_safety::effective_action_class(action, payment_floor_refs, focus_payment_context),
+        Ok(browser_safety::ActionClass::PaymentCommit)
+    )
+}
+
+fn claim_payment_approval_for_action(
+    state: &AppState,
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+    thread_id: Option<&str>,
+) -> Result<String, String> {
+    let mut approvals = lock_payment_approvals(state).map_err(|error| error.message)?;
+    claim_payment_approval_from_map(&mut approvals, action, payment_floor_refs, focus_payment_context, thread_id)
+}
+
+fn claim_payment_approval_from_map(
+    approvals: &mut std::collections::HashMap<String, PaymentApprovalGrant>,
+    action: &serde_json::Value,
+    payment_floor_refs: &std::collections::HashSet<String>,
+    focus_payment_context: bool,
+    thread_id: Option<&str>,
+) -> Result<String, String> {
+    if !browser_safety::action_is_payment_commit(action, payment_floor_refs, focus_payment_context) {
+        return Err("payment approval can only be used on the final payment control".to_string());
+    }
+    let approval_id = action
+        .get("payment_approval_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "final payment requires a Payment Approval Card".to_string())?
+        .to_string();
+    prune_expired_payment_approvals(approvals);
+    let grant = approvals
+        .get_mut(&approval_id)
+        .ok_or_else(|| "payment approval is missing or expired".to_string())?;
+    if grant.thread_id != thread_id.unwrap_or_default() {
+        return Err("payment approval belongs to a different conversation".to_string());
+    }
+    if grant.consumed {
+        return Err("payment approval was already used".to_string());
+    }
+    grant.consumed = true;
+    Ok(grant.snapshot.approval_id.clone())
 }
 
 fn prune_expired_payment_approvals(
@@ -58644,7 +60646,8 @@ mod tests {
         authorize_managed_capability_tool, block_stalled_step, brain_budgets_for_context_window,
         browser_capability_action_refusal, browser_error_indicates_dead_sidecar,
         browser_method_for_capability_tool, browser_snapshot_text, browser_targets_for_goal,
-        browser_url_for_goal, build_browse_goal,
+        browser_url_for_goal, build_browse_goal, delegated_browse_tool_outcome,
+        earlier_browse_call_in_current_round,
         build_memory_source_grant, build_plan_markdown, clawhub_origin,
         capability_call_completed_outcome, classify_connector_error,
         collect_member_counts, composio_tool_is_read, connector_error_hint,
@@ -61627,6 +63630,196 @@ mod tests {
     }
 
     #[test]
+    fn browse_schema_accepts_result_contract_and_hints() {
+        let schema = super::browse_tool_schema();
+        let params = schema.pointer("/function/parameters/properties").unwrap();
+        assert!(params.get("goal").is_some());
+        assert!(params.get("hints").is_some());
+        assert!(params.get("result_contract").is_some());
+    }
+
+    #[test]
+    fn browser_act_schema_accepts_flat_action_bundles() {
+        let schema = super::browser_act_tool_schema();
+        let props = schema.pointer("/function/parameters/properties").unwrap();
+        assert!(props.get("actions").is_some());
+        assert!(schema.to_string().contains("at most four"));
+    }
+
+    #[test]
+    fn browser_act_bundle_items_have_a_real_schema() {
+        let schema = super::browser_act_tool_schema();
+        let items = &schema["function"]["parameters"]["properties"]["actions"]["items"];
+        let kinds = items["properties"]["kind"]["enum"].as_array().expect("kind enum");
+        assert!(kinds.iter().any(|k| k == "click"));
+        assert!(items["required"].as_array().expect("required").iter().any(|r| r == "kind"));
+    }
+
+    #[test]
+    fn browser_done_schema_is_structured_terminal() {
+        let schema = super::browser_done_tool_schema();
+        assert_eq!(
+            schema.pointer("/function/name").and_then(serde_json::Value::as_str),
+            Some("browser_done")
+        );
+        assert!(schema.to_string().contains("completed"));
+        assert!(schema.to_string().contains("fields_missing"));
+    }
+
+    #[test]
+    fn browser_event_summary_redacts_page_text_and_keeps_metrics() {
+        let event = super::browser_protocol_event_summary(
+            "child_123",
+            "action_bundle",
+            serde_json::json!({
+                "observation_chars": 6120,
+                "refs": 42,
+                "action_kinds": ["type", "click"],
+                "stop_reason": "completed",
+                "raw_page_text": "Departure 09:05 secret@example.com"
+            }),
+        );
+
+        assert!(event.contains("child_123"));
+        assert!(event.contains("observation_chars=6120"));
+        assert!(event.contains("action_kinds=type,click"));
+        assert!(!event.contains("secret@example.com"));
+        assert!(!event.contains("Departure 09:05"));
+    }
+
+    #[test]
+    fn browser_protocol_journal_event_keeps_metrics_and_drops_page_text() {
+        let metrics = serde_json::json!({
+            "observation_chars": 5000, "refs": 12, "action_kinds": ["click","type"],
+            "stop_reason": "completed", "page_text": "SECRET STATION NAMES"
+        });
+        let event = super::browser_protocol_journal_event("run_1", "action_bundle", &metrics);
+        let (_kind, _round, value) = event.into_parts();
+        assert_eq!(value["boundary"], "action_bundle");
+        assert_eq!(value["stop_reason"], "completed");
+        assert!(value.get("page_text").is_none(), "raw page text must not be journaled");
+    }
+
+    #[test]
+    fn parse_browse_request_keeps_model_contract_without_keyword_inference() {
+        let parsed = super::parse_browse_request(r#"{
+            "goal":"Search the requested journey",
+            "hints":{"url":"https://www.trenitalia.com/it.html"},
+            "result_contract":{
+                "kind":"list",
+                "minimum_items":3,
+                "fields":[
+                    {"name":"departure","required":true},
+                    {"name":"arrival","required":true},
+                    {"name":"duration","required":true},
+                    {"name":"price","required":false}
+                ],
+                "boundary":"Stop before booking or payment"
+            }
+        }"#);
+
+        assert_eq!(parsed.goal, "Search the requested journey");
+        assert_eq!(parsed.hint_url.as_deref(), Some("https://www.trenitalia.com/it.html"));
+        let contract = parsed.contract.unwrap();
+        assert_eq!(contract.minimum_items, Some(3));
+        assert_eq!(contract.fields[0].name, "departure");
+    }
+
+    #[test]
+    fn browse_round_budget_scales_with_contract_shape() {
+        use local_first_engine::browse::{BrowseResultContract, BrowseResultField, BrowseResultKind};
+        let simple = BrowseResultContract { kind: BrowseResultKind::Fact, minimum_items: None, fields: vec![], boundary: None };
+        assert_eq!(super::browse_round_budget(&simple), 5);
+
+        let list = BrowseResultContract {
+            kind: BrowseResultKind::List,
+            minimum_items: Some(5),
+            fields: vec![
+                BrowseResultField { name: "departure".into(), required: true },
+                BrowseResultField { name: "arrival".into(), required: true },
+                BrowseResultField { name: "duration".into(), required: true },
+                BrowseResultField { name: "price".into(), required: false },
+            ],
+            boundary: None,
+        };
+        // BASE 5 + ceil(3 required / 2)=2 + (minimum_items>3 ? 1 : 0)=1 = 8
+        assert_eq!(super::browse_round_budget(&list), 8);
+    }
+
+    #[test]
+    fn browse_round_budget_never_exceeds_cap() {
+        use local_first_engine::browse::{BrowseResultContract, BrowseResultField, BrowseResultKind};
+        let huge = BrowseResultContract {
+            kind: BrowseResultKind::List,
+            minimum_items: Some(10),
+            fields: (0..12).map(|i| BrowseResultField { name: format!("f{i}"), required: true }).collect(),
+            boundary: None,
+        };
+        assert_eq!(super::browse_round_budget(&huge), 10);
+    }
+
+    #[test]
+    fn built_in_browse_is_loaded_without_find_capability() {
+        let base_tools = super::initial_manager_tool_schemas_for_test(false, false);
+        let names = base_tools
+            .iter()
+            .filter_map(|schema| schema.pointer("/function/name").and_then(serde_json::Value::as_str))
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"browse"));
+        assert!(!names.iter().position(|name| *name == "browse").is_none());
+    }
+
+    #[test]
+    fn defers_a_second_browse_call_until_the_manager_sees_the_first_result() {
+        let messages = vec![serde_json::json!({
+            "role": "assistant",
+            "tool_calls": [
+                {"id":"browse_1","function":{"name":"browse","arguments":"{\\\"goal\\\":\\\"Trenitalia\\\"}"}},
+                {"id":"browse_2","function":{"name":"browse","arguments":"{\\\"goal\\\":\\\"Italo\\\"}"}}
+            ]
+        })];
+
+        assert!(!earlier_browse_call_in_current_round(&messages, "browse_1"));
+        assert!(earlier_browse_call_in_current_round(&messages, "browse_2"));
+    }
+
+    #[test]
+    fn delegated_browse_outcome_marks_browser_activity_and_structured_progress() {
+        let found = local_first_engine::BrowseResult {
+            found: true,
+            answer: "dato verificato".to_string(),
+            sources: vec!["https://example.test/source".to_string()],
+            confidence: local_first_engine::browse::Confidence::High,
+            note: None,
+            status: local_first_engine::browse::BrowserDoneStatus::Completed,
+            items: Vec::new(),
+            fields_missing: Vec::new(),
+            evidence: Vec::new(),
+        };
+        let found_outcome = delegated_browse_tool_outcome(&found);
+        assert!(found_outcome.effects.browser_activity_observed);
+        assert_eq!(
+            found_outcome.effects.outcome_hint,
+            Some(local_first_engine::ToolOutcomeHint::Success)
+        );
+
+        let missing = local_first_engine::BrowseResult::not_found("source unavailable");
+        let missing_outcome = delegated_browse_tool_outcome(&missing);
+        assert!(missing_outcome.effects.browser_activity_observed);
+        assert_eq!(
+            missing_outcome.effects.outcome_hint,
+            Some(local_first_engine::ToolOutcomeHint::NoProgress)
+        );
+    }
+
+    #[test]
+    fn browse_subagent_uses_a_tighter_navigation_cap_per_single_goal() {
+        assert_eq!(super::bounded_browse_subagent_nav_cap(20), 8);
+        assert_eq!(super::bounded_browse_subagent_nav_cap(5), 5);
+    }
+
+    #[test]
     fn navigate_failure_hint_escalates_to_search_pivot_on_repeat() {
         // First failure: a gentle suggestion to search.
         let first = super::browser_navigate_failure_hint("https://x.test/page", 1);
@@ -63991,6 +66184,8 @@ prs.save(Path({path:?}))
             super::PaymentApprovalGrant {
                 snapshot: payment_snapshot(),
                 cvv_one_shot: Some("123".to_string()),
+                thread_id: String::new(),
+                consumed: false,
                 expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
             },
         )]);
@@ -64072,18 +66267,17 @@ prs.save(Path({path:?}))
         assert!(!rewritten.contains("123456"));
         assert!(!rewritten.contains("CVV: 123"));
 
-        let page_snapshot = "- textbox \"CVV\" [ref=e12]\n- button \"Paga ora\" [ref=e20]";
-        let blocked_click = serde_json::json!({"kind":"click","ref":"e20"});
-        assert!(browser_safety::high_risk_reason(&blocked_click, page_snapshot).is_some());
-        let approved_click =
-            serde_json::json!({"kind":"click","ref":"e20","payment_approval_id":"pay_test"});
+        // Machine floor marks e20 as the payment control — never a label match.
+        let payment_floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e20".to_string()]);
+        let blocked_click = serde_json::json!({"kind":"click","ref":"e20","action_class":"payment_commit"});
+        assert!(browser_safety::evaluate_browser_action(&blocked_click, &payment_floor, false, None).is_some());
+        let approved_click = serde_json::json!({
+            "kind":"click","ref":"e20","action_class":"payment_commit","payment_approval_id":"pay_test"
+        });
         assert!(
-            browser_safety::high_risk_reason_with_payment_approval(
-                &approved_click,
-                page_snapshot,
-                Some("pay_test")
-            )
-            .is_none()
+            browser_safety::evaluate_browser_action(&approved_click, &payment_floor, false, Some("pay_test"))
+                .is_none()
         );
 
         let mut fill_cvv = serde_json::json!({
@@ -64111,11 +66305,645 @@ prs.save(Path({path:?}))
     }
 
     #[test]
+    fn payment_grant_is_thread_scoped_and_final_click_is_one_shot() {
+        let mut approvals = std::collections::HashMap::from([(
+            "pay_test".to_string(),
+            super::PaymentApprovalGrant {
+                snapshot: payment_snapshot(),
+                cvv_one_shot: Some("123".to_string()),
+                thread_id: "thread_1".to_string(),
+                consumed: false,
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+            },
+        )]);
+        let action = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "action_class": "payment_commit",
+            "payment_approval_id": "pay_test"
+        });
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        assert!(super::claim_payment_approval_from_map(
+            &mut approvals,
+            &action,
+            &payment_floor,
+            false,
+            Some("thread_2")
+        )
+        .is_err());
+        assert_eq!(
+            super::claim_payment_approval_from_map(
+                &mut approvals,
+                &action,
+                &payment_floor,
+                false,
+                Some("thread_1")
+            )
+            .unwrap(),
+            "pay_test"
+        );
+        assert!(super::claim_payment_approval_from_map(
+            &mut approvals,
+            &action,
+            &payment_floor,
+            false,
+            Some("thread_1")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn payment_grant_survives_a_class_error_and_the_redeclared_retry_succeeds_once() {
+        // Regression for the A2/A3 review finding: a committing action that
+        // carries a valid, unconsumed payment_approval_id but omits (or
+        // conflicts on) action_class must NOT burn the one-shot grant. Only
+        // the enforcement site's CLAIM decision differs from the gate's
+        // REJECT decision: the gate still fail-closed rejects a class error;
+        // claiming must require a genuinely resolved PaymentCommit.
+        let mut approvals = std::collections::HashMap::from([(
+            "pay_test".to_string(),
+            super::PaymentApprovalGrant {
+                snapshot: payment_snapshot(),
+                cvv_one_shot: Some("123".to_string()),
+                thread_id: "thread_1".to_string(),
+                consumed: false,
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+            },
+        )]);
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Under-declared action: a valid payment_approval_id but no
+        // action_class at all (model typo / omission on a committing click).
+        let missing_class_action = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "payment_approval_id": "pay_test"
+        });
+        assert!(
+            browser_safety::effective_action_class(&missing_class_action, &payment_floor, false)
+                .is_err(),
+            "discriminator the fix relies on: an under-declared committing action is a class error"
+        );
+
+        // Enforcement-site decision: must NOT claim on a class error.
+        let should_claim =
+            super::should_claim_payment_approval(&missing_class_action, &payment_floor, false);
+        assert!(
+            !should_claim,
+            "a class error must never trigger consuming the one-shot grant"
+        );
+        if should_claim {
+            // Only reachable if the enforcement gate regresses to the old
+            // `action_is_payment_commit`-based decision (which also treats a
+            // class error as "payment"); mirrors the real call site so this
+            // branch, if ever taken, burns the grant just like the bug did.
+            let _ = super::claim_payment_approval_from_map(
+                &mut approvals,
+                &missing_class_action,
+                &payment_floor,
+                false,
+                Some("thread_1"),
+            );
+        }
+
+        // The gate still fail-closed rejects the action on the class error —
+        // no approved id was ever produced, so nothing unauthorized executes.
+        let blocked =
+            browser_safety::evaluate_browser_action(&missing_class_action, &payment_floor, false, None);
+        assert!(
+            blocked
+                .as_deref()
+                .is_some_and(|reason| reason.contains("BROWSER_ACTION_CLASS_MISSING")),
+            "expected a BROWSER_ACTION_CLASS_MISSING rejection, got {blocked:?}"
+        );
+
+        // The grant must still be unconsumed: the corrected retry can reuse it.
+        assert!(
+            !approvals.get("pay_test").unwrap().consumed,
+            "grant must not be burned by a class-error action"
+        );
+
+        // A correctly re-declared retry with the SAME approval id resolves to
+        // a genuine PaymentCommit and succeeds exactly once.
+        let declared_payment_action = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "action_class": "payment_commit",
+            "payment_approval_id": "pay_test"
+        });
+        assert_eq!(
+            browser_safety::effective_action_class(&declared_payment_action, &payment_floor, false),
+            Ok(browser_safety::ActionClass::PaymentCommit)
+        );
+        assert!(super::should_claim_payment_approval(
+            &declared_payment_action,
+            &payment_floor,
+            false
+        ));
+        let claimed = super::claim_payment_approval_from_map(
+            &mut approvals,
+            &declared_payment_action,
+            &payment_floor,
+            false,
+            Some("thread_1"),
+        )
+        .expect("retry should successfully claim the still-unconsumed grant");
+        assert_eq!(claimed, "pay_test");
+        assert!(
+            browser_safety::evaluate_browser_action(
+                &declared_payment_action,
+                &payment_floor,
+                false,
+                Some(&claimed)
+            )
+            .is_none(),
+            "declared payment_commit with matching approval id must be allowed"
+        );
+
+        // One-shot: the grant is now burned, a second attempt fails.
+        assert!(super::claim_payment_approval_from_map(
+            &mut approvals,
+            &declared_payment_action,
+            &payment_floor,
+            false,
+            Some("thread_1")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn clickcoords_with_payment_class_is_rejected_before_the_claim_and_leaves_the_grant_unconsumed(
+    ) {
+        // Regression for the Important review finding on Task 1 (commit
+        // eb9d877d): the single-action `browser_act` enforcement branch in
+        // `execute_browser_tool` used to compute `approved_payment_id` — via
+        // `should_claim_payment_approval` → `claim_payment_approval_for_action`
+        // → `claim_payment_approval_from_map`, which sets `grant.consumed =
+        // true` — BEFORE checking whether the action is `clickCoords`.
+        // Because `effective_action_class` resolves purely from the
+        // model-DECLARED `action_class` field (`kind` never enters that
+        // decision), a clickCoords action carrying `action_class:
+        // "payment_commit"` and a valid, unconsumed `payment_approval_id`
+        // resolves to a genuine `Ok(PaymentCommit)`, so
+        // `should_claim_payment_approval` said "claim it" and the grant was
+        // burned — even though the action is then unconditionally rejected
+        // as BROWSER_UNSUPPORTED_COMMITTING_ACTION. The coordinate click
+        // never executed (good), but the Payment Approval Card was burned
+        // for nothing, forcing an unnecessary re-approval.
+        //
+        // LIMITATION: `execute_browser_tool` is a private `async fn` that
+        // needs a live `AppState`, a tokio runtime and a real/mock browser
+        // session, so it cannot be driven directly by a plain `#[test]`.
+        // This test instead exercises
+        // `single_action_rejects_unsupported_execution_before_payment_claim` — the
+        // exact function the fixed single-action branch now calls FIRST,
+        // gating both `apply_payment_approval_secret_for_action` and
+        // `should_claim_payment_approval`/`claim_payment_approval_for_action`
+        // behind it — together with the same map-based claim helper
+        // (`claim_payment_approval_from_map`) the sibling tests above use,
+        // to pin the ordering invariant the fix establishes: reject BEFORE
+        // claim, so the grant survives for a legitimate follow-up action.
+        let mut approvals = std::collections::HashMap::from([(
+            "pay_test".to_string(),
+            super::PaymentApprovalGrant {
+                snapshot: payment_snapshot(),
+                cvv_one_shot: Some("123".to_string()),
+                thread_id: "thread_1".to_string(),
+                consumed: false,
+                expires_at: std::time::Instant::now() + std::time::Duration::from_secs(300),
+            },
+        )]);
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // The trap: a hallucinated clickCoords action declaring
+        // action_class:"payment_commit" plus a valid payment_approval_id.
+        let click_coords_action = serde_json::json!({
+            "kind": "clickCoords",
+            "x": 120,
+            "y": 240,
+            "action_class": "payment_commit",
+            "payment_approval_id": "pay_test"
+        });
+
+        // Discriminator the bug relied on: `kind` is irrelevant to
+        // `effective_action_class`, so this payload resolves as a
+        // GENUINELY claimable PaymentCommit — proving the claim call, if it
+        // ran first, would succeed and burn the grant.
+        assert!(
+            super::should_claim_payment_approval(&click_coords_action, &payment_floor, false),
+            "a clickCoords action declaring action_class:payment_commit must resolve as a \
+             genuine PaymentCommit — this is exactly why the clickCoords reject must run \
+             BEFORE should_claim_payment_approval/claim_payment_approval_for_action, never after"
+        );
+        // Confirms the claim really would burn it, on a disposable clone —
+        // isolated so it never touches the `approvals` map the assertions
+        // below check.
+        let mut would_be_burned = approvals.clone();
+        assert!(
+            super::claim_payment_approval_from_map(
+                &mut would_be_burned,
+                &click_coords_action,
+                &payment_floor,
+                false,
+                Some("thread_1"),
+            )
+            .is_ok(),
+            "sanity: the trap payload is a well-formed, claimable grant"
+        );
+        assert!(
+            would_be_burned.get("pay_test").unwrap().consumed,
+            "sanity: claiming this exact payload does consume the grant when reached"
+        );
+
+        // (a) The fix: the single-action branch now checks this FIRST and
+        // rejects with the typed BROWSER_UNSUPPORTED_COMMITTING_ACTION error.
+        let blocked_before_claim =
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&click_coords_action);
+        assert_eq!(
+            blocked_before_claim,
+            Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR),
+            "expected the typed BROWSER_UNSUPPORTED_COMMITTING_ACTION rejection"
+        );
+
+        // (b) Mirror the real call site's actual gate on the ORIGINAL
+        // `approvals` map: `execute_browser_tool`'s single-action branch
+        // only reaches should_claim_payment_approval/claim_payment_approval_for_action
+        // when `blocked_before_claim.is_none()`. Threading that exact
+        // condition here (rather than asserting on an untouched map) means
+        // this test genuinely fails if the reorder ever regresses: dropping
+        // the `blocked_before_claim.is_none()` guard — i.e. reverting to the
+        // pre-fix ordering — would make this branch run the claim and burn
+        // the grant, flipping the assertion below to RED.
+        if blocked_before_claim.is_none() {
+            if super::should_claim_payment_approval(&click_coords_action, &payment_floor, false) {
+                let _ = super::claim_payment_approval_from_map(
+                    &mut approvals,
+                    &click_coords_action,
+                    &payment_floor,
+                    false,
+                    Some("thread_1"),
+                );
+            }
+        }
+        assert!(
+            !approvals.get("pay_test").unwrap().consumed,
+            "clickCoords must be rejected before any payment-approval claim runs; the grant \
+             must survive UNCONSUMED for a subsequent legitimate action to use"
+        );
+    }
+
+    // --- 1.3: generalized reject (non-schema kind / selector field) ---
+
+    #[test]
+    fn schema_legal_kinds_are_all_accepted_and_a_hallucinated_kind_is_not() {
+        for kind in super::BROWSER_ACT_SCHEMA_KINDS {
+            let action = serde_json::json!({"kind": kind, "ref": "e1"});
+            assert!(
+                super::browser_action_execution_fields_are_schema_legal(&action),
+                "schema kind {kind:?} must be accepted"
+            );
+        }
+        for bad_kind in ["clickCoords", "batch", "evaluate", "wat"] {
+            let action = serde_json::json!({"kind": bad_kind, "ref": "e1"});
+            assert!(
+                !super::browser_action_execution_fields_are_schema_legal(&action),
+                "non-schema kind {bad_kind:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn selector_field_is_rejected_even_on_an_otherwise_legal_kind() {
+        // `selector` bypasses the ref-based floor entirely (a floored ref never has
+        // to appear in the request at all), so it must be rejected regardless of an
+        // otherwise-legal `kind`.
+        let action = serde_json::json!({"kind": "click", "selector": "#pay-now"});
+        assert!(!super::browser_action_execution_fields_are_schema_legal(&action));
+    }
+
+    #[test]
+    fn single_action_reject_catches_non_schema_kind_and_selector_before_any_claim() {
+        let hallucinated_kind =
+            serde_json::json!({"kind": "wat", "ref": "e1", "action_class": "payment_commit"});
+        assert_eq!(
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&hallucinated_kind),
+            Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
+        );
+
+        let selector_action = serde_json::json!({
+            "kind": "click", "selector": "#pay-now", "action_class": "payment_commit"
+        });
+        assert_eq!(
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&selector_action),
+            Some(super::BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR)
+        );
+
+        // A legitimate schema-legal single action is never rejected here.
+        let legal = serde_json::json!({"kind": "click", "ref": "e1", "action_class": "ordinary"});
+        assert_eq!(
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&legal),
+            None
+        );
+    }
+
+    #[test]
+    fn single_action_reject_does_not_re_reject_a_normalized_bundle() {
+        // Once `normalize_browser_action_bundle` validates every item and rewrites
+        // the wrapper's `kind` to its own internal "batch" marker, the single-action
+        // reject-check must treat that wrapper as legitimate (it is not itself a
+        // schema kind, but it is not a hallucinated one either) — distinguished by
+        // the presence of the `actions` array, not by `kind`.
+        let normalized_bundle = serde_json::json!({
+            "kind": "batch",
+            "chatBundle": true,
+            "actions": [{"kind": "click", "ref": "e1", "action_class": "ordinary"}]
+        });
+        assert_eq!(
+            super::single_action_rejects_unsupported_execution_before_payment_claim(&normalized_bundle),
+            None
+        );
+    }
+
+    #[test]
+    fn bundle_item_with_selector_or_non_schema_kind_is_rejected_before_the_gate() {
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        let mut selector_bundle = serde_json::json!({
+            "actions": [{"kind": "click", "selector": "#pay-now", "action_class": "ordinary"}]
+        });
+        let rejected = super::normalize_browser_action_bundle(
+            &mut selector_bundle,
+            "chat_0",
+            &payment_floor,
+            false,
+        );
+        assert!(rejected.is_some_and(|reason| reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION")));
+
+        let mut bad_kind_bundle = serde_json::json!({
+            "actions": [{"kind": "clickCoords", "x": 1, "y": 2, "action_class": "ordinary"}]
+        });
+        let rejected = super::normalize_browser_action_bundle(
+            &mut bad_kind_bundle,
+            "chat_0",
+            &payment_floor,
+            false,
+        );
+        assert!(rejected.is_some_and(|reason| reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION")));
+
+        // A schema-legal bundle is normalized (not rejected) and gets tagged "batch".
+        let mut legal_bundle = serde_json::json!({
+            "actions": [{"kind": "click", "ref": "e1", "action_class": "ordinary"}]
+        });
+        assert!(super::normalize_browser_action_bundle(
+            &mut legal_bundle,
+            "chat_0",
+            &payment_floor,
+            false,
+        )
+        .is_none());
+        assert_eq!(legal_bundle["kind"], "batch");
+    }
+
+    // --- 1.4: ref ∈ payment floor gates ANY kind (defense-in-depth) ---
+
+    #[test]
+    fn act_gate_blocks_scroll_on_a_floored_ref_regardless_of_kind() {
+        // `scroll` is not in the committing set at all, but a ref the machine
+        // analysis already floored must still force a declared class — defense
+        // against a FUTURE (or hallucinated) kind acting on a floored control.
+        let floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e9".to_string()]);
+        let action =
+            serde_json::json!({ "kind": "scroll", "ref": "e9", "target_id": "chat_0" });
+        assert!(browser_safety::evaluate_browser_action(&action, &floor, false, None).is_some());
+    }
+
+    // --- 1.2: per-target payment context (focus flag + robust last-acted-floored) ---
+
+    #[test]
+    fn per_target_context_defaults_to_false_for_an_unobserved_target() {
+        let map: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        assert!(!super::browser_payment_context_for(&map, "chat_0"));
+    }
+
+    #[test]
+    fn last_acted_floored_raises_the_combined_context_for_its_target_only() {
+        let mut map: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        // Acting on a floored ref on chat_0 sets ITS flag...
+        super::browser_mark_target_acted_floored(&mut map, "chat_0");
+        assert!(super::browser_payment_context_for(&map, "chat_0"));
+        // ...and must NOT bleed into a different tab (fixes IMPORTANT D).
+        assert!(!super::browser_payment_context_for(&map, "chat_1"));
+    }
+
+    #[test]
+    fn explicit_snapshot_on_one_target_does_not_clear_a_different_targets_floor() {
+        // Regression for IMPORTANT D: acting on tab B's floored ref, then an
+        // explicit re-observation (snapshot/navigate) of tab A, then a ref-less
+        // Enter on tab B must still be floored — tab A's clear must not bleed into
+        // tab B's entry.
+        let mut map: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        super::browser_mark_target_acted_floored(&mut map, "chat_1"); // tab B acted on a floored ref
+        super::browser_clear_target_acted_floored(&mut map, "chat_0"); // tab A re-observed
+        assert!(
+            super::browser_payment_context_for(&map, "chat_1"),
+            "tab B's last-acted-floored flag must survive a DIFFERENT tab's re-observation"
+        );
+        // Clearing the SAME target does take effect.
+        super::browser_clear_target_acted_floored(&mut map, "chat_1");
+        assert!(!super::browser_payment_context_for(&map, "chat_1"));
+    }
+
+    #[test]
+    fn refless_enter_is_floored_by_last_acted_floored_with_no_focus_signal() {
+        // "act on a floored ref, then a ref-less Enter (no focus context) → floored."
+        let mut map: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        let payment_floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e12".to_string()]);
+        // The prior act targeted e12 (a floored ref) — mirrors what the enforcement
+        // site does via `browser_action_targeted_a_floored_ref`.
+        let cvv_fill = serde_json::json!({"kind": "fill", "ref": "e12", "text": "123"});
+        assert!(super::browser_action_targeted_a_floored_ref(&cvv_fill, &payment_floor));
+        super::browser_mark_target_acted_floored(&mut map, "chat_0");
+
+        let combined = super::browser_payment_context_for(&map, "chat_0");
+        assert!(combined, "last_acted_floored alone must floor, with NO focus signal");
+
+        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let reason = browser_safety::evaluate_browser_action(&enter, &payment_floor, combined, None)
+            .unwrap();
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+    }
+
+    #[test]
+    fn action_targeted_a_floored_ref_covers_single_and_bundle_actions() {
+        let payment_floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e12".to_string()]);
+        assert!(super::browser_action_targeted_a_floored_ref(
+            &serde_json::json!({"kind": "fill", "ref": "e12"}),
+            &payment_floor
+        ));
+        assert!(!super::browser_action_targeted_a_floored_ref(
+            &serde_json::json!({"kind": "fill", "ref": "e1"}),
+            &payment_floor
+        ));
+        // A bundle: any item's ref matching the floor set counts.
+        let bundle = serde_json::json!({
+            "actions": [
+                {"kind": "click", "ref": "e1"},
+                {"kind": "fill", "ref": "e12"}
+            ]
+        });
+        assert!(super::browser_action_targeted_a_floored_ref(&bundle, &payment_floor));
+        let bundle_no_hit = serde_json::json!({
+            "actions": [{"kind": "click", "ref": "e1"}]
+        });
+        assert!(!super::browser_action_targeted_a_floored_ref(&bundle_no_hit, &payment_floor));
+    }
+
+    // --- Build1 fill-fields fail-open: `fields[].ref` must floor too ---
+
+    #[test]
+    fn fill_fields_array_targeting_floored_ref_sets_last_acted_floored_for_a_following_refless_enter() {
+        // {kind:"fill", fields:[{ref:<floored>, value:"x"}]} carries no top-level
+        // `ref` — the sidecar's canonical multi-field contract puts the ref inside
+        // `fields[]` (see `resolveFillFields` in
+        // `runtimes/browser-automation/src/browser/actions.ts`). Before the fix,
+        // `browser_action_targeted_a_floored_ref` only read `action.get("ref")` and
+        // missed it entirely, so `last_acted_floored` never got set — leaving a
+        // FOLLOWING ref-less Enter (no focus signal, e.g. a cross-origin PSP OOPIF
+        // that fails `focusPaymentContext` open) completely ungated.
+        let payment_floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e12".to_string()]);
+        let cc_fields_fill = serde_json::json!({
+            "kind": "fill",
+            "fields": [{"ref": "e12", "type": "text", "value": "4242 4242 4242 4242"}]
+        });
+        assert!(super::browser_action_targeted_a_floored_ref(&cc_fields_fill, &payment_floor));
+
+        let mut ctx_by_target: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        super::browser_mark_target_acted_floored(&mut ctx_by_target, "chat_0");
+        let combined = super::browser_payment_context_for(&ctx_by_target, "chat_0");
+        assert!(combined, "last_acted_floored alone must floor, with NO focus signal");
+
+        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let reason = browser_safety::evaluate_browser_action(&enter, &payment_floor, combined, None)
+            .expect("a ref-less Enter following a floored fields[] fill must be rejected as under-declared payment_commit");
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+
+        // A fields[] fill hitting ONLY a non-floored ref must NOT set the flag.
+        let ordinary_fields_fill = serde_json::json!({
+            "kind": "fill",
+            "fields": [{"ref": "e1", "value": "Napoli"}, {"ref": "e2", "value": "Milano"}]
+        });
+        assert!(!super::browser_action_targeted_a_floored_ref(&ordinary_fields_fill, &payment_floor));
+
+        // A bundle whose item uses fields[] to hit a floored ref counts too.
+        let bundle = serde_json::json!({
+            "actions": [
+                {"kind": "click", "ref": "e1"},
+                {"kind": "fill", "fields": [{"ref": "e12", "value": "4242"}]}
+            ]
+        });
+        assert!(super::browser_action_targeted_a_floored_ref(&bundle, &payment_floor));
+    }
+
+    // --- Build1 Fix 3: per-target floor set (cross-tab fail-open) ---
+
+    #[test]
+    fn browser_floor_for_target_defaults_to_empty_for_an_unobserved_target() {
+        let map: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        assert!(super::browser_floor_refs_for_target(&map, "chat_0").is_empty());
+    }
+
+    #[test]
+    fn browser_set_target_floor_only_touches_its_own_target() {
+        let mut map: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        super::browser_set_target_floor(
+            &mut map,
+            "chat_1",
+            std::collections::HashSet::from(["e5".to_string()]),
+        );
+        super::browser_set_target_floor(&mut map, "chat_0", std::collections::HashSet::new());
+        assert!(super::browser_floor_refs_for_target(&map, "chat_1").contains("e5"));
+        assert!(super::browser_floor_refs_for_target(&map, "chat_0").is_empty());
+    }
+
+    #[test]
+    fn browser_per_target_floor_set_survives_a_different_targets_observation_cross_tab_regression() {
+        // Build1 Fix 3 regression: a single global floor set let observing tab A
+        // clobber tab B's floor out from under it. Scenario from the review:
+        // observe tab B (floors e5), observe tab A (empties A only), act on tab
+        // B's e5 → last_acted_floored[B] set → a ref-less Enter on tab B floors.
+        let mut floor_by_target: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        super::browser_set_target_floor(
+            &mut floor_by_target,
+            "chat_1", // tab B
+            std::collections::HashSet::from(["e5".to_string()]),
+        );
+        super::browser_set_target_floor(
+            &mut floor_by_target,
+            "chat_0", // tab A — its own (empty) floor must not bleed into chat_1
+            std::collections::HashSet::new(),
+        );
+        let b_floor = super::browser_floor_refs_for_target(&floor_by_target, "chat_1");
+        assert!(
+            b_floor.contains("e5"),
+            "tab B's floor must survive tab A's unrelated observation"
+        );
+
+        // Act: type into tab B's e5 (a floored ref) — mirrors the enforcement
+        // site's PRE-act `browser_action_targeted_a_floored_ref` check, now read
+        // from chat_1's OWN entry rather than a single shared set.
+        let cvv_fill =
+            serde_json::json!({"kind": "type", "ref": "e5", "text": "123", "target_id": "chat_1"});
+        assert!(super::browser_action_targeted_a_floored_ref(&cvv_fill, &b_floor));
+
+        let mut ctx_by_target: std::collections::HashMap<String, super::BrowserPaymentContext> =
+            std::collections::HashMap::new();
+        super::browser_mark_target_acted_floored(&mut ctx_by_target, "chat_1");
+        assert!(super::browser_payment_context_for(&ctx_by_target, "chat_1"));
+        assert!(!super::browser_payment_context_for(&ctx_by_target, "chat_0"));
+
+        // A ref-less Enter on tab B must floor via last_acted_floored, using
+        // chat_1's own (still-intact) floor set.
+        let enter = serde_json::json!({"kind": "press", "key": "Enter", "action_class": "ordinary"});
+        let combined = super::browser_payment_context_for(&ctx_by_target, "chat_1");
+        let reason = browser_safety::evaluate_browser_action(&enter, &b_floor, combined, None)
+            .expect("ref-less Enter on tab B must be rejected as under-declared payment_commit");
+        assert!(reason.contains("BROWSER_ACTION_CLASS_CONFLICT"));
+    }
+
+    #[test]
     fn stale_ref_recovery_message_forbids_reusing_the_old_ref() {
         let msg = super::stale_ref_recovery_message(Some("e145"), "[ref=e200] Article");
         assert!(msg.contains("Do NOT retry e145"));
         assert!(msg.contains("NEW [ref=...]"));
         assert!(msg.contains("[ref=e200] Article"));
+        // The message is built off the shared engine marker so
+        // `local_first_engine::browser::is_stale_ref_recovery_result` recognizes it (MINOR 8).
+        assert!(local_first_engine::browser::is_stale_ref_recovery_result(&msg));
+    }
+
+    #[test]
+    fn stale_ref_error_detection_covers_common_playwright_phrasings() {
+        // MINOR 8: broadened beyond the original stale/detached pair to the phrasings Playwright
+        // actually throws, case-insensitively.
+        assert!(super::is_stale_ref_error("Error: stale element reference"));
+        assert!(super::is_stale_ref_error("element is DETACHED from document"));
+        assert!(super::is_stale_ref_error("Error: element is not attached to the DOM"));
+        assert!(super::is_stale_ref_error("Error: no node found for selector [ref=e12]"));
+        assert!(super::is_stale_ref_error("NO NODE FOUND for selector"));
+        assert!(!super::is_stale_ref_error("Error: timeout waiting for selector"));
     }
 
     #[test]
@@ -64320,6 +67148,148 @@ prs.save(Path({path:?}))
             .unwrap()
             .contains("APPLY TO THE CURRENT RUN"));
         assert!(second.is_empty());
+    }
+
+    #[test]
+    fn gateway_projects_and_acknowledges_structured_turn_control() {
+        let state = super::AppState::for_tests();
+        let user_id = super::gateway_user_id();
+        let objective = state.task_store.lock().unwrap().upsert_objective_contract(
+            user_id.as_str(),
+            "workspace-a",
+            "thread-1",
+            "message-objective",
+            "Find train results",
+            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+            &serde_json::json!({}),
+            &serde_json::json!(["read"]),
+            &serde_json::json!({"deliverable": "results"}),
+            "active",
+        ).unwrap();
+        let pending = state.task_store.lock().unwrap().append_turn_steering(
+            user_id.as_str(),
+            "workspace-a",
+            "thread-1",
+            "turn-1",
+            &local_first_task_runtime::NewTurnSteering {
+                source_message_id: "message-control".into(),
+                prompt: "answer with current evidence".into(),
+                visible_prompt: "answer with current evidence".into(),
+                images: Vec::new(),
+                attachments: serde_json::json!([]),
+                mode: None,
+                model: None,
+            },
+            objective.revision,
+        ).unwrap();
+        let claimed = state.task_store.lock().unwrap().claim_pending_turn_steering(
+            user_id.as_str(), "workspace-a", "thread-1", "turn-1", "run-1", 1,
+        ).unwrap().remove(0);
+        let mut decision = super::semantic_decision::safe_fallback(None, "fixture");
+        decision.provenance.fallback_reason = None;
+        decision.decision.relationship_to_active_objective =
+            super::semantic_decision::ObjectiveRelationship::CompatibleExtension;
+        decision.decision.steering_disposition =
+            super::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence;
+        let interpreted = state.task_store.lock().unwrap().mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::to_value(decision).unwrap(),
+            "run-1",
+        ).unwrap();
+        let context = crate::model_client::GatewaySteeringContext {
+            state: &state,
+            user_id: user_id.as_str(),
+            workspace_id: "workspace-a",
+            thread_id: "thread-1",
+            turn_id: "turn-1",
+            run_id: "run-1",
+        };
+
+        let control = crate::model_client::current_turn_control(context).unwrap();
+        assert_eq!(control.steering_id, pending.steering_id);
+        assert_eq!(
+            control.disposition,
+            local_first_engine::TurnControlDisposition::FinalizeWithCurrentEvidence
+        );
+        crate::model_client::acknowledge_turn_control_applied(context, control.steering_id);
+        assert_eq!(
+            state.task_store.lock().unwrap().load_turn_steering(
+                control.steering_id, user_id.as_str(), "workspace-a",
+            ).unwrap().unwrap().status,
+            local_first_task_runtime::TurnSteeringStatus::Applied
+        );
+        crate::model_client::acknowledge_turn_control_completed(context, control.steering_id);
+        let completed = state.task_store.lock().unwrap().load_turn_steering(
+            control.steering_id, user_id.as_str(), "workspace-a",
+        ).unwrap().unwrap();
+        assert_eq!(completed.status, local_first_task_runtime::TurnSteeringStatus::Completed);
+        assert!(completed.revision > interpreted.revision);
+    }
+
+    #[test]
+    fn gateway_confirmation_requirement_overrides_the_requested_disposition() {
+        let state = super::AppState::for_tests();
+        let user_id = super::gateway_user_id();
+        let objective = state.task_store.lock().unwrap().upsert_objective_contract(
+            user_id.as_str(),
+            "workspace-a",
+            "thread-1",
+            "message-objective",
+            "Find train results",
+            local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+            &serde_json::json!({}),
+            &serde_json::json!(["read"]),
+            &serde_json::json!({"deliverable": "results"}),
+            "active",
+        ).unwrap();
+        state.task_store.lock().unwrap().append_turn_steering(
+            user_id.as_str(),
+            "workspace-a",
+            "thread-1",
+            "turn-1",
+            &local_first_task_runtime::NewTurnSteering {
+                source_message_id: "message-confirm".into(),
+                prompt: "change the active objective".into(),
+                visible_prompt: "change the active objective".into(),
+                images: Vec::new(),
+                attachments: serde_json::json!([]),
+                mode: None,
+                model: None,
+            },
+            objective.revision,
+        ).unwrap();
+        let claimed = state.task_store.lock().unwrap().claim_pending_turn_steering(
+            user_id.as_str(), "workspace-a", "thread-1", "turn-1", "run-1", 1,
+        ).unwrap().remove(0);
+        let mut decision = super::semantic_decision::safe_fallback(None, "fixture");
+        decision.provenance.fallback_reason = None;
+        decision.decision.relationship_to_active_objective =
+            super::semantic_decision::ObjectiveRelationship::CompatibleExtension;
+        decision.decision.steering_disposition =
+            super::semantic_decision::SteeringDisposition::ReplanCurrentWork;
+        decision.decision.requires_user_confirmation = true;
+        state.task_store.lock().unwrap().mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::to_value(decision).unwrap(),
+            "run-1",
+        ).unwrap();
+        let context = crate::model_client::GatewaySteeringContext {
+            state: &state,
+            user_id: user_id.as_str(),
+            workspace_id: "workspace-a",
+            thread_id: "thread-1",
+            turn_id: "turn-1",
+            run_id: "run-1",
+        };
+
+        let control = crate::model_client::current_turn_control(context).unwrap();
+
+        assert_eq!(
+            control.disposition,
+            local_first_engine::TurnControlDisposition::NeedsClarification
+        );
     }
 
     #[test]
@@ -65223,7 +68193,25 @@ prs.save(Path({path:?}))
                 missing_kind,
                 super::CapabilityError::SchemaValidationFailed(_)
             ),
-            "act without kind must be a typed validation error, got {missing_kind:?}"
+            "act without kind/actions must be a typed validation error, got {missing_kind:?}"
+        );
+        let valid_bundle = facade
+            .call_tool(
+                &policy,
+                call(
+                    "browser_act",
+                    serde_json::json!({
+                        "actions": [
+                            {"kind": "type", "ref": "e1", "text": "Napoli"},
+                            {"kind": "click", "ref": "e2"}
+                        ]
+                    }),
+                ),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(valid_bundle, super::CapabilityError::ProviderUnavailable(_)),
+            "a well-formed action bundle must clear validation and reach the executor, got {valid_bundle:?}"
         );
 
         // Valid args PASS validation — proven because execution is reached and the
@@ -69527,6 +72515,231 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     }
 
     #[test]
+    fn semantic_auth_fallback_prefers_a_usable_different_provider() {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut cloud = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        cloud.active_model = Some("deepseek-v4-pro".into());
+        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        registry.upsert(cloud);
+
+        let mut local = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        local.models = vec![
+            super::model_registry::ModelEntry::inferred("deepseek-v4-pro:cloud"),
+            super::model_registry::ModelEntry::inferred("gemma4:12b"),
+        ];
+        registry.upsert(local);
+
+        let fallback =
+            super::auth_fallback_resolved_role_from_registry(&registry, "deepseek-v4-pro", |_| {
+                false
+            })
+            .unwrap();
+
+        assert_eq!(fallback.provider_id, "ollama");
+        assert_eq!(fallback.model, "gemma4:12b");
+        assert_eq!(fallback.kind, super::model_registry::ProviderKind::Ollama);
+    }
+
+    #[test]
+    fn semantic_decision_auth_fallback_prefers_qualified_local_json_model() {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut cloud = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        cloud.active_model = Some("deepseek-v4-pro".into());
+        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        registry.upsert(cloud);
+
+        let mut local = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        local.models = vec![
+            super::model_registry::ModelEntry::inferred("gemma4:12b"),
+            super::model_registry::ModelEntry::inferred("qwen3.5:2b"),
+            super::model_registry::ModelEntry::inferred("qwen3.5:4b"),
+        ];
+        registry.upsert(local);
+
+        let fallback = super::semantic_decision_auth_fallback_resolved_role_from_registry(
+            &registry,
+            "deepseek-v4-pro",
+            |_| false,
+        )
+        .unwrap();
+
+        assert_eq!(fallback.provider_id, "ollama");
+        assert_eq!(fallback.model, "qwen3.5:4b");
+        assert_eq!(fallback.kind, super::model_registry::ProviderKind::Ollama);
+    }
+
+    // Malformed URL: RequestBuilder::build() surfaces the stored parse error
+    // synchronously without performing any network I/O or needing an async runtime.
+    fn sample_reqwest_request_error() -> reqwest::Error {
+        reqwest::blocking::Client::new()
+            .get("not a valid url")
+            .build()
+            .expect_err("malformed URL should fail to build a request")
+    }
+
+    fn semantic_decision_auth_fallback_test_resolved(model: &str) -> super::model_registry::ResolvedRole {
+        super::model_registry::ResolvedRole {
+            role: "orchestrator".to_string(),
+            provider_id: "cloud".to_string(),
+            model: model.to_string(),
+            kind: super::model_registry::ProviderKind::OpenaiCompat,
+            base_url: "https://api.example.test/v1".to_string(),
+            auto: false,
+            tier: super::model_registry::ModelTier::Balanced,
+        }
+    }
+
+    // Registry with a distinct, usable local fallback model (mirrors the fixture in
+    // `semantic_decision_auth_fallback_prefers_qualified_local_json_model`).
+    fn semantic_decision_auth_fallback_registry_with_fallback() -> super::model_registry::ProviderRegistry
+    {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut cloud = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        cloud.active_model = Some("deepseek-v4-pro".into());
+        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        registry.upsert(cloud);
+
+        let mut local = super::model_registry::ProviderEntry::new(
+            "ollama".into(),
+            "Ollama".into(),
+            super::model_registry::ProviderKind::Ollama,
+            "http://127.0.0.1:11434/v1".into(),
+        );
+        local.models = vec![super::model_registry::ModelEntry::inferred("qwen3.5:4b")];
+        registry.upsert(local);
+        registry
+    }
+
+    // Registry with no other provider and no local model at all: there is nothing
+    // distinct to fall back to.
+    fn semantic_decision_auth_fallback_registry_without_fallback(
+    ) -> super::model_registry::ProviderRegistry {
+        let mut registry = super::model_registry::ProviderRegistry::default();
+        let mut cloud = super::model_registry::ProviderEntry::new(
+            "cloud".into(),
+            "Cloud".into(),
+            super::model_registry::ProviderKind::OpenaiCompat,
+            "https://api.example.test/v1".into(),
+        );
+        cloud.active_model = Some("deepseek-v4-pro".into());
+        cloud.models = vec![super::model_registry::ModelEntry::inferred("deepseek-v4-pro")];
+        registry.upsert(cloud);
+        registry
+    }
+
+    #[test]
+    fn semantic_decision_auth_fallback_applies_beyond_401() {
+        use local_first_subagents::RuntimeClientError;
+
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(401)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(403)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(429)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(500)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(599)
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::StreamEndedWithoutDone
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"))
+        ));
+        assert!(super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Request(sample_reqwest_request_error())
+        ));
+
+        // Not a genuine availability signal: leave these ungated (unchanged behavior).
+        assert!(!super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(400)
+        ));
+        assert!(!super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Status(404)
+        ));
+        assert!(!super::semantic_decision_auth_fallback_applies(
+            &RuntimeClientError::Runtime {
+                code: "context_length_exceeded".to_string(),
+                message: "too long".to_string(),
+            }
+        ));
+    }
+
+    #[test]
+    fn semantic_decision_auth_fallback_attempts_configured_fallback_beyond_401() {
+        use local_first_subagents::RuntimeClientError;
+
+        let registry = semantic_decision_auth_fallback_registry_with_fallback();
+        let resolved = semantic_decision_auth_fallback_test_resolved("deepseek-v4-pro");
+
+        for error in [
+            RuntimeClientError::Status(403),
+            RuntimeClientError::Status(429),
+            RuntimeClientError::Status(500),
+            RuntimeClientError::StreamEndedWithoutDone,
+        ] {
+            let fallback = super::semantic_decision_auth_fallback_from_registry(
+                &error,
+                Some(&resolved),
+                &registry,
+                |_| false,
+            );
+            assert_eq!(
+                fallback.map(|role| role.model),
+                Some("qwen3.5:4b".to_string()),
+                "expected a fallback for {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_decision_auth_fallback_stays_pending_without_configured_fallback() {
+        use local_first_subagents::RuntimeClientError;
+
+        let registry = semantic_decision_auth_fallback_registry_without_fallback();
+        let resolved = semantic_decision_auth_fallback_test_resolved("deepseek-v4-pro");
+
+        let fallback = super::semantic_decision_auth_fallback_from_registry(
+            &RuntimeClientError::Status(500),
+            Some(&resolved),
+            &registry,
+            |_| false,
+        );
+        assert!(fallback.is_none());
+    }
+
+    #[test]
     fn privacy_guard_payload_disables_reasoning_and_requires_json_content() {
         let payload = super::privacy_guard_payload("qwen3.5:0.8b", "nessun segreto");
 
@@ -73735,6 +76948,65 @@ data: [DONE]\n";
         assert_eq!(body3["choices"][0]["message"]["content"], "hi");
     }
 
+    #[tokio::test]
+    async fn openai_stream_finishes_when_provider_sends_finish_reason_but_keeps_socket_open() {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test stream");
+        let address = listener.local_addr().expect("test stream address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept test stream");
+            let payload = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"final answer\"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: keep-alive\r\n\r\n{:X}\r\n{}\r\n",
+                payload.len(),
+                payload,
+            );
+            socket.write_all(response.as_bytes()).await.expect("write test stream");
+            socket.flush().await.expect("flush test stream");
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        });
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}"))
+            .send()
+            .await
+            .expect("open test stream");
+        let (mpsc, _mpsc_rx) = tokio::sync::mpsc::channel(4);
+        let (tx, _) = tokio::sync::broadcast::channel(4);
+        let sink = super::StreamSink {
+            mpsc,
+            entry: std::sync::Arc::new(super::StreamEntry {
+                lines: std::sync::Mutex::new(Vec::new()),
+                tx,
+                finished: std::sync::atomic::AtomicBool::new(false),
+                last_event_at: std::sync::atomic::AtomicU64::new(super::now_epoch_secs()),
+                thread_id: None,
+            }),
+        };
+
+        let body = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            super::collect_openai_stream(
+                response,
+                std::time::Duration::from_secs(1),
+                std::time::Duration::from_secs(30),
+                &sink,
+            ),
+        )
+        .await
+        .expect("finish_reason must terminate a stream without waiting for the idle timeout")
+        .expect("stream is valid");
+
+        server.abort();
+        assert_eq!(body["choices"][0]["message"]["content"], "final answer");
+        assert_eq!(body["choices"][0]["finish_reason"], "stop");
+    }
+
     #[test]
     fn ollama_native_routing_and_message_conversion() {
         // Detection: local daemon + cloud are Ollama; Z.ai / OpenAI are not.
@@ -75295,17 +78567,34 @@ data: [DONE]\n";
     }
 
     #[test]
-    fn act_gate_blocks_purchase_click() {
-        let snapshot = "- button \"Acquista ora\" [ref=e9]\n- textbox \"Da\" [ref=e1]";
-        let action = serde_json::json!({ "kind": "click", "ref": "e9", "target_id": "chat_0" });
-        assert!(browser_safety::high_risk_reason(&action, snapshot).is_some());
+    fn act_gate_blocks_final_payment_click_without_approval() {
+        // Machine floor marks e9 as the payment control — never label text.
+        let floor: std::collections::HashSet<String> =
+            std::collections::HashSet::from(["e9".to_string()]);
+        let action = serde_json::json!({
+            "kind": "click", "ref": "e9", "target_id": "chat_0", "action_class": "payment_commit"
+        });
+        assert!(browser_safety::evaluate_browser_action(&action, &floor, false, None).is_some());
+    }
+
+    #[test]
+    fn act_gate_allows_ordinary_click_before_payment() {
+        let action = serde_json::json!({
+            "kind": "click", "ref": "e9", "target_id": "chat_0", "action_class": "ordinary"
+        });
+        assert!(
+            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), false, None)
+                .is_none()
+        );
     }
 
     #[test]
     fn act_gate_allows_typing_into_field() {
-        let snapshot = "- textbox \"Da\" [ref=e1]";
         let action = serde_json::json!({ "kind": "type", "ref": "e1", "text": "Napoli", "target_id": "chat_0" });
-        assert!(browser_safety::high_risk_reason(&action, snapshot).is_none());
+        assert!(
+            browser_safety::evaluate_browser_action(&action, &std::collections::HashSet::new(), false, None)
+                .is_none()
+        );
     }
 
     #[test]
@@ -75321,6 +78610,30 @@ data: [DONE]\n";
         let value = serde_json::json!({ "snapshot": "- page", "url": "https://x" });
         assert_eq!(browser_snapshot_text(&value), "- page");
         assert_eq!(browser_snapshot_text(&serde_json::json!({})), "");
+    }
+
+    #[test]
+    fn browser_floor_refs_reads_sidecar_payment_floor() {
+        let value = serde_json::json!({
+            "snapshot": "- button \"Conferma\" [ref=e9]",
+            "paymentFloorRefs": ["e9"]
+        });
+        let refs = super::browser_floor_refs(&value);
+        assert!(refs.contains("e9"));
+        assert_eq!(refs.len(), 1);
+
+        let empty = serde_json::json!({ "snapshot": "- button \"Cerca\" [ref=e7]" });
+        assert!(super::browser_floor_refs(&empty).is_empty());
+    }
+
+    #[test]
+    fn sidecar_deadlines_match_the_budget() {
+        use std::time::Duration;
+        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Navigate), Duration::from_secs(25));
+        // Open creates+navigates a fresh tab (heavier than Navigate) → same 25s, not the 10s catch-all.
+        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Open), Duration::from_secs(25));
+        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Act), Duration::from_secs(15));
+        assert_eq!(super::browser_call_deadline(local_first_browser_automation::BrowserMethod::Snapshot), Duration::from_secs(10));
     }
 
     #[test]
@@ -77153,6 +80466,164 @@ data: [DONE]\n";
                 .delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Retrying
         );
+    }
+
+    #[test]
+    fn park_chat_turn_task_parks_the_running_task_and_aborts_its_run() {
+        let state = AppState::for_tests();
+        let user = super::gateway_user_id();
+        let workspace = WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            "turn_park_wrapper",
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "prompt",
+            serde_json::json!({}),
+        );
+        task.status = TaskStatus::Running;
+        {
+            let store = super::lock_task_store(&state).unwrap();
+            store.insert_task(&task).unwrap();
+            store
+                .create_agent_run(&local_first_task_runtime::NewAgentRun {
+                    run_id: "agent_run_park_wrapper".to_string(),
+                    turn_id: task.task_id.as_str().to_string(),
+                    thread_id: "thread_park_wrapper".to_string(),
+                    user_id: user.as_str().to_string(),
+                    workspace_id: workspace.as_str().to_string(),
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+        }
+
+        super::park_chat_turn_task(&state, Some(task.task_id.as_str()), &user, &workspace);
+
+        let persisted = super::lock_task_store(&state)
+            .unwrap()
+            .get_task(&task.task_id, &user, &workspace)
+            .unwrap()
+            .expect("task still present");
+        assert_eq!(persisted.status, TaskStatus::Parked);
+        let runs = super::lock_task_store(&state)
+            .unwrap()
+            .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
+            .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            runs[0].terminal_reason.as_deref(),
+            Some("parked_waiting_for_model")
+        );
+    }
+
+    #[test]
+    fn park_chat_turn_task_is_a_noop_without_a_broker_turn_id() {
+        let state = AppState::for_tests();
+        // The engine can only reach `TurnDelivery::Parked` with a live steering context, which
+        // requires a broker turn_id — but the wrapper must not panic if that invariant is ever
+        // violated (e.g. a non-broker call somehow parks). Nothing to park, nothing crashes.
+        super::park_chat_turn_task(
+            &state,
+            None,
+            &super::gateway_user_id(),
+            &WorkspaceId::new("workspace_test"),
+        );
+    }
+
+    #[test]
+    fn parked_chat_turn_short_circuits_the_runner_without_a_terminal_event_or_failed_bubble() {
+        let state = AppState::for_tests();
+        let thread = super::lock_store(&state)
+            .unwrap()
+            .create_thread("workspace_test")
+            .unwrap();
+        let mut assistant = super::channel_chat_message_with_id(
+            "assistant",
+            "",
+            "local_assistant_park_guard",
+        );
+        assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
+        super::lock_store(&state)
+            .unwrap()
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .unwrap();
+
+        let user = super::gateway_user_id();
+        let workspace = WorkspaceId::new("workspace_test");
+        let mut task = TaskRecord::new(
+            "turn_park_guard",
+            user.clone(),
+            workspace.clone(),
+            "chat_turn",
+            "prompt",
+            serde_json::json!({
+                "thread_id": thread.thread_id,
+                "assistant_message_id": assistant.id,
+            }),
+        );
+        task.status = TaskStatus::Running;
+        {
+            let store = super::lock_task_store(&state).unwrap();
+            store.insert_task(&task).unwrap();
+            store
+                .create_agent_run(&local_first_task_runtime::NewAgentRun {
+                    run_id: "agent_run_park_guard".to_string(),
+                    turn_id: task.task_id.as_str().to_string(),
+                    thread_id: thread.thread_id.clone(),
+                    user_id: user.as_str().to_string(),
+                    workspace_id: workspace.as_str().to_string(),
+                    model: None,
+                    provider: None,
+                    prompt_fingerprint: None,
+                })
+                .unwrap();
+            // Simulate `run_agent_rounds`'s outcome consumer having already parked the turn
+            // (T2's `park_chat_turn`, wired to this exact call in `park_chat_turn_task`).
+            store
+                .park_chat_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
+                .unwrap();
+        }
+        task.status = TaskStatus::Parked;
+
+        // (b) the runner's guard sees the task as parked — this is what makes it skip
+        // `handle_failed_task_run` in `run_next_task_once` instead of clobbering the status.
+        assert!(super::chat_turn_task_is_parked(
+            &state, &task, &user, &workspace
+        ));
+        let runs = super::lock_task_store(&state)
+            .unwrap()
+            .list_agent_runs_for_turn(task.task_id.as_str(), user.as_str(), workspace.as_str())
+            .unwrap();
+        assert_eq!(
+            runs[0].terminal_reason.as_deref(),
+            Some("parked_waiting_for_model")
+        );
+
+        // (c) the assistant bubble was NEVER touched by the park path — still `Streaming`,
+        // not `Failed`/`Completed`/`Cancelled` (no half-finalized bubble).
+        let stored = super::lock_store(&state)
+            .unwrap()
+            .message(&thread.thread_id, &assistant.id)
+            .unwrap()
+            .expect("assistant message still present");
+        assert_eq!(
+            stored.delivery_state,
+            local_first_desktop_gateway::MessageDeliveryState::Streaming
+        );
+
+        // (a) no terminal turn event exists for this turn — park emits none.
+        let events = super::lock_task_store(&state)
+            .unwrap()
+            .read_turn_events(task.task_id.as_str(), 0)
+            .unwrap();
+        assert!(!events.iter().any(|event| matches!(
+            event.kind,
+            local_first_task_runtime::TurnEventKind::Done
+                | local_first_task_runtime::TurnEventKind::Error
+                | local_first_task_runtime::TurnEventKind::Cancelled
+        )));
     }
 
     #[test]

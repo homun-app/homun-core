@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Non-ARIA autocomplete fixture</title>
+  </head>
+  <body>
+    <h1>Cerca stazione</h1>
+    <!-- Deliberately NO role/aria-*/list attribute on the input — mirrors a
+         real-world typeahead (e.g. Trenitalia's station picker) that renders a
+         suggestion list purely via JS/CSS with zero accessibility wiring, so
+         inputComboboxInfo's ARIA signals never fire and the sidecar must fall
+         back to scanning the rendered suggestion markup itself. -->
+    <label>
+      Stazione
+      <input id="station" placeholder="Digita la stazione" autocomplete="off" />
+    </label>
+    <ul class="suggestions-list" style="display: none"></ul>
+
+    <script>
+      const OPTIONS = ["Napoli Centrale", "Napoli Campi Flegrei"];
+      const input = document.getElementById("station");
+      const list = document.querySelector(".suggestions-list");
+
+      input.addEventListener("input", () => {
+        const q = input.value.trim().toLowerCase();
+        const matches = q ? OPTIONS.filter((o) => o.toLowerCase().startsWith(q)) : [];
+        list.replaceChildren();
+        for (const text of matches) {
+          const li = document.createElement("li");
+          li.className = "suggestion-item";
+          li.textContent = text;
+          // Deliberately plain — a real click handler, but no ARIA role.
+          li.addEventListener("click", () => {
+            input.value = text;
+            list.replaceChildren();
+            list.style.display = "none";
+          });
+          list.appendChild(li);
+        }
+        list.style.display = matches.length ? "block" : "none";
+      });
+    </script>
+  </body>
+</html>

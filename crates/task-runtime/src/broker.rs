@@ -721,8 +721,8 @@ pub fn cancel_chat_turn(
     task.status = TaskStatus::Cancelled;
     task.blocked_reason = Some("cancelled by user/server".into());
     task.updated_at = now;
+    store.release_resources(&task)?;
     if !was_running {
-        store.release_resources(&task)?;
         task.lease_owner = None;
         task.lease_expires_at = None;
         task.last_heartbeat_at = None;
@@ -1043,6 +1043,82 @@ mod cancel_tests {
             s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn cancel_releases_resources_when_turn_is_running_but_preserves_lease() {
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let mut task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        task.status = TaskStatus::Running;
+        task.lease_owner = Some("1:worker-a".into());
+        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full").unwrap();
+        s.reserve_resources(&task, "worker-a").unwrap();
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            1
+        );
+
+        assert!(cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
+
+        let cancelled = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+        assert_eq!(cancelled.lease_owner.as_deref(), Some("1:worker-a"));
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn cancel_of_a_parked_turn_ends_cancelled_with_exactly_one_terminal_event() {
+        // Steering park+resume (Build 2): a Parked turn is active (not in the
+        // idempotent guard's completed|failed|cancelled exclusion set) and has NO
+        // live executor (already unregistered/aborted at park time — see
+        // `park_chat_turn`). This exercises the store-level half of "cancel-of-parked"
+        // (task-runtime has no notion of the chat bubble; that finalize lives in the
+        // gateway and is covered there): the task must still end up genuinely
+        // `Cancelled`, with exactly one durable `Cancelled` terminal event.
+        let s = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("u");
+        let workspace = WorkspaceId::new("w");
+        let r = enqueue_chat_turn(&s, &user, &workspace, &make_input("r1", "t1")).unwrap();
+        let mut task = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        task.status = TaskStatus::Running;
+        s.insert_chat_turn(&task, "t1", "r1", "interactive", "full").unwrap();
+        s.reserve_resources(&task, "worker-a").unwrap();
+
+        s.park_chat_turn(r.task_id.as_str(), "u", "w").unwrap();
+        let parked = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        assert_eq!(parked.status, TaskStatus::Parked, "precondition: turn is parked");
+        assert_eq!(
+            s.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0,
+            "park already released the browser_session slot"
+        );
+
+        assert!(
+            cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap(),
+            "a parked turn is still cancellable"
+        );
+
+        let cancelled = s.get_task(&r.task_id, &user, &workspace).unwrap().unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+
+        let events = s.read_turn_events(r.task_id.as_str(), 0).unwrap();
+        assert_eq!(
+            events.iter().filter(|e| e.kind == TurnEventKind::Cancelled).count(),
+            1,
+            "exactly one Cancelled terminal event"
+        );
+
+        // Idempotent: cancelling the now-Cancelled turn again is a no-op and does
+        // not mint a second terminal event.
+        assert!(!cancel_chat_turn(&s, &user, &workspace, &r.task_id, &NoopCancelNotify).unwrap());
+        let events_after = s.read_turn_events(r.task_id.as_str(), 0).unwrap();
+        assert_eq!(events_after.iter().filter(|e| e.kind == TurnEventKind::Cancelled).count(), 1);
     }
 
     #[test]

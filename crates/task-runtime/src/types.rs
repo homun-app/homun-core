@@ -89,10 +89,79 @@ pub enum TaskStatus {
     WaitingUserApproval,
     WaitingResource,
     Paused,
+    /// Hit the finalization boundary with steering the coordinator could not interpret
+    /// (semantic model unavailable): checkpointed and parked instead of spinning. An
+    /// ACTIVE, non-terminal state — NOT part of any terminal set, and NOT picked up by
+    /// the scheduler's `Queued|Pending` dispatch (unlike `Queued`, which would busy-run
+    /// it). Only the coordinator's resume trigger (probe confirms model availability)
+    /// flips this back to `Queued` via `unpark_chat_turn_to_queued`. Existing terminal
+    /// checks (`active_chat_turn_on`, `project_thread_activity`) already treat anything
+    /// outside `completed/failed/cancelled/expired/finalizing` as active, so a new user
+    /// message on this thread becomes steering, not a second turn.
+    Parked,
     Completed,
     Failed,
     Cancelled,
     Expired,
+}
+
+impl TaskStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::WaitingTime => "waiting_time",
+            Self::WaitingExternalEvent => "waiting_external_event",
+            Self::WaitingUserApproval => "waiting_user_approval",
+            Self::WaitingResource => "waiting_resource",
+            Self::Paused => "paused",
+            Self::Parked => "parked",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Expired => "expired",
+        }
+    }
+}
+
+impl std::fmt::Display for TaskStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for TaskStatus {
+    type Err = String;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "pending" => Ok(Self::Pending),
+            "running" => Ok(Self::Running),
+            "waiting_time" => Ok(Self::WaitingTime),
+            "waiting_external_event" => Ok(Self::WaitingExternalEvent),
+            "waiting_user_approval" => Ok(Self::WaitingUserApproval),
+            "waiting_resource" => Ok(Self::WaitingResource),
+            "paused" => Ok(Self::Paused),
+            "parked" => Ok(Self::Parked),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            "expired" => Ok(Self::Expired),
+            _ => Err(format!("unknown task status: {value}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod task_status_tests {
+    use super::TaskStatus;
+
+    #[test]
+    fn task_status_parked_round_trips() {
+        assert_eq!(TaskStatus::Parked.as_str(), "parked");
+        assert_eq!("parked".parse::<TaskStatus>().unwrap(), TaskStatus::Parked);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -289,6 +358,12 @@ pub struct TurnSteeringRecord {
     pub applied_at: Option<i64>,
     pub cancelled_at: Option<i64>,
     pub consumed_at: Option<i64>,
+    pub semantic_decision_json: Option<Value>,
+    pub interpreted_at: Option<i64>,
+    pub completed_at: Option<i64>,
+    pub last_interpretation_error: Option<String>,
+    pub next_retry_at: Option<i64>,
+    pub interpretation_attempts: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -296,7 +371,9 @@ pub struct TurnSteeringRecord {
 pub enum TurnSteeringStatus {
     Pending,
     Claimed,
+    Interpreted,
     Applied,
+    Completed,
     Held,
     Cancelled,
     Promoted,
@@ -307,7 +384,9 @@ impl TurnSteeringStatus {
         match self {
             Self::Pending => "pending",
             Self::Claimed => "claimed",
+            Self::Interpreted => "interpreted",
             Self::Applied => "applied",
+            Self::Completed => "completed",
             Self::Held => "held",
             Self::Cancelled => "cancelled",
             Self::Promoted => "promoted",
@@ -327,7 +406,9 @@ impl std::str::FromStr for TurnSteeringStatus {
         match value {
             "pending" => Ok(Self::Pending),
             "claimed" | "consumed" => Ok(Self::Claimed),
+            "interpreted" => Ok(Self::Interpreted),
             "applied" => Ok(Self::Applied),
+            "completed" => Ok(Self::Completed),
             "held" => Ok(Self::Held),
             "cancelled" => Ok(Self::Cancelled),
             "promoted" => Ok(Self::Promoted),

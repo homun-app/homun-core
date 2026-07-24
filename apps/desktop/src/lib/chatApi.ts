@@ -11,6 +11,7 @@ import type {
 } from "./coreBridge";
 import { buildJuicePromptChatContext } from "./contextBudget";
 import { DESKTOP_GATEWAY_URL, gatewayHeaders } from "./gatewayConfig";
+import { createStreamSequenceGate } from "./streamSequenceGate";
 
 // One alternative at a branch point: the sibling node and the leaf to activate to
 // display its branch, plus an optional name (Phase 4).
@@ -28,6 +29,7 @@ export interface CoreBranchPoint {
 
 const streamEventListeners = new Set<(payload: CoreChatStreamEvent) => void>();
 const streamListeners = new Set<(payload: CoreChatStreamDelta) => void>();
+const publishedStreamSequences = createStreamSequenceGate();
 let activeThreadId = "thread_active_prompt";
 let localThreads: CoreChatThread[] = [
   {
@@ -525,6 +527,7 @@ function notifyChatStreamDelta(payload: CoreChatStreamDelta) {
 }
 
 function notifyChatStreamEvent(payload: CoreChatStreamEvent) {
+  if (!publishedStreamSequences.accept(payload)) return;
   for (const listener of streamEventListeners) {
     listener(payload);
   }
@@ -760,7 +763,9 @@ export type EnqueueTurnResponse = QueuedTurnResponse | SteeringQueuedResponse;
 export type TurnSteeringStatus =
   | "pending"
   | "claimed"
+  | "interpreted"
   | "applied"
+  | "completed"
   | "held"
   | "cancelled"
   | "promoted";
@@ -788,6 +793,13 @@ export interface TurnSteeringRecord {
   claimed_at: number | null;
   applied_at: number | null;
   cancelled_at: number | null;
+  consumed_at: number | null;
+  semantic_decision_json: unknown | null;
+  interpreted_at: number | null;
+  completed_at: number | null;
+  last_interpretation_error: string | null;
+  next_retry_at: number | null;
+  interpretation_attempts: number;
 }
 
 export interface SteeringMutation {
@@ -1002,6 +1014,22 @@ export async function openTurnStream(turnId: string, since: number = 0): Promise
     throw new Error(`openTurnStream: HTTP ${res.status}: ${await gatewayErrorMessage(res)}`);
   }
   return res;
+}
+
+export interface TurnStatusResponse {
+  turn_id: string;
+  thread_id: string | null;
+  request_id: string | null;
+  status: string;
+  source: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function fetchTurnStatus(turnId: string): Promise<TurnStatusResponse> {
+  return gatewayJson<TurnStatusResponse>(
+    `/api/chat/turns/${encodeURIComponent(turnId)}`,
+  );
 }
 
 /** Durable cockpit projection for the working island (mirrors the Rust

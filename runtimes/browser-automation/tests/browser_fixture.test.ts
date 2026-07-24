@@ -256,6 +256,247 @@ describe("browser sidecar engine", () => {
     expect(snapshot.snapshot).toContain("/docs");
   });
 
+  it("returns bounded interact, delta and extract observations", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/train`, label: "train" });
+
+    const interact = await manager.snapshot({
+      targetId: "train",
+      observationMode: "interact",
+    } as never);
+    expect(interact.observationMode).toBe("interact");
+    expect(interact.generation).toBeGreaterThan(0);
+    expect(interact.fingerprint).toMatch(/^snap_/);
+    expect(interact.stats.chars).toBeLessThanOrEqual(6_200);
+    expect(interact.snapshot).toContain('textbox "Da"');
+
+    const from = interact.refs.find((ref) => ref.name === "Da");
+    const typed = await manager.act({
+      targetId: "train",
+      kind: "type",
+      ref: from!.ref,
+      text: "Nap",
+      observationMode: "delta",
+      generation: interact.generation,
+    } as never);
+    expect(typed.observationMode).toBe("delta");
+    expect(typed.generation).toBeGreaterThan(interact.generation);
+    expect(typed.fingerprint).toMatch(/^snap_/);
+    expect(typed.stats!.chars).toBeLessThanOrEqual(8_200);
+    expect(JSON.stringify(typed)).toContain("Napoli Centrale");
+
+    const extract = await manager.snapshot({
+      targetId: "train",
+      observationMode: "extract",
+      maxChars: 16_000,
+    } as never);
+    expect(extract.observationMode).toBe("extract");
+    expect(extract.generation).toBeGreaterThan(typed.generation!);
+    expect(extract.stats.chars).toBeLessThanOrEqual(16_200);
+  });
+
+  // Pins the real-world regression: structuralDelta's basis must be the last
+  // FULL raw accessibility snapshot, not whatever text was actually displayed
+  // (an interact-role-filtered view, or a previous marked delta). Diffing the
+  // next full raw snapshot against a filtered/marked previous makes nearly
+  // every line look "added", spuriously tripping the ref-churn fallback and
+  // collapsing delta mode into a full-page dump on the two common sequences
+  // (interact->delta, delta->delta). Against the buggy displayed-text basis
+  // this test fails (the fallback fires and the unrelated heading leaks into
+  // the "delta"); against the full-raw-snapshot basis it passes.
+  it("yields a small marked delta (not a full-page fallback) across an interact-then-delta sequence with one genuine change", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/train`, label: "train" });
+
+    const interact = await manager.snapshot({
+      targetId: "train",
+      observationMode: "interact",
+    } as never);
+    const from = interact.refs.find((ref) => ref.name === "Da");
+
+    const typed = await manager.act({
+      targetId: "train",
+      kind: "type",
+      ref: from!.ref,
+      text: "Nap",
+      observationMode: "delta",
+      generation: interact.generation,
+    } as never);
+    expect(typed.observationMode).toBe("delta");
+
+    const delta = typed.snapshot!;
+    // A genuine delta only ever contains marked add/remove lines for what
+    // changed; it must never echo unrelated, unchanged static content (the
+    // page's <h1>) the way the full-page fallback would.
+    expect(delta).not.toContain("Cerca treni");
+    // The two new autocomplete suggestions must show up as marked additions.
+    const addedLines = delta.split("\n").filter((line) => line.startsWith("+ "));
+    expect(addedLines.some((line) => line.includes("Napoli Centrale"))).toBe(true);
+    // Bounded well below the delta char cap (8_000) — proof this is a small
+    // incremental diff, not a truncated full-page dump that happens to fit.
+    expect(delta.length).toBeLessThan(600);
+
+    // A second, delta-then-delta step over another genuine change must stay
+    // small too — the basis fix must hold across repeated delta calls, not
+    // just the first one after an interact call.
+    const to = interact.refs.find((ref) => ref.name === "A");
+    const typedAgain = await manager.act({
+      targetId: "train",
+      kind: "type",
+      ref: to!.ref,
+      text: "Mil",
+      observationMode: "delta",
+      generation: typed.generation,
+    } as never);
+    const secondDelta = typedAgain.snapshot!;
+    expect(secondDelta).not.toContain("Cerca treni");
+    const secondAddedLines = secondDelta.split("\n").filter((line) => line.startsWith("+ "));
+    expect(secondAddedLines.some((line) => line.includes("Milano Centrale"))).toBe(true);
+    expect(secondDelta.length).toBeLessThan(600);
+  });
+
+  it("executes a chat bundle of four actions and rejects nested or oversized bundles", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/train`, label: "train" });
+    const snapshot = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const accept = snapshot.refs.find((ref) => ref.name === "Accetta tutto");
+    const from = snapshot.refs.find((ref) => ref.name === "Da");
+
+    const accepted = accept
+      ? await manager.act({
+          targetId: "train",
+          kind: "batch",
+          chatBundle: true,
+          generation: snapshot.generation,
+          actions: [{ targetId: "train", kind: "click", ref: accept.ref }],
+          observationMode: "delta",
+        } as never)
+      : snapshot;
+    if (accept) {
+      expect(accepted).toMatchObject({ ok: true });
+    }
+
+    const afterAccept = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const fromRef = afterAccept.refs.find((ref) => ref.name === "Da") ?? from;
+    const bundle = await manager.act({
+      targetId: "train",
+      kind: "batch",
+      chatBundle: true,
+      generation: afterAccept.generation,
+      actions: [
+        { targetId: "train", kind: "type", ref: fromRef!.ref, text: "Nap" },
+        { targetId: "train", kind: "wait", text: "Napoli Centrale", timeoutMs: 2_000 },
+      ],
+      observationMode: "delta",
+    } as never);
+    expect(bundle.batchResults).toHaveLength(2);
+    expect(bundle.completedActions).toBe(2);
+    expect(JSON.stringify(bundle)).toContain("Napoli Centrale");
+
+    await expect(
+      manager.act({
+        targetId: "train",
+        kind: "batch",
+        chatBundle: true,
+        generation: bundle.generation,
+        actions: [
+          { targetId: "train", kind: "wait", text: "x" },
+          { targetId: "train", kind: "wait", text: "x" },
+          { targetId: "train", kind: "wait", text: "x" },
+          { targetId: "train", kind: "wait", text: "x" },
+          { targetId: "train", kind: "wait", text: "x" },
+        ],
+      } as never),
+    ).rejects.toMatchObject({ code: "BROWSER_CHAT_BUNDLE_TOO_LARGE" });
+
+    await expect(
+      manager.act({
+        targetId: "train",
+        kind: "batch",
+        chatBundle: true,
+        generation: bundle.generation,
+        actions: [{ targetId: "train", kind: "batch", actions: [] }],
+      } as never),
+    ).rejects.toMatchObject({ code: "BROWSER_NESTED_BATCH_REJECTED" });
+  });
+
+  it("rejects a chat bundle from a stale observation generation", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "booking" });
+    const first = await manager.snapshot({ targetId: "booking", observationMode: "interact" } as never);
+    await manager.snapshot({ targetId: "booking", observationMode: "interact" } as never);
+    const name = first.refs.find((ref) => ref.name === "Name");
+
+    await expect(
+      manager.act({
+        targetId: "booking",
+        kind: "batch",
+        chatBundle: true,
+        generation: first.generation,
+        actions: [{ targetId: "booking", kind: "type", ref: name!.ref, text: "Ada" }],
+      } as never),
+    ).rejects.toMatchObject({ code: "BROWSER_STALE_GENERATION" });
+  });
+
+  it("fills train search with bounded bundles and extracts three result cards", async () => {
+    await manager.start();
+    await manager.open({ url: `${baseUrl}/train`, label: "train" });
+    const first = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const accept = first.refs.find((ref) => ref.name === "Accetta tutto");
+    if (accept) {
+      await manager.act({
+        targetId: "train",
+        kind: "batch",
+        chatBundle: true,
+        generation: first.generation,
+        actions: [{ targetId: "train", kind: "click", ref: accept.ref }],
+        observationMode: "delta",
+      } as never);
+    }
+
+    const form = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const from = form.refs.find((ref) => ref.name === "Da");
+    const to = form.refs.find((ref) => ref.name === "A");
+    const typed = await manager.act({
+      targetId: "train",
+      kind: "batch",
+      chatBundle: true,
+      generation: form.generation,
+      actions: [
+        { targetId: "train", kind: "type", ref: from!.ref, text: "Nap" },
+        { targetId: "train", kind: "type", ref: to!.ref, text: "Mil" },
+      ],
+      observationMode: "delta",
+    } as never);
+    expect(typed.completedActions).toBe(2);
+
+    const ready = await manager.snapshot({ targetId: "train", observationMode: "interact" } as never);
+    const date = ready.refs.find((ref) => ref.name === "Scegli data");
+    const search = ready.refs.find((ref) => ref.name === "Cerca");
+    await manager.act({
+      targetId: "train",
+      kind: "batch",
+      chatBundle: true,
+      generation: ready.generation,
+      actions: [
+        { targetId: "train", kind: "click", ref: date!.ref },
+        { targetId: "train", kind: "wait", text: "10 giugno 2026", timeoutMs: 2_000 },
+        { targetId: "train", kind: "click", ref: search!.ref },
+        { targetId: "train", kind: "wait", text: "FR 9512", timeoutMs: 3_000 },
+      ],
+      observationMode: "extract",
+    } as never);
+
+    const extract = await manager.snapshot({ targetId: "train", observationMode: "extract" } as never);
+    const text = extract.snapshot;
+    expect(text).toContain("FR 9512");
+    expect(text).toContain("Intercity 590");
+    expect(text).toContain("Italo 9920");
+    expect(text).toContain("€49.90");
+    expect(text).toContain("€39.90");
+    expect(text).toContain("€54.90");
+  });
+
   it("selects options and can snapshot after an explicit fill_form request", async () => {
     await manager.start();
     await manager.open({ url: baseUrl, label: "booking" });
@@ -358,6 +599,59 @@ describe("browser sidecar engine", () => {
     });
     expect(waited).toMatchObject({ ok: true, targetId: "booking" });
   }, 15_000);
+
+  // Critical B: `kind: "scroll"` with a `ref` used to `.click()` that ref before
+  // scrolling — a scroll on a floored Pay button could submit it ungated. It must
+  // now only bring the element into view, like scrollIntoView/scroll_into_view.
+  it("does not click a ref when scrolling — only scrolls it into view", async () => {
+    await manager.start();
+    await manager.open({ url: baseUrl, label: "booking" });
+    const snapshot = await manager.snapshot({ targetId: "booking" });
+    const submit = snapshot.refs.find((ref) => ref.name === "Submit");
+    expect(submit?.ref).toBeDefined();
+
+    // The fixture's #submit button sits below a 110vh spacer (`<div
+    // style="height: 110vh">`), so it starts out of view — confirm that, so
+    // the "now in view" assertion below is actually exercising the scroll.
+    const before = await manager.act({
+      targetId: "booking",
+      kind: "evaluate",
+      ref: submit!.ref,
+      fn: "(el) => el.getBoundingClientRect().top",
+    });
+    expect(before.result as number).toBeGreaterThan(600);
+
+    const scrolled = await manager.act({
+      targetId: "booking",
+      kind: "scroll",
+      ref: submit!.ref,
+    });
+    expect(scrolled).toMatchObject({ ok: true, targetId: "booking" });
+
+    // Not clicked: the fixture's #submit click handler is the ONLY thing that
+    // ever writes to #result, so an empty #result proves no click fired.
+    const resultText = await manager.act({
+      targetId: "booking",
+      kind: "evaluate",
+      fn: "() => document.querySelector('#result').textContent",
+    });
+    expect(resultText.result).toBe("");
+
+    // Scrolled into view: the element is now within the viewport's vertical bounds.
+    const after = await manager.act({
+      targetId: "booking",
+      kind: "evaluate",
+      ref: submit!.ref,
+      fn: "(el) => el.getBoundingClientRect().top",
+    });
+    const viewportHeight = await manager.act({
+      targetId: "booking",
+      kind: "evaluate",
+      fn: "() => window.innerHeight",
+    });
+    expect(after.result as number).toBeGreaterThanOrEqual(0);
+    expect(after.result as number).toBeLessThanOrEqual(viewportHeight.result as number);
+  });
 
   it("returns a classified timeout error for impossible waits", async () => {
     await manager.start();

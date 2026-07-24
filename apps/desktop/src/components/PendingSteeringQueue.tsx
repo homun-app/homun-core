@@ -44,9 +44,20 @@ export function PendingSteeringQueue({
   if (rows.length === 0) return null;
 
   const statusLabel = (row: TurnSteeringRecord) => {
-    if (row.status === "claimed") return t("chat.steeringApplied");
+    if (row.status === "pending") return t("chat.steeringWaitingForModel");
+    if (row.status === "claimed") return t("chat.steeringInterpreting");
+    if (row.status === "interpreted") return t("chat.steeringUnderstood");
+    if (row.status === "applied") return t("chat.steeringApplying");
     if (row.status === "held") return t("chat.steeringHeld");
     return t("chat.steeringRequest");
+  };
+
+  const statusIcon = (row: TurnSteeringRecord) => {
+    if (row.status === "interpreted") return <Check size={13} />;
+    if (row.status === "pending" || row.status === "claimed" || row.status === "applied") {
+      return <Loader2 className="pending-steering-state-icon" size={12} />;
+    }
+    return null;
   };
 
   const run = async (row: TurnSteeringRecord, action: () => Promise<void>) => {
@@ -113,7 +124,7 @@ export function PendingSteeringQueue({
 
             {!editing && (
               <span className="pending-steering-status">
-                {row.status === "claimed" ? <Check size={13} /> : null}
+                {statusIcon(row)}
                 {statusLabel(row)}
                 <small>#{index + 1}</small>
               </span>

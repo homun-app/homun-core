@@ -423,7 +423,7 @@ export function WorkspaceIsland({
                 aria-expanded={activityOpen}
                 onClick={() => setActivityOpen((value) => !value)}
               >
-                <span>Activity</span>
+                <span>{streaming ? t("chat.activity") : t("chat.lastActivity")}</span>
                 <em>{activitySteps.length}</em>
                 <ChevronDown
                   size={14}

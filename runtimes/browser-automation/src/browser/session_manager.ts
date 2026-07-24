@@ -42,6 +42,17 @@ type PageState = {
   page: Page;
   label?: string;
   refs: Map<string, Locator>;
+  generation: number;
+  // The last FULL raw accessibility snapshot (pre-role-filter, pre-delta —
+  // see BrowserSnapshot.rawSnapshot), independent of whatever was actually
+  // displayed to the model. This, not the displayed snapshot, is the basis
+  // fed to the NEXT delta call: diffing full-raw against a previously
+  // *displayed* (role-filtered "interact" view, or already diff-marked)
+  // snapshot made nearly every line read as "added" and spuriously tripped
+  // structuralDelta's ref-churn fallback on ordinary interact->delta and
+  // delta->delta sequences, collapsing delta mode into a full-page dump.
+  lastFullSnapshot?: string;
+  lastSnapshotFingerprint?: string;
   consoleMessages: ConsoleEntry[];
   pendingDialog?: Dialog;
   dialogWaiters: Array<(dialog: Dialog) => void>;
@@ -225,6 +236,11 @@ export class BrowserSessionManager {
       chars: number;
       refs: number;
     };
+    generation: number;
+    fingerprint: string;
+    observationMode: "interact" | "delta" | "extract";
+    paymentFloorRefs: string[];
+    focusPaymentContext: boolean;
   }> {
     const state = await this.resolvePage(params.targetId);
     // Let late content settle before snapshotting: a static page (Wikipedia) is already
@@ -233,8 +249,15 @@ export class BrowserSessionManager {
     // snapshotting an empty shell. Bounded so it never hangs on a never-idle SPA.
     await state.page.waitForLoadState("networkidle", { timeout: 2_500 }).catch(() => {});
     await dismissCommonOverlays(state.page);
-    const snapshot = await createSnapshot(state.page, params.targetId, params);
+    state.generation += 1;
+    const snapshot = await createSnapshot(state.page, params.targetId, {
+      ...params,
+      previousSnapshot: state.lastFullSnapshot,
+      generation: state.generation,
+    });
     state.refs = snapshot.refLocators;
+    state.lastFullSnapshot = snapshot.rawSnapshot;
+    state.lastSnapshotFingerprint = snapshot.fingerprint;
     return {
       targetId: snapshot.targetId,
       url: snapshot.url,
@@ -243,12 +266,25 @@ export class BrowserSessionManager {
       refsMode: snapshot.refsMode,
       snapshotFormat: snapshot.snapshotFormat,
       stats: snapshot.stats,
+      generation: snapshot.generation,
+      fingerprint: snapshot.fingerprint,
+      observationMode: snapshot.observationMode,
+      paymentFloorRefs: snapshot.paymentFloorRefs,
+      focusPaymentContext: snapshot.focusPaymentContext,
     };
   }
 
   async act(action: BrowserActRequest): Promise<BrowserActionResult> {
     const state = await this.resolvePage(action.targetId);
     await dismissCommonOverlays(state.page);
+    const requestedGeneration = Number((action as Record<string, unknown>).generation);
+    if (Number.isFinite(requestedGeneration) && requestedGeneration > 0 && requestedGeneration !== state.generation) {
+      throw new BrowserAutomationError({
+        code: "BROWSER_STALE_GENERATION",
+        message: `action generation ${requestedGeneration} does not match current page generation ${state.generation}`,
+        retryable: true,
+      });
+    }
     if (action.kind === "click" && action.ref && state.armedFileChooser) {
       const files = state.armedFileChooser;
       state.armedFileChooser = undefined;
@@ -264,8 +300,15 @@ export class BrowserSessionManager {
       return result;
     }
     await waitForPageToSettle(state.page, action);
-    const snapshot = await createSnapshot(state.page, action.targetId);
+    state.generation += 1;
+    const snapshot = await createSnapshot(state.page, action.targetId, {
+      ...(action as Record<string, unknown>),
+      previousSnapshot: state.lastFullSnapshot,
+      generation: state.generation,
+    } as BrowserSnapshotOptions);
     state.refs = snapshot.refLocators;
+    state.lastFullSnapshot = snapshot.rawSnapshot;
+    state.lastSnapshotFingerprint = snapshot.fingerprint;
     return {
       ...result,
       targetId: snapshot.targetId,
@@ -274,6 +317,11 @@ export class BrowserSessionManager {
       refsMode: snapshot.refsMode,
       snapshotFormat: snapshot.snapshotFormat,
       stats: snapshot.stats,
+      generation: snapshot.generation,
+      fingerprint: snapshot.fingerprint,
+      observationMode: snapshot.observationMode,
+      paymentFloorRefs: snapshot.paymentFloorRefs,
+      focusPaymentContext: snapshot.focusPaymentContext,
     };
   }
 
@@ -470,6 +518,7 @@ export class BrowserSessionManager {
       page,
       label,
       refs: new Map(),
+      generation: 0,
       consoleMessages: [],
       dialogWaiters: [],
     };

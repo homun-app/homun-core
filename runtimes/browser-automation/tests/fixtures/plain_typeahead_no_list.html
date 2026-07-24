@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <title>Plain field fixture (no suggestion list at all)</title>
+  </head>
+  <body>
+    <h1>Note libere</h1>
+    <!-- No role/aria-*/list attribute AND no suggestion machinery whatsoever —
+         proves the non-ARIA fallback is a true no-op (never mis-selects, never
+         hangs) on an ordinary field with nothing resembling a typeahead. -->
+    <label>
+      Note
+      <input id="note" placeholder="Testo libero" autocomplete="off" />
+    </label>
+  </body>
+</html>

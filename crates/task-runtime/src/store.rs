@@ -432,6 +432,12 @@ impl TaskStore {
             ("claimed_at", "INTEGER"),
             ("applied_at", "INTEGER"),
             ("cancelled_at", "INTEGER"),
+            ("semantic_decision_json", "TEXT"),
+            ("interpreted_at", "INTEGER"),
+            ("completed_at", "INTEGER"),
+            ("last_interpretation_error", "TEXT"),
+            ("next_retry_at", "INTEGER"),
+            ("interpretation_attempts", "INTEGER NOT NULL DEFAULT 0"),
         ];
         for (column, definition) in steering_columns {
             if !column_exists(&self.connection, "turn_steering", column) {
@@ -446,7 +452,7 @@ impl TaskStore {
             [],
         )?;
         self.connection.execute(
-            "UPDATE task_runtime_metadata SET value = '9' WHERE key = 'schema_version'",
+            "UPDATE task_runtime_metadata SET value = '10' WHERE key = 'schema_version'",
             [],
         )?;
         // Partial index: only chat_turn rows (thread_id IS NOT NULL). Indexes the
@@ -625,6 +631,26 @@ impl TaskStore {
         Ok(record)
     }
 
+    /// Upserts the thread's single objective contract. Idempotent on the objective's
+    /// SUBSTANTIVE identity (review I1, steering park+resume Build 2): `revision`
+    /// only bumps when `objective` (text) or `mode` actually differ from the stored
+    /// row; every other field (scope/allowed_actions/completion/status) still always
+    /// updates to the latest projection, just without forcing a new revision.
+    ///
+    /// This matters because `execute_chat_turn_task` calls this on EVERY dispatch of
+    /// a chat_turn, including a coordinator-driven RESUME of a parked turn — which
+    /// re-derives the objective from a fresh model call. A fresh call's raw semantic
+    /// decision (confidence/rationale, embedded in `scope_json`) is essentially never
+    /// byte-identical even when the underlying objective is unchanged, so gating the
+    /// bump on the full row (as an unconditional `revision + 1` effectively did) bumps
+    /// on every resume — desyncing the resumed run's objective revision from the
+    /// `objective_revision` a pending steering row was queued against. That mismatch
+    /// makes `steering_requires_confirmation`'s `!revision_matches` unconditionally
+    /// true, silently downgrading an otherwise-actionable steering decision to
+    /// `NeedsClarification` right when resume is supposed to apply it. Comparing only
+    /// `objective` + `mode` (the contract's actual identity) keeps "a genuinely
+    /// different objective forces reinterpretation" intact while making "the exact
+    /// same ask, re-derived" a no-op on the revision counter.
     #[allow(clippy::too_many_arguments)]
     pub fn upsert_objective_contract(
         &self,
@@ -660,7 +686,12 @@ impl TaskStore {
                 allowed_actions_json = excluded.allowed_actions_json,
                 completion_json = excluded.completion_json,
                 status = excluded.status,
-                revision = objective_contracts.revision + 1,
+                revision = CASE
+                    WHEN objective_contracts.objective = excluded.objective
+                     AND objective_contracts.mode = excluded.mode
+                    THEN objective_contracts.revision
+                    ELSE objective_contracts.revision + 1
+                END,
                 updated_at = excluded.updated_at",
             params![
                 user_id,
@@ -745,22 +776,27 @@ impl TaskStore {
                 "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
                         source_message_id, content, payload_json, objective_revision, status,
                         revision, created_at, updated_at, claimed_run_id, claimed_round,
-                        claimed_at, applied_at, cancelled_at, consumed_at
+                        claimed_at, applied_at, cancelled_at, consumed_at,
+                        semantic_decision_json, interpreted_at, completed_at,
+                        last_interpretation_error, next_retry_at, interpretation_attempts
                  FROM turn_steering
                  WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
                    AND active_turn_id = ?4 AND status = 'pending'
+                   AND (next_retry_at IS NULL OR next_retry_at <= ?5)
                  ORDER BY steering_id ASC",
             )?;
             statement
-                .query_map(params![user_id, workspace_id, thread_id, active_turn_id], map_turn_steering_row)?
+                .query_map(params![user_id, workspace_id, thread_id, active_turn_id, now], map_turn_steering_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
         tx.execute(
             "UPDATE turn_steering
              SET status = 'claimed', claimed_run_id = ?1, claimed_round = ?2,
-                 claimed_at = ?3, consumed_at = ?3, updated_at = ?3
+                 claimed_at = ?3, consumed_at = ?3, updated_at = ?3,
+                 revision = revision + 1
              WHERE user_id = ?4 AND workspace_id = ?5 AND thread_id = ?6
-               AND active_turn_id = ?7 AND status = 'pending'",
+               AND active_turn_id = ?7 AND status = 'pending'
+               AND (next_retry_at IS NULL OR next_retry_at <= ?3)",
             params![run_id, round as i64, now, user_id, workspace_id, thread_id, active_turn_id],
         )?;
         tx.commit()?;
@@ -773,6 +809,7 @@ impl TaskStore {
                 record.claimed_at = Some(now);
                 record.updated_at = now;
                 record.consumed_at = Some(now);
+                record.revision += 1;
                 record
             })
             .collect())
@@ -800,13 +837,64 @@ impl TaskStore {
             "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
                     source_message_id, content, payload_json, objective_revision, status,
                     revision, created_at, updated_at, claimed_run_id, claimed_round,
-                    claimed_at, applied_at, cancelled_at, consumed_at
+                    claimed_at, applied_at, cancelled_at, consumed_at,
+                    semantic_decision_json, interpreted_at, completed_at,
+                    last_interpretation_error, next_retry_at, interpretation_attempts
              FROM turn_steering
              WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3
              ORDER BY steering_id ASC",
         )?;
         Ok(statement
             .query_map(params![user_id, workspace_id, thread_id], map_turn_steering_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_interpreted_turn_steering(
+        &self,
+        user_id: &str,
+        workspace_id: &str,
+        thread_id: &str,
+        active_turn_id: &str,
+        run_id: &str,
+    ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                    source_message_id, content, payload_json, objective_revision, status,
+                    revision, created_at, updated_at, claimed_run_id, claimed_round,
+                    claimed_at, applied_at, cancelled_at, consumed_at,
+                    semantic_decision_json, interpreted_at, completed_at,
+                    last_interpretation_error, next_retry_at, interpretation_attempts
+             FROM turn_steering
+             WHERE user_id=?1 AND workspace_id=?2 AND thread_id=?3 AND active_turn_id=?4
+               AND claimed_run_id=?5 AND status='interpreted'
+             ORDER BY steering_id ASC",
+        )?;
+        Ok(statement
+            .query_map(
+                params![user_id, workspace_id, thread_id, active_turn_id, run_id],
+                map_turn_steering_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    pub fn list_due_pending_turn_steering(
+        &self,
+        now: i64,
+        limit: usize,
+    ) -> TaskRuntimeResult<Vec<TurnSteeringRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                    source_message_id, content, payload_json, objective_revision, status,
+                    revision, created_at, updated_at, claimed_run_id, claimed_round,
+                    claimed_at, applied_at, cancelled_at, consumed_at,
+                    semantic_decision_json, interpreted_at, completed_at,
+                    last_interpretation_error, next_retry_at, interpretation_attempts
+             FROM turn_steering
+             WHERE status='pending' AND (next_retry_at IS NULL OR next_retry_at <= ?1)
+             ORDER BY steering_id ASC LIMIT ?2",
+        )?;
+        Ok(statement
+            .query_map(params![now, limit as i64], map_turn_steering_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -884,24 +972,140 @@ impl TaskStore {
         ).optional().map_err(Into::into)
     }
 
-    pub fn mark_turn_steering_applied(&self, ids: &[i64], run_id: &str) -> TaskRuntimeResult<()> {
-        if ids.is_empty() { return Ok(()); }
+    pub fn mark_turn_steering_interpreted(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        semantic_decision_json: &Value,
+        run_id: &str,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
-        let tx = self.connection.unchecked_transaction()?;
-        for id in ids {
-            tx.execute("UPDATE turn_steering SET status='applied', applied_at=?1, updated_at=?1
-                        WHERE steering_id=?2 AND status='claimed' AND claimed_run_id=?3",
-                params![now, id, run_id])?;
+        let changed = self.connection.execute(
+            "UPDATE turn_steering
+             SET status='interpreted', semantic_decision_json=?1, interpreted_at=?2,
+                 last_interpretation_error=NULL, next_retry_at=NULL,
+                 revision=revision+1, updated_at=?2
+             WHERE steering_id=?3 AND revision=?4 AND status='claimed' AND claimed_run_id=?5",
+            params![serde_json::to_string(semantic_decision_json)?, now, steering_id, expected_revision as i64, run_id],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict("steering changed before interpretation".into()));
         }
-        tx.commit()?;
-        Ok(())
+        load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
+    pub fn mark_turn_steering_applied(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        run_id: &str,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        self.transition_interpreted_steering(
+            steering_id, expected_revision, run_id, "interpreted", "applied", "applied_at",
+        )
+    }
+
+    pub fn mark_turn_steering_completed(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        run_id: &str,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        self.transition_interpreted_steering(
+            steering_id, expected_revision, run_id, "applied", "completed", "completed_at",
+        )
+    }
+
+    fn transition_interpreted_steering(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        run_id: &str,
+        from_status: &str,
+        to_status: &str,
+        timestamp_column: &str,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let sql = format!(
+            "UPDATE turn_steering SET status=?1, {timestamp_column}=?2,
+                    revision=revision+1, updated_at=?2
+             WHERE steering_id=?3 AND revision=?4 AND status=?5 AND claimed_run_id=?6"
+        );
+        let changed = self.connection.execute(
+            &sql,
+            params![to_status, now, steering_id, expected_revision as i64, from_status, run_id],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict(format!("steering changed before transition to {to_status}")));
+        }
+        load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
+    pub fn release_turn_steering_for_retry(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        error: &str,
+        next_retry_at: i64,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE turn_steering
+             SET status='pending', claimed_run_id=NULL, claimed_round=NULL, claimed_at=NULL,
+                 semantic_decision_json=NULL, interpreted_at=NULL,
+                 last_interpretation_error=?1, next_retry_at=?2,
+                 interpretation_attempts=interpretation_attempts+1,
+                 revision=revision+1, updated_at=?3
+             WHERE steering_id=?4 AND revision=?5 AND status='claimed'",
+            params![error, next_retry_at, now, steering_id, expected_revision as i64],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict("steering changed before retry release".into()));
+        }
+        load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
+    }
+
+    /// Records a coordinator interpretation attempt against a row that is STILL
+    /// `pending` (never claimed) — the `status='pending'` counterpart of
+    /// `release_turn_steering_for_retry` (which requires `status='claimed'`).
+    /// Needed because the coordinator's park-resume probe and its orphan-row
+    /// detection (steering park+resume, Build 2) both deliberately do NOT claim
+    /// before they touch the model/diagnose the turn (design: no `claimed_run_id`
+    /// binding to a dead parked/orphaned run) — bounded backoff on those rows has
+    /// nowhere else to live. The row stays `pending`; only the bookkeeping columns
+    /// change, so a later poll cycle can still pick it up once `next_retry_at` passes.
+    pub fn defer_pending_turn_steering(
+        &self,
+        steering_id: i64,
+        expected_revision: u64,
+        error: &str,
+        next_retry_at: i64,
+    ) -> TaskRuntimeResult<TurnSteeringRecord> {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let changed = self.connection.execute(
+            "UPDATE turn_steering
+             SET last_interpretation_error=?1, next_retry_at=?2,
+                 interpretation_attempts=interpretation_attempts+1,
+                 revision=revision+1, updated_at=?3
+             WHERE steering_id=?4 AND revision=?5 AND status='pending'",
+            params![error, next_retry_at, now, steering_id, expected_revision as i64],
+        )?;
+        if changed == 0 {
+            return Err(TaskRuntimeError::Conflict("steering changed before retry defer".into()));
+        }
+        load_turn_steering_unscoped_by_id(&self.connection, steering_id)?
+            .ok_or_else(|| TaskRuntimeError::NotFound("steering".into()))
     }
 
     pub fn hold_pending_turn_steering(&self, user_id: &str, workspace_id: &str, active_turn_id: &str) -> TaskRuntimeResult<usize> {
         let now = OffsetDateTime::now_utc().unix_timestamp();
         Ok(self.connection.execute(
             "UPDATE turn_steering SET status='held', revision=revision+1, updated_at=?1
-             WHERE user_id=?2 AND workspace_id=?3 AND active_turn_id=?4 AND status='pending'",
+             WHERE user_id=?2 AND workspace_id=?3 AND active_turn_id=?4
+               AND status IN ('pending','claimed','interpreted')",
             params![now, user_id, workspace_id, active_turn_id],
         )?)
     }
@@ -918,7 +1122,8 @@ impl TaskStore {
         let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
         let pending: i64 = tx.query_row(
             "SELECT COUNT(*) FROM turn_steering
-             WHERE user_id=?1 AND workspace_id=?2 AND active_turn_id=?3 AND status='pending'",
+             WHERE user_id=?1 AND workspace_id=?2 AND active_turn_id=?3
+               AND status IN ('pending','claimed','interpreted')",
             params![user_id, workspace_id, active_turn_id],
             |row| row.get(0),
         )?;
@@ -1044,7 +1249,7 @@ impl TaskStore {
                  JOIN agent_runs r ON r.run_id = c.run_id
                  WHERE c.turn_id = ?1 AND c.user_id = ?2 AND c.workspace_id = ?3
                    AND c.resumable = 1 AND r.status = 'aborted'
-                   AND r.terminal_reason = 'gateway_restart'
+                   AND r.terminal_reason IN ('gateway_restart', 'parked_waiting_for_model')
                  ORDER BY c.created_at DESC, c.round DESC
                  LIMIT 1",
                 params![turn_id, user_id, workspace_id],
@@ -2176,6 +2381,190 @@ impl TaskStore {
         )?)
     }
 
+    /// Parks a running chat turn at its finalization boundary: aborts the running
+    /// agent run with `terminal_reason = "parked_waiting_for_model"` (preserving its
+    /// resumable checkpoint intact — mirrors `abort_running_agent_runs_for_turn`'s
+    /// gateway-restart abort, just with a different reason string) and flips the
+    /// chat_turn task `running -> parked`. `Parked` is an active, non-terminal status
+    /// the scheduler's `Queued|Pending` dispatch never picks up; only the coordinator's
+    /// resume trigger (`unpark_chat_turn_to_queued`) moves it forward. Still-`pending`
+    /// steering rows are untouched (left `pending` for the resumed run to interpret);
+    /// any `claimed`-but-not-yet-`interpreted` row is released back to `pending` (see
+    /// below — review I2). Idempotent: a no-op if the task is not currently `running`
+    /// (already parked/terminal/gone).
+    ///
+    /// Releasing `claimed` rows (review I2, steering park+resume Build 2): the
+    /// finalization fence only parks once its bounded wait finds nothing newly
+    /// INTERPRETED (an interpreted row is drained/applied before park — see
+    /// `agent_loop`'s fence), so the only steering states that can still be present
+    /// at park time are `pending` (never claimed) or `claimed` (the coordinator
+    /// claimed it under the run that's being aborted right now, but interpretation
+    /// hadn't finished within the park budget). A `claimed` row left bound to the
+    /// now-aborted run would (a) never appear in `list_due_pending_turn_steering`
+    /// (pending-only — the coordinator would never re-probe it) and (b) permanently
+    /// block `fence_chat_turn_finalization` (which counts `pending|claimed|interpreted`)
+    /// on the RESUMED run too, since nothing can ever finish interpreting a claim bound
+    /// to a dead run — re-parking at every fence forever. Releasing it back to
+    /// `pending` here lets the resumed run's coordinator poll re-claim and interpret it
+    /// normally, same as any other pending row.
+    ///
+    /// Releases the task's resource reservation (e.g. the single shared `BrowserSession`
+    /// slot, `broker::chat_turn_resource_requirements`) and clears its lease, mirroring
+    /// EVERY other "leave Running" transition in this codebase
+    /// (`mark_task_waiting_external`/`mark_task_completed` in the gateway,
+    /// `recover_chat_turns_at_boot` here) — a parked turn can wait for the model
+    /// indefinitely, so without this it would hold the slot for the whole park, blocking
+    /// every OTHER chat's browser use (the "stuck turn holds browser_session" class this
+    /// project already fixed elsewhere). Resume (`unpark_chat_turn_to_queued` ->
+    /// `Queued`) re-reserves through the normal dispatch path
+    /// (`acquire_task_for_execution` -> `ResourceGovernor::reserve`), same as any other
+    /// queued task.
+    pub fn park_chat_turn(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<()> {
+        self.abort_running_agent_runs_for_turn(
+            turn_id,
+            user_id,
+            workspace_id,
+            "parked_waiting_for_model",
+        )?;
+
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let task_json: Option<String> = tx
+            .query_row(
+                "SELECT task_json FROM tasks
+                 WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+                   AND kind = 'chat_turn' AND status = 'running'",
+                params![turn_id, user_id, workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(task_json) = task_json else {
+            tx.commit()?;
+            return Ok(());
+        };
+        // Keep the task_json blob's embedded status in sync with the status column —
+        // unlike the SQL-only `finalizing` sentinel, `Parked` is a real TaskStatus
+        // variant that `get_task`/`list_tasks` readers (dispatch, projections) rely on.
+        let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+        // Same connection, still inside `tx`'s open transaction (rusqlite statements are
+        // connection-scoped, not handle-scoped) — this DELETE commits/rolls back atomically
+        // with the status flip below. `lease_owner`/`lease_expires_at`/`last_heartbeat_at`
+        // have no dedicated SQL columns (they only live inside `task_json`, same as every
+        // other TaskRecord field besides status/priority/kind/etc.), so clearing them on
+        // the struct before re-serializing is sufficient — there is nothing else to null out.
+        self.release_resources(&task)?;
+        task.status = TaskStatus::Parked;
+        task.lease_owner = None;
+        task.lease_expires_at = None;
+        task.last_heartbeat_at = None;
+        task.updated_at = OffsetDateTime::now_utc();
+        tx.execute(
+            "UPDATE tasks SET status = ?1, updated_at = ?2, task_json = ?3
+             WHERE task_id = ?4 AND user_id = ?5 AND workspace_id = ?6 AND status = 'running'",
+            params![
+                TaskStatus::Parked.as_str(),
+                task.updated_at.unix_timestamp(),
+                serde_json::to_string(&task)?,
+                turn_id,
+                user_id,
+                workspace_id,
+            ],
+        )?;
+        // Release any `claimed`-but-not-`interpreted` steering row back to `pending`
+        // (review I2 — see the doc comment above): unbinds it from the run just
+        // aborted so the due-scan (pending-only) and a resumed run's fresh claim can
+        // both see it again, instead of parking forever on a claim nothing can ever
+        // finish.
+        tx.execute(
+            "UPDATE turn_steering
+             SET status = 'pending', claimed_run_id = NULL, claimed_round = NULL,
+                 claimed_at = NULL, revision = revision + 1, updated_at = ?1
+             WHERE user_id = ?2 AND workspace_id = ?3 AND active_turn_id = ?4
+               AND status = 'claimed'",
+            params![
+                OffsetDateTime::now_utc().unix_timestamp(),
+                user_id,
+                workspace_id,
+                turn_id,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Flips a parked chat turn back to `queued` (the resume trigger): the normal
+    /// scheduler re-dispatches it, and the resumed run reseeds from the park
+    /// checkpoint via the now-widened `latest_resumable_checkpoint_for_turn`.
+    /// Returns whether a parked row was actually flipped (`false` if the task
+    /// wasn't `parked` — e.g. already resumed by a concurrent call, or cancelled).
+    ///
+    /// Also resets `interpretation_attempts`/backoff on the turn's still-`pending`
+    /// steering (review C1 hardening, steering park+resume Build 2): that counter is
+    /// SHARED by the parked-model-down probe's backoff and the coordinator's orphan
+    /// budget (`MAX_ORPHAN_INTERPRETATION_ATTEMPTS` in `steering_control.rs`).
+    /// Without this reset, attempts built up purely from waiting out a model outage
+    /// would carry forward into the resumed turn — letting ordinary probe backoffs
+    /// alone tip a resumed (and about-to-be-applied) steering into `held` the moment
+    /// any later poll is misread as orphaned. A successful resume is a natural,
+    /// deliberate point to zero the slate.
+    pub fn unpark_chat_turn_to_queued(
+        &self,
+        turn_id: &str,
+        user_id: &str,
+        workspace_id: &str,
+    ) -> TaskRuntimeResult<bool> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let task_json: Option<String> = tx
+            .query_row(
+                "SELECT task_json FROM tasks
+                 WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3
+                   AND kind = 'chat_turn' AND status = 'parked'",
+                params![turn_id, user_id, workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(task_json) = task_json else {
+            tx.commit()?;
+            return Ok(false);
+        };
+        let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+        task.status = TaskStatus::Queued;
+        task.updated_at = OffsetDateTime::now_utc();
+        let changed = tx.execute(
+            "UPDATE tasks SET status = ?1, updated_at = ?2, task_json = ?3
+             WHERE task_id = ?4 AND user_id = ?5 AND workspace_id = ?6 AND status = 'parked'",
+            params![
+                TaskStatus::Queued.as_str(),
+                task.updated_at.unix_timestamp(),
+                serde_json::to_string(&task)?,
+                turn_id,
+                user_id,
+                workspace_id,
+            ],
+        )?;
+        if changed == 1 {
+            tx.execute(
+                "UPDATE turn_steering
+                 SET interpretation_attempts = 0, next_retry_at = NULL,
+                     last_interpretation_error = NULL, revision = revision + 1, updated_at = ?1
+                 WHERE user_id = ?2 AND workspace_id = ?3 AND active_turn_id = ?4
+                   AND status = 'pending'",
+                params![
+                    OffsetDateTime::now_utc().unix_timestamp(),
+                    user_id,
+                    workspace_id,
+                    turn_id,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed == 1)
+    }
+
     /// Deletes every journal owned by one chat thread; event rows cascade with each run.
     pub fn purge_agent_runs_for_thread(
         &self,
@@ -2742,6 +3131,14 @@ fn map_turn_steering_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TurnSteeri
         applied_at: row.get(16)?,
         cancelled_at: row.get(17)?,
         consumed_at: row.get(18)?,
+        semantic_decision_json: row
+            .get::<_, Option<String>>(19)?
+            .and_then(|raw| serde_json::from_str(&raw).ok()),
+        interpreted_at: row.get(20)?,
+        completed_at: row.get(21)?,
+        last_interpretation_error: row.get(22)?,
+        next_retry_at: row.get(23)?,
+        interpretation_attempts: row.get::<_, i64>(24)? as u32,
     })
 }
 
@@ -2756,7 +3153,9 @@ pub(crate) fn load_turn_steering_by_source_message(
         "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
                 source_message_id, content, payload_json, objective_revision, status,
                 revision, created_at, updated_at, claimed_run_id, claimed_round,
-                claimed_at, applied_at, cancelled_at, consumed_at
+                claimed_at, applied_at, cancelled_at, consumed_at,
+                semantic_decision_json, interpreted_at, completed_at,
+                last_interpretation_error, next_retry_at, interpretation_attempts
          FROM turn_steering
          WHERE user_id = ?1 AND workspace_id = ?2 AND thread_id = ?3 AND source_message_id = ?4",
         params![user_id, workspace_id, thread_id, source_message_id],
@@ -2776,9 +3175,28 @@ fn load_turn_steering_by_id_on(
         "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
                 source_message_id, content, payload_json, objective_revision, status,
                 revision, created_at, updated_at, claimed_run_id, claimed_round,
-                claimed_at, applied_at, cancelled_at, consumed_at
+                claimed_at, applied_at, cancelled_at, consumed_at,
+                semantic_decision_json, interpreted_at, completed_at,
+                last_interpretation_error, next_retry_at, interpretation_attempts
          FROM turn_steering WHERE steering_id=?1 AND user_id=?2 AND workspace_id=?3",
         params![steering_id, user_id, workspace_id],
+        map_turn_steering_row,
+    ).optional().map_err(Into::into)
+}
+
+fn load_turn_steering_unscoped_by_id(
+    conn: &Connection,
+    steering_id: i64,
+) -> TaskRuntimeResult<Option<TurnSteeringRecord>> {
+    conn.query_row(
+        "SELECT steering_id, user_id, workspace_id, thread_id, active_turn_id,
+                source_message_id, content, payload_json, objective_revision, status,
+                revision, created_at, updated_at, claimed_run_id, claimed_round,
+                claimed_at, applied_at, cancelled_at, consumed_at,
+                semantic_decision_json, interpreted_at, completed_at,
+                last_interpretation_error, next_retry_at, interpretation_attempts
+         FROM turn_steering WHERE steering_id=?1",
+        params![steering_id],
         map_turn_steering_row,
     ).optional().map_err(Into::into)
 }
@@ -2872,7 +3290,7 @@ mod migration_tests {
         }
         // Re-running migrations must not panic (guarded ALTER).
         store.run_migrations().expect("idempotent re-run");
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         assert!(table_exists(&store.connection, "runtime_plans"));
@@ -2940,6 +3358,73 @@ mod runtime_plan_tests {
             .load_objective_contract("u", "other", "t")
             .unwrap()
             .is_none());
+    }
+
+    /// Review I1 regression: a resumed chat_turn re-derives its objective from a
+    /// fresh model call (`execute_chat_turn_task` calls `upsert_objective_contract`
+    /// on every dispatch, resume included). An unconditional `revision + 1` on that
+    /// re-derivation desyncs the resumed run's revision from whatever a pending
+    /// steering row was stamped with, forcing it into `NeedsClarification`. Same
+    /// `objective` + `mode` must be a no-op on the revision counter even when the
+    /// surrounding scope/allowed_actions/completion differ (as they realistically do —
+    /// scope_json embeds the raw semantic decision, including volatile
+    /// confidence/rationale text that is never byte-identical across two model calls).
+    #[test]
+    fn upsert_objective_contract_is_idempotent_on_unchanged_objective_and_mode() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let first = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-1",
+                "Investigate the failing test and report findings",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({"resources": ["project"], "semantic_decision": {"confidence": 0.91, "rationale": "first pass"}}),
+                &json!(["read"]),
+                &json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+
+        // Re-derived (e.g. a resume's fresh model call): SAME objective + mode, but a
+        // DIFFERENT scope_json (different confidence/rationale) and source_message_id.
+        let second = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-2",
+                "Investigate the failing test and report findings",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({"resources": ["project"], "semantic_decision": {"confidence": 0.87, "rationale": "second pass, slightly different wording"}}),
+                &json!(["read"]),
+                &json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+
+        assert_eq!(first.revision, second.revision, "unchanged objective/mode must not bump revision");
+        assert_eq!(second.source_message_id, "message-2", "provenance still updates");
+        assert_eq!(second.scope_json["semantic_decision"]["confidence"], 0.87, "other fields still update");
+
+        // A genuinely different objective still bumps (existing behavior preserved —
+        // matches `objective_contract_is_created_and_replaced_in_place` above).
+        let third = store
+            .upsert_objective_contract(
+                "u",
+                "w",
+                "t",
+                "message-3",
+                "Investigate the failing test AND fix the underlying bug",
+                ObjectiveMode::ReadOnlyAnalysis,
+                &json!({"resources": ["project"]}),
+                &json!(["read"]),
+                &json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+        assert_eq!(third.revision, second.revision + 1, "a changed objective still bumps");
     }
 
     #[test]
@@ -3118,6 +3603,174 @@ mod turn_steering_tests {
         assert!(matches!(store.update_turn_steering(row.steering_id, "u", "w", held.revision, &new_steering("stale")), Err(TaskRuntimeError::Conflict(_))));
         assert_eq!(store.cancel_turn_steering(row.steering_id, "u", "w", edited.revision).unwrap().status, TurnSteeringStatus::Cancelled);
     }
+
+    #[test]
+    fn manual_stop_holds_claimed_or_interpreted_steering_for_recovery() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("recover me"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
+        store.mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
+            "run-1",
+        ).unwrap();
+
+        assert_eq!(store.hold_pending_turn_steering("u", "w", "turn-1").unwrap(), 1);
+        let held = store.list_turn_steering("u", "w", "thread").unwrap().remove(0);
+        assert_eq!(held.status, TurnSteeringStatus::Held);
+        assert!(held.semantic_decision_json.is_some());
+    }
+
+    #[test]
+    fn steering_lifecycle_is_revision_guarded_until_runtime_completion() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("answer from current evidence"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 2).unwrap().remove(0);
+        let interpreted = store.mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
+            "run-1",
+        ).unwrap();
+        assert_eq!(interpreted.status, TurnSteeringStatus::Interpreted);
+        assert_eq!(interpreted.semantic_decision_json, Some(serde_json::json!({"steering_disposition": "finalize_with_current_evidence"})));
+
+        let applied = store.mark_turn_steering_applied(interpreted.steering_id, interpreted.revision, "run-1").unwrap();
+        assert_eq!(applied.status, TurnSteeringStatus::Applied);
+        let completed = store.mark_turn_steering_completed(applied.steering_id, applied.revision, "run-1").unwrap();
+        assert_eq!(completed.status, TurnSteeringStatus::Completed);
+        assert!(completed.completed_at.is_some());
+        assert!(matches!(
+            store.mark_turn_steering_completed(applied.steering_id, applied.revision, "run-1"),
+            Err(TaskRuntimeError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn finalization_fence_blocks_every_unapplied_steering_state() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let pending = store
+            .append_turn_steering(
+                "u",
+                "w",
+                "thread",
+                "turn-1",
+                &new_steering("finish from current evidence"),
+                1,
+            )
+            .unwrap();
+        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+
+        let claimed = store
+            .claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1)
+            .unwrap()
+            .remove(0);
+        assert_eq!(claimed.steering_id, pending.steering_id);
+        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+
+        let interpreted = store
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::json!({"steering_disposition": "finalize_with_current_evidence"}),
+                "run-1",
+            )
+            .unwrap();
+        assert!(!store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+
+        store
+            .mark_turn_steering_applied(
+                interpreted.steering_id,
+                interpreted.revision,
+                "run-1",
+            )
+            .unwrap();
+        assert!(store.fence_chat_turn_finalization("u", "w", "turn-1").unwrap());
+    }
+
+    #[test]
+    fn unavailable_interpreter_returns_steering_to_pending_with_retry_time() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("use what you already found"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 3).unwrap().remove(0);
+        let pending = store.release_turn_steering_for_retry(
+            claimed.steering_id, claimed.revision, "model_unavailable", 12345,
+        ).unwrap();
+        assert_eq!(pending.status, TurnSteeringStatus::Pending);
+        assert_eq!(pending.next_retry_at, Some(12345));
+        assert_eq!(pending.last_interpretation_error.as_deref(), Some("model_unavailable"));
+        assert_eq!(pending.interpretation_attempts, 1);
+        assert!(pending.applied_at.is_none());
+    }
+
+    #[test]
+    fn defer_pending_turn_steering_backs_off_a_never_claimed_row() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let row = store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("still waiting"), 1).unwrap();
+        assert_eq!(row.status, TurnSteeringStatus::Pending);
+
+        let deferred = store.defer_pending_turn_steering(
+            row.steering_id, row.revision, "model_unavailable", 999,
+        ).unwrap();
+        assert_eq!(deferred.status, TurnSteeringStatus::Pending, "stays pending — never claimed");
+        assert_eq!(deferred.next_retry_at, Some(999));
+        assert_eq!(deferred.last_interpretation_error.as_deref(), Some("model_unavailable"));
+        assert_eq!(deferred.interpretation_attempts, 1);
+        assert!(deferred.claimed_run_id.is_none());
+
+        // Revision-guarded like every other steering transition.
+        assert!(matches!(
+            store.defer_pending_turn_steering(row.steering_id, row.revision, "stale", 1000),
+            Err(TaskRuntimeError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn retry_backoff_rows_are_not_claimed_early() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("wait for semantic model"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
+        store.release_turn_steering_for_retry(
+            claimed.steering_id, claimed.revision, "model_unavailable", i64::MAX,
+        ).unwrap();
+
+        assert!(store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-2", 2).unwrap().is_empty());
+        assert_eq!(store.list_turn_steering("u", "w", "thread").unwrap().remove(0).status, TurnSteeringStatus::Pending);
+    }
+
+    #[test]
+    fn interpreted_rows_can_be_loaded_for_the_active_turn_without_pending_text() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("semantic control"), 1).unwrap();
+        let claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap().remove(0);
+        store.mark_turn_steering_interpreted(
+            claimed.steering_id,
+            claimed.revision,
+            &serde_json::json!({"steering_disposition": "replan_current_work"}),
+            "run-1",
+        ).unwrap();
+
+        let rows = store.list_interpreted_turn_steering("u", "w", "thread", "turn-1", "run-1").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, TurnSteeringStatus::Interpreted);
+        assert_eq!(rows[0].content, "semantic control");
+    }
+
+    #[test]
+    fn due_pending_scan_excludes_future_backoff_and_non_pending_rows() {
+        let store = TaskStore::open_in_memory().unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("due"), 1).unwrap();
+        store.append_turn_steering("u", "w", "thread", "turn-1", &new_steering("future"), 1).unwrap();
+        let mut claimed = store.claim_pending_turn_steering("u", "w", "thread", "turn-1", "run-1", 1).unwrap();
+        let future = claimed.pop().unwrap();
+        let due = claimed.pop().unwrap();
+        store.release_turn_steering_for_retry(future.steering_id, future.revision, "model_unavailable", i64::MAX).unwrap();
+        store.release_turn_steering_for_retry(due.steering_id, due.revision, "model_unavailable", 1).unwrap();
+
+        let rows = store.list_due_pending_turn_steering(10, 20).unwrap();
+        assert_eq!(rows.iter().map(|row| row.content.as_str()).collect::<Vec<_>>(), vec!["due"]);
+    }
 }
 
 #[cfg(test)]
@@ -3172,6 +3825,174 @@ mod agent_control_state_tests {
             .unwrap()
             .unwrap();
         assert_eq!(checkpoint.round, 2);
+    }
+
+    /// Seeds a `chat_turn` task (Running) mirroring `chat_turn_query_tests::make_chat_turn`,
+    /// with the same `BrowserSession` resource requirement real chat turns carry
+    /// (`broker::chat_turn_resource_requirements`) so park/unpark resource release can be
+    /// exercised. Returns the record so the caller can reserve it the same way the real
+    /// dispatcher (`acquire_task_for_execution` -> `ResourceGovernor::reserve`) would.
+    fn seed_chat_turn(store: &TaskStore, task_id: &str) -> TaskRecord {
+        let mut task = TaskRecord::new(
+            task_id,
+            UserId::new("user"),
+            WorkspaceId::new("workspace"),
+            "chat_turn",
+            "seed goal",
+            json!({}),
+        );
+        task.status = TaskStatus::Running;
+        task.resource_requirements =
+            vec![crate::ResourceRequirement::new(ResourceClass::BrowserSession, 1)];
+        store
+            .insert_chat_turn(&task, "thread", "req-1", "interactive", "full")
+            .unwrap();
+        task
+    }
+
+    #[test]
+    fn park_then_resumable_checkpoint_is_readable_and_unpark_queues() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let user = UserId::new("user");
+        let workspace = WorkspaceId::new("workspace");
+        let task = seed_chat_turn(&store, "turn");
+        // Reserve the BrowserSession slot the way the real dispatcher does on acquire.
+        store.reserve_resources(&task, "worker_a").unwrap();
+        assert_eq!(
+            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            1,
+            "the running turn holds the shared browser_session slot"
+        );
+        store.create_agent_run(&run("run")).unwrap();
+        store
+            .append_agent_checkpoint("run", 3, &json!({"round": 3}), "fp", true)
+            .unwrap();
+
+        // Before park: nothing resumable (mirrors the gateway-restart case).
+        assert!(store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .is_none());
+
+        store.park_chat_turn("turn", "user", "workspace").unwrap();
+
+        let parked_task = store
+            .get_task(&TaskId::new("turn"), &UserId::new("user"), &WorkspaceId::new("workspace"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(parked_task.status, TaskStatus::Parked, "task is parked");
+        assert!(parked_task.lease_owner.is_none(), "park clears the lease owner");
+        assert!(parked_task.lease_expires_at.is_none(), "park clears the lease expiry");
+        assert!(parked_task.last_heartbeat_at.is_none(), "park clears the heartbeat");
+
+        // The critical fix under test: parking releases the shared resource reservation.
+        // Without it, a turn parked indefinitely (model down) would hold the single
+        // BrowserSession slot forever and block every other chat's browser use.
+        assert_eq!(
+            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            0,
+            "park releases the browser_session reservation, not just the agent run"
+        );
+
+        let runs = store.list_agent_runs_for_turn("turn", "user", "workspace").unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, AgentRunStatus::Aborted);
+        assert_eq!(runs[0].terminal_reason.as_deref(), Some("parked_waiting_for_model"));
+
+        // The park checkpoint is now resumable (filter widened beyond gateway_restart).
+        let checkpoint = store
+            .latest_resumable_checkpoint_for_turn("turn", "user", "workspace")
+            .unwrap()
+            .unwrap();
+        assert_eq!(checkpoint.round, 3);
+
+        // Unpark: task flips back to queued, and returns true exactly once.
+        assert!(store.unpark_chat_turn_to_queued("turn", "user", "workspace").unwrap());
+        let queued_task = store
+            .get_task(&TaskId::new("turn"), &UserId::new("user"), &WorkspaceId::new("workspace"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(queued_task.status, TaskStatus::Queued, "unpark queues the task");
+        assert!(!store.unpark_chat_turn_to_queued("turn", "user", "workspace").unwrap(),
+            "second unpark call is a no-op (already queued, not parked)");
+
+        // Resume re-reserves through the normal dispatch path (out of this crate's scope to
+        // simulate the gateway's acquire loop, but the store-level primitive works the same
+        // way it did the first time the turn was dispatched):
+        store.reserve_resources(&queued_task, "worker_b").unwrap();
+        assert_eq!(
+            store.resource_usage(&user, &workspace, ResourceClass::BrowserSession).unwrap(),
+            1,
+            "re-dispatch re-reserves the slot exactly like the first acquire"
+        );
+    }
+
+    /// Review I2 regression: a steering row still `claimed` under the run being
+    /// aborted must NOT stay `claimed` across park — it must be released back to
+    /// `pending` so (a) the due-scan (pending-only) can see it again and (b) a later
+    /// fence check doesn't count it as blocking forever against a run that will never
+    /// finish interpreting it.
+    #[test]
+    fn park_releases_a_claimed_but_uninterpreted_steering_row_back_to_pending() {
+        let store = TaskStore::open_in_memory().unwrap();
+        let task = seed_chat_turn(&store, "turn");
+        store.reserve_resources(&task, "worker_a").unwrap();
+        store.create_agent_run(&run("run")).unwrap();
+
+        store
+            .append_turn_steering(
+                "user",
+                "workspace",
+                "thread",
+                "turn",
+                &NewTurnSteering {
+                    source_message_id: "message-1".to_string(),
+                    prompt: "finish now".to_string(),
+                    visible_prompt: "finish now".to_string(),
+                    images: Vec::new(),
+                    attachments: json!([]),
+                    mode: None,
+                    model: None,
+                },
+                1,
+            )
+            .unwrap();
+        // The coordinator claimed it under "run" but interpretation didn't finish
+        // before the fence's park budget expired.
+        let claimed = store
+            .claim_pending_turn_steering("user", "workspace", "thread", "turn", "run", 0)
+            .unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].status, TurnSteeringStatus::Claimed, "precondition");
+
+        // Before park: a claimed row is invisible to the due-scan and blocks the fence.
+        assert!(store.list_due_pending_turn_steering(i64::MAX, 10).unwrap().is_empty());
+        assert!(!store.fence_chat_turn_finalization("user", "workspace", "turn").unwrap());
+
+        store.park_chat_turn("turn", "user", "workspace").unwrap();
+
+        let released = store
+            .list_turn_steering("user", "workspace", "thread")
+            .unwrap()
+            .into_iter()
+            .find(|row| row.steering_id == claimed[0].steering_id)
+            .unwrap();
+        assert_eq!(released.status, TurnSteeringStatus::Pending, "released back to pending");
+        assert!(released.claimed_run_id.is_none());
+        assert!(released.claimed_round.is_none());
+        assert!(released.claimed_at.is_none());
+
+        // After park: it reappears in the due-scan, ready for the resumed run to claim.
+        let due = store.list_due_pending_turn_steering(i64::MAX, 10).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].steering_id, claimed[0].steering_id);
+
+        // A resumed run re-claims and interprets it normally.
+        let reclaimed = store
+            .claim_pending_turn_steering("user", "workspace", "thread", "turn", "run-2", 0)
+            .unwrap();
+        assert_eq!(reclaimed.len(), 1);
+        assert_eq!(reclaimed[0].claimed_run_id.as_deref(), Some("run-2"));
     }
 
     #[test]
@@ -3785,7 +4606,7 @@ mod upgrade_tests {
         conn.execute_batch(&format!("VACUUM INTO '{}'", tmp.display()))
             .unwrap();
         let store = TaskStore::open(&tmp).unwrap();
-        assert_eq!(store.schema_version().unwrap(), 9);
+        assert_eq!(store.schema_version().unwrap(), 10);
         assert!(table_exists(&store.connection, "agent_runs"));
         assert!(table_exists(&store.connection, "agent_run_events"));
         for col in ["thread_id", "request_id", "source", "approval"] {

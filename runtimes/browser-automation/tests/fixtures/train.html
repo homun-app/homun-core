@@ -123,10 +123,27 @@
         setTimeout(() => {
           results.innerHTML = `
             <h2>Risultati Napoli Centrale - Milano Centrale</h2>
-            <ul>
-              <li>FR 9512 - 09:05 - 4h 35m - €49.90</li>
-              <li>Italo 9920 - 09:30 - 4h 45m - €52.90</li>
-            </ul>
+            <article class="result-card" aria-label="FR 9512">
+              <h2>FR 9512</h2>
+              <p>Departure 09:05 Napoli Centrale</p>
+              <p>Arrival 13:40 Milano Centrale</p>
+              <p>Duration 4h 35m</p>
+              <p>Price €49.90</p>
+            </article>
+            <article class="result-card" aria-label="Intercity 590">
+              <h2>Intercity 590</h2>
+              <p>Departure 09:30 Napoli Centrale</p>
+              <p>Arrival 17:10 Milano Centrale</p>
+              <p>Duration 7h 39m</p>
+              <p>Price €39.90</p>
+            </article>
+            <article class="result-card" aria-label="Italo 9920">
+              <h2>Italo 9920</h2>
+              <p>Departure 10:30 Napoli Centrale</p>
+              <p>Arrival 15:05 Milano Centrale</p>
+              <p>Duration 4h 35m</p>
+              <p>Price €54.90</p>
+            </article>
           `;
         }, 700);
       });

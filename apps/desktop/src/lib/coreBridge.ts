@@ -1,10 +1,10 @@
 import { chatApi } from "./chatApi";
-import { cancelTurn, enqueueTurn, openTurnStream } from "./chatApi";
+import { cancelTurn, enqueueTurn, fetchTurnStatus, openTurnStream } from "./chatApi";
 import type { RoutingBindingInput } from "./chatApi";
 import type { SetupComputerStatus } from "./onboardingComputer";
+import { recoverTurnStream } from "./turnStreamRecovery";
 export type { SetupComputerStatus, SetupComputerPhase } from "./onboardingComputer";
 import {
-  applyTurnEvent,
   createTurnReplayState,
   type TurnReplayState,
 } from "./turnReplayState";
@@ -4900,45 +4900,53 @@ async function replayBrokerTurnStream(
     onFirstDelta?: () => void;
   } = {},
 ): Promise<BrokerTurnReplayResult> {
-  let state = createTurnReplayState(turnId, {
+  const initialState = createTurnReplayState(turnId, {
     lastSeq: options.since ?? 0,
     text: options.initialText ?? "",
   });
   let redactedUserText: string | undefined;
   let errorMessage: string | undefined;
-  let firstDelta = state.text.length === 0;
-  const response = await openTurnStream(turnId, state.lastSeq);
-  if (!response.body) {
-    throw new Error("The turn stream has no body.");
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  stream: while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      let envelope: { seq?: number; kind?: string; payload?: Record<string, unknown> };
+  let firstDelta = initialState.text.length === 0;
+  const state = await recoverTurnStream({
+    turnId,
+    initialState,
+    getStatus: fetchTurnStatus,
+    connect: async ({ since, onEvent }) => {
+      const response = await openTurnStream(turnId, since);
+      if (!response.body) throw new Error("The turn stream has no body.");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
       try {
-        envelope = JSON.parse(line) as typeof envelope;
-      } catch {
-        continue;
+        stream: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            let envelope: { seq?: number; kind?: string; payload?: Record<string, unknown> };
+            try {
+              envelope = JSON.parse(line) as typeof envelope;
+            } catch {
+              continue;
+            }
+            if (!envelope.kind || !Number.isFinite(envelope.seq)) continue;
+            onEvent({
+              turn_id: turnId,
+              seq: Number(envelope.seq),
+              kind: envelope.kind,
+              payload: envelope.payload ?? {},
+            });
+            if (["done", "error", "cancelled"].includes(envelope.kind)) break stream;
+          }
+        }
+      } finally {
+        void reader.cancel().catch(() => undefined);
       }
-      if (!envelope.kind || !Number.isFinite(envelope.seq)) continue;
-      const event = {
-        turn_id: turnId,
-        seq: Number(envelope.seq),
-        kind: envelope.kind,
-        payload: envelope.payload ?? {},
-      };
-      const next = applyTurnEvent(state, event);
-      if (next === state) continue;
-      state = next;
-      const payload = event.payload;
+    },
+    onEvent: (event) => {
+      const payload = event.payload ?? {};
       if (event.kind === "delta") {
         const delta = String(payload.text ?? "");
         if (firstDelta && delta) {
@@ -4956,7 +4964,6 @@ async function replayBrokerTurnStream(
           redactedUserText = payload.redacted_user_text;
         }
         chatApi.notifyChatStreamEvent({ type: "done", request_id: requestId, seq: event.seq });
-        break stream;
       } else if (event.kind === "error") {
         errorMessage = String(payload.message ?? "Turn error");
         chatApi.notifyChatStreamEvent({
@@ -4966,10 +4973,8 @@ async function replayBrokerTurnStream(
           retryable: payload.retryable === true,
           seq: event.seq,
         });
-        break stream;
       } else if (event.kind === "cancelled") {
         errorMessage = "Turn cancelled";
-        break stream;
       } else {
         const type = event.kind === "tool" ? "tool_result" : event.kind;
         chatApi.notifyChatStreamEvent({
@@ -4981,12 +4986,8 @@ async function replayBrokerTurnStream(
           seq: event.seq,
         } as CoreChatStreamEvent);
       }
-    }
-  }
-  void reader.cancel().catch(() => undefined);
-  if (!["completed", "failed", "cancelled"].includes(state.status)) {
-    throw new Error("Turn stream ended before a terminal event.");
-  }
+    },
+  });
   return { state, redactedUserText, errorMessage };
 }
 

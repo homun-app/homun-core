@@ -12,11 +12,13 @@
 //! loop recursively for the browser sub-agent.
 
 use crate::browser::{
-    is_browser_granular_tool, prune_browser_history, resolve_browser_chat_tool_name,
+    is_browser_granular_tool, is_stale_ref_recovery_result, prune_browser_history,
+    resolve_browser_chat_tool_name,
 };
 use crate::contract::{
     BrowserExecutor, CapabilityExecutor, ContextCompactor, EventSink, ExecutionJournal,
-    ModelClient, PlanProgress, TurnCompletionJudge, TurnPolicy,
+    ModelClient, PlanProgress, TurnCompletionJudge, TurnControlDecision, TurnControlDisposition,
+    TurnPolicy,
 };
 use crate::events::{GenerateStreamEvent, TokenMetrics};
 use crate::execution_journal::{
@@ -39,6 +41,61 @@ use std::time::Instant;
 
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
 const MAX_PLAN_NUDGES: u32 = 8;
+
+/// Bounded wait, in 50ms wall-clock ticks, for an uninterpreted steering row at the finalization
+/// fence before parking (≈ 40 × 50ms ≈ 2s). Deliberately wall-clock, not event-driven: the row may
+/// never become interpretable (the semantic model can be down indefinitely), so the budget must
+/// elapse on its own — replaces the old infinite spin, which parks instead of hanging.
+const PARK_WAIT_CYCLES: u32 = 40;
+
+async fn wait_for_interrupting_control<M: ModelClient>(
+    model_client: &M,
+) -> TurnControlDecision {
+    loop {
+        if let Some(control) = model_client.current_turn_control()
+            && control.disposition != TurnControlDisposition::ContinueCurrentWork
+        {
+            return control;
+        }
+        let control = model_client.wait_for_turn_control().await;
+        if control.disposition != TurnControlDisposition::ContinueCurrentWork {
+            return control;
+        }
+    }
+}
+
+fn apply_turn_control<M: ModelClient>(
+    model_client: &M,
+    messages: &mut Vec<serde_json::Value>,
+    control: &TurnControlDecision,
+) {
+    messages.push(serde_json::json!({
+        "role": "user",
+        "content": format!(
+            "[VALIDATED USER STEERING]\n{}\n\nApply the structured runtime disposition {:?} now.",
+            control.instruction,
+            control.disposition,
+        ),
+    }));
+    model_client.acknowledge_turn_control_applied(control.steering_id);
+}
+
+/// Acknowledge every drained (applied) steering id back to the coordinator, deduped. Shared
+/// between the normal turn-end completion and the park early-return: a control applied EARLIER
+/// in the turn (round loop, model-call race, or an earlier fence-drain iteration) must still be
+/// completed even when the turn parks on a DIFFERENT, later, uninterpreted row — otherwise that
+/// earlier id's store row is stuck at `applied` forever (a permanent "Applying…" spinner in the
+/// UI). Drains the vec so callers can't double-flush the same ids.
+fn complete_drained_steering<M: ModelClient>(
+    model_client: &M,
+    steering_to_complete: &mut Vec<i64>,
+) {
+    steering_to_complete.sort_unstable();
+    steering_to_complete.dedup();
+    for steering_id in steering_to_complete.drain(..) {
+        model_client.acknowledge_turn_control_completed(steering_id);
+    }
+}
 
 /// Harness-driven plan progress from VERIFIED evidence. Called after each work tool result: if the
 /// plan has a frontier `doing` step and enough new evidence has accrued, ask the F2 judge whether that
@@ -185,11 +242,42 @@ where
 {
     let mut delivery = TurnDelivery::NoVisibleAnswer;
     let turn_started_at = Instant::now();
-    for round in 0..cfg.hard_round_ceiling {
+    // The per-progress stall clock: reset to `now` on every real browser progress (see the
+    // `browser_no_progress = 0` point below). The browser wall-clock budget is measured from THIS,
+    // not from `turn_started_at`, so a browse that keeps advancing is never choked by a cumulative
+    // timer — only the absolute cap (from `turn_started_at`) and a genuine stall stop it.
+    let mut last_browser_progress_at = Instant::now();
+    let mut steering_to_complete = Vec::new();
+    // Tracks the last round the loop actually ran, captured in outer scope because the `for`
+    // loop's `round` binding does not survive past the loop (exhaustion or `break`) — the
+    // post-loop finalization fence below needs it to checkpoint at the right round on park.
+    // The `0` default is never observed as a stale/wrong round in practice: `cfg.hard_round_ceiling`
+    // is always configured >= 1, so the loop runs at least round 0 (setting this) before the
+    // fence can ever be reached.
+    let mut last_round: usize = 0;
+    'rounds: for round in 0..cfg.hard_round_ceiling {
+        last_round = round;
+        if let Some(control) = model_client.current_turn_control() {
+            apply_turn_control(model_client, &mut ls.messages, &control);
+            steering_to_complete.push(control.steering_id);
+            match control.disposition {
+                TurnControlDisposition::FinalizeWithCurrentEvidence
+                | TurnControlDisposition::NeedsClarification => break 'rounds,
+                TurnControlDisposition::CancelCurrentWork => {
+                    final_done = true;
+                    break 'rounds;
+                }
+                TurnControlDisposition::ContinueCurrentWork
+                | TurnControlDisposition::ReplanCurrentWork => {}
+            }
+        }
         if ls.browser_used {
             let elapsed_ms = u64::try_from(turn_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+            let stall_ms =
+                u64::try_from(last_browser_progress_at.elapsed().as_millis()).unwrap_or(u64::MAX);
             if let Some(reason) = cfg.browser_budget.stop_reason(
                 elapsed_ms,
+                stall_ms,
                 ls.browser_failed_navigations,
                 ls.browser_no_progress,
             ) {
@@ -329,35 +417,47 @@ missing, give what you have and note the gap in one short line.",
         let mut round_usage = usage_context.clone();
         round_usage.call_id = format!("{}:round:{round}", usage_context.call_id);
         round_usage.round = u32::try_from(round).ok();
-        let out = model_client
-            .generate(
-                &crate::ModelCall {
-                    base_url: &ls.provider.base_url,
-                    model: &ls.provider.model,
-                    api_key: ls.provider.api_key.as_deref(),
-                    messages: &ls.messages,
-                    tools: &ls.tool_schemas,
-                    temperature,
-                    is_final_round,
-                    // S2 T5: the ONLY call site that forces a tool — resolved once, gateway-side,
-                    // into `cfg` (see `TurnConfig::forced_tool` for the intake-turn / binding gate).
-                    // Final-review fix (C1, one-shot forcing): `cfg.forced_tool` is immutable for the
-                    // whole turn, but a forced `tool_choice` contractually MUST return a tool call —
-                    // re-forcing on every round would make round 1 force a SECOND make_document call
-                    // right after a successful delivery (the binding is already cleared by then, so
-                    // the duplicate would render GENERIC instead of from the template). Force only on
-                    // round 0 (the post-intake generation call); every later round falls back to auto
-                    // so the model can emit its text summary and the turn terminates cleanly.
-                    forced_tool: if round == 0 {
-                        cfg.forced_tool.as_deref()
-                    } else {
-                        None
-                    },
-                    usage: &round_usage,
-                },
-                &|_tok| {},
-            )
-            .await;
+        let round_call = crate::ModelCall {
+            base_url: &ls.provider.base_url,
+            model: &ls.provider.model,
+            api_key: ls.provider.api_key.as_deref(),
+            messages: &ls.messages,
+            tools: &ls.tool_schemas,
+            temperature,
+            is_final_round,
+            forced_tool: if round == 0 {
+                cfg.forced_tool.as_deref()
+            } else {
+                None
+            },
+            usage: &round_usage,
+        };
+        let mut control_during_model = None;
+        let out = tokio::select! {
+            out = model_client.generate(&round_call, &|_tok| {}) => Some(out),
+            control = wait_for_interrupting_control(model_client) => {
+                apply_turn_control(model_client, &mut ls.messages, &control);
+                steering_to_complete.push(control.steering_id);
+                execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
+                control_during_model = Some(control);
+                None
+            }
+        };
+        if let Some(control) = control_during_model {
+            match control.disposition {
+                TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
+                TurnControlDisposition::FinalizeWithCurrentEvidence
+                | TurnControlDisposition::NeedsClarification => break 'rounds,
+                TurnControlDisposition::CancelCurrentWork => {
+                    final_done = true;
+                    break 'rounds;
+                }
+                TurnControlDisposition::ContinueCurrentWork => continue 'rounds,
+            }
+        }
+        let Some(out) = out else {
+            continue 'rounds;
+        };
         let (message, round_finish_reason) = match out {
             Ok(o) => {
                 // Adopt any mid-turn fallback swap for the remaining rounds.
@@ -501,6 +601,7 @@ missing, give what you have and note the gap in one short line.",
             let mut pending_confirm = false;
             let mut stop_for_no_progress = false;
             let mut nudge_no_progress = false;
+            let mut control_after_tools = None;
             // Bundle the turn-level state the dispatch loop touches into `ctx` so
             // the loop body addresses it via `ctx.<field>` (the seam a later refactor
             // extracts into a function). Built once per round; its block ends right
@@ -614,28 +715,104 @@ missing, give what you have and note the gap in one short line.",
                         call_id: call_id.clone(),
                         name: name.to_string(),
                     });
-                    let (result, tool_effects) = if is_browser_granular_tool(name) {
+                    let (result, tool_effects, interrupted) = if is_browser_granular_tool(name) {
                         // Browser: through the BrowserExecutor seam (ADR 0026 / ADR 0025). The executor owns
                         // the browser subsystem's private state (session, snapshots, tab/nav bookkeeping)
                         // and mutates the loop-visible browser fields + provider via `&mut ls`. Produces no
                         // ToolEffects (it mutates directly). Folds into a recursive `browse` at ADR 0025.
-                        let r = browser_executor
-                            .execute_browser(name, args_raw, &call_id, &mut ls)
-                            .await;
-                        (r, crate::ToolEffects::default())
+                        tokio::select! {
+                            (r, hint) = browser_executor.execute_browser(name, args_raw, &call_id, &mut ls) => {
+                                // The browser branch produces no other ToolEffects (it mutates its own
+                                // state directly), but it DOES carry a machine outcome hint so the loop's
+                                // stall/no-progress accounting isn't fooled by prose that always reads
+                                // "success" (a timed-out or no-op action, or a type that selected nothing).
+                                (r, crate::ToolEffects { outcome_hint: Some(hint), ..crate::ToolEffects::default() }, None)
+                            }
+                            control = wait_for_interrupting_control(model_client) => {
+                                (
+                                    "Tool execution interrupted by validated user steering.".to_string(),
+                                    crate::ToolEffects::default(),
+                                    Some(control),
+                                )
+                            }
+                        }
                     } else {
                         // Non-browser: through the CapabilityExecutor seam (ADR 0026). The executor builds
                         // the per-call ChatToolCtx from `&mut ls` + its held read-only context. `args_raw`
                         // (the model's exact JSON string) is passed through unchanged — no round-trip.
-                        match capability_executor
-                            .execute_tool(name, args_raw, &call_id, &mut ls)
-                            .await
-                        {
-                            Ok(o) => (o.result, o.effects),
-                            Err(e) => (e, crate::ToolEffects::default()),
+                        let delegated_browse = name == "browse";
+                        // The `browse` sub-agent call gets the ABSOLUTE cap as a fresh hard deadline
+                        // from NOW (this call) — not a cumulative `cap - elapsed` that shrinks as the
+                        // turn runs and folds in pre-browse (e.g. curl) time, which starved the browse
+                        // on a slow model. The sub-turn's own per-progress stall window
+                        // (`config.rs` `max_stall_ms`, reset on success) is the real control; this is a
+                        // final backstop on a single browse call.
+                        let browser_deadline = tokio::time::sleep(std::time::Duration::from_millis(
+                            cfg.browser_budget.max_elapsed_ms,
+                        ));
+                        tokio::pin!(browser_deadline);
+                        tokio::select! {
+                            biased;
+                            control = wait_for_interrupting_control(model_client) => {
+                                (
+                                    "Tool execution interrupted by validated user steering.".to_string(),
+                                    crate::ToolEffects::default(),
+                                    Some(control),
+                                )
+                            }
+                            _ = &mut browser_deadline, if delegated_browse => {
+                                (
+                                    "found: false\nnote: browse stopped because the turn's browser time budget was exhausted; synthesize from earlier evidence".to_string(),
+                                    crate::ToolEffects {
+                                        browser_activity_observed: true,
+                                        outcome_hint: Some(crate::ToolOutcomeHint::NoProgress),
+                                        ..crate::ToolEffects::default()
+                                    },
+                                    None,
+                                )
+                            }
+                            outcome = capability_executor.execute_tool(name, args_raw, &call_id, &mut ls) => {
+                                match outcome {
+                                    Ok(o) => (o.result, o.effects, None),
+                                    Err(e) => (e, crate::ToolEffects::default(), None),
+                                }
+                            }
                         }
                     };
-                    let outcome = classify_tool_result(&result);
+                    if let Some(control) = interrupted {
+                        if is_browser_granular_tool(name) {
+                            browser_executor.interrupt().await;
+                        }
+                        execution_journal.record(AgentExecutionEvent::ToolCallCompleted {
+                            round,
+                            call_id: call_id.clone(),
+                            name: name.to_string(),
+                            result_chars: result.chars().count(),
+                            outcome: "steering_interrupted".to_string(),
+                            result_fingerprint: tool_result_fingerprint(&result),
+                        });
+                        ls.messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": result,
+                        }));
+                        for skipped in calls.iter().skip(idx + 1) {
+                            ls.messages.push(serde_json::json!({
+                                "role": "tool",
+                                "tool_call_id": skipped.get("id").and_then(|id| id.as_str()).unwrap_or(""),
+                                "content": "Tool call skipped because validated user steering changed the active run.",
+                            }));
+                        }
+                        apply_turn_control(model_client, &mut ls.messages, &control);
+                        steering_to_complete.push(control.steering_id);
+                        execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
+                        control_after_tools = Some(control);
+                        break;
+                    }
+                    let outcome = tool_effects
+                        .outcome_hint
+                        .map(crate::ToolOutcomeHint::as_str)
+                        .unwrap_or_else(|| classify_tool_result(&result));
                     let result_fingerprint = tool_result_fingerprint(&result);
                     execution_journal.record(AgentExecutionEvent::ToolCallCompleted {
                         round,
@@ -645,8 +822,39 @@ missing, give what you have and note the gap in one short line.",
                         outcome: outcome.to_string(),
                         result_fingerprint,
                     });
+                    // Scoped to the browse sub-turn (E2): `browser_done` is that sub-turn's own
+                    // completion signal, not a general-purpose terminal. Outside it (`cfg.browser_subturn
+                    // == false`) the name is reachable only via hallucination — no non-subturn turn
+                    // offers it as a real tool — so it must fall through to normal handling instead of
+                    // silently ending the turn on whatever the model made up.
+                    if cfg.browser_subturn && name == "browser_done" && !result.trim().is_empty() {
+                        memory_answer = result.trim().to_string();
+                        ls.messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": result,
+                        }));
+                        let _ = event_sink
+                            .emit(GenerateStreamEvent::Done {
+                                text: memory_answer.clone(),
+                                metrics: TokenMetrics::zero(),
+                                redacted_user_text: None,
+                            })
+                            .await;
+                        delivery = TurnDelivery::Delivered;
+                        final_done = true;
+                        break 'rounds;
+                    }
                     if is_browser_granular_tool(name) {
-                        let stalled = matches!(outcome, "empty" | "error" | "blocked" | "no_progress");
+                        // MINOR 8: a stale-ref auto-recovery (main.rs) is a real page observation but
+                        // NOT progress toward the goal — it comes back as an ordinary `Ok(...)` plain-text
+                        // result, which `classify_tool_result` reads as "success" (it isn't the
+                        // `{"status":...}` shape), so left unchecked it would reset the counter below and
+                        // let a ref-churning SPA loop act→stale→snapshot→act forever. Fold it into the
+                        // same stalled bucket as empty/error/blocked so repeated churn still trips
+                        // `max_no_progress`.
+                        let stalled = is_stale_ref_recovery_result(&result)
+                            || matches!(outcome, "empty" | "error" | "blocked" | "no_progress");
                         if stalled {
                             ls.browser_no_progress = ls.browser_no_progress.saturating_add(1);
                             if name == "browser_navigate" {
@@ -655,6 +863,11 @@ missing, give what you have and note the gap in one short line.",
                             }
                         } else {
                             ls.browser_no_progress = 0;
+                            // Real browser progress → reset the per-progress stall clock, so the
+                            // wall-clock stall window (checked at the top of the loop) measures time
+                            // SINCE this success, not since the turn began. Same signal that resets
+                            // `browser_no_progress`; keeps the two budgets consistent.
+                            last_browser_progress_at = Instant::now();
                         }
                     } else {
                         let no_progress_count =
@@ -673,9 +886,20 @@ missing, give what you have and note the gap in one short line.",
                             source: name.to_string(),
                         });
                     }
+                    // A delegated `browse` call reports `browser_activity_observed` (it did real
+                    // browser work in its sub-turn). In the MANAGER turn no granular browser tool ever
+                    // runs, so the granular-branch progress reset below never fires here — without this,
+                    // the manager's stall clock would stay pinned at turn start and a healthy long
+                    // browse (up to its own 300s deadline) would trip the manager's stall window the
+                    // moment it returns, ending the turn before the model can use the result (C2). A
+                    // browse call IS progress at the manager level → reset the stall clock.
+                    let browser_activity_observed = tool_effects.browser_activity_observed;
                     // ADR 0024 inc 5d.1b: apply the tool's loop-state effects immediately, before the
                     // loop reads any field they populate (plan, ls.accumulated, …) — net state as inline.
                     ls.apply_effects(&mut pending_confirm, round, tool_effects);
+                    if browser_activity_observed {
+                        last_browser_progress_at = Instant::now();
+                    }
 
                     // Collect source URLs from browser results so the final
                     // answer can carry a deterministic "Fonti" section. The
@@ -768,6 +992,18 @@ missing, give what you have and note the gap in one short line.",
                     }
                 }
             } // end ctx scope → borrows freed before the post-loop reads below
+            if let Some(control) = control_after_tools {
+                match control.disposition {
+                    TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
+                    TurnControlDisposition::FinalizeWithCurrentEvidence
+                    | TurnControlDisposition::NeedsClarification => break 'rounds,
+                    TurnControlDisposition::CancelCurrentWork => {
+                        final_done = true;
+                        break 'rounds;
+                    }
+                    TurnControlDisposition::ContinueCurrentWork => continue 'rounds,
+                }
+            }
             if nudge_no_progress {
                 ls.messages.push(serde_json::json!({
                     "role": "system",
@@ -1080,6 +1316,56 @@ missing, give what you have and note the gap in one short line.",
     // stops it for an anonymous chat) and hides the "● LIVE" activity — see `close_session`.
     browser_executor.close_session(ls.browser_used).await;
 
+    // Exhaustion is still a finalization path. Fence it exactly like the
+    // in-loop delivery path so a steering instruction that was queued,
+    // claimed, or interpreted while the last tool was running cannot be
+    // overtaken by the forced no-tools synthesis.
+    //
+    // Drain interpreted controls (including `continue`) so a steering queued/claimed
+    // while the last tool ran is honored before finalization. If the fence stays
+    // PendingInput with nothing interpreted (rows pending/claimed the coordinator
+    // cannot resolve — e.g. the semantic model is unavailable), park instead of
+    // spinning: exit with a non-delivering Parked outcome for coordinator resume.
+    let mut park_wait: u32 = 0;
+    while !final_done
+        && model_client.finalization_fence() == crate::FinalizationFence::PendingInput
+    {
+        if let Some(control) = model_client.current_turn_control() {
+            apply_turn_control(model_client, &mut ls.messages, &control);
+            steering_to_complete.push(control.steering_id);
+            if control.disposition == TurnControlDisposition::CancelCurrentWork {
+                final_done = true;
+            }
+            park_wait = 0;
+            continue;
+        }
+        if park_wait >= PARK_WAIT_CYCLES {
+            // Park: capture a resumable checkpoint at the boundary and return without
+            // delivering. Do NOT force synthesis, do NOT emit Done. Flush completions for
+            // anything already drained/applied earlier in this same turn FIRST — this is the
+            // only place those ids would otherwise get acknowledged (the normal completion
+            // block below is never reached on this early-return path), and their instructions
+            // are already folded into `ls.messages`, which the park checkpoint preserves.
+            complete_drained_steering(model_client, &mut steering_to_complete);
+            execution_journal.checkpoint(crate::LoopCheckpoint::from_state(last_round, &ls));
+            return crate::TurnOutcome {
+                delivery: TurnDelivery::Parked,
+                memory_answer: String::new(),
+                image_rejection: None,
+                ..Default::default()
+            };
+        }
+        park_wait += 1;
+        // A plain wall-clock tick, deliberately NOT `wait_for_turn_control()`: that seam is
+        // specified to return only once a non-`continue` interpreted control appears (the real
+        // gateway impl loops internally, sleeping, and never returns on its own otherwise) — if
+        // the semantic model is down and the row never gets interpreted, awaiting it here would
+        // block this tick forever and `park_wait` would never reach the budget, defeating the
+        // park. Ticking on a bounded sleep instead means the budget elapses on wall-clock time
+        // regardless of whether interpretation ever happens.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
     if !final_done {
         // Turn trace: the loop exited without a committed answer → the guaranteed post-loop synthesis
         // fires. No per-round finish_reason applies on this exhaustion path (the loop broke on the
@@ -1213,6 +1499,9 @@ missing, give what you have and note the gap in one short line.",
             }
         }
     }
+    if final_done || delivery == TurnDelivery::Delivered {
+        complete_drained_steering(model_client, &mut steering_to_complete);
+    }
     // 5.D1c.8: the post-turn tail (memory learn + code-graph refresh) is a GATEWAY concern (AppState /
     // stores / spawn), so it runs in the caller after this returns — driven by the outcome below. The
     // engine's turn ends here.
@@ -1239,6 +1528,7 @@ mod tests {
     use crate::events::{LinkedMemoryRead, TurnMemoryReadSet};
     use serde_json::{Value, json};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     // Minimal seam mocks: the model answers immediately (no tool calls); everything else is a no-op.
     struct AnswerModel;
@@ -1415,10 +1705,214 @@ mod tests {
             _a: &str,
             _c: &str,
             _s: &mut LoopState,
-        ) -> String {
-            String::new()
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            (String::new(), crate::contract::ToolOutcomeHint::Success)
         }
         async fn close_session(&mut self, _b: bool) {}
+    }
+
+    #[derive(Default)]
+    struct BrowserDoneModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for BrowserDoneModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if index == 0 {
+                return Ok(ModelRoundOutput {
+                    message: json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "call_done",
+                            "type": "function",
+                            "function": {
+                                "name": "browser_done",
+                                "arguments": "{\"status\":\"completed\",\"answer\":\"done\",\"items\":[{\"departure\":\"09:05\"}],\"sources\":[\"https://example.test\"],\"evidence\":[\"visible\"]}"
+                            }
+                        }]
+                    }),
+                    provider,
+                    finish_reason: Some("tool_calls".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            on_delta("forced synthesis should not run");
+            Ok(ModelRoundOutput {
+                message: json!({"role": "assistant", "content": "forced synthesis should not run"}),
+                provider,
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct DoneBrowser;
+
+    impl BrowserExecutor for DoneBrowser {
+        async fn execute_browser(
+            &mut self,
+            name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            assert_eq!(name, "browser_done");
+            state.browser_used = true;
+            ("done".to_string(), crate::contract::ToolOutcomeHint::Success)
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_done_tool_terminates_without_forced_synthesis() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.tool_schemas = vec![json!({
+            "type": "function",
+            "function": {
+                "name": "browser_done",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        })];
+        let model = BrowserDoneModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = DoneBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(outcome.memory_answer, "done");
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            1,
+            "browser_done must not trigger forced synthesis"
+        );
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            1
+        );
+    }
+
+    /// E2: `browser_done` is the browse SUB-turn's own completion signal. Outside that sub-turn
+    /// (`browser_subturn = false`) the same tool name — reached only via hallucination, since
+    /// non-subturn turns never offer it as a real capability — must NOT terminate the turn. The
+    /// turn instead keeps rolling and reaches its normal (forced-synthesis) completion.
+    #[tokio::test(flavor = "current_thread")]
+    async fn browser_done_does_not_terminate_a_non_browser_subturn() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        ls.tool_schemas = vec![json!({
+            "type": "function",
+            "function": {
+                "name": "browser_done",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        })];
+        let model = BrowserDoneModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = DoneBrowser;
+        let mut config = cfg();
+        config.browser_subturn = false;
+
+        let outcome = run_turn(
+            ls,
+            config,
+            &usage_context(),
+            &model,
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // The browser_done terminal did NOT fire: `memory_answer` is NOT the raw tool result
+        // ("done") and the model was called a SECOND time (forced synthesis actually ran),
+        // unlike the subturn case above where exactly one model call happens.
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_ne!(outcome.memory_answer, "done");
+        assert_eq!(outcome.memory_answer, "forced synthesis should not run");
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            2,
+            "outside the browser sub-turn, browser_done must NOT short-circuit the loop — the turn \
+             continues into a normal second round"
+        );
     }
 
     #[derive(Default)]
@@ -1482,13 +1976,482 @@ mod tests {
             _args: &str,
             _call_id: &str,
             state: &mut LoopState,
-        ) -> String {
+        ) -> (String, crate::contract::ToolOutcomeHint) {
             state.browser_used = true;
-            json!({ "status": "blocked" }).to_string()
+            (
+                json!({ "status": "blocked" }).to_string(),
+                crate::contract::ToolOutcomeHint::NoProgress,
+            )
         }
 
         async fn close_session(&mut self, _browser_used: bool) {}
     }
+    #[derive(Default)]
+    struct StaleRefChurnModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for StaleRefChurnModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call.is_final_round {
+                let content = "Non sono riuscito ad accedere alla pagina richiesta. Puoi riprovare.";
+                on_delta(content);
+                return Ok(ModelRoundOutput {
+                    message: json!({ "role": "assistant", "content": content }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            // The model keeps targeting a ref that just went stale — exactly the SPA churn MINOR 8
+            // guards against: the page keeps re-rendering the same control under a NEW [ref=eN].
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": format!("act_{call_index}"),
+                        "type": "function",
+                        "function": {
+                            "name": "browser_act",
+                            "arguments": "{\"kind\":\"click\",\"ref\":\"e1\"}"
+                        },
+                    }],
+                }),
+                provider,
+                finish_reason: Some("tool_calls".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    /// Every `browser_act` comes back as the gateway's stale-ref auto-recovery text (MINOR 8): a
+    /// real `Ok(...)` result (plain prose, not `{"status":...}`) that pre-fix would have looked
+    /// like ordinary success to `classify_tool_result` and reset `browser_no_progress` on every
+    /// call — letting the churn above loop forever instead of tripping the budget.
+    struct StaleRefRecoveryBrowser;
+
+    impl BrowserExecutor for StaleRefRecoveryBrowser {
+        async fn execute_browser(
+            &mut self,
+            name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            assert_eq!(name, "browser_act");
+            state.browser_used = true;
+            // Hint = Success on purpose: this fixture proves the stale-ref MARKER trips
+            // no-progress independently (the `||` in the branch), not the hint.
+            (
+                format!(
+                    "{} I took a fresh snapshot. Do NOT retry e1; choose a NEW [ref=...] \
+from this snapshot:\n[ref=e2] Same control, re-rendered",
+                    crate::browser::STALE_REF_RECOVERY_MARKER
+                ),
+                crate::contract::ToolOutcomeHint::Success,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stale_ref_recovery_churn_still_trips_the_no_progress_budget() {
+        // MINOR 8 regression: N consecutive stale-ref recoveries must NOT reset
+        // `browser_no_progress` to 0 on every round (that would let a ref-churning SPA loop
+        // act→stale→snapshot→act forever) — they must count as stalls like empty/error/blocked.
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = StaleRefRecoveryBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 12;
+        turn_cfg.browser_nav_cap = 12;
+        turn_cfg.browser_budget.max_no_progress = 2;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &StaleRefChurnModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            1,
+            "the budget must trip after max_no_progress consecutive stale-ref recoveries, not loop \
+             until hard_round_ceiling"
+        );
+        drop(journal_events);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
+    /// Like `StaleRefChurnModel` but each round targets a DIFFERENT ref — a model legitimately
+    /// advancing through a form, one field per round. Needed by the stall-window reset test:
+    /// byte-identical rounds would trip the repeat-guard before the timing is provable.
+    #[derive(Default)]
+    struct VariedActModel {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl ModelClient for VariedActModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let call_index = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let provider = ProviderBinding {
+                model: call.model.to_string(),
+                base_url: call.base_url.to_string(),
+                api_key: None,
+            };
+            if call.is_final_round {
+                let content = "Modulo completato.";
+                on_delta(content);
+                return Ok(ModelRoundOutput {
+                    message: json!({ "role": "assistant", "content": content }),
+                    provider,
+                    finish_reason: Some("stop".to_string()),
+                    usage: Default::default(),
+                    latency_ms: None,
+                    time_to_first_token_ms: None,
+                });
+            }
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": format!("act_{call_index}"),
+                        "type": "function",
+                        "function": {
+                            "name": "browser_act",
+                            "arguments": format!("{{\"kind\":\"click\",\"ref\":\"e{call_index}\"}}")
+                        },
+                    }],
+                }),
+                provider,
+                finish_reason: Some("tool_calls".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    /// Progressing browser: every action takes real time (~20ms) and reports Success — the shape
+    /// of a slow model legitimately advancing through a multi-field form. Used to prove the stall
+    /// window RESETS on progress (the run outlives `max_stall_ms` cumulatively).
+    struct SlowProgressBrowser;
+
+    impl BrowserExecutor for SlowProgressBrowser {
+        async fn execute_browser(
+            &mut self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            state.browser_used = true;
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            (
+                "Action performed. Updated snapshot:\n[ref=e2] Next field".to_string(),
+                crate::contract::ToolOutcomeHint::Success,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    /// Stalled browser: every action takes longer than the stall window and reports NoProgress —
+    /// the wall-clock stall window must stop the run even when the stagnation counters are far
+    /// from tripping.
+    struct SlowStallBrowser;
+
+    impl BrowserExecutor for SlowStallBrowser {
+        async fn execute_browser(
+            &mut self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            state.browser_used = true;
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            (
+                "Action performed. Updated snapshot:\n[ref=e1] Same field".to_string(),
+                crate::contract::ToolOutcomeHint::NoProgress,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stall_window_resets_on_progress_so_a_progressing_browse_outlives_it() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = SlowProgressBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 6;
+        turn_cfg.browser_max_rounds = 6;
+        turn_cfg.browser_nav_cap = 12;
+        // Stall window (100ms) far below the run's TOTAL browse time (6 × 20ms + overhead): only
+        // the per-progress reset lets this run finish without a budget stop.
+        turn_cfg.browser_budget.max_stall_ms = 100;
+        let started = Instant::now();
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &VariedActModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert!(
+            started.elapsed() >= std::time::Duration::from_millis(100),
+            "the run must have cumulatively outlived the stall window for the reset to be proven"
+        );
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            0,
+            "a browse that makes progress every round must never be stopped by the stall window"
+        );
+        drop(journal_events);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stalled_browse_stops_within_the_stall_window() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = SlowStallBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 12;
+        turn_cfg.browser_nav_cap = 12;
+        turn_cfg.browser_budget.max_stall_ms = 100;
+        // Stagnation counters far from tripping: ONLY the stall window can stop this run.
+        turn_cfg.browser_budget.max_no_progress = 50;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &StaleRefChurnModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            1,
+            "a browse with no progress for longer than the stall window must stop (reason: stall)"
+        );
+        drop(journal_events);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
+    /// Every `browser_act` comes back with PROSE that reads like success ("Action performed.
+    /// Updated snapshot…") but a NoProgress HINT — the exact shape of a type that selected no
+    /// autocomplete suggestion, or a timed-out action the sidecar reports as failed. The hint,
+    /// not `classify_tool_result` on the prose, must drive the stall budget. Pre-fix (the browser
+    /// branch discarded the hint and used `ToolEffects::default()`) this looped to the round
+    /// ceiling; now `max_no_progress` trips.
+    struct SuccessProseNoProgressBrowser;
+
+    impl BrowserExecutor for SuccessProseNoProgressBrowser {
+        async fn execute_browser(
+            &mut self,
+            name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            assert_eq!(name, "browser_act");
+            state.browser_used = true;
+            (
+                "Action performed. Updated snapshot:\n[ref=e1] Station field".to_string(),
+                crate::contract::ToolOutcomeHint::NoProgress,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_progress_hint_trips_budget_even_when_prose_looks_like_success() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = SuccessProseNoProgressBrowser;
+        let composio_writes = std::collections::BTreeSet::new();
+        let catalog_index: Vec<(String, String, Value)> = Vec::new();
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 12;
+        turn_cfg.browser_nav_cap = 12;
+        turn_cfg.browser_budget.max_no_progress = 2;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &StaleRefChurnModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &composio_writes,
+            &catalog_index,
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let journal_events = journal.0.lock().unwrap();
+        assert_eq!(
+            journal_events
+                .iter()
+                .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+                .count(),
+            1,
+            "a NoProgress hint must trip max_no_progress even though the result prose reads as success"
+        );
+        drop(journal_events);
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
     struct NoPlan;
     impl PlanProgress for NoPlan {
         async fn persist_plan(&self, _t: Option<&str>, _s: &[Value]) {}
@@ -1544,13 +2507,17 @@ mod tests {
         }
     }
     #[derive(Default)]
-    struct CollectJournal(Mutex<Vec<String>>);
+    struct CollectJournal(Mutex<Vec<String>>, Mutex<Vec<crate::LoopCheckpoint>>);
     impl crate::ExecutionJournal for CollectJournal {
         fn record(&self, event: crate::AgentExecutionEvent) {
             self.0
                 .lock()
                 .unwrap()
                 .push(event.into_parts().0.to_string());
+        }
+
+        fn checkpoint(&self, checkpoint: crate::LoopCheckpoint) {
+            self.1.lock().unwrap().push(checkpoint);
         }
     }
 
@@ -1562,6 +2529,7 @@ mod tests {
             browser_nav_cap: 6,
             browser_budget: crate::BrowserBudget {
                 max_elapsed_ms: 300_000,
+                max_stall_ms: 300_000,
                 max_failed_navigations: 8,
                 max_no_progress: 5,
             },
@@ -1571,6 +2539,10 @@ mod tests {
             step_verification: true,
             verbose: false,
             forced_tool: None,
+            // Default true: most existing browser_done tests in this module drive the browse
+            // sub-turn shape and expect the terminal to fire. Tests that need the OFF behavior
+            // (non-subturn) override this field explicitly.
+            browser_subturn: true,
         }
     }
 
@@ -2239,6 +3211,1022 @@ mod tests {
         assert_eq!(
             done_count, 1,
             "expected exactly one Done event (clean termination)"
+        );
+    }
+
+    #[derive(Default)]
+    struct SteeringFinalizeModel {
+        calls: AtomicUsize,
+        control_ready: AtomicBool,
+        applied: AtomicBool,
+        completed: AtomicBool,
+    }
+
+    impl ModelClient for SteeringFinalizeModel {
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            (self.control_ready.load(Ordering::SeqCst)
+                && !self.applied.load(Ordering::SeqCst))
+            .then(|| crate::TurnControlDecision {
+                steering_id: 7,
+                disposition: crate::TurnControlDisposition::FinalizeWithCurrentEvidence,
+                instruction: "Answer now from the evidence already collected".to_string(),
+            })
+        }
+
+        fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+            assert_eq!(steering_id, 7);
+            self.applied.store(true, Ordering::SeqCst);
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            std::future::poll_fn(|context| {
+                if let Some(control) = self.current_turn_control() {
+                    std::task::Poll::Ready(control)
+                } else {
+                    context.waker().wake_by_ref();
+                    std::task::Poll::Pending
+                }
+            })
+            .await
+        }
+
+        fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+            assert_eq!(steering_id, 7);
+            self.completed.store(true, Ordering::SeqCst);
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "tool_wait",
+                        "type": "function",
+                        "function": { "name": "wait_forever", "arguments": "{}" }
+                    }]
+                })
+            } else {
+                assert!(call.tools.is_empty());
+                assert!(call.messages.iter().any(|message| {
+                    message["content"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("evidence already collected"))
+                }));
+                json!({"role": "assistant", "content": "Final answer from current evidence."})
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct PendingSteeringTool<'a>(&'a SteeringFinalizeModel);
+
+    impl CapabilityExecutor for PendingSteeringTool<'_> {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            self.0.control_ready.store(true, Ordering::SeqCst);
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn steering_control_interrupts_active_tool_and_forces_one_terminal_synthesis() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "investigate" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = SteeringFinalizeModel::default();
+        let tool = PendingSteeringTool(&model);
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+
+        let outcome = run_turn(
+            ls,
+            cfg(),
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "investigate".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+        assert!(model.applied.load(Ordering::SeqCst));
+        assert!(model.completed.load(Ordering::SeqCst));
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[derive(Default)]
+    struct ExhaustedTurnSteeringModel {
+        calls: AtomicUsize,
+        control_ready: AtomicBool,
+        applied: AtomicBool,
+        completed: AtomicBool,
+    }
+
+    impl ModelClient for ExhaustedTurnSteeringModel {
+        fn finalization_fence(&self) -> crate::FinalizationFence {
+            if self.control_ready.load(Ordering::SeqCst)
+                && !self.applied.load(Ordering::SeqCst)
+            {
+                crate::FinalizationFence::PendingInput
+            } else {
+                crate::FinalizationFence::Ready
+            }
+        }
+
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            (self.control_ready.load(Ordering::SeqCst)
+                && !self.applied.load(Ordering::SeqCst))
+            .then(|| crate::TurnControlDecision {
+                steering_id: 9,
+                disposition: crate::TurnControlDisposition::FinalizeWithCurrentEvidence,
+                instruction: "Stop browsing and answer from current evidence".to_string(),
+            })
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            loop {
+                if let Some(control) = self.current_turn_control() {
+                    return control;
+                }
+                tokio::task::yield_now().await;
+            }
+        }
+
+        fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+            assert_eq!(steering_id, 9);
+            self.applied.store(true, Ordering::SeqCst);
+        }
+
+        fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+            assert_eq!(steering_id, 9);
+            self.completed.store(true, Ordering::SeqCst);
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "browse_once",
+                        "type": "function",
+                        "function": { "name": "browse", "arguments": "{}" }
+                    }]
+                })
+            } else {
+                assert!(call.is_final_round);
+                assert!(self.applied.load(Ordering::SeqCst));
+                assert!(call.messages.iter().any(|message| {
+                    message["content"]
+                        .as_str()
+                        .is_some_and(|content| content.contains("Stop browsing"))
+                }));
+                json!({"role": "assistant", "content": "Answer after the steering instruction."})
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct ExhaustingBrowseTool<'a>(&'a ExhaustedTurnSteeringModel);
+
+    impl CapabilityExecutor for ExhaustingBrowseTool<'_> {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            self.0.control_ready.store(true, Ordering::SeqCst);
+            Ok(ToolOutcome {
+                result: "found: false".to_string(),
+                effects: ToolEffects::default(),
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn post_loop_synthesis_cannot_overtake_interpreted_steering() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "research" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = ExhaustedTurnSteeringModel::default();
+        let tool = ExhaustingBrowseTool(&model);
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 1;
+        turn_cfg.max_rounds = 1;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "research".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert!(model.applied.load(Ordering::SeqCst));
+        assert!(model.completed.load(Ordering::SeqCst));
+        assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[derive(Default)]
+    struct BrowserDeadlineModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for BrowserDeadlineModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "slow_browse",
+                        "type": "function",
+                        "function": { "name": "browse", "arguments": "{\"goal\":\"test\"}" }
+                    }]
+                })
+            } else {
+                assert!(call.is_final_round);
+                json!({"role": "assistant", "content": "Final answer from the available evidence."})
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct SlowDelegatedBrowse;
+
+    impl CapabilityExecutor for SlowDelegatedBrowse {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+            Ok(ToolOutcome {
+                result: "found: false".to_string(),
+                effects: ToolEffects {
+                    browser_activity_observed: true,
+                    outcome_hint: Some(crate::ToolOutcomeHint::NoProgress),
+                    ..ToolEffects::default()
+                },
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn delegated_browse_is_interrupted_at_the_turns_remaining_browser_deadline() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = BrowserDeadlineModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_budget.max_elapsed_ms = 20;
+        let started = Instant::now();
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &SlowDelegatedBrowse,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        assert!(started.elapsed() < std::time::Duration::from_millis(100));
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// Round 0 delegates to `browse`; the next round answers from the result — no `is_final_round`
+    /// expectation (the browse COMPLETES normally here, so round 1 is an ordinary round, unlike the
+    /// budget-exhausted deadline test where the second call is a forced synthesis).
+    #[derive(Default)]
+    struct BrowseThenAnswerModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for BrowseThenAnswerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let (message, finish) = if index == 0 {
+                (
+                    json!({
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "browse_0",
+                            "type": "function",
+                            "function": { "name": "browse", "arguments": "{\"goal\":\"test\"}" }
+                        }]
+                    }),
+                    "tool_calls",
+                )
+            } else {
+                (json!({"role": "assistant", "content": "Answer using the browse result."}), "stop")
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(finish.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_completed_delegated_browse_does_not_trip_the_manager_stall_window_on_return() {
+        // C2 regression: a healthy `browse` that legitimately runs longer than the MANAGER turn's
+        // stall window must NOT stall the manager the moment it returns — the model has to get its
+        // next round to use the browse result. `browser_activity_observed` resets the manager stall
+        // clock (the granular-branch reset never fires in the manager turn). Without the fix the
+        // model would be cut off after the browse (1 call, budget_exceeded).
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = BrowseThenAnswerModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.browser_budget.max_elapsed_ms = 300_000; // browse completes (its 120ms << cap)
+        turn_cfg.browser_budget.max_stall_ms = 80; // < the browse's 120ms → would stall on return
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &SlowDelegatedBrowse,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let stalls = journal
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|kind| kind.as_str() == "browser_budget_exceeded")
+            .count();
+        assert_eq!(stalls, 0, "a completed browse must not trip the manager stall window on return");
+        assert_eq!(
+            model.calls.load(Ordering::SeqCst),
+            2,
+            "the model must get its post-browse round to use the result"
+        );
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
+    // --- Finalization fence rework: drain / bounded-wait / park (steering-park-resume, Task 1) ---
+
+    /// A tool ran while a steering row became interpreted as a plain `continue` — the disposition
+    /// `wait_for_interrupting_control` (used mid-round/mid-tool) deliberately ignores, so it never
+    /// surfaces there. The fence's drain step must pick it up via `current_turn_control()` directly
+    /// (which returns ANY interpreted row, continue included) instead of spinning on it forever.
+    #[derive(Default)]
+    struct TrailingContinueAtFenceModel {
+        calls: AtomicUsize,
+        control_ready: AtomicBool,
+        applied: AtomicBool,
+        completed: AtomicBool,
+    }
+
+    impl ModelClient for TrailingContinueAtFenceModel {
+        fn finalization_fence(&self) -> crate::FinalizationFence {
+            if self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst) {
+                crate::FinalizationFence::PendingInput
+            } else {
+                crate::FinalizationFence::Ready
+            }
+        }
+
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            (self.control_ready.load(Ordering::SeqCst) && !self.applied.load(Ordering::SeqCst)).then(
+                || crate::TurnControlDecision {
+                    steering_id: 11,
+                    disposition: crate::TurnControlDisposition::ContinueCurrentWork,
+                    instruction: "Keep going with the current step".to_string(),
+                },
+            )
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            loop {
+                if let Some(control) = self.current_turn_control() {
+                    return control;
+                }
+                tokio::task::yield_now().await;
+            }
+        }
+
+        fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+            assert_eq!(steering_id, 11);
+            self.applied.store(true, Ordering::SeqCst);
+        }
+
+        fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+            assert_eq!(steering_id, 11);
+            self.completed.store(true, Ordering::SeqCst);
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            let message = if index == 0 {
+                json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "browse_once",
+                        "type": "function",
+                        "function": { "name": "browse", "arguments": "{}" }
+                    }]
+                })
+            } else {
+                assert!(call.is_final_round);
+                assert!(self.applied.load(Ordering::SeqCst));
+                assert!(call.messages.iter().any(|message| {
+                    message["content"].as_str().is_some_and(|content| {
+                        content.contains("Keep going with the current step")
+                    })
+                }));
+                json!({"role": "assistant", "content": "Answer after the drained continue."})
+            };
+            Ok(ModelRoundOutput {
+                message,
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some(if index == 0 { "tool_calls" } else { "stop" }.to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    struct ContinueSettingBrowseTool<'a>(&'a TrailingContinueAtFenceModel);
+
+    impl CapabilityExecutor for ContinueSettingBrowseTool<'_> {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            self.0.control_ready.store(true, Ordering::SeqCst);
+            Ok(ToolOutcome {
+                result: "found: false".to_string(),
+                effects: ToolEffects::default(),
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn trailing_continue_at_the_fence_is_drained_and_finalizes() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "research" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = TrailingContinueAtFenceModel::default();
+        let tool = ContinueSettingBrowseTool(&model);
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 1;
+        turn_cfg.max_rounds = 1;
+
+        let outcome = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &model,
+            &tool,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "research".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        // The trailing `continue` sitting at the fence is drained (applied) rather than parked —
+        // the turn finalizes via forced synthesis instead of hanging on the old spin.
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+        assert!(model.applied.load(Ordering::SeqCst));
+        assert!(model.completed.load(Ordering::SeqCst));
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            1
+        );
+    }
+
+    /// The fence stays `PendingInput` forever and `current_turn_control()` never returns an
+    /// interpreted row (the steering stays `pending`/`claimed` — e.g. the semantic model is
+    /// unavailable to interpret it). `wait_for_turn_control()` models the REAL production
+    /// behavior (`GatewayModelClient::wait_for_turn_control`): it returns ONLY once a non-
+    /// `continue` interpreted control appears, else it never resolves on its own — so with
+    /// `current_turn_control()` permanently `None`, awaiting it directly would block forever.
+    /// The reworked park loop must tick on a plain wall-clock sleep instead of this seam, so it
+    /// parks within its bounded budget regardless. If a regression makes the loop await this
+    /// future directly, the test hangs and the `tokio::time::timeout` guard below catches it.
+    #[derive(Default)]
+    struct NeverInterpretedSteeringModel {
+        calls: AtomicUsize,
+        wait_calls: AtomicUsize,
+    }
+
+    impl ModelClient for NeverInterpretedSteeringModel {
+        fn finalization_fence(&self) -> crate::FinalizationFence {
+            crate::FinalizationFence::PendingInput
+        }
+
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            None
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            self.wait_calls.fetch_add(1, Ordering::SeqCst);
+            // Never resolves — mirrors production when the row never gets interpreted. The
+            // fixed park loop must not depend on this future completing.
+            std::future::pending().await
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "Draft answer while steering is still pending.",
+                }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn uninterpreted_pending_steering_at_the_fence_parks_within_budget() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "investigate" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = NeverInterpretedSteeringModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 1;
+        turn_cfg.max_rounds = 1;
+
+        // Guard against a regression to the old infinite spin (or to a park loop that awaits
+        // the blocking `wait_for_turn_control()` seam): fail fast with a clear panic instead of
+        // hanging the whole test binary.
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_turn(
+                ls,
+                turn_cfg,
+                &usage_context(),
+                &model,
+                &NoTools,
+                &mut browser,
+                &NoPlan,
+                &DoneJudge,
+                &NoCompact,
+                &OpenPolicy,
+                &journal,
+                &sink,
+                0.0,
+                None,
+                &std::collections::BTreeSet::new(),
+                &[],
+                "investigate".to_string(),
+                String::new(),
+                None,
+                false,
+                0,
+                false,
+                Vec::new(),
+                None,
+                &crate::turn_trace::TurnTrace::disabled(),
+            ),
+        )
+        .await
+        .expect("run_turn must park within its bounded wait budget, not hang");
+        let elapsed = started.elapsed();
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Parked);
+        assert!(outcome.memory_answer.is_empty());
+        // Proves the budget is wall-clock-ticked (PARK_WAIT_CYCLES=40 * 50ms ~= 2s), not an
+        // instant return and not a hang: real time actually elapsed, comfortably under the
+        // 5s timeout above.
+        assert!(
+            elapsed >= std::time::Duration::from_millis(1_500),
+            "expected the bounded wait to actually tick ~2s of wall-clock time, elapsed={elapsed:?}"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "park must complete within its own budget, well before the outer timeout, elapsed={elapsed:?}"
+        );
+        // `wait_for_turn_control()` never resolves in this double (`std::future::pending()`), so
+        // the ONLY way this line is reached at all is if the park loop's tick never awaited it
+        // to completion — a direct await here would have hung and been caught by the timeout
+        // above instead. The lone round-0 model call races the loop's OTHER (unrelated)
+        // `wait_for_interrupting_control` select arm against `generate()`, which may poll (but
+        // never complete) this same seam once — hence `<= 1`, not a strict `== 0`.
+        assert!(
+            model.wait_calls.load(Ordering::SeqCst) <= 1,
+            "wait_for_turn_control should be polled at most once (the unrelated round-call race), \
+             never awaited to completion by the park loop's tick"
+        );
+        assert_eq!(
+            sink.0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, GenerateStreamEvent::Done { .. }))
+                .count(),
+            0,
+            "a parked turn must never emit a terminal Done"
+        );
+        // The park path must emit a resumable checkpoint at the boundary (the coordinator-resume
+        // pipeline reseeds from it). At least the normal per-round checkpoint fires (round 0, the
+        // only round `hard_round_ceiling = 1` allows) PLUS the park-point checkpoint itself — both
+        // at round 0 here; assert on the LAST one (the park checkpoint) rather than an exact count,
+        // since that's not this test's concern.
+        let checkpoints = journal.1.lock().unwrap();
+        assert!(
+            !checkpoints.is_empty(),
+            "expected at least one checkpoint emitted by the time the turn parks"
+        );
+        assert_eq!(
+            checkpoints.last().unwrap().round,
+            0,
+            "the park checkpoint must capture the last round the loop actually ran"
+        );
+    }
+
+    /// A steering control drained/applied EARLIER in the turn (round 0, via `current_turn_control`
+    /// at the top of the round loop) must still be acknowledged completed even though the turn
+    /// later parks on a DIFFERENT row that never becomes interpretable. Before the flush fix, the
+    /// park early-return skipped the normal turn-end completion block entirely, silently dropping
+    /// this id — its store row would be stuck at `applied` forever (a permanent "Applying…"
+    /// spinner in the UI).
+    #[derive(Default)]
+    struct EarlierAppliedThenStuckSteeringModel {
+        calls: AtomicUsize,
+        early_control_taken: AtomicBool,
+        early_applied: AtomicBool,
+        early_completed: AtomicBool,
+    }
+
+    impl ModelClient for EarlierAppliedThenStuckSteeringModel {
+        fn finalization_fence(&self) -> crate::FinalizationFence {
+            // Always pending: a SECOND, different row is stuck uninterpreted at the fence
+            // regardless of what happened earlier in the turn with the first row.
+            crate::FinalizationFence::PendingInput
+        }
+
+        fn current_turn_control(&self) -> Option<crate::TurnControlDecision> {
+            // Offered exactly once, at the very top of round 0 (before `early_control_taken`
+            // flips) — a control drained by the ROUND LOOP itself, not the fence. Never
+            // interpreted again afterward (the stuck row at the fence is a DIFFERENT id that
+            // this double never surfaces through `current_turn_control`).
+            (!self.early_control_taken.load(Ordering::SeqCst)).then(|| {
+                self.early_control_taken.store(true, Ordering::SeqCst);
+                crate::TurnControlDecision {
+                    steering_id: 5,
+                    disposition: crate::TurnControlDisposition::ContinueCurrentWork,
+                    instruction: "Keep going — applied early in the turn".to_string(),
+                }
+            })
+        }
+
+        async fn wait_for_turn_control(&self) -> crate::TurnControlDecision {
+            // Models production: never resolves once nothing is left to interpret.
+            std::future::pending().await
+        }
+
+        fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+            assert_eq!(steering_id, 5);
+            self.early_applied.store(true, Ordering::SeqCst);
+        }
+
+        fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+            assert_eq!(steering_id, 5);
+            self.early_completed.store(true, Ordering::SeqCst);
+        }
+
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "Draft answer while a different row is still stuck pending.",
+                }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("stop".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn park_flushes_completion_for_steering_drained_earlier_in_the_turn() {
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "investigate" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = EarlierAppliedThenStuckSteeringModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 1;
+        turn_cfg.max_rounds = 1;
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_turn(
+                ls,
+                turn_cfg,
+                &usage_context(),
+                &model,
+                &NoTools,
+                &mut browser,
+                &NoPlan,
+                &DoneJudge,
+                &NoCompact,
+                &OpenPolicy,
+                &journal,
+                &sink,
+                0.0,
+                None,
+                &std::collections::BTreeSet::new(),
+                &[],
+                "investigate".to_string(),
+                String::new(),
+                None,
+                false,
+                0,
+                false,
+                Vec::new(),
+                None,
+                &crate::turn_trace::TurnTrace::disabled(),
+            ),
+        )
+        .await
+        .expect("run_turn must park within its bounded wait budget, not hang");
+
+        assert_eq!(outcome.delivery, crate::TurnDelivery::Parked);
+        assert!(model.early_applied.load(Ordering::SeqCst));
+        // The regression: without the flush-before-park fix, this stays false — the id applied
+        // earlier in the turn is silently dropped when the turn parks on the later, different,
+        // uninterpreted row.
+        assert!(
+            model.early_completed.load(Ordering::SeqCst),
+            "a steering control drained/applied earlier in the turn must still be acknowledged \
+             completed when the turn parks on a later, different, uninterpreted row"
         );
     }
 }

@@ -448,6 +448,7 @@ export function ChatView({
   // cleared when it ends. Used by the wsSubscription subscriber to route events.
   const activeTurnIdRef = useRef<string | null>(null);
   const turnReplayRef = useRef<TurnReplayState | null>(null);
+  const streamOwnerTurnRef = useRef<string | null>(null);
   // Turn ids of background turns we've already attached to (via incomingBackgroundTurn), so a
   // re-fired `thread.turn_started` or a messages re-render never double-attaches the same turn.
   const handledBackgroundTurnsRef = useRef<Set<string>>(new Set());
@@ -769,6 +770,7 @@ export function ChatView({
     setProjectedSubagents([]);
     setProjectedActiveTurn(null);
     turnReplayRef.current = null;
+    streamOwnerTurnRef.current = null;
     setProjectionLoaded(false);
   }, [thread.threadId]);
   // Load the durable island projection on thread change and when a turn ENDS (isStreaming →
@@ -1169,8 +1171,11 @@ export function ChatView({
     };
     const promptMessages = [...conversationBase, userMessage];
     const requestId = `chat_stream_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    activeTurnIdRef.current = `turn_${requestId}`;
-    turnReplayRef.current = createTurnReplayState(activeTurnIdRef.current);
+    const localTurnId = `turn_${requestId}`;
+    activeTurnIdRef.current = localTurnId;
+    streamOwnerTurnRef.current = localTurnId;
+    handledBackgroundTurnsRef.current.add(localTurnId);
+    turnReplayRef.current = createTurnReplayState(localTurnId);
     setStreamStatus({
       requestId,
       phase: "accepted",
@@ -1476,6 +1481,9 @@ export function ChatView({
       }
       cancelledStreamIdsRef.current.delete(requestId);
       activeTurnIdRef.current = null;
+      if (streamOwnerTurnRef.current === localTurnId) {
+        streamOwnerTurnRef.current = null;
+      }
       clearResumeMarker(thread.threadId);
     }
   }
@@ -1538,11 +1546,14 @@ export function ChatView({
     if (promptSubmitting || streamingAssistantId) return;
     const shouldAutoTitleAfterResume = isPlaceholderThreadTitle(thread.title);
     const requestId = marker.requestId;
+    const resumedTurnId = `turn_${requestId}`;
+    if (streamOwnerTurnRef.current) return;
+    streamOwnerTurnRef.current = resumedTurnId;
     // Point the island's live WS channel (the `turn.event` subscription) at THIS turn. The
     // broker fan-out keys on `turn_{request_id}`, which now also equals the id carried by
     // `thread.turn_started` (the visible turn adopts the broker id — see start_visible_
     // conversation_turn). Set BEFORE any await so the first replayed event is already accepted.
-    activeTurnIdRef.current = `turn_${requestId}`;
+    activeTurnIdRef.current = resumedTurnId;
     turnReplayRef.current = createTurnReplayState(activeTurnIdRef.current);
     const userMessage: ChatMessage = {
       id: `resume_user_${Date.now()}`,
@@ -1676,6 +1687,9 @@ export function ChatView({
       // newer turn that started meanwhile keeps its attachment.
       if (activeTurnIdRef.current === `turn_${requestId}`) {
         activeTurnIdRef.current = null;
+      }
+      if (streamOwnerTurnRef.current === resumedTurnId) {
+        streamOwnerTurnRef.current = null;
       }
       if (options?.commitResult !== false) {
         clearResumeMarker(thread.threadId);

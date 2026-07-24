@@ -51,40 +51,175 @@ pub(crate) struct GatewaySteeringContext<'a> {
     pub run_id: &'a str,
 }
 
-impl GatewayModelClient<'_> {
-    fn consume_steering_messages(&self, round: u32) -> Vec<serde_json::Value> {
-        let Some(context) = self.steering else {
-            return Vec::new();
-        };
-        steering_messages_for_round_number(context, round)
+pub(crate) fn current_turn_control(
+    context: GatewaySteeringContext<'_>,
+) -> Option<local_first_engine::TurnControlDecision> {
+    let (record, objective) = {
+        let store = context.state.task_store.lock().ok()?;
+        let record = store
+            .list_interpreted_turn_steering(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+                context.turn_id,
+                context.run_id,
+            )
+            .ok()?
+            .into_iter()
+            .next()?;
+        let objective = store
+            .load_objective_contract(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+            )
+            .ok()?;
+        (record, objective)
+    };
+    let decision = serde_json::from_value::<crate::semantic_decision::ValidatedSemanticDecision>(
+        record.semantic_decision_json?,
+    )
+    .ok()?;
+    let requires_confirmation = objective.as_ref().is_none_or(|active| {
+        crate::semantic_decision::steering_requires_confirmation(
+            active,
+            &decision,
+            record.objective_revision == active.revision,
+        )
+    });
+    let semantic_disposition = crate::semantic_decision::actionable_steering_decision(&decision)?;
+    let disposition = if requires_confirmation {
+        local_first_engine::TurnControlDisposition::NeedsClarification
+    } else {
+        match semantic_disposition {
+        crate::semantic_decision::SteeringDisposition::ContinueCurrentWork => {
+            local_first_engine::TurnControlDisposition::ContinueCurrentWork
+        }
+        crate::semantic_decision::SteeringDisposition::ReplanCurrentWork => {
+            local_first_engine::TurnControlDisposition::ReplanCurrentWork
+        }
+        crate::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence => {
+            local_first_engine::TurnControlDisposition::FinalizeWithCurrentEvidence
+        }
+        crate::semantic_decision::SteeringDisposition::CancelCurrentWork => {
+            local_first_engine::TurnControlDisposition::CancelCurrentWork
+        }
+        crate::semantic_decision::SteeringDisposition::NeedsClarification => {
+            local_first_engine::TurnControlDisposition::NeedsClarification
+        }
+        }
+    };
+    Some(local_first_engine::TurnControlDecision {
+        steering_id: record.steering_id,
+        disposition,
+        instruction: record.content,
+    })
+}
+
+pub(crate) fn acknowledge_turn_control_applied(
+    context: GatewaySteeringContext<'_>,
+    steering_id: i64,
+) {
+    let Some((current, objective)) = context.state.task_store.lock().ok().and_then(|store| {
+        let current = store
+            .load_turn_steering(steering_id, context.user_id, context.workspace_id)
+            .ok()
+            .flatten()?;
+        let objective = store
+            .load_objective_contract(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+            )
+            .ok()
+            .flatten();
+        Some((current, objective))
+    }) else {
+        return;
+    };
+    let record = context.state.task_store.lock().ok().and_then(|store| {
+        store
+            .mark_turn_steering_applied(steering_id, current.revision, context.run_id)
+            .ok()
+    });
+    if let Some(record) = record {
+        if let Ok(chat) = crate::lock_store(context.state) {
+            let _ = chat.materialize_steering_message(context.thread_id, &record);
+        }
+        let proposed = record
+            .semantic_decision_json
+            .as_ref()
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
+        if let (Some(active), Some(proposed)) = (objective.as_ref(), proposed.as_ref())
+            && !crate::semantic_decision::steering_requires_confirmation(
+                active,
+                proposed,
+                record.objective_revision == active.revision,
+            )
+        {
+            let projection = crate::semantic_decision::objective_contract_projection(
+                proposed,
+                Some(active),
+                context.thread_id,
+                context.workspace_id,
+                crate::effective_thread_folder(context.thread_id).as_deref(),
+            );
+            if let Ok(store) = context.state.task_store.lock() {
+                let _ = store.upsert_objective_contract(
+                    context.user_id,
+                    context.workspace_id,
+                    context.thread_id,
+                    &record.source_message_id,
+                    &projection.objective,
+                    projection.mode,
+                    &projection.scope_json,
+                    &projection.allowed_actions_json,
+                    &projection.completion_json,
+                    "active",
+                );
+            }
+        }
+        crate::publish_steering_changed(&record);
     }
 }
 
+pub(crate) fn acknowledge_turn_control_completed(
+    context: GatewaySteeringContext<'_>,
+    steering_id: i64,
+) {
+    let record = context.state.task_store.lock().ok().and_then(|store| {
+        let current = store
+            .load_turn_steering(steering_id, context.user_id, context.workspace_id)
+            .ok()
+            .flatten()?;
+        store
+            .mark_turn_steering_completed(steering_id, current.revision, context.run_id)
+            .ok()
+    });
+    if let Some(record) = record {
+        crate::publish_steering_changed(&record);
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn steering_messages_for_round(
     context: GatewaySteeringContext<'_>,
 ) -> Vec<serde_json::Value> {
     steering_messages_for_round_number(context, 0)
 }
 
+#[cfg(test)]
 fn steering_messages_for_round_number(
     context: GatewaySteeringContext<'_>,
-    round: u32,
+    _round: u32,
 ) -> Vec<serde_json::Value> {
-    let binding = crate::active_routing_binding(context.state, Some(context.thread_id));
-    steering_messages_for_round_number_with(context, round, |content, active| {
-        crate::resolve_semantic_decision(
-            context.state,
-            Some(context.thread_id),
-            content,
-            active,
-            binding.as_ref(),
-        )
-    })
+    consume_interpreted_steering(context)
 }
 
+#[cfg(test)]
 pub(crate) fn steering_messages_for_round_with(
     context: GatewaySteeringContext<'_>,
-    mut resolve: impl FnMut(
+    resolve: impl FnMut(
         &str,
         Option<&local_first_task_runtime::ObjectiveContractRecord>,
     ) -> crate::semantic_decision::ValidatedSemanticDecision,
@@ -92,6 +227,7 @@ pub(crate) fn steering_messages_for_round_with(
     steering_messages_for_round_number_with(context, 0, resolve)
 }
 
+#[cfg(test)]
 fn steering_messages_for_round_number_with(
     context: GatewaySteeringContext<'_>,
     round: u32,
@@ -100,44 +236,93 @@ fn steering_messages_for_round_number_with(
         Option<&local_first_task_runtime::ObjectiveContractRecord>,
     ) -> crate::semantic_decision::ValidatedSemanticDecision,
 ) -> Vec<serde_json::Value> {
-    let Ok(store) = context.state.task_store.lock() else {
-        return Vec::new();
-    };
-    let mut objective = store
-        .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
-        .ok()
-        .flatten();
-    let messages = store
-        .claim_pending_turn_steering(
-            context.user_id,
-            context.workspace_id,
-            context.thread_id,
-            context.turn_id,
-            context.run_id,
-            round,
-        )
-        .unwrap_or_default();
-    drop(store);
-
-    if !messages.is_empty() {
-        let materialized = crate::lock_store(context.state)
-            .ok()
-            .is_some_and(|chat| messages.iter().all(|message| {
-                chat.materialize_steering_message(context.thread_id, message).is_ok()
-            }));
-        if !materialized {
+    let (objective, claimed) = {
+        let Ok(store) = context.state.task_store.lock() else {
             return Vec::new();
-        }
+        };
+        let objective = store
+            .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
+            .ok()
+            .flatten();
+        let claimed = store
+            .claim_pending_turn_steering(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+                context.turn_id,
+                context.run_id,
+                round,
+            )
+            .unwrap_or_default();
+        (objective, claimed)
+    };
+    for message in claimed {
+        let decision = resolve(&message.content, objective.as_ref());
         if let Ok(store) = context.state.task_store.lock() {
-            let ids = messages.iter().map(|message| message.steering_id).collect::<Vec<_>>();
-            if store.mark_turn_steering_applied(&ids, context.run_id).is_err() {
-                return Vec::new();
-            }
+            let _ = crate::steering_control::persist_interpretation_result(
+                &store,
+                &message,
+                context.run_id,
+                Ok(decision),
+                crate::now_epoch_secs() as i64,
+            );
         }
     }
+    consume_interpreted_steering(context)
+}
 
-    messages.into_iter().map(|message| {
-            let proposed = resolve(&message.content, objective.as_ref());
+#[cfg(test)]
+fn consume_interpreted_steering(
+    context: GatewaySteeringContext<'_>,
+) -> Vec<serde_json::Value> {
+    let (mut objective, messages) = {
+        let Ok(store) = context.state.task_store.lock() else {
+            return Vec::new();
+        };
+        let objective = store
+            .load_objective_contract(context.user_id, context.workspace_id, context.thread_id)
+            .ok()
+            .flatten();
+        let messages = store
+            .list_interpreted_turn_steering(
+                context.user_id,
+                context.workspace_id,
+                context.thread_id,
+                context.turn_id,
+                context.run_id,
+            )
+            .unwrap_or_default();
+        (objective, messages)
+    };
+
+    messages.into_iter().filter_map(|message| {
+            let proposed = message
+                .semantic_decision_json
+                .as_ref()
+                .and_then(|value| serde_json::from_value(value.clone()).ok())?;
+            let materialized = crate::lock_store(context.state)
+                .ok()
+                .is_some_and(|chat| {
+                    chat.materialize_steering_message(context.thread_id, &message).is_ok()
+                });
+            if !materialized {
+                return None;
+            }
+            let applied = context
+                .state
+                .task_store
+                .lock()
+                .ok()
+                .and_then(|store| {
+                    store
+                        .mark_turn_steering_applied(
+                            message.steering_id,
+                            message.revision,
+                            context.run_id,
+                        )
+                        .ok()
+                });
+            applied?;
             let requires_confirmation = objective.as_ref().is_none_or(|active| {
                 crate::semantic_decision::steering_requires_confirmation(
                     active,
@@ -181,7 +366,7 @@ fn steering_messages_for_round_number_with(
                     proposed.decision.relationship_to_active_objective,
                 )
             };
-            serde_json::json!({"role": "user", "content": content})
+            Some(serde_json::json!({"role": "user", "content": content}))
         })
         .collect()
 }
@@ -480,6 +665,34 @@ impl ModelClient for GatewayModelClient<'_> {
         }
     }
 
+    fn current_turn_control(&self) -> Option<local_first_engine::TurnControlDecision> {
+        current_turn_control(self.steering?)
+    }
+
+    async fn wait_for_turn_control(&self) -> local_first_engine::TurnControlDecision {
+        loop {
+            if let Some(control) = self.current_turn_control()
+                && control.disposition
+                    != local_first_engine::TurnControlDisposition::ContinueCurrentWork
+            {
+                return control;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    fn acknowledge_turn_control_applied(&self, steering_id: i64) {
+        if let Some(context) = self.steering {
+            acknowledge_turn_control_applied(context, steering_id);
+        }
+    }
+
+    fn acknowledge_turn_control_completed(&self, steering_id: i64) {
+        if let Some(context) = self.steering {
+            acknowledge_turn_control_completed(context, steering_id);
+        }
+    }
+
     async fn generate(
         &self,
         call: &ModelCall<'_>,
@@ -497,12 +710,7 @@ impl ModelClient for GatewayModelClient<'_> {
         // provider 400s specifically on the forcing shape. `None` everywhere but the loop's main
         // per-round call (see `ModelCall::forced_tool`), so this is a no-op for every other turn.
         let mut forced_tool_fallback_tried = false;
-        // Consume steering only at a round boundary: `generate` is entered once per
-        // model round, before the request payload is built. The durable queue makes
-        // this exactly-once even across provider retries within this round.
-        let mut messages_owned = call.messages.to_vec();
-        messages_owned.extend(self.consume_steering_messages(call.usage.round.unwrap_or_default()));
-        let messages = messages_owned.as_slice();
+        let messages = call.messages;
         let tool_schemas = call.tools;
         let temperature = call.temperature;
         let is_final_round = call.is_final_round;
@@ -1155,6 +1363,134 @@ mod tests {
             started.elapsed() < std::time::Duration::from_secs(2),
             "must give up in ~the headers budget, not hang (elapsed {:?})",
             started.elapsed()
+        );
+    }
+
+    /// Review I1 regression: a resumed chat_turn re-derives its objective from a
+    /// fresh model call (`execute_chat_turn_task` calls `upsert_objective_contract`
+    /// on EVERY dispatch, resume included). Before the store-level fix, an
+    /// unconditional `revision + 1` on that re-derivation desynced the resumed run's
+    /// objective revision from whatever a pending steering row was stamped with at
+    /// append time, forcing `steering_requires_confirmation`'s `!revision_matches`
+    /// unconditionally true — silently downgrading an otherwise-actionable steering
+    /// decision to `NeedsClarification` right when resume is supposed to apply it.
+    #[test]
+    fn resumed_steering_with_unchanged_objective_is_applied_not_demoted() {
+        let state = crate::AppState::for_tests();
+        let (user, workspace, thread, turn_id) = ("u", "w", "t", "turn-1");
+
+        // Original dispatch: objective at revision 1.
+        let original = state
+            .task_store
+            .lock()
+            .unwrap()
+            .upsert_objective_contract(
+                user,
+                workspace,
+                thread,
+                "message-1",
+                "Investigate the failing test and report findings",
+                local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                &serde_json::json!({"resources": ["project"], "semantic_decision": {"confidence": 0.91}}),
+                &serde_json::json!(["read"]),
+                &serde_json::json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+
+        // A steering message queued against that revision — mirrors the real
+        // `append_turn_steering` call site, which stamps `objective_revision` with
+        // whatever the CURRENT contract revision is at append time.
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .append_turn_steering(
+                user,
+                workspace,
+                thread,
+                turn_id,
+                &local_first_task_runtime::NewTurnSteering {
+                    source_message_id: "steer-1".to_string(),
+                    prompt: "finish with what you have".to_string(),
+                    visible_prompt: "finish with what you have".to_string(),
+                    images: Vec::new(),
+                    attachments: serde_json::json!([]),
+                    mode: None,
+                    model: None,
+                },
+                original.revision,
+            )
+            .unwrap();
+
+        // Resume re-derives the SAME objective/mode from a fresh model call — a
+        // DIFFERENT scope_json (different confidence, as two real model calls
+        // realistically produce) but the same substantive objective. Must NOT bump.
+        let resumed = state
+            .task_store
+            .lock()
+            .unwrap()
+            .upsert_objective_contract(
+                user,
+                workspace,
+                thread,
+                "message-1",
+                "Investigate the failing test and report findings",
+                local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis,
+                &serde_json::json!({"resources": ["project"], "semantic_decision": {"confidence": 0.87}}),
+                &serde_json::json!(["read"]),
+                &serde_json::json!({"kind": "report"}),
+                "active",
+            )
+            .unwrap();
+        assert_eq!(resumed.revision, original.revision, "unchanged objective/mode must not bump across resume");
+
+        // Claim + interpret the steering under the resumed run, with a decision that
+        // is only actionable if the revision genuinely matches.
+        let run_id = "resumed-run-1";
+        let claimed = state
+            .task_store
+            .lock()
+            .unwrap()
+            .claim_pending_turn_steering(user, workspace, thread, turn_id, run_id, 0)
+            .unwrap();
+        assert_eq!(claimed.len(), 1);
+        let claimed = claimed.into_iter().next().unwrap();
+
+        let mut decision = crate::semantic_decision::safe_fallback(None, "unused");
+        decision.provenance.fallback_reason = None;
+        decision.decision.steering_disposition =
+            crate::semantic_decision::SteeringDisposition::FinalizeWithCurrentEvidence;
+        decision.decision.requires_user_confirmation = false;
+        decision.decision.relationship_to_active_objective =
+            crate::semantic_decision::ObjectiveRelationship::SameObjective;
+        decision.decision.mode = local_first_task_runtime::ObjectiveMode::ReadOnlyAnalysis;
+
+        state
+            .task_store
+            .lock()
+            .unwrap()
+            .mark_turn_steering_interpreted(
+                claimed.steering_id,
+                claimed.revision,
+                &serde_json::to_value(&decision).unwrap(),
+                run_id,
+            )
+            .unwrap();
+
+        let context = GatewaySteeringContext {
+            state: &state,
+            user_id: user,
+            workspace_id: workspace,
+            thread_id: thread,
+            turn_id,
+            run_id,
+        };
+        let control = current_turn_control(context).expect("interpreted control must be available");
+        assert_eq!(
+            control.disposition,
+            local_first_engine::TurnControlDisposition::FinalizeWithCurrentEvidence,
+            "must be applied under the resumed run, not demoted to NeedsClarification"
         );
     }
 }

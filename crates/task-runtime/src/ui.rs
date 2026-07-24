@@ -67,7 +67,11 @@ impl<'a> TaskUiReadModel<'a> {
                 TaskStatus::Running => active.push(TaskUiItem::from_task(&task)),
                 TaskStatus::WaitingResource
                 | TaskStatus::WaitingTime
-                | TaskStatus::WaitingExternalEvent => blocked.push(TaskUiItem::from_task(&task)),
+                | TaskStatus::WaitingExternalEvent
+                // A parked turn is waiting on the semantic model, same UI bucket as
+                // any other external-dependency wait; it is active (not ignored like
+                // Paused/terminal) and NOT auto-dispatched.
+                | TaskStatus::Parked => blocked.push(TaskUiItem::from_task(&task)),
                 TaskStatus::WaitingUserApproval => {
                     if let Some(approval) =
                         self.store

@@ -7,9 +7,9 @@ use serde_json::json;
 #[test]
 fn store_creates_schema_and_migrations_are_idempotent() {
     let store = TaskStore::open_in_memory().unwrap();
-    assert_eq!(store.schema_version().unwrap(), 9);
+    assert_eq!(store.schema_version().unwrap(), 10);
     store.run_migrations().unwrap();
-    assert_eq!(store.schema_version().unwrap(), 9);
+    assert_eq!(store.schema_version().unwrap(), 10);
 }
 
 #[test]
