@@ -19,7 +19,7 @@ single line so the site captures its full text; version delimiters are `## [x.y.
 - **Long waits are no longer mistaken for errors.** If the model stays unavailable for a while, a wait stays a wait — no error message while Homun is still recovering.
 - **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
-## [0.1.1085] — 2026-07-25
+## [0.1.1086] — 2026-07-25
 
 New browser engine and mid-task steering.
 
@@ -37,8 +37,8 @@ New browser engine and mid-task steering.
 - **The browser reads pages faster while working.** When it's navigating and filling forms it now looks at a lighter view of the page, so each step is quicker; it still reads the full page when it needs the actual results.
 
 ## Fixes
-- **The browser is no longer blocked by its own safety check.** Ordinary clicks — picking a suggestion, pressing a search button — were being refused internally, which left the browser wandering between sites until it gave up. Only real payment steps ask for confirmation now.
+- **The browser is no longer blocked by its own safety check.** Ordinary clicks — picking a suggestion, pressing a search button — were being refused internally, and the refusal told Homun to give up rather than correct itself, so it wandered between sites until the task died. Refusals now explain exactly what to fix, and only real payment steps ask for your confirmation.
 - **The browser no longer gives up mid-search.** As long as it keeps making progress, it is no longer cut off by a fixed step limit — so a longer multi-field search runs to the results instead of stopping halfway.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
-[0.1.1085]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1085
+[0.1.1086]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1086
