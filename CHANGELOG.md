@@ -32,12 +32,13 @@ New browser engine and mid-task steering.
 - **A browser that's better at filling forms.** Reliable selection from suggestion fields (dropdowns like a station picker), so it no longer gets stuck re-typing the same thing.
 - **The browser keeps going while it's making progress.** Its time budget resets on every successful step, with an overall safety cap: on slower models it no longer gives up in the middle of a form — it stops only when it's genuinely stuck.
 - **More robust web searches.** Better page reading, fewer dead-end attempts, and results returned more faithfully.
-- **Search forms filled in one step.** For ticket-style searches (trains, flights) the browser now fills the whole form — stations, date and time together — in a single step instead of one field at a time, setting the date and time directly rather than clicking through a calendar, so those searches reach the results reliably.
+- **Ticket searches actually reach the results.** For train and flight searches the browser now picks each station from its suggestion list before moving on (instead of retyping it), and sets the date and time directly rather than clicking through a calendar.
 
 - **The browser reads pages faster while working.** When it's navigating and filling forms it now looks at a lighter view of the page, so each step is quicker; it still reads the full page when it needs the actual results.
 
 ## Fixes
+- **The browser is no longer blocked by its own safety check.** Ordinary clicks — picking a suggestion, pressing a search button — were being refused internally, which left the browser wandering between sites until it gave up. Only real payment steps ask for confirmation now.
 - **The browser no longer gives up mid-search.** As long as it keeps making progress, it is no longer cut off by a fixed step limit — so a longer multi-field search runs to the results instead of stopping halfway.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
-[0.1.1082]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1084
+[0.1.1084]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1084
