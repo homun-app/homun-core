@@ -13822,8 +13822,10 @@ async fn run_in_project(
     };
     let scan = skill_security::scan_blobs(&[("command".to_string(), command.to_string())]);
     if scan.blocked {
+        let reasons = security_scan_block_reasons(&scan);
+        tracing::warn!(target: "security::scan", risk = scan.risk_score, %reasons, "shell command blocked");
         return RunProjectOutcome::Completed(format!(
-            "Command NOT executed: blocked by the security scan (risk {}/100). \
+            "Command NOT executed: blocked by the security scan (risk {}/100). {reasons} \
 Reformulate it without destructive operations.",
             scan.risk_score
         ));
@@ -18390,6 +18392,30 @@ fn browser_navigate_failure_hint(url: &str, fails: u32) -> String {
          (browser_navigate to https://www.google.com/search?q=<your query>), then open a working \
          result link."
             .to_string()
+    }
+}
+
+/// Human-readable "why" for a security-scan block. `scan_blobs` already computes a
+/// `SecurityWarning` per match (severity + category + description), but both shell call sites used to
+/// format only `risk_score` and drop the warnings — so a blocked command told the model a number and
+/// nothing else. With substring-matched needles that is a dead end: the model cannot tell that
+/// `rm -rf ./target` passes while `rm -rf /abs/path/target` trips the "rm -rf /" needle, so it
+/// rephrases blindly. Naming the matched rule does not weaken the gate (the command still does not
+/// run) — it just makes the refusal correctable.
+fn security_scan_block_reasons(scan: &skill_security::SecurityReport) -> String {
+    let mut seen: Vec<&str> = Vec::new();
+    for warning in &scan.warnings {
+        if !seen.contains(&warning.description.as_str()) {
+            seen.push(warning.description.as_str());
+        }
+        if seen.len() == 3 {
+            break;
+        }
+    }
+    if seen.is_empty() {
+        String::new()
+    } else {
+        format!("Triggered rule(s): {}.", seen.join("; "))
     }
 }
 
@@ -24391,9 +24417,11 @@ available tools (for data from the web use the browser: browser_navigate on the 
                 command.clone(),
             )]);
             if scan.blocked {
+                let reasons = security_scan_block_reasons(&scan);
+                tracing::warn!(target: "security::scan", risk = scan.risk_score, %reasons, "sandboxed command blocked");
                 format!(
                     "Command NOT executed: blocked by the security scan \
-(risk {}/100). Reformulate it without dangerous operations.",
+(risk {}/100). {reasons} Reformulate it without dangerous operations.",
                     scan.risk_score
                 )
             } else {

