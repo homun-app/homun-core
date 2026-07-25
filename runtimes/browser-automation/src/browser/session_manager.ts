@@ -302,6 +302,11 @@ export class BrowserSessionManager {
     await waitForPageToSettle(state.page, action);
     state.generation += 1;
     const snapshot = await createSnapshot(state.page, action.targetId, {
+      // The observation returned AFTER an action must stay CONTENT-preserving at full size: the model
+      // reads results straight from it (e.g. the cards that appear after a search submit), so shrinking
+      // it here truncates the very data the task needs. Per-step latency is instead reduced by cutting
+      // the NUMBER of steps (one-bundle form fills) and by reading structured results from the network
+      // (browser.read_network), not by starving this observation.
       ...(action as Record<string, unknown>),
       previousSnapshot: state.lastFullSnapshot,
       generation: state.generation,

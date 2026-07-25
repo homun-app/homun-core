@@ -22958,14 +22958,16 @@ or tell the user to start the contained computer (Settings → Local computer)."
                             chat_browser_call_bounded(client, open_method, open_params)
                                 .await;
                         let nav_err = nav_res.err();
-                        // Navigate/Open return no snapshot → snapshot now.
+                        // Navigate/Open return no snapshot → snapshot now. ACTING view (small,
+                        // interactive-only): the model has just landed and needs the controls to act
+                        // on, not the whole page — reading content is a later explicit browser_snapshot.
                         let mut client_now = client_back;
                         let snap_result = if nav_err.is_none() {
                             if let Some(c) = client_now.take() {
                                 let (c2, snap) = chat_browser_call_bounded(
                                     c,
                                     BrowserMethod::Snapshot,
-                                    browser_chat_snapshot_params(
+                                    browser_chat_act_snapshot_params(
                                         ctx.current_target.as_str(),
                                     ),
                                 )
@@ -23528,10 +23530,11 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 match (stale, browser_session.take()) {
                                     (true, Some(c)) => {
                                         let guard = browse_web_lock().lock().await;
+                                        // Stale-ref recovery is an ACTING re-observation → small view.
                                         let (c_back, snap_res) = chat_browser_call_bounded(
                                             c,
                                             BrowserMethod::Snapshot,
-                                            browser_chat_snapshot_params(
+                                            browser_chat_act_snapshot_params(
                                                 ctx.current_target.as_str(),
                                             ),
                                         )
@@ -27311,8 +27314,12 @@ re-reading the snapshot after each.\n\
 3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
 JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
 do not repeat the same failing search.\n\
-4. EXTRACT AS YOU GO: the moment a page shows the value you need, copy the CONCRETE data (actual \
-numbers, rows, names, dates) into your answer — page content is NOT retained once you navigate away.\n\
+4. TO READ a long results table or article in full (all the train times, the whole standings table), \
+call browser_snapshot — it returns the FULL page content. The observation you get back AFTER an action \
+is kept compact so acting stays fast, so when you need to read a large block of data in full, take a \
+browser_snapshot. EXTRACT AS YOU GO: the moment a page shows the value you need, copy the CONCRETE data \
+(actual numbers, rows, names, dates) into your answer — page content is NOT retained once you navigate \
+away.\n\
 5. STOP as soon as you have the answer: write it plainly with the real values. If the information is \
 genuinely unavailable after trying your sources, say so explicitly (e.g. \"not available on X\") — do \
 NOT invent it. Your browsing budget is limited; settle the goal in 1-2 good sources, not 5+.",
@@ -31903,6 +31910,26 @@ fn browser_chat_snapshot_params(target_id: &str) -> serde_json::Value {
         // The appended flat url-dump made `extract_source_urls` scrape EVERY link (a
         // Wikipedia page's donate / edit / history / action= chrome) into `browse_sources`,
         // which then polluted the "Sources" footer with non-source UI links.
+    })
+}
+
+/// ACTING observation: content-preserving but SMALLER (compact + a tighter 9k cap) than the full
+/// reading snapshot. Pure interactive-only filtering (what browser-use/OpenClaw serialize) would be
+/// even smaller, but Homun's aria-role filter drops the autocomplete SUGGESTIONS and typed values a
+/// weak model needs to complete a field — so acting keeps content and just trims the page tail. On a
+/// slow/local model this is the per-step latency lever (each generation ~2x cheaper than the 20k
+/// dump). Used after navigate and after a stale-ref recovery; the post-`act` observation gets the
+/// same treatment sidecar-side (session_manager `act`). Reading a full results table is the SEPARATE,
+/// larger `browser_chat_snapshot_params`, reached only by the explicit `browser_snapshot` tool.
+fn browser_chat_act_snapshot_params(target_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "target_id": target_id,
+        "snapshot_format": "ai",
+        "refs_mode": "aria",
+        "compact": true,
+        "depth": 12,
+        "max_chars": 9_000,
+        "timeout_ms": 8_000,
     })
 }
 
