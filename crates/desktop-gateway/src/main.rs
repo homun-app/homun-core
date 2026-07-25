@@ -23235,7 +23235,13 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         focus_ctx,
                     ) {
                         *browser_session = Some(client);
-                        push_browser_step("browser action bundle blocked".to_string(), "error");
+                        // Log WHY (same gap as the act-error line): "bundle blocked" alone cannot
+                        // distinguish a payment gate from a schema-illegal item or a missing
+                        // action_class, and the browse sub-turn keeps no other record.
+                        push_browser_step(
+                            format!("browser action bundle blocked: {}", clip_chars(&error, 200)),
+                            "error",
+                        );
                         *ctx.outcome_hint =
                             Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                         Err(error)
@@ -27320,6 +27326,12 @@ CLICK the matching suggestion — do NOT press Enter, and do NOT type the next f
 next field before selecting the suggestion, the first field CLEARS and you'll be stuck re-typing it (this \
 is the #1 cause of a search form that never completes). If no suggestion list appears after one step, then \
 you may press Enter.\n\
+   IMPORTANT — every click (and every Enter/submit) MUST carry action_class, or it is REJECTED and nothing \
+happens: use action_class=\"ordinary\" for normal interaction like picking a suggestion, opening a menu or \
+pressing a search button; \"account\" for logging in; \"booking\" for reserving/selecting a seat or fare. \
+Example: {{\"kind\":\"click\",\"ref\":\"e42\",\"action_class\":\"ordinary\"}}. This applies to EVERY click, \
+including each item inside an `actions` bundle. If an action comes back rejected, FIX THAT ACTION and \
+retry it on the SAME page — do not respond by navigating somewhere else.\n\
    c) Only after the station is committed, move to the next field.\n\
 For the DATE field use ONE kind='set_date' (date=YYYY-MM-DD); for the TIME field ONE kind='set_time' \
 (time=HH:MM) — each drives the whole calendar/time widget in a single action, so NEVER click calendar days \
