@@ -29352,6 +29352,21 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         &request.request_id,
         &privacy_decision,
     ) {
+        // The two failure branches above log; the branch that actually REWRITES the user's message
+        // did not — and that is the common one. A false positive (an ordinary path or word read as a
+        // credential) therefore silently changed what the model was asked, with nothing in the log to
+        // explain the odd answer. Categories/kinds only — never the matched value.
+        tracing::warn!(
+            target: "privacy::guard",
+            detections = privacy_decision.items.len(),
+            kinds = %privacy_decision
+                .items
+                .iter()
+                .map(|item| format!("{}:{}", item.category, item.kind))
+                .collect::<Vec<_>>()
+                .join(","),
+            "privacy guard intercepted the turn (user text rewritten)"
+        );
         // Privacy Guard runs before the agent loop: the raw secret must not reach
         // the main chat model or the committed user transcript. The actual value
         // lives only in the pending sidecar until the user accepts with the PIN.

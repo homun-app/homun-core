@@ -178,7 +178,41 @@ fn detect_credentials(text: &str, detections: &mut Vec<SensitiveDetection>) {
         while let Some(relative) = lower[offset..].find(label) {
             let label_start = offset + relative;
             let value_start = label_start + label.len();
-            let Some((secret_start, secret_end)) = first_secret_value(text, value_start) else {
+            // The label must be a WORD, and the value must be genuinely separated from it. A bare
+            // substring search matches labels buried in identifiers and paths — "crates/secrets/src/
+            // lib.rs" contains "secret", and `first_secret_value` then captured the remainder of the
+            // very same token ("s/src/lib.rs") and redacted it, so an ordinary file path was rewritten
+            // into a vault placeholder and the model never saw what it was asked to read. A real
+            // credential is always written `label: value`, `label=value` or `label value`, so require
+            // the character right after the label to be a separator (or the end of the text).
+            let follows = lower[value_start..].chars().next();
+            let separated = match follows {
+                None => true,
+                Some(c) => c.is_whitespace() || matches!(c, ':' | '=' | '"' | '\''),
+            };
+            let preceded_by_word_char = lower[..label_start]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_ascii_alphanumeric());
+            if !separated || preceded_by_word_char {
+                offset = value_start;
+                continue;
+            }
+            // An explicit `label:`/`label=` states the intent, so whatever follows is the secret.
+            // In prose ("il token refresh loop va sistemato") the next word is just the next word —
+            // taking it blindly redacted ordinary sentences — so there we require the value to LOOK
+            // like a secret (length or a letter+digit/symbol mix) and scan the clause for the first
+            // such token instead of grabbing whatever comes next.
+            let explicit_assignment = lower[value_start..]
+                .chars()
+                .find(|c| !c.is_whitespace())
+                .is_some_and(|c| matches!(c, ':' | '='));
+            let found = if explicit_assignment {
+                first_secret_value(text, value_start)
+            } else {
+                first_secret_shaped_value(text, value_start)
+            };
+            let Some((secret_start, secret_end)) = found else {
                 offset = value_start;
                 continue;
             };
@@ -284,6 +318,46 @@ fn first_digit_run(
     })
 }
 
+/// Does this token look like an actual secret rather than an ordinary word? Real keys/tokens are
+/// long, or mix letters with digits/symbols ("hunter2", "sk-abc123", "ghp_ABCDEF…"); prose words
+/// ("refresh", "loop", "e'") are short, all-letter and single-case.
+fn looks_like_secret_value(value: &str) -> bool {
+    let trimmed = value.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | '.' | ';'));
+    if trimmed.len() >= 16 {
+        return true;
+    }
+    if trimmed.len() < 6 {
+        return false;
+    }
+    let has_digit = trimmed.chars().any(|c| c.is_ascii_digit());
+    let has_alpha = trimmed.chars().any(|c| c.is_ascii_alphabetic());
+    let has_symbol = trimmed.chars().any(|c| matches!(c, '-' | '_' | '.' | '/' | '+'));
+    let mixed_case = trimmed.chars().any(|c| c.is_ascii_uppercase())
+        && trimmed.chars().any(|c| c.is_ascii_lowercase());
+    (has_digit && has_alpha) || (has_alpha && has_symbol && (has_digit || mixed_case))
+}
+
+/// Like [`first_secret_value`] but only accepts a token that actually looks like a secret, scanning
+/// forward within the same clause. Used when the label appears in prose rather than as `label: value`.
+fn first_secret_shaped_value(text: &str, offset: usize) -> Option<(usize, usize)> {
+    let (_, clause_end) = containing_clause(text, offset.min(text.len().saturating_sub(1)));
+    let end_bound = clause_end.max(offset);
+    let mut cursor = offset;
+    while cursor < end_bound {
+        let Some((start, end)) = first_secret_value(&text[..end_bound], cursor) else {
+            return None;
+        };
+        if looks_like_secret_value(&text[start..end]) {
+            return Some((start, end));
+        }
+        if end <= cursor {
+            return None;
+        }
+        cursor = end;
+    }
+    None
+}
+
 fn first_secret_value(text: &str, offset: usize) -> Option<(usize, usize)> {
     let mut start = None;
     for (relative, ch) in text[offset..].char_indices() {
@@ -372,6 +446,40 @@ fn apply_redactions(text: &str, detections: &[SensitiveDetection]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credential_labels_buried_in_paths_and_words_are_not_redacted() {
+        // "crates/secrets/src/lib.rs" contains "secret"; the old substring match captured the rest of
+        // the SAME token ("s/src/lib.rs") and redacted it, so asking to read a file in this very repo
+        // reached the model as "read crates/[VAULT:credentials:secret]".
+        for text in [
+            "read crates/secrets/src/lib.rs",
+            "apri il file token_store.rs",
+            "il token refresh loop va sistemato",
+        ] {
+            let out = classify_sensitive_text(text);
+            assert_eq!(
+                out.redacted_text, text,
+                "ordinary text must pass through untouched: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn real_credentials_are_still_redacted() {
+        for text in [
+            "password: hunter2",
+            "api key = sk-abc123def456",
+            "il token e' ghp_ABCDEFGHIJKLMNOP",
+        ] {
+            let out = classify_sensitive_text(text);
+            assert!(
+                out.redacted_text.contains("[VAULT:credentials:secret]"),
+                "a real credential must still be redacted: {text} -> {}",
+                out.redacted_text
+            );
+        }
+    }
 
     #[test]
     fn detects_and_redacts_payment_card_without_cvv_storage() {
