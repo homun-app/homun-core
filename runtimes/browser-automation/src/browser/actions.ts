@@ -112,6 +112,31 @@ type BrowserActRequestInner =
       commit?: "arrow_enter" | "enter" | "none";
     }
   | {
+      // Higher-level "widget work in the system" (vs the model driving a calendar click-by-click):
+      // open the date control's calendar and set it to `date`, deterministically, in ONE action —
+      // the sidecar reads the month heading, navigates prev/next to the target month, and clicks the
+      // day cell. Collapses ~4 model round-trips (open → navigate month → click day) into one.
+      kind: "set_date";
+      targetId: string;
+      ref?: string;
+      selector?: string;
+      // Target date as ISO `YYYY-MM-DD` (the model has already resolved it via resolve_datetime).
+      date: string;
+      timeoutMs?: number;
+    }
+  | {
+      // Higher-level "widget work in the system": open a time control and pick `time` (HH:MM) — the
+      // sidecar clicks the control, then the matching time option/button (closest available if the
+      // exact minute isn't offered). One action instead of the model hunting the time list.
+      kind: "set_time";
+      targetId: string;
+      ref?: string;
+      selector?: string;
+      // Target time as 24h `HH:MM` (e.g. "08:00").
+      time: string;
+      timeoutMs?: number;
+    }
+  | {
       kind: "press";
       targetId: string;
       key: string;
@@ -328,6 +353,32 @@ async function executeActionUnchecked(
       }
       await page.waitForTimeout(800);
       return { ok: true, url: page.url(), committedOption, suggestions };
+    }
+    case "set_date": {
+      const locator = requireRefOrSelector(page, refs, action.ref, action.selector, "set_date");
+      const outcome = await driveDatePicker(page, locator, action.date, actionTimeout(action.timeoutMs));
+      if (!outcome.ok) {
+        // Throw a clear, actionable error (consistent with other action failures): the gateway turns
+        // it into "Action failed: …" so the model can fall back to driving the calendar by hand.
+        throw new Error(
+          `set_date failed: ${outcome.error ?? "could not set the date"}. Fall back to manual clicks: ` +
+            `click the date field, use the next/previous-month arrows to reach the month, then click the day.`,
+        );
+      }
+      await page.waitForTimeout(400);
+      return { ok: true, url: page.url(), committedOption: outcome.committed };
+    }
+    case "set_time": {
+      const locator = requireRefOrSelector(page, refs, action.ref, action.selector, "set_time");
+      const outcome = await driveTimePicker(page, locator, action.time, actionTimeout(action.timeoutMs));
+      if (!outcome.ok) {
+        throw new Error(
+          `set_time failed: ${outcome.error ?? "could not set the time"}. Fall back to manual clicks: ` +
+            `click the time field, then click the time option closest to what you want.`,
+        );
+      }
+      await page.waitForTimeout(300);
+      return { ok: true, url: page.url(), committedOption: outcome.committed };
     }
     case "press": {
       await page.keyboard.press(action.key, { delay: nonNegativeDelay(action.delayMs) });
@@ -987,6 +1038,177 @@ async function confirmAutocomplete(
     /* leave the full typed value as-is */
   }
   return { options: [] };
+}
+
+// Month-name aliases (IT + EN, full + common abbreviations) for reading a calendar's month heading.
+const CAL_MONTHS: readonly (readonly string[])[] = [
+  ["gennaio", "january", "gen", "jan"],
+  ["febbraio", "february", "feb"],
+  ["marzo", "march", "mar"],
+  ["aprile", "april", "apr"],
+  ["maggio", "may", "mag"],
+  ["giugno", "june", "giu", "jun"],
+  ["luglio", "july", "lug", "jul"],
+  ["agosto", "august", "ago", "aug"],
+  ["settembre", "september", "set", "sep"],
+  ["ottobre", "october", "ott", "oct"],
+  ["novembre", "november", "nov"],
+  ["dicembre", "december", "dic", "dec"],
+];
+
+/// Parse "<MonthName> <Year>" (e.g. "Agosto 2026", "August 2026") → {month:0-11, year}. This is
+/// calendar-widget structure, not user-intent interpretation: we read the month the widget is
+/// showing to navigate it deterministically.
+function parseMonthYear(text: string): { month: number; year: number } | null {
+  const t = (text || "").toLowerCase();
+  const yearMatch = t.match(/(20\d\d)/);
+  if (!yearMatch) return null;
+  const year = Number(yearMatch[1]);
+  for (let i = 0; i < 12; i += 1) {
+    if (CAL_MONTHS[i].some((name) => new RegExp(`\\b${name}`).test(t))) {
+      return { month: i, year };
+    }
+  }
+  return null;
+}
+
+/// Deterministically drive a calendar date picker to `isoDate` (YYYY-MM-DD): open it via `control`,
+/// read the displayed month/year heading, click prev/next until the target month, then click the day
+/// cell. Generic over the common pattern (a `[role=grid]`/table of day cells + a month heading +
+/// prev/next buttons). Returns `ok:false` (never throws) when the structure isn't recognizable, so
+/// the caller can fall back to the model driving the calendar with plain clicks. This is the
+/// "widget work in the system": one action replaces ~4 model round-trips (open, navigate, click day).
+async function driveDatePicker(
+  page: Page,
+  control: Locator,
+  isoDate: string,
+  timeout: number,
+): Promise<{ ok: boolean; committed?: string; error?: string }> {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec((isoDate || "").trim());
+  if (!iso) return { ok: false, error: `set_date needs an ISO date YYYY-MM-DD, got "${isoDate}"` };
+  const targetYear = Number(iso[1]);
+  const targetMonth = Number(iso[2]) - 1; // 0-11
+  const targetDay = Number(iso[3]);
+  const targetIndex = targetYear * 12 + targetMonth;
+
+  const controlText = async () =>
+    ((await control.innerText().catch(() => "")) || (await control.getAttribute("value").catch(() => "")) || "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const before = await controlText();
+
+  await control.click({ timeout });
+  const grid = page
+    .locator('[role="grid"], [class*="calendar" i] table, [class*="datepicker" i], .DayPicker, [class*="react-datepicker" i]')
+    .first();
+  try {
+    await grid.waitFor({ state: "visible", timeout: Math.min(timeout, 2500) });
+  } catch {
+    return { ok: false, error: "no calendar appeared after clicking the date control" };
+  }
+
+  // Read the month/year the calendar is currently showing (heading first, then the grid's own name).
+  const currentMonthYear = async (): Promise<{ month: number; year: number } | null> => {
+    const headings = grid.locator("xpath=..").locator('h1,h2,h3,[role="heading"],[class*="caption" i],[class*="title" i]');
+    const n = await headings.count().catch(() => 0);
+    for (let i = 0; i < Math.min(n, 6); i += 1) {
+      const parsed = parseMonthYear(await headings.nth(i).innerText().catch(() => ""));
+      if (parsed) return parsed;
+    }
+    const gridName = (await grid.getAttribute("aria-label").catch(() => null)) || "";
+    return parseMonthYear(gridName) ?? parseMonthYear(await grid.locator("xpath=..").innerText().catch(() => ""));
+  };
+
+  // Navigate to the target month — bounded so an unreadable widget can't loop forever.
+  for (let step = 0; step <= 24; step += 1) {
+    const cur = await currentMonthYear();
+    if (!cur) return { ok: false, error: "could not read the calendar's month/year" };
+    const delta = targetIndex - (cur.year * 12 + cur.month);
+    if (delta === 0) break;
+    if (step === 24) return { ok: false, error: "target month not reached within 24 steps" };
+    const wantNext = delta > 0;
+    const navBtn = page
+      .locator(
+        wantNext
+          ? '[aria-label*="successiv" i], [aria-label*="next" i], [aria-label*="avanti" i], [class*="next" i][role="button"], button[class*="next" i]'
+          : '[aria-label*="precedent" i], [aria-label*="previous" i], [aria-label*="prev" i], [aria-label*="indietro" i], [class*="prev" i][role="button"], button[class*="prev" i]',
+      )
+      .first();
+    if (!(await navBtn.isVisible().catch(() => false))) {
+      return { ok: false, error: `no month-${wantNext ? "next" : "prev"} button on the calendar` };
+    }
+    await navBtn.click({ timeout });
+    await page.waitForTimeout(250);
+  }
+
+  // Click the day cell for `targetDay` in the current month. Match by accessible NAME (exact) — the
+  // robust Playwright way — across the roles calendars use for day cells (gridcell/button/link/cell),
+  // scoped to the grid so adjacent-month overflow cells of other months aren't picked. Overflow cells
+  // of THIS view are usually disabled/empty; prefer an enabled one.
+  const day = String(targetDay);
+  const cell = grid
+    .getByRole("gridcell", { name: day, exact: true })
+    .or(grid.getByRole("button", { name: day, exact: true }))
+    .or(grid.getByRole("link", { name: day, exact: true }))
+    .first();
+  try {
+    await cell.click({ timeout });
+  } catch {
+    return { ok: false, error: `could not click day ${targetDay} in the target month` };
+  }
+  await page.waitForTimeout(300);
+
+  const after = await controlText();
+  return { ok: true, committed: after && after !== before ? after : undefined };
+}
+
+/// Deterministically set a time picker to `hhmm` (24h HH:MM): open it via `control`, then click the
+/// matching time option/button — or the CLOSEST available time when the exact minute isn't offered
+/// (many pickers list only 30-/60-minute slots). Returns `ok:false` (never throws) so the caller can
+/// fall back to manual clicks. One action instead of the model hunting the time list.
+async function driveTimePicker(
+  page: Page,
+  control: Locator,
+  hhmm: string,
+  timeout: number,
+): Promise<{ ok: boolean; committed?: string; error?: string }> {
+  const parsed = /^(\d{1,2}):(\d{2})$/.exec((hhmm || "").trim());
+  if (!parsed) return { ok: false, error: `set_time needs a 24h time HH:MM, got "${hhmm}"` };
+  const targetMinutes = Number(parsed[1]) * 60 + Number(parsed[2]);
+  const target = `${parsed[1].padStart(2, "0")}:${parsed[2]}`;
+
+  await control.click({ timeout });
+  await page.waitForTimeout(500);
+
+  // Exact match first.
+  const exact = page
+    .getByRole("button", { name: target, exact: true })
+    .or(page.getByRole("option", { name: target, exact: true }))
+    .first();
+  if ((await exact.count().catch(() => 0)) > 0 && (await exact.isVisible().catch(() => false))) {
+    await exact.click({ timeout });
+    return { ok: true, committed: target };
+  }
+
+  // Otherwise pick the CLOSEST offered time (visible option/button whose label is `HH:MM`).
+  const opts = page
+    .getByRole("button")
+    .or(page.getByRole("option"))
+    .filter({ hasText: /^\s*\d{1,2}:\d{2}\s*$/ });
+  const count = Math.min(await opts.count().catch(() => 0), 200);
+  let best: { loc: Locator; diff: number; label: string } | null = null;
+  for (let i = 0; i < count; i += 1) {
+    const el = opts.nth(i);
+    if (!(await el.isVisible().catch(() => false))) continue;
+    const label = (await el.innerText().catch(() => "")).trim();
+    const mm = /^(\d{1,2}):(\d{2})$/.exec(label);
+    if (!mm) continue;
+    const diff = Math.abs(Number(mm[1]) * 60 + Number(mm[2]) - targetMinutes);
+    if (!best || diff < best.diff) best = { loc: el, diff, label };
+  }
+  if (!best) return { ok: false, error: "no time options appeared in the opened time picker" };
+  await best.loc.click({ timeout });
+  return { ok: true, committed: best.label };
 }
 
 function requireRefOrSelector(

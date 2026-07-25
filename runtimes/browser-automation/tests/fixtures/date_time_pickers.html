@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="it">
+  <head><meta charset="utf-8" /><title>Date/time picker fixture</title></head>
+  <body>
+    <h1>Cerca</h1>
+    <!-- A date control that opens a calendar (role=grid, month heading, prev/next, day gridcells) and
+         a time control that opens a list of HH:MM buttons — mirroring Trenitalia's structure so the
+         sidecar's set_date/set_time drivers are exercised against the same shape. -->
+    <button id="dateControl" type="button">Seleziona data</button>
+    <div id="calendar" style="display:none">
+      <button id="prev" type="button" aria-label="Mese precedente">‹</button>
+      <h3 id="calHeading"></h3>
+      <button id="next" type="button" aria-label="Mese successivo">›</button>
+      <div id="grid" role="grid" aria-label=""></div>
+    </div>
+
+    <button id="timeControl" type="button">Seleziona orario</button>
+    <div id="timeList" style="display:none"></div>
+
+    <script>
+      const MONTHS = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
+      const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+      // The calendar starts on the CURRENT month so a future date needs real forward navigation.
+      let view = new Date(); view.setDate(1);
+      const dateControl = document.getElementById("dateControl");
+      const calendar = document.getElementById("calendar");
+      const grid = document.getElementById("grid");
+      const heading = document.getElementById("calHeading");
+
+      function renderMonth() {
+        const label = `${cap(MONTHS[view.getMonth()])} ${view.getFullYear()}`;
+        heading.textContent = label;
+        grid.setAttribute("aria-label", label);
+        grid.replaceChildren();
+        const days = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
+        for (let d = 1; d <= days; d += 1) {
+          const cell = document.createElement("div");
+          cell.setAttribute("role", "gridcell");
+          cell.textContent = String(d);
+          cell.style.cursor = "pointer";
+          cell.addEventListener("click", () => {
+            dateControl.textContent = `${d} ${cap(MONTHS[view.getMonth()])} ${view.getFullYear()}`;
+            calendar.style.display = "none";
+          });
+          grid.appendChild(cell);
+        }
+      }
+      dateControl.addEventListener("click", () => { calendar.style.display = "block"; renderMonth(); });
+      document.getElementById("prev").addEventListener("click", () => { view.setMonth(view.getMonth() - 1); renderMonth(); });
+      document.getElementById("next").addEventListener("click", () => { view.setMonth(view.getMonth() + 1); renderMonth(); });
+
+      // Time: a list of HH:MM buttons on 30-minute slots (so an odd minute has to pick the closest).
+      const timeControl = document.getElementById("timeControl");
+      const timeList = document.getElementById("timeList");
+      timeControl.addEventListener("click", () => {
+        timeList.style.display = "block";
+        if (timeList.childElementCount === 0) {
+          for (let h = 0; h < 24; h += 1) for (const mm of ["00", "30"]) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.textContent = `${String(h).padStart(2, "0")}:${mm}`;
+            b.addEventListener("click", () => { timeControl.textContent = b.textContent; timeList.style.display = "none"; });
+            timeList.appendChild(b);
+          }
+        }
+      });
+    </script>
+  </body>
+</html>

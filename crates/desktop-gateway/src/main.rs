@@ -1,5 +1,9 @@
 // Shared browser high-risk safety gate (used by the main-agent-driven
 // browser_* tools).
+// The `browser_act_tool_schema` (and other large `serde_json::json!` literals) expand past the
+// default 128 macro-recursion depth; 256 is the standard headroom for big inline JSON (compile-time
+// only, no runtime effect).
+#![recursion_limit = "256"]
 mod apply_patch;
 mod attachments;
 mod agent_journal;
@@ -18284,14 +18288,16 @@ fn browser_act_tool_schema() -> serde_json::Value {
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["click","type","fill","select","select_option","press","press_key","hover","hold","scroll","scrollIntoView","wait"],
-                        "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
+                        "enum": ["click","type","fill","select","select_option","press","press_key","hover","hold","scroll","scrollIntoView","wait","set_date","set_time"],
+                        "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'set_date' opens a date field's calendar and sets it to `date` (YYYY-MM-DD) in ONE action (prefer this over clicking through the calendar day by day); 'set_time' opens a time field and picks `time` (HH:MM); 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
                     },
                     "ref": {
                         "type": "string",
                         "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])."
                     },
                     "text": { "type": "string", "description": "Text to type (kind='type'), value (kind='fill'), or the key name to press (kind='press_key'), e.g. 'Enter', 'ArrowDown'." },
+                    "date": { "type": "string", "description": "For kind='set_date': the target date as YYYY-MM-DD (resolve it with resolve_datetime first). The sidecar opens the date control, navigates the calendar to that month, and clicks the day — one action instead of many clicks." },
+                    "time": { "type": "string", "description": "For kind='set_time': the target time as 24h HH:MM, e.g. '08:00'. The sidecar opens the time control and picks the matching (or closest) time." },
                     "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
                     "values": { "type": "array", "items": { "type": "string" }, "description": "Multiple values for a multi-select." },
                     "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
@@ -18313,11 +18319,13 @@ fn browser_act_tool_schema() -> serde_json::Value {
                             "properties": {
                                 "kind": {
                                     "type": "string",
-                                    "enum": ["click","type","fill","select","select_option","press","press_key","hover","hold","scroll","scrollIntoView","wait"],
-                                    "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
+                                    "enum": ["click","type","fill","select","select_option","press","press_key","hover","hold","scroll","scrollIntoView","wait","set_date","set_time"],
+                                    "description": "Type of action. 'type' writes with possible autocomplete; 'fill' sets the value directly; 'set_date' opens a date field's calendar and sets it to `date` (YYYY-MM-DD) in ONE action (prefer this over clicking through the calendar day by day); 'set_time' opens a time field and picks `time` (HH:MM); 'hold' presses and holds the target (for 'press and hold' challenges); 'wait' waits."
                                 },
                                 "ref": { "type": "string", "description": "Reference of the target element from the snapshot, e.g. 'e5' (from the token [ref=e5])." },
                                 "text": { "type": "string", "description": "Text to type (kind='type'), value (kind='fill'), or the key name to press (kind='press_key'), e.g. 'Enter', 'ArrowDown'." },
+                    "date": { "type": "string", "description": "For kind='set_date': the target date as YYYY-MM-DD (resolve it with resolve_datetime first). The sidecar opens the date control, navigates the calendar to that month, and clicks the day — one action instead of many clicks." },
+                    "time": { "type": "string", "description": "For kind='set_time': the target time as 24h HH:MM, e.g. '08:00'. The sidecar opens the time control and picks the matching (or closest) time." },
                                 "value": { "type": "string", "description": "Value to select (kind='select'/'select_option')." },
                                 "key": { "type": "string", "description": "Key to press for kind='press', e.g. 'Enter', 'ArrowDown'. For kind='press_key' put the key name in 'text' instead — press_key reads 'text', not 'key'." },
                                 "submit": { "type": "boolean", "description": "If true, submit the form after writing (equivalent to pressing Enter)." },
@@ -18395,7 +18403,7 @@ const BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR: &str =
 /// text above, since the schema itself must stay a plain JSON literal for the model).
 const BROWSER_ACT_SCHEMA_KINDS: &[&str] = &[
     "click", "type", "fill", "select", "select_option", "press", "press_key", "hover", "hold",
-    "scroll", "scrollIntoView", "wait",
+    "scroll", "scrollIntoView", "wait", "set_date", "set_time",
 ];
 
 /// True when `action` carries only fields the `browser_act` schema exposes for
@@ -27286,7 +27294,9 @@ METHOD:\n\
 re-read the snapshot after each action (browser_act returns the updated one). When a field shows \
 suggestions as you type (a station, city, or airport picker), type the name and then pick the \
 matching suggestion before moving on — a typed value with no suggestion selected is usually not \
-accepted.\n\
+accepted. For a DATE field use kind='set_date' with date=YYYY-MM-DD and for a TIME field kind='set_time' \
+with time=HH:MM: one action drives the whole calendar/time picker — do NOT click through the calendar \
+day by day.\n\
 3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
 JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
 do not repeat the same failing search.\n\
