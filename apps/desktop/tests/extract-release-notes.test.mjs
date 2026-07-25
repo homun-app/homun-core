@@ -3,39 +3,47 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { extractReleaseNotes, CHANGELOG_PATH } from "../scripts/extract-release-notes.mjs";
 
+// The site parser reads `## Highlights`/`## Improvements`/`## Fixes` (H2) from the release body, so
+// section headers are H2 — same level as the `## [version]` delimiters. The extractor must KEEP the
+// H2 section headers and stop only at the next `## [version]`.
 const FIXTURE = `# Changelog
 
-## [Non rilasciato]
+## [Unreleased]
 
-## [0.1.2] — 2026-07-24
+## [0.1.1079] — 2026-07-24
 
-### Novità
-- Alpha
-- Beta
+Intro line shown in the app.
 
-### Sicurezza
-- Gamma
+## Highlights
+- Alpha highlight
+- Beta highlight
 
-## [0.1.1] — 2026-06-16
-- vecchia voce
+## Improvements
+- Gamma improvement
 
-[0.1.2]: https://example/tag/v0.1.2
-[0.1.1]: https://example/tag/v0.1.1
+## [0.1.1078] — 2026-06-16
+
+## Fixes
+- old fix
+
+[0.1.1079]: https://example/tag/v0.1.1079
+[0.1.1078]: https://example/tag/v0.1.1078
 `;
 
-test("extracts only the requested version's body, without the heading", () => {
-  const notes = extractReleaseNotes(FIXTURE, "0.1.2");
-  assert.match(notes, /### Novità/);
-  assert.match(notes, /- Alpha/);
-  assert.match(notes, /### Sicurezza/);
-  // Must NOT bleed into the previous OR next section, and must drop its own heading.
-  assert.doesNotMatch(notes, /0\.1\.1/);
-  assert.doesNotMatch(notes, /vecchia voce/);
-  assert.doesNotMatch(notes, /## \[0\.1\.2\]/);
+test("extracts one version's body — keeps its ## H2 sections, stops at the next ## [version]", () => {
+  const notes = extractReleaseNotes(FIXTURE, "0.1.1079");
+  assert.match(notes, /## Highlights/); // an H2 section header is content, NOT a delimiter
+  assert.match(notes, /- Alpha highlight/);
+  assert.match(notes, /## Improvements/);
+  assert.match(notes, /Intro line shown in the app/); // the intro before the first section is kept
+  // Must stop at the next version and drop its own version heading + link refs.
+  assert.doesNotMatch(notes, /0\.1\.1078/);
+  assert.doesNotMatch(notes, /old fix/);
+  assert.doesNotMatch(notes, /## \[0\.1\.1079\]/);
 });
 
 test("drops trailing link-reference definitions", () => {
-  const notes = extractReleaseNotes(FIXTURE, "0.1.2");
+  const notes = extractReleaseNotes(FIXTURE, "0.1.1079");
   assert.doesNotMatch(notes, /example\/tag/);
 });
 

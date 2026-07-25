@@ -1,53 +1,37 @@
 # Changelog
 
-Tutte le modifiche degne di nota a Homun sono documentate qui. Il formato segue
-[Keep a Changelog](https://keepachangelog.com/it/1.1.0/). Questa è la fonte di verità unica:
-la sezione della versione rilasciata finisce nel corpo della release GitHub (da cui l'app mostra
-il "cosa c'è di nuovo" nell'aggiornamento) e nella pagina changelog del sito.
+All notable changes to Homun are documented here, in the format the marketing site's changelog
+parses. This is the single source of truth: the released version's section is written into the
+GitHub Release body (from which the app shows the in-app "What's new" on update, and the website
+`/changelog` renders it via the GitHub Releases API).
 
-## [Non rilasciato]
+Section headers are `## Highlights` / `## Improvements` / `## Fixes` (H2), and each bullet is a
+single line so the site captures its full text; version delimiters are `## [x.y.z] — date`.
 
-### Migliorato
-- **L'app è molto più fluida.** La risposta ora scorre senza rimbalzi mentre viene scritta, il testo
-  si aggiorna senza scatti anche nelle risposte lunghe, e i blocchi di codice non "sfarfallano" più
-  mentre arrivano.
-- **Avvio più pulito e veloce.** La finestra appare già col tema giusto, senza lampo bianco, e l'app
-  si carica più in fretta perché le schermate secondarie vengono caricate solo quando servono.
-- **Homun continua a scrivere anche quando la finestra è coperta.** Prima, con l'app in secondo
-  piano, la risposta si congelava e ripartiva di colpo tornando sopra.
+## [Unreleased]
 
-### Correzioni
-- **Attese lunghe non vengono più scambiate per errori.** Se il modello resta non disponibile a
-  lungo, l'attesa resta un'attesa: niente messaggio d'errore mentre Homun sta ancora riprendendo.
-- **Il modello locale rispetta il tempo massimo.** Una generazione bloccata non tiene più occupato
-  Homun a tempo indefinito.
+## Improvements
+- **The app is much smoother.** Replies scroll without bouncing as they stream, the text updates without jank even on long answers, and code blocks no longer flicker as they arrive.
+- **Cleaner, faster startup.** The window opens already in the correct theme — no white flash — and the app loads faster because secondary views load only when they're needed.
+- **Homun keeps writing while the window is covered.** Previously, with the app in the background, the reply would freeze and then jump ahead when you switched back.
+
+## Fixes
+- **Long waits are no longer mistaken for errors.** If the model stays unavailable for a while, a wait stays a wait — no error message while Homun is still recovering.
+- **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
 ## [0.1.1079] — 2026-07-24
 
-Nuovo motore del browser e controllo a metà attività ("steering").
+New browser engine and mid-task steering.
 
-### Novità
-- **Controllo a metà attività (steering).** Puoi correggere o reindirizzare Homun mentre sta
-  già lavorando, senza ricominciare da capo: il messaggio viene interpretato e applicato al
-  compito in corso.
-- **Recupero automatico se il modello non risponde un attimo.** Se il modello diventa
-  momentaneamente non disponibile durante un'attività, il turno **attende e riprende** da dove
-  era invece di fallire — una sola risposta, nessun lavoro perso, nessun doppione.
+## Highlights
+- **Mid-task steering.** Correct or redirect Homun while it's already working, without starting over — your message is understood and applied to the task in progress.
+- **Automatic recovery when the model blips.** If the model becomes briefly unavailable during a task, the turn waits and resumes where it left off instead of failing — one answer, no lost work, no duplicates.
+- **Money actions require explicit confirmation.** Logins, bookings and form-filling stay free when you ask for them; only the final payment needs an explicit go-ahead, decided by what the action actually does on the page — never by the button's wording.
 
-### Migliorato
-- **Browser più capace nel compilare i form.** Selezione affidabile delle voci dai campi con
-  suggerimenti (tendine tipo il selettore di stazione), così non resta bloccato a ridigitare.
-- **Il browser insiste finché fa progressi.** Il tempo a disposizione si **ripristina a ogni
-  passo riuscito**, con un tetto di sicurezza complessivo: su modelli più lenti non abbandona
-  più a metà di un modulo, ma si ferma solo se è davvero bloccato.
-- **Ricerche web più robuste.** Migliore lettura delle pagine, meno tentativi a vuoto, risultati
-  restituiti in modo più fedele.
+## Improvements
+- **A browser that's better at filling forms.** Reliable selection from suggestion fields (dropdowns like a station picker), so it no longer gets stuck re-typing the same thing.
+- **The browser keeps going while it's making progress.** Its time budget resets on every successful step, with an overall safety cap: on slower models it no longer gives up in the middle of a form — it stops only when it's genuinely stuck.
+- **More robust web searches.** Better page reading, fewer dead-end attempts, and results returned more faithfully.
 
-### Sicurezza
-- **Le azioni che impegnano denaro richiedono conferma esplicita.** Login, prenotazioni e
-  compilazione moduli restano liberi se richiesti; solo il pagamento finale richiede
-  un'autorizzazione esplicita, decisa da ciò che l'azione fa davvero sulla pagina (non dalle
-  parole del pulsante).
-
-[Non rilasciato]: https://github.com/homun-app/homun-releases/releases
+[Unreleased]: https://github.com/homun-app/homun-releases/releases
 [0.1.1079]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1079
