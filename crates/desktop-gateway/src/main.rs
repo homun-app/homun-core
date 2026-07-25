@@ -23501,7 +23501,15 @@ don't repeat the same action; try a different element, scroll, or wait (kind=wai
                                 Ok(out)
                             }
                             Err(error) => {
-                                push_browser_step(format!("{kind}"), "error");
+                                // Always log the REAL error text (not only under HOMUN_DEBUG): the
+                                // browse sub-turn has no persisted journal, so this terse line was the
+                                // only record — and without the message a session death (a hung anti-bot
+                                // page timing out every call) is indistinguishable from a stale ref. The
+                                // per-action detail below stays debug-gated; this one line is the record.
+                                push_browser_step(
+                                    format!("{kind}: {}", clip_chars(&error.to_string(), 200)),
+                                    "error",
+                                );
                                 *ctx.outcome_hint =
                                     Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
                                 // DIAG (HOMUN_DEBUG): what the model tried + why it
@@ -27297,7 +27305,13 @@ browser_screenshot, browser_tabs, browser_dialog. There is no other tool and no 
 browse and answer.\n\
 \n\
 METHOD:\n\
-1. Open a source with browser_navigate, then read the snapshot.\n\
+1. Open a source with browser_navigate, then read the snapshot. IF the goal says \"start at <url>\", you \
+have ALREADY been opened on the best site for this task (a working search/booking engine) — read its \
+snapshot and DO THE TASK RIGHT THERE. Do NOT navigate to a different website or domain, and in particular \
+do NOT switch to a brand's main portal (e.g. a company .com landing page) just because the goal mentions \
+that brand: those portals are heavier and frequently BLOCK automation, so every action there hangs and \
+times out. Stay on the page you were given and fill its form; only navigate elsewhere if the current page \
+visibly cannot do the task at all (no relevant form/results after you actually read it).\n\
 2. FILL A WHOLE FORM IN ONE ACTION. When the page has a search or booking form (departure/arrival/date/\
 time and the like), do NOT fill one field per turn — send ONE browser_act whose `actions` array lists \
 EVERY field at once: kind='type' for each text field (station/city/airport — type the name), \
