@@ -27312,19 +27312,21 @@ do NOT switch to a brand's main portal (e.g. a company .com landing page) just b
 that brand: those portals are heavier and frequently BLOCK automation, so every action there hangs and \
 times out. Stay on the page you were given and fill its form; only navigate elsewhere if the current page \
 visibly cannot do the task at all (no relevant form/results after you actually read it).\n\
-2. FILL A WHOLE FORM IN ONE ACTION. When the page has a search or booking form (departure/arrival/date/\
-time and the like), do NOT fill one field per turn — send ONE browser_act whose `actions` array lists \
-EVERY field at once: kind='type' for each text field (station/city/airport — type the name), \
-kind='set_date' with date=YYYY-MM-DD for a date field, kind='set_time' with time=HH:MM for a time field. \
-Resolve any relative/partial date against today's date shown above (e.g. \"18 agosto\" -> 2026-08-18). \
-Example — a train search — is exactly one browser_act with actions=[\
-{{\"kind\":\"type\",\"ref\":\"<dep>\",\"text\":\"Napoli\"}},{{\"kind\":\"type\",\"ref\":\"<arr>\",\"text\":\"Milano\"}},\
-{{\"kind\":\"set_date\",\"ref\":\"<date>\",\"date\":\"2026-08-18\"}},{{\"kind\":\"set_time\",\"ref\":\"<time>\",\"time\":\"08:00\"}}]. \
-One set_date drives the ENTIRE calendar and one set_time the whole time picker — NEVER click calendar days \
-one by one. After the bundle, re-read the snapshot (browser_act returns it): if a text field still shows \
-open suggestions, pick the matching one; then submit (click the search button). For anything that is NOT a \
-form to fill, proceed one action at a time (browser_act with a kind + a [ref=...] from the snapshot), \
-re-reading the snapshot after each.\n\
+2. FILLING A SEARCH/BOOKING FORM — one field at a time, and for each station/city/airport field you MUST \
+select its suggestion before moving on:\n\
+   a) kind='type' the name into the field (e.g. \"Napoli\").\n\
+   b) A suggestions dropdown appears in the NEXT snapshot as new option/list items under the field. \
+CLICK the matching suggestion — do NOT press Enter, and do NOT type the next field yet. If you type the \
+next field before selecting the suggestion, the first field CLEARS and you'll be stuck re-typing it (this \
+is the #1 cause of a search form that never completes). If no suggestion list appears after one step, then \
+you may press Enter.\n\
+   c) Only after the station is committed, move to the next field.\n\
+For the DATE field use ONE kind='set_date' (date=YYYY-MM-DD); for the TIME field ONE kind='set_time' \
+(time=HH:MM) — each drives the whole calendar/time widget in a single action, so NEVER click calendar days \
+one by one. Resolve a relative/partial date against today's date shown above (e.g. \"18 agosto\" -> \
+2026-08-18). When every field is set, click the search button. Do NOT bundle a station 'type' together \
+with other actions — after typing a station you must stop and select its suggestion first. (You MAY bundle \
+independent, non-autocomplete actions, e.g. set_date + set_time, in one browser_act `actions` array.)\n\
 3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
 JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
 do not repeat the same failing search.\n\
