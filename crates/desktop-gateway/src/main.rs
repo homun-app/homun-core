@@ -18060,7 +18060,12 @@ fn chat_browser_budget() -> local_first_engine::BrowserBudget {
     }
 }
 
-const BROWSE_SUBAGENT_MAX_ELAPSED_MS: u64 = 180_000;
+// Absolute wall-clock BACKSTOP for one browse sub-turn — never resets, a final safety net only. Set
+// to match the manager ceiling (chat_browser_budget's 300s) and config's default: 180s was too tight
+// for a slow local model doing a legitimate multi-round form (each generation can be 25-50s), so it
+// killed progressing browses that the per-progress stall window (120s, resets on every success) would
+// have let finish. The stall window remains the PRIMARY control; this only stops a truly runaway loop.
+const BROWSE_SUBAGENT_MAX_ELAPSED_MS: u64 = 300_000;
 const BROWSE_SUBAGENT_MAX_NAVS: usize = 8;
 
 fn browse_subagent_budget() -> local_first_engine::BrowserBudget {
@@ -27290,13 +27295,19 @@ browse and answer.\n\
 \n\
 METHOD:\n\
 1. Open a source with browser_navigate, then read the snapshot.\n\
-2. Proceed ONE micro-action at a time (browser_act with a kind + a [ref=...] from the snapshot); \
-re-read the snapshot after each action (browser_act returns the updated one). When a field shows \
-suggestions as you type (a station, city, or airport picker), type the name and then pick the \
-matching suggestion before moving on — a typed value with no suggestion selected is usually not \
-accepted. For a DATE field use kind='set_date' with date=YYYY-MM-DD and for a TIME field kind='set_time' \
-with time=HH:MM: one action drives the whole calendar/time picker — do NOT click through the calendar \
-day by day.\n\
+2. FILL A WHOLE FORM IN ONE ACTION. When the page has a search or booking form (departure/arrival/date/\
+time and the like), do NOT fill one field per turn — send ONE browser_act whose `actions` array lists \
+EVERY field at once: kind='type' for each text field (station/city/airport — type the name), \
+kind='set_date' with date=YYYY-MM-DD for a date field, kind='set_time' with time=HH:MM for a time field. \
+Resolve any relative/partial date against today's date shown above (e.g. \"18 agosto\" -> 2026-08-18). \
+Example — a train search — is exactly one browser_act with actions=[\
+{{\"kind\":\"type\",\"ref\":\"<dep>\",\"text\":\"Napoli\"}},{{\"kind\":\"type\",\"ref\":\"<arr>\",\"text\":\"Milano\"}},\
+{{\"kind\":\"set_date\",\"ref\":\"<date>\",\"date\":\"2026-08-18\"}},{{\"kind\":\"set_time\",\"ref\":\"<time>\",\"time\":\"08:00\"}}]. \
+One set_date drives the ENTIRE calendar and one set_time the whole time picker — NEVER click calendar days \
+one by one. After the bundle, re-read the snapshot (browser_act returns it): if a text field still shows \
+open suggestions, pick the matching one; then submit (click the search button). For anything that is NOT a \
+form to fill, proceed one action at a time (browser_act with a kind + a [ref=...] from the snapshot), \
+re-reading the snapshot after each.\n\
 3. Prefer a login-free, text-rich source (Wikipedia, an official page) over login-walled or \
 JavaScript-heavy SPAs. Keep 2-3 candidate sources; if one is blocked or has no data, try the next — \
 do not repeat the same failing search.\n\

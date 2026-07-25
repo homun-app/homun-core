@@ -62,6 +62,37 @@ describe("set_date / set_time drivers", () => {
     expect(["08:00", "08:30"]).toContain(await timeText());
   });
 
+  it("fills a whole form — text + date + time — in ONE bundle (kind='batch')", async () => {
+    // The plan-once path (what the browse prompt now steers the model to emit): a single browser_act
+    // bundle drives every field through its own driver — type for the text field, set_date/set_time for
+    // the pickers — so a slow model fills the form in ONE round-trip instead of one field per turn.
+    const now = new Date();
+    const target = new Date(now.getFullYear(), now.getMonth() + 1, 20);
+    const iso = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-20`;
+
+    const res = await manager.act({
+      targetId: "p",
+      kind: "batch",
+      actions: [
+        { targetId: "p", kind: "type", selector: "#departure", text: "Napoli", commit: "none" },
+        { targetId: "p", kind: "set_date", selector: "#dateControl", date: iso },
+        { targetId: "p", kind: "set_time", selector: "#timeControl", time: "08:30" },
+      ],
+    } as any);
+    // The batch always resolves ok:true; completedActions is the real success signal (a failed field
+    // would stop the batch and leave it below 3).
+    expect(res.completedActions).toBe(3);
+
+    const departure = (await manager.act({
+      targetId: "p",
+      kind: "evaluate",
+      fn: "() => document.querySelector('#departure').value",
+    } as any)).result as string;
+    expect(departure).toBe("Napoli");
+    expect(await dateText()).toMatch(/\b20\b/);
+    expect(await timeText()).toBe("08:30");
+  });
+
   it("set_date rejects a non-ISO date (so the model gets a clear, actionable error)", async () => {
     await expect(
       manager.act({ targetId: "p", kind: "set_date", selector: "#dateControl", date: "18 agosto" } as any),

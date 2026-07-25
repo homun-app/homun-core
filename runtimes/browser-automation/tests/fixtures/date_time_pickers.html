@@ -3,9 +3,11 @@
   <head><meta charset="utf-8" /><title>Date/time picker fixture</title></head>
   <body>
     <h1>Cerca</h1>
-    <!-- A date control that opens a calendar (role=grid, month heading, prev/next, day gridcells) and
-         a time control that opens a list of HH:MM buttons — mirroring Trenitalia's structure so the
-         sidecar's set_date/set_time drivers are exercised against the same shape. -->
+    <!-- A text field, a date control that opens a calendar (role=grid, month heading, prev/next, day
+         gridcells) and a time control that opens a list of HH:MM buttons — mirroring Trenitalia's
+         structure so the sidecar's type/set_date/set_time drivers are exercised against the same shape,
+         both singly and as ONE fill-the-whole-form bundle (kind='batch'). -->
+    <input id="departure" type="text" aria-label="Partenza" placeholder="Partenza" />
     <button id="dateControl" type="button">Seleziona data</button>
     <div id="calendar" style="display:none">
       <button id="prev" type="button" aria-label="Mese precedente">‹</button>
