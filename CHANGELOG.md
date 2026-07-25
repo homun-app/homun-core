@@ -19,7 +19,7 @@ single line so the site captures its full text; version delimiters are `## [x.y.
 - **Long waits are no longer mistaken for errors.** If the model stays unavailable for a while, a wait stays a wait — no error message while Homun is still recovering.
 - **The local model respects its timeout.** A stuck generation no longer keeps Homun busy indefinitely.
 
-## [0.1.1083] — 2026-07-25
+## [0.1.1084] — 2026-07-25
 
 New browser engine and mid-task steering.
 
@@ -40,4 +40,4 @@ New browser engine and mid-task steering.
 - **The browser no longer gives up mid-search.** As long as it keeps making progress, it is no longer cut off by a fixed step limit — so a longer multi-field search runs to the results instead of stopping halfway.
 
 [Unreleased]: https://github.com/homun-app/homun-releases/releases
-[0.1.1082]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1083
+[0.1.1082]: https://github.com/homun-app/homun-releases/releases/tag/v0.1.1084
