@@ -18313,7 +18313,7 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "action_class": {
                         "type": "string",
                         "enum": ["ordinary","account","booking","payment_commit"],
-                        "description": "Required on every committing action (click, submit, Enter, hold). Judge by real-world effect: 'ordinary' = everyday navigation with no lasting effect; 'account' = changes signed-in identity or account state; 'booking' = reserves/selects/orders something not yet a completed purchase; 'payment_commit' = actually commits money and requires an approved payment_approval_id."
+                        "description": "REQUIRED on every action (and mandatory for click, submit, Enter, hold — those are refused without it). Judge by real-world effect: 'ordinary' = everyday interaction with no lasting effect (picking a suggestion, opening a menu, pressing a search button, following a link); 'account' = changes signed-in identity or account state; 'booking' = reserves/selects/orders something not yet a completed purchase; 'payment_commit' = actually commits money and requires an approved payment_approval_id."
                     },
                     "actions": {
                         "type": "array",
@@ -18337,10 +18337,18 @@ fn browser_act_tool_schema() -> serde_json::Value {
                                 "action_class": {
                                     "type": "string",
                                     "enum": ["ordinary","account","booking","payment_commit"],
-                                    "description": "Required on this item when it is a committing action (click, submit, Enter, hold). Same meaning as the top-level action_class."
+                                    "description": "REQUIRED on every item. Use 'ordinary' for normal interaction (picking a suggestion, opening a menu, pressing search); 'account' for login/registration; 'booking' for reserving/selecting; 'payment_commit' only for the action that actually pays. Same meaning as the top-level action_class."
                                 }
                             },
-                            "required": ["kind"]
+                            // action_class is REQUIRED, not merely described: the gate refuses any
+                            // committing item that omits it, and prose in the system prompt was not
+                            // enough — the model kept omitting it, its ordinary clicks were refused,
+                            // and it wandered instead of correcting. Schema-level `required` is
+                            // enforced by the function-calling layer, so the field is always present.
+                            // Harmless on non-committing kinds (the gate simply ignores it there),
+                            // and NOT a safety loosening: a wrong 'ordinary' on a real payment control
+                            // is still raised by the machine-derived floor and rejected as a conflict.
+                            "required": ["kind", "action_class"]
                         }
                     },
                     "payment_approval_id": { "type": "string", "description": "Exact id returned by an approved Payment Approval Card. Use only for approved checkout actions and the final payment click; never invent it." },
@@ -18348,7 +18356,10 @@ fn browser_act_tool_schema() -> serde_json::Value {
                     "target": { "type": "string", "description": "id of the tab to operate on; default: the current tab." }
                 },
                 "anyOf": [
-                    { "required": ["kind"] },
+                    // Single-action form: action_class rides along with `kind` for the same reason
+                    // it is required per bundle item — the gate refuses a committing action without
+                    // it, and only schema-level `required` reliably makes the model emit it.
+                    { "required": ["kind", "action_class"] },
                     { "required": ["actions"] }
                 ],
                 "required": []
