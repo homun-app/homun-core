@@ -18395,7 +18395,18 @@ fn browser_navigate_failure_hint(url: &str, fails: u32) -> String {
 
 fn browser_act_error_hint(error: &str) -> &'static str {
     let e = error.to_lowercase();
-    if e.contains("unknown action kind") || e.contains("invalid_request") && e.contains("kind") {
+    // Gate refusals first: these were the most common real-world rejections and none of the arms
+    // below matched them, so the model got a refusal with no hint at all and guessed (usually by
+    // navigating away). Each hint states the exact edit that makes the SAME action pass.
+    if e.contains("browser_action_class_missing") {
+        " HINT: add action_class to this action — \"ordinary\" for normal interaction (picking a suggestion, opening a menu, pressing search), \"account\" for login, \"booking\" for reserving. Re-send the same kind+ref with that field."
+    } else if e.contains("browser_action_class_conflict") {
+        " HINT: this control is machine-detected as a payment control. Do NOT re-declare it to get past this — stop and report that a payment approval is required."
+    } else if e.contains("browser_payment_approval_required") {
+        " HINT: you cannot obtain a Payment Approval Card yourself. Stop and report the blocked payment step with the evidence you already have."
+    } else if e.contains("browser_unsupported_committing_action") {
+        " HINT: use a schema kind (click/type/fill/select/press/hover/hold/scroll/wait) with a [ref=...] from the snapshot — no coordinates and no CSS selector."
+    } else if e.contains("unknown action kind") || e.contains("invalid_request") && e.contains("kind") {
         " HINT: browser_act needs a 'kind' (one of click/type/fill/select/press/hover/hold/scroll/wait) AND a 'ref' from the snapshot, e.g. {\"kind\":\"click\",\"ref\":\"e5\"}. Retry with both."
     } else if e.contains("tab not found") {
         " HINT: that looks like an element ref, not a tab. Put element refs in 'ref' (e.g. \"ref\":\"e83\"); 'target' is ONLY a tab id from browser_tabs. Retry with kind + ref."
@@ -18600,16 +18611,26 @@ fn normalize_browser_action_bundle(
         if !browser_action_execution_fields_are_schema_legal(nested) {
             return Some(BROWSER_UNSUPPORTED_COMMITTING_ACTION_ERROR.to_string());
         }
-        if browser_safety::action_is_payment_commit(nested, payment_floor_refs, focus_context) {
-            return Some(
-                "Payment actions cannot run inside a browser action bundle. Ask for the Payment Approval Card and execute the final payment as a standalone approved action."
-                    .to_string(),
-            );
-        }
+        // Order matters: report the item's OWN typed reason first. `action_is_payment_commit`
+        // deliberately counts a class ERROR as payment (fail-closed for the single-action gate), so
+        // running it first masked every ordinary mistake as a payment problem — a bundle item that
+        // merely forgot `action_class` was answered with "Ask for the Payment Approval Card", which
+        // for a search button is nonsense the model cannot act on (and which the bundle log then
+        // faithfully recorded as the wrong cause). Evaluate first; the payment branch below then
+        // only speaks for a genuine, well-formed payment_commit.
         if let Some(reason) =
             browser_safety::evaluate_browser_action(nested, payment_floor_refs, focus_context, None)
         {
             return Some(format!("Browser action bundle rejected: {reason}"));
+        }
+        if matches!(
+            browser_safety::effective_action_class(nested, payment_floor_refs, focus_context),
+            Ok(browser_safety::ActionClass::PaymentCommit)
+        ) {
+            return Some(
+                "Payment actions cannot run inside a browser action bundle. Ask for the Payment Approval Card and execute the final payment as a standalone approved action."
+                    .to_string(),
+            );
         }
         let targets_floored_ref = nested
             .get("ref")
@@ -23359,20 +23380,46 @@ or tell the user to start the contained computer (Settings → Local computer)."
                         *browser_session = Some(client);
                         *ctx.outcome_hint =
                             Some(local_first_engine::contract::ToolOutcomeHint::NoProgress);
+                        // Log the REASON, not just the kind (the bundle path already does): without
+                        // it a gate refusal is indistinguishable from a stale ref in a post-mortem.
                         push_browser_step(
                             format!(
-                                "action blocked: {}",
-                                args.get("kind")
-                                    .and_then(|k| k.as_str())
-                                    .unwrap_or("?")
+                                "action blocked: {} — {}",
+                                args.get("kind").and_then(|k| k.as_str()).unwrap_or("?"),
+                                clip_chars(&reason, 200)
                             ),
                             "error",
                         );
-                        Err(format!(
-                            "🚫 action blocked, user confirmation needed: {reason}.{} \
-I did nothing: propose to the user what to do and wait — do NOT retry the same action.",
-                            browser_act_error_hint(&reason)
-                        ))
+                        // Branch the guidance on WHAT was wrong. The old single message told the
+                        // model "user confirmation needed … propose to the user and wait — do NOT
+                        // retry" for EVERY refusal, including a plain missing argument. In the browse
+                        // sub-turn there is no user to propose to (its stream is drained) and the only
+                        // correct recovery for a missing//conflicting `action_class` IS to re-send the
+                        // same action with the field — so the message forbade the fix and pushed the
+                        // model to wander to another site instead. Argument-shaped errors now say
+                        // "fix and retry the same ref"; only a real payment/hazard refusal keeps the
+                        // stop-and-ask wording, and for that one the sub-agent is told to report
+                        // `blocked` (it cannot obtain a Payment Approval Card itself).
+                        let model_fixable = reason.contains("BROWSER_ACTION_CLASS_MISSING")
+                            || reason.contains("BROWSER_ACTION_CLASS_CONFLICT")
+                            || reason.contains("BROWSER_UNSUPPORTED_COMMITTING_ACTION");
+                        if model_fixable {
+                            Err(format!(
+                                "🚫 action rejected, nothing was executed: {reason}.{} \
+Fix THIS action and re-send it on the SAME ref — for example \
+{{\"kind\":\"click\",\"ref\":\"e42\",\"action_class\":\"ordinary\"}}. \
+Do NOT navigate to another site because of this error.",
+                                browser_act_error_hint(&reason)
+                            ))
+                        } else {
+                            Err(format!(
+                                "🚫 action blocked, user confirmation needed: {reason}.{} \
+I did nothing. You cannot approve this yourself: stop here and report what is blocked \
+(browser_done with the evidence you already have) — do NOT retry the same action and do NOT \
+navigate elsewhere to work around it.",
+                                browser_act_error_hint(&reason)
+                            ))
+                        }
                     } else {
                         let kind = args
                             .get("kind")
@@ -27341,8 +27388,10 @@ you may press Enter.\n\
 happens: use action_class=\"ordinary\" for normal interaction like picking a suggestion, opening a menu or \
 pressing a search button; \"account\" for logging in; \"booking\" for reserving/selecting a seat or fare. \
 Example: {{\"kind\":\"click\",\"ref\":\"e42\",\"action_class\":\"ordinary\"}}. This applies to EVERY click, \
-including each item inside an `actions` bundle. If an action comes back rejected, FIX THAT ACTION and \
-retry it on the SAME page — do not respond by navigating somewhere else.\n\
+including each item inside an `actions` bundle, and to kind='hold' (a press-and-hold verification is \
+action_class=\"ordinary\"). If an action comes back rejected, FIX THAT ACTION and retry it on the SAME \
+page — do not respond by navigating somewhere else. If instead an action is refused because the control \
+is a PAYMENT control, do not try to work around it: stop and report what is blocked.\n\
    c) Only after the station is committed, move to the next field.\n\
 For the DATE field use ONE kind='set_date' (date=YYYY-MM-DD); for the TIME field ONE kind='set_time' \
 (time=HH:MM) — each drives the whole calendar/time widget in a single action, so NEVER click calendar days \
@@ -66749,6 +66798,45 @@ prs.save(Path({path:?}))
         assert_eq!(
             super::single_action_rejects_unsupported_execution_before_payment_claim(&normalized_bundle),
             None
+        );
+    }
+
+    #[test]
+    fn bundle_item_missing_action_class_reports_the_class_error_not_a_payment_error() {
+        // Regression: `action_is_payment_commit` counts a class ERROR as payment (fail-closed for
+        // the single-action gate), so running it before `evaluate_browser_action` masked every
+        // ordinary mistake as a payment problem — a bundle item that merely forgot `action_class`
+        // was told to "Ask for the Payment Approval Card", which for a search button is nonsense the
+        // model cannot act on, and which the bundle log then recorded as the wrong cause.
+        let payment_floor: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut bundle = serde_json::json!({
+            "actions": [{"kind": "click", "ref": "e42"}]
+        });
+        let rejected =
+            super::normalize_browser_action_bundle(&mut bundle, "chat_0", &payment_floor, false);
+        let reason = rejected.expect("a committing item without action_class must be rejected");
+        assert!(
+            reason.contains("BROWSER_ACTION_CLASS_MISSING"),
+            "the model must be told the ACTUAL problem (missing action_class), got: {reason}"
+        );
+        assert!(
+            !reason.contains("Payment Approval Card"),
+            "a missing class must not be reported as a payment error: {reason}"
+        );
+
+        // A genuine, well-formed payment_commit item still gets the payment message.
+        let mut payment_bundle = serde_json::json!({
+            "actions": [{"kind": "click", "ref": "e9", "action_class": "payment_commit"}]
+        });
+        let rejected = super::normalize_browser_action_bundle(
+            &mut payment_bundle,
+            "chat_0",
+            &payment_floor,
+            false,
+        );
+        assert!(
+            rejected.is_some_and(|reason| reason.contains("Payment Approval Card")),
+            "a real payment_commit item must still be refused inside a bundle"
         );
     }
 
