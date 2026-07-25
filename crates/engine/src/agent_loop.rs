@@ -878,6 +878,16 @@ missing, give what you have and note the gap in one short line.",
                             // SINCE this success, not since the turn began. Same signal that resets
                             // `browser_no_progress`; keeps the two budgets consistent.
                             last_browser_progress_at = Instant::now();
+                            // …and reset the ROUND anchor too. The round cap (`rounds_since_progress
+                            // >= max_rounds`) is anchored to `progress_anchor_round`, which otherwise
+                            // resets only on plan-frontier progress (a closed step). A browse sub-turn
+                            // has no plan, so without this the anchor stays at 0 and the cap counts
+                            // TOTAL rounds — cutting off a browse that advances a form field every
+                            // round at exactly `browser_max_rounds` while it is still progressing (the
+                            // Trenitalia round-9 stall). Browser progress IS progress: a run that keeps
+                            // advancing is bounded only by a genuine stall (`stop_reason`), never an
+                            // absolute round count.
+                            ls.progress_anchor_round = round;
                         }
                     } else {
                         let no_progress_count =
@@ -909,6 +919,11 @@ missing, give what you have and note the gap in one short line.",
                     ls.apply_effects(&mut pending_confirm, round, tool_effects);
                     if browser_activity_observed {
                         last_browser_progress_at = Instant::now();
+                        // Same reasoning as the granular-tool progress reset above, at the MANAGER
+                        // level: a delegated `browse` that did real work IS progress, so it must also
+                        // reset the round anchor — otherwise a manager that keeps delegating healthy
+                        // browses would still hit the round cap on total delegations.
+                        ls.progress_anchor_round = round;
                     }
 
                     // Collect source URLs from browser results so the final
@@ -2316,6 +2331,97 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         );
         drop(journal_events);
         assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
+    }
+
+    /// Makes real progress on every call and counts how many times it ran, so a test can prove the
+    /// ROUND budget resets on browser progress (not just plan-frontier progress).
+    struct CountingProgressBrowser(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    impl BrowserExecutor for CountingProgressBrowser {
+        async fn execute_browser(
+            &mut self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            state: &mut LoopState,
+        ) -> (String, crate::contract::ToolOutcomeHint) {
+            state.browser_used = true;
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            (
+                "Action performed. Updated snapshot:\n[ref=e2] Next field".to_string(),
+                crate::contract::ToolOutcomeHint::Success,
+            )
+        }
+
+        async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn progressing_browse_runs_past_the_round_cap_because_progress_resets_it() {
+        // The Trenitalia round-9 bug: `browse_round_budget` is passed as `browser_max_rounds`, and
+        // the round cap at the top of the loop is `rounds_since_progress >= max_rounds`. But
+        // `progress_anchor_round` reset ONLY on plan-frontier progress (a closed step) — never on
+        // browser progress. A browse sub-turn has no plan, so the anchor stayed at 0 and a browse
+        // advancing a form field every round was still cut off at `browser_max_rounds` while making
+        // steady successful progress. A progressing browse must run PAST the round cap; only a real
+        // stall (`stop_reason`: no_progress / stall window / absolute cap) may stop it.
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut browser = CountingProgressBrowser(count.clone());
+        let mut turn_cfg = cfg();
+        // Ceiling deliberately well ABOVE the round cap, so "capped at the cap" and "ran past it"
+        // are distinguishable outcomes.
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 4;
+        turn_cfg.browser_nav_cap = 24;
+        // Neither stagnation counter nor stall window may interfere: only the round cap is on trial,
+        // and it must NOT be what stops a browse that progresses every round.
+        turn_cfg.browser_budget.max_no_progress = 50;
+        turn_cfg.browser_budget.max_stall_ms = 600_000;
+        let round_cap = turn_cfg.browser_max_rounds;
+
+        let _ = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &VariedActModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let ran = count.load(std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            ran > round_cap,
+            "a browse that progresses every round must run PAST browser_max_rounds ({round_cap}), \
+             not be capped at it — only {ran} browser actions ran"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
