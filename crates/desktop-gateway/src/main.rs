@@ -18062,20 +18062,24 @@ fn chat_browser_budget() -> local_first_engine::BrowserBudget {
     }
 }
 
-// Absolute wall-clock BACKSTOP for one browse sub-turn — never resets, a final safety net only. Set
-// to match the manager ceiling (chat_browser_budget's 300s) and config's default: 180s was too tight
-// for a slow local model doing a legitimate multi-round form (each generation can be 25-50s), so it
-// killed progressing browses that the per-progress stall window (120s, resets on every success) would
-// have let finish. The stall window remains the PRIMARY control; this only stops a truly runaway loop.
-const BROWSE_SUBAGENT_MAX_ELAPSED_MS: u64 = 300_000;
+// Absolute wall-clock BACKSTOP for one browse sub-turn — never resets, a final safety net only.
+// Deliberately generous (15 min): the goal of an autonomous browse is that it ANSWERS, not that it
+// answers quickly, so a run that keeps making progress must not be cut off by the clock. What stops a
+// STUCK run is the per-progress stall window (90s without a single successful action, reset on every
+// success) plus the change-approach hint the loop sends when the same call repeats — controls that
+// measure progress rather than elapsed time. This bound only exists so a pathological loop cannot run
+// unbounded; reaching it means ~15 minutes of work that never stalled for 90s.
+const BROWSE_SUBAGENT_MAX_ELAPSED_MS: u64 = 900_000;
 const BROWSE_SUBAGENT_MAX_NAVS: usize = 8;
 
 fn browse_subagent_budget() -> local_first_engine::BrowserBudget {
     let mut budget = chat_browser_budget();
+    // Upper clamp raised to 1h so a deliberately long autonomous run can be configured; the default
+    // above is the 15-minute backstop.
     budget.max_elapsed_ms = env::var("HOMUN_CHAT_BROWSER_SUBAGENT_MAX_ELAPSED_MS")
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .map(|value| value.clamp(1_000, 600_000))
+        .map(|value| value.clamp(1_000, 3_600_000))
         .unwrap_or(BROWSE_SUBAGENT_MAX_ELAPSED_MS);
     budget
 }
