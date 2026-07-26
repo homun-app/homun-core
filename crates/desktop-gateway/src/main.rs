@@ -27574,6 +27574,15 @@ fn delegated_browse_tool_outcome(
 /// Round budget scaled from the declared result contract. Progress (the engine's
 /// `max_no_progress`) is the primary limiter; this only sizes the ceiling so a
 /// richer goal gets proportionally more rounds. Deterministic, no model input.
+/// Absolute round backstop for one browse sub-turn. Must stay comfortably ABOVE the progress-relative
+/// round budget: the latter resets on every successful browser action, so a healthy multi-field form
+/// legitimately runs past it, and a hard ceiling equal to it silently truncated exactly those runs.
+/// This bound only exists so a pathological loop cannot spin forever — the stall window (90s without
+/// progress) and the absolute wall clock (300s) are what normally stop a stuck browse.
+fn browse_hard_round_ceiling(rounds: usize) -> usize {
+    rounds.saturating_mul(4).max(24)
+}
+
 fn browse_round_budget(contract: &local_first_engine::browse::BrowseResultContract) -> usize {
     const BASE: usize = 5;
     const CAP: usize = 10;
@@ -27750,7 +27759,14 @@ impl GatewayBrowseExecutor<'_> {
             .map(browse_round_budget)
             .unwrap_or(5);
         let cfg = local_first_engine::TurnConfig {
-            hard_round_ceiling: rounds,
+            // NOT `rounds`: the soft budget below is progress-relative (it resets on every successful
+            // browser action), but `hard_round_ceiling` is the raw `for round in 0..N` bound, so
+            // setting both to the same number made the soft budget unreachable — a browse that
+            // advanced a field every round was still cut off at exactly `rounds`, which is the
+            // timeout users kept hitting on multi-field searches (8 rounds, ~47s, every action
+            // successful). The hard ceiling must be a runaway backstop only; the real controls are
+            // the progress-relative round budget plus the stall/wall-clock budgets below.
+            hard_round_ceiling: browse_hard_round_ceiling(rounds),
             max_rounds: rounds,
             browser_max_rounds: rounds,
             browser_nav_cap: browse_subagent_nav_cap(),
@@ -63923,6 +63939,22 @@ mod tests {
         };
         // BASE 5 + ceil(3 required / 2)=2 + (minimum_items>3 ? 1 : 0)=1 = 8
         assert_eq!(super::browse_round_budget(&list), 8);
+    }
+
+    #[test]
+    fn browse_hard_ceiling_stays_above_the_progress_relative_round_budget() {
+        // Regression: both were set to the same `rounds`, so the raw `for round in 0..ceiling` bound
+        // fired first and the progress-relative budget could never do its job — a browse that
+        // succeeded on every action was still cut off at exactly `rounds` (observed: 8 rounds, ~47s,
+        // every action completed, reported to the user as a timeout).
+        for rounds in [5usize, 8, 10] {
+            let ceiling = super::browse_hard_round_ceiling(rounds);
+            assert!(
+                ceiling > rounds,
+                "hard ceiling ({ceiling}) must leave room above the round budget ({rounds})"
+            );
+            assert!(ceiling >= 24, "the backstop must stay generous, got {ceiling}");
+        }
     }
 
     #[test]
