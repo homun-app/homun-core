@@ -42,6 +42,16 @@ use std::time::Instant;
 /// Max harness "you're not done — plan the rest" nudges per turn before giving up (F1 anti-loop).
 const MAX_PLAN_NUDGES: u32 = 8;
 
+/// Repeats of an identical round before the loop TELLS the model to change approach. Repetition means
+/// the model is stuck on one step, not that the task is impossible: the useful response is a specific
+/// hint ("you have called exactly this N times; target something else"), not ending the turn. An
+/// autonomous run is allowed to take a long time — what must not happen is spending it on the same
+/// failing call.
+const REPEAT_NUDGE_AT: u32 = 2;
+/// Repeats before giving up. Only reached AFTER the change-approach hint above, i.e. the model was
+/// told exactly what was looping and did it again anyway.
+const REPEAT_STOP_AT: u32 = 4;
+
 /// Bounded wait, in 50ms wall-clock ticks, for an uninterpreted steering row at the finalization
 /// fence before parking (≈ 40 × 50ms ≈ 2s). Deliberately wall-clock, not event-driven: the row may
 /// never become interpretable (the semantic model can be down indefinitely), so the budget must
@@ -584,11 +594,35 @@ missing, give what you have and note the gap in one short line.",
                 .join("|");
             if !round_sig.is_empty() && round_sig == ls.last_round_sig {
                 ls.repeat_count += 1;
-                if ls.repeat_count >= 2 {
+                // Repetition is a signal to CHANGE APPROACH, not a reason to give up. The old code
+                // broke out of the turn on the second identical round, so a model stuck on one form
+                // field lost the whole task instead of being told what it was doing wrong — and the
+                // user saw a truncated answer with no explanation. Tell it first, naming the exact
+                // repeated call, and only stop if it repeats again AFTER being told (that is a model
+                // that cannot self-correct, not one that merely needed a hint).
+                if ls.repeat_count == REPEAT_NUDGE_AT {
+                    let repeated = round_sig.chars().take(200).collect::<String>();
+                    ls.messages.push(serde_json::json!({
+                        "role": "system",
+                        "content": format!(
+                            "You have now issued the identical call(s) {} times with no progress: {repeated}. \
+Repeating it again will not work. CHANGE APPROACH for this specific step: target a different \
+element/ref, use a different action kind, or reach the same goal another way (e.g. read the page \
+again to find the right control). Keep working on the task — do not stop and do not start over.",
+                            ls.repeat_count + 1
+                        ),
+                    }));
+                    let _ = event_sink
+                        .emit(GenerateStreamEvent::Delta {
+                            text: "‹‹ACT››🔁 Same action repeated: telling the model to change approach‹‹/ACT››"
+                                .to_string(),
+                        })
+                        .await;
+                } else if ls.repeat_count >= REPEAT_STOP_AT {
                     let _ = event_sink
                         .emit(GenerateStreamEvent::Delta {
                             text:
-                                "‹‹ACT››⏹️ Same actions repeated: stopping and summarizing‹‹/ACT››"
+                                "‹‹ACT››⏹️ Same actions repeated after a change-approach hint: stopping and summarizing‹‹/ACT››"
                                     .to_string(),
                         })
                         .await;
@@ -2354,6 +2388,80 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         }
 
         async fn close_session(&mut self, _browser_used: bool) {}
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_repeated_action_is_told_to_change_approach_before_the_turn_gives_up() {
+        // The loop used to break out of the turn on the SECOND identical round, so a model stuck on
+        // one form field lost the whole task and the user got a truncated answer with no explanation.
+        // Being stuck on one step is a reason to tell the model to change approach — an autonomous run
+        // may legitimately take a long time; what must not happen is spending it on the same failing
+        // call. Assert the hint is emitted, and that the run keeps working past the old break point.
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "browse" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut browser = CountingProgressBrowser(count.clone());
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.browser_max_rounds = 12;
+        turn_cfg.browser_nav_cap = 24;
+        turn_cfg.browser_budget.max_no_progress = 50;
+        turn_cfg.browser_budget.max_stall_ms = 600_000;
+
+        let _ = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            // Emits the byte-identical browser_act every round → trips the repeat guard.
+            &StaleRefChurnModel::default(),
+            &NoTools,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "browse".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let events = sink.0.lock().unwrap();
+        let text = events
+            .iter()
+            .filter_map(|event| match event {
+                GenerateStreamEvent::Delta { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            text.contains("change approach"),
+            "the model must be told to change approach before the turn is abandoned: {text}"
+        );
+        drop(events);
+        assert!(
+            count.load(std::sync::atomic::Ordering::SeqCst) > 2,
+            "the turn must keep working past the old give-up point (2 identical rounds)"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
