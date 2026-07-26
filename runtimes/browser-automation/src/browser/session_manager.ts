@@ -811,7 +811,65 @@ async function waitForPageToSettle(page: Page, action: BrowserActRequest): Promi
 
   await page.waitForLoadState("domcontentloaded", { timeout: 2_000 }).catch(() => undefined);
   await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => undefined);
+  await waitForDomToStopChanging(page);
   await page.waitForTimeout(250);
+}
+
+// How long a committing action may wait for the page to finish producing its result. Submitting a
+// search starts an XHR that commonly takes several seconds, and a results SPA keeps polling so
+// `networkidle` never fires — with only the load-state waits above, the snapshot was taken while the
+// spinner was still up. The model then saw no results, concluded the search had not run, and clicked
+// again: the "it reloads the results page instead of waiting" loop.
+//
+// browser-use waits far less than this (0.25s min / 0.5s idle / 0.3s when requests are pending),
+// because for them a wasted step costs ~1s. Ours costs one model generation (seconds to tens of
+// seconds), so it is worth blocking a little longer here — but on the SAME signal they use: in-flight
+// requests via the Performance API plus document.readyState, not a blind sleep. The wait ends as soon
+// as the page is genuinely quiet, so a static page pays ~0.8s.
+const SETTLE_TIMEOUT_MS = 12_000;
+const SETTLE_SAMPLE_MS = 400;
+const SETTLE_STABLE_SAMPLES = 2;
+
+/// Wait until nothing is in flight AND the DOM has stopped changing, or the timeout elapses.
+/// Machine signals only — request timings, readyState, and a size probe; never a search for particular
+/// words — so it behaves the same on any site and in any language.
+async function waitForDomToStopChanging(page: Page): Promise<void> {
+  const probe = () =>
+    page
+      .evaluate(() => {
+        const now = performance.now();
+        // A resource whose response has not ended yet is still in flight. Ignore ones that have been
+        // hanging for >15s (long-poll/streaming/analytics sockets never finish and would block forever).
+        const pending = performance
+          .getEntriesByType("resource")
+          .filter((entry) => {
+            const timing = entry as PerformanceResourceTiming;
+            return timing.responseEnd === 0 && now - timing.startTime < 15_000;
+          }).length;
+        const size = `${document.querySelectorAll("*").length}:${document.body?.innerText.length ?? 0}`;
+        return { ready: document.readyState, pending, size };
+      })
+      .catch(() => null);
+
+  let previousSize: string | null = null;
+  let stable = 0;
+  const deadline = Date.now() + SETTLE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const current = await probe();
+    // A failed probe (navigation in flight, context torn down) is not stability — keep waiting.
+    const quiet =
+      current !== null && current.pending === 0 && current.ready !== "loading";
+    if (quiet && current.size === previousSize) {
+      stable += 1;
+      if (stable >= SETTLE_STABLE_SAMPLES) {
+        return;
+      }
+    } else {
+      stable = 0;
+    }
+    previousSize = current?.size ?? null;
+    await page.waitForTimeout(SETTLE_SAMPLE_MS);
+  }
 }
 
 const COMMON_OVERLAY_DISMISS_SELECTORS = [

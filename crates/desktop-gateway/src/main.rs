@@ -32713,7 +32713,13 @@ fn browser_observation_metrics(
         "action_kinds": action_kinds,
         "stop_reason": stop_reason,
         "generation": value.get("generation").and_then(serde_json::Value::as_u64).unwrap_or(0),
-        "completed_actions": value.get("completedActions").and_then(serde_json::Value::as_u64).unwrap_or(0),
+        // `completedActions` is a BATCH field; a single action does not carry it, so it used to log as
+        // 0 — indistinguishable from "nothing executed" while reading a post-mortem. Fall back to the
+        // action's own ok flag so a successful single action reports 1.
+        "completed_actions": value
+            .get("completedActions")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_else(|| u64::from(value.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false))),
         "unexecuted_actions": value.get("unexecutedActions").and_then(serde_json::Value::as_array).map(|actions| actions.len() as u64).unwrap_or(0),
     })
 }

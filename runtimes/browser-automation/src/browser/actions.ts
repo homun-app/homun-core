@@ -381,11 +381,11 @@ async function executeActionUnchecked(
       return { ok: true, url: page.url(), committedOption: outcome.committed };
     }
     case "press": {
-      await page.keyboard.press(action.key, { delay: nonNegativeDelay(action.delayMs) });
+      await page.keyboard.press(normalizeKeyName(action.key), { delay: nonNegativeDelay(action.delayMs) });
       return { ok: true, url: page.url() };
     }
     case "press_key": {
-      await page.keyboard.press(action.text, { delay: nonNegativeDelay(action.delayMs) });
+      await page.keyboard.press(normalizeKeyName(action.text), { delay: nonNegativeDelay(action.delayMs) });
       return { ok: true, url: page.url() };
     }
     case "select": {
@@ -971,6 +971,63 @@ const NON_ARIA_OPTION_SELECTOR =
 /// no dropdown opened for the full value, retype a PREFIX to coax the typeahead
 /// and match the full value against it; (3) otherwise leave the full value (plain
 /// field). Scoped to genuine combobox inputs so plain fields pay no popup-wait.
+// Playwright's keyboard vocabulary is exact ("Enter", "Escape", "ArrowDown"), but models write the
+// equally valid everyday names ("Return", "Esc", "Down"). Passing those straight through threw
+// `Unknown key: "Return"` — and because it happened on the SUBMIT of a filled search form, the search
+// never ran and the model kept clicking around trying to make results appear. Canonicalize the common
+// aliases (per segment, so "Control+Return" works too) and leave anything unknown untouched so
+// Playwright still reports a genuine bad key.
+const KEY_ALIASES = new Map<string, string>([
+  ["return", "Enter"],
+  ["enter", "Enter"],
+  ["esc", "Escape"],
+  ["escape", "Escape"],
+  ["del", "Delete"],
+  ["delete", "Delete"],
+  ["ins", "Insert"],
+  ["space", "Space"],
+  ["spacebar", "Space"],
+  ["up", "ArrowUp"],
+  ["down", "ArrowDown"],
+  ["left", "ArrowLeft"],
+  ["right", "ArrowRight"],
+  ["arrowup", "ArrowUp"],
+  ["arrowdown", "ArrowDown"],
+  ["arrowleft", "ArrowLeft"],
+  ["arrowright", "ArrowRight"],
+  ["ctrl", "Control"],
+  ["control", "Control"],
+  ["cmd", "Meta"],
+  ["command", "Meta"],
+  ["meta", "Meta"],
+  ["alt", "Alt"],
+  ["option", "Alt"],
+  ["shift", "Shift"],
+  ["tab", "Tab"],
+  ["backspace", "Backspace"],
+  ["home", "Home"],
+  ["end", "End"],
+  ["pageup", "PageUp"],
+  ["pagedown", "PageDown"],
+]);
+
+export function normalizeKeyName(key: string): string {
+  const raw = (key ?? "").trim();
+  if (!raw) {
+    return raw;
+  }
+  return raw
+    .split("+")
+    .map((segment) => {
+      const token = segment.trim();
+      if (!token) {
+        return token;
+      }
+      return KEY_ALIASES.get(token.toLowerCase()) ?? token;
+    })
+    .join("+");
+}
+
 async function confirmAutocomplete(
   page: Page,
   input: Locator,
