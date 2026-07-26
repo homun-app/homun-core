@@ -27440,9 +27440,14 @@ is kept compact so acting stays fast, so when you need to read a large block of 
 browser_snapshot. EXTRACT AS YOU GO: the moment a page shows the value you need, copy the CONCRETE data \
 (actual numbers, rows, names, dates) into your answer — page content is NOT retained once you navigate \
 away.\n\
-5. STOP as soon as you have the answer: write it plainly with the real values. If the information is \
+5. NEVER conclude \"no results\" from a partial view. After a search runs, the results often load a \
+moment later and sit BELOW the visible part of the page. If the observation ends with a TRUNCATED \
+marker, or you simply do not see rows yet: scroll down and read again (and if needed wait once), then \
+take a browser_snapshot. Only report that nothing was found after you have actually read the results \
+area and it is genuinely empty.\n\
+6. STOP as soon as you have the answer: write it plainly with the real values. If the information is \
 genuinely unavailable after trying your sources, say so explicitly (e.g. \"not available on X\") — do \
-NOT invent it. Your browsing budget is limited; settle the goal in 1-2 good sources, not 5+.",
+NOT invent it.",
         now = now_block(),
     )
 }
@@ -32055,7 +32060,9 @@ fn browser_chat_snapshot_params(target_id: &str) -> serde_json::Value {
         "refs_mode": "aria",
         "compact": true,
         "depth": 12,
-        "max_chars": 20_000,
+        // Must match the sidecar's `extract` budget: this value is applied as min(max_chars, cap), so
+        // leaving it at 20k would silently re-truncate a results table the larger cap was raised to fit.
+        "max_chars": 40_000,
         "timeout_ms": 8_000,
         // No `urls:true`: the content snapshot already carries the page's links inline.
         // The appended flat url-dump made `extract_source_urls` scrape EVERY link (a

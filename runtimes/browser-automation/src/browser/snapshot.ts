@@ -61,10 +61,15 @@ export type BrowserSnapshotOptions = {
   generation?: number;
 };
 
+// `extract` is the READING budget: it must fit a full results table (train times, flight legs, a
+// standings table), because that content IS the answer. At 16k a search-results page was cut before
+// its rows — the model received header/filters/nav, saw no results and reported that there were none
+// while they were on screen. Acting stays small (interact/delta) so per-step latency is unaffected;
+// only an explicit read pays for the larger window.
 const OBSERVATION_LIMITS: Record<BrowserObservationMode, number> = {
   interact: 6_000,
   delta: 8_000,
-  extract: 16_000,
+  extract: 40_000,
 };
 
 // Role grouping follows the OpenClaw browser snapshot contract (MIT) so our
@@ -417,9 +422,12 @@ async function createAiSnapshot(
   const observedSnapshot =
     observedMode === "delta" ? structuralDelta(options?.previousSnapshot, rawSnapshot) : displaySnapshot;
   const limit = limitForObservation(observedMode, options?.maxChars);
+  // Say WHAT was cut and what to do about it. The bare "page too large" marker read as "this is the
+  // whole page": a model that had just submitted a search saw the truncated top of the results page,
+  // found no rows in it and concluded there were no results.
   const snapshot =
     observedSnapshot.length > limit
-      ? `${observedSnapshot.slice(0, limit)}\n\n[...TRUNCATED - page too large]`
+      ? `${observedSnapshot.slice(0, limit)}\n\n[...TRUNCATED after ${limit} of ${observedSnapshot.length} characters — this is only the TOP of the page. Content further down (e.g. result rows) is NOT shown here. Scroll down and read again, or narrow the observation, before concluding anything is missing.]`
       : observedSnapshot;
   // A delta is `+`/`-`-prefixed diff text, not a snapshot: re-parsing refs out
   // of it yields ZERO refs, because `refsFromAiSnapshot` anchors on `^\s*-`

@@ -829,6 +829,9 @@ async function waitForPageToSettle(page: Page, action: BrowserActRequest): Promi
 const SETTLE_TIMEOUT_MS = 12_000;
 const SETTLE_SAMPLE_MS = 400;
 const SETTLE_STABLE_SAMPLES = 2;
+/// Confirmation delay for the already-quiet fast path — long enough for a click's fetch to show up in
+/// the resource timings, short enough not to tax the many actions that start no request at all.
+const SETTLE_CONFIRM_MS = 150;
 
 /// Wait until nothing is in flight AND the DOM has stopped changing, or the timeout elapses.
 /// Machine signals only — request timings, readyState, and a size probe; never a search for particular
@@ -851,15 +854,29 @@ async function waitForDomToStopChanging(page: Page): Promise<void> {
       })
       .catch(() => null);
 
-  let previousSize: string | null = null;
+  const isQuiet = (sample: Awaited<ReturnType<typeof probe>>) =>
+    // A failed probe (navigation in flight, context torn down) is not stability — keep waiting.
+    sample !== null && sample.pending === 0 && sample.ready !== "loading";
+
+  // Fast path: a page that is ALREADY quiet only pays one short confirmation sample. Most actions
+  // (typing, opening a menu, picking a suggestion) do not start a fetch, and charging them a full
+  // stability loop would add latency to every step of every run.
+  const first = await probe();
+  if (isQuiet(first)) {
+    await page.waitForTimeout(SETTLE_CONFIRM_MS);
+    const second = await probe();
+    if (isQuiet(second) && second!.size === first!.size) {
+      return;
+    }
+  }
+
+  let previousSize: string | null = first?.size ?? null;
   let stable = 0;
   const deadline = Date.now() + SETTLE_TIMEOUT_MS;
   while (Date.now() < deadline) {
+    await page.waitForTimeout(SETTLE_SAMPLE_MS);
     const current = await probe();
-    // A failed probe (navigation in flight, context torn down) is not stability — keep waiting.
-    const quiet =
-      current !== null && current.pending === 0 && current.ready !== "loading";
-    if (quiet && current.size === previousSize) {
+    if (isQuiet(current) && current!.size === previousSize) {
       stable += 1;
       if (stable >= SETTLE_STABLE_SAMPLES) {
         return;
@@ -868,7 +885,6 @@ async function waitForDomToStopChanging(page: Page): Promise<void> {
       stable = 0;
     }
     previousSize = current?.size ?? null;
-    await page.waitForTimeout(SETTLE_SAMPLE_MS);
   }
 }
 
