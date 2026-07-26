@@ -29728,6 +29728,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         let tail_user = memory_user_message.clone();
         let tail_thread = thread_id.clone();
         let tail_turn_id = request.request_id.clone();
+        // Snapshots for the end-of-turn steering fence below: the originals are moved into
+        // `run_agent_rounds` (and `tail_turn_id` into the memory-learn spawn).
+        let fence_turn_id = request.request_id.clone();
+        let fence_user_id = automation_user_id.clone();
+        let fence_workspace_id = automation_workspace_id.clone();
         // 5.D1c.9: resolve the trace-dump dir gateway-side (armed only when HOMUN_TRACE_DUMP=1) and
         // inject it, so the engine loop appends without calling the gateway's path resolver.
         let trace_dir = local_first_engine::trace::dump_enabled()
@@ -29801,6 +29806,15 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
                 spawn_project_graph_refresh(&tail_state, &ws);
             }
         }
+        // INVARIANT — nothing transient outlives its turn. This runs on EVERY exit of the turn task
+        // (delivered, parked, error, abort), because the failure it prevents is not tied to any one
+        // outcome: a steering row still `pending` when its turn ends can never be applied (the turn it
+        // targeted is gone), but the next turn's finalization fence still sees PendingInput, waits its
+        // budget and PARKS — so one uninterpretable instruction silently broke every following turn in
+        // the thread. Resources with their own lifetime (the thread's warm browser session, reused for
+        // "search → then book") are deliberately NOT touched here; they are owned per thread and reaped
+        // on idle/close.
+        finalize_turn_steering(&tail_state, tail_thread.as_deref(), &fence_turn_id, &fence_user_id, &fence_workspace_id);
         // Mark the resume entry finished and evict it after a grace window so a
         // client that reloaded right at the end can still reattach and read it.
         tx.entry
@@ -46130,6 +46144,62 @@ fn single_action_rejects_unsupported_execution_before_payment_claim(
 /// `PaymentCommit`; on a class error, do not claim, so the grant survives
 /// for a correctly re-declared retry (see the call site comment in
 /// `execute_browser_tool`).
+/// Close every steering row still waiting on a turn that has ended.
+///
+/// A row left `pending`/`held` when its turn finishes is unappliable — its target turn is over — but
+/// it stays visible to the NEXT turn's finalization fence, which then waits its full budget and parks.
+/// One instruction the semantic coordinator could not interpret therefore broke every subsequent turn
+/// in the thread, each time looking like a fresh hang. Cancelling is the honest state: the instruction
+/// never ran, and the user can restate it; leaving it pending is strictly worse, because it cannot ever
+/// be applied and it disables the thread.
+///
+/// Best-effort and non-fatal by design: this is a cleanup fence on the way out of a turn, so a store
+/// error must never propagate into (or fail) the turn that just finished — it is logged instead.
+fn finalize_turn_steering(
+    state: &AppState,
+    thread_id: Option<&str>,
+    turn_id: &str,
+    user_id: &UserId,
+    workspace_id: &WorkspaceId,
+) {
+    let Some(thread_id) = thread_id.filter(|id| !id.trim().is_empty()) else {
+        return;
+    };
+    let Ok(store) = state.task_store.lock() else {
+        return;
+    };
+    let (user_id, workspace_id) = (user_id.as_str(), workspace_id.as_str());
+    let Ok(rows) = store.list_turn_steering(user_id, workspace_id, thread_id) else {
+        return;
+    };
+    for row in rows {
+        // Only this turn's leftovers: a row queued against a DIFFERENT (e.g. still running) turn is
+        // none of our business, and one already interpreted/applied/completed/cancelled is settled.
+        if row.active_turn_id != turn_id || !matches!(row.status.as_str(), "pending" | "held") {
+            continue;
+        }
+        match store.cancel_turn_steering(row.steering_id, user_id, workspace_id, row.revision) {
+            Ok(record) => {
+                tracing::warn!(
+                    target: "steering::finalize",
+                    steering_id = row.steering_id,
+                    turn_id,
+                    "closed a steering row left pending by a finished turn"
+                );
+                publish_steering_changed(&record);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    target: "steering::finalize",
+                    steering_id = row.steering_id,
+                    %error,
+                    "could not close a steering row left pending by a finished turn"
+                );
+            }
+        }
+    }
+}
+
 fn should_claim_payment_approval(
     action: &serde_json::Value,
     payment_floor_refs: &std::collections::HashSet<String>,
