@@ -1402,6 +1402,19 @@ again to find the right control). Keep working on the task — do not stop and d
             continue;
         }
         if park_wait >= PARK_WAIT_CYCLES {
+            // Never park a turn that already HAS an answer. Parking returns an empty
+            // `memory_answer` and deliberately emits no terminal event, because it expects the
+            // coordinator to resume the run later. When the work is already done, that trade is
+            // pure loss: the user has the full answer on screen, but the bubble keeps spinning
+            // forever (no terminal), the answer can be re-streamed by the resume path, and the
+            // finished result is discarded. Observed exactly that: a completed train search whose
+            // turn parked afterwards and span for 80 minutes with the answer already delivered.
+            // An unresolvable steering row is not a reason to throw away finished work — fall
+            // through to the normal finalization below and deliver.
+            if !memory_answer.trim().is_empty() {
+                final_done = true;
+                break;
+            }
             // Park: capture a resumable checkpoint at the boundary and return without
             // delivering. Do NOT force synthesis, do NOT emit Done. Flush completions for
             // anything already drained/applied earlier in this same turn FIRST — this is the
@@ -4216,6 +4229,72 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
                 time_to_first_token_ms: None,
             })
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_turn_that_already_has_an_answer_delivers_instead_of_parking() {
+        // Parking returns an empty answer and emits no terminal event, expecting a later coordinator
+        // resume. When the work is already finished that is pure loss: observed in production as a
+        // completed train search whose turn parked afterwards — the user had the full answer on
+        // screen while the bubble span for 80 minutes, and the finished result was discarded.
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "investigate" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let model = NeverInterpretedSteeringModel::default();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        turn_cfg.hard_round_ceiling = 1;
+        turn_cfg.max_rounds = 1;
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run_turn(
+                ls,
+                turn_cfg,
+                &usage_context(),
+                &model,
+                &NoTools,
+                &mut browser,
+                &NoPlan,
+                &DoneJudge,
+                &NoCompact,
+                &OpenPolicy,
+                &journal,
+                &sink,
+                0.0,
+                None,
+                &std::collections::BTreeSet::new(),
+                &[],
+                "investigate".to_string(),
+                // The turn already produced a complete answer before the fence blocked.
+                "Ecco i treni: Frecciarossa 9524 alle 08:10.".to_string(),
+                None,
+                false,
+                0,
+                false,
+                Vec::new(),
+                None,
+                &crate::turn_trace::TurnTrace::disabled(),
+            ),
+        )
+        .await
+        .expect("run_turn must not hang");
+
+        assert_ne!(
+            outcome.delivery,
+            crate::TurnDelivery::Parked,
+            "a turn holding a finished answer must deliver it, not park it away"
+        );
+        assert!(
+            outcome.memory_answer.contains("Frecciarossa 9524"),
+            "the finished answer must survive: {:?}",
+            outcome.memory_answer
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
