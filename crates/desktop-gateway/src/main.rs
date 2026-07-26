@@ -46135,6 +46135,20 @@ fn should_claim_payment_approval(
     payment_floor_refs: &std::collections::HashSet<String>,
     focus_payment_context: bool,
 ) -> bool {
+    // Filling a card field is not the act of paying. The documented flow tells the model to fill the
+    // CVV with `vault_secret` + the approval id, but that field sits in paymentFloorRefs, so the FILL
+    // classified as PaymentCommit and burned the one-shot grant — and the real payment click that
+    // followed was then always refused with "payment approval was already used". The happy path could
+    // never complete. A non-committing fill that carries `vault_secret` is therefore exempt from
+    // claiming: it still passes the gate (its class is unchanged, the approval id is still required
+    // and validated), it just does not CONSUME the grant. Anything that actually commits — a click, a
+    // submit, `type` with submit=true, Enter — is still a claim, so the money-moving action remains
+    // one-shot and fail-closed.
+    let is_vault_field_fill = action.get("vault_secret").is_some()
+        && !browser_safety::is_committing_action(action);
+    if is_vault_field_fill {
+        return false;
+    }
     matches!(
         browser_safety::effective_action_class(action, payment_floor_refs, focus_payment_context),
         Ok(browser_safety::ActionClass::PaymentCommit)
@@ -66612,6 +66626,32 @@ prs.save(Path({path:?}))
             browser_safety::effective_action_class(&missing_class_action, &payment_floor, false)
                 .is_err(),
             "discriminator the fix relies on: an under-declared committing action is a class error"
+        );
+
+        // Filling the CVV field must NOT consume the one-shot grant: that fill is not the act of
+        // paying, and burning the grant there made the subsequent real payment click fail with
+        // "payment approval was already used" — the documented checkout flow could never complete.
+        let cvv_fill = serde_json::json!({
+            "kind": "fill",
+            "ref": "e20",
+            "vault_secret": "cvv_one_shot",
+            "payment_approval_id": "pay_test",
+            "action_class": "payment_commit"
+        });
+        assert!(
+            !super::should_claim_payment_approval(&cvv_fill, &payment_floor, true),
+            "a vault-secret field fill must not consume the one-shot payment grant"
+        );
+        // The action that actually commits the money still claims it.
+        let pay_click = serde_json::json!({
+            "kind": "click",
+            "ref": "e20",
+            "payment_approval_id": "pay_test",
+            "action_class": "payment_commit"
+        });
+        assert!(
+            super::should_claim_payment_approval(&pay_click, &payment_floor, true),
+            "the committing payment action must still consume the grant (one-shot, fail-closed)"
         );
 
         // Enforcement-site decision: must NOT claim on a class error.
