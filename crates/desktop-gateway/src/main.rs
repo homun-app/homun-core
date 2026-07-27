@@ -26015,6 +26015,11 @@ an uncertain date.",
         // tools so the model sees its full CRUD together. Channels: READ only.
         // contact_only turns: don't surface connected services at all (the
         // dispatch refuses them anyway — this just avoids a wasted round).
+        // Capabilities that MATCHED the query but were withheld by this conversation's perimeter or by
+        // read-only mode. Without this the empty result told the model to "rephrase" — but the filters
+        // are on tool IDENTITY, not on the wording, so rephrasing could never work and the model kept
+        // re-querying with synonyms.
+        let mut withheld = 0usize;
         if !ctx.catalog_index.is_empty() && !ctx.contact_only {
             for entry in search_connector_capability_entries(
                 ctx.catalog_index,
@@ -26022,14 +26027,17 @@ an uncertain date.",
                 COMPOSIO_DISCOVERY_RESULTS,
             ) {
                 if ctx.read_only && !composio_tool_is_read(&entry.key) {
+                    withheld += 1;
                     continue;
                 }
                 // PERIMETER: don't even surface calendar/contacts tools when the
                 // matching axis is off (the dispatch refuses them anyway).
                 if !ctx.can_see_calendar && tool_touches_calendar(&entry.key) {
+                    withheld += 1;
                     continue;
                 }
                 if !ctx.can_see_contacts && tool_touches_contacts(&entry.key) {
+                    withheld += 1;
                     continue;
                 }
                 effects.load_tools.push(local_first_engine::LoadedTool {
@@ -26048,9 +26056,17 @@ an uncertain date.",
             }
         }
         if lines.is_empty() {
-            "No capability matches. Rephrase with what you want to do (e.g. \
+            if withheld > 0 {
+                format!(
+                    "No capability is available here. {withheld} matched your query but are outside this \
+conversation's permissions (read-only mode, or calendar/contacts access is off) — rephrasing will NOT \
+change that. Continue with what you can do, and tell the user which access would be needed."
+                )
+            } else {
+                "No capability matches. Rephrase with what you want to do (e.g. \
 \"browse the web\", \"search GitHub\", \"read the user's files\", \"send an email\")."
-                .to_string()
+                    .to_string()
+            }
         } else {
             format!(
                 "Capabilities found (the tools are now CALLABLE; skills are \
