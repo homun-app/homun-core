@@ -81,6 +81,7 @@ function loadWorkspaceIslandMode(): WorkspaceIslandMode {
 
 export function WorkspaceIsland({
   threadId,
+  openActivityNonce,
   objective,
   activitySteps,
   computerActivity,
@@ -98,6 +99,8 @@ export function WorkspaceIsland({
   onExportChat,
   onOpenInspector,
 }: {
+  /** Bumped by the caller to force the activity list open. */
+  openActivityNonce?: number;
   threadId: string;
   /** North-star objective text (top of the Objective → Progress hierarchy). null when
    *  the workspace has none — the block stays hidden. */
@@ -133,6 +136,11 @@ export function WorkspaceIsland({
   // Activity reveals its accumulated steps INLINE (the old row opened the Workbench
   // "activity" tab, which is bound to background TASKS — not these conversation steps).
   const [activityOpen, setActivityOpen] = useState(false);
+  // The status pill's "Activity" button asks for the list to be SHOWN. Opening the island alone was a
+  // no-op whenever it was already open (the common case), so the click appeared to do nothing.
+  useEffect(() => {
+    if (openActivityNonce) setActivityOpen(true);
+  }, [openActivityNonce]);
   // Latch: keep the island around (collapsed) after a run so the user can review the work.
   const [hadWorkspaceState, setHadWorkspaceState] = useState(false);
   const sourceList = sources ?? [];

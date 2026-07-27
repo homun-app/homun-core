@@ -486,6 +486,8 @@ export function ChatView({
   // Inspector tabs and their ordering are isolated by thread; App keys ChatView by thread id,
   // so each mount restores only the current activity's validated descriptors.
   const [islandOpen, setIslandOpen] = useState(true);
+  // Bumped when the user asks for the activity list, so the island expands it even when already open.
+  const [activityNonce, setActivityNonce] = useState(0);
   const [inspector, dispatchInspector] = useReducer(inspectorWorkspaceReducer,
     loadInspectorState(thread.threadId,
       (tab) => isRestorableInspectorTab(tab, thread.threadId, thread.workspaceId),
@@ -1561,6 +1563,7 @@ export function ChatView({
   function openActivityIsland() {
     dispatchInspector({ type: "hideWorkspace" });
     setIslandOpen(true);
+    setActivityNonce((n) => n + 1);
   }
 
   // Reattach to an answer that was streaming when the app was reloaded: replays
@@ -2838,6 +2841,7 @@ export function ChatView({
             list read as clutter. Everything the agent shows lives in this single card. */}
         <div className="unified-status-panel">
           <WorkspaceIsland
+            openActivityNonce={activityNonce}
             threadId={thread.threadId}
             objective={projectObjective}
             activitySteps={conversationActivity}
@@ -3276,11 +3280,15 @@ export function ChatView({
 
       <div className="composer-stack">
         {chatTurnState && (
-          <ActiveTurnStatus
-            {...chatTurnState}
-            onOpenActivity={openActivityIsland}
-            onStop={() => void stopActiveTurn()}
-          />
+          /* Band matching the composer's width so the status pill lines up with the LEFT edge of the
+             input instead of floating centred above it. */
+          <div className="active-turn-band">
+            <ActiveTurnStatus
+              {...chatTurnState}
+              onOpenActivity={openActivityIsland}
+              onStop={() => void stopActiveTurn()}
+            />
+          </div>
         )}
         <PendingSteeringQueue
           rows={pendingSteering.rows}

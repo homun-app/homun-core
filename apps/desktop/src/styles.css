@@ -5767,11 +5767,19 @@ body.resizing-drawer {
   align-items: center;
 }
 
+/* Same width as .composer-surface, so its left edge is the input's left edge. */
+.active-turn-band {
+  width: min(100%, 760px);
+  margin: 0 auto;
+  display: flex;
+  justify-content: flex-start;
+}
+
 .active-turn-status {
   width: fit-content;
-  max-width: min(100%, 760px);
+  max-width: 100%;
   min-width: 0;
-  margin: 0 auto 6px;
+  margin: 0 0 6px;
   padding: 6px 8px 6px 10px;
   display: flex;
   align-items: center;
@@ -7596,7 +7604,10 @@ body.resizing-drawer {
   text-wrap: balance;
 }
 .chat-usage-overview {
-  width: 100%;
+  /* Match .composer-surface exactly: the hero is wider (920px) than the input, so filling it made the
+     usage card visibly broader than the prompt below it. */
+  width: min(100%, 760px);
+  margin-inline: auto;
   margin-top: clamp(36px, 6vh, 72px);
   padding: 14px 16px 12px;
   box-sizing: border-box;
