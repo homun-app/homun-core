@@ -21966,6 +21966,23 @@ const CORE_TOOL_NAMES: &[&str] = &[
     "run_in_project",
 ];
 
+/// Which tools stay in the LIVE (non-deferred) set for THIS turn.
+///
+/// The fixed core, PLUS `browse` while the thread holds a live warm browser session. Root cause
+/// this closes: `browse` is not in `CORE_TOOL_NAMES`, so after a successful browse the follow-up
+/// turn ("book the first one") reached a manager that did not have `browse` in its tool set at all
+/// — while `run_in_project`/`read_file`/`write_file`/`apply_patch` always are — and it did the only
+/// thing it could see: Python/shell, a dead end that cannot carry the site's interactive session.
+/// The manager guidance is the textual half of the fix; this is the machine half.
+///
+/// `browse` stays OUT of `CORE_TOOL_NAMES` on purpose: making it always-live would spend the
+/// tokens on every turn of every thread, including the ones that never touched a browser. The
+/// signal is derived from state (`thread_has_live_browser_session`), never from the wording of
+/// the user's message.
+fn tool_stays_live_this_turn(name: &str, browser_session_live: bool) -> bool {
+    CORE_TOOL_NAMES.contains(&name) || (browser_session_live && name == "browse")
+}
+
 fn find_capability_tool_schema() -> serde_json::Value {
     serde_json::json!({
         "type": "function",
@@ -29208,12 +29225,20 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
     // upfront tool count low (selection accuracy + context budget) as tools grow, and makes
     // the browser a discovered last-resort instead of the silent catch-all. `find_capability`
     // pushes matches into the live `tool_schemas` (same mechanism as `find_connected_tools`).
+    // One machine-derived exception (see `tool_stays_live_this_turn`): a thread that still holds a
+    // LIVE warm browser session is MID web task, so `browse` stays live for this turn instead of
+    // requiring a `find_capability` hop the manager may never think to take. Read-only probe — it
+    // must not take, park or extend the session.
+    let browser_session_live = request
+        .thread_id
+        .as_deref()
+        .is_some_and(|thread_id| thread_has_live_browser_session(state, thread_id));
     let (mut base_tools, deferred_tools): (Vec<serde_json::Value>, Vec<serde_json::Value>) =
         base_tools.into_iter().partition(|schema| {
             schema
                 .pointer("/function/name")
                 .and_then(|v| v.as_str())
-                .map(|name| CORE_TOOL_NAMES.contains(&name))
+                .map(|name| tool_stays_live_this_turn(name, browser_session_live))
                 .unwrap_or(false)
         });
     match &capability_route {
@@ -32398,6 +32423,28 @@ fn browser_action_targeted_a_floored_ref(
 /// How long a per-thread browser session may sit idle before it is reaped.
 const THREAD_BROWSER_SESSION_IDLE: std::time::Duration = std::time::Duration::from_secs(300);
 
+/// The single idle rule for a warm browser session: past `THREAD_BROWSER_SESSION_IDLE` it is
+/// stale and must be treated as gone (the reaper is about to close it anyway). Shared by the
+/// consuming take and the read-only probe so the two can never disagree.
+fn thread_browser_session_is_live(last_used: std::time::Instant) -> bool {
+    last_used.elapsed() <= THREAD_BROWSER_SESSION_IDLE
+}
+
+/// Read-only probe: does this thread currently hold a LIVE warm browser session?
+///
+/// This is the MACHINE SIGNAL behind `tool_stays_live_this_turn`: mid web task the manager must
+/// keep seeing `browse`, and "mid web task" is exactly "the thread still has an open session".
+/// Deliberately NON-consuming — unlike `take_thread_browser_session` it must not remove, park,
+/// close or refresh anything: probing a session is not using it, so it may not extend its idle
+/// window either.
+fn thread_has_live_browser_session(state: &AppState, thread_id: &str) -> bool {
+    let Ok(map) = state.browser_thread_sessions.lock() else {
+        return false;
+    };
+    map.get(thread_id)
+        .is_some_and(|session| thread_browser_session_is_live(session.last_used))
+}
+
 /// Take (remove) a thread's warm browser session for reuse. Returns `None` if
 /// absent or stale (a stale one is gracefully closed here so it doesn't leak).
 fn take_thread_browser_session(
@@ -32408,7 +32455,7 @@ fn take_thread_browser_session(
         let mut map = state.browser_thread_sessions.lock().ok()?;
         map.remove(thread_id)?
     };
-    if session.last_used.elapsed() > THREAD_BROWSER_SESSION_IDLE {
+    if !thread_browser_session_is_live(session.last_used) {
         let _ = session
             .client
             .call(BrowserMethod::Stop, serde_json::json!({}));
@@ -64288,6 +64335,79 @@ mod tests {
 
         assert!(names.contains(&"browse"));
         assert!(!names.iter().position(|name| *name == "browse").is_none());
+    }
+
+    /// The turn's live-vs-deferred partition, both directions. Regression: `browse` is not in
+    /// CORE_TOOL_NAMES, so the follow-up turn after a successful browse ("book the first one")
+    /// reached a manager that did not have `browse` at all — but did have run_in_project/read_file
+    /// — and continued the web task with Python/shell, which cannot carry the site's session.
+    #[test]
+    fn a_live_browser_session_keeps_browse_in_the_live_tool_set() {
+        let offered = ["browse", "run_in_project", "run_in_sandbox"];
+        let live: Vec<&str> = offered
+            .into_iter()
+            .filter(|name| super::tool_stays_live_this_turn(name, true))
+            .collect();
+        // `browse` joins the core for this turn; nothing else changes.
+        assert_eq!(live, vec!["browse", "run_in_project"]);
+    }
+
+    #[test]
+    fn without_a_live_browser_session_browse_stays_deferred() {
+        assert!(!super::tool_stays_live_this_turn("browse", false));
+        // The signal only ever adds `browse`: the core set is identical either way.
+        assert!(super::tool_stays_live_this_turn("run_in_project", false));
+        assert!(super::tool_stays_live_this_turn("run_in_project", true));
+        assert!(!super::tool_stays_live_this_turn("run_in_sandbox", false));
+        assert!(!super::tool_stays_live_this_turn("run_in_sandbox", true));
+    }
+
+    /// The machine signal itself: present + within the idle window, probed WITHOUT consuming the
+    /// session (a probe is not a use, so it must neither remove it nor extend its idle window).
+    #[test]
+    fn thread_browser_session_liveness_is_read_only_and_respects_the_idle_window() {
+        let state = super::AppState::for_tests();
+        // No session at all → `browse` is deferred exactly as before.
+        assert!(!super::thread_has_live_browser_session(&state, "thread-1"));
+
+        // A stub sidecar: the probe only reads `last_used`, it never talks to the process.
+        let session = super::ThreadBrowserSession {
+            client: super::BrowserAutomationClient::new(
+                super::BrowserSidecarSession::spawn("cat", &[]).expect("spawn stub sidecar"),
+            ),
+            last_used: std::time::Instant::now(),
+        };
+        state
+            .browser_thread_sessions
+            .lock()
+            .expect("session map")
+            .insert("thread-1".to_string(), session);
+        assert!(super::thread_has_live_browser_session(&state, "thread-1"));
+        // Probing twice must still see it: the session was not taken.
+        assert!(super::thread_has_live_browser_session(&state, "thread-1"));
+        assert_eq!(
+            state.browser_thread_sessions.lock().expect("session map").len(),
+            1
+        );
+        // Another thread's session is not this thread's.
+        assert!(!super::thread_has_live_browser_session(&state, "thread-2"));
+
+        // Past the idle window the session is stale — never resurrect its tool.
+        let stale = std::time::Instant::now()
+            .checked_sub(super::THREAD_BROWSER_SESSION_IDLE + std::time::Duration::from_secs(1))
+            .expect("monotonic clock deep enough to age a session");
+        state
+            .browser_thread_sessions
+            .lock()
+            .expect("session map")
+            .get_mut("thread-1")
+            .expect("stored session")
+            .last_used = stale;
+        assert!(!super::thread_has_live_browser_session(&state, "thread-1"));
+        assert!(!super::tool_stays_live_this_turn(
+            "browse",
+            super::thread_has_live_browser_session(&state, "thread-1")
+        ));
     }
 
     #[test]
