@@ -78,6 +78,17 @@ pub enum TurnEvent {
     ForcedSynthesis {
         finish_reason: String,
     },
+    /// Which of the round loop's exits actually fired, and how much of the turn it had spent.
+    /// `ForcedSynthesis { finish_reason: "post_loop_exhausted" }` only says the loop ended — with
+    /// 22 possible exits that left every "why did it stop so early?" diagnosis to guesswork, and
+    /// guesswork is what turned budget tuning into the default answer. Recorded exactly once, on
+    /// every path out of the loop.
+    LoopExit {
+        reason: String,
+        last_round: usize,
+        rounds_since_progress: usize,
+        browsed: bool,
+    },
     Reconcile {
         fired: bool,
         step: String,

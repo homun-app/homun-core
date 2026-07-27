@@ -269,19 +269,31 @@ where
     // is always configured >= 1, so the loop runs at least round 0 (setting this) before the
     // fence can ever be reached.
     let mut last_round: usize = 0;
+    // WHY the round loop stopped. The loop has 22 exits and the trace used to record only
+    // `post_loop_exhausted` — "the loop ended" — which is why diagnosing a turn that stopped too
+    // early meant guessing between them, and then tuning whichever limit seemed likeliest. Every
+    // `break` out of `'rounds` sets this; `None` after the loop means the round range ran out (or,
+    // if it did NOT, that someone added a `break` without a reason — reported as
+    // `uninstrumented_exit` rather than silently mislabelled as exhaustion).
+    let mut loop_exit: Option<&'static str> = None;
     'rounds: for round in 0..cfg.hard_round_ceiling {
         last_round = round;
         if let Some(control) = model_client.current_turn_control() {
             apply_turn_control(model_client, &mut ls.messages, &control);
             steering_to_complete.push(control.steering_id);
             match control.disposition {
-                TurnControlDisposition::FinalizeWithCurrentEvidence => break 'rounds,
+                TurnControlDisposition::FinalizeWithCurrentEvidence => {
+                    loop_exit = Some("steering_finalize_pre_model");
+                    break 'rounds;
+                }
                 TurnControlDisposition::NeedsClarification => {
                     needs_clarification = true;
+                    loop_exit = Some("steering_needs_clarification_pre_model");
                     break 'rounds;
                 }
                 TurnControlDisposition::CancelCurrentWork => {
                     final_done = true;
+                    loop_exit = Some("steering_cancel_pre_model");
                     break 'rounds;
                 }
                 TurnControlDisposition::ContinueCurrentWork
@@ -310,6 +322,7 @@ where
                         text: format!("browser_budget_exceeded:{}", reason.as_str()),
                     })
                     .await;
+                loop_exit = Some("browser_budget_exceeded");
                 break;
             }
         }
@@ -325,6 +338,7 @@ where
         // by total rounds — only by getting STUCK on a single step.
         let rounds_since_progress = round.saturating_sub(ls.progress_anchor_round);
         if rounds_since_progress >= max_rounds {
+            loop_exit = Some("round_budget_since_last_progress");
             break;
         }
         // Wander-cap: the model has navigated to many sources for the CURRENT step
@@ -348,6 +362,7 @@ gathered‹‹/ACT››"
                             .to_string(),
                     })
                     .await;
+                loop_exit = Some("browser_nav_cap_reached");
                 break;
             }
         }
@@ -463,13 +478,18 @@ missing, give what you have and note the gap in one short line.",
         if let Some(control) = control_during_model {
             match control.disposition {
                 TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
-                TurnControlDisposition::FinalizeWithCurrentEvidence => break 'rounds,
+                TurnControlDisposition::FinalizeWithCurrentEvidence => {
+                    loop_exit = Some("steering_finalize_post_model");
+                    break 'rounds;
+                }
                 TurnControlDisposition::NeedsClarification => {
                     needs_clarification = true;
+                    loop_exit = Some("steering_needs_clarification_post_model");
                     break 'rounds;
                 }
                 TurnControlDisposition::CancelCurrentWork => {
                     final_done = true;
+                    loop_exit = Some("steering_cancel_post_model");
                     break 'rounds;
                 }
                 TurnControlDisposition::ContinueCurrentWork => continue 'rounds,
@@ -486,14 +506,21 @@ missing, give what you have and note the gap in one short line.",
             }
             // Upstream and transport failures end the loop; a visible final answer may still be
             // recovered by the post-loop synthesis from accumulated turn prose.
-            Err(crate::ModelCallError::Upstream(_)) => break,
-            Err(crate::ModelCallError::Transport(_)) => break,
+            Err(crate::ModelCallError::Upstream(_)) => {
+                loop_exit = Some("model_upstream_error");
+                break;
+            }
+            Err(crate::ModelCallError::Transport(_)) => {
+                loop_exit = Some("model_transport_error");
+                break;
+            }
             // The model can't see the images it was sent. This is recoverable — but ONLY as a replay of
             // the whole turn from a re-seeded conversation, so it is recoverable only while the turn is
             // still inert. Once a tool has run, replaying would run it twice; at that point the
             // rejection is just a fatal upstream error like any other.
             Err(crate::ModelCallError::ImageUnsupported(reason)) => {
                 if turn_used_tools {
+                    loop_exit = Some("image_unsupported_after_tools");
                     break;
                 }
                 // Return with NOTHING emitted and nothing committed: no Done, no answer, no memory. The
@@ -626,6 +653,7 @@ again to find the right control). Keep working on the task — do not stop and d
                                     .to_string(),
                         })
                         .await;
+                    loop_exit = Some("repeated_action_after_change_approach_hint");
                     break;
                 }
             } else {
@@ -851,6 +879,9 @@ again to find the right control). Keep working on the task — do not stop and d
                         steering_to_complete.push(control.steering_id);
                         execution_journal.checkpoint(crate::LoopCheckpoint::from_state(round, &ls));
                         control_after_tools = Some(control);
+                        // Stops iterating THIS round's remaining tool calls, not the turn — the
+                        // rounds loop continues and acts on `control_after_tools`. Deliberately not
+                        // a `loop_exit` site (see the exit-reason instrumentation above).
                         break;
                     }
                     let outcome = tool_effects
@@ -887,6 +918,7 @@ again to find the right control). Keep working on the task — do not stop and d
                             .await;
                         delivery = TurnDelivery::Delivered;
                         final_done = true;
+                        loop_exit = Some("browser_done_terminal");
                         break 'rounds;
                     }
                     if is_browser_granular_tool(name) {
@@ -1054,13 +1086,18 @@ again to find the right control). Keep working on the task — do not stop and d
             if let Some(control) = control_after_tools {
                 match control.disposition {
                     TurnControlDisposition::ReplanCurrentWork => continue 'rounds,
-                    TurnControlDisposition::FinalizeWithCurrentEvidence => break 'rounds,
+                    TurnControlDisposition::FinalizeWithCurrentEvidence => {
+                        loop_exit = Some("steering_finalize_after_tools");
+                        break 'rounds;
+                    }
                     TurnControlDisposition::NeedsClarification => {
                         needs_clarification = true;
+                        loop_exit = Some("steering_needs_clarification_after_tools");
                         break 'rounds;
                     }
                     TurnControlDisposition::CancelCurrentWork => {
                         final_done = true;
+                        loop_exit = Some("steering_cancel_after_tools");
                         break 'rounds;
                     }
                     TurnControlDisposition::ContinueCurrentWork => continue 'rounds,
@@ -1118,6 +1155,7 @@ again to find the right control). Keep working on the task — do not stop and d
                     delivery = TurnDelivery::Delivered;
                     final_done = true;
                 }
+                loop_exit = Some("pending_user_confirmation");
                 break;
             }
             if stop_for_no_progress {
@@ -1131,6 +1169,7 @@ again to find the right control). Keep working on the task — do not stop and d
                     round: Some(round),
                     reason: "structured_no_progress".to_string(),
                 });
+                loop_exit = Some("structured_no_progress");
                 break;
             }
             continue;
@@ -1301,6 +1340,7 @@ again to find the right control). Keep working on the task — do not stop and d
                 ls.messages
                     .push(serde_json::json!({ "role": "assistant", "content": content }));
             }
+            loop_exit = Some("empty_visible_answer_forced_synthesis");
             break;
         }
         // The content already streamed LIVE (raw) via collect_openai_stream; here we
@@ -1321,6 +1361,7 @@ again to find the right control). Keep working on the task — do not stop and d
         // settled → the next turn won't falsely resume a plan this answer already finished.
         let delivered = collapse_plan_markers(&ls.accumulated);
         if visible_answer(&delivered).is_none() {
+            loop_exit = Some("no_visible_answer_at_delivery");
             break;
         }
         // Turn trace: open-step count BEFORE the final reconcile (its input), captured so the trace
@@ -1370,8 +1411,27 @@ again to find the right control). Keep working on the task — do not stop and d
             delivery = TurnDelivery::Delivered;
             final_done = true;
         }
+        loop_exit = Some("model_stopped_naturally");
         break;
     }
+
+    // The single place that records WHY the loop stopped. `None` is only honest when the round range
+    // genuinely ran out; if the loop left early without a reason, someone added a `break` and forgot
+    // to name it — say so instead of reporting a plausible-looking exhaustion (the exact failure mode
+    // that let a whole class of plan bugs hide behind `unwrap_or("todo")`).
+    let exhausted_range = last_round + 1 >= cfg.hard_round_ceiling;
+    turn_trace.record(crate::turn_trace::TurnEvent::LoopExit {
+        reason: loop_exit
+            .unwrap_or(if exhausted_range {
+                "round_ceiling_reached"
+            } else {
+                "uninstrumented_exit"
+            })
+            .to_string(),
+        last_round,
+        rounds_since_progress: last_round.saturating_sub(ls.progress_anchor_round),
+        browsed: ls.browser_used,
+    });
 
     // Turn end (ALL exit paths converge here: normal answer, pending_confirm, round-budget break,
     // natural exhaustion). The browser executor parks its session warm for the thread's next turn (or
