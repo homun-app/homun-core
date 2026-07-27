@@ -7901,14 +7901,29 @@ fn runtime_plan_memory_metadata(
     })
 }
 
-/// The gateway's typed `ExecutionPlan` from `LoopState.plan`'s opaque `Value` (ADR 0024 inc 5,
-/// P5). The inverse of `serde_json::to_value(&ExecutionPlan)`: the loop carries the plan as a
-/// `Value` (engine-safe), but the ExecutionPlan-only helpers (`merge_execution_plan`,
-/// `plan_steps_reconciled_on_delivery`) still need the typed form. A faithful round-trip in
-/// practice (the Value is always `to_value(&ExecutionPlan)`); an empty plan is the safe fallback
-/// for `Null`/malformed, matching the old `runtime_execution_plan(&[])` seed.
+/// THE shape of `LoopState.plan` — the plan the engine reads: canonical steps
+/// (`{id,title,status,detail}`) under `steps`, the same language the merge, the F2 verifier, the
+/// persistence (`upsert_runtime_plan_memory_from_state`) and the ‹‹PLAN›› marker already speak.
+///
+/// It must NEVER be the raw `serde_json::to_value(&ExecutionPlan)`: `PlanStep` keeps title/status
+/// inside `arguments`, so the engine's readers (`plan_step_status`/`plan_step_title`, which default
+/// to `"todo"`/`""` on a missing field) saw an untitled `todo` for EVERY step whatever its real
+/// state. That silently disabled every plan-driven control in the loop — the evidence-driven
+/// frontier advance and the "keep going, your next step is X" nudge, i.e. exactly the harness nets
+/// that must fire when the model stops calling `step_advance` itself. With no step ever closing,
+/// the per-step budgets never reset and elapsed time became the only limit the turn had left.
+fn canonical_plan_value(steps: &[serde_json::Value]) -> serde_json::Value {
+    serde_json::json!({ "steps": steps })
+}
+
+/// The gateway's typed `ExecutionPlan` from `LoopState.plan` (ADR 0024 inc 5, P5). The loop carries
+/// the plan in the canonical shape above; the ExecutionPlan-only helpers (`merge_execution_plan`,
+/// `plan_steps_reconciled_on_delivery`) still want the typed form, so rebuild it from those steps.
+/// Lossless for the chat plan: every step in `ls.plan` was produced by `runtime_execution_plan`, so
+/// the orchestrator-only fields (`kind`, `provider_id`, `tool_name`) are already its defaults. An
+/// empty plan is the safe fallback for `Null`/malformed, matching the old seed.
 fn plan_value_from(plan: &serde_json::Value) -> ExecutionPlan {
-    serde_json::from_value::<ExecutionPlan>(plan.clone()).unwrap_or_else(|_| runtime_execution_plan(&[]))
+    runtime_execution_plan(&plan_value_steps(plan))
 }
 
 fn runtime_execution_plan(plan: &[serde_json::Value]) -> ExecutionPlan {
@@ -25989,8 +26004,9 @@ an uncertain date.",
             // truth (verified state), not the model's raw claim. This is what
             // the UI shows and what the next turn resumes from.
             plan_steps = execution_plan_steps(&current_plan);
-            // The whole merged/verified plan is the effect the caller applies to `ctx.plan`.
-            effects.plan = Some(serde_json::to_value(&current_plan).unwrap_or_default());
+            // The whole merged/verified plan is the effect the caller applies to `ctx.plan` — in the
+            // CANONICAL shape, so the loop's own plan-driven controls can read the frontier back.
+            effects.plan = Some(canonical_plan_value(&plan_steps));
             let plan_mark =
                 format!("‹‹PLAN››{}‹‹/PLAN››", build_plan_markdown(&plan_steps));
             effects.append_output.push(plan_mark.clone());
@@ -29749,7 +29765,7 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
         // F2 verification, F5 next-step and the ‹‹PLAN›› marker all read THIS. Seeded from
         // the prior conversation (F4 resume). A step is `done` only after F2 verified it.
         // P5: carried as an opaque `Value` in `LoopState` (engine-safe); seeded here from the resume.
-        ls.plan = serde_json::to_value(runtime_execution_plan(&resume_plan)).unwrap_or_default();
+        ls.plan = canonical_plan_value(&resume_plan);
         if verbose_debug() {
             let done = resume_plan
                 .iter()
@@ -37789,9 +37805,9 @@ impl local_first_engine::PlanProgress for GatewayPlanProgress {
     }
 
     fn plan_value_from_steps(&self, steps: &[serde_json::Value]) -> serde_json::Value {
-        // The other half of the bridge (5.D1c.5): serialize a fresh step list as the canonical plan
-        // Value. Pure — no `self.state` needed.
-        serde_json::to_value(runtime_execution_plan(steps)).unwrap_or_default()
+        // The other half of the bridge (5.D1c.5): a fresh step list as the canonical plan Value —
+        // the shape the loop reads back. Pure — no `self.state` needed.
+        canonical_plan_value(steps)
     }
 }
 
@@ -68138,6 +68154,55 @@ prs.save(Path({path:?}))
         assert_eq!(plan_step_status(&steps[1]), "done", "before frontier → done");
         assert_eq!(plan_step_status(&steps[2]), "doing", "frontier stays doing");
         assert_eq!(plan_step_status(&steps[3]), "todo", "after frontier stays todo");
+    }
+
+    /// The plan the ENGINE reads (`LoopState::plan`) must expose the SAME canonical step shape
+    /// the gateway merges and verifies. `effects.plan` serializes the typed `ExecutionPlan`, whose
+    /// `PlanStep` keeps title/status inside `arguments` — so a raw serialization makes every
+    /// engine-side reader (`plan_step_status`/`plan_step_title`, hence the autoadvance frontier and
+    /// the "keep going" nudge) see an untitled `todo`, whatever the real state is. That silently
+    /// disables every plan-driven control in the loop, leaving the wall clock as the only limit.
+    #[test]
+    fn the_plan_value_handed_to_the_engine_preserves_status_and_title() {
+        let canonical = vec![
+            serde_json::json!({ "id": "s1", "title": "Cerca il treno", "status": "done", "detail": "" }),
+            serde_json::json!({ "id": "s2", "title": "Apri la prenotazione", "status": "doing", "detail": "" }),
+        ];
+        use local_first_engine::plan::{plan_step_status, plan_step_title, plan_value_steps};
+        // Exactly what the update_plan arm / the resume / the frontier advance assign to `ls.plan`.
+        let as_engine_sees_it = super::canonical_plan_value(&canonical);
+        let steps = plan_value_steps(&as_engine_sees_it);
+        assert_eq!(steps.len(), 2, "the engine sees both steps");
+        assert_eq!(plan_step_title(&steps[0]), "Cerca il treno");
+        assert_eq!(plan_step_status(&steps[0]), "done");
+        assert_eq!(plan_step_status(&steps[1]), "doing", "the frontier must be visible to the loop");
+        // And the merge path reads the SAME state back out of it (no status lost round-tripping
+        // through the typed `ExecutionPlan` that `update_plan` still merges on).
+        let round_tripped = super::execution_plan_steps(&super::plan_value_from(&as_engine_sees_it));
+        assert_eq!(plan_step_status(&round_tripped[0]), "done");
+        assert_eq!(plan_step_status(&round_tripped[1]), "doing");
+        assert_eq!(plan_step_title(&round_tripped[1]), "Apri la prenotazione");
+    }
+
+    /// The raw `ExecutionPlan` serialization is what the engine used to receive, and it is exactly
+    /// what must never be handed to it again: `plan_step_status` defaults a missing field to
+    /// `"todo"`, so the loop saw an untitled `todo` for every step and every plan-driven control
+    /// went quiet. Pins the difference between the two shapes so a future refactor can't silently
+    /// swap them back.
+    #[test]
+    fn the_raw_execution_plan_serialization_hides_status_from_the_engine() {
+        use local_first_engine::plan::{plan_step_status, plan_value_steps};
+        let canonical = vec![
+            serde_json::json!({ "id": "s1", "title": "Fatto", "status": "done", "detail": "" }),
+        ];
+        let raw = serde_json::to_value(super::runtime_execution_plan(&canonical)).unwrap();
+        let steps = plan_value_steps(&raw);
+        assert_eq!(
+            plan_step_status(&steps[0]),
+            "todo",
+            "the raw shape buries status in `arguments` — this is the trap, keep it documented"
+        );
+        assert_eq!(plan_step_status(&plan_value_steps(&super::canonical_plan_value(&canonical))[0]), "done");
     }
 
     #[test]

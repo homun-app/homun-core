@@ -85,10 +85,17 @@ pub struct LoopState {
     /// the gateway re-hydrates the enum per call. Non-empty → the harness force-confirms
     /// effectful actions regardless of approval policy (`skill_policy_forces_confirm`).
     pub active_sensitive: Vec<String>,
-    /// The canonical runtime plan, carried as an opaque `Value` (the serialized `ExecutionPlan`)
-    /// because that type lives in a downstream crate the leaf `engine` can't reference. The gateway
-    /// seeds it (resume) and round-trips it faithfully via serde at the plan-helper boundaries; the
-    /// pure step queries live in `engine::plan` (which already operates on `Value` steps).
+    /// The canonical runtime plan, carried as an opaque `Value`: `{"steps":[{id,title,status,
+    /// detail,done_criterion,depends_on}, …]}` — the shape `engine::plan`'s queries read.
+    ///
+    /// CONTRACT, and it is load-bearing: whoever writes here MUST use that shape. It is NOT the
+    /// serialized `ExecutionPlan` — that type keeps title/status nested under `arguments`, and
+    /// because `plan_step_status`/`plan_step_title` default a missing field to `"todo"`/`""`, the
+    /// loop then reads an untitled `todo` for every step no matter its real state. Nothing errors:
+    /// the evidence-driven frontier advance and the "keep going, next step is X" nudge simply stop
+    /// firing, no step ever closes, the per-step budgets never reset, and elapsed time becomes the
+    /// turn's only remaining limit. Pinned gateway-side by
+    /// `the_plan_value_handed_to_the_engine_preserves_status_and_title`.
     pub plan: Value,
     /// The effective provider for the CURRENT round (model + base_url + api_key). Seeded from the
     /// turn's model, then REPLACED wholesale by a mid-turn fallback swap (`ls.provider = out.provider`).
