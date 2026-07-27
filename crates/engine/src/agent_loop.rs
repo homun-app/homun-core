@@ -4003,6 +4003,138 @@ from this snapshot:\n[ref=e2] Same control, re-rendered",
         assert_eq!(outcome.delivery, crate::TurnDelivery::Delivered);
     }
 
+    /// A manager-level delegated `browse` that SUCCEEDS every time, with a distinct goal per round
+    /// (so the identical-call repeat guard never fires — repetition is a separate control).
+    struct CountingDelegatedBrowse(std::sync::Arc<AtomicUsize>);
+
+    impl CapabilityExecutor for CountingDelegatedBrowse {
+        async fn execute_tool(
+            &self,
+            _name: &str,
+            _args: &str,
+            _call_id: &str,
+            _state: &mut LoopState,
+        ) -> Result<ToolOutcome, String> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolOutcome {
+                result: "found: true".to_string(),
+                effects: ToolEffects {
+                    browser_activity_observed: true,
+                    outcome_hint: Some(crate::ToolOutcomeHint::Success),
+                    ..ToolEffects::default()
+                },
+            })
+        }
+    }
+
+    /// Keeps delegating `browse` forever, varying the goal so each round has a fresh signature.
+    #[derive(Default)]
+    struct EndlessBrowseManagerModel {
+        calls: AtomicUsize,
+    }
+
+    impl ModelClient for EndlessBrowseManagerModel {
+        async fn generate(
+            &self,
+            call: &ModelCall<'_>,
+            _on_delta: &(dyn Fn(&str) + Send + Sync),
+        ) -> Result<ModelRoundOutput, ModelCallError> {
+            let index = self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(ModelRoundOutput {
+                message: json!({
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": format!("browse_{index}"),
+                        "type": "function",
+                        "function": {
+                            "name": "browse",
+                            "arguments": format!("{{\"goal\":\"phase {index}\"}}")
+                        }
+                    }]
+                }),
+                provider: ProviderBinding {
+                    model: call.model.to_string(),
+                    base_url: call.base_url.to_string(),
+                    api_key: None,
+                },
+                finish_reason: Some("tool_calls".to_string()),
+                usage: Default::default(),
+                latency_ms: None,
+                time_to_first_token_ms: None,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn progressing_manager_runs_past_the_round_cap_because_delegated_browses_reset_it() {
+        // Manager-level counterpart of `progressing_browse_runs_past_the_round_cap_because_progress_
+        // resets_it`. A real booking turn (search → choose → book) spends ONE multi-minute `browse`
+        // per phase; every delegation succeeds. No granular browser tool ever runs in the manager
+        // turn, so the granular progress reset cannot fire here — only `browser_activity_observed`
+        // can. If that reset regressed, `progress_anchor_round` would stay pinned at 0 and the cap
+        // would count TOTAL rounds, killing a manager that was progressing the whole way.
+        let mut ls = LoopState::new();
+        ls.messages = vec![
+            json!({ "role": "system", "content": "sys" }),
+            json!({ "role": "user", "content": "book a train" }),
+        ];
+        ls.step_messages_start = ls.messages.len();
+        let sink = Collect::default();
+        let journal = CollectJournal::default();
+        let browses = std::sync::Arc::new(AtomicUsize::new(0));
+        let executor = CountingDelegatedBrowse(browses.clone());
+        let mut browser = NoBrowser;
+        let mut turn_cfg = cfg();
+        // Ceiling deliberately well ABOVE the round cap so "capped at the cap" and "ran past it" are
+        // distinguishable outcomes.
+        turn_cfg.hard_round_ceiling = 12;
+        turn_cfg.max_rounds = 4;
+        turn_cfg.browser_max_rounds = 4;
+        turn_cfg.browser_subturn = false; // this is the MANAGER turn
+        // Nothing time- or stagnation-based may interfere: only the round cap is on trial.
+        turn_cfg.browser_budget.max_elapsed_ms = 600_000;
+        turn_cfg.browser_budget.max_stall_ms = 600_000;
+        turn_cfg.browser_budget.max_no_progress = 50;
+        let round_cap = turn_cfg.browser_max_rounds;
+
+        let _ = run_turn(
+            ls,
+            turn_cfg,
+            &usage_context(),
+            &EndlessBrowseManagerModel::default(),
+            &executor,
+            &mut browser,
+            &NoPlan,
+            &DoneJudge,
+            &NoCompact,
+            &OpenPolicy,
+            &journal,
+            &sink,
+            0.0,
+            None,
+            &std::collections::BTreeSet::new(),
+            &[],
+            "book a train".to_string(),
+            String::new(),
+            None,
+            false,
+            0,
+            false,
+            Vec::new(),
+            None,
+            &crate::turn_trace::TurnTrace::disabled(),
+        )
+        .await;
+
+        let ran = browses.load(Ordering::SeqCst);
+        assert!(
+            ran > round_cap,
+            "a manager whose every delegated browse succeeds must run PAST browser_max_rounds \
+             ({round_cap}), not be capped at it — only {ran} browses ran"
+        );
+    }
+
     // --- Finalization fence rework: drain / bounded-wait / park (steering-park-resume, Task 1) ---
 
     /// A tool ran while a steering row became interpreted as a plain `continue` — the disposition

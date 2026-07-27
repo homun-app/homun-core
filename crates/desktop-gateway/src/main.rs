@@ -18062,6 +18062,42 @@ fn chat_browser_budget() -> local_first_engine::BrowserBudget {
     }
 }
 
+/// Absolute wall-clock backstop for ONE delegated `browse` sub-turn (see the sub-turn's `TurnConfig`).
+/// Named rather than inlined because the MANAGER budget below is DERIVED from it: the two are one
+/// invariant, not two independent numbers that can drift apart.
+const BROWSE_SUBTURN_MAX_ELAPSED_MS: u64 = 300_000;
+
+/// The MANAGER turn's absolute wall-clock backstop, derived from one browse sub-turn's own cap.
+///
+/// Same trap as `browse_hard_round_ceiling`: a backstop set EQUAL to the thing it backstops fires
+/// first and makes the progress-relative control unreachable. The manager does not browse itself, it
+/// DELEGATES — and one `browse` may legitimately spend its entire sub-turn budget (observed: a single
+/// browse round taking 259s). With the manager also capped at 300s, any task needing more than one
+/// browse was mathematically guaranteed to be killed mid-flight: a train booking ran 4 successful
+/// browses, was cut at 302s (`round 4` ended at t=302240ms, the wall-clock check tripped 4ms later)
+/// and forced into a synthesis the user received as nothing at all.
+///
+/// The PRIMARY control remains `max_stall_ms` — wall-clock WITHOUT a single successful delegated
+/// browse, reset on every `browser_activity_observed` — so a genuinely stuck manager still dies in
+/// ~2 minutes. Only a manager that keeps making real progress gets the long rope. `x4` mirrors
+/// `browse_hard_round_ceiling`'s ratio; the `.max()` floor keeps the invariant "the manager outlives
+/// what it delegates" true even when `HOMUN_CHAT_BROWSER_MAX_ELAPSED_MS` shortens the shared budget
+/// (that knob can still scale the manager UP, it just cannot push it below the sub-turn it drives).
+fn manager_browser_max_elapsed_ms(configured_ms: u64) -> u64 {
+    configured_ms
+        .max(BROWSE_SUBTURN_MAX_ELAPSED_MS)
+        .saturating_mul(4)
+}
+
+/// Browser budget for the MANAGER turn: the shared budget with only the absolute wall-clock backstop
+/// widened (see `manager_browser_max_elapsed_ms`). The stall window and the stagnation counters — the
+/// controls that actually stop a stuck turn — are deliberately left identical to `chat_browser_budget`.
+fn chat_manager_browser_budget() -> local_first_engine::BrowserBudget {
+    let mut budget = chat_browser_budget();
+    budget.max_elapsed_ms = manager_browser_max_elapsed_ms(budget.max_elapsed_ms);
+    budget
+}
+
 // Absolute wall-clock BACKSTOP for one browse sub-turn — never resets, a final safety net only.
 // Deliberately generous (15 min): the goal of an autonomous browse is that it ANSWERS, not that it
 // answers quickly, so a run that keeps making progress must not be cut off by the clock. What stops a
@@ -27903,7 +27939,7 @@ impl GatewayBrowseExecutor<'_> {
                 // suggestion, a page change, a navigation). This is what lets a slow model finish a
                 // multi-field form the old 90s-from-start ceiling killed at ~2 rounds. The round
                 // budget still sizes how far a progressing run may go.
-                max_elapsed_ms: 300_000,
+                max_elapsed_ms: BROWSE_SUBTURN_MAX_ELAPSED_MS,
                 max_stall_ms: 90_000,
                 max_failed_navigations: 4,
                 max_no_progress: 3,
@@ -29832,7 +29868,11 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             max_rounds: chat_max_rounds(),
             browser_max_rounds: chat_browser_max_rounds(),
             browser_nav_cap: chat_browser_nav_cap(),
-            browser_budget: chat_browser_budget(),
+            // The MANAGER budget, not the shared one: its absolute wall clock must outlive the
+            // `browse` sub-turns it delegates (see `manager_browser_max_elapsed_ms`), otherwise a
+            // multi-phase task — search → choose → book, one browse per phase — is cut mid-flight
+            // while every single delegation succeeded.
+            browser_budget: chat_manager_browser_budget(),
             // Fase 1.1: the model's real context window (catalog `context_window`, resolved above)
             // drives token-budget auto-compaction. `None` → fail-open (no budget compaction).
             context_window: model_context_window,
@@ -64311,6 +64351,41 @@ mod tests {
             );
             assert!(ceiling >= 24, "the backstop must stay generous, got {ceiling}");
         }
+    }
+
+    #[test]
+    fn manager_wall_clock_stays_above_the_browse_subturn_it_delegates() {
+        // Same shape of regression as `browse_hard_ceiling_...` above, one level up and on the
+        // wall-clock axis: the manager turn and the `browse` sub-turn it delegates were BOTH capped
+        // at 300s absolute. The manager doesn't browse, it delegates — and one browse can legitimately
+        // spend the whole sub-turn budget (observed: a single browse round of 259s) — so any task
+        // needing more than one browse was guaranteed to die. A real train booking did 4 successful
+        // browses and was cut at 302s, then forced into an empty synthesis.
+        //
+        // The manager must be able to run SEVERAL full sub-turns end to end; what stops a stuck
+        // manager is the stall window, which is progress-relative and deliberately left untouched.
+        let subturn = super::BROWSE_SUBTURN_MAX_ELAPSED_MS;
+        let manager = super::chat_manager_browser_budget();
+        assert!(
+            manager.max_elapsed_ms >= subturn.saturating_mul(4),
+            "the manager wall clock ({}) must leave room for several full browse sub-turns ({subturn} each)",
+            manager.max_elapsed_ms
+        );
+        // The floor holds even if the shared budget is configured SHORTER than a sub-turn: the manager
+        // can never be given less rope than the thing it drives.
+        for configured in [1_000u64, 60_000, subturn, 600_000] {
+            assert!(
+                super::manager_browser_max_elapsed_ms(configured) > subturn,
+                "manager budget must outlive one sub-turn even when configured to {configured}ms"
+            );
+        }
+        // The stall window (the PRIMARY, progress-relative control) must NOT have been widened —
+        // widening the absolute backstop is only safe because a stuck manager still dies quickly.
+        assert_eq!(
+            manager.max_stall_ms,
+            super::chat_browser_budget().max_stall_ms,
+            "the progress-relative stall window must stay exactly as tight as before"
+        );
     }
 
     #[test]
