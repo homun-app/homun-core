@@ -18124,7 +18124,7 @@ fn browse_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "browse",
-            "description": "Delegate a web-browsing GOAL to an isolated browser sub-agent and get back the result. Use it whenever you need real-time or web data (prices, standings, schedules, facts, availability): state ONE concrete information goal in `goal` (e.g. 'current BTC price on Kraken', 'Serie A standings after matchday 30'). One delegated browse call should be enough for a concrete goal: include semantic hints/result requirements when useful, then inspect the returned structured result. If the result is partial, blocked, unavailable, or failed, report that grounded state instead of blindly retrying the same browse.",
+            "description": "Delegate a web-browsing GOAL to an isolated browser sub-agent and get back the result. Use it whenever you need real-time or web data (prices, standings, schedules, facts, availability) AND whenever the task itself lives on a website (filling a form, picking a result, booking, checkout, an account page): state ONE concrete goal in `goal` (e.g. 'current BTC price on Kraken', 'Serie A standings after matchday 30'). One delegated browse call should be enough for a concrete goal: include semantic hints/result requirements when useful, then inspect the returned structured result. If the result is partial, blocked, unavailable, or failed, report that grounded state instead of blindly retrying the same browse. CONTINUING A WEB TASK: the thread keeps ONE warm browser session on the page the last browse left, so the next step of a web task is ANOTHER browse call whose goal refers to what is already open (e.g. 'on the search results already open, select the 08:10 Frecciarossa 9524 and proceed to the booking step') rather than a fresh search — never continue it with shell, Python, run_in_project, run_in_sandbox, curl or an HTTP request, which cannot carry the site's interactive session and can never book, buy or submit anything there.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -18172,6 +18172,49 @@ fn browse_tool_schema() -> serde_json::Value {
             }
         }
     })
+}
+
+/// Manager-facing browser guide, always appended to the chat system prompt.
+///
+/// ADR 0025: the manager's ONLY browser surface is the delegated `browse(goal)` tool — the granular
+/// micro-tools are seeded exclusively inside the isolated browse sub-loop. The block this replaced
+/// still described `browser_navigate`/`browser_act` (a toolset the manager does not have) and gave
+/// autocomplete advice contradicting the sub-agent's own rule.
+///
+/// The CONTINUATION bullet is the load-bearing one: after a `browse` returned `completed`, nothing
+/// told the manager that the next step of a web task is ANOTHER `browse`, so on a follow-up like
+/// "now book the first one" it fell back to Python/shell — a dead end, because the site's
+/// interactive session lives in the thread's warm browser session (`browser_thread_sessions`) and
+/// no script or HTTP call can carry it. Pinned by `manager_browser_guidance_*` tests.
+fn manager_browser_guidance() -> &'static str {
+    "BROWSER (delegated `browse`): web work happens ONLY through the `browse` \
+tool — you state ONE concrete goal, an isolated sub-agent drives the real browser and returns the \
+result. You never navigate or click yourself; if `browse` is not among your tools yet, activate it \
+with `find_capability` instead of giving up or improvising another route.\n\
+- CONTINUATION: when a task lives on a website (searching, filling a form, selecting a result, \
+booking, checkout, an account page), the ONLY way to continue it is ANOTHER `browse` call stating \
+the next goal. NEVER continue a web task with run_in_sandbox, run_in_project, shell, Python, curl \
+or an HTTP request: those cannot carry the site's interactive session (cookies, cart, the selected \
+result), so they can never book, buy or submit anything there.\n\
+- THE SESSION STAYS OPEN: the thread keeps one warm browser session between turns, on the page the \
+last browse left (it is closed only after some idle time or when the thread ends). So a follow-up \
+like \"book the first one\" is a browse goal that REFERS to what is already on screen (e.g. \"on the \
+search results already open, select the 08:10 Frecciarossa 9524 and proceed to the booking step\"), \
+not a fresh search from scratch. Carry into the goal every parameter already resolved in the \
+conversation (route, date with year, constraints); if the user gave a range of dates, state the \
+whole range in the goal instead of silently dropping it.\n\
+- RESULTS: rows of results ARE a success: report them (operator, times, duration, changes, price). \
+Do NOT say \"no results\" when the browse returned rows. If a browse comes back partial, blocked or \
+unavailable, report that grounded state instead of blindly repeating the same browse.\n\
+- SECURITY: NEVER logins/bookings/payments unattended. The browse sub-agent CANNOT authorize a \
+payment: payment controls are refused to it and it stops and reports. At final checkout, STOP and show \
+a Payment Approval Card with marker `‹‹PAYMENT_APPROVAL››{\"snapshot\":{\"approval_id\":\"pay_<uuid>\",\"merchant\":\"...\",\"domain\":\"...\",\"amount_minor\":5900,\"currency\":\"EUR\",\"product_summary\":\"...\",\"payment_method_label\":\"Visa 1111\",\"checkout_fingerprint\":\"stable hash or screenshot id\"}}‹‹/PAYMENT_APPROVAL››`. \
+Do not let the payment be committed until the user approves that card locally: only after approval may \
+the checkout continue, in a `browse` goal carrying the exact `payment_approval_id` the approval \
+returned — never invent that id, never type a CVV yourself, and never try to work around a refused \
+payment control with another tool (say what is blocked instead).\n\
+- STOP: as soon as you have enough data, STOP browsing and write the final reply \
+to the user (one row per option + an optional Sources footer)."
 }
 
 fn browser_done_tool_schema() -> serde_json::Value {
@@ -18930,7 +18973,7 @@ fn run_in_sandbox_tool_schema() -> serde_json::Value {
         "type": "function",
         "function": {
             "name": "run_in_sandbox",
-            "description": "Run a shell command in the contained computer (isolated sandbox: bash, curl, python, git, compilers). Use it to: run commands/scripts, process data (incl. fetching STRUCTURED data — RSS/JSON APIs — with curl), and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes. For browsing or SEARCHING rendered websites prefer the browser (browser_navigate) over scraping HTML with curl. (A skill/automation's own instructions win — follow what its SKILL.md / steps say.)",
+            "description": "Run a shell command in the contained computer (isolated sandbox: bash, curl, python, git, compilers). Use it to: run commands/scripts, process data (incl. fetching STRUCTURED data — RSS/JSON APIs — with curl), and ABOVE ALL to VERIFY BY EXECUTING — run build/test/lint or execute the code and read the REAL output instead of assuming code or calculations are correct. Returns stdout/stderr. Iterate on failures until the verification passes. For browsing or SEARCHING rendered websites prefer the `browse` tool over scraping HTML with curl, and NEVER use this tool to continue a task started in a browser (a search, a form, a booking, a checkout): the site's interactive session lives in the browser session, so only another `browse` call can carry it. (A skill/automation's own instructions win — follow what its SKILL.md / steps say.)",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -29008,32 +29051,7 @@ execution tool (run_in_sandbox), do NOT assume it works — VERIFY BY EXECUTING:
 run the code, read the REAL output and iterate on the failures until it passes, BEFORE saying it's done. \
 Trust the compiler and the tests, not your estimate."
     );
-    // Granular browser operating guide (OpenClaw-SKILL-style). Always present:
-    // the main agent drives the browser via the granular micro-tools (there is no
-    // legacy browse_web handoff anymore).
-    let system = format!(
-        "{system}\n\nBROWSER (granular tools): for web tasks YOU drive the browser, \
-one micro-action at a time, with browser_navigate / browser_snapshot / browser_act / \
-browser_screenshot (browse_web no longer exists).\n\
-- FLOW: browser_navigate(url) → read the snapshot → browser_act ONE action → re-read the \
-snapshot (browser_act already returns the updated one) → next action. Never two actions \
-without re-reading the page.\n\
-- FIELDS: fill ONE field at a time. For fields with autocomplete use kind='type' (the \
-suggestion selection is automatic): write the value and wait for the snapshot, don't force the click \
-on the suggestion.\n\
-- DATES/WINDOWS: if the user gives a range (e.g. 7–13), set the lower bound and then page \
-through the results; don't discard the range.\n\
-- RESULTS: a page with rows of results IS a success: EXTRACT the rows (operator, times, \
-duration, changes, price). Do NOT say \"no results\" if there are visible rows.\n\
-- SCREENSHOT: use browser_screenshot ONLY if the snapshot text isn't enough (layout/map/\
-image).\n\
-- SECURITY: NEVER logins/bookings/payments unattended. At final checkout, STOP and show \
-a Payment Approval Card with marker `‹‹PAYMENT_APPROVAL››{{\"snapshot\":{{\"approval_id\":\"pay_<uuid>\",\"merchant\":\"...\",\"domain\":\"...\",\"amount_minor\":5900,\"currency\":\"EUR\",\"product_summary\":\"...\",\"payment_method_label\":\"Visa 1111\",\"checkout_fingerprint\":\"stable hash or screenshot id\"}}}}‹‹/PAYMENT_APPROVAL››`. \
-After local approval, if a CVV/CV2 field must be filled, call browser_act with `payment_approval_id` and `vault_secret:\"cvv_one_shot\"` instead of writing the CVV yourself. \
-Do not click the final payment button until the user approves the card locally and gives you the exact returned `payment_approval_id`; never invent that id.\n\
-- STOP: as soon as you have enough data, STOP using the browser and write the final reply \
-to the user (one table per row + an optional Sources footer)."
-    );
+    let system = format!("{system}\n\n{}", manager_browser_guidance());
     // Composer interaction mode (agent = default). plan/ask/debug refine behavior;
     // "ask" also drops the toolset below (pure conversation).
     let mode = request.mode.as_deref().unwrap_or("agent").to_string();
@@ -64015,6 +64033,74 @@ mod tests {
         assert!(params.get("goal").is_some());
         assert!(params.get("hints").is_some());
         assert!(params.get("result_contract").is_some());
+    }
+
+    // A completed `browse` used to leave the manager with no rule for "and now book the first
+    // one", so it reached for Python/shell — which cannot carry the site's session. Both
+    // manager-facing surfaces (the always-present guidance block and the `browse` description
+    // read at call time) must state that the continuation of a web task is another `browse`.
+    #[test]
+    fn manager_browser_guidance_continues_web_work_with_browse_not_with_scripts() {
+        let guidance = super::manager_browser_guidance();
+        // The manager's browser surface is the delegated `browse`, not the granular sub-agent tools.
+        assert!(guidance.contains("`browse`"));
+        for granular in [
+            "browser_navigate",
+            "browser_snapshot",
+            "browser_act",
+            "browser_screenshot",
+        ] {
+            assert!(
+                !guidance.contains(granular),
+                "manager guidance must not teach the granular tool {granular} it cannot call"
+            );
+        }
+        // The continuation rule, and the interpreters it must NOT fall back to.
+        assert!(guidance.contains("CONTINUATION"));
+        for forbidden in [
+            "run_in_sandbox",
+            "run_in_project",
+            "shell",
+            "Python",
+            "curl",
+            "HTTP request",
+        ] {
+            assert!(
+                guidance.contains(forbidden),
+                "the continuation rule must name {forbidden} as a non-continuation"
+            );
+        }
+        // The warm per-thread session is why a follow-up is a goal on what is already open.
+        assert!(guidance.contains("warm browser session"));
+        assert!(guidance.contains("already open"));
+        // The payment gate stays fail-closed: card first, no work-arounds.
+        assert!(guidance.contains("PAYMENT_APPROVAL"));
+        assert!(guidance.contains("payment_approval_id"));
+        assert!(guidance.contains("work around"));
+    }
+
+    #[test]
+    fn browse_description_tells_the_manager_to_continue_web_tasks_with_browse() {
+        let description = super::browse_tool_schema()
+            .pointer("/function/description")
+            .and_then(serde_json::Value::as_str)
+            .expect("browse description")
+            .to_string();
+        assert!(description.contains("warm browser session"));
+        assert!(description.contains("ANOTHER browse call"));
+        for forbidden in [
+            "shell",
+            "Python",
+            "run_in_project",
+            "run_in_sandbox",
+            "curl",
+            "HTTP request",
+        ] {
+            assert!(
+                description.contains(forbidden),
+                "the browse description must rule out continuing a web task with {forbidden}"
+            );
+        }
     }
 
     #[test]
