@@ -26907,6 +26907,16 @@ fn canonical_json(value: serde_json::Value) -> serde_json::Value {
 /// names merely embed a verb — `SLACK_LIST_ALL_SAVED_ITEMS` contains "save", `list_bookings` contains
 /// "book", `LIST_REPOSITORY_UPDATES` contains "update" — and since a missing objective contract defaults
 /// to read-only analysis, those listings were refused with a message naming no way to proceed.
+/// The loop's own control tools. They are not capabilities a contact perimeter is meant to scope, so an
+/// allowlist must not remove them — without `update_plan`/`step_advance` the turn cannot plan, without
+/// `find_capability` it cannot discover what it may use, and without `recall_memory` it answers blind.
+const HARNESS_CONTROL_TOOLS: &[&str] = &[
+    "update_plan",
+    "step_advance",
+    "find_capability",
+    "recall_memory",
+];
+
 fn effectful_tool_name(name: &str, composio_writes: &std::collections::BTreeSet<String>) -> bool {
     if composio_writes.contains(name) {
         return true;
@@ -29705,19 +29715,40 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             let denied = &cx.perimeter.tools_denied;
             let allowed = &cx.perimeter.tools_allowed;
             if !denied.is_empty() || !allowed.is_empty() {
+                let mut dropped: Vec<String> = Vec::new();
                 ls.tool_schemas.retain(|schema| {
                     let name = schema
                         .pointer("/function/name")
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     if denied.iter().any(|d| name.contains(d.as_str())) {
+                        dropped.push(name.to_string());
                         return false;
                     }
-                    if !allowed.is_empty() && !allowed.iter().any(|a| name.contains(a.as_str())) {
+                    // An allowlist narrows CAPABILITIES, not the loop's own machinery. Applied to
+                    // everything, a perimeter allowing only e.g. "calendar" also deleted update_plan,
+                    // step_advance, find_capability and recall_memory — so the turn lost the ability to
+                    // plan, to discover what it may use, and to read memory, for a reason that has
+                    // nothing to do with the contact's perimeter. Harness tools stay unless explicitly
+                    // denied above.
+                    if !allowed.is_empty()
+                        && !HARNESS_CONTROL_TOOLS.contains(&name)
+                        && !allowed.iter().any(|a| name.contains(a.as_str()))
+                    {
+                        dropped.push(name.to_string());
                         return false;
                     }
                     true
                 });
+                if !dropped.is_empty() {
+                    // Was entirely silent: a turn could lose tools with nothing to explain why the
+                    // model then said it could not do something it normally can.
+                    tracing::warn!(
+                        target: "perimeter::tools",
+                        dropped = %dropped.join(","),
+                        "contact perimeter withheld tools from this turn"
+                    );
+                }
             }
         }
         // Turn-local browser state now lives in the browser subsystem: the loop-visible fields

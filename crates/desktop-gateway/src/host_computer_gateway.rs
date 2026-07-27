@@ -577,8 +577,24 @@ async fn cancel_active_and_clear_snapshots(reason: &str) {
 pub fn finish_worker_session(session_id: &str, succeeded: bool) {
     let snapshot = sessions().lock().ok().and_then(|mut coordinator| {
         let current = coordinator.snapshot(session_id).ok()?;
-        if matches!(current.phase, HostSessionPhase::AwaitingApproval | HostSessionPhase::PausedByUser) {
-            return None;
+        // The WORKER is gone by the time this runs, so an approval still pending for it can never be
+        // answered and a user pause can never be resumed — nobody is left to act on either. Bailing out
+        // here left `active_session_id` set forever: every later session request failed with "another
+        // host-computer session is active", with no TTL sweeper to recover, so one pause bricked
+        // computer-use for the lifetime of the process. Terminate it (as failed, which is the truth) and
+        // say so.
+        let stranded = matches!(
+            current.phase,
+            HostSessionPhase::AwaitingApproval | HostSessionPhase::PausedByUser
+        );
+        if stranded {
+            tracing::warn!(
+                target: "computer::session",
+                session_id,
+                phase = ?current.phase,
+                "worker finished while the session was waiting on the user — terminating it so the next session can start"
+            );
+            return coordinator.fail(session_id, "worker_gone_while_waiting", now_ms()).ok();
         }
         if succeeded { coordinator.done(session_id, now_ms()).ok() }
         else { coordinator.fail(session_id, "worker_failed", now_ms()).ok() }
