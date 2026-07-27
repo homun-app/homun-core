@@ -676,7 +676,17 @@ pub async fn worker_execute_action(session_id: &str, mut request: ActionRequest)
             publish_session("approval_required", &pending);
             await_approval(session_id, &digest).await?;
         }
-        PolicyDecision::GrantRequired(_) => return Err("control_grant_required".into()),
+        // Name the level that is missing and where to change it. The bare code discarded the required
+        // level, and the sub-agent prompt does not list this token at all — so on a freshly installed
+        // app, where the grant defaults to "observe" while no action ever classifies as observe, EVERY
+        // action failed with an opaque string the model could neither interpret nor act on.
+        PolicyDecision::GrantRequired(level) => {
+            return Err(format!(
+                "control_grant_required: this app is granted only observation, but the action needs {level:?}. \
+You cannot raise it yourself — tell the user to open Settings → Mac Apps and grant control for this app, \
+then stop; do not retry the action."
+            ));
+        }
         PolicyDecision::Denied(reason) => return Err(format!("hard_denied:{reason:?}")),
     }
     let token = uuid::Uuid::new_v4().to_string();
