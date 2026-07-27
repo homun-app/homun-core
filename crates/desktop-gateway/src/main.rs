@@ -26884,14 +26884,33 @@ fn canonical_json(value: serde_json::Value) -> serde_json::Value {
     }
 }
 
+/// Does this tool name look effectful? `composio_writes` is the authoritative set for connector tools;
+/// the token list below is the fallback for everything else.
+///
+/// Matched on whole NAME SEGMENTS, not as substrings. A bare `contains` fired on read-only tools whose
+/// names merely embed a verb — `SLACK_LIST_ALL_SAVED_ITEMS` contains "save", `list_bookings` contains
+/// "book", `LIST_REPOSITORY_UPDATES` contains "update" — and since a missing objective contract defaults
+/// to read-only analysis, those listings were refused with a message naming no way to proceed.
 fn effectful_tool_name(name: &str, composio_writes: &std::collections::BTreeSet<String>) -> bool {
-    composio_writes.contains(name)
-        || [
-            "write", "edit", "apply", "create", "update", "delete", "remove", "send",
-            "save", "make_", "book", "purchase", "forget", "cancel", "record_decision",
-        ]
-        .iter()
-        .any(|token| name.to_ascii_lowercase().contains(token))
+    if composio_writes.contains(name) {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    let segments: Vec<&str> = lower.split(|c: char| !c.is_ascii_alphanumeric()).collect();
+    [
+        "write", "edit", "apply", "create", "update", "delete", "remove", "send",
+        "save", "make_", "book", "purchase", "forget", "cancel", "record_decision",
+    ]
+    .iter()
+    .any(|token| {
+        // Multi-segment tokens ("make_", "record_decision") are matched against the whole name; the
+        // single-word ones must BE a segment, so "saved"/"bookings"/"updates" no longer count.
+        if token.contains('_') {
+            lower.starts_with(token) || lower.contains(token)
+        } else {
+            segments.contains(token)
+        }
+    })
 }
 
 fn objective_blocks_tool(
@@ -26991,9 +27010,21 @@ impl local_first_engine::CapabilityExecutor for GatewayCapabilityExecutor<'_> {
         }
         let objective_mode = objective_mode_for_execution(self.state, self.thread_id, self.prompt);
         if objective_blocks_tool(objective_mode, name, self.composio_writes) {
+            // Log the refusal: it used to be silent, so a task that quietly lost its effectful tools
+            // looked like the model simply choosing not to act.
+            tracing::warn!(
+                target: "objective::contract",
+                tool = name,
+                ?objective_mode,
+                "objective contract blocked an effectful tool"
+            );
             return Ok(local_first_engine::ToolOutcome {
+                // The old text told the model to "ask the user to authorize expanding the objective",
+                // naming no tool that does that — there is none — so it had no move to make. State what
+                // IS possible: read-only work continues; anything with an effect needs the user to say
+                // so in a new message.
                 result: format!(
-                    "OBJECTIVE CONTRACT BLOCKED `{name}`: this task is read-only analysis. No effect was executed. Ask the user to explicitly authorize expanding the objective to mutation before retrying."
+                    "OBJECTIVE CONTRACT BLOCKED `{name}`: this task is read-only analysis, so nothing was executed and no change was made. You cannot widen the objective yourself and there is no tool for it. Continue with read-only work (reading, searching, analysing) and report what you found; if the task genuinely requires a change, stop and tell the user plainly which action you would need to take, so they can ask for it."
                 ),
                 effects: Default::default(),
             });
@@ -29017,7 +29048,12 @@ RE-VERIFY by executing. One cause at a time, no blind attempts."
             objective.mode,
             objective.objective
         ),
-        None => system,
+        // No contract does NOT mean "no rules": execution defaults to read-only analysis, so the
+        // effectful tools are gated. Saying nothing here was the worst combination — the gate was armed
+        // and the model had no idea, so its writes came back refused for reasons it could not see.
+        None => format!(
+            "{system}\n\nOBJECTIVE CONTRACT: none recorded for this task, so execution defaults to READ-ONLY analysis. Reading, searching, browsing and analysing are available; tools that change something (writing files, sending, creating, booking, purchasing) are refused until the user asks for that change. Do the read-only work and say plainly what you would need to change, rather than attempting it."
+        ),
     };
     let prompt_runtime = system
         .strip_prefix(&prompt_core)
@@ -64040,6 +64076,45 @@ mod tests {
         };
         // BASE 5 + ceil(3 required / 2)=2 + (minimum_items>3 ? 1 : 0)=1 = 8
         assert_eq!(super::browse_round_budget(&list), 8);
+    }
+
+    #[test]
+    fn read_only_tool_names_are_not_mistaken_for_effectful_ones() {
+        // The token list was matched as a SUBSTRING, so listings whose names merely embed a verb were
+        // treated as mutations — and since a missing objective contract defaults to read-only analysis,
+        // they were refused with a message that named no way to proceed.
+        let no_composio = std::collections::BTreeSet::new();
+        for name in [
+            "SLACK_LIST_ALL_SAVED_ITEMS",
+            "list_bookings",
+            "LIST_REPOSITORY_UPDATES",
+            "read_file",
+            "search_memory",
+        ] {
+            assert!(
+                !super::effectful_tool_name(name, &no_composio),
+                "read-only tool must not be classified effectful: {name}"
+            );
+        }
+        // Genuinely effectful names still match.
+        for name in [
+            "write_file",
+            "edit_file",
+            "create_automation",
+            "send_message",
+            "make_document",
+            "record_decision",
+            "cancel_scheduled_task",
+        ] {
+            assert!(
+                super::effectful_tool_name(name, &no_composio),
+                "effectful tool must still be classified effectful: {name}"
+            );
+        }
+        // The authoritative connector set always wins, whatever the name looks like.
+        let mut composio = std::collections::BTreeSet::new();
+        composio.insert("SOME_CONNECTOR_ACTION".to_string());
+        assert!(super::effectful_tool_name("SOME_CONNECTOR_ACTION", &composio));
     }
 
     #[test]
