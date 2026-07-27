@@ -61277,45 +61277,103 @@ mod tests {
     use std::collections::{BTreeSet, HashMap};
     use std::sync::{Mutex, MutexGuard};
 
-    static GATEWAY_DATA_DIR_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     // Serializes tests that mutate PROCESS-GLOBAL state (`MEMORY_WORKSPACE`, `HOMUN_USER_ID`).
     // Without this they race under the parallel test runner and flake. Poison-tolerant:
     // if a holder panics we still hand out the guard (the global is restored per-test anyway).
     static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    struct TestGatewayDataDir {
-        _lock: MutexGuard<'static, ()>,
-        restore: Option<String>,
+    /// THE guard for tests that touch process-global env vars. Environment variables are shared by
+    /// the whole test binary while cargo runs tests on parallel threads, so without one shared lock
+    /// tests read each other's values.
+    ///
+    /// Two defects made the suite an unreliable gate before this existed as a single type. There
+    /// were three near-identical guards holding TWO different locks, so a test serialized against
+    /// some env users and raced the rest — `resolved_sandbox_mode_precedence…` even carried the
+    /// comment "env-mutation under TEST_ENV_LOCK" while actually holding the data-dir lock. And
+    /// tests restored their variables by hand AFTER their assertions, so the first real failure
+    /// skipped its own cleanup and poisoned everything scheduled after it (observed: one genuine
+    /// failure reported as eight). Restoring in `Drop` runs during unwind too, so a failing test
+    /// now fails alone.
+    ///
+    /// Take it ONCE per test (the lock is not reentrant) and add variables with [`TestEnv::set`].
+    thread_local! {
+        /// How many `TestEnv` guards this thread holds. Tests legitimately COMPOSE guards (a data
+        /// dir plus a feature flag), and `std::sync::Mutex` is not reentrant — taking it twice on
+        /// one thread deadlocks. Only the outermost guard locks; inner ones ride it and still
+        /// restore their own variables on drop (guards drop LIFO, so the original value wins).
+        static ENV_LOCK_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
-    impl TestGatewayDataDir {
-        fn new(path: &std::path::Path) -> Self {
-            let lock = GATEWAY_DATA_DIR_TEST_LOCK
-                .lock()
-                .expect("gateway data dir test lock");
-            let restore = std::env::var("HOMUN_DATA_DIR").ok();
-            // SAFETY: gateway tests already mutate process env for focused
-            // configuration checks. This guard restores the previous value.
-            unsafe {
-                std::env::set_var("HOMUN_DATA_DIR", path);
-            }
+    struct TestEnv {
+        saved: std::cell::RefCell<Vec<(String, Option<String>)>>,
+        // `None` on a nested guard — the outer one on this thread owns the lock and releases it last.
+        _lock: Option<MutexGuard<'static, ()>>,
+    }
+
+    impl TestEnv {
+        fn acquire() -> Self {
+            let lock = ENV_LOCK_DEPTH.with(|depth| {
+                let outermost = depth.get() == 0;
+                depth.set(depth.get() + 1);
+                // Poison-tolerant on purpose: a panicking test must not turn every later test into
+                // a lock-poisoning failure. The guard has already restored what it changed.
+                outermost.then(|| TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner()))
+            });
             Self {
+                saved: std::cell::RefCell::new(Vec::new()),
                 _lock: lock,
-                restore,
+            }
+        }
+
+        /// `None` removes the variable. Records the value it displaced, so `Drop` puts it back.
+        fn set(&self, key: &str, value: Option<&str>) -> &Self {
+            self.saved
+                .borrow_mut()
+                .push((key.to_string(), std::env::var(key).ok()));
+            // SAFETY: every env mutation in these tests happens under the lock this guard holds.
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+            self
+        }
+    }
+
+    impl Drop for TestEnv {
+        fn drop(&mut self) {
+            ENV_LOCK_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+            // Reverse order: a key set more than once is restored to the value it had on entry.
+            for (key, previous) in self.saved.borrow().iter().rev() {
+                // SAFETY: see `set` — still under this guard's lock.
+                unsafe {
+                    match previous {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
+                }
             }
         }
     }
 
-    impl Drop for TestGatewayDataDir {
-        fn drop(&mut self) {
-            // SAFETY: see TestGatewayDataDir::new.
-            unsafe {
-                match &self.restore {
-                    Some(value) => std::env::set_var("HOMUN_DATA_DIR", value),
-                    None => std::env::remove_var("HOMUN_DATA_DIR"),
-                }
-            }
+    /// `HOMUN_DATA_DIR` pointed at a throwaway directory, on the shared env lock. Kept as a named
+    /// wrapper because most call sites want exactly this; reach for the inner [`TestEnv`] via
+    /// [`TestGatewayDataDir::env`] to set more variables without taking the lock twice.
+    struct TestGatewayDataDir {
+        env: TestEnv,
+    }
+
+    impl TestGatewayDataDir {
+        fn new(path: &std::path::Path) -> Self {
+            let env = TestEnv::acquire();
+            env.set("HOMUN_DATA_DIR", path.to_str());
+            Self { env }
+        }
+
+        fn env(&self) -> &TestEnv {
+            &self.env
         }
     }
 
@@ -61323,35 +61381,16 @@ mod tests {
         std::env::temp_dir().join(format!("homun-{prefix}-{}", uuid::Uuid::new_v4().simple()))
     }
 
+    /// `HOMUN_MEMORYBENCH_ENABLED=1`, on the shared env lock. Thin wrapper over [`TestEnv`].
     struct TestMemoryBenchFlag {
-        _lock: MutexGuard<'static, ()>,
-        restore: Option<String>,
+        _env: TestEnv,
     }
 
     impl TestMemoryBenchFlag {
         fn enabled() -> Self {
-            let lock = TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let restore = std::env::var("HOMUN_MEMORYBENCH_ENABLED").ok();
-            // SAFETY: process-global mutation is serialized by TEST_ENV_LOCK and restored in Drop.
-            unsafe { std::env::set_var("HOMUN_MEMORYBENCH_ENABLED", "1") };
-            Self {
-                _lock: lock,
-                restore,
-            }
-        }
-    }
-
-    impl Drop for TestMemoryBenchFlag {
-        fn drop(&mut self) {
-            // SAFETY: see TestMemoryBenchFlag::enabled.
-            unsafe {
-                match &self.restore {
-                    Some(value) => std::env::set_var("HOMUN_MEMORYBENCH_ENABLED", value),
-                    None => std::env::remove_var("HOMUN_MEMORYBENCH_ENABLED"),
-                }
-            }
+            let env = TestEnv::acquire();
+            env.set("HOMUN_MEMORYBENCH_ENABLED", Some("1"));
+            Self { _env: env }
         }
     }
 
@@ -62161,40 +62200,16 @@ mod tests {
         );
     }
 
+    /// `HOMUN_MEMORY_SOURCES`, on the shared env lock. Thin wrapper over [`TestEnv`].
     struct TestMemorySourcesFlag {
-        _lock: MutexGuard<'static, ()>,
-        restore: Option<String>,
+        _env: TestEnv,
     }
 
     impl TestMemorySourcesFlag {
         fn set(value: Option<&str>) -> Self {
-            let lock = TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let restore = std::env::var("HOMUN_MEMORY_SOURCES").ok();
-            // SAFETY: serialized by TEST_ENV_LOCK and restored in Drop.
-            unsafe {
-                match value {
-                    Some(value) => std::env::set_var("HOMUN_MEMORY_SOURCES", value),
-                    None => std::env::remove_var("HOMUN_MEMORY_SOURCES"),
-                }
-            }
-            Self {
-                _lock: lock,
-                restore,
-            }
-        }
-    }
-
-    impl Drop for TestMemorySourcesFlag {
-        fn drop(&mut self) {
-            // SAFETY: serialized by TEST_ENV_LOCK and restored before releasing it.
-            unsafe {
-                match &self.restore {
-                    Some(value) => std::env::set_var("HOMUN_MEMORY_SOURCES", value),
-                    None => std::env::remove_var("HOMUN_MEMORY_SOURCES"),
-                }
-            }
+            let env = TestEnv::acquire();
+            env.set("HOMUN_MEMORY_SOURCES", value);
+            Self { _env: env }
         }
     }
 
@@ -63527,17 +63542,14 @@ mod tests {
     #[test]
     fn resolved_sandbox_mode_precedence_env_beats_persisted_beats_default() {
         use crate::tool_safety::SandboxMode;
-        let _env = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = TestEnv::acquire();
         let dir = isolated_gateway_test_dir("sandbox-mode-precedence");
         std::fs::create_dir_all(&dir).expect("create temp data dir");
         let _data = TestGatewayDataDir::new(&dir);
         // No thread → the active (default) workspace, which carries no override → inherit
         // the global default. This keeps the env + on-disk `runtime-settings.json` coverage.
         let state = super::AppState::for_tests();
-        // SAFETY: env-mutation under TEST_ENV_LOCK, restored at the end.
-        unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); }
+        _data.env().set("HOMUN_SANDBOX_MODE", None);
 
         // No env + no persisted file → the DEFAULT is workspace-write (NOT danger).
         assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::WorkspaceWrite);
@@ -63551,22 +63563,19 @@ mod tests {
         assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::ReadOnly);
 
         // Env override beats the persisted value.
-        unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "danger"); }
+        _data.env().set("HOMUN_SANDBOX_MODE", Some("danger"));
         assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::Danger);
         // A blank env var is ignored (falls through to persisted), not parsed as unknown.
-        unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "  "); }
+        _data.env().set("HOMUN_SANDBOX_MODE", Some("  "));
         assert_eq!(super::resolved_sandbox_mode(&state, None), SandboxMode::ReadOnly);
 
-        unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); }
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn resolved_approval_policy_precedence_env_beats_persisted_beats_default() {
         use crate::tool_safety::AskForApproval;
-        let _env = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = TestEnv::acquire();
         let dir = isolated_gateway_test_dir("approval-policy-precedence");
         std::fs::create_dir_all(&dir).expect("create temp data dir");
         let _data = TestGatewayDataDir::new(&dir);
@@ -63574,7 +63583,7 @@ mod tests {
         // the global default. Keeps the env + on-disk `runtime-settings.json` coverage.
         let state = super::AppState::for_tests();
         // SAFETY: env-mutation under TEST_ENV_LOCK, restored at the end.
-        unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); }
+        _data.env().set("HOMUN_APPROVAL_POLICY", None);
 
         // No env + no persisted file → the DEFAULT is on-request.
         assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::OnRequest);
@@ -63588,10 +63597,10 @@ mod tests {
         assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::Never);
 
         // Env override beats the persisted value.
-        unsafe { std::env::set_var("HOMUN_APPROVAL_POLICY", "on-failure"); }
+        _data.env().set("HOMUN_APPROVAL_POLICY", Some("on-failure"));
         assert_eq!(super::resolved_approval_policy(&state, None), AskForApproval::OnFailure);
 
-        unsafe { std::env::remove_var("HOMUN_APPROVAL_POLICY"); }
+        _data.env().set("HOMUN_APPROVAL_POLICY", None);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -63602,14 +63611,11 @@ mod tests {
     // the real file chokepoint.
     #[test]
     fn write_project_file_honors_per_workspace_read_only() {
-        let _env = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = TestEnv::acquire();
         let dir = isolated_gateway_test_dir("per-workspace-write");
         std::fs::create_dir_all(&dir).expect("create temp data dir");
         let _data = TestGatewayDataDir::new(&dir);
         // SAFETY: env-mutation under TEST_ENV_LOCK; env must not shadow the workspace axis.
-        unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); }
 
         // A real project folder both workspaces point at, so the inheriting workspace's
         // write actually lands on disk (the read-only one is blocked before the folder).
@@ -64067,9 +64073,7 @@ mod tests {
 
     #[test]
     fn read_only_mode_refuses_write_project_file_without_writing() {
-        let _env = TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = TestEnv::acquire();
         let dir = isolated_gateway_test_dir("read-only-refuses-write");
         let project = dir.join("proj");
         std::fs::create_dir_all(&project).expect("create project dir");
@@ -64095,7 +64099,7 @@ mod tests {
 
         // read-only → refuse with the structured marker, and NO bytes written.
         // SAFETY: env-mutation under TEST_ENV_LOCK.
-        unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "read-only"); }
+        _data.env().set("HOMUN_SANDBOX_MODE", Some("read-only"));
         let blocked = super::write_project_file(&state, None, "probe.txt", "data");
         assert!(
             blocked.starts_with(super::READ_ONLY_BLOCKED_MARKER),
@@ -64105,12 +64109,11 @@ mod tests {
 
         // workspace-write (same inputs) → the write succeeds, proving the block above was
         // the sandbox mode and not the test setup.
-        unsafe { std::env::set_var("HOMUN_SANDBOX_MODE", "workspace-write"); }
+        _data.env().set("HOMUN_SANDBOX_MODE", Some("workspace-write"));
         let ok = super::write_project_file(&state, None, "probe.txt", "data");
         assert!(ok.starts_with("✅ Wrote "), "workspace-write should write: {ok}");
         assert_eq!(std::fs::read_to_string(&probe).unwrap(), "data");
 
-        unsafe { std::env::remove_var("HOMUN_SANDBOX_MODE"); }
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -74441,7 +74444,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     /// `briefing_pack_personal_shape_is_well_formed_with_profile_only`.
     #[test]
     fn scope_from_active_workspace_projects_personal_and_project() {
-        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env_guard = TestEnv::acquire();
         // Salvaguarda e ripristina lo scope memory globale (test condiviso).
         let prev = std::env::var("HOMUN_USER_ID").ok();
         // SAFETY: test isolato; ripristinato sotto.
@@ -75638,7 +75641,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     /// si aggiusta il service, si investiga (kickoff, stop-and-ask).
     #[test]
     fn brief_via_service_matches_inline_assembly_personal_and_project() {
-        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env_guard = TestEnv::acquire();
         // Il metodo brief() viene dal trait MemoryRecallService: portiamolo in scope.
         use super::MemoryRecallService;
         // User id stabile per entrambi gli scope (le funzioni leggono la globale).
@@ -75704,7 +75707,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     /// serve la cache stale (cache miss → rebuild che riflette la nuova memoria).
     #[test]
     fn briefing_cache_invalidates_after_memory_write() {
-        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env_guard = TestEnv::acquire();
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
         unsafe { std::env::set_var("HOMUN_USER_ID", "invalidate-user"); }
 
@@ -75769,7 +75772,7 @@ DECK_QA_JSON:{"ok":false,"slide_count":1,"issues":[{"severity":"error","code":"s
     /// deriving the text a second way.
     #[tokio::test]
     async fn project_context_exposes_objective_from_goal_memory() {
-        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env_guard = TestEnv::acquire();
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
         unsafe { std::env::set_var("HOMUN_USER_ID", "objective-user"); }
 
@@ -75866,7 +75869,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
     /// the request to B, and assert the payload shows B's objective — never A's.
     #[tokio::test]
     async fn project_context_objective_follows_request_workspace_not_global() {
-        let _env_guard = TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env_guard = TestEnv::acquire();
         let prev_user = std::env::var("HOMUN_USER_ID").ok();
         unsafe { std::env::set_var("HOMUN_USER_ID", "objective-scope-user"); }
 
@@ -76320,6 +76323,7 @@ POINT IT OUT before proceeding. The objectives:\n- Ship the island redesign"
 
     #[tokio::test(flavor = "current_thread")]
     async fn delete_chat_thread_purges_its_execution_journal() {
+        let _env = TestEnv::acquire();
         let state = super::AppState::for_tests();
         let thread = state
             .chat_store
@@ -79488,27 +79492,15 @@ data: [DONE]\n";
         // SAFETY: env mutation is `unsafe` under edition 2024; these tests run
         // single-threaded within the gateway test binary so there is no data race
         // with concurrent readers of the process environment.
-        let restore = std::env::var("HOMUN_LLM_CONCURRENCY").ok();
-        unsafe {
-            std::env::set_var("HOMUN_LLM_CONCURRENCY", "7");
-        }
+        let env = TestEnv::acquire();
+        env.set("HOMUN_LLM_CONCURRENCY", Some("7"));
         assert_eq!(active_llm_concurrency(), 7);
-        unsafe {
-            std::env::set_var("HOMUN_LLM_CONCURRENCY", "1");
-        }
+        env.set("HOMUN_LLM_CONCURRENCY", Some("1"));
         assert_eq!(active_llm_concurrency(), 1);
         // 0 must be ignored (would stall the LLM resource) — fall back to the
         // registry/locality path, which is >= 1 by construction.
-        unsafe {
-            std::env::set_var("HOMUN_LLM_CONCURRENCY", "0");
-        }
+        env.set("HOMUN_LLM_CONCURRENCY", Some("0"));
         assert!(active_llm_concurrency() >= 1);
-        unsafe {
-            match &restore {
-                Some(value) => std::env::set_var("HOMUN_LLM_CONCURRENCY", value),
-                None => std::env::remove_var("HOMUN_LLM_CONCURRENCY"),
-            }
-        }
     }
 
     #[test]
@@ -79527,38 +79519,24 @@ data: [DONE]\n";
 
     #[test]
     fn task_executor_worker_count_clamps_and_defaults() {
-        // SAFETY: single-threaded test binary; no concurrent env readers.
-        let restore = std::env::var("HOMUN_TASK_WORKER_COUNT").ok();
-        unsafe {
-            std::env::set_var("HOMUN_TASK_WORKER_COUNT", "5");
-        }
+        let env = TestEnv::acquire();
+        env.set("HOMUN_TASK_WORKER_COUNT", Some("5"));
         assert_eq!(task_executor_worker_count(), 5);
-        unsafe {
-            std::env::set_var("HOMUN_TASK_WORKER_COUNT", "0");
-        }
+        env.set("HOMUN_TASK_WORKER_COUNT", Some("0"));
         assert_eq!(
             task_executor_worker_count(),
             TASK_EXECUTOR_DEFAULT_WORKER_COUNT
         );
-        unsafe {
-            std::env::set_var("HOMUN_TASK_WORKER_COUNT", "99");
-        }
+        env.set("HOMUN_TASK_WORKER_COUNT", Some("99"));
         assert_eq!(
             task_executor_worker_count(),
             TASK_EXECUTOR_DEFAULT_WORKER_COUNT
         );
-        unsafe {
-            std::env::remove_var("HOMUN_TASK_WORKER_COUNT");
-        }
+        env.set("HOMUN_TASK_WORKER_COUNT", None);
         assert_eq!(
             task_executor_worker_count(),
             TASK_EXECUTOR_DEFAULT_WORKER_COUNT
         );
-        unsafe {
-            if let Some(value) = &restore {
-                std::env::set_var("HOMUN_TASK_WORKER_COUNT", value);
-            }
-        }
     }
 
     #[test]
@@ -80862,6 +80840,7 @@ data: [DONE]\n";
 
     #[tokio::test]
     async fn sandbox_escalation_missing_root_fails_exact_source() {
+        let _env = TestEnv::acquire();
         let state = AppState::for_tests();
         let (thread_id, message_id, task_id, user, workspace) =
             seed_sandbox_escalation_source(&state, "pwd", None);
@@ -80903,6 +80882,7 @@ data: [DONE]\n";
 
     #[tokio::test]
     async fn sandbox_escalation_nonzero_exit_fails_source_without_continuation() {
+        let _env = TestEnv::acquire();
         let root = isolated_gateway_test_dir("sandbox-escalation-failure");
         std::fs::create_dir_all(&root).unwrap();
         let state = AppState::for_tests();
