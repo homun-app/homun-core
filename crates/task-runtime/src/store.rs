@@ -426,9 +426,11 @@ impl TaskStore {
                 execution_id TEXT PRIMARY KEY,
                 parent_execution_id TEXT,
                 kind TEXT NOT NULL,
-                revision INTEGER NOT NULL,
-                fencing_token INTEGER NOT NULL,
-                state TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                fencing_token INTEGER NOT NULL CHECK(fencing_token > 0),
+                state TEXT NOT NULL CHECK(
+                    state IN ('ready', 'running', 'suspended', 'completed', 'cancelled', 'failed')
+                ),
                 user_id TEXT NOT NULL,
                 workspace_id TEXT NOT NULL,
                 thread_id TEXT,
@@ -436,32 +438,45 @@ impl TaskStore {
                 outcome_json TEXT,
                 outcome_committed_at INTEGER,
                 created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                UNIQUE(execution_id, revision),
+                CHECK(
+                    (outcome_json IS NULL AND outcome_committed_at IS NULL
+                        AND state IN ('ready', 'running'))
+                    OR
+                    (outcome_json IS NOT NULL AND outcome_committed_at IS NOT NULL
+                        AND state IN ('suspended', 'completed', 'cancelled', 'failed'))
+                )
             );
 
             CREATE TABLE IF NOT EXISTS execution_events (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 execution_id TEXT NOT NULL,
-                revision INTEGER NOT NULL,
-                seq INTEGER NOT NULL,
-                kind TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                seq INTEGER NOT NULL CHECK(seq > 0),
+                kind TEXT NOT NULL CHECK(length(trim(kind)) > 0),
                 payload_json TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                UNIQUE(execution_id, revision, seq),
-                FOREIGN KEY(execution_id) REFERENCES executions(execution_id) ON DELETE CASCADE
+                UNIQUE(execution_id, revision, seq)
             );
 
             CREATE TABLE IF NOT EXISTS execution_wakes (
                 execution_id TEXT NOT NULL,
-                revision INTEGER NOT NULL,
-                dedup_key TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                dedup_key TEXT NOT NULL CHECK(length(trim(dedup_key)) > 0),
                 condition_json TEXT NOT NULL,
-                status TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(length(trim(status)) > 0),
                 delivery_json TEXT,
                 created_at INTEGER NOT NULL,
                 delivered_at INTEGER,
                 PRIMARY KEY(execution_id, revision, dedup_key),
-                FOREIGN KEY(execution_id) REFERENCES executions(execution_id) ON DELETE CASCADE
+                FOREIGN KEY(execution_id, revision)
+                    REFERENCES executions(execution_id, revision) ON DELETE CASCADE,
+                CHECK(
+                    (delivery_json IS NULL AND delivered_at IS NULL)
+                    OR (delivery_json IS NOT NULL AND delivered_at IS NOT NULL)
+                ),
+                CHECK(delivered_at IS NULL OR delivered_at >= created_at)
             );
 
             CREATE TABLE IF NOT EXISTS broker_meta (

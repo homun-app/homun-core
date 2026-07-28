@@ -23,7 +23,9 @@ pub use broker::{
 };
 pub use checkpoint::{RetryController, TaskCheckpoint};
 pub use error::{TaskRuntimeError, TaskRuntimeResult};
-pub use execution_store::{ExecutionEvent, ExecutionRecord, OutcomeCommit};
+pub use execution_store::{
+    CreateExecution, ExecutionEvent, ExecutionJournalEvent, ExecutionRecord, OutcomeCommit,
+};
 pub use executor::{ExecutorResult, FakeTaskExecutor, TaskExecutor};
 pub use facade::{RunReadySummary, TaskRuntime};
 pub use lease::LeaseManager;
