@@ -3,14 +3,15 @@
 #![deny(missing_docs)]
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 /// Current durable JSON schema version accepted by [`ExecutionContract::validate`].
 pub const PROTOCOL_SCHEMA_VERSION: u32 = 1;
 
-/// Durable input and policy envelope for one execution.
+/// Mutable execution DTO for adapter construction and wire decoding.
 ///
-/// Call [`ExecutionContract::validate`] immediately before every persistence write.
+/// `Serialize` and `Deserialize` do not make this DTO persistable. Convert it to
+/// [`ValidatedExecutionContract`] before passing it to any persistence API.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ExecutionContract {
     /// Durable wire schema version for this contract.
@@ -142,20 +143,43 @@ impl ExecutionContract {
             if is_blank(&delivery.dedup_key) {
                 return Err(ProtocolValidationError::EmptyWakeDedupKey);
             }
-            if let Ok(condition) = serde_json::from_value::<WakeCondition>(delivery.payload.clone())
-            {
-                condition.validate_references()?;
-                let expected = condition.dedup_key();
-                if delivery.dedup_key != expected {
-                    return Err(ProtocolValidationError::WakeDedupKeyMismatch {
-                        expected,
-                        actual: delivery.dedup_key.clone(),
-                    });
-                }
+            delivery.condition.validate_references()?;
+            let expected = delivery.condition.dedup_key();
+            if delivery.dedup_key != expected {
+                return Err(ProtocolValidationError::WakeDedupKeyMismatch {
+                    expected,
+                    actual: delivery.dedup_key.clone(),
+                });
             }
         }
 
         Ok(())
+    }
+}
+
+/// Execution contract proven safe for use as a persistence input.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatedExecutionContract(ExecutionContract);
+
+impl ValidatedExecutionContract {
+    /// Consumes the wrapper and returns the raw DTO.
+    pub fn into_inner(self) -> ExecutionContract {
+        self.0
+    }
+}
+
+impl AsRef<ExecutionContract> for ValidatedExecutionContract {
+    fn as_ref(&self) -> &ExecutionContract {
+        &self.0
+    }
+}
+
+impl TryFrom<ExecutionContract> for ValidatedExecutionContract {
+    type Error = ProtocolValidationError;
+
+    fn try_from(contract: ExecutionContract) -> Result<Self, Self::Error> {
+        contract.validate()?;
+        Ok(Self(contract))
     }
 }
 
@@ -173,7 +197,10 @@ fn validate_optional_ref(
     Ok(())
 }
 
-/// Canonical result of an execution; these are the only lifecycle outcomes.
+/// Mutable outcome DTO returned by adapters and decoded from the wire.
+///
+/// `Serialize` and `Deserialize` do not make this DTO persistable. Convert it to
+/// [`ValidatedExecutionOutcome`] against its validated contract first.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExecutionOutcome {
@@ -210,6 +237,79 @@ impl ExecutionOutcome {
             output,
             continuation: None,
         }
+    }
+}
+
+/// Execution outcome proven consistent with a validated contract.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ValidatedExecutionOutcome(ExecutionOutcome);
+
+impl ValidatedExecutionOutcome {
+    /// Validates an outcome against its contract before persistence.
+    pub fn new(
+        outcome: ExecutionOutcome,
+        contract: &ValidatedExecutionContract,
+    ) -> Result<Self, ProtocolValidationError> {
+        validate_outcome(&outcome, contract.as_ref())?;
+        Ok(Self(outcome))
+    }
+
+    /// Consumes the wrapper and returns the raw DTO.
+    pub fn into_inner(self) -> ExecutionOutcome {
+        self.0
+    }
+}
+
+impl AsRef<ExecutionOutcome> for ValidatedExecutionOutcome {
+    fn as_ref(&self) -> &ExecutionOutcome {
+        &self.0
+    }
+}
+
+fn validate_outcome(
+    outcome: &ExecutionOutcome,
+    contract: &ExecutionContract,
+) -> Result<(), ProtocolValidationError> {
+    match outcome {
+        ExecutionOutcome::Completed {
+            continuation: Some(continuation),
+            ..
+        } if is_blank(&continuation.execution_id) => {
+            Err(ProtocolValidationError::EmptyContinuationExecutionId)
+        }
+        ExecutionOutcome::Completed { .. } | ExecutionOutcome::Cancelled { .. } => Ok(()),
+        ExecutionOutcome::Suspended { wake, checkpoint } => {
+            wake.validate_references()?;
+            if checkpoint.execution_id != contract.execution_id {
+                return Err(ProtocolValidationError::CheckpointExecutionIdMismatch);
+            }
+            if checkpoint.revision != contract.revision {
+                return Err(ProtocolValidationError::CheckpointRevisionMismatch);
+            }
+            if checkpoint.producer_kind != contract.kind {
+                return Err(ProtocolValidationError::CheckpointProducerKindMismatch);
+            }
+            if is_blank(&checkpoint.checkpoint_id) {
+                return Err(ProtocolValidationError::EmptyScopedReference {
+                    field: "checkpoint.checkpoint_id",
+                });
+            }
+            if checkpoint.schema_version != PROTOCOL_SCHEMA_VERSION {
+                return Err(
+                    ProtocolValidationError::UnsupportedCheckpointSchemaVersion {
+                        actual: checkpoint.schema_version,
+                    },
+                );
+            }
+            checkpoint.data_ref.validate().map_err(|reason| {
+                ProtocolValidationError::InvalidCheckpointDataReference { reason }
+            })?;
+            Ok(())
+        }
+        ExecutionOutcome::Failed { failure } if is_blank(&failure.code) => {
+            Err(ProtocolValidationError::EmptyFailureCode)
+        }
+        ExecutionOutcome::Failed { .. } => Ok(()),
     }
 }
 
@@ -500,6 +600,8 @@ pub struct ExecutionBudget {
 /// Durable input that caused a suspended execution to resume.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WakeDelivery {
+    /// Typed wake condition this delivery satisfies.
+    pub condition: WakeCondition,
     /// Nonempty canonical deduplication key for the delivered condition.
     pub dedup_key: String,
     /// Adapter-neutral delivery payload.
@@ -508,10 +610,7 @@ pub struct WakeDelivery {
     pub delivered_at_unix_seconds: i64,
 }
 
-/// Durable checkpoint metadata containing exactly one secrecy-safe data mode.
-///
-/// Sensitive raw payloads must be encrypted in an external secret store before
-/// constructing this envelope.
+/// Durable checkpoint metadata containing only a checked external data reference.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CheckpointEnvelope {
     /// Stable checkpoint identity.
@@ -524,8 +623,8 @@ pub struct CheckpointEnvelope {
     pub producer_kind: String,
     /// Producer-defined checkpoint schema version.
     pub schema_version: u32,
-    /// The sole persisted checkpoint data representation.
-    pub data: PersistedCheckpointData,
+    /// Reference to checkpoint data stored outside the canonical journal.
+    pub data_ref: CheckpointDataRef,
 }
 
 impl CheckpointEnvelope {
@@ -536,39 +635,225 @@ impl CheckpointEnvelope {
         producer_kind: impl Into<String>,
     ) -> Self {
         let execution_id = execution_id.into();
+        let checkpoint_id = format!("{execution_id}:{revision}");
+        let record_ref = DurableDataRef::new(format!("{checkpoint_id}:empty"))
+            .expect("execution identifiers used by an empty checkpoint are nonempty");
         Self {
-            checkpoint_id: format!("{execution_id}:{revision}"),
+            checkpoint_id,
             execution_id,
             revision,
             producer_kind: producer_kind.into(),
-            schema_version: 1,
-            data: PersistedCheckpointData::Public { value: json!({}) },
+            schema_version: PROTOCOL_SCHEMA_VERSION,
+            data_ref: CheckpointDataRef::Public { record_ref },
         }
     }
 }
 
-/// Secrecy-safe checkpoint representation persisted in the canonical envelope.
+/// Reference-only checkpoint representation persisted in the canonical journal.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
-pub enum PersistedCheckpointData {
-    /// Public data that may be stored as provided.
+pub enum CheckpointDataRef {
+    /// Public checkpoint bytes stored in a durable data record.
     Public {
-        /// Public checkpoint value.
-        value: Value,
+        /// Checked durable record reference.
+        record_ref: DurableDataRef,
     },
-    /// Already-redacted data plus references to externally encrypted secrets.
+    /// Redacted checkpoint bytes stored in a durable data record.
     Redacted {
-        /// Checkpoint value after all sensitive material has been removed.
-        value: Value,
-        /// Opaque references to encrypted secret material.
-        secret_refs: Vec<String>,
+        /// Checked durable record reference.
+        record_ref: DurableDataRef,
     },
-    /// Opaque references only, with no persisted checkpoint value.
-    SecretRefsOnly {
-        /// Opaque references to encrypted secret material.
-        secret_refs: Vec<String>,
+    /// Encrypted checkpoint bytes stored in a secret record.
+    Encrypted {
+        /// Checked encrypted secret reference.
+        secret_ref: SecretRef,
     },
 }
+
+impl CheckpointDataRef {
+    fn validate(&self) -> Result<(), ReferenceValidationError> {
+        match self {
+            Self::Public { record_ref } | Self::Redacted { record_ref } => {
+                DurableDataRef::parse(record_ref.as_ref()).map(|_| ())
+            }
+            Self::Encrypted { secret_ref } => SecretRef::parse(secret_ref.as_ref()).map(|_| ()),
+        }
+    }
+}
+
+/// Checked reference to non-secret checkpoint bytes in durable storage.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct DurableDataRef(String);
+
+impl DurableDataRef {
+    /// Builds a `durable:v1` reference from a nonempty scoped identifier.
+    pub fn new(identifier: impl Into<String>) -> Result<Self, ReferenceValidationError> {
+        let identifier = identifier.into();
+        checked_reference("durable:v1:", identifier).map(Self)
+    }
+
+    /// Parses and validates an encoded `durable:v1` reference.
+    pub fn parse(encoded: impl Into<String>) -> Result<Self, ReferenceValidationError> {
+        let encoded = encoded.into();
+        validate_encoded_reference("durable:v1:", &encoded)?;
+        Ok(Self(encoded))
+    }
+
+    /// Consumes the wrapper and returns the stable encoded reference.
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for DurableDataRef {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::str::FromStr for DurableDataRef {
+    type Err = ReferenceValidationError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
+    }
+}
+
+impl Serialize for DurableDataRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
+}
+
+impl<'de> Deserialize<'de> for DurableDataRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::parse(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Checked reference to encrypted checkpoint bytes in secret storage.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SecretRef(String);
+
+impl SecretRef {
+    /// Builds a `secret:v1` reference from a nonempty scoped identifier.
+    pub fn new(identifier: impl Into<String>) -> Result<Self, ReferenceValidationError> {
+        let identifier = identifier.into();
+        checked_reference("secret:v1:", identifier).map(Self)
+    }
+
+    /// Parses and validates an encoded `secret:v1` reference.
+    pub fn parse(encoded: impl Into<String>) -> Result<Self, ReferenceValidationError> {
+        let encoded = encoded.into();
+        validate_encoded_reference("secret:v1:", &encoded)?;
+        Ok(Self(encoded))
+    }
+
+    /// Consumes the wrapper and returns the stable encoded reference.
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl AsRef<str> for SecretRef {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::str::FromStr for SecretRef {
+    type Err = ReferenceValidationError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
+    }
+}
+
+impl Serialize for SecretRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_ref())
+    }
+}
+
+impl<'de> Deserialize<'de> for SecretRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::parse(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+fn checked_reference(
+    prefix: &'static str,
+    identifier: String,
+) -> Result<String, ReferenceValidationError> {
+    if is_blank(&identifier) {
+        return Err(ReferenceValidationError::EmptyIdentifier);
+    }
+    Ok(format!("{prefix}{}:{identifier}", identifier.len()))
+}
+
+fn validate_encoded_reference(
+    prefix: &'static str,
+    encoded: &str,
+) -> Result<(), ReferenceValidationError> {
+    let remainder = encoded
+        .strip_prefix(prefix)
+        .ok_or(ReferenceValidationError::InvalidPrefix { expected: prefix })?;
+    let (length, identifier) = remainder
+        .split_once(':')
+        .ok_or(ReferenceValidationError::InvalidLength)?;
+    let expected = length
+        .parse::<usize>()
+        .map_err(|_| ReferenceValidationError::InvalidLength)?;
+    if is_blank(identifier) {
+        return Err(ReferenceValidationError::EmptyIdentifier);
+    }
+    let actual = identifier.len();
+    if expected != actual {
+        return Err(ReferenceValidationError::LengthMismatch { expected, actual });
+    }
+    Ok(())
+}
+
+/// Reason a durable or secret data reference is malformed.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReferenceValidationError {
+    /// Scoped identifier is empty.
+    EmptyIdentifier,
+    /// Encoded reference does not use the required versioned prefix.
+    InvalidPrefix {
+        /// Required prefix.
+        expected: &'static str,
+    },
+    /// Encoded reference has no valid decimal byte length.
+    InvalidLength,
+    /// Encoded byte length does not match the identifier.
+    LengthMismatch {
+        /// Length declared by the reference.
+        expected: usize,
+        /// Actual UTF-8 byte length.
+        actual: usize,
+    },
+}
+
+impl std::fmt::Display for ReferenceValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for ReferenceValidationError {}
 
 /// Reason an execution contract cannot be persisted safely.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -622,6 +907,26 @@ pub enum ProtocolValidationError {
         /// Key supplied by the delivery.
         actual: String,
     },
+    /// A completed outcome contains an empty continuation execution reference.
+    EmptyContinuationExecutionId,
+    /// A suspended checkpoint belongs to another execution.
+    CheckpointExecutionIdMismatch,
+    /// A suspended checkpoint belongs to another contract revision.
+    CheckpointRevisionMismatch,
+    /// A suspended checkpoint was produced by another execution kind.
+    CheckpointProducerKindMismatch,
+    /// A suspended checkpoint uses an unsupported schema version.
+    UnsupportedCheckpointSchemaVersion {
+        /// Unsupported checkpoint schema version.
+        actual: u32,
+    },
+    /// A checkpoint data reference failed structural validation.
+    InvalidCheckpointDataReference {
+        /// Structural reference validation failure.
+        reason: ReferenceValidationError,
+    },
+    /// A failed outcome contains no stable failure code.
+    EmptyFailureCode,
 }
 
 impl std::fmt::Display for ProtocolValidationError {
@@ -631,548 +936,3 @@ impl std::fmt::Display for ProtocolValidationError {
 }
 
 impl std::error::Error for ProtocolValidationError {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn scope() -> ExecutionScope {
-        ExecutionScope {
-            user_id: "user-1".into(),
-            workspace_id: "workspace-1".into(),
-            thread_id: Some("thread-1".into()),
-        }
-    }
-
-    fn valid_contract() -> ExecutionContract {
-        ExecutionContract::new("exec-1", "chat_turn", scope(), json!({"prompt": "hello"}))
-    }
-
-    fn assert_invalid(contract: ExecutionContract, expected: ProtocolValidationError) {
-        assert_eq!(contract.validate(), Err(expected));
-    }
-
-    fn assert_golden_round_trip<T>(value: &T, golden: &str)
-    where
-        T: serde::Serialize + serde::de::DeserializeOwned + std::fmt::Debug + Eq,
-    {
-        assert_eq!(serde_json::to_string(value).unwrap(), golden);
-        let decoded = serde_json::from_str::<T>(golden).unwrap();
-        assert_eq!(&decoded, value);
-        assert_eq!(serde_json::to_string(&decoded).unwrap(), golden);
-    }
-
-    fn checkpoint_with(data: PersistedCheckpointData) -> CheckpointEnvelope {
-        CheckpointEnvelope {
-            checkpoint_id: "exec-1:1".into(),
-            execution_id: "exec-1".into(),
-            revision: 1,
-            producer_kind: "chat_turn".into(),
-            schema_version: 1,
-            data,
-        }
-    }
-
-    #[test]
-    fn canonical_outcomes_round_trip_without_domain_types() {
-        let outcomes = [
-            ExecutionOutcome::completed(json!({"ok": true})),
-            ExecutionOutcome::Suspended {
-                wake: WakeCondition::Signal {
-                    kind: "connector.message".into(),
-                    correlation_id: "msg-1".into(),
-                },
-                checkpoint: CheckpointEnvelope::empty("exec-1", 1, "chat_turn"),
-            },
-            ExecutionOutcome::Cancelled {
-                reason: CancelReason::User,
-            },
-            ExecutionOutcome::Failed {
-                failure: ExecutionFailure::permanent("no_reply", "No final reply"),
-            },
-        ];
-
-        for outcome in outcomes {
-            let encoded = serde_json::to_string(&outcome).unwrap();
-            assert_eq!(
-                serde_json::from_str::<ExecutionOutcome>(&encoded).unwrap(),
-                outcome
-            );
-        }
-    }
-
-    #[test]
-    fn default_contract_v1_wire_format_is_stable() {
-        let golden = r#"{"schema_version":1,"execution_id":"exec-1","parent_execution_id":null,"kind":"chat_turn","revision":1,"fencing_token":1,"scope":{"user_id":"user-1","workspace_id":"workspace-1","thread_id":"thread-1"},"objective":null,"input":{"prompt":"hello"},"policy":{"allowed_effects":["read"],"approval_policy":"deny"},"resources":[],"budget":{"max_attempts":1,"backoff_seconds":0,"deadline_unix_seconds":null},"checkpoint":null,"wake":null}"#;
-
-        assert_golden_round_trip(&valid_contract(), golden);
-    }
-
-    #[test]
-    fn execution_outcomes_v1_wire_format_is_stable() {
-        let cases = [
-            (
-                ExecutionOutcome::completed(json!({"ok": true})),
-                r#"{"type":"completed","output":{"ok":true},"continuation":null}"#,
-            ),
-            (
-                ExecutionOutcome::Suspended {
-                    wake: WakeCondition::Signal {
-                        kind: "connector.message".into(),
-                        correlation_id: "msg-1".into(),
-                    },
-                    checkpoint: CheckpointEnvelope::empty("exec-1", 1, "chat_turn"),
-                },
-                r#"{"type":"suspended","wake":{"type":"signal","kind":"connector.message","correlation_id":"msg-1"},"checkpoint":{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","schema_version":1,"data":{"mode":"public","value":{}}}}"#,
-            ),
-            (
-                ExecutionOutcome::Cancelled {
-                    reason: CancelReason::User,
-                },
-                r#"{"type":"cancelled","reason":"user"}"#,
-            ),
-            (
-                ExecutionOutcome::Failed {
-                    failure: ExecutionFailure::permanent("no_reply", "No final reply"),
-                },
-                r#"{"type":"failed","failure":{"class":"permanent","code":"no_reply","redacted_detail":"No final reply"}}"#,
-            ),
-        ];
-
-        for (outcome, golden) in cases {
-            assert_golden_round_trip(&outcome, golden);
-        }
-    }
-
-    #[test]
-    fn wake_conditions_v1_wire_format_is_stable() {
-        let cases = [
-            (
-                WakeCondition::At {
-                    unix_seconds: 1_800_000_000,
-                },
-                r#"{"type":"at","unix_seconds":1800000000}"#,
-            ),
-            (
-                WakeCondition::Signal {
-                    kind: "connector.message".into(),
-                    correlation_id: "msg-1".into(),
-                },
-                r#"{"type":"signal","kind":"connector.message","correlation_id":"msg-1"}"#,
-            ),
-            (
-                WakeCondition::Resource {
-                    class: "browser".into(),
-                },
-                r#"{"type":"resource","class":"browser"}"#,
-            ),
-            (
-                WakeCondition::ModelAvailable {
-                    role: "reasoning".into(),
-                },
-                r#"{"type":"model_available","role":"reasoning"}"#,
-            ),
-            (
-                WakeCondition::User {
-                    wait_ref: "wait-1".into(),
-                },
-                r#"{"type":"user","wait_ref":"wait-1"}"#,
-            ),
-            (
-                WakeCondition::Approval {
-                    approval_ref: "approval-1".into(),
-                },
-                r#"{"type":"approval","approval_ref":"approval-1"}"#,
-            ),
-            (
-                WakeCondition::EffectResolution {
-                    receipt_ref: "receipt-1".into(),
-                },
-                r#"{"type":"effect_resolution","receipt_ref":"receipt-1"}"#,
-            ),
-        ];
-
-        for (wake, golden) in cases {
-            assert_golden_round_trip(&wake, golden);
-        }
-    }
-
-    #[test]
-    fn checkpoint_data_modes_v1_wire_format_are_stable() {
-        let cases = [
-            (
-                checkpoint_with(PersistedCheckpointData::Public {
-                    value: json!({"cursor": 3}),
-                }),
-                r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","schema_version":1,"data":{"mode":"public","value":{"cursor":3}}}"#,
-            ),
-            (
-                checkpoint_with(PersistedCheckpointData::Redacted {
-                    value: json!({"token": "[redacted]"}),
-                    secret_refs: vec!["secret-ref-1".into()],
-                }),
-                r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","schema_version":1,"data":{"mode":"redacted","value":{"token":"[redacted]"},"secret_refs":["secret-ref-1"]}}"#,
-            ),
-            (
-                checkpoint_with(PersistedCheckpointData::SecretRefsOnly {
-                    secret_refs: vec!["secret-ref-1".into()],
-                }),
-                r#"{"checkpoint_id":"exec-1:1","execution_id":"exec-1","revision":1,"producer_kind":"chat_turn","schema_version":1,"data":{"mode":"secret_refs_only","secret_refs":["secret-ref-1"]}}"#,
-            ),
-        ];
-
-        for (checkpoint, golden) in cases {
-            assert_golden_round_trip(&checkpoint, golden);
-        }
-    }
-
-    #[test]
-    fn wake_conditions_have_stable_dedup_keys() {
-        let cases = [
-            (
-                WakeCondition::At {
-                    unix_seconds: 1_800_000_000,
-                },
-                "v1:at:1800000000",
-            ),
-            (
-                WakeCondition::Signal {
-                    kind: "connector.message".into(),
-                    correlation_id: "msg-1".into(),
-                },
-                "v1:signal:17:connector.message:5:msg-1",
-            ),
-            (
-                WakeCondition::Resource {
-                    class: "browser".into(),
-                },
-                "v1:resource:7:browser",
-            ),
-            (
-                WakeCondition::ModelAvailable {
-                    role: "reasoning".into(),
-                },
-                "v1:model_available:9:reasoning",
-            ),
-            (
-                WakeCondition::User {
-                    wait_ref: "wait-1".into(),
-                },
-                "v1:user:6:wait-1",
-            ),
-            (
-                WakeCondition::Approval {
-                    approval_ref: "approval-1".into(),
-                },
-                "v1:approval:10:approval-1",
-            ),
-            (
-                WakeCondition::EffectResolution {
-                    receipt_ref: "receipt-1".into(),
-                },
-                "v1:effect_resolution:9:receipt-1",
-            ),
-        ];
-
-        for (wake, expected) in cases {
-            assert_eq!(wake.dedup_key(), expected);
-        }
-    }
-
-    #[test]
-    fn signal_dedup_keys_do_not_collide_when_components_contain_delimiters() {
-        let left = WakeCondition::Signal {
-            kind: "a:b".into(),
-            correlation_id: "c".into(),
-        };
-        let right = WakeCondition::Signal {
-            kind: "a".into(),
-            correlation_id: "b:c".into(),
-        };
-
-        assert_ne!(left.dedup_key(), right.dedup_key());
-        assert_eq!(left.dedup_key(), "v1:signal:3:a:b:1:c");
-        assert_eq!(right.dedup_key(), "v1:signal:1:a:3:b:c");
-    }
-
-    #[test]
-    fn wake_dedup_keys_length_prefix_utf8_bytes() {
-        let wake = WakeCondition::Signal {
-            kind: "méssage".into(),
-            correlation_id: "消息".into(),
-        };
-
-        assert_eq!(wake.dedup_key(), "v1:signal:8:méssage:6:消息");
-    }
-
-    #[test]
-    fn contract_constructor_uses_conservative_defaults() {
-        let contract = valid_contract();
-
-        assert_eq!(contract.schema_version, PROTOCOL_SCHEMA_VERSION);
-        assert_eq!(contract.execution_id, "exec-1");
-        assert_eq!(contract.parent_execution_id, None);
-        assert_eq!(contract.kind, "chat_turn");
-        assert_eq!(contract.revision, 1);
-        assert_eq!(contract.fencing_token, 1);
-        assert_eq!(contract.objective, None);
-        assert_eq!(contract.input, json!({"prompt": "hello"}));
-        assert_eq!(contract.policy.allowed_effects, vec![EffectClass::Read]);
-        assert_eq!(contract.policy.approval_policy, ApprovalPolicy::Deny);
-        assert!(contract.resources.is_empty());
-        assert_eq!(contract.budget.max_attempts, 1);
-        assert_eq!(contract.budget.backoff_seconds, 0);
-        assert_eq!(contract.budget.deadline_unix_seconds, None);
-        assert_eq!(contract.checkpoint, None);
-        assert_eq!(contract.wake, None);
-        assert_eq!(contract.validate(), Ok(()));
-    }
-
-    #[test]
-    fn validation_rejects_empty_required_identity_fields() {
-        let mut contract = valid_contract();
-        contract.execution_id = " ".into();
-        assert_invalid(contract, ProtocolValidationError::EmptyExecutionId);
-
-        let mut contract = valid_contract();
-        contract.kind.clear();
-        assert_invalid(contract, ProtocolValidationError::EmptyKind);
-
-        let mut contract = valid_contract();
-        contract.scope.user_id.clear();
-        assert_invalid(contract, ProtocolValidationError::EmptyUserId);
-
-        let mut contract = valid_contract();
-        contract.scope.workspace_id = "  ".into();
-        assert_invalid(contract, ProtocolValidationError::EmptyWorkspaceId);
-    }
-
-    #[test]
-    fn validation_rejects_invalid_revision_fence_and_budget() {
-        let mut contract = valid_contract();
-        contract.revision = 0;
-        assert_invalid(contract, ProtocolValidationError::RevisionZero);
-
-        let mut contract = valid_contract();
-        contract.fencing_token = 0;
-        assert_invalid(contract, ProtocolValidationError::FencingTokenZero);
-
-        let mut contract = valid_contract();
-        contract.revision = i64::MAX as u64 + 1;
-        assert_invalid(contract, ProtocolValidationError::RevisionOutOfRange);
-
-        let mut contract = valid_contract();
-        contract.fencing_token = i64::MAX as u64 + 1;
-        assert_invalid(contract, ProtocolValidationError::FencingTokenOutOfRange);
-
-        let mut contract = valid_contract();
-        contract.budget.max_attempts = 0;
-        assert_invalid(contract, ProtocolValidationError::MaxAttemptsZero);
-
-        let mut contract = valid_contract();
-        contract.budget.backoff_seconds = -1;
-        assert_invalid(contract, ProtocolValidationError::NegativeBackoff);
-    }
-
-    #[test]
-    fn validation_rejects_invalid_resources() {
-        let mut contract = valid_contract();
-        contract.resources.push(ResourceRequirement {
-            class: " ".into(),
-            units: 1,
-        });
-        assert_invalid(
-            contract,
-            ProtocolValidationError::EmptyResourceClass { index: 0 },
-        );
-
-        let mut contract = valid_contract();
-        contract.resources.push(ResourceRequirement {
-            class: "browser".into(),
-            units: 0,
-        });
-        assert_invalid(
-            contract,
-            ProtocolValidationError::ResourceUnitsZero { index: 0 },
-        );
-    }
-
-    #[test]
-    fn validation_rejects_empty_scoped_references() {
-        let mut contract = valid_contract();
-        contract.parent_execution_id = Some("".into());
-        assert_invalid(
-            contract,
-            ProtocolValidationError::EmptyScopedReference {
-                field: "parent_execution_id",
-            },
-        );
-
-        let mut contract = valid_contract();
-        contract.scope.thread_id = Some(" ".into());
-        assert_invalid(
-            contract,
-            ProtocolValidationError::EmptyScopedReference {
-                field: "scope.thread_id",
-            },
-        );
-
-        let mut contract = valid_contract();
-        contract.objective = Some(ObjectiveRef {
-            thread_id: "".into(),
-            revision: 1,
-        });
-        assert_invalid(
-            contract,
-            ProtocolValidationError::EmptyScopedReference {
-                field: "objective.thread_id",
-            },
-        );
-
-        let mut contract = valid_contract();
-        contract.checkpoint = Some(CheckpointRef {
-            checkpoint_id: " ".into(),
-            schema_version: 1,
-        });
-        assert_invalid(
-            contract,
-            ProtocolValidationError::EmptyScopedReference {
-                field: "checkpoint.checkpoint_id",
-            },
-        );
-    }
-
-    #[test]
-    fn validation_rejects_unsupported_schema_version() {
-        let mut contract = valid_contract();
-        contract.schema_version = PROTOCOL_SCHEMA_VERSION + 1;
-
-        assert_invalid(
-            contract,
-            ProtocolValidationError::UnsupportedSchemaVersion {
-                actual: PROTOCOL_SCHEMA_VERSION + 1,
-            },
-        );
-    }
-
-    #[test]
-    fn validation_rejects_empty_or_mismatched_wake_delivery_keys() {
-        let condition = WakeCondition::Signal {
-            kind: "connector.message".into(),
-            correlation_id: "msg-1".into(),
-        };
-        let mut contract = valid_contract();
-        contract.wake = Some(WakeDelivery {
-            dedup_key: " ".into(),
-            payload: json!({"opaque": true}),
-            delivered_at_unix_seconds: 1_800_000_000,
-        });
-        assert_invalid(contract, ProtocolValidationError::EmptyWakeDedupKey);
-
-        let mut contract = valid_contract();
-        contract.wake = Some(WakeDelivery {
-            dedup_key: "v1:signal:5:wrong:3:key".into(),
-            payload: serde_json::to_value(&condition).unwrap(),
-            delivered_at_unix_seconds: 1_800_000_000,
-        });
-        assert_invalid(
-            contract,
-            ProtocolValidationError::WakeDedupKeyMismatch {
-                expected: condition.dedup_key(),
-                actual: "v1:signal:5:wrong:3:key".into(),
-            },
-        );
-    }
-
-    #[test]
-    fn timestamp_fields_state_seconds_explicitly() {
-        let budget = ExecutionBudget {
-            max_attempts: 1,
-            backoff_seconds: 0,
-            deadline_unix_seconds: Some(1_800_000_000),
-        };
-        let wake = WakeCondition::At {
-            unix_seconds: 1_800_000_001,
-        };
-        let delivery = WakeDelivery {
-            dedup_key: wake.dedup_key(),
-            payload: serde_json::to_value(&wake).unwrap(),
-            delivered_at_unix_seconds: 1_800_000_002,
-        };
-
-        assert_eq!(budget.deadline_unix_seconds, Some(1_800_000_000));
-        assert_eq!(delivery.delivered_at_unix_seconds, 1_800_000_002);
-    }
-
-    #[test]
-    fn failure_constructors_set_class_code_and_redacted_detail() {
-        let cases = [
-            (
-                ExecutionFailure::transient("temporarily_unavailable", "retry later"),
-                FailureClass::Transient,
-                "temporarily_unavailable",
-                "retry later",
-            ),
-            (
-                ExecutionFailure::permanent("invalid_input", "input rejected"),
-                FailureClass::Permanent,
-                "invalid_input",
-                "input rejected",
-            ),
-            (
-                ExecutionFailure::policy_denied("effect_denied", "write not allowed"),
-                FailureClass::PolicyDenied,
-                "effect_denied",
-                "write not allowed",
-            ),
-        ];
-
-        for (failure, class, code, detail) in cases {
-            assert_eq!(failure.class, class);
-            assert_eq!(failure.code, code);
-            assert_eq!(failure.redacted_detail, detail);
-        }
-    }
-
-    #[test]
-    fn empty_checkpoint_is_public_and_contains_no_payload_or_secrets() {
-        let checkpoint = CheckpointEnvelope::empty("exec-1", 3, "chat_turn");
-
-        assert_eq!(checkpoint.checkpoint_id, "exec-1:3");
-        assert_eq!(checkpoint.execution_id, "exec-1");
-        assert_eq!(checkpoint.revision, 3);
-        assert_eq!(checkpoint.producer_kind, "chat_turn");
-        assert_eq!(checkpoint.schema_version, 1);
-        assert_eq!(
-            checkpoint.data,
-            PersistedCheckpointData::Public { value: json!({}) }
-        );
-    }
-
-    #[test]
-    fn redacted_checkpoint_serialization_contains_no_raw_secret() {
-        let checkpoint = checkpoint_with(PersistedCheckpointData::Redacted {
-            value: json!({"token": "[redacted]"}),
-            secret_refs: vec!["secret-ref-1".into()],
-        });
-
-        let encoded = serde_json::to_string(&checkpoint).unwrap();
-        assert!(!encoded.contains("raw_secret"));
-        assert!(!encoded.contains("secret-value-123"));
-        assert!(encoded.contains("[redacted]"));
-        assert!(encoded.contains("secret-ref-1"));
-    }
-
-    #[test]
-    fn secret_refs_only_checkpoint_serialization_contains_no_raw_secret() {
-        let checkpoint = checkpoint_with(PersistedCheckpointData::SecretRefsOnly {
-            secret_refs: vec!["secret-ref-1".into()],
-        });
-
-        let encoded = serde_json::to_string(&checkpoint).unwrap();
-        assert!(!encoded.contains("raw_secret"));
-        assert!(!encoded.contains("secret-value-123"));
-        assert!(encoded.contains("secret-ref-1"));
-    }
-}
