@@ -49,6 +49,7 @@ impl TaskScheduler {
         now: OffsetDateTime,
         limit: usize,
     ) -> TaskRuntimeResult<Vec<TaskRecord>> {
+        store.wake_due_executions(now, usize::MAX)?;
         let mut candidates = Vec::new();
         for workspace_id in store.non_terminal_workspace_ids(user_id)? {
             candidates.extend(self.ready_tasks(store, user_id, &workspace_id, now, limit)?);

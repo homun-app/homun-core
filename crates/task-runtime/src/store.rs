@@ -465,7 +465,7 @@ impl TaskStore {
                 revision INTEGER NOT NULL CHECK(revision > 0),
                 dedup_key TEXT NOT NULL CHECK(length(trim(dedup_key)) > 0),
                 condition_json TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(length(trim(status)) > 0),
+                status TEXT NOT NULL CHECK(status IN ('pending', 'delivered')),
                 delivery_json TEXT,
                 created_at INTEGER NOT NULL,
                 delivered_at INTEGER,

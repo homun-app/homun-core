@@ -82,7 +82,7 @@ fn next_revision(
         condition: wake.clone(),
         dedup_key: wake.dedup_key(),
         payload: json!({"signal": "delivered"}),
-        delivered_at_unix_seconds: 2_000_000_000,
+        delivered_at_unix_seconds: time::OffsetDateTime::now_utc().unix_timestamp(),
     });
     ValidatedExecutionContract::try_from(contract).unwrap()
 }
@@ -165,17 +165,41 @@ fn insert_delivered_wake(
         .unwrap();
     connection
         .execute(
-            "INSERT INTO execution_wakes (
-                execution_id, revision, dedup_key, condition_json, status,
-                delivery_json, created_at, delivered_at
-             ) VALUES (?1, ?2, ?3, ?4, 'delivered', ?5, ?6, ?7)",
+            "UPDATE execution_wakes
+             SET status = 'delivered', delivery_json = ?1, delivered_at = ?2
+             WHERE execution_id = ?3 AND revision = ?4 AND dedup_key = ?5
+               AND condition_json = ?6 AND status = 'pending'
+               AND delivery_json IS NULL AND delivered_at IS NULL AND created_at = ?7",
             params![
+                serde_json::to_string(delivery).unwrap(),
+                delivery.delivered_at_unix_seconds,
                 execution_id,
                 i64::try_from(revision).unwrap(),
                 wake.dedup_key(),
                 serde_json::to_string(wake).unwrap(),
-                serde_json::to_string(delivery).unwrap(),
                 suspended_at,
+            ],
+        )
+        .unwrap();
+    let event = ExecutionJournalEvent::WakeDelivered {
+        version: 1,
+        delivery: delivery.clone(),
+        next_revision: revision + 1,
+    };
+    connection
+        .execute(
+            "INSERT INTO execution_events (
+                execution_id, revision, seq, kind, payload_json, created_at
+             ) VALUES (
+                ?1, ?2,
+                (SELECT COALESCE(MAX(seq), 0) + 1 FROM execution_events
+                 WHERE execution_id = ?1 AND revision = ?2),
+                'wake_delivered', ?3, ?4
+             )",
+            params![
+                execution_id,
+                i64::try_from(revision).unwrap(),
+                serde_json::to_string(&event).unwrap(),
                 delivery.delivered_at_unix_seconds,
             ],
         )
@@ -433,7 +457,7 @@ fn suspended_revision_can_start_and_complete_the_next_revision() {
             .iter()
             .map(|event| event.seq)
             .collect::<Vec<_>>(),
-        vec![1, 2]
+        vec![1, 2, 3]
     );
     assert_eq!(
         revision_two_events
@@ -484,7 +508,7 @@ fn create_and_revision_start_retries_return_the_latest_projection() {
     assert_eq!(revision_retry, started);
     assert_eq!(
         store.execution_events("exec-multi-retry", 1).unwrap().len(),
-        2
+        3
     );
     assert_eq!(
         store.execution_events("exec-multi-retry", 2).unwrap().len(),
@@ -718,17 +742,15 @@ fn revision_start_rejects_unauthenticated_wake_history() {
                 };
                 connection
                     .execute(
-                        "INSERT INTO execution_wakes (
-                            execution_id, revision, dedup_key, condition_json, status,
-                            delivery_json, created_at, delivered_at
-                         ) VALUES (?1, 1, ?2, ?3, 'delivered', ?4, ?5, ?6)",
+                        "UPDATE execution_wakes
+                         SET status = 'delivered', delivery_json = ?1, delivered_at = ?2,
+                             created_at = ?2 - 1
+                         WHERE execution_id = ?3 AND revision = 1 AND dedup_key = ?4",
                         params![
+                            serde_json::to_string(&delivery).unwrap(),
+                            suspended_at - 1,
                             execution_id,
                             wake.dedup_key(),
-                            serde_json::to_string(wake).unwrap(),
-                            serde_json::to_string(&delivery).unwrap(),
-                            suspended_at - 2,
-                            suspended_at - 1,
                         ],
                     )
                     .unwrap();
@@ -1183,7 +1205,7 @@ fn rebuild_restores_only_the_latest_revision_projection() {
             .execution_events("exec-rebuild-latest", 1)
             .unwrap()
             .len(),
-        2
+        3
     );
     let rebuilt = store
         .rebuild_execution_projection("exec-rebuild-latest")
@@ -1299,23 +1321,9 @@ fn historical_wake_survives_revision_start_and_projection_rebuild() {
         suspended_at,
         delivery.delivered_at_unix_seconds,
     );
-    connection
-        .execute(
-            "INSERT INTO execution_wakes (
-                execution_id, revision, dedup_key, condition_json, status,
-                delivery_json, created_at, delivered_at
-             ) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                "exec-wake-history",
-                expected.0,
-                expected.1,
-                expected.2,
-                expected.3,
-                expected.4,
-                expected.5,
-            ],
-        )
-        .unwrap();
+    drop(connection);
+    insert_delivered_wake(&path, &suspended, &revision_two);
+    let connection = raw_connection(&path);
 
     store.start_execution_revision(&revision_two).unwrap();
     assert_eq!(
@@ -1403,7 +1411,7 @@ fn stale_prior_revision_outcome_never_rewrites_the_latest_projection() {
             .execution_events("exec-stale-prior-outcome", 1)
             .unwrap()
             .len(),
-        2
+        3
     );
     drop(store);
     let _ = std::fs::remove_file(path);
@@ -2036,10 +2044,20 @@ fn legacy_v12_wake_foreign_key_is_migrated_to_v13_without_data_loss() {
             .unwrap(),
         0
     );
-    assert_eq!(
-        raw_event_rows(&connection, "exec-legacy-wake-migration"),
-        expected_events
-    );
+    let migrated_events = raw_event_rows(&connection, "exec-legacy-wake-migration");
+    assert_eq!(&migrated_events[..2], expected_events.as_slice());
+    assert_eq!(migrated_events[2].1, 1);
+    assert_eq!(migrated_events[2].2, 3);
+    assert_eq!(migrated_events[2].3, "wake_delivered");
+    assert_eq!(migrated_events[2].5, delivery.delivered_at_unix_seconds);
+    assert!(matches!(
+        serde_json::from_str::<ExecutionJournalEvent>(&migrated_events[2].4).unwrap(),
+        ExecutionJournalEvent::WakeDelivered {
+            delivery: stored,
+            next_revision: 2,
+            ..
+        } if stored == *delivery
+    ));
     assert_eq!(
         migrated.execution("exec-legacy-wake-migration").unwrap(),
         Some(expected_projection)

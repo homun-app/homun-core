@@ -1,10 +1,11 @@
-use crate::{TaskRuntimeError, TaskRuntimeResult, TaskStore};
+use crate::{TaskRecord, TaskRuntimeError, TaskRuntimeResult, TaskStatus, TaskStore};
 use local_first_execution_protocol::{
-    ExecutionContract, ExecutionOutcome, ExecutionState, ValidatedExecutionContract,
-    ValidatedExecutionOutcome,
+    CheckpointRef, ExecutionContract, ExecutionOutcome, ExecutionState, ValidatedExecutionContract,
+    ValidatedExecutionOutcome, WakeCondition, WakeDelivery,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use time::OffsetDateTime;
 
@@ -41,6 +42,11 @@ pub enum ExecutionJournalEvent {
         outcome: ExecutionOutcome,
         state: ExecutionState,
     },
+    WakeDelivered {
+        version: u32,
+        delivery: WakeDelivery,
+        next_revision: u64,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,6 +80,7 @@ pub enum OutcomeCommit {
 struct FoldedExecution {
     record: ExecutionRecord,
     outcome_committed_at: Option<i64>,
+    wake_transition: Option<WakeTransitionEvidence>,
 }
 
 struct FoldedJournal {
@@ -93,6 +100,22 @@ struct RawMigrationEvent {
     seq: i64,
     kind: String,
     payload_json: String,
+    created_at: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WakeTransitionEvidence {
+    delivery: WakeDelivery,
+    next_revision: u64,
+    created_at: i64,
+}
+
+#[derive(Clone)]
+struct PendingWakeReceipt {
+    execution_id: String,
+    revision: u64,
+    dedup_key: String,
+    condition: WakeCondition,
     created_at: i64,
 }
 
@@ -357,6 +380,14 @@ impl TaskStore {
         let canonical_outcome = serde_json::to_string(outcome.as_ref())?;
         if let Some(existing) = current.record.outcome.as_ref() {
             if serde_json::to_string(existing.as_ref())? == canonical_outcome {
+                verify_registered_wake_on(
+                    &tx,
+                    execution_id,
+                    revision,
+                    existing.as_ref(),
+                    current.outcome_committed_at,
+                    current.wake_transition.as_ref(),
+                )?;
                 let record = current.record.clone();
                 tx.commit()?;
                 return Ok(OutcomeCommit::Existing(record));
@@ -385,6 +416,7 @@ impl TaskStore {
             },
             now,
         )?;
+        register_suspended_wake_on(&tx, execution_id, revision, outcome.as_ref(), now)?;
         let (_, journal) = load_validated_journal_on(&tx, execution_id)?
             .ok_or_else(|| TaskRuntimeError::Store("committed journal disappeared".into()))?;
         let latest = journal.latest()?;
@@ -393,6 +425,496 @@ impl TaskStore {
         tx.commit()?;
         Ok(OutcomeCommit::Inserted(record))
     }
+
+    pub fn wake_due_executions(
+        &self,
+        now: OffsetDateTime,
+        limit: usize,
+    ) -> TaskRuntimeResult<usize> {
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let mut pending = load_pending_wake_receipts_on(&tx)?
+            .into_iter()
+            .filter_map(|receipt| match receipt.condition {
+                WakeCondition::At { unix_seconds } if unix_seconds <= now.unix_timestamp() => {
+                    Some((unix_seconds, receipt))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        pending.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.execution_id.cmp(&right.1.execution_id))
+                .then_with(|| left.1.revision.cmp(&right.1.revision))
+                .then_with(|| left.1.dedup_key.cmp(&right.1.dedup_key))
+        });
+
+        let mut delivered = 0usize;
+        for (scheduled_unix_seconds, receipt) in pending.into_iter().take(limit) {
+            let payload = json!({
+                "scheduled_unix_seconds": scheduled_unix_seconds,
+                "type": "timer",
+            });
+            deliver_pending_wake_on(&tx, &receipt, payload, now.unix_timestamp())?;
+            delivered = delivered
+                .checked_add(1)
+                .ok_or_else(|| TaskRuntimeError::Store("delivered wake count exhausted".into()))?;
+        }
+        tx.commit()?;
+        Ok(delivered)
+    }
+
+    pub fn deliver_execution_signal(
+        &self,
+        kind: &str,
+        correlation_id: &str,
+        payload: &Value,
+    ) -> TaskRuntimeResult<usize> {
+        validated_text(kind, "signal kind")?;
+        validated_text(correlation_id, "signal correlation id")?;
+        let tx = Transaction::new_unchecked(&self.connection, TransactionBehavior::Immediate)?;
+        let pending = load_pending_wake_receipts_on(&tx)?;
+        let delivered_at = OffsetDateTime::now_utc().unix_timestamp();
+        let mut delivered = 0usize;
+        for receipt in pending {
+            let matches = matches!(
+                &receipt.condition,
+                WakeCondition::Signal {
+                    kind: expected_kind,
+                    correlation_id: expected_correlation_id,
+                } if expected_kind == kind && expected_correlation_id == correlation_id
+            );
+            if !matches {
+                continue;
+            }
+            deliver_pending_wake_on(&tx, &receipt, payload.clone(), delivered_at)?;
+            delivered = delivered
+                .checked_add(1)
+                .ok_or_else(|| TaskRuntimeError::Store("delivered wake count exhausted".into()))?;
+        }
+        if delivered == 0 {
+            verify_delivered_signal_dedup_on(&tx, kind, correlation_id)?;
+        }
+        tx.commit()?;
+        Ok(delivered)
+    }
+}
+
+fn load_pending_wake_receipts_on(
+    connection: &Connection,
+) -> TaskRuntimeResult<Vec<PendingWakeReceipt>> {
+    let mut statement = connection.prepare(
+        "SELECT execution_id, revision, dedup_key, condition_json,
+                delivery_json, created_at, delivered_at
+         FROM execution_wakes
+         WHERE status = 'pending'
+         ORDER BY execution_id, revision, dedup_key",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, Option<i64>>(6)?,
+        ))
+    })?;
+    let mut pending = Vec::new();
+    for row in rows {
+        let (
+            execution_id,
+            revision,
+            dedup_key,
+            condition_json,
+            delivery_json,
+            created_at,
+            delivered_at,
+        ) = row?;
+        let condition: WakeCondition = serde_json::from_str(&condition_json).map_err(|error| {
+            TaskRuntimeError::Store(format!("stored wake condition is invalid: {error}"))
+        })?;
+        if condition_json != serde_json::to_string(&condition)?
+            || dedup_key != condition.dedup_key()
+        {
+            return Err(TaskRuntimeError::Store(
+                "stored wake receipt condition or dedup key is not canonical".into(),
+            ));
+        }
+        if delivery_json.is_some() || delivered_at.is_some() {
+            return Err(TaskRuntimeError::Store(
+                "stored pending wake receipt has delivery state".into(),
+            ));
+        }
+        pending.push(PendingWakeReceipt {
+            execution_id,
+            revision: stored_u64(revision, "wake revision")?,
+            dedup_key,
+            condition,
+            created_at,
+        });
+    }
+    Ok(pending)
+}
+
+fn verify_delivered_signal_dedup_on(
+    connection: &Connection,
+    kind: &str,
+    correlation_id: &str,
+) -> TaskRuntimeResult<()> {
+    let condition = WakeCondition::Signal {
+        kind: kind.into(),
+        correlation_id: correlation_id.into(),
+    };
+    let canonical_condition = serde_json::to_string(&condition)?;
+    let mut statement = connection.prepare(
+        "SELECT execution_id, revision, dedup_key, delivery_json, created_at, delivered_at
+         FROM execution_wakes
+         WHERE status = 'delivered' AND condition_json = ?1
+         ORDER BY execution_id, revision, dedup_key",
+    )?;
+    let rows = statement.query_map([&canonical_condition], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, Option<i64>>(5)?,
+        ))
+    })?;
+    for row in rows {
+        let (execution_id, revision, dedup_key, delivery_json, created_at, delivered_at) = row?;
+        let delivery_json = delivery_json.ok_or_else(|| {
+            TaskRuntimeError::Store("delivered signal has no delivery JSON".into())
+        })?;
+        let delivered_at = delivered_at.ok_or_else(|| {
+            TaskRuntimeError::Store("delivered signal has no delivery timestamp".into())
+        })?;
+        let delivery: WakeDelivery = serde_json::from_str(&delivery_json)?;
+        if dedup_key != condition.dedup_key()
+            || delivery_json != serde_json::to_string(&delivery)?
+            || delivery.condition != condition
+            || delivery.dedup_key != dedup_key
+            || delivery.delivered_at_unix_seconds != delivered_at
+            || delivered_at < created_at
+        {
+            return Err(TaskRuntimeError::Store(
+                "stored delivered signal receipt is not canonical".into(),
+            ));
+        }
+        verify_delivered_receipt_journal_on(
+            connection,
+            &execution_id,
+            stored_u64(revision, "wake revision")?,
+            &condition,
+            &delivery,
+            created_at,
+            delivered_at,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_delivered_receipt_journal_on(
+    connection: &Connection,
+    execution_id: &str,
+    revision: u64,
+    condition: &WakeCondition,
+    delivery: &WakeDelivery,
+    created_at: i64,
+    delivered_at: i64,
+) -> TaskRuntimeResult<()> {
+    let (_, journal) = load_validated_journal_on(connection, execution_id)?.ok_or_else(|| {
+        TaskRuntimeError::Store("delivered wake receipt has no execution journal".into())
+    })?;
+    let prior = journal.revision(revision).ok_or_else(|| {
+        TaskRuntimeError::Store("delivered wake receipt references an unknown revision".into())
+    })?;
+    let suspended_condition = match prior.record.outcome.as_ref().map(AsRef::as_ref) {
+        Some(ExecutionOutcome::Suspended { wake, .. }) => wake,
+        _ => {
+            return Err(TaskRuntimeError::Store(
+                "delivered wake receipt does not reference a suspended outcome".into(),
+            ));
+        }
+    };
+    let transition = prior.wake_transition.as_ref().ok_or_else(|| {
+        TaskRuntimeError::Store("delivered wake receipt has no journal delivery evidence".into())
+    })?;
+    if suspended_condition != condition
+        || prior.outcome_committed_at != Some(created_at)
+        || transition.delivery != *delivery
+        || transition.created_at != delivered_at
+    {
+        return Err(TaskRuntimeError::Store(
+            "delivered wake receipt does not match its journal evidence".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn deliver_pending_wake_on(
+    connection: &Connection,
+    receipt: &PendingWakeReceipt,
+    payload: Value,
+    delivered_at: i64,
+) -> TaskRuntimeResult<()> {
+    let (_, journal) =
+        load_validated_journal_on(connection, &receipt.execution_id)?.ok_or_else(|| {
+            TaskRuntimeError::Store("wake receipt has no authoritative execution journal".into())
+        })?;
+    let prior = journal.revision(receipt.revision).ok_or_else(|| {
+        TaskRuntimeError::Store("wake receipt references an unknown execution revision".into())
+    })?;
+    if journal.latest()?.record.contract.as_ref().revision != receipt.revision {
+        return Err(TaskRuntimeError::Store(
+            "pending wake receipt does not belong to the latest execution revision".into(),
+        ));
+    }
+    verify_registered_wake_on(
+        connection,
+        &receipt.execution_id,
+        sqlite_integer_from_store(receipt.revision, "wake revision")?,
+        prior
+            .record
+            .outcome
+            .as_ref()
+            .ok_or_else(|| TaskRuntimeError::Store("wake revision has no outcome".into()))?
+            .as_ref(),
+        prior.outcome_committed_at,
+        prior.wake_transition.as_ref(),
+    )?;
+    if delivered_at < receipt.created_at {
+        return Err(TaskRuntimeError::InvalidTransition(
+            "wake delivery predates its suspended outcome".into(),
+        ));
+    }
+    let next_revision = receipt.revision.checked_add(1).ok_or_else(|| {
+        TaskRuntimeError::InvalidTransition("execution revision exhausted".into())
+    })?;
+    let delivery = WakeDelivery {
+        condition: receipt.condition.clone(),
+        dedup_key: receipt.dedup_key.clone(),
+        payload,
+        delivered_at_unix_seconds: delivered_at,
+    };
+    append_journal_event_on(
+        connection,
+        &receipt.execution_id,
+        sqlite_integer_from_store(receipt.revision, "wake revision")?,
+        &ExecutionJournalEvent::WakeDelivered {
+            version: JOURNAL_EVENT_VERSION,
+            delivery: delivery.clone(),
+            next_revision,
+        },
+        delivered_at,
+    )?;
+    let updated = connection.execute(
+        "UPDATE execution_wakes
+         SET status = 'delivered', delivery_json = ?1, delivered_at = ?2
+         WHERE execution_id = ?3 AND revision = ?4 AND dedup_key = ?5
+           AND status = 'pending' AND delivery_json IS NULL AND delivered_at IS NULL",
+        params![
+            serde_json::to_string(&delivery)?,
+            delivered_at,
+            receipt.execution_id,
+            sqlite_integer_from_store(receipt.revision, "wake revision")?,
+            receipt.dedup_key,
+        ],
+    )?;
+    if updated != 1 {
+        return Err(TaskRuntimeError::Conflict(
+            "wake receipt was delivered concurrently".into(),
+        ));
+    }
+
+    let (checkpoint, producer_schema_version) =
+        match prior.record.outcome.as_ref().map(AsRef::as_ref) {
+            Some(ExecutionOutcome::Suspended { checkpoint, .. }) => (
+                checkpoint.checkpoint_id(),
+                checkpoint.producer_schema_version,
+            ),
+            _ => {
+                return Err(TaskRuntimeError::Store(
+                    "wake receipt does not reference a suspended outcome".into(),
+                ));
+            }
+        };
+    let prior_contract = prior.record.contract.as_ref();
+    let next_fencing_token = prior_contract.fencing_token.checked_add(1).ok_or_else(|| {
+        TaskRuntimeError::InvalidTransition("execution fencing token exhausted".into())
+    })?;
+    let mut next_contract = prior_contract.clone();
+    next_contract.revision = next_revision;
+    next_contract.fencing_token = next_fencing_token;
+    next_contract.checkpoint = Some(CheckpointRef {
+        checkpoint_id: checkpoint.into(),
+        producer_schema_version,
+    });
+    next_contract.wake = Some(delivery);
+    let next_contract = ValidatedExecutionContract::try_from(next_contract).map_err(|error| {
+        TaskRuntimeError::Store(format!(
+            "generated wake revision contract is invalid: {error}"
+        ))
+    })?;
+    match start_execution_revision_on(connection, &next_contract)? {
+        StartExecutionRevision::Inserted(_) => {}
+        StartExecutionRevision::Existing(_) => {
+            return Err(TaskRuntimeError::Conflict(
+                "pending wake already has a started execution revision".into(),
+            ));
+        }
+    }
+    project_legacy_task_ready_on(connection, next_contract.as_ref(), delivered_at)
+}
+
+fn project_legacy_task_ready_on(
+    connection: &Connection,
+    contract: &ExecutionContract,
+    updated_at: i64,
+) -> TaskRuntimeResult<()> {
+    let task_json = connection
+        .query_row(
+            "SELECT task_json FROM tasks
+             WHERE task_id = ?1 AND user_id = ?2 AND workspace_id = ?3",
+            params![
+                contract.execution_id,
+                contract.scope.user_id,
+                contract.scope.workspace_id,
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(task_json) = task_json else {
+        return Ok(());
+    };
+    let mut task: TaskRecord = serde_json::from_str(&task_json)?;
+    task.status = TaskStatus::Queued;
+    task.blocked_reason = None;
+    task.updated_at = OffsetDateTime::from_unix_timestamp(updated_at).map_err(|error| {
+        TaskRuntimeError::Store(format!("wake delivery timestamp is invalid: {error}"))
+    })?;
+    let updated = connection.execute(
+        "UPDATE tasks
+         SET status = 'queued', blocked_reason = NULL, updated_at = ?1, task_json = ?2
+         WHERE task_id = ?3 AND user_id = ?4 AND workspace_id = ?5",
+        params![
+            updated_at,
+            serde_json::to_string(&task)?,
+            contract.execution_id,
+            contract.scope.user_id,
+            contract.scope.workspace_id,
+        ],
+    )?;
+    if updated != 1 {
+        return Err(TaskRuntimeError::Store(
+            "matching legacy task disappeared during wake projection".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn register_suspended_wake_on(
+    connection: &Connection,
+    execution_id: &str,
+    revision: i64,
+    outcome: &ExecutionOutcome,
+    created_at: i64,
+) -> TaskRuntimeResult<()> {
+    let ExecutionOutcome::Suspended { wake, .. } = outcome else {
+        return Ok(());
+    };
+    connection.execute(
+        "INSERT INTO execution_wakes (
+            execution_id, revision, dedup_key, condition_json, status,
+            delivery_json, created_at, delivered_at
+         ) VALUES (?1, ?2, ?3, ?4, 'pending', NULL, ?5, NULL)",
+        params![
+            execution_id,
+            revision,
+            wake.dedup_key(),
+            serde_json::to_string(wake)?,
+            created_at,
+        ],
+    )?;
+    verify_registered_wake_on(
+        connection,
+        execution_id,
+        revision,
+        outcome,
+        Some(created_at),
+        None,
+    )
+}
+
+fn verify_registered_wake_on(
+    connection: &Connection,
+    execution_id: &str,
+    revision: i64,
+    outcome: &ExecutionOutcome,
+    outcome_committed_at: Option<i64>,
+    wake_transition: Option<&WakeTransitionEvidence>,
+) -> TaskRuntimeResult<()> {
+    let ExecutionOutcome::Suspended { wake, .. } = outcome else {
+        return Ok(());
+    };
+    let count = connection.query_row(
+        "SELECT COUNT(*) FROM execution_wakes WHERE execution_id = ?1 AND revision = ?2",
+        params![execution_id, revision],
+        |row| row.get::<_, i64>(0),
+    )?;
+    if count != 1 {
+        return Err(TaskRuntimeError::InvalidTransition(
+            "suspended outcome does not have exactly one wake receipt".into(),
+        ));
+    }
+    let row = connection
+        .query_row(
+            "SELECT dedup_key, condition_json, status, delivery_json, created_at, delivered_at
+             FROM execution_wakes
+             WHERE execution_id = ?1 AND revision = ?2 AND dedup_key = ?3",
+            params![execution_id, revision, wake.dedup_key()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| {
+            TaskRuntimeError::InvalidTransition(
+                "suspended outcome wake receipt is missing or conflicting".into(),
+            )
+        })?;
+    let canonical_condition = serde_json::to_string(wake)?;
+    let canonical_delivery = wake_transition
+        .map(|transition| serde_json::to_string(&transition.delivery))
+        .transpose()?;
+    let state_matches = match wake_transition {
+        None => row.2 == "pending" && row.3.is_none() && row.5.is_none(),
+        Some(transition) => {
+            row.2 == "delivered"
+                && row.3.as_deref() == canonical_delivery.as_deref()
+                && row.5 == Some(transition.delivery.delivered_at_unix_seconds)
+        }
+    };
+    if row.0 != wake.dedup_key()
+        || row.1 != canonical_condition
+        || Some(row.4) != outcome_committed_at
+        || !state_matches
+    {
+        return Err(TaskRuntimeError::InvalidTransition(
+            "suspended outcome wake receipt is not canonical journal-matched state".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn start_execution_revision_on(
@@ -437,7 +959,17 @@ pub(crate) fn start_execution_revision_on(
         validate_revision_transition(&prior.record, contract).map_err(|reason| {
             TaskRuntimeError::InvalidTransition(format!("invalid execution revision: {reason}"))
         })?;
-        verify_delivered_wake_on(connection, prior, contract)?;
+        let wake_transition = verify_delivered_wake_on(connection, prior, contract)?;
+        let started_at = events
+            .iter()
+            .find(|event| event.revision == raw.revision && event.seq == 1)
+            .map(|event| event.created_at)
+            .ok_or_else(|| TaskRuntimeError::Store("revision-start event disappeared".into()))?;
+        if started_at != wake_transition.created_at {
+            return Err(TaskRuntimeError::Store(
+                "revision-start timestamp does not match wake delivery".into(),
+            ));
+        }
         write_projection_on(connection, latest)?;
         let record = latest.record.clone();
         return Ok(StartExecutionRevision::Existing(record));
@@ -460,9 +992,8 @@ pub(crate) fn start_execution_revision_on(
     validate_revision_transition(&latest.record, contract).map_err(|reason| {
         TaskRuntimeError::InvalidTransition(format!("invalid execution revision: {reason}"))
     })?;
-    verify_delivered_wake_on(connection, latest, contract)?;
+    let wake_transition = verify_delivered_wake_on(connection, latest, contract)?;
 
-    let now = OffsetDateTime::now_utc().unix_timestamp();
     append_journal_event_on(
         connection,
         execution_id,
@@ -472,7 +1003,7 @@ pub(crate) fn start_execution_revision_on(
             previous_revision: raw.revision - 1,
             contract: raw.clone(),
         },
-        now,
+        wake_transition.created_at,
     )?;
     let (_, journal) = load_validated_journal_on(connection, execution_id)?
         .ok_or_else(|| TaskRuntimeError::Store("started revision disappeared".into()))?;
@@ -482,11 +1013,11 @@ pub(crate) fn start_execution_revision_on(
     Ok(StartExecutionRevision::Inserted(record))
 }
 
-fn verify_delivered_wake_on(
+fn verify_delivered_wake_on<'a>(
     connection: &Connection,
-    prior: &FoldedExecution,
+    prior: &'a FoldedExecution,
     next: &ValidatedExecutionContract,
-) -> TaskRuntimeResult<()> {
+) -> TaskRuntimeResult<&'a WakeTransitionEvidence> {
     let (condition, prior_revision) = match prior.record.outcome.as_ref().map(AsRef::as_ref) {
         Some(ExecutionOutcome::Suspended { wake, .. }) => {
             (wake, prior.record.contract.as_ref().revision)
@@ -500,6 +1031,19 @@ fn verify_delivered_wake_on(
     let delivery = next.as_ref().wake.as_ref().ok_or_else(|| {
         TaskRuntimeError::InvalidTransition("next revision has no wake delivery".into())
     })?;
+    let wake_transition = prior.wake_transition.as_ref().ok_or_else(|| {
+        TaskRuntimeError::InvalidTransition(
+            "prior revision has no authoritative wake-delivery event".into(),
+        )
+    })?;
+    if wake_transition.delivery != *delivery
+        || wake_transition.next_revision != next.as_ref().revision
+        || wake_transition.created_at != delivery.delivered_at_unix_seconds
+    {
+        return Err(TaskRuntimeError::InvalidTransition(
+            "journal wake delivery does not authenticate the revision start".into(),
+        ));
+    }
     let revision = sqlite_integer(prior_revision, "prior execution revision")?;
     let row = connection
         .query_row(
@@ -543,7 +1087,7 @@ fn verify_delivered_wake_on(
             "durable wake delivery does not authenticate the revision start".into(),
         ));
     }
-    Ok(())
+    Ok(wake_transition)
 }
 
 pub(crate) fn migrate_execution_schema_v13(connection: &Connection) -> TaskRuntimeResult<()> {
@@ -554,7 +1098,7 @@ pub(crate) fn migrate_execution_schema_v13(connection: &Connection) -> TaskRunti
     let tx = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
     let projections = read_migration_projections(&tx)?;
     let raw_events = read_raw_migration_events(&tx)?;
-    let events_by_execution = transform_migration_events(raw_events, &projections)?;
+    let events_by_execution = transform_migration_events(&tx, raw_events, &projections)?;
     for execution_id in projections.keys() {
         if !events_by_execution.contains_key(execution_id) {
             return Err(TaskRuntimeError::Store(format!(
@@ -611,7 +1155,7 @@ pub(crate) fn migrate_execution_schema_v13(connection: &Connection) -> TaskRunti
             revision INTEGER NOT NULL CHECK(revision > 0),
             dedup_key TEXT NOT NULL CHECK(length(trim(dedup_key)) > 0),
             condition_json TEXT NOT NULL,
-            status TEXT NOT NULL CHECK(length(trim(status)) > 0),
+            status TEXT NOT NULL CHECK(status IN ('pending', 'delivered')),
             delivery_json TEXT,
             created_at INTEGER NOT NULL,
             delivered_at INTEGER,
@@ -707,7 +1251,7 @@ fn execution_tables_need_v13_rebuild(connection: &Connection) -> TaskRuntimeResu
             [
                 "check(revision>0)",
                 "check(length(trim(dedup_key))>0)",
-                "check(length(trim(status))>0)",
+                "check(statusin('pending','delivered'))",
             ]
             .as_slice(),
         ),
@@ -796,9 +1340,17 @@ fn read_raw_migration_events(connection: &Connection) -> TaskRuntimeResult<Vec<R
 }
 
 fn transform_migration_events(
+    connection: &Connection,
     raw_events: Vec<RawMigrationEvent>,
     projections: &BTreeMap<String, MigrationProjection>,
 ) -> TaskRuntimeResult<BTreeMap<String, Vec<ExecutionEvent>>> {
+    let mut next_event_id = raw_events
+        .iter()
+        .map(|event| event.event_id)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| TaskRuntimeError::Store("execution event identity exhausted".into()))?;
     let mut raw_by_execution: BTreeMap<String, Vec<RawMigrationEvent>> = BTreeMap::new();
     for event in raw_events {
         raw_by_execution
@@ -814,7 +1366,7 @@ fn transform_migration_events(
                 serde_json::from_str::<ExecutionJournalEvent>(&event.payload_json).is_ok()
             })
             .count();
-        let events = if typed_count == raw.len() {
+        let mut events = if typed_count == raw.len() {
             raw.into_iter()
                 .map(raw_typed_migration_event)
                 .collect::<TaskRuntimeResult<Vec<_>>>()?
@@ -830,6 +1382,7 @@ fn transform_migration_events(
                 "execution journal mixes legacy and typed payloads: {execution_id}"
             )));
         };
+        upgrade_typed_wake_events_on(connection, &execution_id, &mut events, &mut next_event_id)?;
         let folded = fold_journal(&events, &execution_id)?;
         if let Some(projection) = projections.get(&execution_id)
             && (folded.latest()?.record != projection.record
@@ -842,6 +1395,145 @@ fn transform_migration_events(
         transformed.insert(execution_id, events);
     }
     Ok(transformed)
+}
+
+fn upgrade_typed_wake_events_on(
+    connection: &Connection,
+    execution_id: &str,
+    events: &mut Vec<ExecutionEvent>,
+    next_event_id: &mut i64,
+) -> TaskRuntimeResult<()> {
+    let suspended = events
+        .iter()
+        .filter_map(|event| match &event.event {
+            ExecutionJournalEvent::OutcomeCommitted {
+                outcome: ExecutionOutcome::Suspended { wake, .. },
+                ..
+            } => Some((event.revision, event.created_at, wake.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for (revision, suspended_at, wake) in suspended {
+        if events.iter().any(|event| {
+            event.revision == revision
+                && matches!(event.event, ExecutionJournalEvent::WakeDelivered { .. })
+        }) {
+            continue;
+        }
+        let next_revision = revision.checked_add(1).ok_or_else(|| {
+            TaskRuntimeError::Store("execution revision sequence exhausted".into())
+        })?;
+        let later_start = events.iter().find(|event| {
+            event.revision == next_revision
+                && matches!(event.event, ExecutionJournalEvent::RevisionStarted { .. })
+        });
+        let row = connection
+            .query_row(
+                "SELECT condition_json, status, delivery_json, created_at, delivered_at
+                 FROM execution_wakes
+                 WHERE execution_id = ?1 AND revision = ?2 AND dedup_key = ?3",
+                params![
+                    execution_id,
+                    sqlite_integer_from_store(revision, "wake revision")?,
+                    wake.dedup_key(),
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((condition_json, status, delivery_json, created_at, delivered_at)) = row else {
+            if later_start.is_some() {
+                return Err(TaskRuntimeError::Store(
+                    "typed revision-start history has no wake receipt to upgrade".into(),
+                ));
+            }
+            continue;
+        };
+        if condition_json != serde_json::to_string(&wake)? || created_at != suspended_at {
+            return Err(TaskRuntimeError::Store(
+                "typed wake receipt is not canonical for migration".into(),
+            ));
+        }
+        if status == "pending" && delivery_json.is_none() && delivered_at.is_none() {
+            if later_start.is_some() {
+                return Err(TaskRuntimeError::Store(
+                    "typed revision-start history still has a pending wake".into(),
+                ));
+            }
+            continue;
+        }
+        if status != "delivered" {
+            return Err(TaskRuntimeError::Store(
+                "typed wake receipt has an unsupported migration status".into(),
+            ));
+        }
+        let delivery_json = delivery_json
+            .ok_or_else(|| TaskRuntimeError::Store("typed delivered wake has no payload".into()))?;
+        let delivered_at = delivered_at.ok_or_else(|| {
+            TaskRuntimeError::Store("typed delivered wake has no timestamp".into())
+        })?;
+        let delivery: WakeDelivery = serde_json::from_str(&delivery_json)?;
+        if delivery_json != serde_json::to_string(&delivery)?
+            || delivery.condition != wake
+            || delivery.dedup_key != wake.dedup_key()
+            || delivery.delivered_at_unix_seconds != delivered_at
+            || delivered_at < suspended_at
+        {
+            return Err(TaskRuntimeError::Store(
+                "typed delivered wake is not canonical for migration".into(),
+            ));
+        }
+        if let Some(later_start) = later_start {
+            let started_contract = match &later_start.event {
+                ExecutionJournalEvent::RevisionStarted { contract, .. } => contract,
+                _ => unreachable!(),
+            };
+            if started_contract.wake.as_ref() != Some(&delivery)
+                || later_start.created_at != delivered_at
+            {
+                return Err(TaskRuntimeError::Store(
+                    "typed revision-start does not match its migrated wake delivery".into(),
+                ));
+            }
+        }
+        let seq = events
+            .iter()
+            .filter(|event| event.revision == revision)
+            .map(|event| event.seq)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| TaskRuntimeError::Store("execution event sequence exhausted".into()))?;
+        events.push(ExecutionEvent {
+            event_id: *next_event_id,
+            execution_id: execution_id.into(),
+            revision,
+            seq,
+            event: ExecutionJournalEvent::WakeDelivered {
+                version: JOURNAL_EVENT_VERSION,
+                delivery,
+                next_revision,
+            },
+            created_at: delivered_at,
+        });
+        *next_event_id = next_event_id
+            .checked_add(1)
+            .ok_or_else(|| TaskRuntimeError::Store("execution event identity exhausted".into()))?;
+    }
+    events.sort_by(|left, right| {
+        left.revision
+            .cmp(&right.revision)
+            .then_with(|| left.seq.cmp(&right.seq))
+            .then_with(|| left.event_id.cmp(&right.event_id))
+    });
+    Ok(())
 }
 
 fn raw_typed_migration_event(raw: RawMigrationEvent) -> TaskRuntimeResult<ExecutionEvent> {
@@ -1090,6 +1782,7 @@ fn fold_journal(events: &[ExecutionEvent], execution_id: &str) -> TaskRuntimeRes
                         updated_at: event.created_at,
                     },
                     outcome_committed_at: None,
+                    wake_transition: None,
                 });
             }
             ExecutionJournalEvent::RevisionStarted {
@@ -1137,6 +1830,19 @@ fn fold_journal(events: &[ExecutionEvent], execution_id: &str) -> TaskRuntimeRes
                         "stored execution revision transition is invalid: {reason}"
                     ))
                 })?;
+                let wake_transition = prior.wake_transition.as_ref().ok_or_else(|| {
+                    TaskRuntimeError::Store(
+                        "revision-start has no authoritative wake-delivery event".into(),
+                    )
+                })?;
+                if wake_transition.next_revision != event.revision
+                    || contract.as_ref().wake.as_ref() != Some(&wake_transition.delivery)
+                    || event.created_at != wake_transition.created_at
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "revision-start does not match its wake-delivery event".into(),
+                    ));
+                }
                 revisions.push(FoldedExecution {
                     record: ExecutionRecord {
                         contract,
@@ -1146,6 +1852,7 @@ fn fold_journal(events: &[ExecutionEvent], execution_id: &str) -> TaskRuntimeRes
                         updated_at: event.created_at,
                     },
                     outcome_committed_at: None,
+                    wake_transition: None,
                 });
             }
             ExecutionJournalEvent::FenceAdvanced {
@@ -1213,6 +1920,55 @@ fn fold_journal(events: &[ExecutionEvent], execution_id: &str) -> TaskRuntimeRes
                 current.record.outcome = Some(outcome);
                 current.record.updated_at = event.created_at;
                 current.outcome_committed_at = Some(event.created_at);
+            }
+            ExecutionJournalEvent::WakeDelivered {
+                version,
+                delivery,
+                next_revision,
+            } => {
+                require_event_version(*version)?;
+                let current = revisions.last_mut().ok_or_else(|| {
+                    TaskRuntimeError::Store("wake event precedes execution creation".into())
+                })?;
+                if current.record.contract.as_ref().revision != event.revision {
+                    return Err(TaskRuntimeError::Store(
+                        "wake event does not belong to the current revision".into(),
+                    ));
+                }
+                if current.wake_transition.is_some() {
+                    return Err(TaskRuntimeError::Store(
+                        "execution revision contains more than one wake delivery".into(),
+                    ));
+                }
+                let outcome_at = current.outcome_committed_at.ok_or_else(|| {
+                    TaskRuntimeError::Store("wake event precedes a suspended outcome".into())
+                })?;
+                let wake = match current.record.outcome.as_ref().map(AsRef::as_ref) {
+                    Some(ExecutionOutcome::Suspended { wake, .. }) => wake,
+                    _ => {
+                        return Err(TaskRuntimeError::Store(
+                            "wake event does not follow a suspended outcome".into(),
+                        ));
+                    }
+                };
+                let expected_next_revision = event.revision.checked_add(1).ok_or_else(|| {
+                    TaskRuntimeError::Store("execution revision sequence exhausted".into())
+                })?;
+                if *next_revision != expected_next_revision
+                    || delivery.condition != *wake
+                    || delivery.dedup_key != wake.dedup_key()
+                    || delivery.delivered_at_unix_seconds != event.created_at
+                    || event.created_at < outcome_at
+                {
+                    return Err(TaskRuntimeError::Store(
+                        "wake-delivery event is not canonical or causal".into(),
+                    ));
+                }
+                current.wake_transition = Some(WakeTransitionEvidence {
+                    delivery: delivery.clone(),
+                    next_revision: *next_revision,
+                    created_at: event.created_at,
+                });
             }
         }
     }
@@ -1285,8 +2041,15 @@ fn validate_revision_transition(
             "schema, objective, input, policy, resources, and budget must remain stable".into(),
         );
     }
-    if next_contract.fencing_token <= prior_contract.fencing_token {
-        return Err("fencing token must strictly increase across revisions".into());
+    let expected_fencing_token = prior_contract
+        .fencing_token
+        .checked_add(1)
+        .ok_or_else(|| "execution fencing token exhausted".to_string())?;
+    if next_contract.fencing_token != expected_fencing_token {
+        return Err(format!(
+            "fencing token must advance from {} to {expected_fencing_token}",
+            prior_contract.fencing_token
+        ));
     }
 
     let (wake, checkpoint) = match prior.outcome.as_ref().map(AsRef::as_ref) {
@@ -1545,6 +2308,7 @@ fn journal_event_kind(event: &ExecutionJournalEvent) -> &'static str {
         ExecutionJournalEvent::RevisionStarted { .. } => "revision_started",
         ExecutionJournalEvent::FenceAdvanced { .. } => "fence_advanced",
         ExecutionJournalEvent::OutcomeCommitted { .. } => "outcome_committed",
+        ExecutionJournalEvent::WakeDelivered { .. } => "wake_delivered",
     }
 }
 

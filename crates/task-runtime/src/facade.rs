@@ -55,6 +55,7 @@ impl TaskRuntime {
         workspace_id: &WorkspaceId,
         now: OffsetDateTime,
     ) -> TaskRuntimeResult<RunReadySummary> {
+        self.store.wake_due_executions(now, usize::MAX)?;
         self.requeue_waiting_resource_tasks(user_id, workspace_id)?;
         let ready =
             self.scheduler
