@@ -1208,6 +1208,180 @@ fn populated_v11_database_migrates_to_constrained_v12() {
 }
 
 #[test]
+fn legacy_v12_wake_foreign_key_is_migrated_in_place_without_data_loss() {
+    let (path, store) = file_store();
+    let revision_one = contract("exec-legacy-wake-migration", 1, 1);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 2);
+    let wake = match suspended.as_ref() {
+        ExecutionOutcome::Suspended { wake, .. } => wake,
+        _ => unreachable!(),
+    };
+    let delivery = revision_two.as_ref().wake.as_ref().unwrap();
+    let expected = (
+        "exec-legacy-wake-migration".to_string(),
+        1_i64,
+        wake.dedup_key(),
+        serde_json::to_string(wake).unwrap(),
+        "delivered".to_string(),
+        serde_json::to_string(delivery).unwrap(),
+        100_i64,
+        101_i64,
+    );
+    drop(store);
+
+    let connection = raw_connection(&path);
+    connection
+        .execute_batch(
+            "DROP TABLE execution_wakes;
+             CREATE TABLE execution_wakes (
+                execution_id TEXT NOT NULL,
+                revision INTEGER NOT NULL CHECK(revision > 0),
+                dedup_key TEXT NOT NULL CHECK(length(trim(dedup_key)) > 0),
+                condition_json TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(length(trim(status)) > 0),
+                delivery_json TEXT,
+                created_at INTEGER NOT NULL,
+                delivered_at INTEGER,
+                PRIMARY KEY(execution_id, revision, dedup_key),
+                FOREIGN KEY(execution_id, revision)
+                    REFERENCES executions(execution_id, revision) ON DELETE CASCADE,
+                CHECK(
+                    (delivery_json IS NULL AND delivered_at IS NULL)
+                    OR (delivery_json IS NOT NULL AND delivered_at IS NOT NULL)
+                ),
+                CHECK(delivered_at IS NULL OR delivered_at >= created_at)
+             );",
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO execution_wakes (
+                execution_id, revision, dedup_key, condition_json, status,
+                delivery_json, created_at, delivered_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                expected.0, expected.1, expected.2, expected.3, expected.4, expected.5, expected.6,
+                expected.7,
+            ],
+        )
+        .unwrap();
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_list('execution_wakes')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        2
+    );
+    drop(connection);
+
+    let migrated = TaskStore::open(&path).unwrap();
+    assert_eq!(migrated.schema_version().unwrap(), 12);
+    let connection = raw_connection(&path);
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_list('execution_wakes')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
+    let load_wake = || {
+        connection.query_row(
+            "SELECT execution_id, revision, dedup_key, condition_json, status,
+                    delivery_json, created_at, delivered_at
+             FROM execution_wakes WHERE execution_id = ?1 AND revision = 1",
+            ["exec-legacy-wake-migration"],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )
+    };
+    assert_eq!(load_wake().unwrap(), expected);
+
+    migrated.start_execution_revision(&revision_two).unwrap();
+    assert_eq!(
+        migrated
+            .execution("exec-legacy-wake-migration")
+            .unwrap()
+            .unwrap()
+            .contract
+            .as_ref()
+            .revision,
+        2
+    );
+    assert_eq!(load_wake().unwrap(), expected);
+    connection
+        .execute(
+            "DELETE FROM executions WHERE execution_id = ?1",
+            ["exec-legacy-wake-migration"],
+        )
+        .unwrap();
+    assert_eq!(load_wake().unwrap(), expected);
+    let rebuilt = migrated
+        .rebuild_execution_projection("exec-legacy-wake-migration")
+        .unwrap();
+    assert_eq!(rebuilt.contract.as_ref().revision, 2);
+    assert_eq!(load_wake().unwrap(), expected);
+
+    drop(connection);
+    drop(migrated);
+    let reopened = TaskStore::open(&path).unwrap();
+    let connection = raw_connection(&path);
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_foreign_key_list('execution_wakes')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
+    let preserved = connection
+        .query_row(
+            "SELECT execution_id, revision, dedup_key, condition_json, status,
+                    delivery_json, created_at, delivered_at
+             FROM execution_wakes WHERE execution_id = ?1 AND revision = 1",
+            ["exec-legacy-wake-migration"],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(preserved, expected);
+
+    drop(connection);
+    drop(reopened);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn competing_different_outcomes_commit_exactly_one() {
     let (path, seed) = file_store();
     let contract = contract("exec-race-different", 1, 1);
