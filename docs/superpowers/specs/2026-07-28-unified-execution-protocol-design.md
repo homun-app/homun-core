@@ -11,10 +11,10 @@ automations, browser operations, host-computer work, connectors, subagents,
 filesystem operations, artifacts, timers, and resumed work must not have distinct
 lifecycle APIs.
 
-The conceptual public entry point is always:
+The conceptual public entry point is always asynchronous:
 
 ```rust
-execute(contract) -> ExecutionOutcome
+async execute(contract) -> ExecutionOutcome
 ```
 
 Domain implementations may extend the contract payload and implement domain
@@ -67,6 +67,7 @@ pub struct ExecutionContract {
     pub parent_execution_id: Option<ExecutionId>,
     pub kind: ExecutionKind,
     pub revision: u64,
+    pub fencing_token: FencingToken,
     pub scope: ExecutionScope,
     pub objective: ObjectiveRef,
     pub input: serde_json::Value,
@@ -95,16 +96,30 @@ pub enum WakeCondition {
     Signal { kind: String, correlation_id: String },
     Resource { class: ResourceClass },
     ModelAvailable { role: String },
-    User { wait: HitlEnvelope },
+    User { wait: UserWaitRef },
     Approval { approval: ApprovalRef },
     EffectResolution { receipt: EffectReceiptRef },
+}
+
+pub struct ExecutionFailure {
+    pub class: FailureClass,
+    pub code: String,
+    pub redacted_detail: String,
+}
+
+pub enum FailureClass {
+    Transient,
+    Permanent,
+    PolicyDenied,
 }
 ```
 
 These four outcomes are the only lifecycle variants. `Parked` is represented as a
 suspension on `ModelAvailable`; HITL, approval, uncertain effects, `WaitingTime`,
 `WaitingExternalEvent`, and `WaitingResource` are projections of
-`WakeCondition`, not separate producer contracts.
+`WakeCondition`, not separate producer contracts. Protocol references are neutral:
+domain payloads such as a HITL envelope, browser draft, or connector request remain
+owned by their adapter and are resolved through scoped references.
 
 ## Extension model
 
@@ -114,11 +129,11 @@ or call adapters directly.
 
 ```rust
 pub trait ExecutionAdapter {
-    fn execute(
-        &mut self,
-        contract: &ExecutionContract,
-        context: &ExecutionContext,
-    ) -> ExecutionOutcome;
+    fn execute<'a>(
+        &'a mut self,
+        contract: &'a ExecutionContract,
+        context: &'a ExecutionContext,
+    ) -> futures::future::BoxFuture<'a, ExecutionOutcome>;
 }
 ```
 
@@ -127,9 +142,16 @@ services. It cannot persist task/run/message status, mint custom wait states, or
 resume itself. The runtime validates the returned outcome against the contract's
 policy before committing it.
 
-An agent turn is an execution kind. Each consequential tool action is a child
-execution using the same protocol and `parent_execution_id`; it is not dispatched
-through an unrelated tool lifecycle.
+An agent turn is an execution kind. A tool action becomes a child execution using
+the same protocol and `parent_execution_id` when it is effectful, suspendable,
+remote, long-running, or must recover after a crash. Pure functions and bounded
+internal reads remain inside the current execution slice; they do not create
+durable task noise or a second lifecycle.
+
+The runtime owns an event sink backed by the canonical journal. Adapters publish
+progress through the supplied context; callers observe journal events by
+`execution_id`. Streaming therefore does not introduce a second execution or
+terminal API.
 
 ## Effect protocol
 
@@ -170,6 +192,10 @@ Projection failure does not change the committed outcome. It is retried from the
 journal. This removes crash windows where visible text is delivered while task or
 run remains active.
 
+Outcome commit uses compare-and-swap on `(execution_id, revision, fencing_token)`.
+A stale worker may append no outcome after its lease has been recovered or stolen,
+even if its model, browser, or connector call returns later.
+
 ## Suspend and resume
 
 All suspension uses `ExecutionOutcome::Suspended`. The scheduler owns wake-up:
@@ -188,6 +214,11 @@ delivery. Domain-specific `resume_*` entry points are not permitted.
 HITL Free and approval Hold preserve their product distinction, but resolution
 also produces a typed wake delivery and re-enters the same execution protocol.
 
+Adapters report failures with `Transient`, `Permanent`, or `PolicyDenied` class.
+Before commit, the runtime alone applies `ExecutionBudget` and retry policy: an
+eligible transient failure is normalized to `Suspended` with an `At` wake;
+otherwise it remains terminal `Failed`. Adapters cannot schedule their own retry.
+
 ## Checkpoint contract
 
 Every checkpoint uses one envelope containing schema version, execution identity,
@@ -202,6 +233,12 @@ Long histories use `continue_as_new`: a completed execution revision creates a
 new linked execution with a compacted checkpoint and preserved objective lineage.
 External multi-step workflows may register compensations on completed receipts;
 compensations run in reverse order through the same execution protocol.
+
+The runtime does not attempt Temporal-style deterministic replay of model calls.
+LLM and remote decisions are non-deterministic activities whose committed results,
+checkpoints, and receipts are reused. Replay is limited to the canonical journal
+and its idempotent projections; a resumed model starts from the committed
+checkpoint and never regenerates an already committed effect decision.
 
 ## Migration and deletion order
 
@@ -236,6 +273,8 @@ Contract tests must cover the same protocol for:
 - browser checkpoint recovery;
 - connector write and uncertain remote outcome;
 - cancellation racing completion;
+- a stale fencing token attempting a late outcome commit;
+- transient failure normalized by the runtime rather than the adapter;
 - projection failure followed by replay;
 - continue-as-new lineage and compensation.
 
