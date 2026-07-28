@@ -2466,3 +2466,33 @@ fn fence_and_outcome_race_leaves_one_valid_journal_projection() {
     drop(store);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn committed_execution_scan_returns_only_authoritative_outcomes() {
+    let (path, store) = file_store();
+    let pending = contract("exec-pending-scan", 1, 1);
+    let committed = contract("exec-committed-scan", 1, 1);
+    store.create_execution(&pending).unwrap();
+    store.create_execution(&committed).unwrap();
+    store
+        .commit_execution_outcome(&completed(&committed, json!({"ok": true})))
+        .unwrap();
+    raw_connection(&path)
+        .execute(
+            "DELETE FROM executions WHERE execution_id = ?1",
+            ["exec-committed-scan"],
+        )
+        .unwrap();
+
+    let records = store.committed_executions(100).unwrap();
+
+    assert_eq!(records.len(), 1);
+    assert_eq!(
+        records[0].contract.as_ref().execution_id,
+        "exec-committed-scan"
+    );
+    assert!(records[0].outcome.is_some());
+
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}

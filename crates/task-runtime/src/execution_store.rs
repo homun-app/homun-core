@@ -244,6 +244,43 @@ impl TaskStore {
         Ok(Some(record))
     }
 
+    pub fn committed_executions(&self, limit: usize) -> TaskRuntimeResult<Vec<ExecutionRecord>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let execution_ids = {
+            let mut statement = self.connection.prepare(
+                "SELECT event.execution_id
+                 FROM execution_events AS event
+                 WHERE event.kind = 'outcome_committed'
+                   AND event.revision = (
+                       SELECT MAX(latest.revision)
+                       FROM execution_events AS latest
+                       WHERE latest.execution_id = event.execution_id
+                   )
+                 ORDER BY event.created_at, event.execution_id
+                 LIMIT ?1",
+            )?;
+            let rows = statement.query_map(params![limit], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut records = Vec::with_capacity(execution_ids.len());
+        for execution_id in execution_ids {
+            let record = match self.execution(&execution_id)? {
+                Some(record) => record,
+                None => self.rebuild_execution_projection(&execution_id)?,
+            };
+            if record.outcome.is_none() {
+                return Err(TaskRuntimeError::Store(format!(
+                    "committed execution scan loaded no outcome: {execution_id}"
+                )));
+            }
+            records.push(record);
+        }
+        Ok(records)
+    }
+
     pub fn execution_events(
         &self,
         execution_id: &str,

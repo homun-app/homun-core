@@ -1235,6 +1235,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             local_first_desktop_gateway::MessageDeliveryState::Retrying,
         );
     }
+    match execution_projection::replay_committed_chat_projections(&state, usize::MAX).await {
+        Ok(replayed) if replayed > 0 => {
+            eprintln!("execution projection: replayed {replayed} committed chat outcomes");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!("execution projection: startup replay incomplete: {}", error.message);
+        }
+    }
     steering_control::start(state.clone());
     // Graph regeneration runs in the BACKGROUND so it never blocks the HTTP bind. Start it
     // only after the lease-aware broker recovery above has completed its critical write to

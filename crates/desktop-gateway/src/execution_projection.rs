@@ -114,6 +114,46 @@ pub(crate) async fn project_chat_execution(
     .map_err(projection_store_error)
 }
 
+pub(crate) async fn replay_committed_chat_projections(
+    state: &crate::AppState,
+    limit: usize,
+) -> Result<usize, crate::LocalTaskExecutionError> {
+    let records = state
+        .task_store
+        .lock()
+        .map_err(projection_lock_error)?
+        .committed_executions(limit)
+        .map_err(projection_store_error)?;
+    let mut replayed = 0usize;
+    for record in records {
+        if record.contract.as_ref().kind != "chat_turn" {
+            continue;
+        }
+        let contract = record.contract;
+        let scope = &contract.as_ref().scope;
+        let task_id =
+            local_first_task_runtime::TaskId::new(contract.as_ref().execution_id.clone());
+        let user_id = local_first_task_runtime::UserId::new(scope.user_id.clone());
+        let workspace_id =
+            local_first_task_runtime::WorkspaceId::new(scope.workspace_id.clone());
+        let task = state
+            .task_store
+            .lock()
+            .map_err(projection_lock_error)?
+            .get_task(&task_id, &user_id, &workspace_id)
+            .map_err(projection_store_error)?;
+        let Some(task) = task else {
+            continue;
+        };
+        let Some(outcome) = record.outcome else {
+            continue;
+        };
+        project_chat_execution(state, &task, &contract, outcome.as_ref()).await?;
+        replayed += 1;
+    }
+    Ok(replayed)
+}
+
 fn projection_metadata(
     state: &crate::AppState,
     task: &TaskRecord,
@@ -267,13 +307,18 @@ fn project_message_state(
             local_first_desktop_gateway::MessageDeliveryState::Failed
         }
     };
-    state
+    let updated = state
         .chat_store
         .lock()
         .map_err(projection_lock_error)?
         .set_message_delivery_state(thread_id, assistant_message_id, delivery)
-        .map(|_| ())
-        .map_err(|error| projection_error(error.to_string()))
+        .map_err(|error| projection_error(error.to_string()))?;
+    if !updated && !matches!(outcome, ExecutionOutcome::Failed { .. }) {
+        return Err(projection_error(format!(
+            "chat projection message is missing: {assistant_message_id}"
+        )));
+    }
+    Ok(())
 }
 
 fn project_objective(
@@ -392,7 +437,7 @@ mod tests {
     use local_first_execution_protocol::{
         CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionContract,
         ExecutionFailure, ExecutionOutcome, ExecutionScope, ValidatedExecutionContract,
-        WakeCondition,
+        ValidatedExecutionOutcome, WakeCondition,
     };
     use local_first_task_runtime::{
         AgentRunStatus, NewAgentRun, TaskRecord, TaskStatus, TurnEventKind, UserId, WorkspaceId,
@@ -480,12 +525,6 @@ mod tests {
         );
         assistant.id = "assistant-projection-1".to_string();
         assistant.delivery_state = local_first_desktop_gateway::MessageDeliveryState::Streaming;
-        state
-            .chat_store
-            .lock()
-            .expect("chat store")
-            .append_assistant_message(&thread.thread_id, &assistant)
-            .expect("assistant");
 
         let mut task = TaskRecord::new(
             "turn-projection-1",
@@ -540,13 +579,41 @@ mod tests {
             "agent_run_id": "run-projection-1",
             "answer": "done",
         }));
+        {
+            let store = state.task_store.lock().expect("task store");
+            store.create_execution(&contract).expect("create execution");
+            store
+                .commit_execution_outcome(
+                    &ValidatedExecutionOutcome::new(outcome.clone(), &contract)
+                        .expect("validated outcome"),
+                )
+                .expect("commit outcome");
+        }
 
-        project_chat_execution(&state, &task, &contract, &outcome)
+        replay_committed_chat_projections(&state, 100)
             .await
-            .expect("first projection");
-        project_chat_execution(&state, &task, &contract, &outcome)
+            .expect_err("projection must remain pending while the message is missing");
+        assert!(state
+            .task_store
+            .lock()
+            .expect("task store")
+            .read_turn_events(task.task_id.as_str(), 0)
+            .expect("events")
+            .iter()
+            .all(|event| event.payload["projection_ref"] != "turn-projection-1:1"));
+
+        state
+            .chat_store
+            .lock()
+            .expect("chat store")
+            .append_assistant_message(&thread.thread_id, &assistant)
+            .expect("assistant");
+        replay_committed_chat_projections(&state, 100)
             .await
-            .expect("replayed projection");
+            .expect("recovered projection");
+        replay_committed_chat_projections(&state, 100)
+            .await
+            .expect("idempotent replay");
 
         let store = state.task_store.lock().expect("task store");
         let projected = store
@@ -576,5 +643,21 @@ mod tests {
             message.delivery_state,
             local_first_desktop_gateway::MessageDeliveryState::Delivered
         );
+    }
+
+    #[test]
+    fn completed_projection_does_not_acknowledge_a_missing_message() {
+        let state = crate::AppState::for_tests();
+        let outcome = ExecutionOutcome::completed(serde_json::json!({"answer": "done"}));
+
+        let error = project_message_state(
+            &state,
+            "missing-thread",
+            "missing-message",
+            &outcome,
+        )
+        .expect_err("missing completed message must keep projection pending");
+
+        assert!(error.message.contains("message"));
     }
 }
