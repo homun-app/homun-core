@@ -5,7 +5,6 @@ use crate::{
     execute_capability_generic, execute_local_read_only_task, execute_proactive_prompt_task,
     execute_shell_read_only_task, execute_subagent_task,
 };
-use futures_util::future::BoxFuture;
 use local_first_execution_protocol::{
     ApprovalPolicy, CancelReason, CheckpointDataRef, CheckpointEnvelope, DurableDataRef,
     EffectClass, ExecutionBudget, ExecutionContract, ExecutionFailure, ExecutionOutcome,
@@ -24,11 +23,11 @@ pub(crate) trait GatewayExecutionAdapter: Send + Sync {
         "test"
     }
 
-    fn execute<'a>(
-        &'a self,
-        state: &'a AppState,
-        contract: &'a ValidatedExecutionContract,
-    ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>>;
+    fn execute(
+        &self,
+        state: &AppState,
+        contract: &ValidatedExecutionContract,
+    ) -> Result<AdapterExecution, LocalTaskExecutionError>;
 }
 
 pub(crate) struct AdapterExecution {
@@ -182,9 +181,17 @@ impl ExecutionRuntime {
             .ok_or_else(|| {
                 runtime_error("no execution adapter is registered for this task kind")
             })?;
-        let mut adapter_execution = match adapter.execute(state, &contract).await {
-            Ok(execution) => execution,
-            Err(error) => AdapterExecution::legacy(legacy_adapter_error_outcome(error)),
+        let adapter_state = state.clone();
+        let adapter_contract = contract.clone();
+        let adapter_result =
+            tokio::task::spawn_blocking(move || adapter.execute(&adapter_state, &adapter_contract))
+                .await
+                .map_err(|error| runtime_error(format!("execution adapter join error: {error}")));
+        let mut adapter_execution = match adapter_result {
+            Ok(Ok(execution)) => execution,
+            Ok(Err(error)) | Err(error) => {
+                AdapterExecution::legacy(legacy_adapter_error_outcome(error))
+            }
         };
 
         let pre_checkpoint_task = current_task(state, &task)?;
@@ -730,15 +737,13 @@ macro_rules! legacy_adapter {
                 $label
             }
 
-            fn execute<'a>(
-                &'a self,
-                state: &'a AppState,
-                contract: &'a ValidatedExecutionContract,
-            ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-                Box::pin(async move {
-                    let task = task_from_contract(contract)?;
-                    ($execute)(state, &task).map(AdapterExecution::legacy)
-                })
+            fn execute(
+                &self,
+                state: &AppState,
+                contract: &ValidatedExecutionContract,
+            ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+                let task = task_from_contract(contract)?;
+                ($execute)(state, &task).map(AdapterExecution::legacy)
             }
         }
     };
@@ -765,22 +770,20 @@ impl GatewayExecutionAdapter for ChatTurnAdapter {
         "chat_turn"
     }
 
-    fn execute<'a>(
-        &'a self,
-        state: &'a AppState,
-        contract: &'a ValidatedExecutionContract,
-    ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-        Box::pin(async move {
-            let task = task_from_contract(contract)?;
-            let outcome = crate::turn_executor::execute_chat_turn_task(state, &task, contract)
-                .unwrap_or_else(|error| ExecutionOutcome::Failed {
-                    failure: ExecutionFailure::permanent(
-                        "chat_execution_failed",
-                        crate::redact_sensitive_text(&error.message),
-                    ),
-                });
-            Ok(AdapterExecution::canonical(outcome))
-        })
+    fn execute(
+        &self,
+        state: &AppState,
+        contract: &ValidatedExecutionContract,
+    ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+        let task = task_from_contract(contract)?;
+        let outcome = crate::turn_executor::execute_chat_turn_task(state, &task, contract)
+            .unwrap_or_else(|error| ExecutionOutcome::Failed {
+                failure: ExecutionFailure::permanent(
+                    "chat_execution_failed",
+                    crate::redact_sensitive_text(&error.message),
+                ),
+            });
+        Ok(AdapterExecution::canonical(outcome))
     }
 }
 legacy_adapter!(LegacyShellAdapter, "legacy_shell", |_state, task| {
@@ -796,7 +799,6 @@ mod tests {
     use crate::task_registry::TaskExecutorRegistry;
     use crate::{AppState, LocalTaskExecutionError, TaskRecord};
     use crate::{SurfaceKind, TaskExecutionOutcome, TaskResultSurfacing};
-    use futures_util::future::BoxFuture;
     use local_first_execution_protocol::{
         CheckpointDataRef, CheckpointEnvelope, DurableDataRef, ExecutionContract, ExecutionOutcome,
         ExecutionScope, ValidatedExecutionContract, ValidatedExecutionOutcome, WakeCondition,
@@ -816,77 +818,71 @@ mod tests {
     }
 
     impl GatewayExecutionAdapter for RevisionRecordingAdapter {
-        fn execute<'a>(
-            &'a self,
-            _state: &'a AppState,
-            contract: &'a ValidatedExecutionContract,
-        ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-            Box::pin(async move {
-                let contract = contract.as_ref();
-                self.revisions.lock().expect("revision adapter lock").push((
-                    contract.execution_id.clone(),
-                    contract.revision,
-                    contract.fencing_token,
-                    contract.wake.is_some(),
-                ));
-                Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
-                    serde_json::json!({"revision": contract.revision}),
-                )))
-            })
+        fn execute(
+            &self,
+            _state: &AppState,
+            contract: &ValidatedExecutionContract,
+        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            let contract = contract.as_ref();
+            self.revisions.lock().expect("revision adapter lock").push((
+                contract.execution_id.clone(),
+                contract.revision,
+                contract.fencing_token,
+                contract.wake.is_some(),
+            ));
+            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+                serde_json::json!({"revision": contract.revision}),
+            )))
         }
     }
 
     struct SuspendingLegacyAdapter;
 
     impl GatewayExecutionAdapter for SuspendingLegacyAdapter {
-        fn execute<'a>(
-            &'a self,
-            _state: &'a AppState,
-            _contract: &'a ValidatedExecutionContract,
-        ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-            Box::pin(async move {
-                Ok(AdapterExecution::legacy(TaskExecutionOutcome {
-                    completed: false,
-                    blocked_reason: Some("wait for timer".to_string()),
-                    wait_until: Some(OffsetDateTime::now_utc() + Duration::minutes(1)),
-                    pending_approval: None,
-                    summary: "waiting".to_string(),
-                    checkpoint_payload: serde_json::json!({"secret": "raw"}),
-                    checkpoint_redacted: serde_json::json!({"secret": "[REDACTED]"}),
-                    chat_message: String::new(),
-                    result_surfacing: TaskResultSurfacing::AlreadyPersisted,
-                    surface: SurfaceKind::Logs,
-                    event_kind: "test_wait".to_string(),
-                    event_title: "Waiting".to_string(),
-                    event_subtitle: "Waiting".to_string(),
-                    event_payload: serde_json::json!({}),
-                    artifacts: Vec::new(),
-                }))
-            })
+        fn execute(
+            &self,
+            _state: &AppState,
+            _contract: &ValidatedExecutionContract,
+        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            Ok(AdapterExecution::legacy(TaskExecutionOutcome {
+                completed: false,
+                blocked_reason: Some("wait for timer".to_string()),
+                wait_until: Some(OffsetDateTime::now_utc() + Duration::minutes(1)),
+                pending_approval: None,
+                summary: "waiting".to_string(),
+                checkpoint_payload: serde_json::json!({"secret": "raw"}),
+                checkpoint_redacted: serde_json::json!({"secret": "[REDACTED]"}),
+                chat_message: String::new(),
+                result_surfacing: TaskResultSurfacing::AlreadyPersisted,
+                surface: SurfaceKind::Logs,
+                event_kind: "test_wait".to_string(),
+                event_title: "Waiting".to_string(),
+                event_subtitle: "Waiting".to_string(),
+                event_payload: serde_json::json!({}),
+                artifacts: Vec::new(),
+            }))
         }
     }
 
     struct LeaseStealingAdapter;
 
     impl GatewayExecutionAdapter for LeaseStealingAdapter {
-        fn execute<'a>(
-            &'a self,
-            state: &'a AppState,
-            contract: &'a ValidatedExecutionContract,
-        ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-            Box::pin(async move {
-                let mut task = super::task_from_contract(contract).expect("task from contract");
-                task.lease_owner = Some("replacement-worker".to_string());
-                state
-                    .task_store
-                    .lock()
-                    .expect("task store")
-                    .insert_task(&task)
-                    .expect("replace lease owner");
-                Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
-                    serde_json::json!({"must_not_commit": true}),
-                )))
-            })
+        fn execute(
+            &self,
+            state: &AppState,
+            contract: &ValidatedExecutionContract,
+        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            let mut task = super::task_from_contract(contract).expect("task from contract");
+            task.lease_owner = Some("replacement-worker".to_string());
+            state
+                .task_store
+                .lock()
+                .expect("task store")
+                .insert_task(&task)
+                .expect("replace lease owner");
+            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+                serde_json::json!({"must_not_commit": true}),
+            )))
         }
     }
 
@@ -894,52 +890,61 @@ mod tests {
 
     struct TransientCanonicalAdapter;
 
+    struct BlockingClientAdapter;
+
+    impl GatewayExecutionAdapter for BlockingClientAdapter {
+        fn execute(
+            &self,
+            _state: &AppState,
+            _contract: &ValidatedExecutionContract,
+        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            drop(reqwest::blocking::Client::new());
+            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+                serde_json::json!({"blocking_adapter": "completed"}),
+            )))
+        }
+    }
+
     impl GatewayExecutionAdapter for FailingAdapter {
-        fn execute<'a>(
-            &'a self,
-            _state: &'a AppState,
-            _contract: &'a ValidatedExecutionContract,
-        ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-            Box::pin(async {
-                Err(LocalTaskExecutionError {
-                    message: "provider temporarily unavailable".to_string(),
-                })
+        fn execute(
+            &self,
+            _state: &AppState,
+            _contract: &ValidatedExecutionContract,
+        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            Err(LocalTaskExecutionError {
+                message: "provider temporarily unavailable".to_string(),
             })
         }
     }
 
     impl GatewayExecutionAdapter for TransientCanonicalAdapter {
-        fn execute<'a>(
-            &'a self,
-            _state: &'a AppState,
-            _contract: &'a ValidatedExecutionContract,
-        ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-            Box::pin(async {
-                Ok(AdapterExecution::canonical(ExecutionOutcome::Failed {
-                    failure: local_first_execution_protocol::ExecutionFailure::transient(
-                        "provider_unavailable",
-                        "Provider unavailable",
-                    ),
-                }))
-            })
+        fn execute(
+            &self,
+            _state: &AppState,
+            _contract: &ValidatedExecutionContract,
+        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            Ok(AdapterExecution::canonical(ExecutionOutcome::Failed {
+                failure: local_first_execution_protocol::ExecutionFailure::transient(
+                    "provider_unavailable",
+                    "Provider unavailable",
+                ),
+            }))
         }
     }
 
     impl GatewayExecutionAdapter for RecordingAdapter {
-        fn execute<'a>(
-            &'a self,
-            _state: &'a AppState,
-            contract: &'a ValidatedExecutionContract,
-        ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-            Box::pin(async move {
-                self.execution_ids
-                    .lock()
-                    .expect("recording adapter lock")
-                    .push(contract.as_ref().execution_id.clone());
-                Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
-                    serde_json::json!({"execution_id": contract.as_ref().execution_id}),
-                )))
-            })
+        fn execute(
+            &self,
+            _state: &AppState,
+            contract: &ValidatedExecutionContract,
+        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            self.execution_ids
+                .lock()
+                .expect("recording adapter lock")
+                .push(contract.as_ref().execution_id.clone());
+            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+                serde_json::json!({"execution_id": contract.as_ref().execution_id}),
+            )))
         }
     }
 
@@ -1015,6 +1020,23 @@ mod tests {
             *calls.lock().expect("recorded calls"),
             vec!["turn-1", "proactive-1", "capability-1"]
         );
+    }
+
+    #[tokio::test]
+    async fn blocking_adapter_isolated_from_the_async_runtime_context() {
+        let mut registry = TaskExecutorRegistry::new();
+        registry.register("*", Arc::new(BlockingClientAdapter));
+        let runtime = ExecutionRuntime::new(registry);
+        let state = AppState::for_tests();
+        let contract = contract("capability.test", "blocking-adapter-1");
+        insert_contract_task(&state, &contract);
+
+        let result = runtime
+            .execute(&state, contract)
+            .await
+            .expect("blocking adapter executes outside the async runtime context");
+
+        assert_eq!(result.projection().task_status, TaskStatus::Completed);
     }
 
     #[tokio::test]

@@ -27,6 +27,8 @@ The code currently guarantees:
 
 - every scheduled task enters `ExecutionRuntime::execute` with one validated
   `ExecutionContract`;
+- synchronous domain adapters execute on Tokio's blocking pool, outside the async
+  projection context;
 - the execution journal is authoritative per `(execution_id, revision)` and
   outcome commit is fenced;
 - timer and signal wake delivery reopens the same execution identity at revision

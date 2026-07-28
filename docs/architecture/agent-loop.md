@@ -55,6 +55,10 @@ proiezione chat prima di avviare i worker. Il contratto completo, lo stato della
 migrazione e le lacune residue sono in
 [`2026-07-28-unified-execution-protocol-design.md`](../superpowers/specs/2026-07-28-unified-execution-protocol-design.md).
 
+Gli adapter di dominio sincroni vengono sempre isolati da `ExecutionRuntime` sul
+blocking pool di Tokio. Nessun adapter può quindi costruire client HTTP bloccanti,
+eseguire SQLite o guidare il loop sincrono dentro il contesto async del projector.
+
 ## Come una richiesta entra e stream-a (TURN BROKER + WS unificato)
 
 Il **percorso della richiesta** oggi passa **sempre** dal **turn broker** (percorso di chat

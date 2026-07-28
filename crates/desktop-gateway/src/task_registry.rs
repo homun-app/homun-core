@@ -51,7 +51,6 @@ mod tests {
     use super::TaskExecutorRegistry;
     use crate::execution_runtime::{AdapterExecution, GatewayExecutionAdapter};
     use crate::{AppState, LocalTaskExecutionError};
-    use futures_util::future::BoxFuture;
     use local_first_execution_protocol::{ExecutionOutcome, ValidatedExecutionContract};
     use std::sync::Arc;
 
@@ -62,16 +61,14 @@ mod tests {
             self.0
         }
 
-        fn execute<'a>(
-            &'a self,
-            _state: &'a AppState,
-            _contract: &'a ValidatedExecutionContract,
-        ) -> BoxFuture<'a, Result<AdapterExecution, LocalTaskExecutionError>> {
-            Box::pin(async {
-                Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
-                    serde_json::Value::Null,
-                )))
-            })
+        fn execute(
+            &self,
+            _state: &AppState,
+            _contract: &ValidatedExecutionContract,
+        ) -> Result<AdapterExecution, LocalTaskExecutionError> {
+            Ok(AdapterExecution::canonical(ExecutionOutcome::completed(
+                serde_json::Value::Null,
+            )))
         }
     }
 
