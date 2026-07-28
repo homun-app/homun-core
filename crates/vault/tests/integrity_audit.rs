@@ -86,7 +86,7 @@ fn vault_backup_is_consistent_and_in_memory_backup_is_rejected() {
     assert!(
         SQLiteVaultStore::open_in_memory()
             .unwrap()
-            .backup_to(&temp_path("memory-backup"))
+            .backup_to(temp_path("memory-backup"))
             .is_err()
     );
 

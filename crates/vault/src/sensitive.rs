@@ -33,12 +33,13 @@ pub fn classify_sensitive_text(text: &str) -> SensitiveClassification {
     detect_contextual_digits(
         text,
         &mut detections,
-        &["cvv", "cvc", "cv2", "cvv2"],
-        VaultCategory::Payments,
-        "cvv_one_shot",
-        "[VAULT:payments:cvv:one_shot]",
-        3,
-        4,
+        &ContextualDigitPattern {
+            labels: &["cvv", "cvc", "cv2", "cvv2"],
+            category: VaultCategory::Payments,
+            kind: "cvv_one_shot",
+            placeholder: "[VAULT:payments:cvv:one_shot]",
+            length: 3..=4,
+        },
     );
     detect_codice_fiscale(text, &mut detections);
     detect_italian_plate(text, &mut detections);
@@ -84,31 +85,38 @@ fn detect_card_numbers(text: &str, detections: &mut Vec<SensitiveDetection>) {
     }
 }
 
+struct ContextualDigitPattern<'a> {
+    labels: &'a [&'a str],
+    category: VaultCategory,
+    kind: &'a str,
+    placeholder: &'a str,
+    length: std::ops::RangeInclusive<usize>,
+}
+
 fn detect_contextual_digits(
     text: &str,
     detections: &mut Vec<SensitiveDetection>,
-    labels: &[&str],
-    category: VaultCategory,
-    kind: &str,
-    placeholder: &str,
-    min_len: usize,
-    max_len: usize,
+    pattern: &ContextualDigitPattern<'_>,
 ) {
     let lower = text.to_ascii_lowercase();
-    for label in labels {
+    for label in pattern.labels {
         let mut offset = 0;
         while let Some(relative) = lower[offset..].find(label) {
             let label_start = offset + relative;
             let after = label_start + label.len();
-            let Some((digits_start, digits_end)) = first_digit_run(text, after, min_len, max_len)
-            else {
+            let Some((digits_start, digits_end)) = first_digit_run(
+                text,
+                after,
+                *pattern.length.start(),
+                *pattern.length.end(),
+            ) else {
                 offset = after;
                 continue;
             };
             detections.push(SensitiveDetection {
-                category,
-                kind: kind.to_string(),
-                placeholder: placeholder.to_string(),
+                category: pattern.category,
+                kind: pattern.kind.to_string(),
+                placeholder: pattern.placeholder.to_string(),
                 start: digits_start,
                 end: digits_end,
             });
@@ -334,7 +342,7 @@ fn looks_like_secret_value(value: &str) -> bool {
     let has_symbol = trimmed.chars().any(|c| matches!(c, '-' | '_' | '.' | '/' | '+'));
     let mixed_case = trimmed.chars().any(|c| c.is_ascii_uppercase())
         && trimmed.chars().any(|c| c.is_ascii_lowercase());
-    (has_digit && has_alpha) || (has_alpha && has_symbol && (has_digit || mixed_case))
+    has_alpha && (has_digit || (has_symbol && mixed_case))
 }
 
 /// Like [`first_secret_value`] but only accepts a token that actually looks like a secret, scanning
@@ -344,9 +352,7 @@ fn first_secret_shaped_value(text: &str, offset: usize) -> Option<(usize, usize)
     let end_bound = clause_end.max(offset);
     let mut cursor = offset;
     while cursor < end_bound {
-        let Some((start, end)) = first_secret_value(&text[..end_bound], cursor) else {
-            return None;
-        };
+        let (start, end) = first_secret_value(&text[..end_bound], cursor)?;
         if looks_like_secret_value(&text[start..end]) {
             return Some((start, end));
         }
