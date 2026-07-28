@@ -243,6 +243,19 @@ fn write_effect(effect: EffectClass) -> bool {
     )
 }
 
+fn deliverable_effects(deliverable: &DeliverableDecision) -> Vec<EffectClass> {
+    let mut effects = match deliverable.kind {
+        DeliverableKind::Artifact => vec![EffectClass::ArtifactCreation],
+        DeliverableKind::CodeChange => vec![EffectClass::FilesystemWrite],
+        DeliverableKind::ExternalAction => vec![EffectClass::ExternalWrite],
+        DeliverableKind::ChatReport | DeliverableKind::None => Vec::new(),
+    };
+    if deliverable.artifact_requested && !effects.contains(&EffectClass::ArtifactCreation) {
+        effects.push(EffectClass::ArtifactCreation);
+    }
+    effects
+}
+
 pub(crate) fn validate_decision(
     mut decision: SemanticDecision,
     registry: &[CapabilitySemanticEntry],
@@ -299,28 +312,31 @@ pub(crate) fn validate_decision(
             }
         };
 
-    let decision_forbids_writes = decision
-        .forbidden_effect_classes
-        .iter()
-        .copied()
-        .any(write_effect);
     let decision_allows_writes = decision
         .allowed_effect_classes
         .iter()
         .copied()
         .any(write_effect);
-    let deliverable_has_effect = matches!(
-        decision.deliverable.kind,
-        DeliverableKind::Artifact | DeliverableKind::CodeChange | DeliverableKind::ExternalAction
-    ) || decision.deliverable.artifact_requested;
-    let capability_has_effect = capability.is_some_and(|entry| {
-        entry.effects.iter().copied().any(|effect| {
-            write_effect(effect) || decision.forbidden_effect_classes.contains(&effect)
-        })
+    let deliverable_effects = deliverable_effects(&decision.deliverable);
+    let deliverable_has_effect = !deliverable_effects.is_empty();
+    let capability_has_effect =
+        capability.is_some_and(|entry| entry.effects.iter().copied().any(write_effect));
+    let effect_is_disallowed = |effect: &EffectClass| {
+        decision.forbidden_effect_classes.contains(effect)
+            || !decision.allowed_effect_classes.contains(effect)
+    };
+    let deliverable_conflicts = deliverable_effects.iter().any(effect_is_disallowed);
+    let capability_conflicts = capability.is_some_and(|entry| {
+        entry
+            .effects
+            .iter()
+            .filter(|effect| write_effect(**effect))
+            .any(effect_is_disallowed)
     });
     if decision.mode == ObjectiveMode::ReadOnlyAnalysis
         && (decision_allows_writes || deliverable_has_effect || capability_has_effect)
-        || decision_forbids_writes && (deliverable_has_effect || capability_has_effect)
+        || deliverable_conflicts
+        || capability_conflicts
     {
         return Err(SemanticDecisionError {
             code: "effect_conflict",
@@ -820,6 +836,39 @@ mod tests {
         let mut decision = read_only_decision();
         decision.execution_shape = ExecutionShape::Workflow;
         decision.selected_capability = Some("make_document".to_string());
+
+        assert_eq!(
+            validate_decision(decision, &registry(), None)
+                .unwrap_err()
+                .code,
+            "effect_conflict"
+        );
+    }
+
+    #[test]
+    fn mixed_external_action_ignores_unrelated_forbidden_write_classes() {
+        let mut decision = read_only_decision();
+        decision.mode = ObjectiveMode::Mixed;
+        decision.allowed_effect_classes = vec![
+            EffectClass::Read,
+            EffectClass::RequestAuthorization,
+            EffectClass::ExternalWrite,
+        ];
+        decision.forbidden_effect_classes =
+            vec![EffectClass::FilesystemWrite, EffectClass::ArtifactCreation];
+        decision.deliverable.kind = DeliverableKind::ExternalAction;
+
+        assert!(validate_decision(decision, &registry(), None).is_ok());
+    }
+
+    #[test]
+    fn external_action_is_rejected_when_external_write_is_forbidden() {
+        let mut decision = read_only_decision();
+        decision.mode = ObjectiveMode::Mixed;
+        decision.allowed_effect_classes =
+            vec![EffectClass::Read, EffectClass::RequestAuthorization];
+        decision.forbidden_effect_classes = vec![EffectClass::ExternalWrite];
+        decision.deliverable.kind = DeliverableKind::ExternalAction;
 
         assert_eq!(
             validate_decision(decision, &registry(), None)

@@ -500,6 +500,8 @@ mod tests {
         ];
         decision.decision.forbidden_effect_classes =
             vec![EffectClass::FilesystemWrite, EffectClass::ArtifactCreation];
+        decision.decision.deliverable.kind =
+            crate::semantic_decision::DeliverableKind::ExternalAction;
         decision.decision.memory_intent.search_personal = true;
         decision.decision.memory_intent.vault_value_requested = true;
         decision.provenance.fallback_reason = None;
@@ -630,6 +632,15 @@ mod tests {
 
         let decision = hitl_resume_semantic_decision(&wait, "B", Some(&active));
 
+        assert_eq!(decision.decision.mode, ObjectiveMode::Mixed);
+        assert_eq!(
+            decision.decision.relationship_to_active_objective,
+            ObjectiveRelationship::SameObjective
+        );
+        assert_eq!(
+            decision.decision.steering_disposition,
+            SteeringDisposition::ContinueCurrentWork
+        );
         assert_eq!(
             decision.decision.allowed_effect_classes,
             vec![
@@ -644,6 +655,30 @@ mod tests {
         );
         assert!(decision.decision.memory_intent.search_personal);
         assert!(decision.decision.memory_intent.vault_value_requested);
+        assert_eq!(
+            decision.provenance.validator_rejection_code.as_deref(),
+            Some(HITL_RESUME_CODE)
+        );
+        assert!(decision.provenance.fallback_reason.is_none());
+        assert!(
+            crate::semantic_decision::validate_decision(
+                decision.decision.clone(),
+                &[],
+                Some(&active),
+            )
+            .is_ok()
+        );
+
+        let projection = crate::semantic_decision::objective_contract_projection_for_request(
+            &decision,
+            Some(&active),
+            "thread_1",
+            "workspace_1",
+            None,
+            "B",
+        );
+        assert_eq!(projection.objective, active.objective);
+        assert_eq!(projection.mode, ObjectiveMode::Mixed);
     }
 
     #[test]
