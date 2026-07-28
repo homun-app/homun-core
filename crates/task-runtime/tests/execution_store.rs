@@ -743,6 +743,94 @@ fn rebuild_restores_only_the_latest_revision_projection() {
 }
 
 #[test]
+fn historical_wake_survives_revision_start_and_projection_rebuild() {
+    let (path, store) = file_store();
+    let revision_one = contract("exec-wake-history", 1, 1);
+    store.create_execution(&revision_one).unwrap();
+    let suspended = suspended(&revision_one);
+    store.commit_execution_outcome(&suspended).unwrap();
+    let revision_two = next_revision(&revision_one, &suspended, 2);
+    let delivery = revision_two.as_ref().wake.as_ref().unwrap();
+    let wake = match suspended.as_ref() {
+        ExecutionOutcome::Suspended { wake, .. } => wake,
+        _ => unreachable!(),
+    };
+    let expected = (
+        wake.dedup_key(),
+        serde_json::to_string(wake).unwrap(),
+        "delivered".to_string(),
+        serde_json::to_string(delivery).unwrap(),
+        10_i64,
+        11_i64,
+    );
+    let connection = raw_connection(&path);
+    connection
+        .execute(
+            "INSERT INTO execution_wakes (
+                execution_id, revision, dedup_key, condition_json, status,
+                delivery_json, created_at, delivered_at
+             ) VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                "exec-wake-history",
+                expected.0,
+                expected.1,
+                expected.2,
+                expected.3,
+                expected.4,
+                expected.5,
+            ],
+        )
+        .unwrap();
+
+    store.start_execution_revision(&revision_two).unwrap();
+    assert_eq!(
+        store
+            .execution("exec-wake-history")
+            .unwrap()
+            .unwrap()
+            .contract
+            .as_ref()
+            .revision,
+        2
+    );
+    let load_wake = || {
+        connection.query_row(
+            "SELECT dedup_key, condition_json, status, delivery_json, created_at, delivered_at
+             FROM execution_wakes WHERE execution_id = ?1 AND revision = 1",
+            ["exec-wake-history"],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
+            },
+        )
+    };
+    assert_eq!(load_wake().unwrap(), expected);
+
+    connection
+        .execute(
+            "DELETE FROM executions WHERE execution_id = ?1",
+            ["exec-wake-history"],
+        )
+        .unwrap();
+    assert_eq!(load_wake().unwrap(), expected);
+    let rebuilt = store
+        .rebuild_execution_projection("exec-wake-history")
+        .unwrap();
+    assert_eq!(rebuilt.contract.as_ref().revision, 2);
+    assert_eq!(load_wake().unwrap(), expected);
+
+    drop(connection);
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn stale_prior_revision_outcome_never_rewrites_the_latest_projection() {
     let store = TaskStore::open_in_memory().unwrap();
     let revision_one = contract("exec-stale-prior-outcome", 1, 1);
@@ -1023,7 +1111,7 @@ fn schema_constraints_reject_invalid_projection_event_and_wake_rows() {
     }
 
     for (dedup, status, delivery, delivered_at, revision) in [
-        ("key", "pending", None, None, 2_i64),
+        ("key", "pending", None, None, 0_i64),
         (" ", "pending", None, None, 1),
         ("key", " ", None, None, 1),
         ("key", "pending", Some("{}"), None, 1),
@@ -1085,6 +1173,23 @@ fn populated_v11_database_migrates_to_constrained_v12() {
             .is_some()
     );
     let connection = raw_connection(&path);
+    let wake_foreign_keys: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_list('execution_wakes')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(wake_foreign_keys, 0);
+    connection
+        .execute(
+            "INSERT INTO execution_wakes (
+                execution_id, revision, dedup_key, condition_json, status,
+                delivery_json, created_at, delivered_at
+             ) VALUES ('historical', 1, 'wake-key', '{}', 'pending', NULL, 1, NULL)",
+            [],
+        )
+        .unwrap();
     assert!(
         connection
             .execute(

@@ -470,8 +470,6 @@ impl TaskStore {
                 created_at INTEGER NOT NULL,
                 delivered_at INTEGER,
                 PRIMARY KEY(execution_id, revision, dedup_key),
-                FOREIGN KEY(execution_id, revision)
-                    REFERENCES executions(execution_id, revision) ON DELETE CASCADE,
                 CHECK(
                     (delivery_json IS NULL AND delivered_at IS NULL)
                     OR (delivery_json IS NOT NULL AND delivered_at IS NOT NULL)
